@@ -227,10 +227,12 @@ ALTER TABLE "tasks" ADD CONSTRAINT "tasks_parent_task_id_tasks_id_fk" FOREIGN KE
 -- `TEAM_TEMPLATES` entry) and hangs the whole core group off it. The fixture is
 -- what #409 D1 rules against, not evidence against the ruling: those 34 people
 -- are precisely the invisible, unremovable assignments described above. THE
--- SEED SCRIPT MUST BE UPDATED IN THE SAME RELEASE — it inserts its membership
--- rows in one multi-row INSERT against one role id and will fail on this index
--- until each core-group member gets a role of their own. `scripts/` is outside
--- this change's file ownership; the follow-up is filed with the batch.
+-- SEED SCRIPT WAS UPDATED IN THIS SAME RELEASE, because it had to be: it
+-- inserted its membership rows in one multi-row INSERT against one role id and
+-- would have failed on this index the next time it ran, leaving the eval
+-- fixture unregenerable. `scripts/seed-phase-engine-eval.ts` now mints one
+-- "Core Leader N" role per core-group member, so every membership it writes
+-- holds a seat of its own.
 UPDATE "team_memberships"
 SET "status" = 'inactive',
 	"end_date" = CURRENT_DATE,

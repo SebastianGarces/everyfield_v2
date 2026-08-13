@@ -1,6 +1,18 @@
-import { neon } from "@neondatabase/serverless";
+import { neon, neonConfig } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
+import { localNeonHttpEndpoint } from "./connection";
 import * as schema from "./schema";
+
+// A local Postgres does not speak Neon's HTTP protocol, so when DATABASE_URL
+// names one, the driver is pointed at the proxy that does. Real Neon hosts get
+// `null` and keep the driver's own endpoint — production is byte-identical to
+// what it was. The whole reason this line exists is `connection.ts`'s header:
+// it is what makes the `LIVE_DB_TESTS=1` suites runnable in CI at all.
+const localEndpoint = localNeonHttpEndpoint(
+  process.env.DATABASE_URL,
+  process.env.NEON_HTTP_PROXY_URL
+);
+if (localEndpoint) neonConfig.fetchEndpoint = localEndpoint;
 
 const sql = neon(process.env.DATABASE_URL!);
 export const db = drizzle(sql, { schema });

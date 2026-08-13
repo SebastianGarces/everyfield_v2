@@ -177,9 +177,14 @@ export async function sendCommunication(
       ...personMergeData,
     };
 
-    // Generate confirmation tokens if this is meeting-linked. Sequential on
-    // purpose: createConfirmationToken is a SELECT-then-INSERT, and running
-    // them concurrently would widen its duplicate-token race.
+    // Generate confirmation tokens if this is meeting-linked. Sequential
+    // because this loop builds one email payload per recipient and nothing
+    // here is fanned out — NOT because the token write needs serialising.
+    // Since #407 D2 (migration 0038) createConfirmationToken is ONE upsert
+    // against `meeting_confirm_tokens_pending_unique_idx` plus a bounded
+    // re-read, so concurrent calls for one (meeting, person) are safe by
+    // construction; the duplicate-token race this comment used to name is
+    // gone with the SELECT-then-INSERT that caused it.
     let confirmUrl: string | undefined;
     let declineUrl: string | undefined;
     if (meeting) {

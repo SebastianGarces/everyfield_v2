@@ -17,6 +17,7 @@ import {
 } from "./events";
 import { ExpectedError } from "./expected-error";
 import {
+  membershipConflictMessage,
   PERSON_ALREADY_ASSIGNED_MESSAGE,
   ROLE_ALREADY_FILLED_MESSAGE,
 } from "./membership-copy";
@@ -43,38 +44,14 @@ export interface PersonTeamAssignment {
 // Both sentences live in the import-free leaf `membership-copy.ts` and are
 // deliberately NOT re-exported from here — the assign dialog imports them too,
 // and this module opens with `@/db`.
-
-/**
- * Translate a unique-violation on either active-membership index into the user
- * copy it means.
- *
- * WHY A TRANSLATION AND NOT A PRE-CHECK. The reactivation path is an UPDATE, and
- * an UPDATE takes no `ON CONFLICT`. A `WHERE NOT EXISTS (… active row …)`
- * predicate would look like a guard and be none — it is a snapshot read about
- * rows other statements are writing, the trap
- * `memory/invariants.md` → Transactions describes — so the index stays the only
- * guard on both paths and this function is purely about what the planter reads.
- * The write itself is already correct without it: the violation aborts the whole
- * `db.batch`, so a refused reactivation leaves the role's status alone too.
- */
-function membershipConflictMessage(error: unknown): string | null {
-  const text = [
-    error instanceof Error ? error.message : String(error),
-    // Drizzle re-throws its own error and hangs the driver's on `cause`, so the
-    // constraint name is usually there and not in the message.
-    error instanceof Error && error.cause instanceof Error
-      ? error.cause.message
-      : "",
-  ].join(" ");
-
-  if (text.includes("team_memberships_role_active_unique_idx")) {
-    return ROLE_ALREADY_FILLED_MESSAGE;
-  }
-  if (text.includes("team_memberships_active_unique")) {
-    return PERSON_ALREADY_ASSIGNED_MESSAGE;
-  }
-  return null;
-}
+//
+// `membershipConflictMessage` — the translation from a unique-violation to one
+// of those two sentences — lives in the same leaf, for the same reason plus one
+// of its own: it is the only guard between a lost reactivation race and a raw
+// "duplicate key value violates unique constraint" reaching a planter, and it
+// decides that by string-matching a driver error. In the leaf it is testable
+// with no database at all (`membership-conflict.test.ts`, hermetic, every
+// `pnpm test`); here the only test that could reach it was the opt-in live one.
 
 // ============================================================================
 // Membership Functions

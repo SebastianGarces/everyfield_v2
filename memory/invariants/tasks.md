@@ -17,6 +17,16 @@ The second is the one that is easy to leave out and fatal to leave out. "Give B 
 
 The check is pure and the loader is church-scoped, which is what makes tenancy fall out of it: a parent id from another church loads as nothing and reads as *missing*, never as an un-parented task.
 
+### …and the column itself is a self-FK, `ON DELETE CASCADE` (#405 D5, migration 0038)
+
+The nesting rule above is an application rule about DEPTH. It said nothing about whether the id points at a task at all, and until 0038 `parent_task_id` carried no key — so `assertSubtaskNesting` was the only thing between a forged `parentTaskId` and a row nothing renders. That row is the worst kind of live work: `topLevelTasksOnly()` keeps it out of every list, its only route on screen is a parent detail view that 404s, and `getTaskCounts` counts it anyway. The planter sees a number they cannot reconcile and has no way to close the task behind it.
+
+The FK makes that shape unrepresentable, and the migration nulls the dangling parents it finds before adding the key.
+
+**CASCADE, not `set null`** — the choice is about what a delete is allowed to invent. `set null` promotes an orphaned checklist item to a top-level task, so a task the planter never wrote appears in their list the moment its parent leaves it. CASCADE says the item belonged to the parent.
+
+This only fires where rows are deleted OUTRIGHT — `planWipe()`'s seed sweep and hand-run repairs. The product soft-deletes: `deleteTask` stamps `deleted_at` on the parent and its children in one statement and is untouched by the FK.
+
 ## Ticking the last box does not finish the task
 
 There is deliberately no code path from "every subtask complete" to "parent complete". That is the ruling on #90: *every item is ticked* and *this work is finished* are different claims, and only the planter can make the second. `setSubtaskCompletionAction` never touches the parent row.

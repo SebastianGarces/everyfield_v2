@@ -31,6 +31,24 @@ The remedy is the index, not a better predicate: `phase_transitions.kind` (migra
 
 The proof is `src/lib/phase-engine/transitions/declaration-race.test.ts` — a live-DB test (skipped without `DATABASE_URL`), because no SQL-string assertion can see this class of bug.
 
+## The 0038 batch — three more guards, and the non-obvious half of each (#407 D1/D2, #409 D1)
+
+Same shape as the declaration above: an index replaces a SELECT-then-INSERT, and the ON CONFLICT clause that speaks for it ships in the service that owns the write. What a reader cannot recover from the SQL is why each one is keyed the way it is.
+
+- **`message_templates_church_fork_unique_idx`** — `(church_id, source_template_id) where source_template_id is not null`. Partial because a church's OWN templates carry no source and two of them may legitimately share a name. `forkTemplate` claims with `ON CONFLICT … DO NOTHING` and re-reads the winner's fork, rather than the migration picking a winner — a fork holds a planter's edits, so the migration RAISEs on pre-existing duplicates instead of collapsing them. **The gap:** `church_id` is nullable and NULLs never collide, so a sourced row with no church is unconstrained. Nothing writes that shape; a `coalesce` expression index would make the ON CONFLICT target unspellable, which is a worse trade.
+- **`meeting_confirm_tokens_pending_unique_idx`** — `(meeting_id, person_id) where status = 'pending'`. Partial because answered tokens are history and a person may hold a `confirmed` row and a `declined` one. `createConfirmationToken` is ONE `ON CONFLICT … DO UPDATE`: free slot inserts, EXPIRED slot is renewed **in place** — which rotates the token and therefore **invalidates the link the earlier email carried**, deliberately — and a LIVE slot fails `setWhere`, writes nothing, and is re-read. The expiry branch is what makes this more than a race fix: it reached two pending rows with no concurrency at all.
+- **`team_memberships_role_active_unique_idx`** — `role_id` ALONE, `where status = 'active'`. Partial because a past holder stays as an `inactive` row (an unqualified index would make a seat fillable once in its life). **`(church_id, role_id)` was rejected**: a role already belongs to one church, so the pair is a wider key for the same rule and a forged church id would buy a second seat — `church_id` is for tenant-scoped reads, not identity. The INSERT carries `ON CONFLICT … DO NOTHING`; the reactivation UPDATE cannot carry one, so it meets the index as a throw and `membershipConflictMessage` maps it to the same sentence.
+
+**Where the reactivation refusal actually gets tested.** That last mapping is a string match over a driver error, and the error arrives in two shapes: a `db.batch([...])` throws the driver's `NeonDbError` directly (constraint name in `message`), while a single-statement write is wrapped in Drizzle's `Failed query: …` with the driver error on `cause` and no constraint name in the wrapper. Reading only one of them misses half the call sites. The function therefore lives in the import-free leaf `src/lib/ministry-teams/membership-copy.ts`, where `membership-conflict.test.ts` pins both shapes with no database.
+
+## Running the live suites at all
+
+Every race suite in this repo (`declaration-race`, `teams-init-race`, `fork-and-token-race`, `role-seat-race`, `subtask-parent-fk`) is opt-in behind `LIVE_DB_TESTS=1` **and** a reachability probe, and for a long time both were unsatisfiable outside a real Neon instance: `db` is a neon-http client, which speaks Neon's HTTP protocol and cannot reach a plain Postgres over TCP.
+
+The seam is `localNeonHttpEndpoint` (`src/db/connection.ts`): when `DATABASE_URL` names a local host it points `neonConfig.fetchEndpoint` at `local-neon-http-proxy`, which serves that protocol in front of any Postgres. Same driver, same `db.batch`, same SQL. A real Neon host returns `null` and production is byte-identical.
+
+**Do not "fix" this with `drizzle-orm/node-postgres`.** `db.batch()` exists only on the batching drivers, and it is the transaction in every write path here — a suite run on a driver without it tests code the application never executes. The `Live DB Race Suites` CI job stands the proxy up beside a `pgvector/pgvector:pg16` service, applies migrations, and runs `LIVE_DB_TESTS=1 pnpm test`; the proxy's mock control plane needs a `neon_control_plane.endpoints` table in the target database or every query answers HTTP 500 "Control plane request failed", which looks like a connection fault and is not.
+
 ## Why the church batch is one batch (#198)
 
 As three awaited statements, a failure at the last left a church LINKED to a planter with no privacy row and **nothing could repair it**: the retry is refused by the "you already have a church" guard, while every `canAccessFeatureData` read answered from a row that did not exist.
