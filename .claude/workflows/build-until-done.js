@@ -49,7 +49,11 @@ const FACTORY_ROOT = parsed?.factoryRoot || ".claude/workflows";
 // An unknown id fails HERE, at parse — before any claim, before any worktree,
 // never mid-build.
 // ---------------------------------------------------------------------------
-const KNOWN_RECIPES = ["implement-straight", "generate-and-filter"];
+const KNOWN_RECIPES = [
+  "implement-straight",
+  "generate-and-filter",
+  "adversarial-implement",
+];
 const recipeOf = (u) => u.recipe || "implement-straight";
 for (const u of units)
   if (!KNOWN_RECIPES.includes(recipeOf(u)))
@@ -65,8 +69,19 @@ for (const u of units)
 // literal is where that claim is ENFORCED: boundedParallel chunks stages and
 // tracks by summed weight, and both reserve checks multiply by it. A recipe
 // missing here weighs 1.
+//
+// adversarial-implement weighs 3 for the other reason a recipe can: it runs its
+// agents SEQUENTIALLY (implementer → adversary → fixer, up to 3 rounds), so the
+// cost is in the RESERVE rather than in simultaneity — an attempt that cannot
+// fund its adversary rounds would stop mid-loop and ship the unattacked diff,
+// which is the one outcome the recipe exists to prevent. The weight is one
+// number for both checks, so the cap is conservative here by construction.
 // ---------------------------------------------------------------------------
-const RECIPE_AGENT_COST = { "implement-straight": 1, "generate-and-filter": 3 };
+const RECIPE_AGENT_COST = {
+  "implement-straight": 1,
+  "generate-and-filter": 3,
+  "adversarial-implement": 3,
+};
 const agentCostOf = (ws) => RECIPE_AGENT_COST[ws.recipe] || 1;
 // Risk-tiered default (dod.md "EXHAUSTED"): 2 attempts; 3 only when the wave
 // carries a risk:high track. Attempt 3 changed no outcome in the week of

@@ -152,8 +152,12 @@ is fixed; the recipe is the only swappable part. Contract: `ops/agent-os/recipes
 |--------|------------|
 | `implement-straight` | Any shape; the default, and the answer whenever in doubt. |
 | `generate-and-filter` | A small, sharply specified, quality-sensitive unit (≤ ~2 files, low risk, no migration) where independent attempts plausibly diverge — UI polish, a tricky pure function. Costs ~3× (3 candidates) and counts as 3 agents against the 6-agent cap — machine-enforced: the loop's `RECIPE_AGENT_COST` weights both the concurrency chunking and the token-reserve checks. |
+| `adversarial-implement` | **The default for every `risk:high` unit** — set it on those without being asked, and only depart from it with a reason in the dispatch comment. Also earns its place on any unit touching auth, tenancy, invitations, a `"use server"` export or a public route handler, whatever its risk label. An adversary attacks the diff in-worktree (forged inputs, tenant boundaries, SESSION-FIRST, injection, over-broad reads — the HR4 security lens, run PRE-gate) and the implementer fixes, looping until a round finds nothing new, capped at 3 rounds. Costs ~3× and weighs 3 in `RECIPE_AGENT_COST`; its agents are sequential, so the weight is about funding the whole loop, not about simultaneity. Rationale: #304 burned ~8 integration rounds on holes this pass catches for one commit each. |
 
 - `recipe: "<id>"` is set **per unit** in the units array; omitted means `implement-straight`.
+- The risk:high default is a **selection** rule, not an enforcement one: the loop does not infer a
+  recipe from `risk`, so a `risk:high` unit dispatched without `recipe: "adversarial-implement"`
+  simply runs straight. Dispatch is the only thing that sets it.
 - Units that will share a workstream (same stage + shared files) must carry the **same** recipe —
   the loop throws at plan time on a mixed set.
 - An unknown id throws **at parse** — before any claim exists, before any worktree is cut. That is

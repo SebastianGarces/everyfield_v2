@@ -2640,6 +2640,368 @@ test("the agent cap chunks by recipe weight, not workstream count", async () => 
 });
 
 // ---------------------------------------------------------------------------
+// The adversarial-implement recipe (#413 WS1): implementer → adversary attacks
+// the diff in-worktree → implementer fixes, looping until a round names nothing
+// new, capped at 3 rounds.
+//
+// The parent keeps only `commits` and `rootCauseAddressed` out of a recipe's
+// return, so the loop-shaped properties — how many rounds ran, what the cap
+// recorded, which agent was told what — are invisible from runBuild. These
+// evaluate the recipe file DIRECTLY with stubbed globals, the same wrapper the
+// runtime uses, and assert on its own return value. The two runBuild tests at
+// the end cover the seam: that the parent selects it and weights it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a recipe child directly. `reply(prompt, opts)` answers each agent. Its
+ * `workflow` throws, exactly as the runtime's does — nesting is one level.
+ */
+async function runRecipe(id, recipeArgs, reply) {
+  const calls = [];
+  const globals = {
+    args: recipeArgs,
+    budget: { total: null, spent: () => 0, remaining: () => Infinity },
+    log: (m) => calls.push({ kind: "log", value: m }),
+    phase: (p) => calls.push({ kind: "phase", value: p }),
+    agent: async (prompt, opts = {}) => {
+      calls.push({
+        kind: "agent",
+        label: opts.label,
+        phase: opts.phase,
+        model: opts.model,
+        agentType: opts.agentType,
+        prompt,
+      });
+      return reply(prompt, opts);
+    },
+    parallel: async (thunks) =>
+      Promise.all(
+        thunks.map((t) =>
+          Promise.resolve()
+            .then(t)
+            .catch(() => null)
+        )
+      ),
+    workflow: () => {
+      throw new Error(
+        "workflow() nesting is one level deep — a child must never call workflow()"
+      );
+    },
+  };
+  const fn = new Function(
+    ...Object.keys(globals),
+    `return (async () => { ${load(`recipes/${id}.js`)} })()`
+  );
+  return { result: await fn(...Object.values(globals)), calls };
+}
+
+/** The recipeArgs contract (ops/agent-os/recipes.md), as the parent renders it. */
+const recipeArgs = (over = {}) => ({
+  track: { id: "alpha", issues: [101], branch: "feature/alpha" },
+  workstream: {
+    id: "alpha-s0w0",
+    lane: "backend",
+    issues: [101],
+    files: ["src/alpha.ts"],
+    summary: "summary for alpha",
+    units: [buildUnit("alpha", 101)],
+  },
+  worktree: "/repo/.claude/worktrees/alpha",
+  branch: "feature/alpha",
+  stageIndex: 0,
+  attempt: 1,
+  priorReport: null,
+  retryBlock: null,
+  conventions: "CONVENTIONS BLOCK",
+  implAgentType: "backend",
+  unitBlocksRendered: "### Unit 1: alpha",
+  ...over,
+});
+
+const IMPL_SHA = "a11a11a11a11a11a11a11a11a11a11a11a11a11a";
+const fixSha = (round) => `${round}f${"0".repeat(38)}`;
+const adversaryFinding = (n) => ({
+  severity: "critical",
+  summary: `hole ${n}`,
+  attack: `POST the action with a forged church_id — route ${n}`,
+  files: ["src/alpha.ts"],
+  remedy: `scope the query by session church_id — remedy ${n}`,
+});
+
+/**
+ * The adversary names one finding per round for the first `findingRounds`
+ * rounds, then reports the diff clean.
+ */
+const advReply =
+  ({ findingRounds = 0, implCommits = [IMPL_SHA], fixCommits = true } = {}) =>
+  (prompt, opts) => {
+    const l = opts.label || "";
+    if (l.startsWith("impl:"))
+      return {
+        committed: true,
+        filesChanged: ["src/alpha.ts"],
+        summary: "built it",
+        selfCheckPassed: true,
+        commits: implCommits,
+        rootCause: "the named ReferenceError",
+        rootCauseAddressed: "moved the import; `pnpm test` is green",
+      };
+    const adv = l.match(/^adv(\d+):/);
+    if (adv) {
+      const round = Number(adv[1]);
+      return round <= findingRounds
+        ? {
+            newFindings: [adversaryFinding(round)],
+            summary: `attacked; round ${round} got in`,
+          }
+        : { newFindings: [], summary: "attacked every axis; it held" };
+    }
+    const fix = l.match(/^advfix(\d+):/);
+    if (fix) {
+      const round = Number(fix[1]);
+      return {
+        committed: true,
+        filesChanged: ["src/alpha.ts"],
+        summary: `closed round ${round}`,
+        commits: fixCommits ? [fixSha(round)] : [],
+        perFinding: [
+          { finding: `hole ${round}`, addressed: "scoped it; test added" },
+        ],
+      };
+    }
+    return {};
+  };
+
+const labelled = (calls, re) => calls.filter((c) => re.test(c.label || ""));
+
+test("a clean first round ends the adversary loop — no fixer is spent", async () => {
+  const { result, calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply()
+  );
+  assert.equal(labelled(calls, /^adv\d+:/).length, 1, "one attack ran");
+  assert.equal(
+    labelled(calls, /^advfix\d+:/).length,
+    0,
+    "a diff that held costs no fix round"
+  );
+  assert.deepEqual(result.commits, [IMPL_SHA]);
+  assert.deepEqual(result.warnings, [], "a clean loop warns about nothing");
+  assert.match(result.summary, /1 round, no findings/);
+});
+
+test("findings go to the implementer and the loop re-attacks the fix", async () => {
+  const { result, calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply({ findingRounds: 1 })
+  );
+  assert.equal(
+    labelled(calls, /^adv\d+:/).length,
+    2,
+    "round 2 exists because a fix is new code the adversary has never read"
+  );
+  assert.equal(labelled(calls, /^advfix\d+:/).length, 1);
+  assert.deepEqual(
+    result.commits,
+    [fixSha(1), IMPL_SHA],
+    "`git log --format=%H` is newest-first, so the fix leads — commits[0] must stay the branch tip"
+  );
+  assert.deepEqual(result.warnings, []);
+  assert.match(result.summary, /2 rounds, 1 finding\(s\) closed/);
+});
+
+test("the fixer gets the finding VERBATIM, and the adversary never writes code", async () => {
+  const { calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply({ findingRounds: 1 })
+  );
+  const adv = labelled(calls, /^adv1:/)[0];
+  const fix = labelled(calls, /^advfix1:/)[0];
+  assert.equal(
+    adv.agentType,
+    "code-reviewer",
+    "the attacker is a different agent from the implementer — it must not mark its own homework"
+  );
+  assert.equal(adv.model, "opus");
+  assert.match(
+    adv.prompt,
+    /MUST NOT write code, commit, push, merge, edit labels or issues/
+  );
+  assert.match(
+    adv.prompt,
+    /SESSION FIRST, THEN THE PARSE/,
+    "the HR4 security lens, run pre-gate — the same axes, not a generic review"
+  );
+  assert.match(adv.prompt, /TENANT BOUNDARIES/);
+  assert.match(adv.prompt, /memory\/invariants\.md/);
+  assert.equal(fix.agentType, "backend", "the implementer's lane fixes");
+  assert.ok(
+    fix.prompt.includes(adversaryFinding(1).attack),
+    "the named attack reaches the fixer verbatim — a paraphrase is where a defect becomes a hunch"
+  );
+  assert.ok(fix.prompt.includes(adversaryFinding(1).remedy));
+  assert.match(fix.prompt, /Do NOT push/);
+});
+
+test("a later round is told what was already reported, so it reports only what is NEW", async () => {
+  const { calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply({ findingRounds: 1 })
+  );
+  const second = labelled(calls, /^adv2:/)[0];
+  assert.match(second.prompt, /already reported/);
+  assert.ok(
+    second.prompt.includes(adversaryFinding(1).summary),
+    "without the prior findings the loop can never terminate — round 2 re-reports round 1"
+  );
+});
+
+test("the 3-round cap is enforced AND recorded in the warnings — never a silent stop", async () => {
+  const { result, calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    // The adversary never runs out of findings.
+    advReply({ findingRounds: 99 })
+  );
+  assert.equal(labelled(calls, /^adv\d+:/).length, 3, "capped at 3 attacks");
+  assert.equal(labelled(calls, /^advfix\d+:/).length, 3, "and 3 fixes");
+  assert.ok(
+    result.warnings.some((w) => /3-round cap/.test(w)),
+    "a loop that gave up looks exactly like a loop that converged — the difference has to be said out loud"
+  );
+  assert.match(result.summary, /cap reached without a clean round/);
+  assert.deepEqual(
+    result.commits,
+    [fixSha(3), fixSha(2), fixSha(1), IMPL_SHA],
+    "every round's commits survive, newest first"
+  );
+});
+
+test("a fix that committed nothing is warned about, not reported closed", async () => {
+  const { result } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply({ findingRounds: 1, fixCommits: false })
+  );
+  assert.ok(
+    result.warnings.some((w) => /committed nothing/.test(w)),
+    "the finding is still open and the returned warnings are where the journal meets it"
+  );
+  assert.ok(
+    result.warnings.some((w) => /hole 1/.test(w)),
+    "the open finding is NAMED, not counted"
+  );
+});
+
+test("a dead adversary is a warning, and the attempt still carries its commits", async () => {
+  const { result } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    (prompt, opts) =>
+      /^adv\d+:/.test(opts.label || "") ? null : advReply()(prompt, opts)
+  );
+  assert.deepEqual(result.commits, [IMPL_SHA]);
+  assert.ok(
+    result.warnings.some((w) => /adversary agent died/.test(w)),
+    "the gates still run — but nobody may read the journal as if the diff was attacked"
+  );
+});
+
+test("an implementer that committed nothing skips the adversary entirely", async () => {
+  const { result, calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    advReply({ implCommits: [] })
+  );
+  assert.deepEqual(
+    result.commits,
+    [],
+    "commits: [] is what the parent's empty-commits gate reads"
+  );
+  assert.equal(
+    labelled(calls, /^adv\d+:/).length,
+    0,
+    "spending an opus attacker on a diff that does not exist proves nothing"
+  );
+});
+
+test("a retry passes the implementer's root-cause answer through verbatim", async () => {
+  const { result, calls } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs({
+      priorReport: { verdict: "FAIL", failingGate: "G2-subset" },
+      retryBlock: `THE ROOT CAUSE IS BELOW\n${CRASH}`,
+    }),
+    advReply({ findingRounds: 1 })
+  );
+  assert.equal(result.rootCause, "the named ReferenceError");
+  assert.equal(
+    result.rootCauseAddressed,
+    "moved the import; `pnpm test` is green",
+    "the parent's refusal gate reads this — the adversary rounds report through warnings and never rewrite it"
+  );
+  const impl = labelled(calls, /^impl:/)[0];
+  assert.ok(
+    impl.prompt.startsWith("THE ROOT CAUSE IS BELOW"),
+    "mod 2: the parent-rendered retryBlock is prepended VERBATIM"
+  );
+});
+
+test("an adversarial-implement unit runs the recipe child and ships", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "adversarial-implement" }],
+    replyShip(passing([]))
+  );
+  assert.ok(
+    calls.some(
+      (c) =>
+        c.kind === "workflow" &&
+        c.scriptPath.includes("recipes/adversarial-implement.js")
+    ),
+    "the recipe named on the unit is the child that runs"
+  );
+  assert.ok(
+    calls.some((c) => /^adv1:/.test(c.label || "")),
+    "the attack runs inside the attempt, before any gate"
+  );
+  assert.equal(
+    scopedVerify(calls).length,
+    1,
+    "the attacked diff proceeds to the scoped verifier like any attempt"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+test("the token reserve is recipe-weighted: adversarial-implement needs 3x before it starts", async () => {
+  const tight = {
+    total: 1_000_000,
+    spent: () => 700_000,
+    remaining: () => 300_000,
+  };
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "adversarial-implement" }],
+    replyShip(passing([])),
+    { budgetImpl: tight }
+  );
+  assert.ok(
+    !calls.some(
+      (c) => c.kind === "workflow" && c.scriptPath.includes("recipes/")
+    ),
+    "an attempt that cannot fund its adversary rounds must be refused BEFORE it starts — stopping mid-loop ships the unattacked diff, which is the one outcome the recipe exists to prevent"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.match(
+    result.blocked[0].reason,
+    /450k/,
+    "the refusal shows the weighted arithmetic (150k reserve x 3)"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The two file-level mechanisms: the parent idiom and the format hook.
 //
 // Neither is exercised by a stubbed run — one is a doctrine about which command
@@ -2684,6 +3046,7 @@ test("every workflow script parses under the harness wrapper (AC1)", () => {
     "frd-implement.js",
     "recipes/implement-straight.js",
     "recipes/generate-and-filter.js",
+    "recipes/adversarial-implement.js",
   ])
     assert.ok(
       WORKFLOW_FILES.includes(`.claude/workflows/${name}`),
@@ -2707,6 +3070,35 @@ test("every workflow script parses under the harness wrapper (AC1)", () => {
       assert.fail(`${file} does not parse: ${e.message}`);
     }
   }
+});
+
+// A recipe is registered in FOUR places (recipes.md "Adding a recipe"), and
+// three of them are text a stubbed run cannot reach: the parse-time registry,
+// the cost weight, the dispatch selection row and the contract section. Half a
+// registration is the failure mode — a recipe file with no KNOWN_RECIPES entry
+// throws at selection; a cost row missing under-reserves the fan-out.
+test("adversarial-implement is registered in all four places, and the risk:high default is stated", () => {
+  const loop = read(".claude/workflows/build-until-done.js");
+  assert.match(
+    loop,
+    /"adversarial-implement"/,
+    "KNOWN_RECIPES is the parse-time registry — an unlisted recipe throws on selection"
+  );
+  assert.match(
+    loop,
+    /"adversarial-implement":\s*3/,
+    "RECIPE_AGENT_COST = 3 is where the ~3x claim is ENFORCED, not merely documented"
+  );
+  assert.match(
+    read(".claude/skills/dispatch/SKILL.md"),
+    /`adversarial-implement`[^\n]*risk:high/,
+    "dispatch's selection table is authoritative for which task shapes get which recipe"
+  );
+  assert.match(
+    read("ops/agent-os/recipes.md"),
+    /^## `adversarial-implement`$/m,
+    "recipes.md carries a section per the 'Adding a recipe' checklist"
+  );
 });
 
 // ---------------------------------------------------------------------------

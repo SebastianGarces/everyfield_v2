@@ -102,6 +102,9 @@ attempt, so a recipe can never spend past its own call — and must be **visible
 a recipe that fans out (candidates, internal improve loops) logs what it spent the fan-out on
 (ruling design note 6). `generate-and-filter` costs ~3× `implement-straight` and counts as 3
 agents against the concurrency cap; dispatch sizes its workstreams at ~3× the budget-table row.
+`adversarial-implement` carries the same weight for a different reason — its agents are sequential,
+so the 3 funds the whole implementer→adversary→fix loop out of one attempt's reserve rather than
+three simultaneous agents.
 
 This weighting is **enforced in the loop, not just documented**: the `RECIPE_AGENT_COST` literal
 in `build-until-done.js` weights the concurrency chunking (`boundedParallel` closes a chunk when
@@ -130,10 +133,59 @@ sets `hold: true` on any track that touches one, and it never auto-merges.
 |----|----------|--------|
 | `implement-straight` | One implementer agent, prompt semantics preserved from the pre-#399 inline call. The default. | landed (#399 WS2) |
 | `generate-and-filter` | 3 candidate diffs in throwaway worktrees → opus judge picks exactly one → ff-only land. The proof that the seam supports a genuinely different shape. | landed (#399 WS3) |
+| `adversarial-implement` | Implementer → adversary attacks the diff in-worktree → implementer fixes, looping until a round finds nothing new (cap 3). The default for `risk:high` units. | landed (#413 WS1) |
 
-Out of scope until the seam is proven: `adversarial-implement`, `loop-until-dry` (runs INSIDE one
-attempt as an internal improve loop — it must not hide attempts from parent accounting),
-cross-workstream tournaments, recipe-driven staging (would need a seam-v2 ruling).
+Out of scope: `loop-until-dry` (runs INSIDE one attempt as an internal improve loop — it must not
+hide attempts from parent accounting; deferred until sweeps recur as a track shape),
+cross-workstream tournaments, `plan-first`, a docs-lane recipe, recipe-driven staging (would need a
+seam-v2 ruling). The last three were considered and rejected on 2026-08-12.
+
+## `adversarial-implement`
+
+**Strategy.** One implementer writes the diff in the parent-provided worktree, exactly as
+`implement-straight` does. Then an independent **adversary** — a different agent, opus,
+`code-reviewer`, with ONE question — attacks that diff in the same worktree and returns findings it
+must state as concrete attacks. The implementer fixes what it named. Repeat until a round reports
+**no new findings**, capped at **3 rounds**.
+
+**What it is for.** `risk:high` units, and anything touching auth, tenancy, a `"use server"` export
+or a public route handler. #304 spent ~8 integration rounds on holes a reader of the diff could have
+named in one pass; each of those rounds paid for a full verify + review cycle to re-learn it. This
+recipe moves HR4's **security lens** — the same axes, the same "you are the only one looking down
+this axis" framing — from the END of the track to INSIDE the attempt, where a finding costs one
+commit instead of one integration round.
+
+**Why it is not just a second reviewer.**
+
+- The adversary **never writes code**. It names findings; the implementer fixes them. The attacker
+  never marks its own homework, which is why the loop can terminate honestly.
+- Its brief is one question, not a checklist of everything — the same reason HR4's three lenses are
+  diverse rather than redundant. A reviewer asked to look at everything reproduces the
+  implementer's blind spots; an attacker asked only "how do I get in" does not.
+- It is **capped and the cap is reported**. A loop that quietly gave up looks exactly like a loop
+  that converged. Hitting round 3 with findings still open is recorded in the returned `warnings`,
+  so the journal and the verifier both meet it. A dead adversary, a dead fixer, a fix that committed
+  nothing and a fix that answered fewer findings than were named are each a warning too — the
+  recipe never reports a round closed that it cannot show closed.
+
+**Cost and weight.** `RECIPE_AGENT_COST` = **3**. Its agents run **sequentially**, so unlike
+`generate-and-filter` the weight is not about simultaneity — it is about the RESERVE. An attempt
+that cannot fund its adversary rounds would stop mid-loop and ship the unattacked diff, which is the
+one outcome the recipe exists to prevent, so the reserve check must refuse it before it starts. One
+number feeds both checks, which makes the concurrency cap conservative here by construction.
+
+**Scratch state.** None. Every agent works in the parent-provided worktree on `branch`; the recipe
+cuts no `recipe/*` branches and no candidate trees, so there is nothing to sweep and nothing that
+can be left behind.
+
+**Retry contract.** `rootCause` / `rootCauseAddressed` come from the IMPLEMENTER verbatim — it is
+the agent the parent's `retryBlock` was handed. The adversary rounds report through `summary` and
+`warnings`, and never rewrite the implementer's answer to the named cause.
+
+**Canary.** Required and still outstanding: the next `risk:high` dispatch (e.g. #378) runs with
+`recipe: adversarial-implement`; the journal must show ≥1 adversary round and the track's
+integration verify must pass with no security-attributed FAIL. That is a POST-MERGE obligation of
+#413, deliberately outside the track's own acceptance criteria — the same pattern as #399's canary.
 
 ## Adding a recipe
 
