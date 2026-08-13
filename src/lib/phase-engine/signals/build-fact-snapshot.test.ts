@@ -468,6 +468,39 @@ test("PE-005: manual attestations are merged; only attested keys appear", () => 
   assert.equal(snap.manual.byKey["daysUntilLaunch"], undefined);
 });
 
+test("PE-005: a prototype-named signal key is an own property, not a mutation", () => {
+  // The WRITE half of the untrusted-key rule (memory/invariants.md → Phase
+  // Engine). The four reads that WALK `manual.byKey` are `Object.hasOwn`-gated;
+  // the object they walk is assembled here, keyed by a stored string. On a
+  // plain `{}` accumulator `byKey["__proto__"] = …` creates no own property, so
+  // the row disappears from the snapshot with nothing failing.
+  const inputs = richInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "__proto__",
+      value: true,
+      attestedAt: new Date("2026-06-01T00:00:00.000Z"),
+    },
+    {
+      signalKey: "constructor",
+      value: "shadowed",
+      attestedAt: new Date("2026-06-02T00:00:00.000Z"),
+    },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+
+  assert.equal(Object.hasOwn(snap.manual.byKey, "__proto__"), true);
+  assert.equal(snap.manual.byKey["__proto__"], true);
+  assert.equal(Object.hasOwn(snap.manual.byKey, "constructor"), true);
+  assert.equal(snap.manual.byKey["constructor"], "shadowed");
+
+  // Nothing was written THROUGH the object either — it has no prototype to
+  // reach, and a plain object still reports the stock constructor.
+  assert.equal(Object.getPrototypeOf(snap.manual.byKey), null);
+  assert.equal({}.constructor, Object);
+});
+
 test("PE-018: cold-start returns a well-formed snapshot with emptiness markers, no throw", () => {
   const snap = assembleFactSnapshot(CHURCH_ID, coldStartInputs(), AS_OF);
 

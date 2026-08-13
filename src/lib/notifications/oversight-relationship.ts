@@ -6,6 +6,14 @@ import {
   organizationInvitations,
   type User,
 } from "@/db/schema";
+import {
+  namesAnOversightOrg,
+  noOversightOrg,
+  OVERSIGHT_ADMIN,
+  OVERSIGHT_ADMIN_ROWS,
+  type OversightAdminPairing,
+  type OversightOrgIds,
+} from "./oversight-admin";
 
 // ============================================================================
 // The recorded-relationship tenancy basis (#304, OV-006 / OV-007).
@@ -44,22 +52,14 @@ import {
 // ============================================================================
 
 /**
- * The org this recipient may be asked about — EXACTLY ONE field set, or neither.
+ * The columns the pairing reads — exactly what `enqueue` already projects.
  *
- * Not a projection of the `users` row, and that is the whole point: both org FKs
- * live on the same row and nothing stops a user carrying both. Only
- * `recipientOrgOf` produces this shape, so the pairing of role to org kind
- * cannot be skipped by a caller who happens to hold a `users` row.
+ * The FK half is the pairing table's own key set, so a new org kind widens this
+ * projection with the row rather than by somebody remembering to add a name.
  */
-export interface RecipientOrg {
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-}
-
-/** The columns the pairing reads — exactly what `enqueue` already projects. */
 export type OversightRecipient = Pick<
   User,
-  "role" | "sendingChurchId" | "sendingNetworkId"
+  "role" | OversightAdminPairing["fk"]
 >;
 
 /**
@@ -81,24 +81,29 @@ export type OversightRecipient = Pick<
  * every other role → neither, which matches nothing at all rather than
  * everything (see the `false` returns below).
  *
+ * WHICH ROLE GOES WITH WHICH KIND, AND WHICH FK THAT KIND LIVES IN, are both
+ * read from `OVERSIGHT_ADMIN` (`./oversight-admin.ts`, whose header carries the
+ * rationale). This is the inverse direction of the other readers' lookup — a
+ * role asking which org it speaks through, rather than an org kind asking which
+ * role administers it — but it is the SAME pairing.
+ *
+ * The scan carries the whole answer, so no column name is written here — the
+ * all-null base included, which is `noOversightOrg()` enumerated from the same
+ * table. A role that matches no row contributes nothing and that base comes
+ * back unchanged, which matches NOTHING at all rather than everything (see the
+ * `false` returns below). Adding a kind is a row in that table; this function
+ * does not change.
+ *
  * Pure, and exported so it can be tested over the whole role × org-FK domain.
  */
-export function recipientOrgOf(recipient: OversightRecipient): RecipientOrg {
-  if (recipient.role === "sending_church_admin") {
-    return {
-      sendingChurchId: recipient.sendingChurchId,
-      sendingNetworkId: null,
-    };
+export function recipientOrgOf(recipient: OversightRecipient): OversightOrgIds {
+  const org = noOversightOrg();
+
+  for (const { role, fk } of Object.values(OVERSIGHT_ADMIN)) {
+    if (recipient.role === role) org[fk] = recipient[fk];
   }
 
-  if (recipient.role === "network_admin") {
-    return {
-      sendingChurchId: null,
-      sendingNetworkId: recipient.sendingNetworkId,
-    };
-  }
-
-  return { sendingChurchId: null, sendingNetworkId: null };
+  return org;
 }
 
 /**
@@ -109,16 +114,17 @@ export function recipientOrgOf(recipient: OversightRecipient): RecipientOrg {
  * commit this announcement follows would silently drop the notification. What
  * the predicate has to establish is that the org and the plant have an
  * invitation between them at all, which no status can make untrue.
+ *
+ * ONE ARM PER ROW OF `OVERSIGHT_ADMIN`, like every other reader — the FK is the
+ * row's, and `organization_invitations` carries the sending-church and network
+ * ids under the same names `users` does, so the row's `fk` indexes both tables.
  */
-function invitationRelationship(org: RecipientOrg, churchId: string): SQL {
-  const reaches = [
-    org.sendingChurchId
-      ? eq(organizationInvitations.sendingChurchId, org.sendingChurchId)
-      : undefined,
-    org.sendingNetworkId
-      ? eq(organizationInvitations.sendingNetworkId, org.sendingNetworkId)
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+function invitationRelationship(org: OversightOrgIds, churchId: string): SQL {
+  const reaches = OVERSIGHT_ADMIN_ROWS.map(([, { fk }]) => {
+    const orgId = org[fk];
+
+    return orgId === null ? undefined : eq(organizationInvitations[fk], orgId);
+  }).filter((clause) => clause !== undefined);
 
   // No org named — no relationship. Never "every invitation in the product",
   // which is what an `and()` with an undefined arm would collapse to.
@@ -130,22 +136,25 @@ function invitationRelationship(org: RecipientOrg, churchId: string): SQL {
   )!;
 }
 
-/** `EXISTS` over the audit: this org and this plant were associated at some point. */
-function auditRelationship(org: RecipientOrg, churchId: string): SQL {
-  const reaches = [
-    org.sendingChurchId
-      ? and(
-          eq(associationEvents.orgType, "sending_church"),
-          eq(associationEvents.orgId, org.sendingChurchId)
-        )
-      : undefined,
-    org.sendingNetworkId
-      ? and(
-          eq(associationEvents.orgType, "network"),
-          eq(associationEvents.orgId, org.sendingNetworkId)
-        )
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+/**
+ * `EXISTS` over the audit: this org and this plant were associated at some point.
+ *
+ * This is the reader that needs the org KIND as well as the FK, because
+ * `association_events` stores the kind in `org_type` beside a polymorphic
+ * `org_id`. It reads the kind off the pairing row's KEY, so the two org-kind
+ * literals that used to sit here are gone with the FK names.
+ */
+function auditRelationship(org: OversightOrgIds, churchId: string): SQL {
+  const reaches = OVERSIGHT_ADMIN_ROWS.map(([kind, { fk }]) => {
+    const orgId = org[fk];
+
+    return orgId === null
+      ? undefined
+      : and(
+          eq(associationEvents.orgType, kind),
+          eq(associationEvents.orgId, orgId)
+        );
+  }).filter((clause) => clause !== undefined);
 
   if (reaches.length === 0) return sql`false`;
 
@@ -172,7 +181,9 @@ export async function orgHasRecordedRelationshipWithChurch(
 ): Promise<boolean> {
   const org = recipientOrgOf(recipient);
 
-  if (!org.sendingChurchId && !org.sendingNetworkId) return false;
+  // No org named — no relationship, asked over the table's keys rather than
+  // over two column names this module would then have to keep in step.
+  if (!namesAnOversightOrg(org)) return false;
 
   const [invited] = await db
     .select({ id: organizationInvitations.id })

@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { organizationInvitationTypes } from "@/db/schema/organization-invitation";
+import { stripComments } from "@/lib/testing/source-span";
 
 // ============================================================================
 // OV-003b (#293) — ONE implementation of "who invited them", in the invitations
@@ -40,13 +41,6 @@ function read(...segments: string[]): string {
   return readFileSync(path.join(ROOT, ...segments), "utf8");
 }
 
-/** Source with comments stripped — the rules below are documented by naming what they forbid. */
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
-}
-
 // ----------------------------------------------------------------------------
 // 1. One reader of the org-name columns
 // ----------------------------------------------------------------------------
@@ -62,7 +56,7 @@ const CONSUMERS = [
 
 test("no consumer re-reads sendingChurches/sendingNetworks for the org name", () => {
   for (const segments of CONSUMERS) {
-    const source = code(read(...segments));
+    const source = stripComments(read(...segments));
     const where = segments.join("/");
 
     assert.match(
@@ -95,7 +89,7 @@ test("no consumer re-reads sendingChurches/sendingNetworks for the org name", ()
 // ----------------------------------------------------------------------------
 
 test("lookupInvitingOrgName is exhaustive over the invitation types", () => {
-  const source = code(read("lib", "invitations", "core.ts"));
+  const source = stripComments(read("lib", "invitations", "core.ts"));
 
   const signature = source.match(
     /export async function lookupInvitingOrgName\(invitation: \{[\s\S]*?\}\): Promise<string \| null> \{([\s\S]*?)\n\}/

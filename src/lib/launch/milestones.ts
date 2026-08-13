@@ -43,11 +43,8 @@ import {
 } from "@/db/schema";
 import type { LaunchMilestoneArea } from "@/db/schema/launch";
 import type { TaskStatus } from "@/db/schema/tasks";
-import {
-  CHURCH_LEVEL_ROLES,
-  requireChurchAccess,
-  requireRole,
-} from "@/lib/auth/access";
+import { requireChurchAccess, requireRole } from "@/lib/auth/access";
+import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
 import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
 
 // ----------------------------------------------------------------------------

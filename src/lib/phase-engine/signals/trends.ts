@@ -25,7 +25,7 @@ import {
 // trend must be the SAME relabelling of the SAME persisted severity, or the page
 // would carry two urgency vocabularies that drift apart.
 import {
-  csfStandingUrgency,
+  compareInsightUrgency,
   standingForSeverity,
   type CsfStanding,
   type LatestAssessment,
@@ -215,10 +215,12 @@ export const NO_ENGINE_ALERT: EngineAlert = {
 /**
  * The most urgent insight in `categories`, as a badge.
  *
- * Ordering is `csfStandingUrgency(standingForSeverity(...))` then the judge's own
- * `rank` — the two exported primitives the scorecard's comparator is built from,
- * so the badge and the tile can never disagree about which finding is the
- * headline for the same insight set.
+ * Ordering is `compareInsightUrgency` — the SCORECARD'S OWN COMPARATOR, imported
+ * rather than rebuilt out of the two primitives it is made of, so the badge and
+ * the tile can never disagree about which finding is the headline for the same
+ * insight set. This function used to inline the same three lines, which made
+ * "they cannot disagree" true only for as long as nobody edited one of them; the
+ * exit criteria already import the comparator for exactly this reason.
  *
  * Callers hand in insights they have already gated: an oversight caller must
  * pass privacy-gated rows, exactly as `buildCsfScorecard` requires, or a badge
@@ -230,12 +232,7 @@ export function deriveEngineAlert(
 ): EngineAlert {
   const matching = insights
     .filter((insight) => categories.includes(insight.category))
-    .sort((a, b) => {
-      const byUrgency =
-        csfStandingUrgency(standingForSeverity(a.severity)) -
-        csfStandingUrgency(standingForSeverity(b.severity));
-      return byUrgency !== 0 ? byUrgency : a.rank - b.rank;
-    });
+    .sort(compareInsightUrgency);
 
   const lead = matching[0];
   if (!lead) return NO_ENGINE_ALERT;

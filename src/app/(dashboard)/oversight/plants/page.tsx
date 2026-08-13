@@ -18,30 +18,21 @@
 // ============================================================================
 
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantsDirectory } from "@/components/oversight/plants-directory";
-import { getCurrentSession } from "@/lib/auth";
-import { scopeLabelForRole } from "@/lib/oversight/presentation";
+import { scopeLabelForRole } from "@/lib/oversight/org-label";
 import { listOversightPlants } from "@/lib/oversight/read";
+import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata: Metadata = {
   title: "Church plants",
 };
 
 export default async function OversightPlantsPage() {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
-
   // Oversight-only surface. Church-level roles never reach the read — and
   // `listOversightPlants` refuses them a second time by resolving no org.
-  if (user.role !== "sending_church_admin" && user.role !== "network_admin") {
-    redirect("/dashboard");
-  }
+  const user = await requireOversightUser();
 
   const plants = await listOversightPlants(user);
 

@@ -39,36 +39,28 @@
 // that sees a transitive derivation. Read that file before adding a field here.
 // ============================================================================
 
-import { redirect } from "next/navigation";
-
 import { HeaderBreadcrumbs } from "@/components/header";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
 import { InvitationsList } from "@/components/oversight/invitations-list";
-import { getCurrentSession } from "@/lib/auth";
 import {
   INVITATION_EXPIRY_DAYS,
   getInvitationsForOrg,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
 import { toInvitationListRow } from "@/lib/invitations/list-row";
+import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata = {
   title: "Invitations",
 };
 
 export default async function OversightInvitationsPage() {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // Oversight-only. The action layer enforces the same rule server-side — a
-  // planter or team member who POSTs to `createInvitation` directly is refused
-  // by `resolveInvitationRequest`, not merely kept off this page.
-  if (user.role !== "sending_church_admin" && user.role !== "network_admin") {
-    redirect("/dashboard");
-  }
+  // Oversight-only, through the guard every /oversight route shares. The action
+  // layer enforces the same rule server-side — a planter or team member who
+  // POSTs to `createInvitation` directly is refused by
+  // `resolveInvitationRequest`, not merely kept off this page.
+  const user = await requireOversightUser();
 
   const actor = invitationActorFromSession({ user });
   const invitations = await getInvitationsForOrg(actor);
@@ -80,10 +72,13 @@ export default async function OversightInvitationsPage() {
       <HeaderBreadcrumbs items={[{ label: "Invitations" }]} />
       <div>
         <h1 className="text-3xl font-bold">Invitations</h1>
+        {/*
+          `scopeLabelForRole` is the ONE spelling of these two words across the
+          oversight surface; this sentence used to re-derive them inline.
+        */}
         <p className="text-muted-foreground mt-1">
           Invite church plants to associate with your{" "}
-          {user.role === "network_admin" ? "network" : "sending church"}, and
-          track what you have sent.
+          {scopeLabelForRole(user.role)}, and track what you have sent.
         </p>
       </div>
 

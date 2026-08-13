@@ -479,7 +479,13 @@ function buildLaunchSignals(
 // ----------------------------------------------------------------------------
 
 function buildManualSignals(rows: PlantSignalRow[]): ManualSignals {
-  const byKey: Record<string, unknown> = {};
+  // PROTOTYPE-FREE, because `row.signalKey` is a stored string and this is the
+  // WRITE half of the untrusted-key rule (memory/invariants.md → Phase Engine —
+  // Cited Facts & Attestation Citations). On a plain `{}`, `byKey["__proto__"]`
+  // creates no own property at all — the row vanishes from the snapshot with
+  // nothing failing — and `byKey["constructor"]` shadows a prototype member on
+  // the very object every later citation is resolved against.
+  const byKey: Record<string, unknown> = Object.create(null);
   const attestations = rows.map((row) => {
     byKey[row.signalKey] = row.value;
     return {

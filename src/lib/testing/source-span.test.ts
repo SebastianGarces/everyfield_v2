@@ -38,6 +38,17 @@ import { assertInOrder, sourceReader } from "./source-span";
 // `html.slice(html.indexOf(inviteUrl))` claiming to be the CTA while actually
 // covering the fallback link, the rule and the footer. `src/lib/email/templates/`
 // is in the scan now.
+//
+// And it got back in a second time, the same way (#411): a sweep over the
+// NOTIFICATIONS domain deleted one tautological span from `anchor.test.ts`,
+// named it "exactly the rot source-span.ts exists to prevent" — and left five
+// more standing in the same domain, one of them the guard that the
+// recorded-relationship fallback cannot reach the consent gate. Its start
+// anchor going missing sliced the EMPTY STRING, so both of its `doesNotMatch`
+// calls asserted nothing, on a risk:high tenancy path. No suite went red,
+// because no scan reached the directory. Both notifications directories are in
+// the scan now — converting instances without widening `GUARDED` leaves the
+// class exactly as live as it was.
 // ============================================================================
 
 /**
@@ -55,6 +66,8 @@ import { assertInOrder, sourceReader } from "./source-span";
 const GUARDED: readonly { readonly dir: string; readonly atLeast: number }[] = [
   { dir: "src/lib/invitations", atLeast: 10 },
   { dir: "src/lib/email/templates", atLeast: 2 },
+  { dir: "src/lib/notifications", atLeast: 15 },
+  { dir: "src/components/notifications", atLeast: 1 },
 ];
 
 /** Repo-relative POSIX path → absolute, for `readdirSync`/`readFileSync`. */
