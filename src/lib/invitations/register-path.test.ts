@@ -415,13 +415,20 @@ test("no module still documents the admin's copy of the link as the recovery", (
 const CLAIMS_A_SECOND_DOOR =
   /\bre-exports?\s+(?:both|it|them|the\s+(?:window|spelling|names))|re-exported so a reader|every existing importer/i;
 
-const LEAF_PROSE = [
-  ["lib", "invitations", "register-path.ts"],
-  ["lib", "invitations", "resend-window.ts"],
+// ONE LIST for the leaf half too — the same rule `DOMAIN_LEAVES`'s own header
+// states, applied to this scan rather than restated beside it. A hand-written
+// copy of the leaf files here is exactly the list-plus-parallel-list that drifts:
+// a THIRD leaf added to the table would pick up rule 1 (imports nothing) and
+// rule 2 (nothing else exports its spelling) for free and silently miss this
+// one. The three TRUNK modules stay explicit, because they are not leaves and
+// have no row in the table — they are here as the modules whose PROSE has
+// described a leaf as re-exported.
+const LEAF_PROSE: readonly (readonly string[])[] = [
+  ...DOMAIN_LEAVES.map((leaf) => leaf.file),
   ["lib", "invitations", "email.ts"],
   ["lib", "invitations", "resend.ts"],
   ["lib", "invitations", "service.ts"],
-] as const;
+];
 
 test("no module documents a leaf as reachable through the trunk", () => {
   for (const segments of LEAF_PROSE) {

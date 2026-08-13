@@ -1546,7 +1546,10 @@ export async function acceptInvitationAs(
   // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
   // sending-church subject included. `null` now means only "this row's
   // type-implied ids are missing", which the statements above would already have
-  // thrown on — not "this kind of association goes unrecorded".
+  // thrown on — not "this kind of association goes unrecorded". A `type` outside
+  // the union does not arrive here as `null` either: it THROWS inside
+  // `auditableAssociationOrg`, because this branch is on truthiness, so a
+  // falsy return would be the unaudited three-statement batch OV-008 forbids.
   const auditedOrg = auditableAssociationOrg(invitation);
   const audit = auditedOrg
     ? acceptedAssociationEventStatement(actor, {
@@ -2224,24 +2227,31 @@ export async function disassociateSendingChurchFromNetwork(
  * the network as org.
  *
  * `null` still means "there is nothing honest to audit" — a row whose type-implied
- * ids are missing. It never means "this kind of association is not recorded".
+ * ids are missing. It never means "this kind of association is not recorded",
+ * and it never means "this row's type is not one we know".
  *
- * IT FAILS CLOSED LIKE EVERY OTHER SWITCH ON `type` IN THIS FILE, and until the
- * 2026-08-13 sweep (#411) it was the one that did not. With three cases and no
- * `default:`, TypeScript treats the switch as exhaustive and lets the function
- * end — so a row carrying a `type` outside the union returned `undefined`, not
- * the `null` the signature promises, and `acceptInvitationAs` reads a falsy
- * result as "nothing to audit" and batches three statements instead of four.
- * That is an association committed with no `association_events` row behind it,
- * which is the one thing #274 / OV-008 forbids. The premise is real rather than
- * theoretical: the column is a bare `varchar(40)` with a TypeScript-only
+ * IT FAILS CLOSED LIKE EVERY OTHER SWITCH ON `type` IN THIS FILE — it THROWS
+ * `InvitationError(NOT_AUTHORIZED_MESSAGE)`, the same arm `insertInvitation`'s
+ * slot rule, `lockTargetRow`, `associationStatement`, the accept path and
+ * `verifyInvitationAuthority` all take. Until the 2026-08-13 sweep (#411) it was
+ * the one that did not. With three cases and no `default:`, TypeScript treats
+ * the switch as exhaustive and lets the function end — so a row carrying a
+ * `type` outside the union returned `undefined`, and `acceptInvitationAs` reads
+ * a falsy result as "nothing to audit" and batches three statements instead of
+ * four. That is an association committed with no `association_events` row behind
+ * it, which is the one thing #274 / OV-008 forbids. Returning `null` from the
+ * arm would leave that outcome exactly as it was, because the caller's branch is
+ * on truthiness — so the arm throws, and the return value now says only "these
+ * ids are missing", never "this type is unknown". The premise is real rather
+ * than theoretical: the column is a bare `varchar(40)` with a TypeScript-only
  * `$type<>` cast and `insertInvitation` validates nothing (see
  * `verifyInvitationAuthority`). Nothing reaches here today — `lockTargetRow`,
  * `associationStatement` and `verifyInvitationAuthority` all throw on such a row
  * first — but "unreachable because three other functions happen to run earlier"
  * is not the guarantee this function should rest on, and a FOURTH
  * `OrganizationInvitationType` would reach it with all three of those extended
- * and this one silently unaudited. The `never` makes that a compile error.
+ * and this one silently unaudited. The `never` makes that a compile error, and
+ * the throw makes the runtime arm refuse rather than half-apply.
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
   subject: AssociationSubject;
@@ -2279,7 +2289,7 @@ export function auditableAssociationOrg(invitation: AssociationFacts): {
       console.error("invitation type has no auditable association", {
         type: unknownType,
       });
-      return null;
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
     }
   }
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  InvitationError,
   NOT_ASSOCIATED_MESSAGE,
   PLANTER_ONLY_SEVER_MESSAGE,
   auditableAssociationOrg,
@@ -466,17 +467,23 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
   );
 });
 
-test("a type outside the union audits NOTHING rather than undefined", () => {
+test("a type outside the union REFUSES rather than auditing nothing", () => {
   // Swept 2026-08-13 (#411). `auditableAssociationOrg` was the one switch on
   // `type` in `core.ts` with no `default:` — three cases, which TypeScript
   // treats as exhaustive, so the function fell off the end and returned
-  // `undefined`. Its signature says `| null`, and `acceptInvitationAs` branches
-  // on truthiness, so the two read alike THERE — but `undefined` is not what the
-  // type promises, and the reason the promise matters is a FOURTH
-  // `OrganizationInvitationType`: with a `default:` carrying `never`, adding one
-  // stops the build here; without it, the new type would batch three statements
-  // instead of four and commit an association with no `association_events` row
-  // behind it, which is exactly what #274 / OV-008 forbids.
+  // `undefined`.
+  //
+  // A `default:` that returns `null` would NOT have fixed that, and this test
+  // exists to pin the difference: `acceptInvitationAs` branches on truthiness
+  // (`const audit = auditedOrg ? … : null`), so `undefined` and `null` reach the
+  // batch identically — three statements instead of four, an association
+  // committed with no `association_events` row behind it, which is exactly what
+  // #274 / OV-008 forbids. Only a THROW refuses, and it is the same arm every
+  // other mutation-guarding switch on `type` in that file already takes
+  // (`insertInvitation`'s slot rule, `lockTargetRow`, `associationStatement`,
+  // the accept path, `verifyInvitationAuthority`). The `never` assignment beside
+  // it makes a FOURTH `OrganizationInvitationType` a compile error here; the
+  // throw is what covers the row that is already in the table.
   //
   // The cast is the point of the test: the column is a bare `varchar(40)` with a
   // TypeScript-only `$type<>` cast and `insertInvitation` validates nothing, so
@@ -489,15 +496,10 @@ test("a type outside the union audits NOTHING rather than undefined", () => {
     sendingNetworkId: NETWORK,
   };
 
-  const audited = auditableAssociationOrg(rogue);
-
-  assert.equal(audited, null);
-  // `deepEqual` would pass for `undefined` too — the whole defect — so the
-  // distinction is asserted directly.
-  assert.notEqual(
-    audited,
-    undefined,
-    "a rogue type must return the declared null, never fall off the end of the switch"
+  assert.throws(
+    () => auditableAssociationOrg(rogue),
+    InvitationError,
+    "a rogue type must refuse — returning null is the same three-statement batch as falling off the end of the switch"
   );
 });
 
