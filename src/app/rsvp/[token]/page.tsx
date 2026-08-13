@@ -9,9 +9,11 @@ import { formatDate, formatTime } from "@/lib/datetime";
 import { getConfirmationDetails } from "@/lib/communication/confirmation";
 // The invitee is told the same NAME the planter sees, from the one derivation —
 // not a local `title ?? typeLabel`, which rendered an empty <h1> for a meeting
-// saved with an empty title. `getConfirmationDetails` projects a narrow row
-// (no meetingNumber, no teamName); `MeetingTitleFacts` is structural and all
-// but `type` optional exactly so this caller may pass what it has.
+// saved with an empty title. This page passes a COMPLETE `MeetingTitleFacts`:
+// `getConfirmationDetails` left-joins `ministry_teams` and projects
+// `meeting_number` and the team name, and every field the derivation branches
+// on is REQUIRED, so dropping either column is a compile error at the
+// projection rather than a second-best name shown to the invitee.
 // See src/lib/meetings/labels.ts.
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { RsvpActions } from "./rsvp-actions";

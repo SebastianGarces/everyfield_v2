@@ -12,6 +12,7 @@ import {
   MEETING_TYPE_OPTIONS,
   meetingDisplayTitle,
   meetingTypeLabel,
+  parseMeetingType,
   type MeetingTitleFacts,
 } from "@/lib/meetings/labels";
 // TYPE-ONLY, both of them: erased at runtime, so this unit test loads no
@@ -132,25 +133,90 @@ test("a prototype key is not a label", () => {
   }
 });
 
-test("the module exports exactly one string-keyed accessor", () => {
-  // The three siblings this one kept — `meetingTypeBadgeClass`,
+test("the module exports exactly two string-keyed accessors", () => {
+  // The three siblings these kept — `meetingTypeBadgeClass`,
   // `meetingStatusLabel`, `meetingStatusBadgeClass` — had ZERO production
   // callers and were deleted. Both status tables and the type-tint table are
   // read by INDEX with a column-typed key, so a `(status: string)` overload
   // invited a caller to widen a key the pg enum already narrows. If a real
   // caller for one appears, add it back with the same `Object.hasOwn` gate and
-  // update this count.
+  // update this list.
+  //
+  // The two that remain are the two reads of a table with something OTHER than
+  // a column-typed key: `meetingTypeLabel` (a joined row, a merge-field
+  // preview) and `parseMeetingType` (a `?type=` query param). Both are gated
+  // with `Object.hasOwn`; the pattern matches every exported function in the
+  // module, so a third one cannot join them unnoticed.
   const file = TS_FILES.find(
     (candidate) =>
       rel(candidate) === path.join("src", "lib", "meetings", "labels.ts")
   );
   assert.ok(file, "the walk did not find labels.ts");
 
-  const accessors = codeOf(file).match(/^export function meeting\w+\(/gm) ?? [];
-  assert.deepEqual(accessors.sort(), [
+  const exported = codeOf(file).match(/^export function \w+\(/gm) ?? [];
+  assert.deepEqual(exported.sort(), [
     "export function meetingDisplayTitle(",
     "export function meetingTypeLabel(",
+    "export function parseMeetingType(",
   ]);
+});
+
+// ============================================================================
+// `?type=` is PARSED, never cast
+// ============================================================================
+
+test("a meeting type is parsed from a query param, and a stranger is undefined", () => {
+  // `/meetings/new` used to read `params.type as MeetingType`, the exact form
+  // memory/invariants.md → Meetings forbids by name. The cast admitted
+  // `?type=prayer_walk`, which reached `useState<MeetingType>`: the select had
+  // no matching option so its trigger rendered empty, and the type-conditional
+  // fields took the wrong branch, so the planter was shown a form that lied
+  // about which meeting it was creating.
+  for (const type of meetingTypes) {
+    assert.equal(parseMeetingType(type), type, type);
+  }
+
+  assert.equal(parseMeetingType("prayer_walk"), undefined, "a non-member type");
+  assert.equal(parseMeetingType(""), undefined, "an empty param");
+  assert.equal(parseMeetingType(undefined), undefined, "no param at all");
+});
+
+test("a REPEATED ?type= is refused rather than resolved to one of its values", () => {
+  // `searchParams` values are `string | string[] | undefined`, so
+  // `/meetings/new?type=a&type=b` hands the page an ARRAY. A cast put that
+  // array straight into the form's `useState<MeetingType>`.
+  assert.equal(parseMeetingType(["vision_meeting", "orientation"]), undefined);
+  assert.equal(parseMeetingType(["vision_meeting"]), undefined);
+});
+
+test("a prototype key is not a meeting type either", () => {
+  // The gate `meetingTypeLabel` carries, on the other read of the same table.
+  // A bare index reaches `Object.prototype`, and a prototype member is a
+  // defined value, so a `??` fallback never fires — `?type=constructor` would
+  // have handed a native function to the form.
+  for (const forged of ["constructor", "toString", "__proto__", "valueOf"]) {
+    assert.equal(parseMeetingType(forged), undefined, forged);
+  }
+});
+
+test("no meetings route casts a query param to a meeting type", () => {
+  // The property, not the instance: the cast is banned across the route group
+  // this domain owns, so it cannot come back on the next page that reads a
+  // `?type=`. Comments are stripped, because this file and the parser's own
+  // docblock quote the forbidden form.
+  const offenders = TS_FILES.filter((file) => {
+    const relative = rel(file);
+    return (
+      relative.startsWith(path.join("src", "app", "(dashboard)", "meetings")) &&
+      /as MeetingType\b/.test(codeOf(file))
+    );
+  }).map(rel);
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "a `?type=` is parsed through parseMeetingType, never cast"
+  );
 });
 
 // ============================================================================
@@ -270,7 +336,7 @@ test("the vision-meeting prefix comes from the label table", () => {
 // `meetingNumber`. One untitled team meeting therefore read "Worship Meeting"
 // on the card, the header, the breadcrumb and the two dialogs, and "Team
 // Meeting" in the activity feed and to the invitee — while the docblock,
-// memory/invariants.md and the two guards below all said the six agreed.
+// memory/invariants.md and the two guards below all said the surfaces agreed.
 //
 // The guards below cannot see this: they check that a FILE mentions
 // `meetingDisplayTitle` and carries no local `title ??`. A missing COLUMN is

@@ -42,7 +42,7 @@ export interface ConfirmationDetails {
     // deleted from the meeting components.
     type: MeetingType;
     // The other two fields `meetingDisplayTitle` branches on. The RSVP page is
-    // one of the six enumerated title surfaces, and while these were absent it
+    // one of the seven enumerated title surfaces, and while these were absent it
     // named an untitled team meeting "Team Meeting" where every in-app surface
     // named it "<Team> Meeting". `MeetingTitleFacts` now requires them, so a
     // projection that drops one is a compile error rather than a quiet

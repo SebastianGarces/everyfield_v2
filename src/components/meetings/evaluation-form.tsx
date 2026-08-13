@@ -8,6 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { createEvaluationAction } from "@/app/(dashboard)/meetings/actions";
+// The factors and the rating scale come from the one list the zod schema is
+// built from, so a factor added there is asked for here, listed on the summary
+// and accepted by the server in one edit. See
+// src/lib/meetings/evaluation-factors.ts.
+import {
+  EVALUATION_QUALITY_FACTORS,
+  RATINGS,
+  type EvaluationScoreKey,
+} from "@/lib/meetings/evaluation-factors";
 import type { ActionResult } from "@/lib/meetings/types";
 import type { MeetingEvaluation } from "@/db/schema";
 
@@ -26,65 +35,21 @@ interface EvaluationFormProps {
   title: string;
 }
 
-const qualityFactors = [
-  {
-    key: "attendanceScore",
-    label: "Great Attendance",
-    description: "Core Group actively inviting",
-  },
-  {
-    key: "locationScore",
-    label: "Acceptable Location",
-    description: "Easy to find, welcoming, distraction-free",
-  },
-  {
-    key: "logisticsScore",
-    label: "Great Logistics",
-    description: "Room ready, AV tested, materials prepared",
-  },
-  {
-    key: "agendaScore",
-    label: "Clear Agenda",
-    description: "Planned in detail, starts and ends on time",
-  },
-  {
-    key: "vibeScore",
-    label: "Great Vibe",
-    description: "Warm, inviting, enthusiastic",
-  },
-  {
-    key: "messageScore",
-    label: "Compelling Message",
-    description: "Clear vision presented effectively",
-  },
-  {
-    key: "closeScore",
-    label: "Strong Close",
-    description: "Non-manipulative call to action",
-  },
-  {
-    key: "nextStepsScore",
-    label: "Clear Next Steps",
-    description: "Dates and details communicated",
-  },
-];
-
 /**
  * How many factors a complete evaluation carries.
  *
  * DERIVED, never the literal `8`. That number was written out three times — the
  * "is it complete" test, the divisor of the average and the submit button's
- * disabled test — so a ninth factor added to the array above would have
- * unlocked Save one factor early AND divided nine scores by eight, printing an
- * average the planter can see is wrong under a heading that says /5.0.
+ * disabled test — so a ninth factor would have unlocked Save one factor early
+ * AND divided nine scores by eight, printing an average the planter can see is
+ * wrong under a heading that says /5.0.
  */
-const FACTOR_COUNT = qualityFactors.length;
-
-/** The rating a star offers, low to high. */
-const RATINGS = [1, 2, 3, 4, 5] as const;
+const FACTOR_COUNT = EVALUATION_QUALITY_FACTORS.length;
 
 export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
-  const [scores, setScores] = useState<Record<string, number>>({});
+  const [scores, setScores] = useState<
+    Partial<Record<EvaluationScoreKey, number>>
+  >({});
 
   const action = async (
     _prevState: ActionResult<MeetingEvaluation> | null,
@@ -121,7 +86,7 @@ export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
       )}
 
       <div className="space-y-4">
-        {qualityFactors.map((factor) => (
+        {EVALUATION_QUALITY_FACTORS.map((factor) => (
           <Card key={factor.key}>
             <CardContent className="pt-4">
               <div className="flex items-start justify-between">

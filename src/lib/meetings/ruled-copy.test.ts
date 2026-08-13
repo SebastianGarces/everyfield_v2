@@ -14,6 +14,15 @@ import {
   EVALUATION_COMPARISON_WINDOW,
   type EvaluationTrendPoint,
 } from "@/lib/meetings/evaluation-comparison";
+import {
+  EVALUATION_QUALITY_FACTORS,
+  RATINGS,
+} from "@/lib/meetings/evaluation-factors";
+import { evaluationCreateSchema } from "@/lib/validations/meetings";
+// The TABLE, so the factor list can be checked against the columns it posts to
+// rather than only against a schema derived from itself. Schema definitions
+// only — no database client is constructed by this import.
+import { meetingEvaluations } from "@/db/schema/meetings";
 
 // ----------------------------------------------------------------------------
 // The copy rulings on #312 (Sebastian). Two from 2026-08-10:
@@ -52,10 +61,10 @@ import {
 // ten schema tables and drizzle, so an import edge from a component that later
 // gains `"use client"` would drag that whole graph into the client bundle.
 // `copy.ts` cannot drag anything, and the last section of this file pins the
-// near half of that split over all FIVE db-free siblings: `copy.ts` and
+// near half of that split over all SIX db-free siblings: `copy.ts` and
 // `evaluation-comparison.ts` import nothing at all, `agenda.ts`,
-// `meeting-type-filter.ts` and `labels.ts` import one erased TYPE each and no
-// value. The far
+// `meeting-type-filter.ts`, `labels.ts` and `evaluation-factors.ts` import one
+// erased TYPE each and no value. The far
 // half — that no client component REACHES service.ts, directly or through any
 // non-server-action module — is an architecture guard rather than a copy
 // ruling, and lives in `client-boundary.test.ts` beside it.
@@ -555,6 +564,11 @@ const DB_FREE_SIBLINGS: readonly {
     holds:
       "the ONE meeting display vocabulary — type and status labels, badge tints, the display title",
   },
+  {
+    file: "evaluation-factors.ts",
+    allows: "type-only",
+    holds: "the ONE evaluation quality-factor list and the rating scale",
+  },
 ];
 
 for (const { file, allows, holds } of DB_FREE_SIBLINGS) {
@@ -585,6 +599,92 @@ for (const { file, allows, holds } of DB_FREE_SIBLINGS) {
     }
   });
 }
+
+// ============================================================================
+// The evaluation factor list IS the schema's key set
+// ============================================================================
+//
+// The eight quality factors were declared three independent times — the form,
+// the summary and `evaluationCreateSchema` — so a ninth factor was three edits
+// in three directories, and one edit produced a form the summary under-reported
+// and the server rejected. The list is now one array the schema is BUILT from;
+// these two tests are what keep "built from" true, and what keeps the array
+// total over the columns it posts to.
+
+test("the zod schema's score keys are exactly the factor list's keys", () => {
+  const declared = EVALUATION_QUALITY_FACTORS.map((factor) => factor.key);
+  const schemaKeys = Object.keys(evaluationCreateSchema.shape).filter(
+    (key) => key !== "notes"
+  );
+
+  assert.deepEqual(
+    [...schemaKeys].sort(),
+    [...declared].sort(),
+    "the schema is spread from the list — a factor the form asks for is a field the server accepts"
+  );
+  assert.equal(
+    new Set(declared).size,
+    declared.length,
+    "no factor is declared twice"
+  );
+});
+
+test("the factor list covers every score column of meeting_evaluations", () => {
+  // The non-circular half. The schema is derived FROM the list, so the test
+  // above cannot see a factor missing from both; the table can. `totalScore` is
+  // the derived average and is deliberately absent — it is a varchar, and no
+  // planter rates it.
+  const scoreColumns = Object.keys(meetingEvaluations)
+    .filter((column) => column.endsWith("Score"))
+    .filter((column) => column !== "totalScore");
+
+  assert.deepEqual(
+    scoreColumns.sort(),
+    EVALUATION_QUALITY_FACTORS.map((factor) => factor.key).sort(),
+    "a score column added to the table is a factor asked for on the form"
+  );
+});
+
+test("every factor carries a label and a description a planter can read", () => {
+  for (const factor of EVALUATION_QUALITY_FACTORS) {
+    assert.ok(factor.label.trim().length > 0, `${factor.key} has a label`);
+    assert.ok(
+      factor.description.trim().length > 0,
+      `${factor.key} has a description`
+    );
+  }
+});
+
+test("the rating scale is written once and both surfaces read it", () => {
+  // The form's star labels ("3 out of 5") read `RATINGS.length`, and the
+  // summary rendered its own `[1, 2, 3, 4, 5]` beside it.
+  assert.deepEqual([...RATINGS], [1, 2, 3, 4, 5]);
+
+  for (const file of [
+    "../../components/meetings/evaluation-form.tsx",
+    "../../components/meetings/evaluation-summary.tsx",
+  ]) {
+    const source = readFileSync(path.join(__dirname, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+
+    assert.match(
+      source,
+      /EVALUATION_QUALITY_FACTORS/,
+      `${file} maps the shared factor list`
+    );
+    assert.doesNotMatch(
+      source,
+      /qualityFactors/,
+      `${file} declares no local factor list`
+    );
+    assert.doesNotMatch(
+      source,
+      /\[\s*1\s*,\s*2\s*,\s*3\s*,\s*4\s*,\s*5\s*\]/,
+      `${file} declares no local rating scale`
+    );
+  }
+});
 
 test("no db-free sibling is named after one of the two surfaces it serves", () => {
   // `meeting-type-filter.ts` shipped for one commit as `analytics-filter.ts`,

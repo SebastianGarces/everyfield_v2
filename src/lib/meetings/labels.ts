@@ -87,6 +87,36 @@ export function meetingTypeLabel(type: string): string {
 }
 
 /**
+ * A token claiming to be a meeting type, TOTALLY parsed — the create form's
+ * `?type=` preselect, and anything else that reads one off untrusted input.
+ *
+ * `unknown`, not `string`: a `searchParams` value is `string | string[] |
+ * undefined`, so `/meetings/new?type=a&type=b` hands this an ARRAY. The page it
+ * replaced cast instead — `params.type as MeetingType` — which put both an
+ * array and a non-member string (`?type=prayer_walk`) into the form's
+ * `useState<MeetingType>`: the select had no matching option so its trigger
+ * rendered empty, and the type-conditional fields silently took the wrong
+ * branch, so the planter filled in a form that lied about what it was creating
+ * and then read the generic "Validation failed" the server correctly returned.
+ * memory/invariants.md → Meetings already forbids the cast by name for
+ * `?type=` on the LIST surface, where it reached Postgres as an enum literal.
+ *
+ * Same `Object.hasOwn` gate and same reason as `meetingTypeLabel` above:
+ * `?type=constructor` reaches `Object.prototype` through a bare index, and a
+ * prototype member is a defined value, so a `??` fallback never fires.
+ *
+ * This module owns what a meeting type IS, so it owns the parse. A caller that
+ * wants a FILTER — where `"all"` is a legal value — wants
+ * `parseMeetingTypeFilter` in `meeting-type-filter.ts` instead; the two
+ * vocabularies stay separate.
+ */
+export function parseMeetingType(value: unknown): MeetingType | undefined {
+  return typeof value === "string" && Object.hasOwn(MEETING_TYPE_LABELS, value)
+    ? (value as MeetingType)
+    : undefined;
+}
+
+/**
  * The meeting types a planter may create, in the order they are offered.
  *
  * DERIVED from `MEETING_TYPE_LABELS` rather than written out again: the create
@@ -159,11 +189,11 @@ export const MEETING_STATUS_BADGE_CLASSES: Record<MeetingStatus, string> = {
  * the function is not the same as sharing the NAME: while `title`,
  * `meetingNumber` and `teamName` were optional, a caller that simply did not
  * SELECT a column type-checked and quietly took a different branch. Two of the
- * six enumerated surfaces did exactly that — neither the dashboard activity
+ * seven enumerated surfaces did exactly that — neither the dashboard activity
  * feed nor the RSVP page projected `teamName` — so one untitled team meeting
  * read "Worship Meeting" on the card and "Team Meeting" in the feed and to the
  * invitee, while the docblock below, `memory/invariants.md` and two guards in
- * `labels.test.ts` all asserted the six agreed. A missing column is invisible
+ * `labels.test.ts` all asserted the surfaces agreed. A missing column is invisible
  * to a guard that greps for an identifier; required-nullable makes it a
  * COMPILE ERROR at the projection. Never widen these back to optional, and
  * never silence the compiler with `?? null` where the column is joinable.

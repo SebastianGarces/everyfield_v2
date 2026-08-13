@@ -58,7 +58,10 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const status = meeting.status as MeetingStatus;
+  // Read, not cast: `MeetingWithCounts` extends `ChurchMeeting`, whose `status`
+  // column is already typed by the pg enum, so the cast that stood here could
+  // only ever have silenced a real schema change to `statusTransitions` above.
+  const status = meeting.status;
   const transition = statusTransitions[status];
 
   const handleDelete = async () => {

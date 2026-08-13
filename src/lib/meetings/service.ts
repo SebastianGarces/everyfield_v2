@@ -32,6 +32,7 @@ import {
   type AgendaSection,
 } from "./agenda";
 import type { EvaluationTrendPoint } from "./evaluation-comparison";
+import { EVALUATION_QUALITY_FACTORS } from "./evaluation-factors";
 // Imported, never RE-EXPORTED: a pass-through would rebuild the coupling the
 // db-free split exists to remove. See memory/invariants.md → Meetings.
 import { meetingDisplayTitle } from "./labels";
@@ -333,8 +334,8 @@ export async function createMeeting(
     churchId,
     createdBy: userId,
     type: data.type,
-    // The STORED title for a numbered vision meeting is the same string the six
-    // display surfaces derive, from the same function — not a second
+    // The STORED title for a numbered vision meeting is the same string the
+    // enumerated display surfaces derive, from the same function — not a second
     // `Vision Meeting #${n}` literal, which would spell the old label for every
     // row written after the label is re-ruled and the new one for every render.
     // The two nulls are FACTS about the row being written, not a partial
@@ -1060,16 +1061,12 @@ export async function createEvaluation(
   userId: string,
   data: EvaluationCreateInput
 ): Promise<MeetingEvaluation> {
-  const avg =
-    (data.attendanceScore +
-      data.locationScore +
-      data.logisticsScore +
-      data.agendaScore +
-      data.vibeScore +
-      data.messageScore +
-      data.closeScore +
-      data.nextStepsScore) /
-    8;
+  // Summed and divided over the ONE factor list, never over a hand-written
+  // eight: the divisor was the literal `8` here and in the form's preview, so a
+  // ninth factor would have stored an average the planter could see was wrong
+  // under a heading that says /5.0 — and stored it permanently.
+  const scores = EVALUATION_QUALITY_FACTORS.map((factor) => data[factor.key]);
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
 
   const totalScore = avg.toFixed(1);
 
