@@ -7,6 +7,15 @@ import { Card, CardContent } from "@/components/ui/card";
 // runtime's zone is. memory/invariants.md → Date & Time Rendering.
 import { formatDate, formatTime } from "@/lib/datetime";
 import { getConfirmationDetails } from "@/lib/communication/confirmation";
+// The invitee is told the same NAME the planter sees, from the one derivation —
+// not a local `title ?? typeLabel`, which rendered an empty <h1> for a meeting
+// saved with an empty title. This page passes a COMPLETE `MeetingTitleFacts`:
+// `getConfirmationDetails` left-joins `ministry_teams` and projects
+// `meeting_number` and the team name, and every field the derivation branches
+// on is REQUIRED, so dropping either column is a compile error at the
+// projection rather than a second-best name shown to the invitee.
+// See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { RsvpActions } from "./rsvp-actions";
 
 interface RsvpPageProps {
@@ -33,12 +42,6 @@ export default async function RsvpPage({
   const isExpired = tokenRecord.expiresAt < new Date();
   const hasResponded = tokenRecord.status !== "pending";
 
-  const meetingTypeLabels: Record<string, string> = {
-    vision_meeting: "Vision Meeting",
-    orientation: "Orientation",
-    team_meeting: "Team Meeting",
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <Card className="w-full max-w-lg">
@@ -49,7 +52,7 @@ export default async function RsvpPage({
               {church.name}
             </p>
             <h1 className="mt-2 text-2xl font-bold">
-              {meeting.title ?? meetingTypeLabels[meeting.type] ?? meeting.type}
+              {meetingDisplayTitle(meeting)}
             </h1>
           </div>
 

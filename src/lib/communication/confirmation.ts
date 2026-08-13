@@ -19,7 +19,8 @@ import {
   type MeetingConfirmationToken,
 } from "@/db/schema/communication";
 import { invitations, meetingAttendance } from "@/db/schema/meetings";
-import { churchMeetings } from "@/db/schema/meetings";
+import { churchMeetings, type MeetingType } from "@/db/schema/meetings";
+import { ministryTeams } from "@/db/schema/ministry-teams";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { RECIPIENT_STATUS_RANK, isUnreachableStatus } from "./queries";
@@ -33,7 +34,21 @@ export interface ConfirmationDetails {
   meeting: {
     id: string;
     title: string | null;
-    type: string;
+    // `MeetingType`, not `string`. The value is copied straight off
+    // `churchMeetings.type` — a pg enum column already typed
+    // `$type<MeetingType>()` — so widening it here could only ever hide a
+    // change, and it forced the RSVP page to hand a `string` to the meetings
+    // vocabulary. Same species as the three `as MeetingStatus` casts #411
+    // deleted from the meeting components.
+    type: MeetingType;
+    // The other two fields `meetingDisplayTitle` branches on. The RSVP page is
+    // one of the seven enumerated title surfaces, and while these were absent it
+    // named an untitled team meeting "Team Meeting" where every in-app surface
+    // named it "<Team> Meeting". `MeetingTitleFacts` now requires them, so a
+    // projection that drops one is a compile error rather than a quiet
+    // second-best name shown to the invitee.
+    meetingNumber: number | null;
+    teamName: string | null;
     datetime: Date;
     locationName: string | null;
     locationAddress: string | null;
@@ -194,8 +209,18 @@ export async function getConfirmationDetails(
   if (!tokenRecord) return null;
 
   const [meeting] = await db
-    .select()
+    .select({
+      id: churchMeetings.id,
+      title: churchMeetings.title,
+      type: churchMeetings.type,
+      meetingNumber: churchMeetings.meetingNumber,
+      teamName: ministryTeams.name,
+      datetime: churchMeetings.datetime,
+      locationName: churchMeetings.locationName,
+      locationAddress: churchMeetings.locationAddress,
+    })
     .from(churchMeetings)
+    .leftJoin(ministryTeams, eq(churchMeetings.teamId, ministryTeams.id))
     .where(eq(churchMeetings.id, tokenRecord.meetingId))
     .limit(1);
 
@@ -219,6 +244,8 @@ export async function getConfirmationDetails(
       id: meeting.id,
       title: meeting.title,
       type: meeting.type,
+      meetingNumber: meeting.meetingNumber,
+      teamName: meeting.teamName,
       datetime: meeting.datetime,
       locationName: meeting.locationName,
       locationAddress: meeting.locationAddress,

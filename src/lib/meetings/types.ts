@@ -54,7 +54,16 @@ export type MeetingWithCounts = ChurchMeeting & {
   newAttendees: number;
   returningAttendees: number;
   location: Location | null;
-  teamName?: string | null;
+  /**
+   * The joined `ministry_teams.name`, `null` when the meeting names no team.
+   *
+   * REQUIRED and nullable, never optional: `meetingDisplayTitle` branches on
+   * it, so an optional field let a producer skip the `leftJoin` and silently
+   * take the "Team Meeting" branch instead of "<Team> Meeting". Required makes
+   * a missing join a compile error at the query. See `MeetingTitleFacts` in
+   * `labels.ts`.
+   */
+  teamName: string | null;
 };
 
 /**
