@@ -46,7 +46,28 @@ The fifth, `getPublishedArticleRefs`, was live: the PE-024 slug index behind the
 
 It lives in `get-articles.ts` now as `publishedArticleRefsQuery` + a `React.cache`d `getPublishedArticleRefs(churchId = null)`, carries `visibleToChurch` + the published filter + `notOverriddenByChurch`, and `insight-card.tsx` threads `session.user.churchId` into it. Two tests own it: `readerFacingReads()` in `tenancy.test.ts` (which is why that loop's name — EVERY reader-facing read — is now true), and a seeded case in `tenancy-live.test.ts` that asserts both directions against a real database, one church's private rows never reaching another reader, and every title in the index resolving to the article its own link opens.
 
-**So the rule is now general: every article read in `src/lib/wiki/` that ends up in front of a reader lives in `get-articles.ts`, carries the pair, and is in `readerFacingReads()`.** `service.ts` keeps the article MUTATIONS, the sections and the revalidation helpers.
+**So the rule is now general: every article read in `src/lib/wiki/` that ends up in front of a reader lives in `get-articles.ts`, carries the pair, and is in `readerFacingReads()`.**
+
+### …and then the same rule reached the mutations it was written above (quality round 1)
+
+Rounds 5–6 emptied the reads out of `service.ts` and left thirteen exports below the deletion with no caller anywhere in the repo: eleven DB functions (`createArticle`, `updateArticle`, `archiveArticle`, `deleteArticle`, `getAllSections`, `getSectionBySlug`, `getChildSections`, `getRootSections`, `createSection`, `updateSection`, `deleteSection`) and two revalidation wrappers (`revalidateWikiIndex`, `revalidateAllWiki`). The rule the reads died under was stated in the file that kept them, and `index.ts` does `export * from "./service"`, so `@/lib/wiki` handed every one of them to the next caller.
+
+Three carried precisely the defects this workstream had spent rounds removing one screen above:
+
+- `updateArticle` and `updateSection` did `.set({ ...data, updatedAt: new Date() })` over a caller-supplied `Partial<New…>` — the mass-assignment shape round 5 removed from `progressUpsertQuery`, reachable here for **every** column, `church_id` and `status` included.
+- `createArticle` inserted a `NewWikiArticle` whose `churchId` was whatever the caller passed: no session, no tenancy predicate, in a domain whose invariant says the application layer *is* the boundary.
+
+None of the three is POST-reachable — `service.ts` carries no `"use server"` directive — which is why this was structural and not critical. They are deleted rather than predicated, for the reason the four dead reads were: nothing wanted them, and predicating dead code doubles the tenancy surface a reviewer has to hold. An admin write surface will bring its own, session-scoped, with the church stamped from the actor rather than taken as an argument.
+
+**`service.ts` is now the `revalidatePath` form and the one wrapper that applies it**, plus the Next research comment that justifies both. That is pinned as a property rather than as a list of eleven forbidden names: `service.test.ts` asserts the module names no `@/db` specifier (via the shared `staticValueSpecifiers`, not a hand-rolled `^import` regex), builds no `db.<verb>(` statement, exports exactly `wikiRevalidationPath` and `revalidateArticle`, and publishes no export `functionBodies` cannot read. A module with no database edge cannot regrow an un-predicated read or an untenanted write, whatever the next one is called.
+
+⚠ `revalidateArticle` itself has no in-app caller today — the tokened route handler (`src/app/api/wiki/revalidate/route.ts`) builds the path with `wikiRevalidationPath` and injects its own `revalidatePath` so the handler stays testable. It is kept deliberately, and it is not the shape the deletions above are about: it reaches no database, has no tenancy surface, wraps `next/cache` only, and `service.test.ts` pins its body character for character as the sanctioned in-app spelling — which is what stops the href form being handed to `revalidatePath` again.
+
+### The reader-facing list counts itself now (quality round 1)
+
+`readerFacingReads()` in `tenancy.test.ts` drives three loops — the override predicate, the churchless case, the published filter — and its docblock recorded that "every" had been untrue twice without doing anything about it. Nothing mechanical stopped a third time.
+
+It is keyed on the builders' own names now, and `deepEqual`'d against `READER_FACING_QUERY_EXPORTS`: every export ending in `Query` from the two module namespaces, read at runtime off `import * as`. The suffix is the seam — a statement builder ends in `Query` throughout this domain and the readers built on them (`getArticles`, `getWikiNavigation`) do not — so adding `visibleDraftsQuery` to `get-articles.ts` and forgetting the list fails `pnpm test` with a message that names the omission. A second test closes the other half: a `*Query` builder may be **declared** only in `get-articles.ts`, `search.ts` and `write-queries.ts` (whose builders `write-paths.test.ts` owns), so a fifth read arriving in a third module cannot sit outside both suites. This is the mechanism `write-paths.test.ts` already used for the writes — `satisfies Record<keyof typeof writeQueries, …>` plus a runtime key comparison — applied to reads that span two modules and therefore cannot use `keyof typeof`.
 
 ## Cross-links: the column is canonical, the prose is gone (#317)
 
@@ -175,6 +196,12 @@ if (!parsedSlug.success) return null;         // `throw` in toggleBookmark
 Four exports survived the sweep that emptied four dead reads out of `service.ts`, in the two modules where the rule bites hardest: `getArticleProgress` and `markCompleted` (`progress.ts`), `addBookmark` and `removeBookmark` (`bookmarks.ts`). Every export of a `"use server"` module is a POSTable endpoint with no session cookie and no UI in front of it, so three of those four were live WRITES nobody was reviewing — post a slug and mark it complete, or bookmark it — kept only because they read like the obvious companions to functions that are used.
 
 `write-paths.test.ts` derives both modules' export lists with `functionBodies` and fails on any export that no non-test file in `src/` names. Two exclusions carry the meaning: the wiki barrel (`index.ts`) re-exports these modules, and a re-export moves a name rather than calling it; and a test that merely asserts the endpoint exists is not a caller either — that is precisely the shape the guard is for.
+
+#### The list is only as complete as the parser (quality round 1)
+
+`functionBodies` matches `function` **declarations** only (`server-action-surface.ts` says so in its own header), so `export const markCompleted = async (slug: string) => {…}` is an equally POSTable endpoint that the walk cannot see and the caller check therefore never runs against. The test anticipated that in its own words and guarded it with `assert.ok(endpoints.length > 0)` — which cannot fire for the case it was written for, because both modules keep several readable declarations forever. A dead arrow-function endpoint would have sat reachable behind a green suite: the exact regression the guard exists to make impossible, arriving through a syntax the guard does not read.
+
+The parser is now proved to have seen the whole export surface before its list is trusted: `valueExportStatements(code)` — the repo's shared reader for the three forms the walk cannot read (a value binding, a default export, a re-export) — is asserted **empty** for both modules before the caller loop runs. It is the same reader `server-action-surface.test.ts` bans those forms repo-wide with, asserted here as well on purpose: this file's guarantee must not depend on another suite's scope, which is the failure mode `memory/invariants.md` records for the leaf guards.
 
 ## Slugs and paths: the two builders
 

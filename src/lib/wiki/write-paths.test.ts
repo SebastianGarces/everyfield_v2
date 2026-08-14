@@ -6,6 +6,7 @@ import {
   codeOf,
   functionBodies,
   TS_FILES,
+  valueExportStatements,
 } from "@/lib/auth/server-action-surface";
 
 import { progressPatchSchema, wikiSlugSchema } from "./write-input";
@@ -165,9 +166,30 @@ test("every endpoint on the wiki's write surface has a caller (#411 round 6)", (
   // meant to keep" goes stale the moment somebody adds one.
   for (const relative of WRITE_MODULES) {
     const full = path.join(process.cwd(), relative);
-    const endpoints = functionBodies(codeOf(full))
+    const code = codeOf(full);
+    const endpoints = functionBodies(code)
       .filter((fn) => fn.exported)
       .map((fn) => fn.name);
+
+    // THE LIST IS ONLY AS COMPLETE AS THE PARSER, so the parser is checked
+    // first. `functionBodies` matches `function` DECLARATIONS only
+    // (`server-action-surface.ts`), so `export const markCompleted = async
+    // (slug) => {…}` is an equally POSTable endpoint that the walk below cannot
+    // see and therefore never asks for a caller. `endpoints.length > 0` was
+    // written for exactly that case and cannot fire for it — both modules keep
+    // several readable declarations, so the tripwire stays satisfied while the
+    // unreadable export sits reachable.
+    //
+    // `valueExportStatements` is the repo's shared reader for the forms the walk
+    // cannot read — a value binding, a default export, a re-export — and it is
+    // the same one `server-action-surface.test.ts` bans them repo-wide with.
+    // Asserted here too, because this file's guarantee must not depend on
+    // another suite's scope.
+    assert.deepEqual(
+      valueExportStatements(code),
+      [],
+      `${relative} publishes an export functionBodies cannot read — every export of a "use server" module is a POST endpoint, so declare it as a function or teach the walk to see it (#411)`
+    );
 
     assert.ok(
       endpoints.length > 0,

@@ -5,11 +5,13 @@ import { test } from "node:test";
 
 import { codeOf } from "@/lib/auth/server-action-surface";
 
+import * as getArticlesModule from "./get-articles";
 import {
   articleBySlugQuery,
   publishedArticleRefsQuery,
   visibleArticlesQuery,
 } from "./get-articles";
+import * as searchModule from "./search";
 import { searchArticlesQuery, type SearchResult } from "./search";
 
 // ----------------------------------------------------------------------------
@@ -179,22 +181,92 @@ test("the insight slug index projects no article body", () => {
 });
 
 /**
- * Every reader-facing read, as a name and a rendered statement.
+ * Every reader-facing read, keyed on the BUILDER'S OWN NAME so the list's
+ * completeness is checkable rather than asserted in prose.
  *
- * "Every" is the load-bearing word and it has twice been untrue: the four dead
+ * "Every" is the load-bearing word and it had twice been untrue: the four dead
  * reads in `service.ts` sat outside it (deleted, #411 round 5) and so did the
  * PE-024 slug index, which was live behind the insight cards (moved in and
- * predicated, round 6). A reader-facing article read that is not in this list is
- * a read nothing below asserts anything about.
+ * predicated, round 6). Both times the list was corrected and nothing stopped a
+ * third — the docblock stated the problem and left three loops claiming to cover
+ * a set nobody counted.
+ *
+ * It is counted now, against the module namespaces the reads live in. The
+ * mechanism is the one `write-paths.test.ts` uses for the writes one file over
+ * (`satisfies Record<keyof typeof writeQueries, …>` plus a runtime
+ * `deepEqual` of the key sets); the reads cannot use `keyof typeof` across two
+ * modules, so the whole check is the runtime one below.
  */
+const READER_FACING = {
+  visibleArticlesQuery: (churchId: string | null) =>
+    visibleArticlesQuery(churchId),
+  articleBySlugQuery: (churchId: string | null) =>
+    articleBySlugQuery("discovery/x", churchId),
+  searchArticlesQuery: (churchId: string | null) =>
+    searchArticlesQuery("elders", churchId),
+  publishedArticleRefsQuery: (churchId: string | null) =>
+    publishedArticleRefsQuery(churchId),
+};
+
+/**
+ * The `*Query` exports of the two modules a reader-facing read may live in.
+ *
+ * The suffix is the seam: a statement BUILDER ends in `Query` throughout this
+ * domain, and `getArticles`/`getWikiNavigation`/`visibleToChurch` — the readers
+ * and the predicates built on them — do not. Read off the live namespaces, so a
+ * builder that is added, renamed or dropped moves this set without anybody
+ * remembering to.
+ */
+const READER_FACING_QUERY_EXPORTS = [
+  ...Object.keys(getArticlesModule),
+  ...Object.keys(searchModule),
+]
+  .filter((name) => name.endsWith("Query"))
+  .sort();
+
 function readerFacingReads(churchId: string | null) {
-  return [
-    ["the corpus read", visibleArticlesQuery(churchId)],
-    ["the single-article read", articleBySlugQuery("discovery/x", churchId)],
-    ["the search read", searchArticlesQuery("elders", churchId)],
-    ["the insight slug index", publishedArticleRefsQuery(churchId)],
-  ] as const;
+  return Object.entries(READER_FACING).map(
+    ([name, build]) => [name, build(churchId)] as const
+  );
 }
+
+test("every reader-facing read is in the list the tenancy loops drive off (#411)", () => {
+  assert.deepEqual(
+    Object.keys(READER_FACING).sort(),
+    READER_FACING_QUERY_EXPORTS,
+    "a reader-facing wiki read exists that the tenancy loops never assert anything about — add it to READER_FACING and it joins all three at once"
+  );
+});
+
+/**
+ * Where a `*Query` builder may be DECLARED — the check above reads two module
+ * namespaces, so a fifth read added to a THIRD wiki module would be outside it
+ * as well as outside the list.
+ *
+ * `write-queries.ts` is here because the wiki's WRITE builders share the suffix
+ * (`progressUpsertQuery`); they are covered by `write-paths.test.ts`, which owns
+ * that module the way this file owns these two.
+ */
+const QUERY_BUILDER_MODULES = [
+  "get-articles.ts",
+  "search.ts",
+  "write-queries.ts",
+];
+
+test("a wiki statement builder is declared only where a suite owns it (#411)", () => {
+  const declaring = wikiSourceFiles()
+    .filter((file) =>
+      /export\s+(?:async\s+)?function\s+\w+Query\b/.test(codeOf(file))
+    )
+    .map((file) => path.basename(file))
+    .sort();
+
+  assert.deepEqual(
+    declaring,
+    [...QUERY_BUILDER_MODULES].sort(),
+    "a wiki module declares a statement builder that neither tenancy.test.ts nor write-paths.test.ts renders — a reader-facing read belongs in get-articles.ts, where the predicates that must travel together are declared"
+  );
+});
 
 test("EVERY reader-facing read suppresses a global row this church overrides, IN THE STATEMENT (#411)", () => {
   // The override decision used to have two implementations: a JS collapse of
