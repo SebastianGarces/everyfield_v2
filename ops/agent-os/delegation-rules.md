@@ -166,6 +166,14 @@ until you ask who they are for.
   reader can go and read *now*; provenance names an event that already happened.
 - **Test files are outside the rule.** A suite quoting a spelling in order to forbid it, or
   naming the round that produced a regression case, is stating its subject.
+- **Prompt strings are outside it too — they are documents, not comments.** A brief an agent
+  reads at runtime (`.claude/workflows/*.js`, the skills) cites a ruling for the same reason a
+  doc does: the agent must apply the rule and needs to be able to look it up. The rule binds
+  the sentences addressed to whoever next EDITS the file.
+- **"Source" means every source tree, not just `src/`.** `.claude/workflows/*.js` and
+  `scripts/` are executable source, and the factory files are the ones every agent reads
+  before touching anything — a changelog accreting in them is the failure at its loudest, not
+  an exemption. The G4 command below is scoped to all three.
 
 **Enforced:** G4's convention checklist runs the check over the track's **added non-test source
 lines** (`ops/agent-os/dod.md` G4); G6's reviewer reports a hit as a finding, fixed in the pass

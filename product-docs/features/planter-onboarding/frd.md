@@ -135,7 +135,7 @@ Church is a shared entity (System Architecture); fields below are additive and n
 - **Planter assignment**: recorded with the same mechanism registration uses (`users.church_id` + role); OB-004 adds no new entity but makes the assignment explicit and queryable ("does this church have a planter?").
 - **Phase history**: the initial declaration must be distinguishable from transitions (e.g. a distinguished transition kind or reason constant on the phase-transition record). No new table expected.
 
-Schema changes ⇒ requirement issues carrying them are `risk:high` per board convention.
+Schema changes are not `risk:high` pre-release; the schema consolidation is an ordering prerequisite (one `db:generate`) and still owes HR1–HR3 at verify time — see `ops/agent-os/dod.md`.
 
 ---
 

@@ -237,16 +237,22 @@ G3 and name the sha the preview came from** rather than reporting on it anyway.
   (`ops/agent-os/delegation-rules.md` R7 — RULED 2026-08-13, while reviewing PR #432). A comment
   states a constraint the code cannot show; issue and PR numbers, ruling dates, review-round
   stamps and attempt counters are not that, and belong in the commit message, the PR body and
-  `memory/`. Compute it, do not recall it:
+  `memory/`. The scope is **every source tree this repo has**, not just the app: `.claude/workflows/*.js`
+  is executable source that agents read before they touch anything, so a factory file narrating its own
+  delivery history is the worst place for it, not an exempt one. Compute it, do not recall it:
   ```bash
-  git diff -U0 $(git merge-base <track-branch> HEAD)...HEAD -- src \
-    ':(exclude)*.test.*' ':(exclude)*.test.tsx' \
-    | grep -E '^\+' | grep -E '(//|/\*|^\+\s*\*)' \
+  git diff -U0 $(git merge-base <track-branch> HEAD)...HEAD -- src .claude/workflows scripts \
+    ':(exclude)*.test.*' \
+    | grep -E '^\+' | grep -E '(//|/\*|^\+\s*\*[^*])' \
     | grep -Ei '#[0-9]{2,}|ruled [0-9]{4}-|round [0-9]|PR #|attempt [0-9]'
   ```
-  Any hit is a finding, not a note: move the sentence to the commit message and keep the
-  constraint in the file. A comment that cites the invariant it obeys or the test that pins it
-  is an enforcement pointer (R5), not provenance, and stays.
+  (`*.test.*` already covers `*.test.tsx` — a non-glob pathspec lets `*` cross `/` — so it needs no
+  second exclusion beside it. The JSDoc-continuation arm is `\*[^*]` so a `**bold**` line inside a
+  workflow's prompt template is not read as a comment.) Any hit is a finding, not a note: move the
+  sentence to the commit message and keep the constraint in the file. A comment that cites the invariant
+  it obeys or the test that pins it is an enforcement pointer (R5), not provenance, and stays. Prompt
+  strings are the doc analog, not comments: a brief that cites the ruling it is applying is citing a
+  live rule to the agent executing it.
 - **Evidence:** checklist with the specific lines/files touched, plus that command's output
   (empty is the pass).
 

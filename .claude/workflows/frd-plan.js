@@ -191,8 +191,9 @@ if (!plan) throw new Error("Decomposition failed");
 // A prerequisite's GATE decides how it is published, and the default is the
 // strict one: an item that did not say is treated as human-gated. Only an
 // explicit `gate: "ordering"` (the schema consolidation) skips the approval —
-// schema stopped being risk:high on 2026-08-13 (#435), but "only one
-// db:generate" is still a reason to land it first and alone.
+// schema is not risk:high, but "only one db:generate" is still a reason to
+// land it first and alone (ops/agent-os/dod.md, "Migration proofs and
+// high-risk units").
 const gated = plan.deferred.map((d) => ({
   ...d,
   gate: d.gate === "ordering" ? "ordering" : "human",

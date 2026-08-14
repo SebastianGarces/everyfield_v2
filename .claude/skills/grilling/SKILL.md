@@ -45,8 +45,9 @@ Prioritise the branches where a wrong guess changes what gets built:
 - **Existing behaviour it collides with** — what does this change for flows that already work?
 - **Tenancy, auth, and permissions** — who can see and do this? Check `memory/invariants.md` and put
   anything it doesn't already settle to the user.
-- **Data shape** — does this need schema? If yes the unit is `risk:high`; say so during the session,
-  not after.
+- **Data shape** — does this need schema? If yes, say so during the session, not after: schema is not
+  `risk:high` pre-release, but it consolidates into one `db:generate` that has to land first, and it
+  owes the HR1–HR3 migration proofs at verify time (`ops/agent-os/dod.md`).
 - **The thing they haven't thought about** — empty states, failure modes, what happens on the second
   attempt, what an admin sees versus a member.
 

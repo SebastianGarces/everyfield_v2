@@ -144,6 +144,17 @@ const RETIRED = [
   /schema, auth and tenancy/i,
   /schema\/migrations, auth/i,
   /touches schema/i,
+  // The CLASSIFICATION stated affirmatively, in whatever words: "schema
+  // changes ⇒ … are risk:high", "does this need schema? then the unit is
+  // risk:high". Four literal spellings missed both, because neither used any
+  // of them — a live FRD and a live skill kept instructing the planner to
+  // re-mint the retired label while this suite reported the ruling applied.
+  //
+  // The gap is tempered against `not` so the sentence the ruling REQUIRES
+  // ("schema is not `risk:high`", "schema/migrations return to `risk:high`")
+  // stays sayable: a form that forbids the correction as loudly as the error
+  // fails every doc that states the narrowing.
+  /schema[^\n]{0,60}(?:\b(?:is|are)\b|⇒|=>)(?:(?!\bnot\b)[^\n]){0,12}`?risk:high/i,
 ];
 
 test("nothing under .claude/, ops/ or product-docs/ still lists schema as risk:high", () => {
@@ -159,6 +170,30 @@ test("nothing under .claude/, ops/ or product-docs/ still lists schema as risk:h
     [],
     `these still describe risk:high the pre-#435 way:\n${offenders.join("\n")}`
   );
+});
+
+test("the sweep catches the classification in whatever words, and permits its correction", () => {
+  // The sweep exempts this suite, so nothing else can check the FORMS
+  // themselves. Both directions matter: a form that misses a rephrasing lets
+  // a live doc keep instructing the planner (which is how the onboarding FRD
+  // and the grilling skill survived four literal spellings), and a form that
+  // fires on the correction makes the ruling unstateable.
+  const hits = (s) => RETIRED.some((p) => p.test(s));
+  for (const retired of [
+    "Schema changes ⇒ requirement issues carrying them are `risk:high` per board convention.",
+    "does this need schema? If yes the unit is `risk:high`; say so during the session",
+    "Any schema work is risk:high.",
+    "schema changes are always `risk:high`",
+  ])
+    assert.ok(hits(retired), `the sweep must catch: ${retired}`);
+
+  for (const ruled of [
+    "Schema changes are not `risk:high` pre-release; the schema consolidation is an ordering prerequisite.",
+    "**Schema and migrations are NOT `risk:high` pre-release** — RULED 2026-08-13 (#435).",
+    "the moment alpha or beta serves real client data, schema/migrations return to `risk:high`",
+    "`ordering` = the schema consolidation; it is NOT risk:high and gets no approval gate.",
+  ])
+    assert.ok(!hits(ruled), `the sweep must permit: ${ruled}`);
 });
 
 test("both sweep exemptions still resolve to a file that actually matches", () => {

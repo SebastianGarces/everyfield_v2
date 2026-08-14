@@ -186,19 +186,17 @@ const PUSH_SCHEMA = {
 };
 
 // ---------------------------------------------------------------------------
-// The HR1–HR3 trigger: the DIFF, never the label.
+// The HR1–HR3 trigger: the DIFF, never the label — see ops/agent-os/dod.md,
+// "Migration proofs and high-risk units (extra gates)".
 //
-// RULED 2026-08-13 (#435, ledger row 435 (a); stated in ops/agent-os/dod.md).
 // The migration proofs are proofs ABOUT THE DDL, not privileges `risk:high`
 // buys, so they fire whenever the track's diff carries a file under
 // `src/db/migrations/` — at ANY risk tier. HR4, attended-only dispatch and
-// never-auto-merge stay keyed to `risk:high`; that split IS the ruling.
+// never-auto-merge stay keyed to `risk:high`; that split is the policy.
 //
-// This used to read `track.risk === "high"`, which was correct only while
-// schema work was labelled high-risk. #435 narrowed the label to
-// auth/permissions, multi-tenant isolation and payments — so the label test
-// would have gone false for exactly the tracks that carry migrations and the
-// proofs would silently never have been asked for again.
+// Never re-key this on `track.risk`: `risk:high` no longer covers schema
+// work, so a label test would be false for exactly the tracks that carry
+// migrations and the proofs would silently never be asked for.
 // ---------------------------------------------------------------------------
 const DIFF_SCHEMA = {
   type: "object",
@@ -591,12 +589,17 @@ The loop compares those two and will NOT run the functional gate until they are 
 /**
  * Does this track's diff carry a migration? Read off `git diff --name-only`
  * against the merge-base with the base branch — never off `track.risk`, never
- * off the issue labels (see DIFF_SCHEMA's header for the ruling).
+ * off the issue labels (see DIFF_SCHEMA's header for the policy).
+ *
+ * Returns `null` when the diff carries none, otherwise `{ line, files }`:
+ * `line` is the sentence spliced into the verifier brief, `files` is what
+ * made the trigger fire — the log and the HR1–HR3 assertion below both need
+ * the list, and deriving it twice is how the brief and the check drift apart.
  *
  * FAILS CLOSED. An undecided diff owes the proofs: a missing answer must never
  * be the reason a DDL change shipped without a dry-run or a rollback.
  */
-async function migrationHighRiskLine() {
+async function migrationProofsOwed() {
   const diff = await agent(
     `Report whether branch ${branch} in worktree ${wt} changes any database migration file.
 
@@ -616,11 +619,66 @@ Put every printed path beginning with \`src/db/migrations/\` into \`migrationFil
   // A dead agent is an undecided diff, which fails closed exactly as above.
   const files = Array.isArray(diff?.migrationFiles) ? diff.migrationFiles : [];
   const carries = diff ? diff.carriesMigration !== false : true;
-  if (!carries) return "";
+  if (!carries) return null;
   const named = files.length
     ? files.join(", ")
     : `the diff could not be read (${diff?.detail || "no detail returned"}), so it is treated as carrying one`;
-  return `THIS DIFF CARRIES A MIGRATION (${named}): also run HR1–HR3 — migration dry-run against a scratch DB, rollback proof, and the exact DDL delta in the PR body. That trigger is the DIFF, not the label (\`ops/agent-os/dod.md\`, RULED 2026-08-13 #435), so it applies at ANY risk tier — \`risk:medium\` included.`;
+  return {
+    files,
+    named,
+    line: `THIS DIFF CARRIES A MIGRATION (${named}): also run HR1–HR3 — migration dry-run against a scratch DB, rollback proof, and the exact DDL delta in the PR body. That trigger is the DIFF, not the label (\`ops/agent-os/dod.md\`, RULED 2026-08-13 #435), so it applies at ANY risk tier — \`risk:medium\` included. Report each one as its own entry in \`gates\` with \`id\` "HR1", "HR2" and "HR3", \`status\` "PASS" and the evidence you actually collected; a report that omits them is rejected mechanically, so an unrun proof cannot read as a clean pass.`,
+  };
+}
+
+// The three proofs a migration diff buys, in the order dod.md states them.
+const MIGRATION_PROOFS = [
+  { id: "HR1", owes: "a migration dry-run against a scratch/shadow DB" },
+  { id: "HR2", owes: "a rollback proof" },
+  { id: "HR3", owes: "the exact DDL delta in the PR body" },
+];
+
+/**
+ * The HR1–HR3 assertion. The brief ASKS for the proofs; this is what makes
+ * them owed — without it the whole product of `migrationProofsOwed()` is a
+ * sentence, and a verifier that silently skipped the dry-run still returns a
+ * clean PASS. Mirrors the HR4 tally below: every proof must clear, and a
+ * missing one is missing evidence rather than an implicit pass.
+ *
+ * Returns null when the report carries all three, otherwise a FAIL report.
+ */
+function migrationProofsMissing(report, migration) {
+  const gates = Array.isArray(report?.gates) ? report.gates : [];
+  const owed = MIGRATION_PROOFS.map(({ id, owes }) => {
+    // `id` may be "HR1" or "HR1 — dry-run"; anything else is not this gate.
+    const gate = gates.find((g) =>
+      new RegExp(`^\\s*${id}\\b`, "i").test(String(g?.id || ""))
+    );
+    return {
+      id,
+      owes,
+      why: !gate
+        ? "no gate with this id in the report"
+        : gate.status !== "PASS"
+          ? `reported ${gate.status}`
+          : !String(gate.evidence || "").trim()
+            ? "reported PASS with no evidence"
+            : null,
+    };
+  });
+  const failed = owed.filter((p) => p.why);
+  if (!failed.length) return null;
+  return {
+    ...report,
+    verdict: "FAIL",
+    failingGate: "HR1-HR3/missing-proofs",
+    // No `failingWorkstream`: the proofs are owed by the VERIFIER of the
+    // assembled branch, so attributing them to one workstream would send the
+    // re-run to an agent that never had the whole diff.
+    fixInstructions: `This track's diff carries a migration (${migration.named}), so HR1–HR3 are owed and the report did not carry them:
+${failed.map((p) => `  - ${p.id} (${p.owes}) — ${p.why}`).join("\n")}
+Run each proof against the migration files above and report it as its own \`gates\` entry with \`id\` "${failed.map((p) => p.id).join('"/"')}", \`status\` "PASS" and the transcript as \`evidence\`. Do not restate the verdict without running them.`,
+    summary: `${report?.summary || "verify"} — but HR1–HR3 were not proven for ${migration.named}.`,
+  };
 }
 
 // Independent verifier (G6): a DIFFERENT agent runs the integration gates.
@@ -790,15 +848,31 @@ log(
   `🧪 ${track.id} — integration verify attempt ${attempt} (origin/${branch} @ ${finalSha.slice(0, 7)})`
 );
 
-// Keyed on the DIFF, not on `track.risk` — see DIFF_SCHEMA's header (#435).
-const hrLine = await migrationHighRiskLine();
-if (hrLine) log(`🧱 ${track.id} — the diff carries a migration; HR1–HR3 apply`);
+// Keyed on the DIFF, not on `track.risk` — see DIFF_SCHEMA's header.
+const migration = await migrationProofsOwed();
+if (migration)
+  log(
+    `🧱 ${track.id} — the diff carries a migration (${migration.named}); HR1–HR3 apply`
+  );
 
-const verify = await integrationVerify(finalSha, hrLine);
+const verify = await integrationVerify(finalSha, migration?.line || "");
 if (!verify) return failResult(null);
 
 if (!(verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS"))
   return failResult(verify);
+
+// The proofs are CHECKED, not merely requested. A verifier that never ran the
+// dry-run returns a report with no HR1–HR3 entries, and nothing downstream —
+// not the merge gate, which holds only on `risk:high` — would see it.
+if (migration) {
+  const missing = migrationProofsMissing(verify, migration);
+  if (missing) {
+    log(
+      `❌ ${track.id} attempt ${attempt}: the diff carries a migration but HR1–HR3 were not proven — ${missing.summary}`
+    );
+    return failResult(missing);
+  }
+}
 
 const unresolved = [...carriedFindings];
 // Set by the afterFixCommit hook when a fix round actually landed (and
@@ -1105,9 +1179,9 @@ if (!labelState.settled) {
 //   1. the DoD passed AND the real CI check is green (proven above),
 //   2. the track is not risk:high — auth/permissions, multi-tenant isolation
 //      and payments are where a bad merge is unrecoverable, so those keep a
-//      human regardless (schema/migrations left that list on 2026-08-13,
-//      #435: pre-release a wrong migration is a dev-DB reset, and the
-//      migration proofs HR1–HR3 key on the diff instead — see DIFF_SCHEMA),
+//      human regardless. A migration is deliberately NOT on that list: what
+//      guards a DDL merge is HR1–HR3, asserted on the verify report above
+//      (`migrationProofsMissing`), not a hold here,
 //   3. the track is not `hold` — the standing policy is that a change to
 //      the factory itself (this loop, the delivery-OS skills, ops/agent-os)
 //      keeps a human, because the thing being changed is the thing that

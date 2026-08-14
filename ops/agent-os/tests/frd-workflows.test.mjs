@@ -1060,16 +1060,31 @@ test("risk:high never auto-merges, even on a spotless pass", async () => {
 const verifyPrompt = (calls, track = "alpha") =>
   calls.find((c) => c.label === `verify:${track}#1`)?.prompt || "";
 
+/** The diff answer for a track that adds one migration file. */
+const MIGRATION_FILE = "src/db/migrations/0042_add_thing.sql";
+const carriesMigration = () => ({
+  carriesMigration: true,
+  migrationFiles: [MIGRATION_FILE],
+});
+
+/** A PASS report that actually carries the three proofs the diff bought. */
+const passingWithProofs = (over = []) => ({
+  ...passing([]),
+  gates: [
+    { id: "HR1", status: "PASS", evidence: "dry-run against a scratch DB" },
+    { id: "HR2", status: "PASS", evidence: "rolled back and re-applied" },
+    { id: "HR3", status: "PASS", evidence: "DDL delta in the PR body" },
+    ...over,
+  ],
+});
+
 test("a migration in the diff buys HR1–HR3 at a non-high risk tier", async () => {
-  const { calls } = await runBuild(
+  const { result, calls } = await runBuild(
     [{ ...buildUnit("alpha", 101), risk: "medium" }],
     (prompt, opts) =>
       opts.label?.startsWith("diff:")
-        ? {
-            carriesMigration: true,
-            migrationFiles: ["src/db/migrations/0042_add_thing.sql"],
-          }
-        : replyShip(passing([]))(prompt, opts),
+        ? carriesMigration()
+        : replyShip(passingWithProofs())(prompt, opts),
     { autoMerge: false }
   );
 
@@ -1098,6 +1113,70 @@ test("a migration in the diff buys HR1–HR3 at a non-high risk tier", async () 
     "the verifier is told WHICH file made the trigger fire"
   );
   assert.match(prompt, /ANY risk tier/);
+  assert.equal(
+    result.shipped.length,
+    1,
+    "a report that carries the three proofs is a clean pass"
+  );
+});
+
+test("a report that omits HR1–HR3 fails the track when the diff carries a migration", async () => {
+  // The brief ASKS for the proofs. Without a mechanical check, a verifier that
+  // never ran the dry-run returns a report with no HR1–HR3 entries and the
+  // track passes — and the merge gate cannot see it either, because that gate
+  // holds on `risk:high` and a migration track no longer carries the label.
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: true }
+  );
+  assert.equal(result.shipped.length, 0, "an unproven migration never ships");
+  assert.equal(result.blocked.length, 1);
+  assert.equal(result.blocked[0].failingGate, "HR1-HR3/missing-proofs");
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "and it certainly never auto-merges"
+  );
+  const alert = calls.find((c) => c.label === "block:alpha");
+  assert.match(
+    alert?.prompt || "",
+    new RegExp(MIGRATION_FILE.replace(/[/.]/g, "\\$&")),
+    "what is handed back names the migration files that made the proofs owed"
+  );
+});
+
+test("a proof reported without evidence is not a proof", async () => {
+  const { result } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip({
+            ...passingWithProofs(),
+            gates: [
+              { id: "HR1", status: "PASS", evidence: "dry-run ok" },
+              { id: "HR2", status: "PASS", evidence: "   " },
+              { id: "HR3", status: "SKIPPED", evidence: "no scratch DB" },
+            ],
+          })(prompt, opts),
+    { autoMerge: false }
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.blocked[0].failingGate, "HR1-HR3/missing-proofs");
+});
+
+test("a track with no migration is never asked for the proofs it does not owe", async () => {
+  // The assertion keys on the same answer the brief does, so a clean report
+  // with an empty `gates` list must still pass when the diff carries no DDL.
+  const { result } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: false }
+  );
+  assert.equal(result.shipped.length, 1);
 });
 
 test("a risk:high track with no migration is not asked for the migration proofs", async () => {
@@ -1116,15 +1195,20 @@ test("a risk:high track with no migration is not asked for the migration proofs"
 test("a diff that could not be read still owes the migration proofs", async () => {
   // Fail closed: a missing answer must never be the reason a DDL change
   // shipped without a dry-run.
-  const { calls } = await runBuild(
+  const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     (prompt, opts) =>
       opts.label?.startsWith("diff:")
         ? null
-        : replyShip(passing([]))(prompt, opts),
+        : replyShip(passingWithProofs())(prompt, opts),
     { autoMerge: false }
   );
   assert.match(verifyPrompt(calls), /also run HR1–HR3/);
+  assert.equal(
+    result.shipped.length,
+    1,
+    "owed, and proven — an undecided diff costs the proofs, not the track"
+  );
 });
 
 // ---------------------------------------------------------------------------
