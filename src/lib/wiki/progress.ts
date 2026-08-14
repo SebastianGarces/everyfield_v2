@@ -6,27 +6,24 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
+import {
+  progressPatchSchema,
+  wikiSlugSchema,
+  type ProgressPatch,
+} from "./write-input";
+import { progressUpsertQuery, recordViewUpsertQuery } from "./write-queries";
 
-/**
- * Get progress for a single article
- */
-export async function getArticleProgress(slug: string) {
-  const session = await getCurrentSession();
-  if (!session?.user) return null;
-
-  const [progress] = await db
-    .select()
-    .from(wikiProgress)
-    .where(
-      and(
-        eq(wikiProgress.userId, session.user.id),
-        eq(wikiProgress.articleSlug, slug)
-      )
-    )
-    .limit(1);
-
-  return progress ?? null;
-}
+// `getArticleProgress` used to live here, and `markCompleted` at the foot of the
+// file. Both were dead repo-wide, and both were exports of THIS module — so each
+// was a POST endpoint reachable with no session cookie and no UI in front of it
+// (`memory/invariants.md` → Authentication: the export list IS the auth
+// surface). `markCompleted` was the worse of the two: an unreferenced WRITE that
+// marked any slug complete for whoever posted it. Deleted with #411 for the same
+// reason the four dead reads left `service.ts` — nothing wanted them, and an
+// endpoint kept "in case" is an endpoint nobody is reviewing.
+//
+// A caller that needs either one writes it back with a caller attached;
+// `write-paths.test.ts` fails the moment an export of this module has none.
 
 /**
  * Get progress for multiple articles (batch query)
@@ -191,79 +188,73 @@ export async function getLastInProgress() {
 }
 
 /**
- * Update progress for an article (upsert)
+ * Update progress for an article (upsert).
+ *
+ * ONE statement, not a read followed by a write — the statement itself is
+ * `progressUpsertQuery` in `write-queries.ts`, which is where every wiki write
+ * path is built and where the reason is written down.
+ *
+ * SESSION FIRST, THEN PARSE (`memory/invariants.md` → Authentication). BOTH
+ * parameters are request body: this is an export of a `"use server"` module, so
+ * a POST reaches it with whatever shapes it likes and the parameter types stop
+ * none of it. The builder names the two columns it will write, which is what
+ * makes every OTHER column unreachable; the two parses are what make the VALUES
+ * legal ones, because `wiki_progress.status` is plain `text` with no CHECK
+ * behind it and `article_slug` is unbounded `text` with no FK behind it. Neither
+ * half may be skipped: `progressPatchSchema` accepts `{}`, so an unparsed slug
+ * alone is enough to write an unbounded junk row under a name that addresses no
+ * article. An argument that fails either schema is refused entirely rather than
+ * written in part — `null`, the same answer a sessionless caller gets, since
+ * both are shapes only a bug or a probe produces.
  */
-export async function updateProgress(
-  slug: string,
-  data: {
-    status?: WikiProgressStatus;
-    scrollPosition?: number;
-  }
-) {
+export async function updateProgress(slug: string, data: ProgressPatch) {
   const session = await getCurrentSession();
   if (!session?.user) return null;
 
-  const now = new Date();
+  const parsedSlug = wikiSlugSchema.safeParse(slug);
+  if (!parsedSlug.success) return null;
 
-  // Check if progress exists
-  const existing = await getArticleProgress(slug);
+  const parsed = progressPatchSchema.safeParse(data);
+  if (!parsed.success) return null;
 
-  if (existing) {
-    // Update existing
-    const [updated] = await db
-      .update(wikiProgress)
-      .set({
-        ...data,
-        lastViewedAt: now,
-        updatedAt: now,
-        ...(data.status === "completed" ? { completedAt: now } : {}),
-      })
-      .where(eq(wikiProgress.id, existing.id))
-      .returning();
+  const [saved] = await progressUpsertQuery(
+    session.user.id,
+    parsedSlug.data,
+    parsed.data,
+    new Date()
+  );
 
-    return updated;
-  } else {
-    // Insert new
-    const [created] = await db
-      .insert(wikiProgress)
-      .values({
-        userId: session.user.id,
-        articleSlug: slug,
-        status: data.status ?? "in_progress",
-        scrollPosition: data.scrollPosition ?? 0,
-        lastViewedAt: now,
-        ...(data.status === "completed" ? { completedAt: now } : {}),
-      })
-      .returning();
-
-    return created;
-  }
+  return saved ?? null;
 }
 
 /**
- * Mark an article as completed
- */
-export async function markCompleted(slug: string) {
-  return updateProgress(slug, { status: "completed", scrollPosition: 1 });
-}
-
-/**
- * Record a view (sets to in_progress if not already completed)
+ * Record a view (sets to in_progress unless the reader already finished it).
+ *
+ * The "don't downgrade a completed article" rule travels INSIDE the statement
+ * (`recordViewUpsertQuery`), not in a branch over a row read a moment earlier:
+ * a completion that landed between the read and the write was overwritten, so
+ * finishing an article in one tab while another reported the view reset it to
+ * in_progress (#411).
+ *
+ * Its slug is parsed for the reason `updateProgress`'s is (round 7): this
+ * endpoint takes a slug and NO body at all, so the slug is the entire POST and
+ * an unparsed one is an unbounded row keyed on a name that addresses nothing.
  */
 export async function recordView(slug: string) {
-  const existing = await getArticleProgress(slug);
+  const session = await getCurrentSession();
+  if (!session?.user) return null;
 
-  let result;
-  // Don't downgrade from completed to in_progress
-  if (existing?.status === "completed") {
-    // Just update lastViewedAt
-    result = await updateProgress(slug, {});
-  } else {
-    result = await updateProgress(slug, { status: "in_progress" });
-  }
+  const parsedSlug = wikiSlugSchema.safeParse(slug);
+  if (!parsedSlug.success) return null;
+
+  const [saved] = await recordViewUpsertQuery(
+    session.user.id,
+    parsedSlug.data,
+    new Date()
+  );
 
   // Revalidate wiki layout to update "Recently Viewed" sidebar
   revalidatePath("/wiki", "layout");
 
-  return result;
+  return saved ?? null;
 }

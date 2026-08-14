@@ -65,7 +65,7 @@ export type InsightCardData = Pick<
 
 /**
  * A published wiki article, as the slug index yields it. Declared structurally
- * rather than imported from `lib/wiki/service` so this file never names a
+ * rather than imported from `lib/wiki/get-articles` so this file never names a
  * DB-backed module.
  */
 export interface InsightArticleRef {

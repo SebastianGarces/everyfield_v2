@@ -388,6 +388,69 @@ describe("extractPrintBlocks", () => {
     ]);
   });
 
+  test("a nested table's rows stay in the cell they were written in (#411)", () => {
+    // `querySelectorAll("tr")` is a DESCENDANT query, so the inner table used to
+    // hand its rows to the OUTER one: "Deposit paid" arrived twice — once
+    // flattened into the cell, as divergence 3 promises, and once as a row of
+    // its own. The walk stops at a nested TABLE now, so nesting flattens
+    // without duplicating.
+    const blocks = extractPrintBlocks(
+      el("div", [
+        el("table", [
+          el("tbody", [
+            el("tr", [
+              el("td", [textNode("Venue")]),
+              el("td", [
+                el("table", [
+                  el("tbody", [
+                    el("tr", [el("td", [textNode("Deposit paid")])]),
+                  ]),
+                ]),
+              ]),
+            ]),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.deepEqual(blocks, [
+      {
+        kind: "table",
+        rows: [
+          {
+            cells: [plain("Venue"), plain("Deposit paid")],
+            isHeader: false,
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("a row marked data-print-hide leaves the file, as it leaves the page", () => {
+    // The table walk was the one place the marker was not honoured, because a
+    // descendant query never looks at attributes — so a row the printed page
+    // drops still reached the download.
+    const blocks = extractPrintBlocks(
+      el("div", [
+        el("table", [
+          el("tbody", [
+            el("tr", [el("td", [textNode("Kept")])]),
+            el("tr", [el("td", [textNode("Dropped")])], {
+              "data-print-hide": "",
+            }),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.deepEqual(blocks, [
+      {
+        kind: "table",
+        rows: [{ cells: [plain("Kept")], isHeader: false }],
+      },
+    ]);
+  });
+
   test("drops a table with nothing in it", () => {
     const blocks = extractPrintBlocks(
       el("div", [el("table", [el("tbody", [el("tr", [el("td", [])])])])])

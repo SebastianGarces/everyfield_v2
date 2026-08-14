@@ -13,19 +13,22 @@
 // reaches the view as its `feedbackSlot`.
 //
 // The insight itself is handed in fully-formed by the Focus panel, which read
-// the latest cached snapshot with ZERO LLM calls (PE-011). The one read this
-// component does make is the published-wiki slug index (PE-024): a stored slug
+// the latest cached snapshot with ZERO LLM calls (PE-011). The one article read
+// this component makes is the published-wiki slug index (PE-024): a stored slug
 // can go stale between assessment and render, and a "how to improve" link that
 // 404s is worse than no link, so the link is resolved against live wiki state.
 // That read is `React.cache`-deduped, so a panel of insight cards costs one
-// query, not one per card — and it is a plain DB read, never an LLM call.
+// query, not one per card — and it is a plain DB read, never an LLM call. It is
+// scoped to the reader's own church like every other reader-facing wiki read
+// (#411); the session it needs for that is `React.cache`d too.
 // ============================================================================
 
 import { InsightCardView } from "@/components/phase-engine/insight-card-view";
 import { InsightFeedback } from "@/components/phase-engine/insight-feedback";
 import type { InsightFeedbackRating } from "@/db/schema";
 import type { AssessedInsight } from "@/lib/phase-engine/assessment";
-import { getPublishedArticleRefs } from "@/lib/wiki/service";
+import { getCurrentSession } from "@/lib/auth";
+import { getPublishedArticleRefs } from "@/lib/wiki/get-articles";
 
 /** The current user's prior feedback for an insight, if any. */
 export interface InsightFeedbackState {
@@ -49,8 +52,18 @@ export async function InsightCard({ insight, feedback }: InsightCardProps) {
   // Only pay for the slug index when there is something to resolve; the view
   // drops any stored slug that no longer resolves (PE-024).
   const storedSlugs = insight.relatedArticleSlugs ?? [];
+
+  // The slug index is a reader-facing wiki read, so it is scoped to the reader's
+  // own church like every other one (#411, #317): the title on this card and the
+  // article the click opens must be one document, and where a church overrides a
+  // global slug the unscoped read named the wrong one. `getCurrentSession` is
+  // `React.cache`d and the dashboard layout above has already called it, so
+  // reading it here costs no extra query.
+  const { user } = await getCurrentSession();
   const articleRefs =
-    storedSlugs.length > 0 ? await getPublishedArticleRefs() : [];
+    storedSlugs.length > 0
+      ? await getPublishedArticleRefs(user?.churchId ?? null)
+      : [];
 
   return (
     <InsightCardView

@@ -16,8 +16,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import type { SearchResult } from "@/lib/wiki";
+// From the module that DEFINES it, never the `@/lib/wiki` barrel: the barrel
+// reaches `@/db` through every other wiki module, and this is a `"use client"`
+// component (`search-request.ts` says so for the same reason).
+import type { SearchResult } from "@/lib/wiki/search";
 import { wikiHref } from "@/lib/wiki/href";
+import {
+  SEARCH_UNAVAILABLE_MESSAGE,
+  runWikiSearch,
+} from "@/lib/wiki/search-request";
 import {
   ArrowDown,
   ArrowUp,
@@ -33,14 +40,89 @@ interface WikiSearchProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * What the list is showing — ONE state, not four booleans (#411 round 4).
+ *
+ * `WikiSearchOutcome` already models the answer as a union, and this component
+ * used to decompose it back into four independent flags (`results`,
+ * `isSearching`, `hasSearched`, `isUnavailable`), of which only four of the
+ * sixteen combinations were legal. The cost landed in the render: five guards
+ * that each had to repeat every earlier guard's negation, and one of them
+ * (the results list) that did not — correct only because two setters happened
+ * to sit in the same React batch. Holding the union makes the illegal states
+ * unrepresentable and the arms mutually exclusive by construction.
+ *
+ * `searchWikiArticles` refuses by throwing (it mints an actor above everything
+ * else, and a failed read rethrows too), and the dialog used to await it with
+ * no rejection handling inside an async `setTimeout`: an unhandled rejection,
+ * and a "Searching…" spinner that never settled because every line below the
+ * `await` was skipped. `runWikiSearch` turns every request into an outcome,
+ * and `"unavailable"` is that outcome as the reader sees it
+ * (`src/lib/wiki/search-request.ts`).
+ */
+type View =
+  | { kind: "idle" }
+  | { kind: "searching" }
+  | { kind: "unavailable" }
+  | { kind: "results"; rows: SearchResult[] };
+
+/**
+ * The two outcome sentences, spelled once.
+ *
+ * Each is rendered twice — visibly in its arm, and inside the live region
+ * below — so they are constants rather than two literals that can drift.
+ */
+const SEARCHING_MESSAGE = "Searching...";
+const NO_RESULTS_MESSAGE = "No articles found.";
+
+/**
+ * What a screen reader is told, derived from the ONE state that decides it.
+ *
+ * The dialog used to put `role="status"` on the arms themselves (#411 round 5).
+ * A live region is only announced when text changes INSIDE a region that was
+ * already in the DOM, and those arms are mutually exclusive: every transition
+ * detached one region and mounted another, so nothing was ever an update to a
+ * live region — and the results arm carried no region at all, which left the
+ * whole dialog with none once rows rendered. The refusal message this component
+ * exists to make legible could therefore never be announced.
+ *
+ * One region, mounted for the life of the list, whose text is a function of
+ * `view` — the same "the union holds the state" reframing already applied to
+ * the render. `role="status"` is `aria-live="polite"` plus `aria-atomic="true"`,
+ * so the whole sentence is read on each change.
+ */
+function announcementFor(view: View): string {
+  switch (view.kind) {
+    case "idle":
+      return "";
+    case "searching":
+      return SEARCHING_MESSAGE;
+    case "unavailable":
+      return SEARCH_UNAVAILABLE_MESSAGE;
+    case "results":
+      return view.rows.length === 0
+        ? NO_RESULTS_MESSAGE
+        : `${view.rows.length} ${view.rows.length === 1 ? "article" : "articles"} found.`;
+  }
+}
+
 export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [view, setView] = useState<View>({ kind: "idle" });
   const [isNavigating, setIsNavigating] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  /**
+   * Which search the reader is actually waiting for.
+   *
+   * The debounce times the REQUEST, not the response, so a slow search can land
+   * after a later, faster one: type "elder", pause, then finish "eldership" and
+   * the first query's rows overwrite the second's — a result list that does not
+   * answer the words in the box, and clicking one opens an article the reader
+   * did not search for. Each request takes a token and only the newest one is
+   * allowed to write state.
+   */
+  const latestRequestRef = useRef(0);
 
   // Handle query changes with debounced search
   const handleQueryChange = useCallback((value: string) => {
@@ -51,31 +133,43 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
       clearTimeout(debounceRef.current);
     }
 
+    // Anything already in flight is stale the moment the query changes,
+    // including on the way back to an empty box.
+    const request = ++latestRequestRef.current;
+
+    // An empty box retires the previous outcome, failure included.
     if (!value.trim()) {
-      setResults([]);
-      setHasSearched(false);
-      setIsSearching(false);
+      setView({ kind: "idle" });
       return;
     }
 
     // Show searching state immediately
-    setIsSearching(true);
+    setView({ kind: "searching" });
 
-    // Debounce search
+    // Debounce search. One assignment settles the request, so the searching
+    // state cannot survive either outcome and no two states can be held at
+    // once.
     debounceRef.current = setTimeout(async () => {
-      const searchResults = await searchWikiArticles(value);
-      setResults(searchResults);
-      setHasSearched(true);
-      setIsSearching(false);
+      const outcome = await runWikiSearch(searchWikiArticles, value);
+      if (request !== latestRequestRef.current) return;
+
+      setView(
+        outcome.status === "results"
+          ? { kind: "results", rows: outcome.results }
+          : { kind: "unavailable" }
+      );
     }, 300);
   }, []);
 
-  // Cleanup timeout on unmount
+  // Cleanup timeout on unmount, and retire whatever is already in flight — a
+  // response that arrives after the dialog closed has nothing left to write to.
   useEffect(() => {
+    const requests = latestRequestRef;
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
+      requests.current += 1;
     };
   }, []);
 
@@ -124,6 +218,20 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
           shouldFilter={false}
           className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3"
         >
+          {/* The dialog's ONE live region. Unconditional, so a change of
+              outcome is a text change inside a region that is already there —
+              which is the only thing a screen reader announces. It sits here,
+              beside the listbox rather than inside it: cmdk gives
+              `CommandList` `role="listbox"`, and a listbox may own only
+              options and groups, so a `role="status"` child is an
+              `aria-required-children` violation and is liable to be pruned by
+              the very AT it exists to talk to. `Command` lives exactly as long
+              as `CommandList`, so the region is no less permanent here. The
+              arms inside the list below are purely visual. */}
+          <div role="status" className="sr-only">
+            {announcementFor(view)}
+          </div>
+
           <CommandInput
             placeholder="Search articles..."
             value={query}
@@ -131,30 +239,39 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
           />
           <CommandList className="h-[300px] max-h-[300px]">
             {/* Loading state */}
-            {isSearching && (
+            {view.kind === "searching" && (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-                Searching...
+                {SEARCHING_MESSAGE}
               </div>
             )}
 
-            {/* Empty state - no results */}
-            {!isSearching && hasSearched && results.length === 0 && (
+            {/* Refused or failed — the spinner settles here rather than
+                spinning forever on a rejected request. */}
+            {view.kind === "unavailable" && (
+              <div className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm text-balance">
+                {SEARCH_UNAVAILABLE_MESSAGE}
+              </div>
+            )}
+
+            {/* Empty state — a search that RAN and matched nothing, which is a
+                different statement from the one above it. */}
+            {view.kind === "results" && view.rows.length === 0 && (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-                No articles found.
+                {NO_RESULTS_MESSAGE}
               </div>
             )}
 
             {/* Initial state - no query */}
-            {!isSearching && !hasSearched && !query.trim() && (
+            {view.kind === "idle" && (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
                 Start typing to search articles...
               </div>
             )}
 
             {/* Results */}
-            {!isSearching && results.length > 0 && (
-              <CommandGroup heading={`Results (${results.length})`}>
-                {results.map((result) => (
+            {view.kind === "results" && view.rows.length > 0 && (
+              <CommandGroup heading={`Results (${view.rows.length})`}>
+                {view.rows.map((result) => (
                   <CommandItem
                     key={result.id}
                     value={result.slug}
