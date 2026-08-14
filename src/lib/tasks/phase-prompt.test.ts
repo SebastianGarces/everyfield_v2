@@ -74,7 +74,7 @@ test("a phase offers exactly the catalog's templates for it", () => {
 // ----------------------------------------------------------------------------
 
 test("a transition surfaces the new phase's templates", () => {
-  const prompt = buildPhaseTemplatePrompt(transition(), null);
+  const prompt = buildPhaseTemplatePrompt(transition());
 
   assert.ok(prompt);
   assert.equal(prompt.toPhase, 2);
@@ -91,8 +91,7 @@ test("a transition surfaces the new phase's templates", () => {
 
 test("the templates offered are the NEW phase's, never the old one's", () => {
   const prompt = buildPhaseTemplatePrompt(
-    transition({ fromPhase: 4, toPhase: 2 }),
-    null
+    transition({ fromPhase: 4, toPhase: 2 })
   );
 
   assert.ok(prompt);
@@ -110,8 +109,7 @@ test("the templates offered are the NEW phase's, never the old one's", () => {
 
 test("a backward move still prompts — the planter is doing that stage's work", () => {
   const prompt = buildPhaseTemplatePrompt(
-    transition({ fromPhase: 3, toPhase: 1 }),
-    null
+    transition({ fromPhase: 3, toPhase: 1 })
   );
 
   assert.ok(prompt);
@@ -119,12 +117,12 @@ test("a backward move still prompts — the planter is doing that stage's work",
 });
 
 test("no transition prompts nothing", () => {
-  assert.equal(buildPhaseTemplatePrompt(null, null), null);
+  assert.equal(buildPhaseTemplatePrompt(null), null);
 });
 
 test("a move that went nowhere prompts nothing", () => {
   assert.equal(
-    buildPhaseTemplatePrompt(transition({ fromPhase: 2, toPhase: 2 }), null),
+    buildPhaseTemplatePrompt(transition({ fromPhase: 2, toPhase: 2 })),
     null
   );
 });
@@ -135,10 +133,7 @@ test("a phase with no templates prompts nothing", () => {
   // asserted first so a catalog that grows a phase 9 fails here loudly rather
   // than quietly stops testing anything.
   assert.equal(phaseTemplatesFor(9).length, 0);
-  assert.equal(
-    buildPhaseTemplatePrompt(transition({ toPhase: 9 }), null),
-    null
-  );
+  assert.equal(buildPhaseTemplatePrompt(transition({ toPhase: 9 })), null);
 });
 
 // ----------------------------------------------------------------------------
@@ -148,51 +143,33 @@ test("a phase with no templates prompts nothing", () => {
 test("an answered transition does not prompt again", () => {
   const row = transition();
 
-  assert.ok(buildPhaseTemplatePrompt(row, null));
-  assert.equal(buildPhaseTemplatePrompt(row, row.id), null);
+  assert.ok(buildPhaseTemplatePrompt(row));
+  assert.equal(buildPhaseTemplatePrompt({ ...row, answeredAt: MARCH }), null);
 });
 
-test("the RECORDED answer silences the prompt with no cookie in sight", () => {
-  // The ruling of 2026-08-10: the answer lives in `phase_prompt_answers`, keyed
-  // by transition id, so a second device — which sends no cookie — is answered
-  // by the row that came back on the transition.
-  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
-
-  assert.equal(buildPhaseTemplatePrompt(answered, null), null);
-});
-
-test("the recorded answer silences only the transition it names", () => {
-  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
-  const next = transition({
-    id: "22222222-2222-4222-8222-222222222222",
-    fromPhase: 2,
-    toPhase: 3,
-    createdAt: SEPTEMBER,
-  });
-
-  assert.equal(buildPhaseTemplatePrompt(answered, null), null);
-  assert.ok(
-    buildPhaseTemplatePrompt(next, null),
-    "the next move must re-arm the prompt"
-  );
-});
-
-test("a cookie can hide a prompt but never restore one", () => {
-  // The asymmetry that makes a forged cookie harmless AND makes the row
-  // authoritative: neither answer can be argued away by the browser.
-  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
-
+test("the ROW is the only thing that answers (#411)", () => {
+  // The ruling of 2026-08-10 put the answer in `phase_prompt_answers`, keyed by
+  // transition id, so a second device is answered by the row that came back on
+  // the transition. #411 finished the job: the browser cookie that used to be a
+  // second, weaker source of "already answered" is gone, so this function takes
+  // ONE argument and the row is the whole decision. A prompt state that depends
+  // on nothing but the row cannot be suppressed by a value a browser holds.
   assert.equal(
-    buildPhaseTemplatePrompt(answered, "a-different-transition-id"),
-    null,
-    "a cookie naming another transition must not resurrect an answered prompt"
+    buildPhaseTemplatePrompt.length,
+    1,
+    "a second parameter here is a second answer, and the only one it could carry is the browser's"
   );
+
+  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
+  assert.equal(buildPhaseTemplatePrompt(answered), null);
 });
 
 test("an answer to an EARLIER transition does not silence the next one", () => {
-  // This is what makes the prompt re-arm by itself: the stored answer names a
-  // transition, so the next move stops matching it.
-  const answered = transition();
+  // This is what makes the prompt re-arm by itself: the answer is a row keyed
+  // by transition, so the next move arrives with no row against it. The LEFT
+  // JOIN in `getLatestPhaseTransition` is what puts the two on one row, which
+  // is why this is expressible as `answeredAt` on the transition itself.
+  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
   const next = transition({
     id: "22222222-2222-4222-8222-222222222222",
     fromPhase: 2,
@@ -200,8 +177,8 @@ test("an answer to an EARLIER transition does not silence the next one", () => {
     createdAt: SEPTEMBER,
   });
 
-  assert.equal(buildPhaseTemplatePrompt(answered, answered.id), null);
-  assert.ok(buildPhaseTemplatePrompt(next, answered.id));
+  assert.equal(buildPhaseTemplatePrompt(answered), null);
+  assert.ok(buildPhaseTemplatePrompt(next));
 });
 
 // ----------------------------------------------------------------------------
@@ -209,13 +186,9 @@ test("an answer to an EARLIER transition does not silence the next one", () => {
 // ----------------------------------------------------------------------------
 
 test("the dates offered are counted from the transition, not from a fixed calendar", () => {
-  const inMarch = buildPhaseTemplatePrompt(
-    transition({ createdAt: MARCH }),
-    null
-  );
+  const inMarch = buildPhaseTemplatePrompt(transition({ createdAt: MARCH }));
   const inSeptember = buildPhaseTemplatePrompt(
-    transition({ createdAt: SEPTEMBER }),
-    null
+    transition({ createdAt: SEPTEMBER })
   );
 
   assert.ok(inMarch);
@@ -251,7 +224,7 @@ test("the dates offered are the dates the import would write", () => {
   // The prompt and the import must not be able to disagree — one is what the
   // planter reads before pressing, the other is what lands in the table.
   const row = transition({ createdAt: SEPTEMBER });
-  const prompt = buildPhaseTemplatePrompt(row, null);
+  const prompt = buildPhaseTemplatePrompt(row);
   assert.ok(prompt);
 
   for (const offer of prompt.offers) {
@@ -274,12 +247,10 @@ test("the transition instant's hour cannot move a due date", () => {
   // Day arithmetic, not instant arithmetic: a plant moved at 23:45 UTC and one
   // moved at 00:15 the same day get the same checklist dates.
   const early = buildPhaseTemplatePrompt(
-    transition({ createdAt: new Date("2026-09-14T00:15:00.000Z") }),
-    null
+    transition({ createdAt: new Date("2026-09-14T00:15:00.000Z") })
   );
   const late = buildPhaseTemplatePrompt(
-    transition({ createdAt: new Date("2026-09-14T23:45:00.000Z") }),
-    null
+    transition({ createdAt: new Date("2026-09-14T23:45:00.000Z") })
   );
 
   assert.ok(early);
@@ -392,77 +363,77 @@ test("a second press is a success that created nothing", () => {
   );
 });
 
-test("a second press writes NO browser fast path — the row it found is not its own", () => {
-  // `memory/invariants.md` → Tasks: `PHASE_TEMPLATE_PROMPT_COOKIE` "may only
-  // ever suppress a prompt the row suppresses too — never restore one". That
-  // rule has exactly one way to break, and this is it.
+test("the decision carries ONE transition id, not two (#411)", () => {
+  // There used to be a second field beside `answeredTransitionId` —
+  // `fastPathTransitionId`, "this press owns a row nothing will take away" —
+  // and its only consumer was a year-long browser cookie that answered the
+  // prompt beside the row. The pair differed on exactly one input
+  // (`already_answered`) and getting that difference wrong on either button had
+  // one consequence: a browser permanently suppressing a prompt the database
+  // says is unanswered, because a claim whose import wrote nothing is RELEASED
+  // and no cookie can be un-minted. #411 deleted the cookie, so the second
+  // field has no reader; deleting it is what makes the failure unreachable
+  // rather than merely handled.
   //
-  // Two presses land in the same millisecond. The winner claims the answer row;
-  // the loser's `ON CONFLICT DO NOTHING` returns nothing and it reports
-  // `already_answered`. Then the winner's very first `importTaskTemplate`
-  // throws — nothing was created — so `acceptPhaseTemplatePrompt` RELEASES the
-  // claim and the row is deleted, which is the whole point of releasing it: the
-  // prompt is honestly unanswered and must come back.
-  //
-  // It comes back from the row. It does not come back through a cookie, and the
-  // cookie lives for a YEAR with no un-answer path — so a fast path minted here
-  // would hide the planter's prompt permanently, in the one browser that
-  // pressed, with nothing imported. The loser therefore re-reads the route and
-  // lets the row answer.
-  const decision = decidePhaseTemplateImportOutcome({
+  // Asserted as the SHAPE of every branch, so re-adding a browser-scoped answer
+  // fails here first.
+  const results: (AcceptPhaseTemplatePromptResult | null)[] = [
+    null,
+    { status: "already_answered", transitionId: TRANSITION_ID },
+    {
+      status: "imported",
+      transitionId: TRANSITION_ID,
+      importedOn: "2026-03-02",
+      createdCount: 22,
+      templateNames: ["Ministry Team Setup"],
+    },
+    {
+      status: "partial",
+      transitionId: TRANSITION_ID,
+      importedOn: "2026-03-02",
+      createdCount: 9,
+      templateNames: ["Ministry Team Setup"],
+    },
+  ];
+
+  for (const result of results) {
+    assert.deepEqual(
+      Object.keys(decidePhaseTemplateImportOutcome(result)).sort(),
+      ["answeredTransitionId", "outcome", "receipt"],
+      `${result?.status ?? "null"} grew a second transition id`
+    );
+  }
+
+  assert.deepEqual(
+    Object.keys(
+      decidePhaseTemplateDismissOutcome({ transitionId: TRANSITION_ID })
+    ).sort(),
+    ["answeredTransitionId", "outcome"]
+  );
+  assert.deepEqual(
+    Object.keys(decidePhaseTemplateDismissOutcome(null)).sort(),
+    ["answeredTransitionId", "outcome"]
+  );
+});
+
+test("every press that answered re-reads the route, including the loser", () => {
+  // `already_answered` is a press that found somebody else's claim. It created
+  // nothing, but the transition IS answered, so `/tasks` has to be re-read —
+  // the prompt comes down from the row, and if that claim is later released the
+  // next render honestly asks again. Nothing about this press is remembered
+  // anywhere but the database.
+  const loser = decidePhaseTemplateImportOutcome({
     status: "already_answered",
     transitionId: TRANSITION_ID,
   });
 
-  assert.equal(
-    decision.fastPathTransitionId,
-    null,
-    "a press that wrote no row minted a year-long cookie against somebody else's claim — which a released claim turns into a prompt suppressed with nothing behind it"
-  );
-  assert.equal(
-    decision.answeredTransitionId,
-    TRANSITION_ID,
-    "the route must still be re-read: if the row IS durable the prompt comes down from it"
-  );
-});
-
-test("only a press that KEEPS its claim mints the fast path", () => {
-  // The other side of the rule. `imported` and `partial` both hold the claim
-  // they wrote and neither is ever released, so the cookie they mint can only
-  // agree with the row. `partial` must mint one for a second reason: the cookie
-  // write is what re-renders the route that draws its receipt.
-  const imported = decidePhaseTemplateImportOutcome({
-    status: "imported",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 22,
-    templateNames: ["Ministry Team Setup"],
-  });
-  assert.equal(imported.fastPathTransitionId, TRANSITION_ID);
-
-  const partial = decidePhaseTemplateImportOutcome({
-    status: "partial",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 9,
-    templateNames: ["Ministry Team Setup"],
-  });
-  assert.equal(
-    partial.fastPathTransitionId,
-    TRANSITION_ID,
-    "a part-way import keeps its claim, and the cookie write is what re-renders the route its receipt is drawn on"
-  );
-
-  // Nothing answered, nothing minted.
-  assert.equal(
-    decidePhaseTemplateImportOutcome(null).fastPathTransitionId,
-    null
-  );
+  assert.equal(loser.answeredTransitionId, TRANSITION_ID);
+  assert.equal(loser.receipt, null);
+  assert.deepEqual(loser.outcome, { status: "idle" });
 });
 
 test("declining decides the same way, from what the service reported", () => {
   const landed = decidePhaseTemplateDismissOutcome({
-    status: "declined",
     transitionId: TRANSITION_ID,
   });
   assert.deepEqual(landed.outcome, { status: "idle" });
@@ -475,61 +446,6 @@ test("declining decides the same way, from what the service reported", () => {
   const missed = decidePhaseTemplateDismissOutcome(null);
   assert.deepEqual(missed.outcome, { status: "failed" });
   assert.equal(missed.answeredTransitionId, null);
-});
-
-test('"Not now" writes NO browser fast path when the row it found is not its own', () => {
-  // THE MIRROR OF THE IMPORT RULE, and the hole it was written to close. The
-  // cookie rule is about the COOKIE, not about Import: `declinePhaseTemplate-
-  // Prompt` used to return the transition id whether or not its
-  // `ON CONFLICT DO NOTHING` actually wrote, so "Not now" minted the year-long
-  // fast path off `answeredTransitionId` without owning the answer row.
-  //
-  // The losing sequence is the import one with the buttons swapped. A decline
-  // and an Import land in the same millisecond; Import claims the row, the
-  // decline's insert conflicts and it reports `already_answered`. Then Import's
-  // first `importTaskTemplate` throws, nothing was created, and the claim is
-  // RELEASED. The transition is now genuinely unanswered and the next render
-  // must ask again — but the declining browser holds a 365-day cookie that
-  // suppresses the prompt before the row is ever consulted, with nothing
-  // imported and no un-answer path. That browser never sees this stage change
-  // again.
-  const decision = decidePhaseTemplateDismissOutcome({
-    status: "already_answered",
-    transitionId: TRANSITION_ID,
-  });
-
-  assert.equal(
-    decision.fastPathTransitionId,
-    null,
-    "a decline that wrote no row minted a year-long cookie against somebody else's claim — released, that claim leaves a prompt suppressed with nothing behind it"
-  );
-  assert.equal(
-    decision.answeredTransitionId,
-    TRANSITION_ID,
-    "the route must still be re-read: if the row IS durable the prompt comes down from it"
-  );
-  assert.deepEqual(
-    decision.outcome,
-    { status: "idle" },
-    "losing the race is still a decline — the prompt is down either way, and the planter has nothing to act on"
-  );
-});
-
-test("only a decline that WROTE its row mints the fast path", () => {
-  // The other side of the mirror. Nothing ever releases a DECLINE — there is no
-  // import behind it that could fail — so a cookie minted by the press that
-  // wrote the row can only ever agree with the row.
-  const declined = decidePhaseTemplateDismissOutcome({
-    status: "declined",
-    transitionId: TRANSITION_ID,
-  });
-  assert.equal(declined.fastPathTransitionId, TRANSITION_ID);
-
-  // Nothing answered, nothing minted.
-  assert.equal(
-    decidePhaseTemplateDismissOutcome(null).fastPathTransitionId,
-    null
-  );
 });
 
 // ----------------------------------------------------------------------------

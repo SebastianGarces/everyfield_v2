@@ -9,7 +9,6 @@ import {
   parseRecurrenceForm,
   parseRecurrenceRule,
   seriesIdOf,
-  toCalendarDate,
   type RecurrenceRule,
 } from "./recurrence";
 
@@ -217,12 +216,9 @@ test("parseRecurrenceForm treats a malformed field as saying nothing", () => {
 // Presentation helpers
 // ----------------------------------------------------------------------------
 
-test("toCalendarDate pins the UTC day of an instant", () => {
-  assert.equal(
-    toCalendarDate(new Date("2026-08-09T23:30:00.000Z")),
-    "2026-08-09"
-  );
-});
+// `toCalendarDate` was tested here while it lived in this module. It is a
+// datetime primitive and moved to `@/lib/datetime` in #411; its test moved with
+// it (`src/lib/datetime.test.ts`).
 
 test("describeRecurrence summarises a rule", () => {
   assert.equal(describeRecurrence(null), null);

@@ -8,6 +8,11 @@ import { TaskDetailActions } from "./task-detail-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
+import {
+  formatDate,
+  formatDateTime,
+  formatDateWithoutWeekday,
+} from "@/lib/datetime";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
 import { eq } from "drizzle-orm";
 import {
@@ -129,30 +134,20 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const relatedUrl = getRelatedUrl(task.relatedType, task.relatedId);
 
-  // Format dates
-  const createdDate = new Date(task.createdAt).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  // Dates, pinned to APP_TIME_ZONE (`memory/invariants.md` → Date & Time
+  // Rendering). All three were `toLocaleDateString` with no `timeZone`, which
+  // follows the runtime's: the server rendered one day and the browser could
+  // hydrate another (React #418), and a due date — a calendar day, parsed here
+  // as naive local midnight — rolled a day for any reader east or west of the
+  // server. `formatDate`/`formatDateTime` carry the same wording.
+  const createdDate = formatDateWithoutWeekday(task.createdAt, "short");
 
   const dueDateFormatted = task.dueDate
-    ? new Date(task.dueDate + "T00:00:00").toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
+    ? formatDate(new Date(`${task.dueDate}T00:00:00Z`), "short")
     : null;
 
   const completedDate = task.completedAt
-    ? new Date(task.completedAt).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
+    ? formatDateTime(task.completedAt, "short")
     : null;
 
   return (

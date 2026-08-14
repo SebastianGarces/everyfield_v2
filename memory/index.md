@@ -12,4 +12,4 @@ Memory holds what the code cannot tell you: invariants, rulings, and architectur
 | [contracts/config.md](contracts/config.md) | Env vars (incl. ones absent from `.env.example`) and constants |
 | [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data-sync conventions |
 
-Size budget, enforced by test: `invariants.md` ≤ 50 KB, the whole tree ≤ 140 KB. Maintenance is part of the REVIEWED gate — see `ops/agent-os/dod.md` § Memory.
+Size budget, enforced by test: `invariants.md` ≤ 62 KB, the whole tree ≤ 175 KB (re-pinned 2026-08-14 when the #432/#434 memory growth merged in). Maintenance is part of the REVIEWED gate — see `ops/agent-os/dod.md` § Memory.

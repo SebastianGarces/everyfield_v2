@@ -60,6 +60,31 @@ const SCRATCH_NAME = "__t306 teams init race scratch__";
 
 const RUNS = 3;
 
+/**
+ * The actor a scratch team is attributed to.
+ *
+ * MINTED, NEVER BORROWED. This used to be `select … from users limit 1` — "any
+ * real user, because the test is about the write guard, not about who pressed
+ * the button". That reads harmlessly and is not: it makes the suite unrunnable
+ * against an empty database (the CI job that finally runs these has one), and
+ * in a parallel run it borrows ANOTHER suite's scratch user, whose sweep then
+ * fails on `ministry_teams_created_by_users_id_fk` — the row it is trying to
+ * delete is referenced from a team this file created. A suite that writes only
+ * inside its own namespace has to own its actor too.
+ */
+async function createScratchActor(): Promise<string> {
+  const [actor] = await db
+    .insert(users)
+    .values({
+      email: `${crypto.randomUUID()}@scratch.invalid`,
+      passwordHash: "scratch",
+      name: SCRATCH_NAME,
+      role: "planter",
+    })
+    .returning({ id: users.id });
+  return actor.id;
+}
+
 async function sweep(): Promise<void> {
   const scratch = await db
     .select({ id: churches.id })
@@ -70,6 +95,11 @@ async function sweep(): Promise<void> {
     await db.delete(ministryTeams).where(eq(ministryTeams.churchId, church.id));
     await db.delete(churches).where(eq(churches.id, church.id));
   }
+
+  // Last: the teams above reference it, and the scratch user carries no
+  // church of its own, so nothing here depends on the delete order with
+  // `churches`.
+  await db.delete(users).where(eq(users.name, SCRATCH_NAME));
 }
 
 after(async () => {
@@ -84,12 +114,9 @@ test(
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
 
-    // Any real user — `created_by` is a FK and this test is about the write
-    // guard, not about who pressed the button.
-    const [actor] = await db.select({ id: users.id }).from(users).limit(1);
-    assert.ok(actor, "the database has no users to attribute a team to");
-
     await sweep();
+
+    const actorId = await createScratchActor();
 
     for (let run = 1; run <= RUNS; run++) {
       const [church] = await db
@@ -99,8 +126,8 @@ test(
 
       // Two tabs, two accepts. Neither knows about the other.
       const results = await Promise.all([
-        initializePredefinedTeams(church.id, actor.id),
-        initializePredefinedTeams(church.id, actor.id),
+        initializePredefinedTeams(church.id, actorId),
+        initializePredefinedTeams(church.id, actorId),
       ]);
 
       const rows = await db
@@ -145,10 +172,9 @@ test(
     // The statement above can only be as safe as the constraint under it. This
     // asserts the constraint directly, so a future rewrite of the initializer
     // cannot quietly remove the thing that makes duplicates impossible.
-    const [actor] = await db.select({ id: users.id }).from(users).limit(1);
-    assert.ok(actor);
-
     await sweep();
+
+    const actorId = await createScratchActor();
 
     const [church] = await db
       .insert(churches)
@@ -160,7 +186,7 @@ test(
         churchId: church.id,
         name: "Worship",
         type: "predefined" as const,
-        createdBy: actor.id,
+        createdBy: actorId,
       };
 
       await db.insert(ministryTeams).values(row);

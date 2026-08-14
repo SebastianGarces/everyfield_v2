@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
-import type { TaskWithAssignee } from "@/lib/tasks/types";
+import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
+import type { TaskListRow } from "@/lib/tasks/service";
 import { ListChecks } from "lucide-react";
 import {
   BulkActionsBar,
@@ -15,7 +16,7 @@ import { TaskCard } from "./task-card";
 
 interface TaskGroup {
   label: string;
-  tasks: TaskWithAssignee[];
+  tasks: TaskListRow[];
   variant: "overdue" | "today" | "upcoming" | "later" | "no_date" | "completed";
 }
 
@@ -29,28 +30,30 @@ interface TaskGroup {
  * separate jobs, and the bulk-select checkbox would then hand a planter a
  * "select all" that spans two levels of the same task.
  */
-function topLevelOnly(tasks: TaskWithAssignee[]): TaskWithAssignee[] {
+function topLevelOnly(tasks: TaskListRow[]): TaskListRow[] {
   return tasks.filter((task) => task.parentTaskId === null);
 }
 
-function groupTasksByDueDate(tasks: TaskWithAssignee[]): TaskGroup[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().split("T")[0];
+/**
+ * The five due-date buckets, decided in `APP_TIME_ZONE`.
+ *
+ * `now` is passed in rather than read here, and the arithmetic is UTC-day
+ * arithmetic (`memory/invariants.md` → Date & Time Rendering). It used to floor
+ * `new Date()` with `setHours` — the RUNTIME's midnight — and then call
+ * `toISOString()`, which converts to UTC: on a machine east of UTC that pair
+ * produces YESTERDAY's date string, so every task moved a bucket. The same
+ * instant then reached the cards below, which were doing their own clock read.
+ */
+function groupTasksByDueDate(tasks: TaskListRow[], now: Date): TaskGroup[] {
+  const todayStr = toCalendarDate(now);
+  const weekEndStr = addCalendarDays(now, 7);
 
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const weekEnd = new Date(today);
-  weekEnd.setDate(weekEnd.getDate() + 7);
-  const weekEndStr = weekEnd.toISOString().split("T")[0];
-
-  const overdue: TaskWithAssignee[] = [];
-  const dueToday: TaskWithAssignee[] = [];
-  const upcoming: TaskWithAssignee[] = []; // tomorrow through 7 days
-  const later: TaskWithAssignee[] = []; // beyond 7 days
-  const noDate: TaskWithAssignee[] = [];
-  const completed: TaskWithAssignee[] = [];
+  const overdue: TaskListRow[] = [];
+  const dueToday: TaskListRow[] = [];
+  const upcoming: TaskListRow[] = []; // tomorrow through 7 days
+  const later: TaskListRow[] = []; // beyond 7 days
+  const noDate: TaskListRow[] = [];
+  const completed: TaskListRow[] = [];
 
   for (const task of tasks) {
     if (task.status === "complete") {
@@ -136,10 +139,20 @@ const GROUP_STYLES: Record<string, string> = {
 // ============================================================================
 
 interface TaskListProps {
-  tasks: TaskWithAssignee[];
+  tasks: TaskListRow[];
   total: number;
   nextCursor: string | null;
   personNotes?: Record<string, string>;
+  /**
+   * The instant every relative due date on this page is measured against.
+   *
+   * ONE read of the clock for the whole list, taken by the server component
+   * that renders it and handed to every card. The cards hydrate, so a card that
+   * read the clock itself would compute a different "3 days overdue" in the
+   * browser and trip React #418 — and two cards could disagree with the group
+   * heading above them across a midnight.
+   */
+  now: Date;
 }
 
 export function TaskList({
@@ -147,6 +160,7 @@ export function TaskList({
   total,
   nextCursor,
   personNotes,
+  now,
 }: TaskListProps) {
   const tasks = topLevelOnly(allTasks);
 
@@ -164,7 +178,7 @@ export function TaskList({
     );
   }
 
-  const groups = groupTasksByDueDate(tasks);
+  const groups = groupTasksByDueDate(tasks, now);
 
   return (
     // Selection is client state; the list itself stays a server component so
@@ -196,6 +210,7 @@ export function TaskList({
                 >
                   <TaskCard
                     task={task}
+                    now={now}
                     personNote={
                       task.relatedType === "person" && task.relatedId
                         ? (personNotes?.[task.relatedId] ?? null)

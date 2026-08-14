@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search, UserPlus, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { assignMemberAction } from "@/app/(dashboard)/teams/actions";
 import type { Person } from "@/db/schema";
+import { assignRefusalDelivery } from "./assign-refusal";
 
 interface MemberAssignDialogProps {
   teamId: string;
@@ -41,6 +44,7 @@ export function MemberAssignDialog({
   people,
   teamCounts,
 }: MemberAssignDialogProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
@@ -68,7 +72,38 @@ export function MemberAssignDialog({
         setSelectedPerson(null);
         setSearch("");
       } else {
-        setError(result.error);
+        // #409 D1. WHERE the refusal goes is decided by `assignRefusalDelivery`
+        // (`./assign-refusal.ts`), not here, because this branch is otherwise
+        // untestable — see that module's header.
+        //
+        // The seat refusal means the page underneath is WRONG, not merely that
+        // the write failed: this dialog is only ever rendered beside an OPEN
+        // seat, so being told the seat is filled means somebody took it since
+        // this page rendered. `router.refresh()` puts the occupant on screen.
+        // But that same refresh flips the role card to its Filled arm, which
+        // UNMOUNTS this dialog — so the sentence must not be inside it. It goes
+        // to the root `<Toaster>` (`src/app/layout.tsx`), a sibling of the whole
+        // page that no re-render below it can take down, and the refresh is NOT
+        // delayed behind a dismissal: delaying it restores the stale roles tab
+        // it exists to destroy.
+        //
+        // `router.refresh()` is legitimate here and is not the client-refresh
+        // this repo's data-sync invariant forbids: nothing was written, so
+        // there is no server action to call `refresh()` from next/cache in.
+        const delivery = assignRefusalDelivery(result.error);
+        setError(delivery.inline);
+        if (delivery.toast) {
+          toast.error(delivery.toast.message, {
+            description: delivery.toast.description,
+            duration: delivery.toast.durationMs,
+          });
+        }
+        if (delivery.closeDialog) {
+          setOpen(false);
+          setSelectedPerson(null);
+          setSearch("");
+        }
+        if (delivery.refreshRoles) router.refresh();
       }
     } finally {
       setLoading(false);

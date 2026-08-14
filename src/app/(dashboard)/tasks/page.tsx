@@ -7,9 +7,9 @@ import { TaskFilters, TaskList, TaskQuickAdd } from "@/components/tasks";
 import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import { getLatestPersonNote } from "@/lib/people/service";
+import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
 import { getTaskCounts, listTasks } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
@@ -26,29 +26,17 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
     redirect("/dashboard");
   }
 
-  const params = await searchParams;
+  // Parsed, never cast: a `?status=` a browser typed reaches `inArray` and then
+  // the CHECK constraint on the column, and this route has no error boundary
+  // (`src/lib/tasks/list-params.ts`).
+  const { view, showCompleted, status, priority, category, cursor } =
+    parseTaskListSearchParams(await searchParams);
 
-  // Parse view mode
-  const view = params.view === "all" ? "all" : "my_tasks";
-  const showCompleted = params.completed === "true";
-
-  // Parse filters
-  const statusParam = params.status;
-  const status = statusParam
-    ? ([statusParam].flat() as TaskStatus[])
-    : undefined;
-
-  const priorityParam = params.priority;
-  const priority = priorityParam
-    ? ([priorityParam].flat() as TaskPriority[])
-    : undefined;
-
-  const categoryParam = params.category;
-  const category = categoryParam
-    ? ([categoryParam].flat() as TaskCategory[])
-    : undefined;
-
-  const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
+  // ONE clock read for the page. Every relative due date under it — the group
+  // headings and each card's "2 days overdue" — is measured against this
+  // instant, so nothing recomputes it at hydration and disagrees with the
+  // markup it is replacing (`memory/invariants.md` → Date & Time Rendering).
+  const now = new Date();
 
   // Fetch tasks and counts in parallel
   const [result, counts] = await Promise.all([
@@ -66,19 +54,26 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
     getTaskCounts(user.churchId, view === "my_tasks" ? user.id : undefined),
   ]);
 
-  // Pre-fetch person notes for person-related tasks
-  const personRelatedTasks = result.tasks.filter(
-    (t) => t.relatedType === "person" && t.relatedId
-  );
+  // Pre-fetch person notes for person-related tasks.
+  //
+  // CHURCH-SCOPED, because `related_id` is a value a client chose: the create
+  // action accepts `relatedType: "person"` with any uuid, so a task pointing at
+  // ANOTHER tenant's person would otherwise print that person's latest note on
+  // this card. `getLatestPersonNote` takes the church and joins through the
+  // person row, so a foreign id reads as "no note".
   const uniquePersonIds = [
-    ...new Set(personRelatedTasks.map((t) => t.relatedId!)),
+    ...new Set(
+      result.tasks
+        .filter((task) => task.relatedType === "person" && task.relatedId)
+        .map((task) => task.relatedId!)
+    ),
   ];
 
   const personNotes: Record<string, string> = {};
   if (uniquePersonIds.length > 0) {
     const noteResults = await Promise.all(
       uniquePersonIds.map(async (personId) => {
-        const note = await getLatestPersonNote(personId);
+        const note = await getLatestPersonNote(user.churchId!, personId);
         return { personId, note: note?.note ?? null };
       })
     );
@@ -171,10 +166,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           </div>
 
           {/* Filters */}
-          <TaskFilters
-            currentView={view as "all" | "my_tasks"}
-            showCompleted={showCompleted}
-          />
+          <TaskFilters currentView={view} showCompleted={showCompleted} />
         </div>
 
         {/* Task list */}
@@ -192,6 +184,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             total={result.total}
             nextCursor={result.nextCursor}
             personNotes={personNotes}
+            now={now}
           />
         </div>
       </div>

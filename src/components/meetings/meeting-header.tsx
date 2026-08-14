@@ -4,57 +4,23 @@ import { CalendarDays, MapPin, Users, Clock } from "lucide-react";
 // cannot disagree about when the meeting is. See src/lib/datetime.ts.
 import { formatDate, formatRelativeDay, formatTime } from "@/lib/datetime";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
-import type { MeetingStatus, MeetingType } from "@/db/schema";
+// The one meeting display vocabulary — labels, badge tints and the title. The
+// card beside this header renders the same values from the same module, so the
+// two cannot call one meeting two things. See src/lib/meetings/labels.ts.
+import {
+  MEETING_STATUS_BADGE_CLASSES,
+  MEETING_STATUS_LABELS,
+  MEETING_TYPE_BADGE_CLASSES,
+  MEETING_TYPE_LABELS,
+  meetingDisplayTitle,
+} from "@/lib/meetings/labels";
 
 interface MeetingHeaderProps {
   meeting: MeetingWithCounts;
 }
 
-const statusColors: Record<MeetingStatus, string> = {
-  planning:
-    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  ready: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  in_progress:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  completed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-};
-
-const statusLabels: Record<MeetingStatus, string> = {
-  planning: "Planning",
-  ready: "Ready",
-  in_progress: "In Progress",
-  completed: "Completed",
-  cancelled: "Cancelled",
-};
-
-const typeColors: Record<MeetingType, string> = {
-  vision_meeting:
-    "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
-  orientation:
-    "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
-  team_meeting:
-    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
-};
-
-const typeLabels: Record<MeetingType, string> = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
-};
-
-function getMeetingTitle(meeting: MeetingWithCounts): string {
-  if (meeting.type === "vision_meeting" && meeting.meetingNumber) {
-    return `Vision Meeting #${meeting.meetingNumber}`;
-  }
-  if (meeting.type === "team_meeting" && meeting.teamName) {
-    return meeting.title || `${meeting.teamName} Meeting`;
-  }
-  return meeting.title || typeLabels[meeting.type];
-}
-
 export function MeetingHeader({ meeting }: MeetingHeaderProps) {
-  const status = meeting.status as MeetingStatus;
+  const status = meeting.status;
   const locationDisplay =
     meeting.locationName || meeting.location?.name || "No location set";
   const addressDisplay =
@@ -66,8 +32,11 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="mb-1 flex items-center gap-2">
-            <Badge className={typeColors[meeting.type]} variant="secondary">
-              {typeLabels[meeting.type]}
+            <Badge
+              className={MEETING_TYPE_BADGE_CLASSES[meeting.type]}
+              variant="secondary"
+            >
+              {MEETING_TYPE_LABELS[meeting.type]}
             </Badge>
             {meeting.teamName && meeting.type === "team_meeting" && (
               <span className="text-muted-foreground text-sm">
@@ -76,7 +45,7 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
             )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight">
-            {getMeetingTitle(meeting)}
+            {meetingDisplayTitle(meeting)}
           </h1>
           <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
             <span className="flex items-center gap-1.5">
@@ -98,8 +67,11 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
           <span className="text-muted-foreground text-sm font-medium">
             {formatRelativeDay(meeting.datetime)}
           </span>
-          <Badge className={statusColors[status]} variant="secondary">
-            {statusLabels[status]}
+          <Badge
+            className={MEETING_STATUS_BADGE_CLASSES[status]}
+            variant="secondary"
+          >
+            {MEETING_STATUS_LABELS[status]}
           </Badge>
         </div>
       </div>

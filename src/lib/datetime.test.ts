@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import {
   APP_TIME_ZONE,
+  addCalendarDays,
   formatDate,
   formatDateTime,
   formatRelativeDay,
@@ -12,6 +13,7 @@ import {
   formatTime,
   parseDateTimeLocalValue,
   relativeDayOffset,
+  toCalendarDate,
   toDateTimeLocalValue,
 } from "./datetime";
 
@@ -225,6 +227,55 @@ test("a meeting at 00:30 keeps its own calendar day", () => {
 
   assert.equal(formatDate(earlyMorning), "Friday, July 31, 2026");
   assert.equal(formatTime(earlyMorning), "12:30 AM");
+});
+
+// ----------------------------------------------------------------------------
+// The calendar-day primitives (#411).
+//
+// `toCalendarDate` and `addCalendarDays` are what every `date` column in the
+// app is written through — `tasks.due_date` above all. They lived in
+// `lib/tasks/recurrence.ts` until #411, where a `"use client"` component had to
+// reach into the tasks domain for them and the "+ N days" shape was written out
+// at six call sites, each with its own spelling of a day in milliseconds.
+// ----------------------------------------------------------------------------
+
+test("toCalendarDate pins the UTC day of an instant", () => {
+  // 23:30 UTC is already tomorrow east of UTC+1 and still yesterday-evening in
+  // the Americas. The answer is the APP_TIME_ZONE day, in every runtime.
+  assert.equal(
+    toCalendarDate(new Date("2026-08-09T23:30:00.000Z")),
+    "2026-08-09"
+  );
+});
+
+test("addCalendarDays steps whole days, forwards and backwards", () => {
+  const noon = new Date("2026-08-09T12:00:00.000Z");
+
+  assert.equal(addCalendarDays(noon, 0), "2026-08-09");
+  assert.equal(addCalendarDays(noon, 1), "2026-08-10");
+  assert.equal(addCalendarDays(noon, 7), "2026-08-16");
+  assert.equal(addCalendarDays(noon, -1), "2026-08-08");
+  // Across a month boundary, and across a year's.
+  assert.equal(addCalendarDays(noon, 23), "2026-09-01");
+  assert.equal(
+    addCalendarDays(new Date("2026-12-31T00:00:00.000Z"), 1),
+    "2027-01-01"
+  );
+});
+
+test("the hour of the base instant never moves the answer by a day", () => {
+  // What makes this DAY arithmetic rather than instant arithmetic: every hour
+  // of one UTC day answers "+2 days" with the same calendar day, so a task
+  // generated at 23:59 and one generated at 00:01 are not a day apart.
+  const answers = new Set(
+    [
+      "2026-08-09T00:00:00.000Z",
+      "2026-08-09T09:00:00.000Z",
+      "2026-08-09T23:59:59.000Z",
+    ].map((instant) => addCalendarDays(new Date(instant), 2))
+  );
+
+  assert.deepEqual([...answers], ["2026-08-11"]);
 });
 
 // ----------------------------------------------------------------------------

@@ -335,8 +335,22 @@ export async function getPeopleForExport(
 /**
  * Get the latest note for a person from person_activities.
  * Returns the note text and metadata, or null if no notes exist.
+ *
+ * CHURCH-SCOPED, AND THE SCOPE IS NOT DECORATION (#411). `personId` reaches
+ * this function from `tasks.related_id`, which is a client-supplied uuid: the
+ * task create action takes `relatedType: "person"` and any uuid beside it, so
+ * `/tasks` could be made to render another tenant's note by creating a task
+ * that points at their person. `person_activities` carries no `church_id` of
+ * its own, so the scope has to come through the person row — which is why this
+ * joins rather than filtering. A person outside `churchId` reads as "no note",
+ * the same answer a person with no notes gets (`memory/invariants.md` →
+ * Multi-Tenancy: isolation is application-layer, and this predicate IS the
+ * boundary).
  */
-export async function getLatestPersonNote(personId: string): Promise<{
+export async function getLatestPersonNote(
+  churchId: string,
+  personId: string
+): Promise<{
   note: string;
   meetingId?: string;
   meetingType?: string;
@@ -348,10 +362,13 @@ export async function getLatestPersonNote(personId: string): Promise<{
       createdAt: personActivities.createdAt,
     })
     .from(personActivities)
+    .innerJoin(persons, eq(persons.id, personActivities.personId))
     .where(
       and(
         eq(personActivities.personId, personId),
-        eq(personActivities.activityType, "note_added")
+        eq(personActivities.activityType, "note_added"),
+        eq(persons.churchId, churchId),
+        isNull(persons.deletedAt)
       )
     )
     .orderBy(desc(personActivities.createdAt))

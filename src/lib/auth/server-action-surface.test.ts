@@ -127,12 +127,6 @@ const TRY_WRAPPED_MINTS = [
   "src/app/(dashboard)/phase/actions.ts → transitionPhaseAction",
   "src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction",
   "src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction",
-  "src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
-  "src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
-  "src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction",
-  "src/app/(dashboard)/tasks/actions.ts → createTaskAction",
-  "src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction",
-  "src/app/(dashboard)/tasks/actions.ts → updateTaskAction",
 ];
 
 test('the session mint precedes the parse in EVERY "use server" module in the repository', () => {

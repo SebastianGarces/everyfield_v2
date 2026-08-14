@@ -4,7 +4,8 @@
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string (Neon) |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (Neon). The app reads it in `src/db/index.ts` and nothing else interprets it — no hostname is inspected, no endpoint is rewritten |
+| `LIVE_DB_TESTS` | No | `1` opts the race suites in. They ALSO probe reachability, so a placeholder `DATABASE_URL` still skips them. CI runs them in the `Live DB Race Suites` job. Pointing them at a LOCAL Postgres also needs the proxy preload `pnpm test:live` loads — a TEST-ONLY switch, read by `scripts/live-db-endpoint.ts` and by no module the app imports; see `memory/invariants/transactions-atomicity.md` |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL (default: localhost:3000) |
 | `REVALIDATION_SECRET` | For prod | Wiki cache revalidation auth. ⚠️ Still required by `src/app/api/wiki/revalidate/route.ts` but MISSING from `.env.example` |
 | `CRON_SECRET` | For prod | Bearer token for BOTH scheduled routes, `/api/phase-engine/assess` and `/api/notifications/dispatch`; both fail closed when unset. It must hold the same value in two places: the Vercel production env (read by the routes) and this repo's Actions secrets (sent by `.github/workflows/notifications-dispatch.yml` every 15 min and `.github/workflows/phase-engine-assess.yml` at 07:00/19:00 UTC). `vercel.json` carries no crons at all — Hobby caps them at daily, too few for either job |

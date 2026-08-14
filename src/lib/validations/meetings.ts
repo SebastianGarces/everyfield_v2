@@ -10,6 +10,10 @@ import {
 } from "@/db/schema";
 import { z } from "zod";
 import { parseDateTimeLocalValue } from "@/lib/datetime";
+import {
+  EVALUATION_QUALITY_FACTORS,
+  type EvaluationScoreKey,
+} from "@/lib/meetings/evaluation-factors";
 
 // ============================================================================
 // Wall-clock datetime
@@ -192,15 +196,23 @@ const scoreSchema = z.coerce
   .min(1, "Score must be at least 1")
   .max(5, "Score must be at most 5");
 
+/**
+ * One `scoreSchema` per quality factor, DERIVED from the shared list rather
+ * than written out again.
+ *
+ * The eight keys used to be spelled here, in `evaluation-form.tsx` and in
+ * `evaluation-summary.tsx` — three independent declarations of one list — so a
+ * ninth factor added to the form posted a field this schema rejected, and the
+ * planter read "Validation failed" over a control they had filled in. The keys
+ * are typed by `EvaluationScoreKey`, so the record is total over the score
+ * columns and every value is the same `scoreSchema`.
+ */
+const scoreShape = Object.fromEntries(
+  EVALUATION_QUALITY_FACTORS.map((factor) => [factor.key, scoreSchema])
+) as Record<EvaluationScoreKey, typeof scoreSchema>;
+
 export const evaluationCreateSchema = z.object({
-  attendanceScore: scoreSchema,
-  locationScore: scoreSchema,
-  logisticsScore: scoreSchema,
-  agendaScore: scoreSchema,
-  vibeScore: scoreSchema,
-  messageScore: scoreSchema,
-  closeScore: scoreSchema,
-  nextStepsScore: scoreSchema,
+  ...scoreShape,
   notes: z.string().optional(),
 });
 

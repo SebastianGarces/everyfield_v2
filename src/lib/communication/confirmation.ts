@@ -9,7 +9,7 @@
 // ============================================================================
 
 import { randomBytes } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   meetingConfirmationTokens,
@@ -19,7 +19,8 @@ import {
   type MeetingConfirmationToken,
 } from "@/db/schema/communication";
 import { invitations, meetingAttendance } from "@/db/schema/meetings";
-import { churchMeetings } from "@/db/schema/meetings";
+import { churchMeetings, type MeetingType } from "@/db/schema/meetings";
+import { ministryTeams } from "@/db/schema/ministry-teams";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { RECIPIENT_STATUS_RANK, isUnreachableStatus } from "./queries";
@@ -33,7 +34,21 @@ export interface ConfirmationDetails {
   meeting: {
     id: string;
     title: string | null;
-    type: string;
+    // `MeetingType`, not `string`. The value is copied straight off
+    // `churchMeetings.type` — a pg enum column already typed
+    // `$type<MeetingType>()` — so widening it here could only ever hide a
+    // change, and it forced the RSVP page to hand a `string` to the meetings
+    // vocabulary. Same species as the three `as MeetingStatus` casts #411
+    // deleted from the meeting components.
+    type: MeetingType;
+    // The other two fields `meetingDisplayTitle` branches on. The RSVP page is
+    // one of the seven enumerated title surfaces, and while these were absent it
+    // named an untitled team meeting "Team Meeting" where every in-app surface
+    // named it "<Team> Meeting". `MeetingTitleFacts` now requires them, so a
+    // projection that drops one is a compile error rather than a quiet
+    // second-best name shown to the invitee.
+    meetingNumber: number | null;
+    teamName: string | null;
     datetime: Date;
     locationName: string | null;
     locationAddress: string | null;
@@ -51,19 +66,12 @@ export interface ConfirmationDetails {
 // Create
 // ---------------------------------------------------------------------------
 
-/**
- * Generate a confirmation token for a meeting + person pair.
- * Re-uses existing token if one already exists and hasn't expired.
- * Returns the token string (not the full record).
- */
-export async function createConfirmationToken(
-  churchId: string,
+/** The one pending token for a (meeting, person) pair, if there is one. */
+async function findPendingToken(
   meetingId: string,
-  personId: string,
-  expiresInDays = 7
-): Promise<string> {
-  // Check for existing valid token
-  const [existing] = await db
+  personId: string
+): Promise<MeetingConfirmationToken | undefined> {
+  const [pending] = await db
     .select()
     .from(meetingConfirmationTokens)
     .where(
@@ -74,25 +82,111 @@ export async function createConfirmationToken(
       )
     )
     .limit(1);
+  return pending;
+}
 
-  if (existing && existing.expiresAt > new Date()) {
-    return existing.token;
-  }
+/**
+ * Generate a confirmation token for a meeting + person pair.
+ * Re-uses the existing token if one is still awaiting an answer.
+ * Returns the token string (not the full record).
+ *
+ * ONE UNANSWERED TOKEN PER PAIR, AND THE DATABASE IS WHAT SAYS SO (#407 D2,
+ * migration 0038). `sendCommunication` calls this once per recipient, so the
+ * old shape — read "is there a live pending token?", then INSERT — minted a
+ * second pending row for every person on any second send of one meeting
+ * invitation, and the planter's tracking showed two unanswered RSVPs for one
+ * invitee. `memory/invariants.md` → Transactions names it: SELECT-then-INSERT
+ * is not a concurrency guard.
+ *
+ * THE WRITE IS ONE STATEMENT and it has three outcomes, which is why it is an
+ * upsert rather than `DO NOTHING`:
+ *
+ *   - the slot is free       → the fresh token is inserted and returned;
+ *   - the slot holds an EXPIRED pending row → that SAME row is renewed in
+ *     place (`setWhere` on `expires_at <= now()`), so a renewal cannot add a
+ *     second row the way the old expiry branch did;
+ *   - the slot holds a LIVE pending row → `setWhere` is false, nothing is
+ *     written, `returning()` is empty, and the live token is re-read below.
+ *
+ * An empty `returning()` is not an error (`memory/invariants.md` →
+ * Transactions). The re-read is the second half of the guard: without it every
+ * loser of a race, and every ordinary second send, would get no token at all.
+ */
+export async function createConfirmationToken(
+  churchId: string,
+  meetingId: string,
+  personId: string,
+  expiresInDays = 7
+): Promise<string> {
+  return claimConfirmationToken(
+    churchId,
+    meetingId,
+    personId,
+    expiresInDays,
+    2
+  );
+}
 
+/**
+ * `attemptsLeft` bounds the "answered between the upsert and the read" retry.
+ * That window needs a third party to answer the RSVP in the microseconds
+ * between two statements, so one retry is already generous — but a loop with no
+ * ceiling is a loop, and this one runs inside a per-recipient send.
+ */
+async function claimConfirmationToken(
+  churchId: string,
+  meetingId: string,
+  personId: string,
+  expiresInDays: number,
+  attemptsLeft: number
+): Promise<string> {
   const token = randomBytes(12).toString("base64url");
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
-  await db.insert(meetingConfirmationTokens).values({
-    token,
-    churchId,
-    meetingId,
-    personId,
-    status: "pending",
-    expiresAt,
-  });
+  const [written] = await db
+    .insert(meetingConfirmationTokens)
+    .values({
+      token,
+      churchId,
+      meetingId,
+      personId,
+      status: "pending",
+      expiresAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        meetingConfirmationTokens.meetingId,
+        meetingConfirmationTokens.personId,
+      ],
+      // The index predicate, repeated byte for byte — a mismatch is "there is
+      // no unique or exclusion constraint matching the ON CONFLICT
+      // specification" on every send.
+      targetWhere: sql`${meetingConfirmationTokens.status} = 'pending'`,
+      set: { token, expiresAt, churchId },
+      // Renew ONLY what has lapsed. A live token is in somebody's inbox and
+      // overwriting it would break the link they were sent.
+      setWhere: sql`${meetingConfirmationTokens.expiresAt} <= now()`,
+    })
+    .returning();
 
-  return token;
+  if (written) return written.token;
+
+  const pending = await findPendingToken(meetingId, personId);
+  if (pending) return pending.token;
+
+  // The holder was answered between the upsert and the read, so the slot is
+  // free again. Retry — the next attempt can only take the first branch above.
+  if (attemptsLeft > 1) {
+    return claimConfirmationToken(
+      churchId,
+      meetingId,
+      personId,
+      expiresInDays,
+      attemptsLeft - 1
+    );
+  }
+  throw new Error("Failed to create a meeting confirmation token");
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +209,18 @@ export async function getConfirmationDetails(
   if (!tokenRecord) return null;
 
   const [meeting] = await db
-    .select()
+    .select({
+      id: churchMeetings.id,
+      title: churchMeetings.title,
+      type: churchMeetings.type,
+      meetingNumber: churchMeetings.meetingNumber,
+      teamName: ministryTeams.name,
+      datetime: churchMeetings.datetime,
+      locationName: churchMeetings.locationName,
+      locationAddress: churchMeetings.locationAddress,
+    })
     .from(churchMeetings)
+    .leftJoin(ministryTeams, eq(churchMeetings.teamId, ministryTeams.id))
     .where(eq(churchMeetings.id, tokenRecord.meetingId))
     .limit(1);
 
@@ -140,6 +244,8 @@ export async function getConfirmationDetails(
       id: meeting.id,
       title: meeting.title,
       type: meeting.type,
+      meetingNumber: meeting.meetingNumber,
+      teamName: meeting.teamName,
       datetime: meeting.datetime,
       locationName: meeting.locationName,
       locationAddress: meeting.locationAddress,

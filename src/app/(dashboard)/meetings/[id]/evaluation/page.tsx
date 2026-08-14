@@ -11,6 +11,10 @@ import {
   compareEvaluationToHistory,
   EVALUATION_COMPARISON_WINDOW,
 } from "@/lib/meetings/evaluation-comparison";
+// The evaluation heading names the meeting THIS PAGE loaded, through the one
+// derivation. The two children used to synthesise a vision meeting out of a
+// number, and the route has no type gate. See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import {
   getEvaluation,
   getEvaluationTrend,
@@ -68,7 +72,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
         <>
           <EvaluationSummary
             evaluation={evaluation}
-            meetingNumber={meeting.meetingNumber ?? 0}
+            title={meetingDisplayTitle(meeting)}
           />
           <EvaluationComparisonCard comparison={comparison} />
           {/* Show attendee notes after evaluation is saved */}
@@ -82,7 +86,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
         <>
           <EvaluationForm
             meetingId={meeting.id}
-            meetingNumber={meeting.meetingNumber ?? 0}
+            title={meetingDisplayTitle(meeting)}
           />
           {/* Show attendee notes alongside form as well */}
           <AttendeeNotes

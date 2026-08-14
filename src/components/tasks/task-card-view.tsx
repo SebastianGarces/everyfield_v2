@@ -25,6 +25,7 @@
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { calendarTileParts, relativeDayOffset } from "@/lib/datetime";
 import type { WithDescriptionPreview } from "@/lib/tasks/descriptions";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
@@ -93,7 +94,39 @@ export const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 // Helpers
 // ============================================================================
 
-export function getDueDateInfo(dueDate: string | null): {
+/**
+ * What the due-date line says, and how loudly.
+ *
+ * `now` IS A PARAMETER, and both halves of that matter
+ * (`memory/invariants.md` → Date & Time Rendering). It used to read the clock
+ * itself, through `new Date()` floored with `setHours` — the RUNTIME's midnight
+ * — and compare that against `new Date(dueDate + "T00:00:00")`, which JS
+ * specifies as local time too. Two consequences, neither cosmetic:
+ *
+ *   - the card is server-rendered and then hydrated, so a browser in another
+ *     zone (or simply a minute either side of midnight) computed a different
+ *     number of days and React reported a hydration mismatch (#418);
+ *   - "Due today" is a claim about a calendar day, and whose calendar was
+ *     whichever machine ran the code.
+ *
+ * Now the whole comparison happens in `APP_TIME_ZONE`, through
+ * `relativeDayOffset`, and the caller passes ONE instant for the whole render —
+ * the same shape the people timeline uses.
+ *
+ * `now` IS REQUIRED, with no clock default. A default would leave the whole
+ * hydration rule one omitted argument away in a component that hydrates, with
+ * nothing to catch it — and the exemption a default would buy ("a surface that
+ * never hydrates has no second render to disagree with") went stale inside the
+ * pass that wrote it: the marketing vignette's own fixture was still building
+ * its `YYYY-MM-DD` from LOCAL date parts, so reader and fixture were on two
+ * calendars while a comment claimed they were on one. Every caller now names
+ * its instant, and the vignette hands the same one to the fixture and to the
+ * card.
+ */
+export function getDueDateInfo(
+  dueDate: string | null,
+  now: Date
+): {
   label: string;
   isOverdue: boolean;
   isDueToday: boolean;
@@ -107,12 +140,8 @@ export function getDueDateInfo(dueDate: string | null): {
       isDueSoon: false,
     };
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate + "T00:00:00");
-  const diffDays = Math.floor(
-    (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const due = new Date(`${dueDate}T00:00:00Z`);
+  const diffDays = relativeDayOffset(due, now);
 
   if (diffDays < 0) {
     const absDays = Math.abs(diffDays);
@@ -145,13 +174,11 @@ export function getDueDateInfo(dueDate: string | null): {
       isDueSoon: true,
     };
 
-  // Format the date
-  const formatted = due.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  // Beyond a week the day itself is more use than a count. Zone-pinned, like
+  // the arithmetic above — `calendarTileParts` is the one "Aug 12" formatter.
+  const [month, day] = calendarTileParts(due);
   return {
-    label: `Due ${formatted}`,
+    label: `Due ${month} ${day}`,
     isOverdue: false,
     isDueToday: false,
     isDueSoon: false,
@@ -194,6 +221,22 @@ interface TaskCardViewProps {
    *  embeds (the marketing page), where nothing may be clickable, focusable or
    *  prefetchable. Absent, as in the app, this row is unchanged. */
   linkStatic?: boolean;
+  /**
+   * The instant "overdue" and "due today" are measured against.
+   *
+   * ONE instant for the whole render, handed down from the server component
+   * that built the list. The due-date line is the card's only clock read, and
+   * this card is server-rendered and then hydrated — a `new Date()` taken again
+   * in the browser is a different number of days and a React #418 mismatch.
+   *
+   * REQUIRED, so the rule is the compiler's rather than the convention it was:
+   * an optional prop makes "this card reads no clock of its own" true only for
+   * as long as nobody forgets it, in the one component where forgetting it is
+   * a hydration mismatch on every row. Presentational callers (the marketing
+   * vignettes) name an instant too and build their fixture dates from it, which
+   * is what keeps reader and fixture on one calendar.
+   */
+  now: Date;
 }
 
 /**
@@ -210,11 +253,12 @@ export function TaskCardView({
   checkboxSlot,
   isPending = false,
   linkStatic,
+  now,
 }: TaskCardViewProps) {
   const isComplete = task.status === "complete";
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const categoryInfo = task.category ? CATEGORY_CONFIG[task.category] : null;
-  const dueDateInfo = getDueDateInfo(task.dueDate);
+  const dueDateInfo = getDueDateInfo(task.dueDate, now);
   // A span carrying the identical className, not an href-less anchor: a
   // presentational embed should carry no app URL at all, so there is nothing
   // left to prefetch by construction.

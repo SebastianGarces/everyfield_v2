@@ -32,7 +32,7 @@
  *                       # run cleans first and would discard them.
  */
 
-import { neon } from "@neondatabase/serverless";
+import { neon, neonConfig } from "@neondatabase/serverless";
 import { config } from "dotenv";
 // `sql` is aliased: the neon client below already owns that name here, and
 // drizzle's tagged template is a different thing entirely.
@@ -89,6 +89,17 @@ const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   console.error("❌ DATABASE_URL environment variable is required");
   process.exit(1);
+}
+
+// This script builds its own client instead of importing `@/db` (see the
+// bootstrapping note above), and neon-http cannot speak to a plain Postgres over
+// TCP. To seed a LOCAL database, run this with `NEON_HTTP_PROXY_URL` naming the
+// `local-neon-http-proxy` in front of it (`http://localhost:4444/sql`) — the
+// same move `pnpm test:live` makes through `scripts/live-db-endpoint.ts`.
+// Deliberate and explicit: the caller knows which database this is, so nothing
+// here guesses from the hostname. Unset is correct for a real Neon instance.
+if (process.env.NEON_HTTP_PROXY_URL) {
+  neonConfig.fetchEndpoint = process.env.NEON_HTTP_PROXY_URL;
 }
 
 const sql = neon(connectionString);
@@ -1019,6 +1030,17 @@ async function seedChurch(
   // 6. Active team memberships for "strong" leadership candidates.
   //    Gives the first `strongLeaders` committed people an active membership so
   //    LeadershipReadinessSignal.activeMemberships > 0. Requires a team + role.
+  //
+  //    ONE ROLE PER MEMBER, because a seat holds ONE person (#409 D1,
+  //    migration 0038): `team_memberships_role_active_unique_idx` is partial on
+  //    `role_id` where `status = 'active'`. This block used to mint a single
+  //    "Core Leader" role and hang the whole core group off it in one
+  //    multi-row INSERT, which is the shape that index refuses outright —
+  //    Postgres answers the second row with `duplicate key value violates
+  //    unique constraint "team_memberships_role_active_unique_idx"` and the
+  //    whole fixture fails to regenerate. Fixture data is not exempt from the
+  //    invariant: what it produced was a role with N occupants, which the
+  //    roles tab cannot render and `removeMember` cannot undo.
   // ------------------------------------------------------------------
   if (profile.strongLeaders > 0 && committedPersonIds.length > 0) {
     const [hostTeam] = await db
@@ -1032,24 +1054,25 @@ async function seedChurch(
       })
       .returning({ id: ministryTeams.id });
 
-    const [role] = await db
-      .insert(teamRoles)
-      .values({
-        churchId,
-        teamId: hostTeam.id,
-        name: "Core Leader",
-        isLeadershipRole: true,
-        status: "filled",
-        createdBy: ownerUserId,
-      })
-      .returning({ id: teamRoles.id });
+    const leaderCount = Math.min(
+      profile.strongLeaders,
+      committedPersonIds.length
+    );
 
     const membershipRows: (typeof teamMemberships.$inferInsert)[] = [];
-    for (
-      let i = 0;
-      i < Math.min(profile.strongLeaders, committedPersonIds.length);
-      i++
-    ) {
+    for (let i = 0; i < leaderCount; i++) {
+      const [role] = await db
+        .insert(teamRoles)
+        .values({
+          churchId,
+          teamId: hostTeam.id,
+          name: `Core Leader ${i + 1}`,
+          isLeadershipRole: true,
+          status: "filled",
+          createdBy: ownerUserId,
+        })
+        .returning({ id: teamRoles.id });
+
       membershipRows.push({
         churchId,
         teamId: hostTeam.id,

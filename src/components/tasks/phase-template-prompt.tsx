@@ -10,8 +10,6 @@ import {
 import { getCurrentSession, verifySession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
-  PHASE_TEMPLATE_PROMPT_COOKIE,
-  PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE,
   PHASE_TEMPLATE_RECEIPT_COOKIE,
   PHASE_TEMPLATE_RECEIPT_COOKIE_MAX_AGE,
   acceptPhaseTemplatePrompt,
@@ -65,10 +63,11 @@ import {
 // first attempt and it failed its browser gate: 16 of 22 tasks created, the
 // transition answered, and no receipt anywhere. An outcome is only renderable
 // for as long as the component holding it is mounted, and answering the prompt
-// removes it — `.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`:
-// "after you set or delete a cookie in a Server Action, Next.js re-renders the
-// current page and its layouts on the server", and the answer always sets the
-// fast-path cookie. That re-render finds an answered transition, so
+// removes it — the answer path calls `refresh()`, and writing the receipt
+// cookie re-renders the route by itself
+// (`.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`: "after you set
+// or delete a cookie in a Server Action, Next.js re-renders the current page and
+// its layouts on the server"). That re-render finds an answered transition, so
 // `PhaseTemplatePrompt` returns the receipt state instead of the prompt — and
 // the island, receipt and all, is gone from the tree. No revalidation setting
 // could have saved it, which is why the "revalidate nothing" machinery is gone
@@ -86,10 +85,12 @@ import {
 // instant. A planter who moved stages a week ago can see that the checklist
 // arrives already part-spent, and decline for that reason.
 //
-// THE ANSWER IS DURABLE NOW (ruled 2026-08-10, PR #393). Answering writes a row
-// keyed by the transition id, so a decline follows the planter to their phone
-// and a second accept — another device, cleared cookies, a double press — adds
-// nothing. The cookie below is kept as a fast path and nothing more.
+// THE ANSWER IS A ROW, AND ONLY A ROW (ruled 2026-08-10, PR #393; the fast path
+// deleted by #411). Answering writes to `phase_prompt_answers`, keyed by the
+// transition id, so a decline follows the planter to their phone and a second
+// accept — another device, cleared cookies, a double press — adds nothing. The
+// only cookie this file writes now is the partial-import receipt below, which
+// carries no answer and expires in two minutes.
 //
 // THE COPY IS IN TWO REGISTERS, NOT ONE STACK OF NOTES (ruled 2026-08-10 round
 // 2, PR #393). Round 2 required the prompt to say what unticking COSTS — the
@@ -197,26 +198,6 @@ const DISMISS_NOTE =
 // ----------------------------------------------------------------------------
 
 /**
- * Note in THIS browser that the transition has been answered.
- *
- * A fast path, not the record: `phase_prompt_answers` is written by the service
- * first and is what every device reads (`phase-prompt.ts`). The cookie can only
- * suppress a prompt the row suppresses anyway, which is why it is safe to keep
- * `httpOnly` and to leave forging it as a way to hide your own prompt.
- */
-async function markPromptAnswered(transitionId: string): Promise<void> {
-  const cookieStore = await cookies();
-
-  cookieStore.set(PHASE_TEMPLATE_PROMPT_COOKIE, transitionId, {
-    path: "/",
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE,
-  });
-}
-
-/**
  * Hand a part-way import's receipt to the render that is about to replace this
  * panel.
  *
@@ -310,19 +291,13 @@ async function importPhaseTemplatesAction(
 
     const decision = decidePhaseTemplateImportOutcome(result);
 
-    // BEFORE the answer cookie, because that one is what re-renders the route
-    // and the re-render is what reads this one.
+    // BEFORE the `refresh()` below, because that re-render is what reads it.
+    // The write is also what makes the re-render unavoidable — setting a cookie
+    // in a Server Action re-renders the route on its own
+    // (`.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`) — so the
+    // receipt cannot be written by a press that has nowhere to draw it.
     if (decision.receipt) {
       await markPartialImportReceipt(decision.receipt);
-    }
-
-    // A SEPARATE TEST FROM `answeredTransitionId`, deliberately. The fast-path
-    // cookie may only ever suppress a prompt the ROW suppresses too
-    // (`memory/invariants.md` → Tasks), so only a press holding a claim it
-    // keeps writes one — `imported` and `partial`, never `already_answered`,
-    // whose row belongs to a concurrent press that may still release it.
-    if (decision.fastPathTransitionId) {
-      await markPromptAnswered(decision.fastPathTransitionId);
     }
 
     if (decision.answeredTransitionId) {
@@ -392,16 +367,6 @@ async function dismissPhaseTemplatePromptAction(
     });
 
     const decision = decidePhaseTemplateDismissOutcome(result);
-
-    // A SEPARATE TEST FROM `answeredTransitionId`, for the reason the import
-    // action splits them: the fast-path cookie may only ever suppress a prompt
-    // the ROW suppresses too (`memory/invariants.md` → Tasks). A decline that
-    // found an existing claim wrote no row of its own, and that claim may be an
-    // accept's — released when its import wrote nothing — so it mints nothing
-    // and lets the next render read the row.
-    if (decision.fastPathTransitionId) {
-      await markPromptAnswered(decision.fastPathTransitionId);
-    }
 
     if (decision.answeredTransitionId) {
       refresh();
@@ -687,18 +652,14 @@ export async function PhaseTemplatePrompt() {
   const { user } = await getCurrentSession();
   if (!user?.churchId) return null;
 
-  const cookieStore = await cookies();
-  const answeredTransitionId =
-    cookieStore.get(PHASE_TEMPLATE_PROMPT_COOKIE)?.value ?? null;
-
   // One read for both: the prompt, and the id of the transition this render is
-  // reporting on — which the receipt below has to match.
-  const { transitionId, prompt } = await readPhaseTemplatePrompt(
-    user.churchId,
-    answeredTransitionId
-  );
+  // reporting on — which the receipt below has to match. Whether the prompt has
+  // been answered comes back on that same row, from `phase_prompt_answers`;
+  // there is no browser-held second opinion to consult (#411).
+  const { transitionId, prompt } = await readPhaseTemplatePrompt(user.churchId);
 
   if (!prompt) {
+    const cookieStore = await cookies();
     const receipt = receiptForTransition(
       cookieStore.get(PHASE_TEMPLATE_RECEIPT_COOKIE)?.value,
       transitionId

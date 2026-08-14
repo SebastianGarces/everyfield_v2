@@ -1,7 +1,34 @@
 import { db } from "@/db";
-import { churchMeetings, personActivities, persons, tasks } from "@/db/schema";
+import {
+  churchMeetings,
+  ministryTeams,
+  personActivities,
+  persons,
+  tasks,
+} from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getTaskCounts } from "@/lib/tasks/service";
+// The activity feed names a meeting the same way /meetings and /meetings/[id]
+// do. It carried its own copy of both the label table and the title branch.
+// See src/lib/meetings/labels.ts.
+import {
+  meetingDisplayTitle,
+  type MeetingTitleFacts,
+} from "@/lib/meetings/labels";
+
+/**
+ * One completed meeting as the activity feed reads it.
+ *
+ * It EXTENDS `MeetingTitleFacts` rather than repeating its fields, and the
+ * query below is annotated with it, so dropping a joined column from the
+ * projection is a compile error here instead of a quietly different name in
+ * the feed. `labels.test.ts` names this type to pin the property with data.
+ */
+export type CompletedMeetingFeedRow = MeetingTitleFacts & {
+  id: string;
+  actualAttendance: number | null;
+  updatedAt: Date;
+};
 
 // ============================================================================
 // Types
@@ -158,16 +185,22 @@ export async function getRecentActivity(
   }
 
   // 2. Completed meetings
-  const completedMeetings = await db
+  const completedMeetings: CompletedMeetingFeedRow[] = await db
     .select({
       id: churchMeetings.id,
       type: churchMeetings.type,
       title: churchMeetings.title,
       meetingNumber: churchMeetings.meetingNumber,
+      // `meetingDisplayTitle` branches on the team name, so the feed must JOIN
+      // it. Without this the feed called an untitled team meeting "Team
+      // Meeting" while the card, header and breadcrumb called the same row
+      // "<Team> Meeting" — sharing the function is not sharing the name.
+      teamName: ministryTeams.name,
       actualAttendance: churchMeetings.actualAttendance,
       updatedAt: churchMeetings.updatedAt,
     })
     .from(churchMeetings)
+    .leftJoin(ministryTeams, eq(churchMeetings.teamId, ministryTeams.id))
     .where(
       and(
         eq(churchMeetings.churchId, churchId),
@@ -178,10 +211,7 @@ export async function getRecentActivity(
     .limit(limit);
 
   for (const meeting of completedMeetings) {
-    const label =
-      meeting.type === "vision_meeting" && meeting.meetingNumber != null
-        ? `Vision Meeting #${meeting.meetingNumber}`
-        : (meeting.title ?? formatMeetingType(meeting.type));
+    const label = meetingDisplayTitle(meeting);
     const attendance = meeting.actualAttendance;
     const description = attendance
       ? `${label} completed with ${attendance} attendees`
@@ -254,13 +284,4 @@ function formatStatus(status: string): string {
     leader: "Leader",
   };
   return map[status] ?? status.replace(/_/g, " ");
-}
-
-function formatMeetingType(type: string): string {
-  const map: Record<string, string> = {
-    vision_meeting: "Vision Meeting",
-    orientation: "Orientation",
-    team_meeting: "Team Meeting",
-  };
-  return map[type] ?? type.replace(/_/g, " ");
 }

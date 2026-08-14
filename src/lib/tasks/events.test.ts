@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
-import {
-  isDuplicateGenerationError,
-  MEETING_EVALUATION_UNIQUE_INDEX,
-} from "./events";
+import { isUniqueViolation } from "@/db/errors";
+import { sourceReader } from "@/lib/testing/source-span";
+
+import { TASKS_MEETING_EVALUATION_UNIQUE } from "./events";
 
 // ----------------------------------------------------------------------------
 // MEET-011 — two concurrent finalizes both pass the SELECT guard in
@@ -14,79 +16,81 @@ import {
 // statement with the follow-ups), and the handler treats exactly that error as
 // an idempotent no-op.
 //
-// These tests pin the classification, which is the part that can silently rot:
-// too broad and a genuine write failure gets swallowed and the meeting is
-// marked finalized with no tasks; too narrow and a normal race becomes a
-// user-visible "we couldn't create the follow-up tasks".
+// WHAT IS ASSERTED HERE CHANGED WITH #411, AND THE DELETION IS THE POINT. This
+// file used to own a byte-identical copy of `isUniqueViolation` under the name
+// `isDuplicateGenerationError`, with five tests over the cause chain, the
+// message fallback and the -1 branches — a second implementation of a predicate
+// `src/db/errors.ts` already owns, and a second suite proving the same walk.
+// Both are gone. `src/db/errors.test.ts` proves the WALK; what is left here is
+// the pair of facts that are this domain's own and that the shared predicate
+// cannot check for itself:
+//
+//   1. the constant names the index the migration actually creates — the
+//      predicate matches on that string, so a rename anywhere else turns a
+//      caught race into a thrown finalize;
+//   2. the catch in `handleMeetingAttendanceFinalized` reaches the SHARED
+//      predicate with THAT constant, rather than a broadened `code === '23505'`
+//      test that would swallow a genuine write failure.
 // ----------------------------------------------------------------------------
 
-/** Shaped like the NeonDbError the driver raises for a unique violation. */
-function uniqueViolation(constraint: string) {
-  return Object.assign(
-    new Error(`duplicate key value violates unique constraint "${constraint}"`),
-    { code: "23505", constraint }
-  );
-}
+const EVENTS_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/lib/tasks/events.ts"),
+  "utf8"
+);
 
-test("a unique violation on the evaluation index is the expected race outcome", () => {
-  assert.equal(
-    isDuplicateGenerationError(
-      uniqueViolation(MEETING_EVALUATION_UNIQUE_INDEX)
-    ),
-    true
+const MIGRATION_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/db/migrations/0022_tense_hydra.sql"),
+  "utf8"
+);
+
+test("the constant names the index the migration creates", () => {
+  assert.ok(
+    MIGRATION_SOURCE.includes(TASKS_MEETING_EVALUATION_UNIQUE),
+    "the predicate matches on this exact string; a rename that misses one side " +
+      "turns an expected race into a finalize that throws"
   );
 });
 
-test("it is found through the wrapper Drizzle puts around driver errors", () => {
-  const wrapped = Object.assign(new Error("Failed query: insert into tasks"), {
-    cause: uniqueViolation(MEETING_EVALUATION_UNIQUE_INDEX),
-  });
+test("the race is classified by the shared predicate, not a local copy", () => {
+  const catchBlock = sourceReader(EVENTS_SOURCE, "events.ts").span(
+    "await db.insert(tasks).values(tasksToCreate);",
+    "throw error;"
+  );
 
-  assert.equal(isDuplicateGenerationError(wrapped), true);
+  assert.match(
+    catchBlock,
+    /isUniqueViolation\(\s*error,\s*TASKS_MEETING_EVALUATION_UNIQUE\s*\)/,
+    "the one predicate in src/db/errors.ts decides this, with this index named"
+  );
+
+  assert.doesNotMatch(
+    EVENTS_SOURCE,
+    /23505/,
+    "the SQLSTATE belongs to src/db/errors.ts; spelling it here is how the " +
+      "second copy grew back"
+  );
 });
 
-test("it is recognised from the message when the driver omits `constraint`", () => {
-  const bare = Object.assign(
+test("a violation of THIS index is the expected race outcome, and no other", () => {
+  // One case each side of the line, through the shared predicate — the walk
+  // itself is proven in src/db/errors.test.ts and is not re-proven here.
+  const ours = Object.assign(
     new Error(
-      `duplicate key value violates unique constraint "${MEETING_EVALUATION_UNIQUE_INDEX}"`
+      `duplicate key value violates unique constraint "${TASKS_MEETING_EVALUATION_UNIQUE}"`
     ),
-    { code: "23505" }
+    { code: "23505", constraint: TASKS_MEETING_EVALUATION_UNIQUE }
   );
 
-  assert.equal(isDuplicateGenerationError(bare), true);
-});
+  assert.equal(isUniqueViolation(ours, TASKS_MEETING_EVALUATION_UNIQUE), true);
 
-test("a unique violation on some OTHER constraint still propagates", () => {
+  const somebodyElses = Object.assign(
+    new Error('duplicate key value violates unique constraint "tasks_pkey"'),
+    { code: "23505", constraint: "tasks_pkey" }
+  );
+
   assert.equal(
-    isDuplicateGenerationError(uniqueViolation("tasks_pkey")),
+    isUniqueViolation(somebodyElses, TASKS_MEETING_EVALUATION_UNIQUE),
     false,
     "swallowing this would finalize a meeting whose tasks never landed"
   );
-});
-
-test("an ordinary write failure is not mistaken for a race", () => {
-  const failures: unknown[] = [
-    new Error("connection terminated unexpectedly"),
-    Object.assign(new Error("null value in column violates not-null"), {
-      code: "23502",
-    }),
-    "some string nobody should be throwing",
-    null,
-    undefined,
-  ];
-
-  for (const failure of failures) {
-    assert.equal(
-      isDuplicateGenerationError(failure),
-      false,
-      `expected ${String(failure)} to propagate`
-    );
-  }
-});
-
-test("a self-referential cause chain terminates", () => {
-  const looping: { message: string; cause?: unknown } = { message: "boom" };
-  looping.cause = looping;
-
-  assert.equal(isDuplicateGenerationError(looping), false);
 });

@@ -46,7 +46,9 @@ tenant scope; `created_at`/`updated_at` default now.
   `transition_id` ALONE — pairing it with `church_id` would let a forged church id claim a second
   answer. `acceptPhaseTemplatePrompt` writes it with `ON CONFLICT DO NOTHING` BEFORE the import
   it guards and gates that import on the claim's rowcount (`../invariants.md` → Transactions,
-  claim-first). `PHASE_TEMPLATE_PROMPT_COOKIE` can only suppress a prompt, never restore one.
+  claim-first). This row is the ONLY record: `PHASE_TEMPLATE_PROMPT_COOKIE` was deleted (#411) — it saved no query
+  (the answer arrives on the transition's own LEFT JOIN) and was a year-long browser-held copy of an
+  answer the plant owns.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.

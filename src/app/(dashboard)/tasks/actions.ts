@@ -26,9 +26,31 @@ import {
   bulkTaskIdsSchema,
   taskCreateSchema,
   taskQuickAddSchema,
+  taskStatusSchema,
   taskUpdateSchema,
 } from "@/lib/validations/tasks";
 import { refresh, revalidatePath } from "next/cache";
+
+// ============================================================================
+// EVERY EXPORT HERE MINTS ITS ACTOR ABOVE ITS `try` (#411).
+//
+// `memory/invariants.md` → Authentication asks for that shape, and the six
+// parsing exports of this module were six of the 45 named try-wrapped mints —
+// a residual "recorded rather than rushed" because the mint still preceded the
+// parse, so there was no shape-oracle. Recorded is not fixed: inside the `try`,
+// the catch converts a sessionless POST into a handled
+// `{ success: false, error: "You must be logged in …" }`, which is an anonymous
+// caller being answered rather than rejected. Above it the rejection escapes.
+//
+// The lift DELETES code rather than adding it: seven `if (error.message ===
+// "Unauthorized")` branches in seven catches are unreachable once the mint is
+// outside, so they are gone, and no catch in this module may grow one back
+// (`importTaskTemplateAction`'s comment has said so since T-011). The six
+// entries this module held in `TRY_WRAPPED_MINTS`
+// (`src/lib/auth/server-action-surface.test.ts`) are retired with them; that
+// list is a closed set asserted with `deepEqual`, so it fails if a new action
+// here is written the old way.
+// ============================================================================
 
 // ============================================================================
 // Helpers
@@ -79,9 +101,9 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
 export async function createTaskAction(
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return {
         success: false,
@@ -118,10 +140,6 @@ export async function createTaskAction(
   } catch (error) {
     console.error("createTaskAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in to create tasks" };
-    }
-
     const known = userFacingError(error);
     if (known) return { success: false, error: known };
 
@@ -138,9 +156,9 @@ export async function createTaskAction(
 export async function quickAddTaskAction(
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return {
         success: false,
@@ -175,10 +193,6 @@ export async function quickAddTaskAction(
   } catch (error) {
     console.error("quickAddTaskAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in to create tasks" };
-    }
-
     return {
       success: false,
       error: "Failed to create task. Please try again.",
@@ -193,9 +207,9 @@ export async function updateTaskAction(
   taskId: string,
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return {
         success: false,
@@ -231,10 +245,6 @@ export async function updateTaskAction(
   } catch (error) {
     console.error("updateTaskAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in to update tasks" };
-    }
-
     if (error instanceof Error && error.message === "Task not found") {
       return { success: false, error: "Task not found" };
     }
@@ -255,9 +265,9 @@ export async function updateTaskAction(
 export async function completeTaskAction(
   taskId: string
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -270,13 +280,6 @@ export async function completeTaskAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("completeTaskAction error:", error);
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to complete tasks",
-      };
-    }
 
     if (error instanceof Error && error.message === "Task not found") {
       return { success: false, error: "Task not found" };
@@ -302,9 +305,9 @@ export async function completeTaskAction(
 export async function reopenTaskAction(
   taskId: string
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -317,13 +320,6 @@ export async function reopenTaskAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("reopenTaskAction error:", error);
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to reopen tasks",
-      };
-    }
 
     if (error instanceof Error && error.message === "Task is not complete") {
       return { success: false, error: "Task is not complete" };
@@ -342,9 +338,9 @@ export async function reopenTaskAction(
 export async function deleteTaskAction(
   taskId: string
 ): Promise<ActionResult<void>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -356,13 +352,6 @@ export async function deleteTaskAction(
     return { success: true, data: undefined };
   } catch (error) {
     console.error("deleteTaskAction error:", error);
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to delete tasks",
-      };
-    }
 
     if (error instanceof Error && error.message === "Task not found") {
       return { success: false, error: "Task not found" };
@@ -377,27 +366,40 @@ export async function deleteTaskAction(
 
 /**
  * Update task status inline (e.g., from task card dropdown).
+ *
+ * THE STATUS IS PARSED, NOT CAST (#411). This export is a POST endpoint that
+ * never saw the dropdown, and the argument used to be asserted into the union
+ * (`status as "not_started" | …`) on its way into `updateTask`. `tasks.status`
+ * is guarded by a CHECK over the four legal values, so an unrecognised string
+ * reached Postgres, was refused, and came back as the generic
+ * "Please try again" — a validation answer delivered as a write failure. The
+ * enum is the same one the write schemas use.
  */
 export async function updateTaskStatusAction(
   taskId: string,
   status: string
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
 
+    const parsed = taskStatusSchema.safeParse(status);
+    if (!parsed.success) {
+      return { success: false, error: "That is not a status a task can have" };
+    }
+
     // If marking complete, use completeTask for proper event emission
-    if (status === "complete") {
+    if (parsed.data === "complete") {
       const { task } = await completeTask(user.churchId, taskId, user.id);
       revalidatePath("/tasks");
       return { success: true, data: task };
     }
 
     const task = await updateTask(user.churchId, taskId, {
-      status: status as "not_started" | "in_progress" | "blocked",
+      status: parsed.data,
     });
 
     revalidatePath("/tasks");
@@ -439,9 +441,9 @@ export async function addSubtaskAction(
   parentTaskId: string,
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return {
         success: false,
@@ -475,10 +477,6 @@ export async function addSubtaskAction(
   } catch (error) {
     console.error("addSubtaskAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in to add subtasks" };
-    }
-
     const known = userFacingError(error);
     if (known) return { success: false, error: known };
 
@@ -501,9 +499,9 @@ export async function setSubtaskCompletionAction(
   subtaskId: string,
   complete: boolean
 ): Promise<ActionResult<Task>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -528,13 +526,6 @@ export async function setSubtaskCompletionAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("setSubtaskCompletionAction error:", error);
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to update subtasks",
-      };
-    }
 
     if (
       error instanceof Error &&
@@ -566,9 +557,9 @@ export async function setSubtaskCompletionAction(
 export async function bulkCompleteTasksAction(
   taskIds: string[]
 ): Promise<ActionResult<BulkTaskResult>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -589,13 +580,6 @@ export async function bulkCompleteTasksAction(
   } catch (error) {
     console.error("bulkCompleteTasksAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to complete tasks",
-      };
-    }
-
     return {
       success: false,
       error: "Failed to complete the selected tasks. Please try again.",
@@ -610,9 +594,9 @@ export async function bulkRescheduleTasksAction(
   taskIds: string[],
   dueDate: string
 ): Promise<ActionResult<BulkTaskResult>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
     if (!user.churchId) {
       return { success: false, error: "No church association" };
     }
@@ -636,13 +620,6 @@ export async function bulkRescheduleTasksAction(
     return { success: true, data: result };
   } catch (error) {
     console.error("bulkRescheduleTasksAction error:", error);
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to reschedule tasks",
-      };
-    }
 
     return {
       success: false,

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -10,6 +12,8 @@ import {
   type BulkTaskCandidate,
   type BulkTaskDeps,
 } from "./service";
+
+import { sourceReader } from "@/lib/testing/source-span";
 
 // ----------------------------------------------------------------------------
 // Bulk operations (T-019).
@@ -357,4 +361,63 @@ test("bulkRescheduleTasks reschedules the open tasks and names the completed one
   );
   // Only the open task is handed to the write.
   assert.deepEqual(rescheduled, [{ ids: ["a"], dueDate: "2026-08-01" }]);
+});
+
+// ----------------------------------------------------------------------------
+// ONE row shape for the three readers (#411)
+//
+// `getTask`, `listTasks` and `listSubtasks` each wrote out the column list by
+// hand and each ended in `as TaskWithAssignee`, which is the compiler being
+// told not to check the copies against each other. They had already drifted —
+// `listSubtasks` selected `completion_event` and the other two did not, so
+// `getTask(...).completionEvent` was a field the type promised and the query
+// never returned.
+//
+// The list is one object now, `satisfies Record<keyof TaskWithAssignee,
+// unknown>`, so a missing column is a compile error. What a compile error
+// cannot say is that all three readers USE it — a fourth hand-written select
+// type-checks perfectly well — so that is asserted here, on the source.
+// ----------------------------------------------------------------------------
+
+test("every task-row reader selects the shared column list", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/lib/tasks/service.ts"),
+    "utf8"
+  );
+
+  // Each reader's body, cut at the NEXT declaration — a moved anchor throws
+  // (`src/lib/testing/source-span.ts`) rather than silently measuring the file.
+  const readers: [from: string, to: string][] = [
+    ["export async function getTask(", "export function topLevelTasksOnly("],
+    [
+      "export async function listTasks(",
+      "export function taskCountConditions(",
+    ],
+    ["export async function listSubtasks(", "// Mutations"],
+  ];
+
+  for (const [from, to] of readers) {
+    assert.match(
+      sourceReader(source, "service.ts").span(from, to),
+      /\.select\(taskWithAssigneeColumns\)/,
+      `${from.trim()} builds its own column list again — that is how completion_event came to be in one of three`
+    );
+  }
+
+  assert.equal(
+    (source.match(/assigneeName: users\.name/g) ?? []).length,
+    1,
+    "the joined assignee columns are spelled out somewhere other than the shared list"
+  );
+  // Comments stripped: the shared list's own docblock names the cast in order
+  // to forbid it, exactly as `resend.test.ts`'s subject does.
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  assert.doesNotMatch(
+    code,
+    /as TaskWithAssignee/,
+    "a cast is back, which is what stopped the three copies being compared"
+  );
 });
