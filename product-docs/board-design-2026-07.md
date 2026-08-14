@@ -599,6 +599,16 @@ A track auto-merges only when the DoD passed, the required check is green, it is
 no warning is a spec-question. `risk:high` is excluded unconditionally: schema, auth and tenancy are
 where a bad merge is unrecoverable.
 
+> **Superseded in part, 2026-08-13 (#435).** Schema and migrations left that list. `risk:high` is now
+> auth/permissions, multi-tenant isolation and payments, and a track carrying a migration auto-merges
+> once the HR1–HR3 migration proofs are green — those proofs re-keyed from the LABEL onto the DIFF, so
+> they are owed at any risk tier. The rule as it stands is in `ops/agent-os/dod.md` and
+> `ops/agent-os/labels.md`; the sentence above is what the policy said in July 2026 and is kept
+> verbatim as the record of that day. The revert condition travels with the ruling: the moment alpha
+> or beta serves real client data from a separate production database, schema/migrations return to
+> `risk:high`. Everything else in this section — the spec-question hold, the code-quality follow-up,
+> "when torn, hold" — is unchanged.
+
 The asymmetry is deliberate and is stated to the verifier: a code-quality item wrongly held wastes a
 little attention; a spec-question wrongly merged ships a product decision the human never made. **When
 torn, hold.**

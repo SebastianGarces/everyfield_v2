@@ -46,7 +46,9 @@ Prioritise the branches where a wrong guess changes what gets built:
 - **Tenancy, auth, and permissions** — who can see and do this? Check `memory/invariants.md` and put
   anything it doesn't already settle to the user.
 - **Data shape** — does this need schema? If yes, say so during the session, not after: schema is not
-  `risk:high` pre-release, but it consolidates into one `db:generate` that has to land first, and it
+  `risk:high` pre-release (RULED 2026-08-13, #435 — `ops/agent-os/dod.md` carries the ruling and its
+  revert condition, which is the moment alpha or beta serves real client data from a separate
+  production database), but it consolidates into one `db:generate` that has to land first, and it
   owes the HR1–HR3 migration proofs at verify time (`ops/agent-os/dod.md`).
 - **The thing they haven't thought about** — empty states, failure modes, what happens on the second
   attempt, what an admin sees versus a member.

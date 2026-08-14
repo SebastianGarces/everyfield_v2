@@ -24,6 +24,10 @@
 //   product-docs/board-design-2026-07.md — a DATED design record of what the
 //   board looked like in July 2026. Rewriting it would falsify the record, so
 //   it is frozen on purpose; #435 changed the policy, not that day's minutes.
+//   The exemption is not a hole: §12 carries a dated superseding note directly
+//   beneath the retired sentence (the "what actually landed" house style §10
+//   and §11 already use), because dispatch/SKILL.md points an agent at §12 at
+//   exactly the decision the ruling changed.
 // Plus this suite itself, which QUOTES the retired spellings in order to forbid
 // them (the same exemption `memory/` takes). Both exemptions are asserted to
 // still MATCH, so a rename or a rewrite fails the test instead of silently
@@ -39,6 +43,7 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
 const SPEC_INTAKE = ".claude/skills/spec-intake/SKILL.md";
 const DISPATCH = ".claude/skills/dispatch/SKILL.md";
+const GRILLING = ".claude/skills/grilling/SKILL.md";
 const DOD_SKILL = ".claude/skills/definition-of-done/SKILL.md";
 const VALIDATE_BACKEND = ".claude/skills/validate-backend/SKILL.md";
 const DELEGATION = "ops/agent-os/delegation-rules.md";
@@ -58,6 +63,10 @@ const RULE_SITES = [SPEC_INTAKE, LABELS, DOD];
 // The sites that ROUTE to the rule: they act on the classification (a verifier
 // brief, a planner prompt, a merge gate) and point at the ruling rather than
 // restating it in full. They owe the citation, not the whole paragraph.
+// `grilling` belongs here even though it is an INTAKE skill rather than a gate:
+// it states the classification to the user it is interviewing, so it routes to
+// the rule as surely as spec-intake does, and the negative sweep below can only
+// forbid the retired form — it cannot require the citation.
 const POINTER_SITES = [
   DISPATCH,
   DOD_SKILL,
@@ -66,13 +75,16 @@ const POINTER_SITES = [
   VERIFY_AND_SHIP,
   WORKFLOW,
   README,
+  GRILLING,
 ];
 
 // The two sweep exemptions, by repo-relative path, each with why.
 const SWEEP_EXEMPT = new Map([
   [
     "product-docs/board-design-2026-07.md",
-    "a dated design record — rewriting it would falsify the record",
+    "a dated design record — rewriting it would falsify the record; §12 carries " +
+      "its own dated superseding note beside the retired sentence, so the " +
+      "exemption freezes the minutes without leaving a reader misinformed",
   ],
   [
     "ops/agent-os/tests/risk-policy-docs.test.mjs",
