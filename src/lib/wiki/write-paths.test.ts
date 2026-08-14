@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 
-import { codeOf } from "@/lib/auth/server-action-surface";
+import {
+  codeOf,
+  functionBodies,
+  TS_FILES,
+} from "@/lib/auth/server-action-surface";
 
+import { progressPatchSchema } from "./write-input";
 import * as writeQueries from "./write-queries";
 import {
   bookmarkDeleteQuery,
@@ -133,6 +138,58 @@ test("no wiki write is built outside the seam", () => {
   }
 });
 
+/**
+ * A file that could CALL an endpoint. Two exclusions, both deliberate:
+ *
+ *  - `index.ts`, the wiki barrel, RE-EXPORTS these modules. A re-export moves an
+ *    endpoint's name; it is not a caller and must not keep a dead one alive.
+ *  - test files. A dead endpoint whose only reference is the test asserting it
+ *    exists is exactly the shape this guard is for.
+ */
+const couldCall = (file: string) =>
+  !file.endsWith(".test.ts") &&
+  !file.endsWith(".test.tsx") &&
+  !file.endsWith(path.join("lib", "wiki", "index.ts"));
+
+test("every endpoint on the wiki's write surface has a caller (#411 round 6)", () => {
+  // Every export of a `"use server"` module is a POSTable endpoint, reachable
+  // with no session cookie and no UI in front of it (`memory/invariants.md` →
+  // Authentication) — so a dead export is not dead code, it is an endpoint
+  // nobody is looking at. Four of them survived the sweep that deleted four dead
+  // READS from `service.ts` for the same reason, and two of the four were
+  // WRITES: `markCompleted` marked any slug complete for whoever posted it, and
+  // `addBookmark`/`removeBookmark` were the toggle's two halves with nothing
+  // calling either.
+  //
+  // Derived from the source, not from a list: a hand-list of "the endpoints we
+  // meant to keep" goes stale the moment somebody adds one.
+  for (const relative of WRITE_MODULES) {
+    const full = path.join(process.cwd(), relative);
+    const endpoints = functionBodies(codeOf(full))
+      .filter((fn) => fn.exported)
+      .map((fn) => fn.name);
+
+    assert.ok(
+      endpoints.length > 0,
+      `${relative} exports no endpoint the walk can read — an export the parser cannot see is an endpoint nothing here checks`
+    );
+
+    for (const name of endpoints) {
+      const callers = TS_FILES.filter(
+        (file) =>
+          file !== full &&
+          couldCall(file) &&
+          new RegExp(`\\b${name}\\b`).test(codeOf(file))
+      );
+
+      assert.ok(
+        callers.length > 0,
+        `${relative} exports ${name}, which nothing in src/ calls — every export of a "use server" module is a public POST endpoint, so delete it rather than leave it reachable (#411)`
+      );
+    }
+  }
+});
+
 test("a progress save conflicts on (user_id, article_slug)", () => {
   // The unique index is on the pair, so that pair is the conflict target: any
   // other target (or none) leaves the duplicate possible.
@@ -172,6 +229,120 @@ test("a progress save cannot be made to write a column the caller named", () => 
   // The fields that ARE the caller's to set still land, so this is a narrowing
   // of the SET and not a disabling of it.
   assert.match(updateClause, /"scroll_position" =/);
+});
+
+// ----------------------------------------------------------------------------
+// The other half of the same POST body: its VALUES (#411 round 6).
+//
+// Naming the two writable columns answers "which columns" and says nothing at
+// all about "which values". `wiki_progress.status` is a plain `text` column with
+// no CHECK behind it (`migrations/0002_mixed_hemingway.sql`), so a forged status
+// persisted verbatim into the caller's own row and every reader of that column
+// then had a fourth state to meet. `updateProgress` parses
+// `progressPatchSchema` straight after its session mint and passes only
+// `parsed.data` on, which is why the schema lives in `write-input.ts` — a module
+// with no directive can be imported here and run against a hostile body, where a
+// schema inside the `"use server"` module could only be asserted about as source
+// text.
+// ----------------------------------------------------------------------------
+
+test("a progress save refuses a value the column cannot mean", () => {
+  // `status` is a three-value vocabulary the whole progress UI switches on.
+  assert.equal(
+    progressPatchSchema.safeParse({ status: "certified_prophet" }).success,
+    false,
+    "a forged status parses, and the column has no CHECK behind it to catch it"
+  );
+  assert.equal(
+    progressPatchSchema.safeParse({ scrollPosition: 42 }).success,
+    false,
+    "a scroll position outside [0,1] parses — the progress UI divides by that number"
+  );
+  assert.equal(
+    progressPatchSchema.safeParse({ scrollPosition: -1 }).success,
+    false
+  );
+
+  // An unknown key is a REFUSAL, not a silently-dropped field: the builder
+  // already makes the column unreachable, and a body carrying `userId` is a
+  // caller probing for mass assignment.
+  assert.equal(
+    progressPatchSchema.safeParse({
+      scrollPosition: 0.4,
+      userId: "99999999-9999-4999-8999-999999999999",
+    }).success,
+    false,
+    "an unknown key survives the parse, so a probe cannot be told apart from a save"
+  );
+
+  // A body that is not an object at all — the parameter type promises one and
+  // the wire promises nothing.
+  assert.equal(progressPatchSchema.safeParse("completed").success, false);
+  assert.equal(progressPatchSchema.safeParse(null).success, false);
+
+  // And the two shapes the product actually sends still pass, so this is a
+  // narrowing of what a POST may say and not a disabling of the endpoint.
+  assert.deepEqual(progressPatchSchema.parse({ scrollPosition: 0.4 }), {
+    scrollPosition: 0.4,
+  });
+  assert.deepEqual(
+    progressPatchSchema.parse({ status: "completed", scrollPosition: 1 }),
+    { status: "completed", scrollPosition: 1 }
+  );
+});
+
+test("the parsed value is what reaches the statement", () => {
+  // The parse is only worth anything if nothing routes around it: what the
+  // builder renders must be the parsed object, so a refused body produces NO
+  // statement rather than a partial one.
+  const hostile = { status: "certified_prophet", scrollPosition: 0.4 };
+  const parsed = progressPatchSchema.safeParse(hostile);
+
+  assert.equal(parsed.success, false, "the hostile body must not parse");
+
+  // Rendered as `updateProgress` would render it if the parse were skipped —
+  // which is the regression this test exists to catch.
+  const { sql: text, params } = progressUpsertQuery(
+    USER,
+    SLUG,
+    hostile as unknown as Parameters<typeof progressUpsertQuery>[2],
+    NOW
+  ).toSQL();
+  const updateClause = text.slice(text.search(/do update/i));
+
+  assert.match(
+    updateClause,
+    /"status" =/,
+    "the builder names status, so an unparsed body decides its VALUE"
+  );
+  assert.ok(
+    params.includes("certified_prophet"),
+    "a forged status binds straight into the statement when nothing parses it — which is why the parse sits above the builder in updateProgress"
+  );
+
+  // …and the source is where that ordering is pinned: the module cannot be
+  // imported here (`"use server"`, and it reaches `@/db`), so the assertion is
+  // that the endpoint hands the BUILDER a parsed value and never its parameter.
+  const body = functionBodies(
+    codeOf(path.join(process.cwd(), "src/lib/wiki/progress.ts"))
+  ).find((fn) => fn.name === "updateProgress");
+
+  assert.ok(body, "updateProgress is gone from progress.ts");
+  assert.match(
+    body.body,
+    /progressPatchSchema\.safeParse\(\s*data\s*\)/,
+    "updateProgress does not parse its body — a TypeScript parameter type constrains a forged POST not at all"
+  );
+  assert.match(
+    body.body,
+    /progressUpsertQuery\([\s\S]*parsed\.data/,
+    "updateProgress passes something other than the parsed value to the builder"
+  );
+  assert.ok(
+    body.body.indexOf("getCurrentSession()") <
+      body.body.indexOf("progressPatchSchema.safeParse("),
+    "the parse runs above the session mint, so an anonymous POST can tell a malformed body from a well-formed one (`memory/invariants.md` → Authentication)"
+  );
 });
 
 test("a progress save writes only the fields the caller passed", () => {

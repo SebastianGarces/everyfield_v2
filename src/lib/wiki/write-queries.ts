@@ -1,11 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import {
-  wikiBookmarks,
-  wikiProgress,
-  type WikiProgressStatus,
-} from "@/db/schema";
+import { wikiBookmarks, wikiProgress } from "@/db/schema";
+
+import type { ProgressPatch } from "./write-input";
 
 // ============================================================================
 // The wiki's write paths, as builders (#411)
@@ -35,12 +33,6 @@ import {
 // the toggle's direction comes from the write itself and the read is gone.
 // ============================================================================
 
-/** The fields a progress save may carry. Absent means "leave it alone". */
-export type ProgressPatch = {
-  status?: WikiProgressStatus;
-  scrollPosition?: number;
-};
-
 /**
  * A progress save: one upsert keyed on (user_id, article_slug).
  *
@@ -60,6 +52,13 @@ export type ProgressPatch = {
  * to whoever POSTs it. Naming the two writable columns makes every other column
  * unreachable by construction rather than by what a caller happens to send, and
  * `write-paths.test.ts` renders a hostile patch to keep it that way.
+ *
+ * NAMING THE COLUMNS IS HALF THE RULE (#411 round 6). It answers "which columns"
+ * and says nothing about "which values", and `wiki_progress.status` is a plain
+ * `text` column with no CHECK, so a forged `status` persisted into the caller's
+ * own row. `updateProgress` therefore parses `progressPatchSchema`
+ * (`write-input.ts`) directly after its session mint and only `parsed.data`
+ * reaches this builder — this `patch` is a parsed value, not a request body.
  */
 export function progressUpsertQuery(
   userId: string,

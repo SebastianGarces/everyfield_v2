@@ -128,30 +128,14 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
   return true;
 }
 
-/**
- * Add a bookmark
- */
-export async function addBookmark(slug: string): Promise<void> {
-  const session = await getCurrentSession();
-  if (!session?.user) {
-    throw new Error("Unauthorized");
-  }
-
-  await bookmarkInsertQuery(session.user.id, slug);
-
-  revalidatePath("/wiki", "layout");
-}
-
-/**
- * Remove a bookmark
- */
-export async function removeBookmark(slug: string): Promise<void> {
-  const session = await getCurrentSession();
-  if (!session?.user) {
-    throw new Error("Unauthorized");
-  }
-
-  await bookmarkDeleteQuery(session.user.id, slug);
-
-  revalidatePath("/wiki", "layout");
-}
+// `addBookmark` and `removeBookmark` used to sit here — the two halves of the
+// toggle above, exported separately and called by nothing. Every export of a
+// `"use server"` module is a POSTable endpoint with no session cookie and no UI
+// in front of it (`memory/invariants.md` → Authentication), so two dead WRITES
+// were two live endpoints: post a slug, get a bookmark row. Deleted with #411,
+// the same rule that emptied four dead reads out of `service.ts`.
+//
+// The star's one behaviour is `toggleBookmark`, whose direction comes from the
+// write. A caller that genuinely needs a one-directional bookmark adds it back
+// WITH that caller — `write-paths.test.ts` fails on an export of this module
+// that nothing calls.

@@ -1,4 +1,4 @@
-import { eq, and, isNull, asc } from "drizzle-orm";
+import { eq, isNull, asc } from "drizzle-orm";
 import { db } from "@/db";
 import {
   wikiArticles,
@@ -9,40 +9,27 @@ import {
   type NewWikiSection,
 } from "@/db/schema";
 import { revalidatePath } from "next/cache";
-import { cache } from "react";
 
 // ============================================================================
 // Article Queries
 // ============================================================================
 
-/** The minimum an article needs to be linked to: where it lives and its name. */
-export interface WikiArticleRef {
-  slug: string;
-  title: string;
-}
-
-/**
- * Slug → title index of every published global article.
- *
- * Deliberately projects only `slug` + `title` (no `content`), so callers that
- * merely need to know whether a slug resolves — e.g. Plant Intelligence
- * insights linking to the methodology that backs them, PE-024 — can check
- * without pulling the corpus body. Deduped per request with `React.cache`, so
- * rendering many insight cards costs one query, not one per card.
- */
-export const getPublishedArticleRefs = cache(
-  async (): Promise<WikiArticleRef[]> => {
-    return db
-      .select({ slug: wikiArticles.slug, title: wikiArticles.title })
-      .from(wikiArticles)
-      .where(
-        and(isNull(wikiArticles.churchId), eq(wikiArticles.status, "published"))
-      )
-      .orderBy(asc(wikiArticles.sortOrder));
-  }
-);
-
-// Four more article reads used to live here — `getArticleBySlug`,
+// FIVE article reads used to live here, and none of them is a read this module
+// should ever have held.
+//
+// `getPublishedArticleRefs` — the PE-024 slug index, and the only one of the
+// five with a live caller — was hardcoded to `church_id IS NULL`. Global-only
+// looks like the fail-closed default the wiki uses everywhere else, and here it
+// was not: the card resolves a stored slug to a TITLE and links to
+// `/wiki/<slug>`, which the detail route resolves through `articleBySlugQuery`
+// and answers with the church's own row when it has one. So a church that
+// overrides a global slug was shown the global title on a link that opened its
+// own article — the two-documents mismatch #411 exists to close. It now lives in
+// `get-articles.ts` carrying `visibleToChurch` + `notOverriddenByChurch`
+// + the published filter, takes the reader's church, and is asserted by the
+// `readerFacingReads()` loop in `tenancy.test.ts` (#411 round 6).
+//
+// Four more went with #411 and simply died — `getArticleBySlug`,
 // `getAllPublishedArticles`, `getArticlesBySection`, `getArticlesByPhase`.
 // All four were dead repo-wide, and none carried the reader-facing tenancy
 // pair (`visibleToChurch` + `notOverriddenByChurch`); `getArticlesBySection`

@@ -6,28 +6,20 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
+import { progressPatchSchema, type ProgressPatch } from "./write-input";
 import { progressUpsertQuery, recordViewUpsertQuery } from "./write-queries";
 
-/**
- * Get progress for a single article
- */
-export async function getArticleProgress(slug: string) {
-  const session = await getCurrentSession();
-  if (!session?.user) return null;
-
-  const [progress] = await db
-    .select()
-    .from(wikiProgress)
-    .where(
-      and(
-        eq(wikiProgress.userId, session.user.id),
-        eq(wikiProgress.articleSlug, slug)
-      )
-    )
-    .limit(1);
-
-  return progress ?? null;
-}
+// `getArticleProgress` used to live here, and `markCompleted` at the foot of the
+// file. Both were dead repo-wide, and both were exports of THIS module — so each
+// was a POST endpoint reachable with no session cookie and no UI in front of it
+// (`memory/invariants.md` → Authentication: the export list IS the auth
+// surface). `markCompleted` was the worse of the two: an unreferenced WRITE that
+// marked any slug complete for whoever posted it. Deleted with #411 for the same
+// reason the four dead reads left `service.ts` — nothing wanted them, and an
+// endpoint kept "in case" is an endpoint nobody is reviewing.
+//
+// A caller that needs either one writes it back with a caller attached;
+// `write-paths.test.ts` fails the moment an export of this module has none.
 
 /**
  * Get progress for multiple articles (batch query)
@@ -197,32 +189,32 @@ export async function getLastInProgress() {
  * ONE statement, not a read followed by a write — the statement itself is
  * `progressUpsertQuery` in `write-queries.ts`, which is where every wiki write
  * path is built and where the reason is written down.
+ *
+ * SESSION FIRST, THEN PARSE (`memory/invariants.md` → Authentication). `data` is
+ * a request body: this is an export of a `"use server"` module, so a POST
+ * reaches it with whatever shape it likes and the parameter type stops none of
+ * it. The builder names the two columns it will write, which is what makes every
+ * OTHER column unreachable; the parse is what makes the two VALUES legal ones,
+ * because `wiki_progress.status` is plain `text` with no CHECK behind it. A body
+ * that fails the schema is refused entirely rather than written in part —
+ * `null`, the same answer a sessionless caller gets, since both are shapes only
+ * a bug or a probe produces.
  */
-export async function updateProgress(
-  slug: string,
-  data: {
-    status?: WikiProgressStatus;
-    scrollPosition?: number;
-  }
-) {
+export async function updateProgress(slug: string, data: ProgressPatch) {
   const session = await getCurrentSession();
   if (!session?.user) return null;
+
+  const parsed = progressPatchSchema.safeParse(data);
+  if (!parsed.success) return null;
 
   const [saved] = await progressUpsertQuery(
     session.user.id,
     slug,
-    data,
+    parsed.data,
     new Date()
   );
 
   return saved ?? null;
-}
-
-/**
- * Mark an article as completed
- */
-export async function markCompleted(slug: string) {
-  return updateProgress(slug, { status: "completed", scrollPosition: 1 });
 }
 
 /**

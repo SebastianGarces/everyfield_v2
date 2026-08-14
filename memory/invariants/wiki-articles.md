@@ -24,7 +24,7 @@ That default is also why threading `churchId` reached further than the article r
 
 `wiki_articles_slug_church_idx` is unique on `(slug, church_id)`, so a church may hold its own row for a global slug — and the visibility predicate admits exactly two scopes, so **at most two rows** can ever satisfy it. The church's published row wins; without that rule the same slug appears twice in navigation, lists and React keys.
 
-**One implementation, and it is a predicate** (#411 round 3). `notOverriddenByChurch(churchId)` sits beside `visibleToChurch` in `get-articles.ts` and returns `NOT EXISTS (this church's published row of this slug)` — `undefined` for a churchless read, since there is nothing to override. Every reader-facing builder carries it: `visibleArticlesQuery`, `articleBySlugQuery` (which therefore takes `LIMIT 1` — the statement returns the winner, so no caller is left to choose) and `searchArticlesQuery`.
+**One implementation, and it is a predicate** (#411 round 3). `notOverriddenByChurch(churchId)` sits beside `visibleToChurch` in `get-articles.ts` and returns `NOT EXISTS (this church's published row of this slug)` — `undefined` for a churchless read, since there is nothing to override. Every reader-facing builder carries it: `visibleArticlesQuery`, `articleBySlugQuery` (which therefore takes `LIMIT 1` — the statement returns the winner, so no caller is left to choose), `searchArticlesQuery` and `publishedArticleRefsQuery`.
 
 It used to have two implementations, and that is the part worth keeping. The lists and the single-article read collapsed the `(slug, church_id)` pair in JS afterwards (`preferChurchOverride`), which works only because they read the **whole** visible corpus; search suppressed the global row inside the statement. A JS collapse cannot answer for a **ranked** read at all: it only ever sees the rows that survived the `ts_rank` cut, and the church's copy need not be among them — a rewritten copy may not match the tsquery, or may rank below the cut — so the global row came back alone with nothing to collapse it against, and the result row and the article the click opened were two different documents. Reproduced against a real database (`tenancy-live.test.ts`), not reasoned about. So the SQL form is the survivor and the JS copy is deleted rather than kept in parallel; a SQL builder and a JS predicate could never share an *implementation*, and here they could not even share the *decision*.
 
@@ -36,9 +36,17 @@ Two terms are load-bearing. The subquery's `published` must match the read's own
 
 `getArticles` is wrapped in `React.cache`. Rendering one article reads the whole visible corpus at least twice (sidebar navigation in the wiki layout, `getArticleNavigation` in the page) and every read is the identical query, so the memo is what keeps derived affordances free. The consequence: **a mutate-then-read inside one request goes stale** — write an article and re-read within the same request and you get the pre-write corpus. Revalidate and let the next request read (see `wikiRevalidationPath` below), rather than reaching around the cache. Outside a React request scope (the test runner) `cache` calls straight through, so live fixtures set up between reads are seen.
 
-### The older `service.ts` readers are not this path
+### `service.ts` holds no article read at all any more (#411 rounds 5–6)
 
-`getPublishedArticleRefs`, `getAllPublishedArticles` and `getArticlesByPhase` are hardcoded `church_id IS NULL` — global-only by design, for callers (PE-024 insight links, admin) that want the shared corpus. They are safe but they are **not** tenant-aware; do not "fix" one by swapping in `eq(churchId)`, which is the mine-alone shape the invariant forbids. Reader-facing article access goes through `get-articles.ts` / `get-article.ts`.
+It used to hold five, all hardcoded `church_id IS NULL`, and this file used to call them "safe but not tenant-aware". That reading was wrong about the one with a caller.
+
+Four — `getArticleBySlug`, `getAllPublishedArticles`, `getArticlesBySection`, `getArticlesByPhase` — were dead repo-wide and were deleted rather than predicated (round 5), because a barrel export of an un-predicated read is a cross-tenant read waiting for its first caller.
+
+The fifth, `getPublishedArticleRefs`, was live: the PE-024 slug index behind the insight cards. Global-only **looks** like the fail-closed default the rest of the wiki uses, and here it was not, because this read is not the read that answers the click. The card resolves a stored slug to a **title** and links to `/wiki/<slug>`; the detail route resolves that path through `articleBySlugQuery`, which answers with the church's own row when it has one. So for a church that overrode a global slug the card advertised the GLOBAL title over a link that opened the CHURCH's article — the same two-documents mismatch search had, one component over, and the failure mode #411 exists to close. Under-fetching is only harmless where the under-fetched thing is all the caller does.
+
+It lives in `get-articles.ts` now as `publishedArticleRefsQuery` + a `React.cache`d `getPublishedArticleRefs(churchId = null)`, carries `visibleToChurch` + the published filter + `notOverriddenByChurch`, and `insight-card.tsx` threads `session.user.churchId` into it. Two tests own it: `readerFacingReads()` in `tenancy.test.ts` (which is why that loop's name — EVERY reader-facing read — is now true), and a seeded case in `tenancy-live.test.ts` that asserts both directions against a real database, one church's private rows never reaching another reader, and every title in the index resolving to the article its own link opens.
+
+**So the rule is now general: every article read in `src/lib/wiki/` that ends up in front of a reader lives in `get-articles.ts`, carries the pair, and is in `readerFacingReads()`.** `service.ts` keeps the article MUTATIONS, the sections and the revalidation helpers.
 
 ## Cross-links: the column is canonical, the prose is gone (#317)
 
@@ -130,7 +138,28 @@ const changes = {
 };
 ```
 
-Which keeps the original property — "the conflicting write applies exactly the fields the caller passed", so a scroll save does not rewrite `status` — while making every other column unreachable **by construction** rather than by what a caller happens to send. `write-paths.test.ts` renders a patch carrying `userId` and `articleSlug` and asserts the DO UPDATE SET contains neither column. The seam is what made this findable at all: the statement lives in `write-queries.ts` with no directive, so `.toSQL()` shows what would reach the database.
+Which keeps the original property — "the conflicting write applies exactly the fields the caller passed", so a scroll save does not rewrite `status` — while making every other **column** unreachable by construction rather than by what a caller happens to send. `write-paths.test.ts` renders a patch carrying `userId` and `articleSlug` and asserts the DO UPDATE SET contains neither column. The seam is what made this findable at all: the statement lives in `write-queries.ts` with no directive, so `.toSQL()` shows what would reach the database.
+
+### Naming the columns was half of it — the body is parsed too (round 6)
+
+The paragraph above claimed "every other column unreachable by construction", and that sentence was true of the COLUMN NAMES and silent about the VALUES bound to the two columns that remain. `wiki_progress.status` is a plain `text` column with no CHECK behind it (migration `0002_mixed_hemingway.sql`), so `updateProgress(slug, {status: "certified_prophet"})` — one POST, no session cookie needed to reach the endpoint, and a TypeScript parameter that constrains nothing — persisted verbatim into the caller's own row, and every reader that switches on that column then met a fourth state nobody wrote a branch for.
+
+So the body is parsed before it reaches the builder, in the order `memory/invariants.md` → Authentication requires: mint, then parse.
+
+```ts
+const parsed = progressPatchSchema.safeParse(data);
+if (!parsed.success) return null;
+```
+
+`progressPatchSchema` is a `z.strictObject` over `status` (the schema's own `wikiProgressStatuses`) and `scrollPosition` (`[0,1]`, the fraction the progress UI divides by — not a pixel offset). Strict, so an unknown key is a refusal rather than a silently dropped field: the builder already makes that column unreachable, and a body carrying `userId` is a probe, which should not be able to tell a partial write from a rejection.
+
+It lives in `write-input.ts`, a THIRD directive-free sibling, for the two reasons the statements live in `write-queries.ts`: a `"use server"` module may export nothing but endpoints, and a module a test can import is a module a hostile body can be run through for real — `write-paths.test.ts` parses the forged values themselves, then reads `updateProgress`'s body with `functionBodies` to pin that the parse sits between the mint and the builder and that `parsed.data` is what the builder gets.
+
+### An endpoint with no caller is deleted (round 6)
+
+Four exports survived the sweep that emptied four dead reads out of `service.ts`, in the two modules where the rule bites hardest: `getArticleProgress` and `markCompleted` (`progress.ts`), `addBookmark` and `removeBookmark` (`bookmarks.ts`). Every export of a `"use server"` module is a POSTable endpoint with no session cookie and no UI in front of it, so three of those four were live WRITES nobody was reviewing — post a slug and mark it complete, or bookmark it — kept only because they read like the obvious companions to functions that are used.
+
+`write-paths.test.ts` derives both modules' export lists with `functionBodies` and fails on any export that no non-test file in `src/` names. Two exclusions carry the meaning: the wiki barrel (`index.ts`) re-exports these modules, and a re-export moves a name rather than calling it; and a test that merely asserts the endpoint exists is not a caller either — that is precisely the shape the guard is for.
 
 ## Slugs and paths: the two builders
 

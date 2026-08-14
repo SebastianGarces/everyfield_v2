@@ -175,11 +175,68 @@ export function articleBySlugQuery(slug: string, churchId: string | null) {
     .limit(1);
 }
 
+/** The minimum an article needs to be linked to: where it lives and its name. */
+export interface WikiArticleRef {
+  slug: string;
+  title: string;
+}
+
+/**
+ * Slug → title index of every published article `churchId` may see.
+ *
+ * Projects `slug` + `title` only (no `content`), so a caller that merely needs
+ * to know whether a slug still resolves — Plant Intelligence insights linking to
+ * the methodology behind them, PE-024 — can check without pulling the corpus
+ * body.
+ *
+ * IT LIVED IN `service.ts` AND WAS GLOBAL-ONLY (`church_id IS NULL`), which was
+ * the last reader-facing read outside this module (#411 round 6). That is not a
+ * quiet under-fetch like the rest of the fail-closed defaults: an insight card
+ * resolves a stored slug to a TITLE and renders it as a link, while the click
+ * goes to `/wiki/<slug>`, which the detail route resolves through
+ * `articleBySlugQuery` — the church's own row when it has one. So for a church
+ * that overrides a global slug the card advertised the GLOBAL title on a link
+ * that opened the CHURCH's article: verbatim the two-documents mismatch #411
+ * exists to kill, one component over from where search had it.
+ *
+ * It carries both predicates now and joins `readerFacingReads()` in
+ * `tenancy.test.ts`, so the claim that loop makes about covering EVERY
+ * reader-facing read is true of this one too.
+ */
+export function publishedArticleRefsQuery(churchId: string | null) {
+  return db
+    .select({ slug: wikiArticles.slug, title: wikiArticles.title })
+    .from(wikiArticles)
+    .where(
+      and(
+        visibleToChurch(churchId),
+        eq(wikiArticles.status, "published"),
+        notOverriddenByChurch(churchId)
+      )
+    )
+    .orderBy(asc(wikiArticles.sortOrder));
+}
+
+/**
+ * The slug index, deduped per request with `React.cache` and keyed on
+ * `churchId`, so a panel of insight cards costs one query rather than one per
+ * card. A plain DB read, never an LLM call.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export const getPublishedArticleRefs = cache(
+  async function getPublishedArticleRefs(
+    churchId: string | null = null
+  ): Promise<WikiArticleRef[]> {
+    return publishedArticleRefsQuery(churchId);
+  }
+);
+
 /**
  * Get all wiki articles with metadata, scoped to a church.
  *
  * Deduped per request with `React.cache`, keyed on `churchId` — the same
- * pattern `getPublishedArticleRefs` in `service.ts` uses. Rendering one article
+ * pattern `getPublishedArticleRefs` above uses. Rendering one article
  * reads the whole visible corpus at least twice (the sidebar's
  * `getWikiNavigation` in the wiki layout, and `getArticleNavigation` in the
  * page), and every read is the identical ~90-row query; without this each

@@ -11,6 +11,7 @@ import {
   articleBySlugQuery,
   getArticles,
   getArticlesByPrefix,
+  getPublishedArticleRefs,
   getWikiNavigation,
 } from "./get-articles";
 import { searchArticles } from "./search";
@@ -351,6 +352,109 @@ test("a search result is always the document the click opens (#411)", async (t: 
   } finally {
     await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
     await db.delete(churches).where(inArray(churches.id, [church.id]));
+  }
+});
+
+// ----------------------------------------------------------------------------
+// The PE-024 slug index, against rows (#411 round 6).
+//
+// The index feeds the insight card's "how to improve" link: it turns a stored
+// slug into the TITLE the card renders, while the click goes to the detail
+// route. So the two must resolve the same document for the same reader, which is
+// the property this file already asserts for search. While the index was
+// `church_id IS NULL` in `service.ts` it could not: a church that overrode a
+// global slug was shown the global title over a link that opened its own
+// article. And the fix is a tenancy change, so the other direction is asserted
+// too — no church-private row may reach a reader from another church.
+// ----------------------------------------------------------------------------
+
+test("the insight slug index leaks no church's private article, and names the document the click opens (#411)", async (t: TestContext) => {
+  if (!(await databaseReachable())) {
+    return t.skip(
+      "SKIPPED — the live slug-index assertions did NOT run. No reachable DATABASE_URL (this is the case on CI). Run in a worktree with .env.local linked: scripts/worktree-env.sh"
+    );
+  }
+
+  const prefix = `__t411r-${randomUUID().slice(0, 8)}`;
+  const [churchA, churchB] = await db
+    .insert(churches)
+    .values([{ name: `${prefix} A` }, { name: `${prefix} B` }])
+    .returning();
+
+  try {
+    const overridden = `${prefix}/global`;
+    const aOnly = `${prefix}/a-only`;
+
+    await db.insert(wikiArticles).values([
+      seedArticle(overridden, null, "Global article"),
+      seedArticle(overridden, churchA.id, "Church A's version"),
+      seedArticle(aOnly, churchA.id, "Church A only"),
+      seedArticle(`${prefix}/b-only`, churchB.id, "Church B only"),
+      {
+        ...seedArticle(`${prefix}/a-draft`, churchA.id, "Church A draft"),
+        status: "draft" as const,
+      },
+    ]);
+
+    /** The index as the insight card reads it, for one reader. */
+    const indexFor = async (churchId: string | null) =>
+      (await getPublishedArticleRefs(churchId)).filter((ref) =>
+        ref.slug.startsWith(`${prefix}/`)
+      );
+
+    const forA = await indexFor(churchA.id);
+    const forB = await indexFor(churchB.id);
+    const forChurchless = await indexFor(null);
+
+    // --- no church-private row reaches another reader ------------------------
+    assert.ok(
+      !forB.some((ref) => ref.slug === aOnly),
+      "church A's private article reached church B through the slug index — cross-tenant read"
+    );
+    assert.ok(
+      !forB.some((ref) => ref.title === "Church A's version"),
+      "church A's private OVERRIDE of a global slug reached church B through the slug index"
+    );
+    assert.deepEqual(
+      forChurchless.map((ref) => ref.slug).sort(),
+      [overridden],
+      "a churchless reader gets the global corpus alone — not everything"
+    );
+    assert.equal(
+      forChurchless[0]?.title,
+      "Global article",
+      "a churchless reader is shown the global title, which is the article its link opens"
+    );
+
+    // --- and the reader's own content is there, exactly once -----------------
+    assert.deepEqual(
+      forA.map((ref) => ref.slug).sort(),
+      [aOnly, overridden],
+      "church A must see its own published article and the global one, once each — a draft of its own is not published content"
+    );
+
+    // --- the title and the link are one document ----------------------------
+    const opensFor = async (slug: string, churchId: string | null) =>
+      (await articleBySlugQuery(slug, churchId))[0] ?? null;
+
+    for (const [reader, index] of [
+      [churchA.id, forA],
+      [churchB.id, forB],
+      [null, forChurchless],
+    ] as const) {
+      for (const ref of index) {
+        assert.equal(
+          ref.title,
+          (await opensFor(ref.slug, reader))?.title,
+          `the slug index named "${ref.title}" for a link that opens a different document`
+        );
+      }
+    }
+  } finally {
+    await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
+    await db
+      .delete(churches)
+      .where(inArray(churches.id, [churchA.id, churchB.id]));
   }
 });
 

@@ -5,7 +5,11 @@ import { test } from "node:test";
 
 import { codeOf } from "@/lib/auth/server-action-surface";
 
-import { articleBySlugQuery, visibleArticlesQuery } from "./get-articles";
+import {
+  articleBySlugQuery,
+  publishedArticleRefsQuery,
+  visibleArticlesQuery,
+} from "./get-articles";
 import { searchArticlesQuery, type SearchResult } from "./search";
 
 // ----------------------------------------------------------------------------
@@ -131,12 +135,64 @@ test("the search read with no church narrows to global", () => {
   assert.doesNotMatch(text, CHURCH_EQUALITY);
 });
 
-/** Every reader-facing read, as a name and a rendered statement. */
+test("the insight slug index carries the same boundary (#411 round 6)", () => {
+  // PE-024's "how to improve" link resolves a stored slug to a TITLE while the
+  // click goes to the detail route, which answers with the church's own row. So
+  // a global-only slug index is not the quiet under-fetch the fail-closed
+  // default usually is: it names one document and links to another. It was the
+  // last reader-facing read outside `get-articles.ts` (it lived in
+  // `service.ts`), and the one this loop's name was untrue about.
+  const { sql: text, params } = publishedArticleRefsQuery(CHURCH_A).toSQL();
+
+  assert.match(text, VISIBILITY);
+  assert.ok(
+    params.includes(CHURCH_A),
+    "the church the index is read for is not bound to the query"
+  );
+  assert.ok(
+    !params.includes(CHURCH_B),
+    "another church's id reached the slug index"
+  );
+});
+
+test("the insight slug index with no church narrows to global", () => {
+  const { sql: text } = publishedArticleRefsQuery(null).toSQL();
+
+  assert.match(text, /"wiki_articles"\."church_id" is null/);
+  assert.doesNotMatch(text, CHURCH_EQUALITY);
+});
+
+test("the insight slug index projects no article body", () => {
+  // The projection is the reason this read exists at all: a caller that only
+  // needs to know whether a slug still resolves must not pull ~90 article
+  // bodies to find out.
+  const { sql: text } = publishedArticleRefsQuery(CHURCH_A).toSQL();
+  const projection = text.slice(0, text.search(/\bfrom\b/i));
+
+  assert.match(projection, /"slug"/);
+  assert.match(projection, /"title"/);
+  assert.doesNotMatch(
+    projection,
+    /"content"/,
+    "the slug index pulls article bodies it never reads"
+  );
+});
+
+/**
+ * Every reader-facing read, as a name and a rendered statement.
+ *
+ * "Every" is the load-bearing word and it has twice been untrue: the four dead
+ * reads in `service.ts` sat outside it (deleted, #411 round 5) and so did the
+ * PE-024 slug index, which was live behind the insight cards (moved in and
+ * predicated, round 6). A reader-facing article read that is not in this list is
+ * a read nothing below asserts anything about.
+ */
 function readerFacingReads(churchId: string | null) {
   return [
     ["the corpus read", visibleArticlesQuery(churchId)],
     ["the single-article read", articleBySlugQuery("discovery/x", churchId)],
     ["the search read", searchArticlesQuery("elders", churchId)],
+    ["the insight slug index", publishedArticleRefsQuery(churchId)],
   ] as const;
 }
 
@@ -196,15 +252,12 @@ test("a churchless read has nothing to suppress (#411)", () => {
 
 test("every read still filters to published articles", () => {
   // Tenancy is not the only predicate on these paths, and an override that
-  // dropped `status` would publish drafts to the church that wrote them.
-  for (const query of [
-    visibleArticlesQuery(CHURCH_A),
-    articleBySlugQuery("discovery/x", CHURCH_A),
-    searchArticlesQuery("elders", CHURCH_A),
-  ]) {
+  // dropped `status` would publish drafts to the church that wrote them. Driven
+  // off the same list as the override loop, so a read joining one joins both.
+  for (const [name, query] of readerFacingReads(CHURCH_A)) {
     const { sql: text, params } = query.toSQL();
-    assert.match(text, /"wiki_articles"\."status" = \$\d/);
-    assert.ok(params.includes("published"));
+    assert.match(text, /"wiki_articles"\."status" = \$\d/, name);
+    assert.ok(params.includes("published"), name);
   }
 });
 
@@ -329,7 +382,8 @@ test("the single-article read returns the winner, not a pair to collapse (#411)"
  * invisible at runtime and invisible to `tsc`. It is exactly the bug #317
  * fixes, and the only thing that can catch it coming back is the source.
  */
-const UNSCOPED_LIST = /\b(?:getArticles|getWikiNavigation)\(\s*\)/;
+const UNSCOPED_LIST =
+  /\b(?:getArticles|getWikiNavigation|getPublishedArticleRefs)\(\s*\)/;
 
 /** A slug-taking read invoked with one argument: `getArticle(slug)`. */
 const UNSCOPED_SLUG_READ = /\b(?:getArticle|getArticlesByPrefix)\(\s*[^,)]*\)/;
@@ -340,6 +394,13 @@ const UNSCOPED_SLUG_READ = /\b(?:getArticle|getArticlesByPrefix)\(\s*[^,)]*\)/;
  * of the assertion is the set being complete, and a workstream that removes the
  * church argument there should fail this test rather than ship a detail route
  * that cannot open its own church's article.
+ *
+ * `insight-card.tsx` is not a wiki surface at all, and that is exactly why it is
+ * on the list (#411 round 6): it renders a wiki TITLE and a wiki LINK from the
+ * PE-024 slug index, and it read that index unscoped for as long as the index
+ * was global-only — so the card named the global article and the click opened
+ * the church's. The read is scoped now; dropping the argument again type-checks
+ * and brings the mismatch straight back.
  */
 const WIKI_READ_CALL_SITES = [
   "src/app/(dashboard)/wiki/layout.tsx",
@@ -350,6 +411,7 @@ const WIKI_READ_CALL_SITES = [
   "src/app/api/wiki/article/route.ts",
   "src/lib/wiki/bookmarks.ts",
   "src/lib/wiki/progress.ts",
+  "src/components/phase-engine/insight-card.tsx",
 ];
 
 /**
