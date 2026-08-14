@@ -316,6 +316,12 @@ functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge
 G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
 gate never ran at that sha.
 
+**HR1–HR3 re-anchor with it**, because they are the same class of evidence: the migration trigger is
+re-read from the diff *at the tip*, and the proofs the PR body quotes are the ones collected there.
+A round that edits a migration would otherwise ship a dry-run and a DDL delta describing SQL the
+branch no longer carries; a round that adds the branch's *first* migration would otherwise never be
+asked for the proofs at all, and auto-merge DDL nobody dry-ran.
+
 > **"CI re-anchors G1/G2 at the final sha" holds only while the final sha is the PR head.** PR
 > Checks fires on `pull_request`, so it can name no other commit. A fix round that lands on a side
 > branch — `feature/X-fix` while the PR still points at `feature/X` — moves the tree but not the

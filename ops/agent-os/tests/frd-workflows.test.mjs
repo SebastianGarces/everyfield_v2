@@ -2615,6 +2615,156 @@ test("a G3 re-run FAIL re-enters the attempt machinery like any gate", async () 
 });
 
 // ---------------------------------------------------------------------------
+// HR1–HR3 are re-anchored beside G3, for the same reason G3 is.
+//
+// The migration proofs are sha-anchored evidence: HR1 dry-runs the SQL as it
+// stands and HR3 IS the DDL delta the PR body quotes. A quality round that
+// edits a migration makes the first verify's proofs statements about SQL the
+// branch no longer carries; one that ADDS the first migration means DDL that
+// was never asked for a proof at all. Both reach main through the same door,
+// and the re-anchor is what closes it.
+// ---------------------------------------------------------------------------
+
+test("a fix round that edits a migration must re-prove HR1–HR3 at the tip", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("diff:")) return carriesMigration();
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passingWithProofs(),
+          findings: [finding("critical", "that column should be NOT NULL")],
+        };
+      // The re-anchor omits them — the exact staleness this exists to catch.
+      if (l.startsWith("verify:g3:")) return passing([]);
+      return replyShip(passingWithProofs())(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.ok(
+    calls.some((c) => c.label === "diff:g3:alpha#1"),
+    "the trigger is re-read from the diff at the tip, not carried over from the first verify"
+  );
+  assert.match(
+    calls.find((c) => c.label?.startsWith("verify:g3:"))?.prompt || "",
+    /also run HR1–HR3/,
+    "the re-anchor brief asks for the proofs the tip's diff owes"
+  );
+  assert.equal(
+    result.shipped.length,
+    0,
+    "proofs about SQL the branch no longer carries are not proofs"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.equal(result.blocked[0].failingGate, "HR1-HR3/missing-proofs");
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "and it certainly never auto-merges"
+  );
+});
+
+test("a fix round that ADDS the branch's first migration owes the proofs too", async () => {
+  let diffs = 0;
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      // No DDL at the first verify; the quality round writes the migration.
+      if (l.startsWith("diff:"))
+        return ++diffs === 1
+          ? { carriesMigration: false, migrationFiles: [] }
+          : carriesMigration();
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passing([]),
+          findings: [finding("critical", "add the index this query needs")],
+        };
+      if (l.startsWith("verify:g3:")) return passing([]);
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.doesNotMatch(
+    verifyPrompt(calls),
+    /HR1/,
+    "the first verify's diff carried no migration, so it owed nothing"
+  );
+  assert.match(
+    calls.find((c) => c.label?.startsWith("verify:g3:"))?.prompt || "",
+    /also run HR1–HR3/,
+    "DDL that arrives in a fix round is DDL that reaches main"
+  );
+  assert.equal(
+    result.shipped.length,
+    0,
+    "auto-merging a migration nobody dry-ran is the original failure, one step later"
+  );
+  assert.equal(result.blocked[0].failingGate, "HR1-HR3/missing-proofs");
+  assert.ok(!calls.some((c) => c.label === "merge:alpha"));
+});
+
+test("the DDL delta the PR body quotes belongs to the sha that will merge", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("diff:")) return carriesMigration();
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passingWithProofs(),
+          gates: [
+            { id: "HR1", status: "PASS", evidence: "dry-run of the STALE sql" },
+            {
+              id: "HR2",
+              status: "PASS",
+              evidence: "rolled back the STALE sql",
+            },
+            {
+              id: "HR3 — DDL delta",
+              status: "PASS",
+              evidence: "alter table thing add column a text",
+            },
+            { id: "G3", status: "PASS", evidence: "the flow works" },
+          ],
+          findings: [finding("critical", "that column should be NOT NULL")],
+        };
+      if (l.startsWith("verify:g3:"))
+        return {
+          ...passing([]),
+          gates: [
+            { id: "HR1", status: "PASS", evidence: "dry-run at the tip" },
+            { id: "HR2", status: "PASS", evidence: "rolled back at the tip" },
+            {
+              id: "HR3",
+              status: "PASS",
+              evidence: "alter table thing add column a text not null",
+            },
+          ],
+        };
+      return replyShip(passingWithProofs())(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.equal(result.shipped.length, 1, "re-proven at the tip, so it ships");
+  const pr = calls.find((c) => c.label?.startsWith("pr:alpha"));
+  assert.match(
+    pr.prompt,
+    /add column a text not null/,
+    "the release agent builds the body from the re-anchored proofs"
+  );
+  assert.ok(
+    !/STALE/.test(pr.prompt),
+    "a PR body that states a DDL delta the branch no longer carries is worse than none"
+  );
+  assert.match(
+    pr.prompt,
+    /the flow works/,
+    "only the HR1–HR3 entries are replaced; the rest of the first verify's gates stand"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The /deliver path (autoMerge=false) and surviving findings: the ruling's
 // exhaust outcome is "HOLD with a DECISION comment", and the reviewer on this
 // path reads the PR — not the workflow return payload. The menu must reach

@@ -596,10 +596,14 @@ The loop compares those two and will NOT run the functional gate until they are 
  * made the trigger fire — the log and the HR1–HR3 assertion below both need
  * the list, and deriving it twice is how the brief and the check drift apart.
  *
+ * Called ONCE PER SHA UNDER REPORT, not once per attempt: a quality-round fix
+ * can edit a migration or add the first one, so the G3 re-anchor asks again at
+ * the tip. `stage` only distinguishes the two calls' labels.
+ *
  * FAILS CLOSED. An undecided diff owes the proofs: a missing answer must never
  * be the reason a DDL change shipped without a dry-run or a rollback.
  */
-async function migrationProofsOwed() {
+async function migrationProofsOwed(stage = "") {
   const diff = await agent(
     `Report whether branch ${branch} in worktree ${wt} changes any database migration file.
 
@@ -608,7 +612,7 @@ Run exactly this, and read the answer off what it prints:
 
 Put every printed path beginning with \`src/db/migrations/\` into \`migrationFiles\`, and set \`carriesMigration\` to whether that list is non-empty. Transcribe what git printed — do NOT infer from the issue, its labels, the branch name or the commit messages. If the command failed, explain in \`detail\`, return \`carriesMigration: true\` and an empty list: an undecided diff owes the migration proofs rather than skipping them. Do not push, do not commit, do not open a PR. Return strictly the schema.`,
     {
-      label: `diff:${track.id}#${attempt}`,
+      label: `diff:${stage}${track.id}#${attempt}`,
       phase: "Verify",
       // One diff and one merge-base, and the answer is a substring test.
       model: "haiku",
@@ -637,6 +641,33 @@ const MIGRATION_PROOFS = [
   { id: "HR3", owes: "the exact DDL delta in the PR body" },
 ];
 
+// ONE spelling of "is this `gates` entry the HR<n> proof?", shared by the
+// assertion and the re-anchor splice. A verifier may report `id` as "HR1" or
+// "HR1 — dry-run"; anything else is not this gate.
+const isProofGate = (gate, id) =>
+  new RegExp(`^\\s*${id}\\b`, "i").test(String(gate?.id || ""));
+
+const anyProofGate = (gate) =>
+  MIGRATION_PROOFS.some(({ id }) => isProofGate(gate, id));
+
+/**
+ * Replace the report's HR1–HR3 entries with the ones collected at the tip.
+ *
+ * The proofs are SHA-ANCHORED EVIDENCE — HR1 is a dry-run of the SQL as it
+ * stands and HR3 IS the DDL delta the PR body quotes — so a fix round that
+ * edited a migration leaves entries describing SQL the branch no longer
+ * carries. Passing an empty `fresh` list DROPS them, which is the right answer
+ * when the tip carries no migration at all: nothing is owed, so nothing may be
+ * quoted.
+ */
+function withReanchoredProofs(gates, fresh) {
+  const kept = (Array.isArray(gates) ? gates : []).filter(
+    (g) => !anyProofGate(g)
+  );
+  const proofs = (Array.isArray(fresh) ? fresh : []).filter(anyProofGate);
+  return [...kept, ...proofs];
+}
+
 /**
  * The HR1–HR3 assertion. The brief ASKS for the proofs; this is what makes
  * them owed — without it the whole product of `migrationProofsOwed()` is a
@@ -649,10 +680,7 @@ const MIGRATION_PROOFS = [
 function migrationProofsMissing(report, migration) {
   const gates = Array.isArray(report?.gates) ? report.gates : [];
   const owed = MIGRATION_PROOFS.map(({ id, owes }) => {
-    // `id` may be "HR1" or "HR1 — dry-run"; anything else is not this gate.
-    const gate = gates.find((g) =>
-      new RegExp(`^\\s*${id}\\b`, "i").test(String(g?.id || ""))
-    );
+    const gate = gates.find((g) => isProofGate(g, id));
     return {
       id,
       owes,
@@ -920,15 +948,27 @@ unresolved.push(
 // in `verify` was produced against the pre-fix sha. CI re-anchors G1/G2 at the
 // final sha, but nothing else re-runs G3 there — and verify-follows-last-push
 // is an ORDERING guarantee (ruling designNote 5), not a presence check. So
-// when any fix round landed commits, G3 — and only G3 — re-runs against the
-// re-pushed finalSha BEFORE HR4/PR/merge. A FAIL re-enters the parent's
-// attempt machinery like any gate failure; the passing entry rides into the
-// PR body via `verify.g3Reanchor`, pinned to the sha that will merge.
+// when any fix round landed commits, G3 re-runs against the re-pushed
+// finalSha BEFORE HR4/PR/merge. A FAIL re-enters the parent's attempt
+// machinery like any gate failure; the passing entry rides into the PR body
+// via `verify.g3Reanchor`, pinned to the sha that will merge.
+//
+// HR1–HR3 RIDE ALONG, because they are the same class of evidence: the trigger
+// is re-read from the diff at the tip (a fix round can edit a migration, or add
+// the branch's first one), the same assertion runs on the re-anchored report,
+// and the proofs the PR body quotes are replaced with the ones collected here.
+// The re-anchor is what makes those two failures impossible: proofs about SQL
+// the branch no longer carries, and DDL that was never asked for a proof at all.
 // ---------------------------------------------------------------------------
 if (fixCommitsLanded) {
   log(
     `🧪 ${track.id} — fix rounds moved the tip; re-running G3 at ${finalSha.slice(0, 7)} before anything ships it`
   );
+  const migrationAtTip = await migrationProofsOwed("g3:");
+  if (migrationAtTip)
+    log(
+      `🧱 ${track.id} — the diff at ${finalSha.slice(0, 7)} carries a migration (${migrationAtTip.named}); HR1–HR3 are re-anchored too`
+    );
   const g3 = await agent(
     `You are the INDEPENDENT verifier, re-running ONLY the functional gate (G3) for branch ${branch} in worktree ${wt}, issue(s) ${hashes(track.issues)}. Quality-round fixes committed new code AFTER the first integration verify, so the G3 evidence already collected belongs to an older sha — nothing may ship a sha whose functional gate never ran at that sha, and your job is to re-anchor it.
 
@@ -937,7 +977,9 @@ if (fixCommitsLanded) {
 Acceptance criteria to prove — all of them:
 ${criteria}
 
-Do NOT re-run G1/G2/G4/G5 — CI re-anchors the build and the full suite at this sha, and the diff-level review already ran; only the functional evidence went stale. Default to FAIL when evidence is missing or unconvincing. If a failure belongs to one workstream, name it in \`failingWorkstream\` — one of: ${wsIds.join(", ")}. Return strictly the DoD report schema.`,
+Do NOT re-run G1/G2/G4/G5 — CI re-anchors the build and the full suite at this sha, and the diff-level review already ran; only the sha-anchored evidence went stale.
+${migrationAtTip?.line || ""}
+Default to FAIL when evidence is missing or unconvincing. If a failure belongs to one workstream, name it in \`failingWorkstream\` — one of: ${wsIds.join(", ")}. Return strictly the DoD report schema.`,
     {
       label: `verify:g3:${track.id}#${attempt}`,
       phase: "Verify",
@@ -948,6 +990,23 @@ Do NOT re-run G1/G2/G4/G5 — CI re-anchors the build and the full suite at this
   if (!g3) return failResult(null);
   if (!(g3.verdict === "PASS" || g3.verdict === "PASS_WITH_WARNINGS"))
     return failResult({ ...g3, fixRounds: loop.journal });
+  if (migrationAtTip) {
+    const missing = migrationProofsMissing(g3, migrationAtTip);
+    if (missing) {
+      log(
+        `❌ ${track.id} attempt ${attempt}: the diff at the tip carries a migration but HR1–HR3 were not re-proven — ${missing.summary}`
+      );
+      return failResult({ ...missing, fixRounds: loop.journal });
+    }
+  }
+  // The PR body quotes `verify.gates`, so HR3's DDL delta must be the one
+  // collected at `finalSha` — not the entry the first verify produced for SQL a
+  // fix round may have rewritten, and never one left standing for a migration
+  // the tip no longer carries.
+  verify.gates = withReanchoredProofs(
+    verify.gates,
+    migrationAtTip ? g3.gates : []
+  );
   // Spec-questions from the re-run hold exactly like first-pass ones, and any
   // actionable finding it raises cannot get fix rounds (that would loop) — it
   // joins `unresolved` and holds the merge for a ruling instead.
