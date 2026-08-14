@@ -254,13 +254,21 @@ jobs:
           );
           SQL
 
-      # drizzle-kit connects over plain TCP, so this one takes the direct URL
-      # and never the proxy. The guards under test are created HERE — a suite
-      # run against an unmigrated database would pass by proving nothing.
+      # NOT `pnpm db:migrate`: drizzle-kit picks its driver from what is
+      # installed, the only installed driver is `@neondatabase/serverless`,
+      # and its websocket never reaches a plain TCP Postgres. The HTTP proxy
+      # is no road either — its prepared statements take one command each,
+      # and the hand-written migrations are multi-command. So the versioned
+      # SQL files apply directly with psql, in journal order (their numeric
+      # prefixes), in autocommit because 0025 builds an index CONCURRENTLY.
+      # The guards under test are created HERE — a suite run against an
+      # unmigrated database would pass by proving nothing.
       - name: Apply migrations
-        run: pnpm db:migrate
-        env:
-          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/main"
+        run: |
+          for f in src/db/migrations/*.sql; do
+            echo "applying $f"
+            PGPASSWORD=postgres psql -h localhost -U postgres -d main -v ON_ERROR_STOP=1 -q -f "$f"
+          done
 
       # `test:live`, not `test`: the full suite also carries CORPUS tests
       # (`templates-live.test.ts`, `article-templates-live.test.ts`) that gate
@@ -273,9 +281,9 @@ jobs:
       - name: Run the live suites
         run: LIVE_DB_TESTS=1 pnpm test:live
         env:
-          # The neon-http client's SQL goes to the proxy; drizzle-kit's own
-          # connection (the migrate step above) goes straight to Postgres over
-          # TCP. Both are named explicitly — no hostname is being interpreted.
+          # The suites' SQL goes through the proxy; the migrate step above
+          # went straight to Postgres with psql. Both URLs are named
+          # explicitly; no hostname is being interpreted.
           NEON_HTTP_PROXY_URL: "http://localhost:4444/sql"
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/main"
           RESEND_API_KEY: "re_ci_placeholder"
