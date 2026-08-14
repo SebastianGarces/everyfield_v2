@@ -33,25 +33,25 @@
 // ONLY `collectBlocks` builds blocks. A list item, a blockquote and a table
 // cell are read out by `inlineRuns` as ONE LINE of text, so a callout reached
 // through one of them is not a block at all: its words join the line and its
-// box is lost. That is divergence 3 below, not a missing case here.
+// box is lost. That is divergence 2 below, not a missing case here.
 //
 // A callout that is itself a block but holds NO blocks — the one-line
 // `<Callout>text</Callout>`, which MDX compiles to a bare string child — is a
 // different thing and IS handled: `collectCallout` falls back to reading it as
 // one line of runs, so the frame, the type and the words all survive. Without
-// that fallback the whole callout vanished, which is worse than divergence 3
+// that fallback the whole callout vanished, which is worse than divergence 2
 // promises and is why the "callouts … all carry across" sentence in
 // `article-actions.tsx` was false.
 //
-// DIVERGENCES 2 AND 3 FROM THE PRINTED PAGE are owned here. The numbering is
+// DIVERGENCES 1 AND 2 FROM THE PRINTED PAGE are owned here. The numbering is
 // `article-actions.tsx`'s list, which is the ONE place that states how many
 // divergences there are — cite an item by number from here, never restate the
 // total, or two files can disagree about it.
 //
-//   2. `collectBlocks` has no `IMG` case, so an image falls to the recursive
+//   1. `collectBlocks` has no `IMG` case, so an image falls to the recursive
 //      default, has no children, and drops silently while the print stylesheet
 //      keeps it. Carrying it across means fetching and embedding the bytes.
-//   3. Nesting inside a list item, a blockquote or a table cell flattens, as
+//   2. Nesting inside a list item, a blockquote or a table cell flattens, as
 //      above. Unflattening means those three becoming block containers the way
 //      a callout is, which changes the block model rather than adding a case.
 // ============================================================================
@@ -276,7 +276,7 @@ function collectList(list: Element, out: PrintBlock[], depth: number): void {
  *
  * An empty callout is still not framed: a box drawn around nothing is a mark on
  * the page that the printed article does not have. The fallback preserves that,
- * and preserves divergence 2 with it — an image-only callout contributes no
+ * and preserves divergence 1 with it — an image-only callout contributes no
  * runs either, so it stays dropped rather than becoming an empty box.
  */
 function collectCallout(
@@ -297,6 +297,46 @@ function collectCallout(
 }
 
 /**
+ * Every `tr` this table owns — never one belonging to a table inside it.
+ *
+ * `querySelectorAll("tr")` is a DESCENDANT query, so a table nested in a cell
+ * handed its rows to the OUTER table as well: the same words arrived twice
+ * (once flattened into the cell, once as extra rows of their own) and the outer
+ * grid was padded out to the widest inner row. That is not what divergence 3
+ * promises — nesting FLATTENS, it does not duplicate — so the walk stops at a
+ * nested `TABLE` instead (#411).
+ *
+ * `thead`, `tbody` and `tfoot` are recursed through because the browser inserts
+ * a `tbody` whether or not the markup has one, so a table's rows are almost
+ * never its direct children.
+ *
+ * `data-print-hide` is honoured here as it is on the other two walks — this was
+ * the one place a marked element still reached the file, because the descendant
+ * query never looked at attributes. A hidden CELL is deliberately not dropped:
+ * removing one shifts every cell after it into the wrong column, and the
+ * printed page hides it in place.
+ */
+function ownRows(table: Element): Element[] {
+  const rows: Element[] = [];
+
+  const walk = (parent: Element): void => {
+    for (const child of Array.from(parent.children)) {
+      if (child.hasAttribute("data-print-hide")) continue;
+      if (child.tagName === "TR") {
+        rows.push(child);
+        continue;
+      }
+      // A nested table owns everything below it, including its own rows.
+      if (child.tagName === "TABLE") continue;
+      walk(child);
+    }
+  };
+
+  walk(table);
+  return rows;
+}
+
+/**
  * Collect a table as ONE block, with its rows intact.
  *
  * A header row is one whose cells are all `th` — which is how the MDX table
@@ -310,7 +350,7 @@ function collectCallout(
 function collectTable(table: Element, out: PrintBlock[]): void {
   const rows: PrintTableRow[] = [];
 
-  for (const row of Array.from(table.querySelectorAll("tr"))) {
+  for (const row of ownRows(table)) {
     const cellElements = Array.from(row.children);
     const cells = cellElements.map((cell) => inlineRuns(cell));
     if (!cells.some((cell) => runsText(cell).length > 0)) continue;

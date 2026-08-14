@@ -254,3 +254,24 @@ the product- and canon-shaping subset. Deferred implementations are pinned: migr
 | 410-2 | **Every person-creation path writes the `person_created` activity**, via the service. | Timelines agree regardless of which door a contact came in through. |
 | 410-3 | **The import preview never ships matched contacts' full records to the browser** — matches are `{id, displayName}` only. | PII of existing contacts stops round-tripping through client state (V2). |
 | 410-4 | **Creating a household with a head is one atomic action.** | The orphaned-empty-household state (second call fails) becomes impossible. |
+
+## 2026-08-13 — The /people status-badge colour scale (#429, prototypes on draft PR #431)
+
+Four directions were built as live prototypes behind the switcher and operated on a preview in
+both themes; Sebastian ruled from the bench rather than from prose.
+
+**The bench never merges, and its teardown is an OBLIGATION here, not a record.** As of this row
+draft PR #431 is still OPEN and `proto/429-status-badge-scale` still exists. When this
+implementation merges, that PR is closed UNMERGED, the branch is deleted (remote and local) and
+the `proto-429` worktree is removed. Until that happens the branch is not inert: it carries a
+commit that adds `proto-429-bench.tsx` to an exemption list inside
+`src/lib/invitations/resend.test.ts`, which disarms the repo-wide "no prototype scaffolding
+survives the ruling" guard for exactly the 609 lines of bench sitting next to it. Merging #431
+would land the scaffolding AND the guard that was supposed to catch it, so #431 is never merged —
+only closed.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 429 | **The person-status badges adopt direction B — "tinted editorial".** Each status that carries colour paints ONE hue three ways — pale ground, deep same-hue ink, hairline same-hue border — and the dark theme mirrors it (deep ground, pale ink). Worst measured pair 6.64:1 light / 7.31:1 dark, against the 1.91:1 the raw 500-level fills shipped. Rejected: A (darkened solids — reads heavy at list density), C (neutral badge + colour dot — status stops being scannable across a long list), D (one green funnel ramp — spends the brand green everywhere and puts the ruled danger red on non-bad news). | `STATUS_BADGE_CONFIG` (`src/lib/people/status-colors.ts`) spells six classes per tinted status on `variant="outline"`, with no hover fill. The deferral ledger `DEFERRED_STATUS_BADGE_FILLS` is DELETED rather than emptied: `status-badge-scale.test.ts` (its own suite — the scale's colours come from Tailwind's palette and `badge.tsx`, not the token layer) requires AA of all fourteen status/theme pairs and pins the shape (six classes, one hue, the mirror measured by luminance). Lighthouse's `color-contrast` audit stops flagging the badge nodes on `/people`. |
+| 429 (a) | **Prospect stays neutral** — the pipeline's zero keeps the token-backed `secondary` variant and declares no colour of its own. | Part of B as ruled, so a later "complete the set" tint is a change to the ruling, not a polish pass. Pinned by name in the suite. |
+| 429 (b) | **Attendee and Launch Team stay on ONE hue, separated by tint level** (blue 50/200 against 100/300, mirrored) — the hue split was offered in the decision comment and declined. | The two adjacent pipeline rungs read as one family told apart by weight. Splitting them onto different hues needs a new ruling; the suite fails with that sentence if a commit tries. |

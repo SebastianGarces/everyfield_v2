@@ -1,255 +1,73 @@
-import { eq, and, isNull, asc } from "drizzle-orm";
-import { db } from "@/db";
-import {
-  wikiArticles,
-  wikiSections,
-  type WikiArticle,
-  type NewWikiArticle,
-  type WikiSection,
-  type NewWikiSection,
-} from "@/db/schema";
 import { revalidatePath } from "next/cache";
-import { cache } from "react";
 
 // ============================================================================
 // Article Queries
 // ============================================================================
 
-/** The minimum an article needs to be linked to: where it lives and its name. */
-export interface WikiArticleRef {
-  slug: string;
-  title: string;
-}
-
-/**
- * Slug → title index of every published global article.
- *
- * Deliberately projects only `slug` + `title` (no `content`), so callers that
- * merely need to know whether a slug resolves — e.g. Plant Intelligence
- * insights linking to the methodology that backs them, PE-024 — can check
- * without pulling the corpus body. Deduped per request with `React.cache`, so
- * rendering many insight cards costs one query, not one per card.
- */
-export const getPublishedArticleRefs = cache(
-  async (): Promise<WikiArticleRef[]> => {
-    return db
-      .select({ slug: wikiArticles.slug, title: wikiArticles.title })
-      .from(wikiArticles)
-      .where(
-        and(isNull(wikiArticles.churchId), eq(wikiArticles.status, "published"))
-      )
-      .orderBy(asc(wikiArticles.sortOrder));
-  }
-);
-
-/**
- * Get a single article by slug
- * For global articles, churchId should be null
- */
-export async function getArticleBySlug(
-  slug: string,
-  churchId: string | null = null
-): Promise<WikiArticle | null> {
-  const conditions = churchId
-    ? and(eq(wikiArticles.slug, slug), eq(wikiArticles.churchId, churchId))
-    : and(eq(wikiArticles.slug, slug), isNull(wikiArticles.churchId));
-
-  const result = await db
-    .select()
-    .from(wikiArticles)
-    .where(and(conditions, eq(wikiArticles.status, "published")))
-    .limit(1);
-
-  return result[0] ?? null;
-}
-
-/**
- * Get all published articles (navigation, section indexes, search)
- * Returns only global articles (churchId = null)
- */
-export async function getAllPublishedArticles(): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(isNull(wikiArticles.churchId), eq(wikiArticles.status, "published"))
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
-
-/**
- * Get articles by section
- */
-export async function getArticlesBySection(
-  sectionId: string
-): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(
-        eq(wikiArticles.sectionId, sectionId),
-        eq(wikiArticles.status, "published")
-      )
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
-
-/**
- * Get articles by phase
- */
-export async function getArticlesByPhase(
-  phase: number
-): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(
-        eq(wikiArticles.phase, phase),
-        eq(wikiArticles.status, "published"),
-        isNull(wikiArticles.churchId)
-      )
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
+// FIVE article reads used to live here, and none of them is a read this module
+// should ever have held.
+//
+// `getPublishedArticleRefs` — the PE-024 slug index, and the only one of the
+// five with a live caller — was hardcoded to `church_id IS NULL`. Global-only
+// looks like the fail-closed default the wiki uses everywhere else, and here it
+// was not: the card resolves a stored slug to a TITLE and links to
+// `/wiki/<slug>`, which the detail route resolves through `articleBySlugQuery`
+// and answers with the church's own row when it has one. So a church that
+// overrides a global slug was shown the global title on a link that opened its
+// own article — the two-documents mismatch #411 exists to close. It now lives in
+// `get-articles.ts` carrying `visibleToChurch` + `notOverriddenByChurch`
+// + the published filter, takes the reader's church, and is asserted by the
+// `readerFacingReads()` loop in `tenancy.test.ts` (#411 round 6).
+//
+// Four more went with #411 and simply died — `getArticleBySlug`,
+// `getAllPublishedArticles`, `getArticlesBySection`, `getArticlesByPhase`.
+// All four were dead repo-wide, and none carried the reader-facing tenancy
+// pair (`visibleToChurch` + `notOverriddenByChurch`); `getArticlesBySection`
+// had no church predicate at all. Left in place they were a barrel export that
+// handed the next caller a cross-tenant read, and they sat outside the
+// `readerFacingReads()` list in `tenancy.test.ts` that is supposed to cover
+// EVERY reader-facing read — so the test's name was broader than its reach.
+// Deleted with #411 rather than predicated, because nothing wanted them.
+//
+// A reader-facing article read belongs in `get-articles.ts`, where the three
+// predicates that must travel together are declared, and it must be added to
+// `readerFacingReads()` so the tenancy loop asserts it.
 
 // ============================================================================
-// Article Mutations
+// Article and Section Mutations
 // ============================================================================
 
-/**
- * Create a new article
- */
-export async function createArticle(
-  data: NewWikiArticle
-): Promise<WikiArticle> {
-  const result = await db.insert(wikiArticles).values(data).returning();
-  return result[0];
-}
-
-/**
- * Update an existing article
- */
-export async function updateArticle(
-  id: string,
-  data: Partial<NewWikiArticle>
-): Promise<WikiArticle | null> {
-  const result = await db
-    .update(wikiArticles)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(wikiArticles.id, id))
-    .returning();
-
-  return result[0] ?? null;
-}
-
-/**
- * Delete an article (soft delete by setting status to archived)
- */
-export async function archiveArticle(id: string): Promise<WikiArticle | null> {
-  const result = await db
-    .update(wikiArticles)
-    .set({ status: "archived", updatedAt: new Date() })
-    .where(eq(wikiArticles.id, id))
-    .returning();
-
-  return result[0] ?? null;
-}
-
-/**
- * Hard delete an article (use with caution)
- */
-export async function deleteArticle(id: string): Promise<void> {
-  await db.delete(wikiArticles).where(eq(wikiArticles.id, id));
-}
-
-// ============================================================================
-// Section Queries
-// ============================================================================
-
-/**
- * Get all sections
- */
-export async function getAllSections(): Promise<WikiSection[]> {
-  return db.select().from(wikiSections).orderBy(asc(wikiSections.sortOrder));
-}
-
-/**
- * Get a section by slug
- */
-export async function getSectionBySlug(
-  slug: string
-): Promise<WikiSection | null> {
-  const result = await db
-    .select()
-    .from(wikiSections)
-    .where(eq(wikiSections.slug, slug))
-    .limit(1);
-
-  return result[0] ?? null;
-}
-
-/**
- * Get child sections of a parent
- */
-export async function getChildSections(
-  parentSectionId: string
-): Promise<WikiSection[]> {
-  return db
-    .select()
-    .from(wikiSections)
-    .where(eq(wikiSections.parentSectionId, parentSectionId))
-    .orderBy(asc(wikiSections.sortOrder));
-}
-
-/**
- * Get root sections (no parent)
- */
-export async function getRootSections(): Promise<WikiSection[]> {
-  return db
-    .select()
-    .from(wikiSections)
-    .where(isNull(wikiSections.parentSectionId))
-    .orderBy(asc(wikiSections.sortOrder));
-}
-
-// ============================================================================
-// Section Mutations
-// ============================================================================
-
-/**
- * Create a new section
- */
-export async function createSection(
-  data: NewWikiSection
-): Promise<WikiSection> {
-  const result = await db.insert(wikiSections).values(data).returning();
-  return result[0];
-}
-
-/**
- * Update an existing section
- */
-export async function updateSection(
-  id: string,
-  data: Partial<NewWikiSection>
-): Promise<WikiSection | null> {
-  const result = await db
-    .update(wikiSections)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(wikiSections.id, id))
-    .returning();
-
-  return result[0] ?? null;
-}
-
-/**
- * Delete a section
- */
-export async function deleteSection(id: string): Promise<void> {
-  await db.delete(wikiSections).where(eq(wikiSections.id, id));
-}
+// ELEVEN of them used to live here, and the rule the reads above were deleted
+// under is the same rule, applied late: an export nothing calls is not dead
+// code, it is a barrel export waiting for its first caller. `index.ts` does
+// `export * from "./service"`, so `@/lib/wiki` handed every one of them out.
+//
+// Gone with #411 (quality round 1): `createArticle`, `updateArticle`,
+// `archiveArticle`, `deleteArticle`, `getAllSections`, `getSectionBySlug`,
+// `getChildSections`, `getRootSections`, `createSection`, `updateSection`,
+// `deleteSection` — all zero-caller repo-wide, none named by any test.
+//
+// Three of them carried the defects this workstream had just removed one screen
+// above:
+//
+//   - `updateArticle` and `updateSection` did `.set({ ...data, updatedAt })`
+//     over a caller-supplied `Partial<New…>` — the mass-assignment shape round 5
+//     removed from `progressUpsertQuery` (`write-queries.ts`), here reaching
+//     EVERY column, `church_id` and `status` included.
+//   - `createArticle` inserted whatever `churchId` the caller passed: no
+//     session, no tenancy predicate, in a domain whose invariant says the
+//     application layer IS the boundary (`memory/invariants.md` →
+//     Multi-Tenancy).
+//
+// They were not predicated instead of deleted, for the reason the four dead
+// reads were not: nothing wants them, and predicating dead code doubles the
+// tenancy surface a reviewer has to hold. An admin write surface will bring its
+// own, session-scoped, with the church stamped from the actor rather than taken
+// as an argument.
+//
+// `service.test.ts` pins the ABSENCE — this module reaches no database at all
+// now — so a write cannot quietly come back here instead of arriving with the
+// surface that needs it.
 
 // ============================================================================
 // Revalidation Helpers
@@ -327,22 +145,18 @@ export function wikiRevalidationPath(slug: string): string {
 }
 
 /**
- * Revalidate a specific article page
+ * Revalidate a specific article page.
+ *
+ * The one wrapper that survives, because it is the only place the two halves of
+ * the rule above are put together: the builder and the `revalidatePath` call.
+ * `service.test.ts` pins its body character for character, which is what stops
+ * the href form being handed to `revalidatePath` again — that assertion reads
+ * the SOURCE, comments included, so do not spell the forbidden call here.
+ *
+ * `revalidateWikiIndex()` and `revalidateAllWiki()` sat beside it with no
+ * caller anywhere and were deleted with the mutations above (#411): they wrapped
+ * a literal string, so re-adding one costs a line at the site that needs it.
  */
 export function revalidateArticle(slug: string): void {
   revalidatePath(wikiRevalidationPath(slug));
-}
-
-/**
- * Revalidate the wiki index and navigation
- */
-export function revalidateWikiIndex(): void {
-  revalidatePath("/wiki");
-}
-
-/**
- * Revalidate all wiki pages (use sparingly)
- */
-export function revalidateAllWiki(): void {
-  revalidatePath("/wiki", "layout");
 }

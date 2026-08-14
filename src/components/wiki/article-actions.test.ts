@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
 
+import { PDF_FONT, PDF_FONT_BASE_PATH } from "@/lib/documents/pdf/fonts";
+
 import { PRINT_BODY_SELECTOR, pdfFileName } from "./article-actions";
 import {
   PRINT_CALLOUT_ATTRIBUTE,
@@ -67,9 +69,21 @@ const PDF_RENDER = readFileSync(
   path.join(SRC, "components", "wiki", "article-pdf", "render.tsx"),
   "utf-8"
 );
+const PDF_FONTS = readFileSync(
+  path.join(SRC, "lib", "documents", "pdf", "fonts.ts"),
+  "utf-8"
+);
 
-/** Every file the download path is spread over, for "this shape is absent". */
-const PDF_SOURCE = [ARTICLE_ACTIONS, PDF_EXTRACT, PDF_RENDER].join("\n");
+/**
+ * Every file the download path is spread over, for "this shape is absent".
+ *
+ * `fonts.ts` joined the path with #398 and belongs here for the same reason
+ * `render.tsx` does: it is imported STATICALLY from the click path, so a static
+ * `@react-pdf/renderer` import over there would reach the bundle just the same.
+ */
+const PDF_SOURCE = [ARTICLE_ACTIONS, PDF_EXTRACT, PDF_RENDER, PDF_FONTS].join(
+  "\n"
+);
 
 /** Everything inside the one `@media print` block. */
 const printBlock = (() => {
@@ -184,8 +198,8 @@ describe("the print contract, across every file that holds a piece of it", () =>
     );
 
     // Each of the three distinctions this corpus makes resolves to its own
-    // face, and a plain run to none — which is what "emphasized" can mean in a
-    // document that carries no font asset.
+    // face, and a plain run to none — which is what "emphasized" means in a
+    // document whose faces are single-source families.
     assert.deepEqual(
       {
         bold: runFontFamily({ text: "x", bold: true }),
@@ -194,15 +208,15 @@ describe("the print contract, across every file that holds a piece of it", () =>
         plain: runFontFamily({ text: "x" }),
       },
       {
-        bold: "Helvetica-Bold",
-        italic: "Helvetica-Oblique",
-        mono: "Courier",
+        bold: PDF_FONT.bold,
+        italic: PDF_FONT.italic,
+        mono: PDF_FONT.mono,
         plain: undefined,
       }
     );
     assert.equal(
       runFontFamily({ text: "x", italic: true }, true),
-      "Helvetica-BoldOblique",
+      PDF_FONT.boldItalic,
       "an italic word in a bold heading keeps both"
     );
   });
@@ -223,7 +237,6 @@ describe("the print contract, across every file that holds a piece of it", () =>
       ARTICLE_ACTIONS.includes("THREE KNOWN DIVERGENCES"),
       "the divergence count must match the list below it"
     );
-    assert.ok(ARTICLE_ACTIONS.includes("#398"), "the arrow gap is named");
     assert.ok(
       /Images print and do not download/.test(ARTICLE_ACTIONS),
       "the image gap is named"
@@ -234,12 +247,16 @@ describe("the print contract, across every file that holds a piece of it", () =>
       ),
       "the nesting gap is named"
     );
+    assert.ok(
+      /An ITALIC inline-code run holding/.test(ARTICLE_ACTIONS),
+      "the italic inline-code gap is named"
+    );
   });
 
   test("an image is dropped from the PDF, as the comment now says", () => {
     // The print stylesheet keeps `img`; the extractor has no IMG case, so the
     // image falls to the recursive default and contributes nothing. This test
-    // is what makes divergence 2 a documented fact rather than a surprise.
+    // is what makes divergence 1 a documented fact rather than a surprise.
     assert.match(printBlock, /\[data-print-root\] img \{/);
 
     const blocks = extractPrintBlocks(
@@ -297,7 +314,7 @@ describe("the print contract, across every file that holds a piece of it", () =>
     // share a line to a BARE STRING child — no `<p>` — so the extractor's block
     // walk, which reads `children` and therefore elements only, found nothing
     // inside and dropped the entire callout: box, type and sentence. That is
-    // strictly worse than divergence 3 promises ("keeps its words and loses its
+    // strictly worse than divergence 2 promises ("keeps its words and loses its
     // box"), and no divergence covered it.
     //
     // Pinned end to end, the way the image gap is pinned, because the two halves
@@ -355,7 +372,7 @@ describe("the print contract, across every file that holds a piece of it", () =>
     assert.match(printBlock, /\[data-print-hide\]\s*\{\s*display:\s*none/);
   });
 
-  test("a callout nested in a list item flattens, as divergence 3 says", () => {
+  test("a callout nested in a list item flattens, as divergence 2 says", () => {
     // Pinned beside the image gap, for the same reason: a limitation nobody
     // asserts is a limitation nobody notices has changed. `inlineRuns` reads a
     // list item, a blockquote and a table cell as ONE LINE, so a callout inside
@@ -437,6 +454,39 @@ describe("the download control", () => {
     assert.match(
       ARTICLE_ACTIONS,
       /await import\(\s*"@react-pdf\/renderer"\s*\)/
+    );
+  });
+
+  test("the Unicode faces are registered before the file is built", () => {
+    // #398. `pdfStyles` names families that only exist once they are
+    // registered, so a download that skipped this step would not corrupt an
+    // arrow — it would throw "Font family not registered" and hand the reader
+    // a toast. The ORDER is what the assertion is about.
+    assert.match(
+      ARTICLE_ACTIONS,
+      /await registerPdfFonts\(Font, fetchFontFile\)/
+    );
+    assert.ok(
+      ARTICLE_ACTIONS.indexOf("registerPdfFonts(Font") <
+        ARTICLE_ACTIONS.indexOf("pdf(document_)"),
+      "the faces have to resolve before layout runs"
+    );
+  });
+
+  test("the font is fetched from the app's own origin, not a font host", () => {
+    // The renderer runs in the READER'S browser, so an absolute URL here would
+    // be a request to a third party on every download.
+    assert.equal(PDF_FONT_BASE_PATH, "/fonts");
+    assert.match(
+      ARTICLE_ACTIONS,
+      /fetch\(`\$\{PDF_FONT_BASE_PATH\}\/\$\{file\}`/,
+      "the face URL must stay relative"
+    );
+    assert.ok(
+      !/https?:\/\//.test(
+        ARTICLE_ACTIONS.slice(ARTICLE_ACTIONS.indexOf("fetchFontFile"))
+      ),
+      "no off-origin font host below the loader"
     );
   });
 

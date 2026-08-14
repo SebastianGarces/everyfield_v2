@@ -10,6 +10,13 @@ import { test } from "node:test";
 // going stale again — which is exactly the regression #310 exists to prevent.
 import { decodePathParams } from "next/dist/server/lib/router-utils/decode-path-params";
 
+import {
+  codeOf,
+  functionBodies,
+  staticValueSpecifiers,
+  valueExportStatements,
+} from "@/lib/auth/server-action-surface";
+
 import { wikiHref } from "./href";
 import { wikiRevalidationPath } from "./service";
 
@@ -193,5 +200,69 @@ test("revalidateArticle passes the revalidation form", () => {
   assert.match(
     source,
     /export function revalidateArticle\(slug: string\): void \{\s*revalidatePath\(wikiRevalidationPath\(slug\)\);/
+  );
+});
+
+// ----------------------------------------------------------------------------
+// What this module is ALLOWED to hold (#411, quality round 1).
+//
+// Round 5 deleted four dead reads from `service.ts` and wrote the rule into the
+// file it emptied: a zero-caller export of a DB statement is not dead code, it
+// is a barrel export (`index.ts` does `export * from "./service"`) handing the
+// next caller an un-predicated read. The rule was then applied to the reads and
+// stopped — thirteen exports below the deletion had no caller repo-wide, and
+// three carried exactly the defects the workstream had just removed one screen
+// above: `updateArticle`/`updateSection` spread a caller-supplied object into a
+// `.set()` (mass assignment over every column, `church_id` included) and
+// `createArticle` inserted a caller-named `churchId` with no session behind it.
+//
+// They are gone. What is pinned here is the PROPERTY rather than those names: a
+// module holding no database edge cannot regrow an un-predicated read or an
+// untenanted write, whatever the next one is called. Its two survivors are the
+// `revalidatePath` form and the one wrapper that applies it.
+// ----------------------------------------------------------------------------
+
+/** `db.select(` / `db.insert(` / `db.update(` / `db.delete(`. */
+const DB_STATEMENT = /\bdb\s*\.\s*(?:select|insert|update|delete)\s*\(/;
+
+test("service.ts reaches no database, so no read or write can regrow here", () => {
+  // CODE, not source: the header explains the rule by naming the shapes it
+  // forbids, and `codeOf` is the repo's comment stripper.
+  const file = path.join(process.cwd(), "src/lib/wiki/service.ts");
+  const code = codeOf(file);
+
+  assert.deepEqual(
+    staticValueSpecifiers(code).filter((specifier) =>
+      specifier.startsWith("@/db")
+    ),
+    [],
+    "service.ts imports the schema or the client again — a reader-facing read belongs in get-articles.ts carrying the tenancy pair, and a write belongs with the session-scoped surface that calls it (#411)"
+  );
+  assert.doesNotMatch(
+    code,
+    DB_STATEMENT,
+    "service.ts builds a database statement — the barrel re-exports this module, so an export of it is handed to the next caller un-predicated (#411)"
+  );
+});
+
+test("service.ts exports the revalidation form and its one wrapper, nothing else", () => {
+  const code = codeOf(path.join(process.cwd(), "src/lib/wiki/service.ts"));
+
+  assert.deepEqual(
+    functionBodies(code)
+      .filter((fn) => fn.exported)
+      .map((fn) => fn.name)
+      .sort(),
+    ["revalidateArticle", "wikiRevalidationPath"],
+    "an export joined service.ts — every one of them is re-exported by `@/lib/wiki`, so it must be something a caller asked for rather than a companion that reads well (#411)"
+  );
+
+  // `functionBodies` reads `function` DECLARATIONS only, so a value binding or a
+  // re-export would be invisible to the list above — the same blind spot
+  // `write-paths.test.ts` closes for the two `"use server"` modules.
+  assert.deepEqual(
+    valueExportStatements(code),
+    [],
+    "service.ts publishes an export the walk above cannot read, so the export list it asserts is not the module's export list (#411)"
   );
 });

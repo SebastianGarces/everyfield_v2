@@ -4,7 +4,7 @@ Why and how, for the Design Tokens rules in [`../invariants.md`](../invariants.m
 
 **Applies to:** `src/app/globals.css` (the token layer), `src/lib/testing/theme-color.ts` (the shared colour math and token reader), `DESIGN.md` (the design authority the identity guards read), and every stylesheet under `src/app/`.
 
-**Pinned by:** three suites, one subject each — `src/app/theme-tokens.test.ts` (token identity, token-on-surface contrast), `src/app/focus-ring.test.ts` (the focus indicator, SC 1.4.11 rather than AA), `src/app/text-contrast.test.ts` (what SHIPS: `.tsx` markup and the other stylesheets).
+**Pinned by:** four suites, one subject each — `src/app/theme-tokens.test.ts` (token identity, token-on-surface contrast), `src/app/focus-ring.test.ts` (the focus indicator, SC 1.4.11 rather than AA), `src/app/text-contrast.test.ts` (what SHIPS: `.tsx` markup and the other stylesheets), `src/app/status-badge-scale.test.ts` (the #429 person-status badge scale, whose colours come from Tailwind's own palette and `badge.tsx` rather than from any token — the one suite of the four that reads the people domain).
 
 ## Where a number is allowed to live
 
@@ -73,13 +73,33 @@ Both are recorded rather than decided, because both are design rulings and not a
 1. **`--destructive` headroom.** The AA limit on `--muted` at the ruled colour's chroma and hue is L 0.5432; DESIGN.md's `danger` is L 0.5354. The headroom is 0.008 of lightness, where `--muted-foreground` deliberately keeps a real step. It is thin because the colour is RULED, not chosen — buying a step means darkening below DESIGN.md.
 2. **`bg-destructive/10 text-destructive`.** Twelve shipped call sites (eleven error banners plus `ui/dropdown-menu.tsx`, which focuses to `/10` light and `dark:/20` dark). The tint is made from the token it carries, so ink and backdrop darken together and NO token value fixes it. The remedy is a solid ground (`csf-scorecard.tsx` sets the precedent) or a text-on-tint role token.
 
-3. **The person-status badges.** `src/lib/people/status-colors.ts` paints six of the seven statuses with RAW Tailwind palette classes — `bg-yellow-500`, `bg-emerald-600`, `bg-purple-500` — over whichever label the Badge variant supplies. That is the per-component colour override this document's first rule forbids, and eight of the twelve status/theme pairs fail AA. The worst is `following_up` at **1.91:1** (`bg-yellow-500 text-white`); Lighthouse's `/people` run at f511478 flags these fills among the 24 nodes of its `color-contrast` audit (one pre-existing `text-foreground/60` control is in there too, and `heading-order` also fails — both pre-existing at base `2459155`). WHICH colours the status scale uses is a design ruling — the remedy is token-backed status colours, or darker fills chosen from the ruled palette.
+3. ~~**The person-status badges.**~~ **RESOLVED by #429** — see the section below. It was the third DECISION #411 carried out: the badges painted raw 500-level fills under whichever label the Badge variant supplied, and eight of the twelve status/theme pairs failed AA (worst `following_up` at **1.91:1**, `bg-yellow-500 text-white`). WHICH colours the scale uses was a design ruling, so #411 measured it and deferred the remedy; #429 ruled the remedy and the deferral is gone.
 
 What is not deferred is MEASURING it. `theme-tokens.test.ts` reads every shipped tint out of the markup, checks it on all eight surfaces, and holds the failing ones to their exact number in `DEFERRED_DESTRUCTIVE_TINTS` — with an INVERTED assertion, so a deferred entry that starts passing fails the suite too and the ledger only holds what is genuinely still open. A new call site, a new alpha or a token move fails loudly instead of passing quietly.
 
-`DEFERRED_STATUS_BADGE_FILLS` is the same ledger, one layer out, and it had to solve one extra problem: `bg-yellow-500` is not a token, so nothing in `globals.css` can say what it paints. The number is still not typed anywhere — `readPaletteColour()` reads Tailwind's own `node_modules/tailwindcss/theme.css`, the stylesheet the build compiles from, and the label comes out of `badge.tsx`'s variant. The colour math re-derives the browser's rasterised hexes exactly (`#f0b100`, `#2b7fff`, `#009966`, `#ad46ff`, `#155dfc`), which is what makes a repo-level guard a substitute for the preview measurement rather than a proxy for it.
+## The status badges: the ruled scale, and why the ledger is gone (#429)
 
-This one was found in a browser, not by the suite, and that is the finding as much as the ratio is. The #411 sweep shipped three repo-wide guards over shipped markup and all three were shaped to the tokens — a 1.91:1 fill sat outside every one of them because it was outside the token layer entirely. A suite that stops where its token stops passing is the pre-#341 defect reproduced one token over.
+Sebastian ruled **direction B, "tinted editorial"** on 2026-08-13, from four directions built as live prototypes and operated on a preview (draft PR #431 — the bench never merges: that PR is closed UNMERGED and `proto/429-status-badge-scale` deleted when this implementation lands, and until then it is an open PR carrying a commit that exempts the bench from the repo-wide anti-scaffolding guard, so it is never merged). Every status that carries colour paints ONE hue three ways — **pale ground, deep ink, hairline border** — and the dark theme **mirrors** it: deep ground, pale ink. Two parts of the ruling are named exceptions and are pinned as such:
+
+- **Prospect stays neutral.** It is the pipeline's zero, so it keeps the token-backed `secondary` variant and declares no colour of its own.
+- **Attendee and Launch Team stay on ONE hue**, separated by tint LEVEL (blue 50/200 against 100/300, mirrored). The ruling was explicitly offered the hue split and declined it. Splitting them is a new ruling, not a commit.
+
+The badges carry `variant="outline"` — the variant whose only colours are `border-border` and `text-foreground`, both overridden here, so exactly one ground, one ink and one border reach the DOM through `cn()`. There is no hover fill: a badge is not a control, and a tint that darkens under the pointer claims it is.
+
+**The guard is its own suite: `src/app/status-badge-scale.test.ts`.** It is the fourth sibling in the "one subject each" set at the top of this file, and it is separate for the reason the other three are: a different subject with a different source of truth. The other three resolve every colour from `globals.css` and DESIGN.md; this one resolves them from Tailwind's own palette and from `badge.tsx`, and it is the only one that reads the people domain (`STATUS_BADGE_CONFIG`, `STATUS_LABELS`) — an import a TOKEN suite has no business carrying, and one that needed a comment explaining itself for as long as it lived there.
+
+**`DEFERRED_STATUS_BADGE_FILLS` is deleted, not emptied.** The ledger existed because the remedy was a ruling nobody had made; the ruling is made, so the suite requires AA of ALL FOURTEEN status/theme pairs — Prospect included, its neutral variant now RESOLVED rather than skipped. Do not re-introduce the list. A scale that cannot clear 4.5:1 is a ruling to reopen, and a deferral list is exactly what turns "this fails AA" into a line somebody adds instead of a decision somebody makes.
+
+The reading machinery survives the ruling and is worth keeping in mind, because `bg-blue-50` is still not a token and nothing in `globals.css` can say what it paints. No number is typed anywhere: `readPaletteColour()` reads Tailwind's own `node_modules/tailwindcss/theme.css` — the stylesheet the build compiles from — and the neutral fallback comes out of `badge.tsx`'s own variant. The colour math re-derives the browser's rasterised hexes exactly, which is what makes a repo-level guard a substitute for the preview measurement rather than a proxy for it.
+
+The guard now pins the SHAPE as well as the ratio, because AA alone does not describe direction B and the next author reads the test:
+
+- six classes per tinted status — ground, ink and border, stated in BOTH themes. A missing `dark:` twin inherits the light value, which is the `--ef-dark` trap one layer out (ink on ink), so it fails naming the missing half.
+- one hue family across all six.
+- the mirror asserted by MEASURED luminance, never by the step numbers: light ground lighter than light ink, dark ground darker than dark ink, dark ground darker than light ground.
+- the two named exceptions, each with the ruling in the failure message.
+
+The original defect is still the lesson. It was found in a browser, not by the suite: the #411 sweep shipped three repo-wide guards over shipped markup and all three were shaped to the tokens, so a 1.91:1 fill sat outside every one of them by sitting outside the token layer entirely. A suite that stops where its token stops passing is the pre-#341 defect reproduced one token over.
 
 ## Why `src/lib/testing/` is not scanned by the markup walk
 
