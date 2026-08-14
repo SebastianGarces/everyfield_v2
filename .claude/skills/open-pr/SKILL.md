@@ -152,7 +152,7 @@ mechanism.
 **Known limitations / deliberate cuts**
 - <scope explicitly excluded, so it does not read as a bug>
 
-<details><summary>Schema diff (high-risk only)</summary>
+<details><summary>Schema diff — the exact DDL delta (HR3: whenever the diff carries a migration, ANY risk tier)</summary>
 
 ```sql
 <DDL delta>
@@ -170,6 +170,14 @@ mechanism.
 - **The PR carries `agent:in-review` too**, not just the issue — `--label agent:in-review` on
   `gh pr create`, verified with `gh pr view <number> --json labels`.
 - **Never open a PR without the evidence table.** The table is the contract with the reviewer.
+- **If the diff carries a migration, the DDL delta goes in the body — at ANY risk tier.** That is
+  HR3, and its trigger is the diff, not the label (`ops/agent-os/dod.md`, "Migration proofs and
+  high-risk units"; RULED 2026-08-13, #435, which narrowed `risk:high` to auth/tenancy/payments).
+  This skill is the only writer of the PR body, so the `Schema diff` block is where HR3 actually
+  lands: gate it on the label and a `risk:medium` migration track — now unattended-dispatchable and
+  auto-mergeable — merges DDL no reviewer was ever shown. Compute the trigger, do not recall it:
+  `git diff --name-only $(git merge-base main HEAD)...HEAD -- src/db/migrations/`. Non-empty ⇒ the
+  block is mandatory. Empty ⇒ drop the block rather than shipping it with a placeholder inside.
 - **Never open a PR without the Manual QA section**, and never let it restate the acceptance criteria.
   G3 already proved the ACs; repeating them wastes the one scarce resource in this system, which is
   human attention. The section earns its place only by naming what the automation *cannot* judge —

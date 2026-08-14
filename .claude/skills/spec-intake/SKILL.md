@@ -82,7 +82,7 @@ up on the board (`product-docs/board-design-2026-07.md` §13).
 ## Validation plan
 - Lane: frontend | backend | fullstack
 - G3 method: validate-frontend (flows: …) | validate-backend (routes: …)
-- Extra (high-risk): migration dry-run + rollback + schema diff
+- Extra (HR1–HR3 — owed whenever the diff carries a migration, at ANY risk tier; RULED 2026-08-13, #435): migration dry-run + rollback + the DDL delta in the PR body
 
 ## Risk
 low | medium | high   <!-- high → label risk:high -->

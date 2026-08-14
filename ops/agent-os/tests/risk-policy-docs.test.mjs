@@ -20,6 +20,22 @@
 // suite reported the ruling applied. It WALKS `.claude/`, `ops/` and
 // `product-docs/` and fails on any file that still spells it the old way.
 //
+// THE RULING HAS TWO HALVES, AND THE SWEEP OWES A FORM FOR EACH.
+//   1. CLASSIFICATION — "schema ⇒ `risk:high`". Retired.
+//   2. PROOF KEYING   — "the migration proofs ⇒ high-risk". Also retired: the
+//      proofs re-key onto the diff, at any tier.
+// Only half 1 had forms at first, so the sweep reported the ruling fully
+// applied while `open-pr`'s PR-body template still said `Schema diff
+// (high-risk only)` and `spec-intake`'s issue template still said
+// `Extra (high-risk): migration dry-run + rollback + schema diff` — twelve
+// lines below the paragraph that repeals it. That pairing is the dangerous
+// one, not a cosmetic one: half 1 makes a migration track `risk:medium`
+// (unattended-dispatchable, auto-mergeable, no HR4), which removes every human
+// checkpoint EXCEPT the PR body — and half 2, left unapplied, is what hides the
+// DDL from that body. `open-pr` is the only writer of the PR body, so it is
+// where HR3 actually lands or does not. Both halves now carry forms, and a new
+// spelling is added to the form list rather than fixed only where it was found.
+//
 // Exactly one live exemption, and it is a record rather than a rule:
 //   product-docs/board-design-2026-07.md — a DATED design record of what the
 //   board looked like in July 2026. Rewriting it would falsify the record, so
@@ -32,6 +48,27 @@
 // them (the same exemption `memory/` takes). Both exemptions are asserted to
 // still MATCH, so a rename or a rewrite fails the test instead of silently
 // exempting nothing.
+//
+// WHY THIS TRACK'S DIFF IS WIDER THAN ITS DECLARED FILE LIST. #435 declared
+// seven likely files, guessed at intake the way `spec-intake` step 4 asks. The
+// diff is eighteen. That gap is a property of the work, not a slip: applying a
+// ruling touches every file that STATES it, and only the sweep knows which
+// files those are — a list guessed by reading cannot be the answer to a
+// question only a walk of the tree can ask. Each extra file is load-bearing and
+// the claim is checkable one file at a time:
+//
+//   git show <base>:<file> > <file> && npx tsx --test ops/agent-os/tests/risk-policy-docs.test.mjs
+//
+// Reverting any of the nine — definition-of-done, grilling, validate-backend,
+// frd-plan.js, verify-and-ship.js, ops README.md, workflow.md, the onboarding
+// FRD, open-pr — turns this suite RED, because each states or routes to the
+// rule. The tenth, board-design-2026-07.md, is the one exception: reverting it
+// keeps the suite green, because it is the exempt dated record and its edit is
+// the §12 superseding note, which is a courtesy to a reader dispatch sends
+// there, not a pin. Anyone shrinking this diff should start (and end) there.
+//
+// The lesson for the next mechanical-amendment issue: declare the SWEEP, not a
+// file list. The files are its output.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,6 +83,7 @@ const DISPATCH = ".claude/skills/dispatch/SKILL.md";
 const GRILLING = ".claude/skills/grilling/SKILL.md";
 const DOD_SKILL = ".claude/skills/definition-of-done/SKILL.md";
 const VALIDATE_BACKEND = ".claude/skills/validate-backend/SKILL.md";
+const OPEN_PR = ".claude/skills/open-pr/SKILL.md";
 const DELEGATION = "ops/agent-os/delegation-rules.md";
 const FRD_PLAN = ".claude/workflows/frd-plan.js";
 const VERIFY_AND_SHIP = ".claude/workflows/verify-and-ship.js";
@@ -67,10 +105,17 @@ const RULE_SITES = [SPEC_INTAKE, LABELS, DOD];
 // it states the classification to the user it is interviewing, so it routes to
 // the rule as surely as spec-intake does, and the negative sweep below can only
 // forbid the retired form — it cannot require the citation.
+// `open-pr` belongs here for the same reason `validate-backend` does: it is not
+// a doc about the rule, it is a gate that ACTS on it. HR3 is "the exact DDL
+// delta in the PR body", and this skill writes every PR body the loop produces
+// (`verify-and-ship.js` hands it the evidence bundle on PASS). If it keys the
+// DDL block on the label, HR3 silently does not happen for the `risk:medium`
+// migration tracks #435 just created.
 const POINTER_SITES = [
   DISPATCH,
   DOD_SKILL,
   VALIDATE_BACKEND,
+  OPEN_PR,
   FRD_PLAN,
   VERIFY_AND_SHIP,
   WORKFLOW,
@@ -167,6 +212,28 @@ const RETIRED = [
   // stays sayable: a form that forbids the correction as loudly as the error
   // fails every doc that states the narrowing.
   /schema[^\n]{0,60}(?:\b(?:is|are)\b|⇒|=>)(?:(?!\bnot\b)[^\n]){0,12}`?risk:high/i,
+
+  // --- The ruling's SECOND half: the PROOF KEYING. ------------------------
+  // "the migration proofs are owed by high-risk units" — retired by #435 (a).
+  // HR1–HR3 key on the diff carrying a migration, at ANY tier; only HR4 still
+  // keys on the label. The four forms below are ordered by the shape of the
+  // sentence, not by the file it was found in.
+  //
+  // The label parenthesised as a gate: `(high-risk only)`, `Extra (high-risk):`.
+  // This is the exact shape both survivors used. It does not fire on prose that
+  // merely mentions the tier in parens with other content — `(high-risk ~450k)`
+  // in token-preflight, `(2 verifiers)` in dispatch — because the paren must
+  // close on the label itself.
+  /\((?:only )?high[- ]risk(?: only)?\)/i,
+  // A proof noun GATED on the label, in that order. The gate word is required
+  // so the section title "Migration proofs and high-risk units" — which
+  // correctly covers both triggers — stays sayable.
+  /\b(?:dry-run|roll ?back|DDL delta|schema diff|migration proofs?)\b[^\n]{0,40}\b(?:only|iff?|when|for|on)\b[^\n]{0,20}\bhigh[- ]risk\b/i,
+  // The same claim with the clauses swapped: "high-risk only: dry-run + rollback".
+  /\bhigh[- ]risk\b[^\n]{0,25}\b(?:only|tracks|units)\b[^\n]{0,60}\b(?:dry-run|roll ?back|DDL delta|schema diff|migration proofs?)\b/i,
+  // The gates named directly. Scoped to HR1-HR3: "HR4 if high-risk" is the
+  // ruled sentence, so a form that caught any HR would forbid the correction.
+  /\bHR[123]\b[^\n]{0,24}\b(?:only|if|when|for)\b[^\n]{0,24}\bhigh[- ]risk\b/i,
 ];
 
 test("nothing under .claude/, ops/ or product-docs/ still lists schema as risk:high", () => {
@@ -206,6 +273,75 @@ test("the sweep catches the classification in whatever words, and permits its co
     "`ordering` = the schema consolidation; it is NOT risk:high and gets no approval gate.",
   ])
     assert.ok(!hits(ruled), `the sweep must permit: ${ruled}`);
+});
+
+test("the sweep catches the PROOF KEYING half too, and permits its correction", () => {
+  // The half that had no form. The first two strings are verbatim the lines
+  // that survived every quality round: `open-pr`'s PR-body template and
+  // `spec-intake`'s issue template. Both were MISSED by all five
+  // classification forms, because neither line mentions `risk:high` at all —
+  // they key a PROOF on the tier, which is a different sentence about the same
+  // ruling.
+  const hits = (s) => RETIRED.some((p) => p.test(s));
+  for (const retired of [
+    "<details><summary>Schema diff (high-risk only)</summary>",
+    "- Extra (high-risk): migration dry-run + rollback + schema diff",
+    "Run the migration dry-run and rollback for high-risk units.",
+    "HR1-HR3 only when high-risk.",
+    "high-risk only: migration dry-run + rollback",
+  ])
+    assert.ok(hits(retired), `the sweep must catch: ${retired}`);
+
+  // The corrections have to survive, including the two sentences that name the
+  // tier for the one gate it still buys (HR4) and the section heading that
+  // covers both triggers at once.
+  for (const ruled of [
+    "## Migration proofs and high-risk units (extra gates)",
+    "(+ HR1..HR3 if the diff carries a migration; + HR4 if high-risk)",
+    "- **HR4 Diverse-lens sign-off** *(`risk:high` only)* — after G6, three independent reviewers",
+    "- **HR3 Schema diff in PR body** *(any tier, whenever the diff carries a migration)*",
+    "they still owe the HR1–HR3 migration proofs at verify time, because that trigger is the DIFF",
+    "Schema/migrations are not high-risk pre-release (#435, 2026-08-13) — they owe HR1–HR3 instead",
+    "| large / high-risk (2 verifiers) | ~450k |",
+    "deferred #18 (high-risk ~450k) — needs more budget.",
+  ])
+    assert.ok(!hits(ruled), `the sweep must permit: ${ruled}`);
+});
+
+test("open-pr's body template makes the DDL delta unconditional on the label", () => {
+  // HR3 is "the exact DDL delta in the PR body". This skill writes the body, so
+  // this template IS where HR3 lands. #435 made migration tracks `risk:medium`
+  // — unattended-dispatchable and auto-mergeable — which leaves the PR body as
+  // the last human checkpoint; a label-gated DDL block removes that one too.
+  const text = read(OPEN_PR);
+  assert.match(
+    text,
+    /<summary>Schema diff[^\n]*whenever the diff carries a migration, ANY risk tier[^\n]*<\/summary>/,
+    "the collapsible's summary is the trigger a body-writing agent reads"
+  );
+  assert.match(
+    text,
+    /\*\*If the diff carries a migration, the DDL delta goes in the body — at ANY risk tier\.\*\*/,
+    "and the Rules list must say it outright, not only in the template"
+  );
+  assert.match(
+    text,
+    /git diff --name-only \$\(git merge-base main HEAD\)\.\.\.HEAD -- src\/db\/migrations\//,
+    "the trigger is computable, so the skill must compute it rather than ask the agent to recall the risk tier"
+  );
+});
+
+test("the spec-intake issue template keys the extra proofs on the diff", () => {
+  // §3 of this skill repeals the label keying; twelve lines later the template
+  // an agent actually copies still asked for the proofs "(high-risk)". The
+  // template is the half that gets pasted into every new issue.
+  const text = read(SPEC_INTAKE);
+  const plan = text.slice(text.indexOf("## Validation plan"));
+  assert.match(
+    plan,
+    /- Extra \(HR1[–-]HR3 — owed whenever the diff carries a migration, at ANY risk tier; RULED 2026-08-13, #435\)/,
+    "the minted issue must carry the ruled trigger, or every issue re-mints the repealed rule"
+  );
 });
 
 test("both sweep exemptions still resolve to a file that actually matches", () => {
