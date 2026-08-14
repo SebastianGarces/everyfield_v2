@@ -326,8 +326,78 @@ test("open-pr's body template makes the DDL delta unconditional on the label", (
   );
   assert.match(
     text,
-    /git diff --name-only \$\(git merge-base main HEAD\)\.\.\.HEAD -- src\/db\/migrations\//,
+    /git diff --name-only \$\(git merge-base origin\/main HEAD\)\.\.\.HEAD -- src\/db\/migrations\//,
     "the trigger is computable, so the skill must compute it rather than ask the agent to recall the risk tier"
+  );
+  // …and computed against the REMOTE ref. Local `main` is worktree-shared and
+  // nothing in the build loop updates it, so `merge-base main HEAD` on a
+  // checkout whose local main lags reports every file merged to origin/main
+  // since as this branch's own — and the DDL pasted into the body would then
+  // describe an already-merged track. A body that misdescribes the schema
+  // change is worse than one that omits it.
+  assert.doesNotMatch(
+    text,
+    /merge-base main HEAD/,
+    "the bare local ref is exactly the stale-ancestor bug this pin exists to prevent"
+  );
+});
+
+test("the workflow asserts HR3 on the PR BODY, keyed on the migration trigger", () => {
+  // `migrationProofsMissing` runs against a report produced BEFORE a PR exists,
+  // so it can only prove a DDL delta was computed — never that it reached a
+  // reader. dod.md defines HR3 as "the exact DDL delta is shown to the
+  // reviewer", and `open-pr` writes the only body there is. Nothing else closes
+  // the loop: the auto-merge hold list is risk:high / hold / spec-question /
+  // unresolved findings, and a migration is deliberately none of them. So the
+  // skill-prose pin above is only half the guard — this is the other half.
+  const text = read(VERIFY_AND_SHIP);
+
+  assert.match(
+    text,
+    /bodyHasSchemaDiff: \{\s*type: "boolean"/,
+    "the PR schema must carry the body read-back, or the answer has nowhere to land"
+  );
+  assert.match(
+    text,
+    /gh pr view <number> --json body/,
+    "the release agent must READ the body back, not report what it believes it wrote"
+  );
+  assert.match(
+    text,
+    /effectiveMigration && pr\?\.opened && pr\.bodyHasSchemaDiff !== true/,
+    "keyed on the migration trigger, and `!== true` fails closed on an unanswered field exactly as migrationProofsOwed does"
+  );
+  assert.match(
+    text,
+    /failingGate: "HR3\/pr-body"/,
+    "and it fails as its own gate, distinguishable from the report-side HR1-HR3 assertion"
+  );
+
+  // ORDERING is the whole guarantee: an assertion after the merge gate proves
+  // nothing about what merged.
+  const gate = text.indexOf('failingGate: "HR3/pr-body"');
+  const settle = text.indexOf('settleLabels(track, "agent:in-review"');
+  const autoMerge = text.indexOf("if (AUTO_MERGE) {");
+  assert.ok(gate > 0 && settle > 0 && autoMerge > 0);
+  assert.ok(
+    gate < settle && gate < autoMerge,
+    "the body assertion must run BEFORE settleLabels and the auto-merge gate"
+  );
+
+  // The tip governs. A fix round can add the branch's first migration or drop
+  // its last, so the state the PR is judged against is the re-anchored one.
+  assert.match(
+    text,
+    /effectiveMigration = migrationAtTip;/,
+    "the G3 re-anchor must hand its answer forward, including when it is null"
+  );
+
+  // And dod.md, which DEFINES HR3, must say where it is asserted — a rule
+  // recorded with no named enforcement is the shape that produced this gap.
+  assert.match(
+    read(DOD),
+    /\*\*HR3 Schema diff in PR body\*\*[^\n]*Asserted on the BODY, not on the report/,
+    "dod.md's HR3 bullet must name the body as the landing site it is checked at"
   );
 });
 

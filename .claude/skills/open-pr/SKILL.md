@@ -176,8 +176,19 @@ mechanism.
   This skill is the only writer of the PR body, so the `Schema diff` block is where HR3 actually
   lands: gate it on the label and a `risk:medium` migration track — now unattended-dispatchable and
   auto-mergeable — merges DDL no reviewer was ever shown. Compute the trigger, do not recall it:
-  `git diff --name-only $(git merge-base main HEAD)...HEAD -- src/db/migrations/`. Non-empty ⇒ the
-  block is mandatory. Empty ⇒ drop the block rather than shipping it with a placeholder inside.
+  `git fetch origin main && git diff --name-only $(git merge-base origin/main HEAD)...HEAD -- src/db/migrations/`.
+  Non-empty ⇒ the block is mandatory. Empty ⇒ drop the block rather than shipping it with a
+  placeholder inside. **The ref is `origin/main`, never the bare `main`.** Local `main` is whatever
+  the checkout last fetched, nothing in the build loop updates it, and the PR merges into
+  `origin/main` — so a merge-base against a lagging local ref reports every file merged to the
+  remote since as if this branch had written it, and the DDL you would then paste into the body
+  belongs to somebody else's already-merged track. A body that MISDESCRIBES the schema change is
+  worse than one that omits it.
+- **Report the block back, do not assume it.** `verify-and-ship.js` asserts HR3 on the body itself:
+  after opening or updating the PR, read it back with `gh pr view <number> --json body` and answer
+  `bodyHasSchemaDiff` / `schemaDiffExcerpt` from what that printed. A missing or `false` answer
+  fails the attempt rather than merging — which is the point, since a migration track is not held
+  from auto-merge by anything else.
 - **Never open a PR without the Manual QA section**, and never let it restate the acceptance criteria.
   G3 already proved the ACs; repeating them wastes the one scarce resource in this system, which is
   human attention. The section earns its place only by naming what the automation *cannot* judge —

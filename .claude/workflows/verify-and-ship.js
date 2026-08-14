@@ -23,7 +23,28 @@ if (!A || !A.track || !A.branch || !A.wt)
 const track = A.track; // { id, issues, risk, hold, lane }
 const branch = A.branch;
 const wt = A.wt;
-const BASE = A.base;
+// The base is a REMOTE ref, and that is not a detail.
+//
+// `BASE` is the left-hand side of every merge-base this file takes, and the
+// one that matters is `migrationProofsOwed`'s: its output names the files
+// spliced into the verifier brief, so a merge-base against the wrong ancestor
+// does not merely widen a log line — it collects HR1–HR3 for migrations this
+// track never wrote, and HR3's DDL delta then MISDESCRIBES the change in the
+// PR body, which is worse than omitting it.
+//
+// A bare `main` is the worktree-shared LOCAL ref. Nothing in this loop updates
+// it, and track prep merges `origin/<base>`, so in a checkout whose local
+// `main` lags the remote, `merge-base(main, HEAD)` lands on the stale ancestor
+// and the diff prints every path merged to `origin/main` since. `origin/main`
+// is also what the PR merges into, which is the ref every other gate reasons
+// about (`ops/agent-os/dod.md`, G5). Normalised here rather than trusted from
+// the caller: the parent normalises its own copy the same way, and this script
+// is also driven directly by its tests. An explicit `origin/…`, a SHA, a `refs/`
+// path or a version tag is already unambiguous and is taken literally.
+const BASE_INPUT = A.base || "main";
+const BASE = /^(origin\/|[0-9a-f]{7,40}$|refs\/|v\d)/.test(BASE_INPUT)
+  ? BASE_INPUT
+  : `origin/${BASE_INPUT}`;
 const attempt = A.attempt || 1;
 const LABEL_ATTEMPTS = A.labelAttempts || 3;
 const AUTO_MERGE = A.autoMerge === true;
@@ -256,6 +277,20 @@ const PR_SCHEMA = {
     checkSummary: {
       type: "string",
       description: "if not success: which step failed and the error excerpt",
+    },
+    // HR3's landing site. `migrationProofsMissing` runs before a PR exists, so
+    // it can only prove a DDL delta was COLLECTED — never that it reached a
+    // reader. This pair is the read-back: what `gh pr view <number> --json body`
+    // printed, not what the body-writing agent believes it wrote.
+    bodyHasSchemaDiff: {
+      type: "boolean",
+      description:
+        "only when the diff carries a migration: whether the PR BODY, read back with `gh pr view <number> --json body`, contains the `Schema diff` block with non-empty SQL inside it",
+    },
+    schemaDiffExcerpt: {
+      type: "string",
+      description:
+        "the SQL that block actually contained, verbatim from the body you read back",
     },
   },
 };
@@ -883,6 +918,13 @@ if (migration)
     `🧱 ${track.id} — the diff carries a migration (${migration.named}); HR1–HR3 apply`
   );
 
+// What the SHIPPING sha owes, which is not always what the first verify owed.
+// The G3 re-anchor below re-reads the trigger at the tip — a fix round can add
+// the branch's first migration, or remove its last — and everything downstream
+// of that point (the PR brief, the HR3 body assertion) must key on the tip's
+// answer, never on this one. Reassigned there, and only there.
+let effectiveMigration = migration;
+
 const verify = await integrationVerify(finalSha, migration?.line || "");
 if (!verify) return failResult(null);
 
@@ -965,6 +1007,12 @@ if (fixCommitsLanded) {
     `🧪 ${track.id} — fix rounds moved the tip; re-running G3 at ${finalSha.slice(0, 7)} before anything ships it`
   );
   const migrationAtTip = await migrationProofsOwed("g3:");
+  // The tip's answer REPLACES the first verify's, including when it is `null`.
+  // Everything after this point — the PR brief and the HR3 body assertion —
+  // keys on the re-anchored state, so a fix round that dropped the last
+  // migration cannot leave a DDL block owed, and one that added the first
+  // cannot ship its DDL unasked-for.
+  effectiveMigration = migrationAtTip;
   if (migrationAtTip)
     log(
       `🧱 ${track.id} — the diff at ${finalSha.slice(0, 7)} carries a migration (${migrationAtTip.named}); HR1–HR3 are re-anchored too`
@@ -1111,7 +1159,15 @@ ${JSON.stringify(verify)}
 Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review — and do not report the flip you did not verify: the loop re-reads every one of those labels after you and will error this track if the board does not agree with you.
 
 The body MUST include the skill's **## 👀 Manual QA** section: the preview URL and exact path(s), a numbered happy-path walkthrough, and — the part that matters — **what the automation could NOT check**. Do NOT restate the acceptance criteria there; G3 already proved those, and a reviewer re-reading them learns nothing. Name the judgement calls instead (does it look right, read right, feel fast) and any edge case no AC asserted. Human attention is the scarcest resource in this system: spend it on what a gate cannot decide. If this track genuinely has nothing to eyeball, say so in one line.
+${
+  effectiveMigration
+    ? `
+THIS TRACK'S DIFF CARRIES A MIGRATION (${effectiveMigration.named}), so the body owes HR3 — "the exact DDL delta is shown to the reviewer" (\`ops/agent-os/dod.md\`, "Migration proofs and high-risk units"). That trigger is the DIFF and not the label, so it applies at ANY risk tier, and this body is where HR3 lands or does not: a migration is deliberately not an auto-merge hold, so a body without the delta merges DDL nobody was ever shown. Put the \`open-pr\` skill's \`Schema diff\` block in the body with the real SQL inside it — the delta the verifier's HR3 gate collected, never a placeholder.
 
+THEN READ THE BODY BACK AND REPORT WHAT IT ACTUALLY CONTAINS, not what you intended to write: run \`gh pr view <number> --json body\`, set \`bodyHasSchemaDiff\` to whether that output carries the \`Schema diff\` block with non-empty SQL inside it, and copy that SQL VERBATIM into \`schemaDiffExcerpt\`. The loop asserts this answer and FAILS the attempt when it is false or absent, so an honest "false" costs one retry while a guess ships unreviewed DDL.
+`
+    : ""
+}
 THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
   // Pinned to opus, the executor tier. This node transcribes the CI
@@ -1140,6 +1196,49 @@ if (pr?.opened && pr.checkConclusion !== "success") {
       verdict: "FAIL",
       failingGate: "CI",
       notes: `CI reported "${pr.checkConclusion}" on ${pr.url}. ${pr.checkSummary || "no summary returned"}`,
+    }),
+    pr,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// HR3 is asserted WHERE IT LANDS — the PR body.
+//
+// `migrationProofsMissing` above runs against a report produced before a PR
+// exists, so all it can ever prove is that the verifier COMPUTED a DDL delta.
+// HR3 is not "a delta was computed", it is "the exact DDL delta is shown to the
+// reviewer" (`ops/agent-os/dod.md`), and the only writer of a PR body is the
+// release agent that just ran. Nothing else downstream closes that loop: the
+// auto-merge gate holds on `risk:high`, `hold`, spec-questions and unresolved
+// findings, and a migration is deliberately none of those — so an unattended
+// `risk:medium` migration track auto-merges on the strength of this body alone.
+//
+// ORDERED: this runs after the PR call and BEFORE settleLabels and the merge
+// gate, so a body with no delta fails the attempt instead of landing. Review it
+// as an ORDERED block, not a presence check.
+//
+// FAILS CLOSED, exactly like `migrationProofsOwed`: a missing answer is not a
+// yes. `!== true` catches the release agent that omitted the field as well as
+// the one that reported `false`.
+if (effectiveMigration && pr?.opened && pr.bodyHasSchemaDiff !== true) {
+  log(
+    `❌ ${track.id} attempt ${attempt}: the diff carries a migration (${effectiveMigration.named}) but ${pr.url || "the PR"} has no Schema diff block in its body — not shipping DDL nobody was shown`
+  );
+  return {
+    ...failResult({
+      ...verify,
+      verdict: "FAIL",
+      failingGate: "HR3/pr-body",
+      // No `failingWorkstream`: the body is written by the release agent for
+      // the whole assembled branch, so this is never one workstream's failure.
+      fixInstructions: `This track's diff carries a migration (${effectiveMigration.named}), so HR3 owes the exact DDL delta in the PR BODY, and reading ${pr.url || "the PR"} back reported \`bodyHasSchemaDiff: ${pr.bodyHasSchemaDiff === false ? "false" : "(not answered)"}\`${pr.schemaDiffExcerpt ? ` with excerpt: ${pr.schemaDiffExcerpt}` : ""}. Update the PR body to include the \`open-pr\` skill's \`Schema diff\` block containing the real DDL delta for those files — not a placeholder — then re-read the body with \`gh pr view <number> --json body\` and report what it printed. The verifier's HR3 gate evidence holds the delta to quote: ${
+        (verify.gates || [])
+          .filter((g) => isProofGate(g, "HR3"))
+          .map((g) => g.evidence)
+          .join("\n") || "(no HR3 evidence in the report — collect it again)"
+      }`,
+      notes: `HR3 was proven on the report but not on the body of ${pr.url || "the PR"}.`,
+      summary: `${verify.summary || "verify"} — but the PR body did not show the reviewer the DDL delta for ${effectiveMigration.named}.`,
     }),
     pr,
   };
@@ -1239,8 +1338,12 @@ if (!labelState.settled) {
 //   2. the track is not risk:high — auth/permissions, multi-tenant isolation
 //      and payments are where a bad merge is unrecoverable, so those keep a
 //      human regardless. A migration is deliberately NOT on that list: what
-//      guards a DDL merge is HR1–HR3, asserted on the verify report above
-//      (`migrationProofsMissing`), not a hold here,
+//      guards a DDL merge is HR1–HR3, asserted TWICE above — on the verify
+//      report (`migrationProofsMissing`) and, for HR3, on the PR body read
+//      back from GitHub (`failingGate: "HR3/pr-body"`) — not a hold here.
+//      Both are load-bearing for this list to stay four entries long: the
+//      body is the only place a reviewer of an auto-merged migration track
+//      ever sees the DDL,
 //   3. the track is not `hold` — the standing policy is that a change to
 //      the factory itself (this loop, the delivery-OS skills, ops/agent-os)
 //      keeps a human, because the thing being changed is the thing that

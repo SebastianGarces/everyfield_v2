@@ -368,7 +368,7 @@ gates, each carrying the trigger that fires it:
 
 - **HR1 Migration dry-run** *(any tier, whenever the diff carries a migration)* — migration applied to a scratch DB and the resulting schema diff captured.
 - **HR2 Rollback verified** *(any tier, whenever the diff carries a migration)* — down-migration (or documented rollback) proven to restore prior state.
-- **HR3 Schema diff in PR body** *(any tier, whenever the diff carries a migration)* — the exact DDL delta is shown to the reviewer.
+- **HR3 Schema diff in PR body** *(any tier, whenever the diff carries a migration)* — the exact DDL delta is shown to the reviewer. **Asserted on the BODY, not on the report.** HR1 and HR2 are proofs a verifier runs and reports; HR3 is not done until a reviewer can read the SQL, and the verify report is produced before a PR exists — so `verify-and-ship.js` makes the release agent read the opened PR back (`gh pr view <number> --json body`) and fails the attempt (`HR3/pr-body`) when the `Schema diff` block is absent, empty or unanswered. That check is load-bearing precisely because a migration is **not** an auto-merge hold: for an unattended `risk:medium` migration track, this body is the only place the DDL is ever shown to a human.
 - **HR4 Diverse-lens sign-off** *(`risk:high` only)* — after G6, three *independent* reviewers each examine the branch
   through **one** lens, and **every one must clear**. Any FAIL blocks; a lens whose agent dies also
   blocks, because missing evidence is a FAIL everywhere else in this document.

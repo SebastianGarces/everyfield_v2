@@ -1078,13 +1078,29 @@ const passingWithProofs = (over = []) => ({
   ],
 });
 
+/**
+ * A release agent that put the DDL in the body and READ IT BACK to say so.
+ *
+ * HR3 lands in the PR body, not in the verify report, so a migration track only
+ * ships once this answer is `true`. Every migration test below has to supply it
+ * — which is the point: the default `pr:` reply omits it, and omission is a
+ * FAIL.
+ */
+const prShowedTheDdl = () => ({
+  opened: true,
+  url: "https://gh/pr/1",
+  checkConclusion: "success",
+  bodyHasSchemaDiff: true,
+  schemaDiffExcerpt: "alter table thing add column a text",
+});
+
 test("a migration in the diff buys HR1–HR3 at a non-high risk tier", async () => {
   const { result, calls } = await runBuild(
     [{ ...buildUnit("alpha", 101), risk: "medium" }],
     (prompt, opts) =>
       opts.label?.startsWith("diff:")
         ? carriesMigration()
-        : replyShip(passingWithProofs())(prompt, opts),
+        : replyShip(passingWithProofs(), null, prShowedTheDdl)(prompt, opts),
     { autoMerge: false }
   );
 
@@ -1200,7 +1216,7 @@ test("a diff that could not be read still owes the migration proofs", async () =
     (prompt, opts) =>
       opts.label?.startsWith("diff:")
         ? null
-        : replyShip(passingWithProofs())(prompt, opts),
+        : replyShip(passingWithProofs(), null, prShowedTheDdl)(prompt, opts),
     { autoMerge: false }
   );
   assert.match(verifyPrompt(calls), /also run HR1–HR3/);
@@ -1209,6 +1225,258 @@ test("a diff that could not be read still owes the migration proofs", async () =
     1,
     "owed, and proven — an undecided diff costs the proofs, not the track"
   );
+});
+
+// ---------------------------------------------------------------------------
+// verify-and-ship: HR3 is asserted on the PR BODY, where it actually lands
+//
+// `migrationProofsMissing` asserts HR1–HR3 against the VERIFY REPORT, which is
+// produced before a PR exists — so it can only ever prove the verifier COMPUTED
+// a DDL delta. dod.md defines HR3 as "the exact DDL delta is shown to the
+// reviewer", and the body is the only place that showing happens. Nothing else
+// downstream closes the loop: the auto-merge hold list is risk:high / hold /
+// spec-question / unresolved findings, and a migration is deliberately none of
+// them, so an unattended risk:medium migration track merges on the strength of
+// that body alone. These tests are what makes the missing block a FAIL.
+// ---------------------------------------------------------------------------
+
+test("the release agent is told to put the DDL in the body and read it back", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passingWithProofs(), null, prShowedTheDdl)(prompt, opts),
+    { autoMerge: true }
+  );
+  const pr = calls.find((c) => c.label?.startsWith("pr:alpha"));
+  assert.match(
+    pr.prompt,
+    new RegExp(MIGRATION_FILE.replace(/[/.]/g, "\\$&")),
+    "the body-writing agent is told WHICH migration made the block mandatory"
+  );
+  assert.match(
+    pr.prompt,
+    /gh pr view <number> --json body/,
+    "and told to read the body BACK — the answer must be an observation, not an intention"
+  );
+  assert.match(pr.prompt, /bodyHasSchemaDiff/);
+});
+
+test("a track with no migration is never asked for a Schema diff block", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  const pr = calls.find((c) => c.label?.startsWith("pr:alpha"));
+  assert.doesNotMatch(
+    pr.prompt,
+    /bodyHasSchemaDiff/,
+    "a body block demanded for a diff with no DDL can only be filled with a placeholder"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:alpha"),
+    "and the PR that never owed one merges without answering"
+  );
+});
+
+test("a PR body with no Schema diff block fails the attempt instead of merging", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passingWithProofs(), null, () => ({
+            opened: true,
+            url: "https://gh/pr/1",
+            checkConclusion: "success",
+            // The verifier proved the delta; the body-writing agent dropped it.
+            bodyHasSchemaDiff: false,
+          }))(prompt, opts),
+    { autoMerge: true }
+  );
+  assert.equal(result.shipped.length, 0, "DDL nobody was shown never ships");
+  assert.equal(result.blocked[0].failingGate, "HR3/pr-body");
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "and the merge gate — which does not hold on migrations — is never reached"
+  );
+});
+
+test("an unanswered bodyHasSchemaDiff is a FAIL, not a pass", async () => {
+  // Fails closed, exactly like migrationProofsOwed: the release agent that
+  // simply omits the field is the same evidence as the one that says "false".
+  const { result } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passingWithProofs())(prompt, opts),
+    { autoMerge: true }
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.blocked[0].failingGate, "HR3/pr-body");
+});
+
+test("the body assertion keys on the migration state at the TIP, not the first verify", async () => {
+  // A fix round can add the branch's FIRST migration. The first verify then
+  // owed nothing, so a body assertion keyed on it would let that DDL through
+  // unshown — which is why the G3 re-anchor hands its answer forward.
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("diff:g3:")) return carriesMigration();
+      if (l.startsWith("diff:"))
+        return { carriesMigration: false, migrationFiles: [] };
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passing([]),
+          findings: [finding("critical", "this wants a column")],
+        };
+      if (l.startsWith("verify:g3:")) return passingWithProofs();
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  const firstVerify = calls.find((c) => c.label === "verify:alpha#1");
+  assert.doesNotMatch(
+    firstVerify.prompt,
+    /HR1/,
+    "the first verify genuinely owed nothing — the migration did not exist yet"
+  );
+  assert.equal(
+    result.shipped.length,
+    0,
+    "but the tip's DDL is still owed a body"
+  );
+  assert.equal(result.blocked[0].failingGate, "HR3/pr-body");
+});
+
+test("a fix round that DROPS the last migration stops owing a Schema diff block", async () => {
+  // The mirror: `effectiveMigration` is replaced by the tip's answer including
+  // when that answer is null, so a body block cannot be demanded for DDL the
+  // branch no longer carries.
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("diff:g3:"))
+        return { carriesMigration: false, migrationFiles: [] };
+      if (l.startsWith("diff:")) return carriesMigration();
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passingWithProofs(),
+          findings: [finding("critical", "drop that migration")],
+        };
+      if (l.startsWith("verify:g3:")) return passing([]);
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  const pr = calls.find((c) => c.label?.startsWith("pr:alpha"));
+  assert.doesNotMatch(
+    pr.prompt,
+    /bodyHasSchemaDiff/,
+    "nothing is owed, so nothing may be demanded"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// verify-and-ship: the merge-base is taken against the REMOTE base ref
+//
+// The migration trigger is `git diff --name-only $(git merge-base <base> HEAD)`,
+// and its output is spliced into the verifier brief — so the ref on the left is
+// what decides which migrations HR1–HR3 are collected for. A bare `main` is the
+// worktree-shared LOCAL ref; nothing in the loop updates it, track prep merges
+// `origin/<base>`, and a checkout whose local main lags reports every file
+// merged to the remote since as this branch's own. That is not noise in the
+// safe direction: HR3's DDL delta would then MISDESCRIBE the change in the PR
+// body, which is worse than omitting it.
+// ---------------------------------------------------------------------------
+
+test("the child normalises a bare base onto origin/ before it takes a merge-base", async () => {
+  const { calls } = await runWorkflow(load("verify-and-ship.js"), {
+    // The child is driven directly, with the bare local ref a caller (or a
+    // test) most easily supplies. The parent normalises its own copy; this
+    // asserts the child does not depend on that having happened.
+    args: {
+      track: { id: "alpha", issues: [101], risk: "medium", lane: "backend" },
+      branch: "feature/alpha",
+      wt: "/tmp/wt/alpha",
+      base: "main",
+      criteria: "- alpha works",
+      wsSummaries: [{ id: "alpha", issues: [101], summary: "built" }],
+      wsIds: ["alpha"],
+      survivingTrees: [],
+    },
+    agentImpl: (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("push:")) return pushedOk();
+      if (l.startsWith("diff:"))
+        return { carriesMigration: false, migrationFiles: [] };
+      if (l.startsWith("verify:")) return passing([]);
+      if (l.startsWith("label:")) return labelledOk(prompt, opts);
+      if (l.startsWith("pr:"))
+        return {
+          opened: true,
+          url: "https://gh/pr/1",
+          checkConclusion: "success",
+        };
+      return {};
+    },
+  });
+  const diff = calls.find((c) => c.label?.startsWith("diff:"));
+  assert.ok(diff, "the migration trigger still reads the diff");
+  assert.match(
+    diff.prompt,
+    /merge-base origin\/main HEAD/,
+    "the remote-tracking ref is what the PR merges into and what prep merged in"
+  );
+  assert.doesNotMatch(
+    diff.prompt,
+    /merge-base main HEAD/,
+    "a stale local main widens the reported migration set onto other tracks' files"
+  );
+});
+
+test("an explicitly remote or pinned base is taken literally, never re-prefixed", async () => {
+  for (const base of ["origin/release", "700c333", "refs/heads/main", "v2.1"]) {
+    const { calls } = await runWorkflow(load("verify-and-ship.js"), {
+      args: {
+        track: { id: "alpha", issues: [101], risk: "medium", lane: "backend" },
+        branch: "feature/alpha",
+        wt: "/tmp/wt/alpha",
+        base,
+        wsSummaries: [],
+        wsIds: [],
+        survivingTrees: [],
+      },
+      agentImpl: (prompt, opts) => {
+        const l = opts.label || "";
+        if (l.startsWith("push:")) return pushedOk();
+        if (l.startsWith("diff:"))
+          return { carriesMigration: false, migrationFiles: [] };
+        if (l.startsWith("verify:")) return passing([]);
+        if (l.startsWith("label:")) return labelledOk(prompt, opts);
+        if (l.startsWith("pr:"))
+          return {
+            opened: true,
+            url: "https://gh/pr/1",
+            checkConclusion: "success",
+          };
+        return {};
+      },
+    });
+    const diff = calls.find((c) => c.label?.startsWith("diff:"));
+    assert.match(
+      diff.prompt,
+      new RegExp(`merge-base ${base.replace(/[/.]/g, "\\$&")} HEAD`),
+      `${base} is already unambiguous — rewriting it would break a deliberate pin`
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -2742,7 +3010,7 @@ test("the DDL delta the PR body quotes belongs to the sha that will merge", asyn
             },
           ],
         };
-      return replyShip(passingWithProofs())(prompt, opts);
+      return replyShip(passingWithProofs(), null, prShowedTheDdl)(prompt, opts);
     },
     { autoMerge: true }
   );
