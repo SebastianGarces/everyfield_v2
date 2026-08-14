@@ -203,6 +203,12 @@ Applies to `src/lib/onboarding/steps.ts`, `src/app/(dashboard)/dashboard/page.ts
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches the church's own content rather than leaking another church's.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose — the authored `## Related Articles` section was migrated out of all 96 articles (#317). Writing one back into `content` renders the list twice, and no test catches it.
 
+## Document PDFs
+
+Applies to every `@react-pdf/renderer` path: the F6 templates under `src/lib/documents/pdf/` and the wiki article download under `src/components/wiki/article-pdf/`.
+
+- Every PDF face is a ROLE from `PDF_FONT` (`src/lib/documents/pdf/fonts.ts`), never a standard-14 name (`Helvetica`, `Courier`, `Times-Roman` and their Bold/Oblique variants) and never a `fontWeight`/`fontStyle` axis — the standard-14 faces write a WRONG GLYPH for anything outside WinAnsi instead of failing, and `@react-pdf/font` filters on `fontStyle` first, so an axis on a single-source family throws. A standard-14 name resolves with no asset, so the corruption returns silently; `src/lib/documents/pdf/fonts.test.ts` scans the whole directory and `src/components/wiki/article-pdf/render.test.ts` pins every emphasis combination.
+
 ## Communication — Resend & Delivery Figures
 
 Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2026-08-09 on PR #371.

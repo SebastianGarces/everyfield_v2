@@ -6,6 +6,7 @@ import { Document, Page, Text, View } from "@react-pdf/renderer";
 
 import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
+import { PDF_FONT } from "./fonts";
 import { PAGE_SIZE, styles } from "./styles";
 
 export function CommitmentCardDocument({
@@ -28,22 +29,22 @@ export function CommitmentCardDocument({
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
           <Text>
-            <Text style={{ fontFamily: "Helvetica-Bold" }}>GROW</Text> —
-            Actively invite others to Vision Meetings.
+            <Text style={{ fontFamily: PDF_FONT.bold }}>GROW</Text> — Actively
+            invite others to Vision Meetings.
           </Text>
         </View>
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
           <Text>
-            <Text style={{ fontFamily: "Helvetica-Bold" }}>PRAY</Text> —
-            Faithfully pray for the church plant.
+            <Text style={{ fontFamily: PDF_FONT.bold }}>PRAY</Text> — Faithfully
+            pray for the church plant.
           </Text>
         </View>
         <View style={styles.checkRow}>
           <View style={styles.checkbox} />
           <Text>
-            <Text style={{ fontFamily: "Helvetica-Bold" }}>GIVE</Text> —
-            Generously and sacrificially give.
+            <Text style={{ fontFamily: PDF_FONT.bold }}>GIVE</Text> — Generously
+            and sacrificially give.
           </Text>
         </View>
 
