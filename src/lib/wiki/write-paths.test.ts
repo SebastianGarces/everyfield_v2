@@ -8,7 +8,7 @@ import {
   TS_FILES,
 } from "@/lib/auth/server-action-surface";
 
-import { progressPatchSchema } from "./write-input";
+import { progressPatchSchema, wikiSlugSchema } from "./write-input";
 import * as writeQueries from "./write-queries";
 import {
   bookmarkDeleteQuery,
@@ -247,6 +247,48 @@ test("a progress save cannot be made to write a column the caller named", () => 
 // ----------------------------------------------------------------------------
 
 test("a progress save refuses a value the column cannot mean", () => {
+  // ---- the SLUG, the other parameter of the same POST (round 7) -----------
+  // `wiki_progress.article_slug` and `wiki_bookmarks.article_slug` are
+  // unbounded `text` with no FK and no CHECK behind them
+  // (`src/db/schema/wiki.ts`), and `progressPatchSchema` accepts `{}` — so
+  // while the slug went unparsed, a signed-in caller could write junk rows of
+  // any size under names that address no article, on all three endpoints
+  // (`updateProgress`, `recordView`, `toggleBookmark`).
+  assert.equal(
+    wikiSlugSchema.safeParse("").success,
+    false,
+    "the empty string addresses no article and must not become a row"
+  );
+  assert.equal(
+    wikiSlugSchema.safeParse("x".repeat(10_000)).success,
+    false,
+    "the column is unbounded `text`, so the only length bound is this one"
+  );
+  assert.equal(
+    wikiSlugSchema.safeParse("../../etc").success,
+    false,
+    "a `..` segment is not a slug shape — every segment must open on [a-z0-9]"
+  );
+  assert.equal(wikiSlugSchema.safeParse("/discovery/values").success, false);
+  assert.equal(wikiSlugSchema.safeParse("discovery//values").success, false);
+  assert.equal(wikiSlugSchema.safeParse("discovery/values/").success, false);
+  assert.equal(
+    wikiSlugSchema.safeParse(null).success,
+    false,
+    "a parameter type promises a string and the wire promises nothing"
+  );
+
+  // …and the real thing still passes, so this is a narrowing and not a break:
+  // every one of the 96 stored slugs has this shape, and
+  // `tenancy-live.test.ts` runs the whole corpus through this schema against a
+  // real database so a drift fails a test rather than a reader's scroll save.
+  assert.equal(wikiSlugSchema.parse(SLUG), SLUG);
+  assert.equal(
+    wikiSlugSchema.parse("administrative/financial/counting-procedures"),
+    "administrative/financial/counting-procedures"
+  );
+
+  // ---- the PATCH's values -------------------------------------------------
   // `status` is a three-value vocabulary the whole progress UI switches on.
   assert.equal(
     progressPatchSchema.safeParse({ status: "certified_prophet" }).success,
@@ -338,11 +380,91 @@ test("the parsed value is what reaches the statement", () => {
     /progressUpsertQuery\([\s\S]*parsed\.data/,
     "updateProgress passes something other than the parsed value to the builder"
   );
-  assert.ok(
-    body.body.indexOf("getCurrentSession()") <
-      body.body.indexOf("progressPatchSchema.safeParse("),
-    "the parse runs above the session mint, so an anonymous POST can tell a malformed body from a well-formed one (`memory/invariants.md` → Authentication)"
-  );
+
+  // The mint runs FIRST and the parse below it (`memory/invariants.md` →
+  // Authentication), so an anonymous POST is refused for having no session and
+  // never for the shape of the body it sent — which would otherwise make the
+  // endpoint a shape oracle for a caller with no cookie. The previous wording
+  // of this message stated the inverse of what the comparison asserts.
+  const mint = body.body.indexOf("getCurrentSession()");
+  const parseIndex = body.body.indexOf("progressPatchSchema.safeParse(");
+
+  assert.notEqual(mint, -1, "updateProgress no longer mints a session");
+  assert.notEqual(parseIndex, -1, "updateProgress no longer parses its body");
+  assert.ok(mint < parseIndex, "the session mint must precede the parse");
+});
+
+// ----------------------------------------------------------------------------
+// The SLUG reaches the statement parsed too (#411 round 7).
+//
+// The round-6 parse covered `data` and left `slug` — the other half of the same
+// POST body — untouched on all three write endpoints, while this module's
+// schemas were titled "what a wiki write is allowed to arrive as" and memory
+// said "the body is parsed before it reaches the builder". Neither was true of
+// the slug, which reaches `wiki_progress.article_slug` /
+// `wiki_bookmarks.article_slug`: unbounded `text`, no FK, no CHECK. The
+// exposure is small (the rows are the caller's own) and the overstatement is
+// the defect — the same class of claim-wider-than-code this whole sequence
+// exists to correct.
+// ----------------------------------------------------------------------------
+
+/** Each write endpoint, with the builder its parsed slug must reach. */
+const SLUG_ENDPOINTS = [
+  {
+    file: "src/lib/wiki/progress.ts",
+    name: "updateProgress",
+    builders: ["progressUpsertQuery"],
+  },
+  {
+    file: "src/lib/wiki/progress.ts",
+    name: "recordView",
+    builders: ["recordViewUpsertQuery"],
+  },
+  {
+    file: "src/lib/wiki/bookmarks.ts",
+    name: "toggleBookmark",
+    builders: ["bookmarkDeleteQuery", "bookmarkInsertQuery"],
+  },
+] as const;
+
+test("every write endpoint parses its slug, and the builder gets the parsed one", () => {
+  for (const { file, name, builders } of SLUG_ENDPOINTS) {
+    const fn = functionBodies(codeOf(path.join(process.cwd(), file))).find(
+      (candidate) => candidate.name === name
+    );
+
+    assert.ok(fn, `${name} is gone from ${file}`);
+
+    const mint = fn.body.indexOf("getCurrentSession()");
+    const parseIndex = fn.body.indexOf("wikiSlugSchema.safeParse(");
+
+    assert.notEqual(mint, -1, `${name} does not mint a session`);
+    assert.notEqual(
+      parseIndex,
+      -1,
+      `${name} does not parse its slug — a TypeScript parameter type constrains a forged POST not at all, and article_slug is unbounded text with no FK behind it`
+    );
+    assert.ok(
+      mint < parseIndex,
+      `${name}: the session mint must precede the parse`
+    );
+
+    for (const builder of builders) {
+      // The builder is pinned to the PARSED slug: passing `slug` straight
+      // through is the regression, and it renders identically, so only the
+      // source can tell the two apart.
+      assert.match(
+        fn.body,
+        new RegExp(`${builder}\\([^)]*parsedSlug\\.data`),
+        `${name} hands ${builder} its raw slug parameter rather than the parsed value`
+      );
+      assert.doesNotMatch(
+        fn.body,
+        new RegExp(`${builder}\\([^)]*\\bslug\\b`),
+        `${name} still passes the unparsed \`slug\` to ${builder}`
+      );
+    }
+  }
 });
 
 test("a progress save writes only the fields the caller passed", () => {

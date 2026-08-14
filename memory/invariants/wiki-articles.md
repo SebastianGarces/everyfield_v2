@@ -144,7 +144,7 @@ Which keeps the original property — "the conflicting write applies exactly the
 
 The paragraph above claimed "every other column unreachable by construction", and that sentence was true of the COLUMN NAMES and silent about the VALUES bound to the two columns that remain. `wiki_progress.status` is a plain `text` column with no CHECK behind it (migration `0002_mixed_hemingway.sql`), so `updateProgress(slug, {status: "certified_prophet"})` — one POST, no session cookie needed to reach the endpoint, and a TypeScript parameter that constrains nothing — persisted verbatim into the caller's own row, and every reader that switches on that column then met a fourth state nobody wrote a branch for.
 
-So the body is parsed before it reaches the builder, in the order `memory/invariants.md` → Authentication requires: mint, then parse.
+So the PATCH is parsed before it reaches the builder, in the order `memory/invariants.md` → Authentication requires: mint, then parse.
 
 ```ts
 const parsed = progressPatchSchema.safeParse(data);
@@ -154,6 +154,21 @@ if (!parsed.success) return null;
 `progressPatchSchema` is a `z.strictObject` over `status` (the schema's own `wikiProgressStatuses`) and `scrollPosition` (`[0,1]`, the fraction the progress UI divides by — not a pixel offset). Strict, so an unknown key is a refusal rather than a silently dropped field: the builder already makes that column unreachable, and a body carrying `userId` is a probe, which should not be able to tell a partial write from a rejection.
 
 It lives in `write-input.ts`, a THIRD directive-free sibling, for the two reasons the statements live in `write-queries.ts`: a `"use server"` module may export nothing but endpoints, and a module a test can import is a module a hostile body can be run through for real — `write-paths.test.ts` parses the forged values themselves, then reads `updateProgress`'s body with `functionBodies` to pin that the parse sits between the mint and the builder and that `parsed.data` is what the builder gets.
+
+### …and the SLUG is the other half of the same POST (round 7)
+
+The round above closed `data` and left `slug`, and then wrote a sentence — "the body is parsed" — that covered both. It did not. `slug` reached `wiki_progress.article_slug` and `wiki_bookmarks.article_slug` unparsed on all three write endpoints, and both columns are unbounded `text` with **no foreign key and no CHECK** (`src/db/schema/wiki.ts`). `progressPatchSchema` accepts `{}`, so the patch parse alone stopped nothing: any signed-in caller could `updateProgress("<ten thousand characters>", {})` — or `recordView`, which takes a slug and no body at all, or `toggleBookmark` — and leave junk rows keyed on names that address no article. The exposure is mild (the rows are the caller's own); the CLAIM was the defect, which is the same overstatement one level out that the round above exists to correct.
+
+**Both parameters are now parsed, on all three endpoints**, below the mint and above the builder:
+
+```ts
+const parsedSlug = wikiSlugSchema.safeParse(slug);
+if (!parsedSlug.success) return null;         // `throw` in toggleBookmark
+```
+
+`wikiSlugSchema` (`write-input.ts`) is `min(1).max(200)` plus `/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/` — every segment opens on `[a-z0-9]`, which is what makes `..`, the empty string, a leading `/` and a doubled `/` unspellable. `toggleBookmark` REJECTS instead of returning, because `false` is its word for "the star is now off".
+
+⚠ It is deliberately **narrower than the read path**. `href.ts` documents that a stored slug may legitimately contain a space, `#`, `?` or `%`, and `encodeWikiSlug` still addresses all four — but a slug outside `wikiSlugSchema` is refused at the WRITE, and the reader's progress on such an article would then silently never save. That is why the domain is asserted against real rows rather than in prose: `tenancy-live.test.ts` runs the whole stored corpus through `wikiSlugSchema` (96 articles, longest slug 73 characters, all inside it) so a drifting corpus fails a test before it costs a reader their scroll position. `write-paths.test.ts` runs the hostile slugs — empty, ten thousand characters, `../../etc` — through the real schema, and pins each endpoint's builder to `parsedSlug.data` rather than to the raw parameter, since the two render identically and only the source tells them apart.
 
 ### An endpoint with no caller is deleted (round 6)
 

@@ -16,6 +16,7 @@ import {
 } from "./get-articles";
 import { searchArticles } from "./search";
 import type { ArticleNavItem, NavGroup } from "./types";
+import { wikiSlugSchema } from "./write-input";
 
 // ----------------------------------------------------------------------------
 // The multi-tenant boundary on the wiki read path (#317, from #16) — the half
@@ -507,4 +508,51 @@ test("a DRAFT church copy does not suppress the global article it replaces (#411
     await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
     await db.delete(churches).where(inArray(churches.id, [church.id]));
   }
+});
+
+// ----------------------------------------------------------------------------
+// The write path's slug domain, checked against the corpus that exists (#411
+// round 7).
+//
+// `wikiSlugSchema` (`write-input.ts`) is what `updateProgress`, `recordView`
+// and `toggleBookmark` refuse a slug by, and it is deliberately NARROWER than
+// what `encodeWikiSlug` can address — `href.ts` documents that a stored slug may
+// legitimately hold a space, `#`, `?` or `%`, and the read path still handles
+// all four. The cost of that narrowing is silent: an article whose slug falls
+// outside the schema is readable, and the reader's progress on it simply never
+// saves.
+//
+// So the schema's domain claim is asserted against the real rows rather than
+// asserted in prose. This is the only place it CAN be — the shape check needs
+// the corpus, and `write-paths.test.ts` never connects.
+// ----------------------------------------------------------------------------
+
+test("every stored article slug is one the write path will accept", async (t: TestContext) => {
+  if (!(await databaseReachable())) {
+    return t.skip(
+      "SKIPPED — the stored corpus was NOT checked against wikiSlugSchema. No reachable DATABASE_URL (this is the case on CI). Run in a worktree with .env.local linked: scripts/worktree-env.sh"
+    );
+  }
+
+  const stored = await db
+    .select({ slug: wikiArticles.slug })
+    .from(wikiArticles);
+
+  assert.ok(
+    stored.length > 0,
+    "no articles are stored, so this assertion proved nothing about the corpus"
+  );
+
+  const refused = stored
+    .map((article) => article.slug)
+    .filter((slug) => !wikiSlugSchema.safeParse(slug).success)
+    // The suite seeds its own `__t…`-prefixed fixtures, which are read-path
+    // scaffolding and are never written to by a progress or bookmark save.
+    .filter((slug) => !slug.startsWith("__t"));
+
+  assert.deepEqual(
+    refused,
+    [],
+    "an article is stored under a slug the write path refuses: a reader can open it and their scroll position will silently never save (widen wikiSlugSchema in write-input.ts, or fix the slug)"
+  );
 });

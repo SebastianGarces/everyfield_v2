@@ -6,6 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
+import { wikiSlugSchema } from "./write-input";
 import { bookmarkDeleteQuery, bookmarkInsertQuery } from "./write-queries";
 
 /**
@@ -106,6 +107,14 @@ export async function getBookmarks(limit: number = 10) {
  * branched on it, which meant two presses in the same instant could both read
  * "bookmarked" and both delete — the star ended up off after an even number of
  * presses that should have left it on.
+ *
+ * SESSION FIRST, THEN PARSE (round 7). This is an export of a `"use server"`
+ * module, so `slug` is the whole POST body and the parameter type constrains a
+ * forged one not at all; `wiki_bookmarks.article_slug` is unbounded `text` with
+ * no FK and no CHECK behind it (`src/db/schema/wiki.ts`), so an unparsed slug is
+ * an insert of whatever arrived. The refusal REJECTS rather than returning a
+ * boolean, because `false` is this function's word for "the star is now off" and
+ * a caller cannot be told a malformed slug that way.
  */
 export async function toggleBookmark(slug: string): Promise<boolean> {
   const session = await getCurrentSession();
@@ -113,7 +122,12 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
     throw new Error("Unauthorized");
   }
 
-  const removed = await bookmarkDeleteQuery(session.user.id, slug);
+  const parsedSlug = wikiSlugSchema.safeParse(slug);
+  if (!parsedSlug.success) {
+    throw new Error("Unknown article");
+  }
+
+  const removed = await bookmarkDeleteQuery(session.user.id, parsedSlug.data);
 
   if (removed.length > 0) {
     revalidatePath("/wiki", "layout");
@@ -123,7 +137,7 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
   // Nothing to remove, so the press adds. `bookmarkInsertQuery` tolerates the
   // row already being there, so a press that raced another press's insert is a
   // no-op rather than a unique-index violation thrown at the reader.
-  await bookmarkInsertQuery(session.user.id, slug);
+  await bookmarkInsertQuery(session.user.id, parsedSlug.data);
   revalidatePath("/wiki", "layout");
   return true;
 }

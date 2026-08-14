@@ -6,7 +6,11 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
-import { progressPatchSchema, type ProgressPatch } from "./write-input";
+import {
+  progressPatchSchema,
+  wikiSlugSchema,
+  type ProgressPatch,
+} from "./write-input";
 import { progressUpsertQuery, recordViewUpsertQuery } from "./write-queries";
 
 // `getArticleProgress` used to live here, and `markCompleted` at the foot of the
@@ -190,26 +194,32 @@ export async function getLastInProgress() {
  * `progressUpsertQuery` in `write-queries.ts`, which is where every wiki write
  * path is built and where the reason is written down.
  *
- * SESSION FIRST, THEN PARSE (`memory/invariants.md` → Authentication). `data` is
- * a request body: this is an export of a `"use server"` module, so a POST
- * reaches it with whatever shape it likes and the parameter type stops none of
- * it. The builder names the two columns it will write, which is what makes every
- * OTHER column unreachable; the parse is what makes the two VALUES legal ones,
- * because `wiki_progress.status` is plain `text` with no CHECK behind it. A body
- * that fails the schema is refused entirely rather than written in part —
- * `null`, the same answer a sessionless caller gets, since both are shapes only
- * a bug or a probe produces.
+ * SESSION FIRST, THEN PARSE (`memory/invariants.md` → Authentication). BOTH
+ * parameters are request body: this is an export of a `"use server"` module, so
+ * a POST reaches it with whatever shapes it likes and the parameter types stop
+ * none of it. The builder names the two columns it will write, which is what
+ * makes every OTHER column unreachable; the two parses are what make the VALUES
+ * legal ones, because `wiki_progress.status` is plain `text` with no CHECK
+ * behind it and `article_slug` is unbounded `text` with no FK behind it. Neither
+ * half may be skipped: `progressPatchSchema` accepts `{}`, so an unparsed slug
+ * alone is enough to write an unbounded junk row under a name that addresses no
+ * article. An argument that fails either schema is refused entirely rather than
+ * written in part — `null`, the same answer a sessionless caller gets, since
+ * both are shapes only a bug or a probe produces.
  */
 export async function updateProgress(slug: string, data: ProgressPatch) {
   const session = await getCurrentSession();
   if (!session?.user) return null;
+
+  const parsedSlug = wikiSlugSchema.safeParse(slug);
+  if (!parsedSlug.success) return null;
 
   const parsed = progressPatchSchema.safeParse(data);
   if (!parsed.success) return null;
 
   const [saved] = await progressUpsertQuery(
     session.user.id,
-    slug,
+    parsedSlug.data,
     parsed.data,
     new Date()
   );
@@ -225,14 +235,21 @@ export async function updateProgress(slug: string, data: ProgressPatch) {
  * a completion that landed between the read and the write was overwritten, so
  * finishing an article in one tab while another reported the view reset it to
  * in_progress (#411).
+ *
+ * Its slug is parsed for the reason `updateProgress`'s is (round 7): this
+ * endpoint takes a slug and NO body at all, so the slug is the entire POST and
+ * an unparsed one is an unbounded row keyed on a name that addresses nothing.
  */
 export async function recordView(slug: string) {
   const session = await getCurrentSession();
   if (!session?.user) return null;
 
+  const parsedSlug = wikiSlugSchema.safeParse(slug);
+  if (!parsedSlug.success) return null;
+
   const [saved] = await recordViewUpsertQuery(
     session.user.id,
-    slug,
+    parsedSlug.data,
     new Date()
   );
 
