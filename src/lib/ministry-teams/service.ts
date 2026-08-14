@@ -14,6 +14,19 @@
 //                   staffing counts) — deliberately NOT re-exported here
 //   expected-error.ts  ExpectedError — a thrown message that IS user copy
 //                   (ruling 409-6C); the action shell surfaces it verbatim
+//   membership-copy.ts the two seat refusals (#409 D1). An IMPORT-FREE leaf,
+//                   deliberately NOT re-exported here: the assign dialog is a
+//                   client component and this barrel opens with `@/db`, so a
+//                   pass-through would put the database client one import away
+//                   from a browser chunk (same rule as
+//                   `src/lib/invitations/register-path.ts`).
+//   membership-conflict.ts whether a driver error IS the seat index's unique
+//                   violation — a BOOLEAN, via `isUniqueViolation`
+//                   (`@/db/errors`). WHICH sentence that means is
+//                   `seatRefusalMessage` in `memberships.ts`, the one decider
+//                   for every refusal path; never an index→sentence table.
+//                   Server-only, so it is a sibling of the leaf rather than
+//                   part of it — and also not re-exported.
 //
 // This barrel preserves the import path every caller already uses
 // (`@/lib/ministry-teams/service`) and its exact export surface. New callers

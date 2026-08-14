@@ -15,7 +15,7 @@
 // ============================================================================
 
 import { Checkbox } from "@/components/ui/checkbox";
-import type { TaskWithAssignee } from "@/lib/tasks/types";
+import type { TaskListRow } from "@/lib/tasks/service";
 import { useTransition } from "react";
 import {
   completeTaskAction,
@@ -29,11 +29,18 @@ import { TaskCardView } from "./task-card-view";
 // ============================================================================
 
 interface TaskCardProps {
-  task: TaskWithAssignee;
+  /** A LIST row: `description` is the stored markup and `descriptionPreview`
+   *  the readable summary the card renders (T-021). Typed as the row the
+   *  service actually returns, so the preview cannot be dropped on the way
+   *  through this boundary without the compiler saying so. */
+  task: TaskListRow;
   personNote?: string | null;
+  /** The instant the due-date line is measured against — one for the whole
+   *  list, from the server. See `TaskCardViewProps.now`. */
+  now: Date;
 }
 
-export function TaskCard({ task, personNote }: TaskCardProps) {
+export function TaskCard({ task, personNote, now }: TaskCardProps) {
   const [isPending, startTransition] = useTransition();
 
   const isComplete = task.status === "complete";
@@ -56,6 +63,7 @@ export function TaskCard({ task, personNote }: TaskCardProps) {
     <TaskCardView
       task={task}
       personNote={personNote}
+      now={now}
       isPending={isPending}
       checkboxSlot={
         <Checkbox

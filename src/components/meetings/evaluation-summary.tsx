@@ -1,27 +1,34 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Star } from "lucide-react";
+// The same list the form asks from and the same scale it offers — this file
+// carried its own copy of both, so a ninth factor rated on the form would have
+// been left off the summary of the planter's own scores. See
+// src/lib/meetings/evaluation-factors.ts.
+import {
+  EVALUATION_QUALITY_FACTORS,
+  RATINGS,
+} from "@/lib/meetings/evaluation-factors";
 import type { MeetingEvaluation } from "@/db/schema";
 
 interface EvaluationSummaryProps {
   evaluation: MeetingEvaluation;
-  meetingNumber: number;
+  /**
+   * The meeting's display name, ALREADY DERIVED by the server page.
+   *
+   * Not `meetingNumber`: this component used to build a meeting out of
+   * `{ type: "vision_meeting", meetingNumber }` and hand that to
+   * `meetingDisplayTitle`, which fabricated a fact — the route has no type
+   * gate, so an orientation or a team meeting reached by URL was headed
+   * "Vision Meeting Evaluation". The page holds the real row, so it derives
+   * the name once and this component only prints it.
+   */
+  title: string;
 }
-
-const qualityFactors = [
-  { key: "attendanceScore" as const, label: "Great Attendance" },
-  { key: "locationScore" as const, label: "Acceptable Location" },
-  { key: "logisticsScore" as const, label: "Great Logistics" },
-  { key: "agendaScore" as const, label: "Clear Agenda" },
-  { key: "vibeScore" as const, label: "Great Vibe" },
-  { key: "messageScore" as const, label: "Compelling Message" },
-  { key: "closeScore" as const, label: "Strong Close" },
-  { key: "nextStepsScore" as const, label: "Clear Next Steps" },
-];
 
 function ScoreStars({ score }: { score: number }) {
   return (
     <div className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((s) => (
+      {RATINGS.map((s) => (
         <Star
           key={s}
           className={`h-4 w-4 ${
@@ -35,14 +42,12 @@ function ScoreStars({ score }: { score: number }) {
 
 export function EvaluationSummary({
   evaluation,
-  meetingNumber,
+  title,
 }: EvaluationSummaryProps) {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-bold">
-          Vision Meeting #{meetingNumber} Evaluation
-        </h2>
+        <h2 className="text-xl font-bold">{title} Evaluation</h2>
         <div className="mt-2">
           <span className="text-4xl font-bold">{evaluation.totalScore}</span>
           <span className="text-muted-foreground text-xl">/5.0</span>
@@ -50,7 +55,7 @@ export function EvaluationSummary({
       </div>
 
       <div className="grid gap-3">
-        {qualityFactors.map((factor) => (
+        {EVALUATION_QUALITY_FACTORS.map((factor) => (
           <Card key={factor.key}>
             <CardContent className="flex items-center justify-between py-3">
               <span className="text-sm font-medium">{factor.label}</span>

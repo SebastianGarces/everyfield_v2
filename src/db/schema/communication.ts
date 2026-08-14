@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -6,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -71,6 +73,36 @@ export type ConfirmationStatus = (typeof confirmationStatuses)[number];
 
 // ----------------------------------------------------------------------------
 // Message Templates - Reusable email/SMS templates
+//
+// #407 D1 — a church has at most ONE fork of any given system template, and the
+// DATABASE is what says so (`message_templates_church_fork_unique_idx`,
+// migration 0038).
+//
+// WHY. Copy-on-write forking is reachable from two places — `forkTemplate` and
+// `updateTemplate`'s system branch, which calls it — and both used to be
+// guarded by a read ("does a fork already exist?") in front of an unconditional
+// INSERT. `memory/invariants.md` → Transactions names that shape exactly:
+// SELECT-then-INSERT is not a concurrency guard. Two edits of one system
+// template a few milliseconds apart both passed the read, and the church woke
+// up with two forks of the same original — after which `getTemplates()` hides
+// the system row and renders BOTH forks, so the planter sees the template they
+// just edited twice and cannot tell which one their next edit will land on.
+//
+// WHY PARTIAL, ON `source_template_id IS NOT NULL`. A church's own templates
+// carry no source, and two of them may legitimately share a name and a
+// category. The predicate keeps the constraint where the invariant holds — on
+// the forks — and off rows it was never about.
+//
+// `church_id` IS NULLABLE HERE and that is the index's one gap: NULLs never
+// collide in a btree unique index, so a row with a source but no church is
+// unconstrained. Nothing writes that shape (a fork is a church's copy by
+// definition, and a system template has no source), and the alternative — a
+// `coalesce` expression index — would make the ON CONFLICT target unspellable.
+//
+// The insert that speaks for this index carries `ON CONFLICT … DO NOTHING`
+// with the SAME predicate — see `forkTemplate`. The two change together: a
+// mismatch is not subtle, it is "there is no unique or exclusion constraint
+// matching the ON CONFLICT specification" on every fork.
 // ----------------------------------------------------------------------------
 export const messageTemplates = pgTable(
   "message_templates",
@@ -99,6 +131,10 @@ export const messageTemplates = pgTable(
     index("message_templates_church_id_idx").on(table.churchId),
     index("message_templates_category_idx").on(table.category),
     index("message_templates_is_system_idx").on(table.isSystem),
+    // The rule: one fork of a system template per church, ever.
+    uniqueIndex("message_templates_church_fork_unique_idx")
+      .on(table.churchId, table.sourceTemplateId)
+      .where(sql`${table.sourceTemplateId} is not null`),
   ]
 );
 
@@ -196,6 +232,30 @@ export type NewCommunicationRecipient =
 
 // ----------------------------------------------------------------------------
 // Meeting Confirmation Tokens - Token-based RSVP for meetings
+//
+// #407 D2 — a (meeting, person) pair has at most ONE token awaiting an answer,
+// and the DATABASE is what says so
+// (`meeting_confirm_tokens_pending_unique_idx`, migration 0038).
+//
+// WHY. `createConfirmationToken` read "is there a pending token for this pair?"
+// and inserted one when the answer was no — the SELECT-then-INSERT shape
+// `memory/invariants.md` → Transactions refuses. `sendCommunication` calls it
+// once per recipient, so two sends of the same meeting invitation (a resend, a
+// double-submitted compose form) each minted a token for every person, and the
+// planter's tracking then showed two unanswered RSVPs for one invitee. The
+// EXPIRY path made it reachable without any race at all: an expired pending row
+// failed the freshness test, so the service inserted a SECOND pending row and
+// left the first one standing.
+//
+// WHY PARTIAL, ON `status = 'pending'`. Answered tokens are history — a person
+// invited to the same meeting twice over may legitimately hold a `confirmed`
+// row and a `declined` one — and only the unanswered slot is single. That is
+// also what lets an answered row make room for a fresh invitation without
+// anything being deleted.
+//
+// The insert that speaks for this index carries `ON CONFLICT` with the SAME
+// predicate — see `createConfirmationToken`, which renews an EXPIRED pending row
+// in place rather than adding a second, and re-reads the live one otherwise.
 // ----------------------------------------------------------------------------
 export const meetingConfirmationTokens = pgTable(
   "meeting_confirmation_tokens",
@@ -223,6 +283,10 @@ export const meetingConfirmationTokens = pgTable(
     index("meeting_confirm_tokens_token_idx").on(table.token),
     index("meeting_confirm_tokens_meeting_id_idx").on(table.meetingId),
     index("meeting_confirm_tokens_person_id_idx").on(table.personId),
+    // The rule: one UNANSWERED token per (meeting, person).
+    uniqueIndex("meeting_confirm_tokens_pending_unique_idx")
+      .on(table.meetingId, table.personId)
+      .where(sql`${table.status} = 'pending'`),
   ]
 );
 

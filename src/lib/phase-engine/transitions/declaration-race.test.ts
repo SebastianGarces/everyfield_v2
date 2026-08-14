@@ -92,6 +92,30 @@ function fakeSnapshot(churchId: string): PlantFactSnapshot {
   } as unknown as PlantFactSnapshot;
 }
 
+/**
+ * The actor a scratch declaration is attributed to.
+ *
+ * MINTED, NEVER BORROWED. This used to be `select … from users limit 1` — "any
+ * real user, because the test is about the write guard, not about who
+ * submitted". That reads harmlessly and is not: it makes the suite unrunnable
+ * against an empty database (the CI job that finally runs these has one), and
+ * in a parallel run it borrows ANOTHER suite's scratch user, which that suite's
+ * sweep then cannot delete. A suite that writes only inside its own namespace
+ * has to own its actor too.
+ */
+async function createScratchActor(): Promise<string> {
+  const [actor] = await db
+    .insert(users)
+    .values({
+      email: `${crypto.randomUUID()}@scratch.invalid`,
+      passwordHash: "scratch",
+      name: SCRATCH_NAME,
+      role: "planter",
+    })
+    .returning({ id: users.id });
+  return actor.id;
+}
+
 async function sweep(): Promise<void> {
   const scratch = await db
     .select({ id: churches.id })
@@ -104,6 +128,10 @@ async function sweep(): Promise<void> {
       .where(eq(phaseTransitions.churchId, church.id));
     await db.delete(churches).where(eq(churches.id, church.id));
   }
+
+  // Last: the transitions above reference it, and the scratch user carries no
+  // church of its own.
+  await db.delete(users).where(eq(users.name, SCRATCH_NAME));
 }
 
 after(async () => {
@@ -118,12 +146,9 @@ test(
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
 
-    // Any real user — `initiated_by_id` is a FK and this test is about the
-    // write guard, not about who submitted.
-    const [actor] = await db.select({ id: users.id }).from(users).limit(1);
-    assert.ok(actor, "the database has no users to attribute a declaration to");
-
     await sweep();
+
+    const actorId = await createScratchActor();
 
     for (let run = 1; run <= RUNS; run++) {
       const [church] = await db
@@ -137,7 +162,7 @@ test(
             declareInitialPhaseStatement({
               churchId: church.id,
               toPhase,
-              initiatedById: actor.id,
+              initiatedById: actorId,
               factSnapshot: fakeSnapshot(church.id),
               rubricVersion: "v0",
             })
@@ -215,10 +240,9 @@ test(
     // The statement above can only be as safe as the constraint under it. This
     // asserts the constraint directly, so a future rewrite of the CTE chain
     // cannot quietly remove the thing that makes duplicates impossible.
-    const [actor] = await db.select({ id: users.id }).from(users).limit(1);
-    assert.ok(actor);
-
     await sweep();
+
+    const actorId = await createScratchActor();
 
     const [church] = await db
       .insert(churches)
@@ -230,7 +254,7 @@ test(
         churchId: church.id,
         fromPhase: 0,
         toPhase: 2,
-        initiatedById: actor.id,
+        initiatedById: actorId,
         reason: "raw insert",
         kind: INITIAL_DECLARATION_KIND,
         rubricVersion: "v0",

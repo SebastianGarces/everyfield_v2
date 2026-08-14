@@ -2,8 +2,23 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
+import {
+  churchMeetings,
+  meetingAttendance,
+  responseStatuses,
+} from "@/db/schema/meetings";
 import { personActivities } from "@/db/schema/people";
+// Statically imported, not `await import(…)` per call. Six actions below each
+// lazy-imported one of these — including `responseStatuses`, which arrived by a
+// SECOND import of a module this file already imports statically. Nothing here
+// is optional, this module never reaches a browser, and a dynamic import of a
+// static dependency only hides the dependency from a reader and from every
+// import-graph walk the repo runs.
+import {
+  addToGuestList,
+  removeFromGuestList,
+  updateRsvpStatus,
+} from "@/lib/meetings/guest-list";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
 import type {
   ChurchMeeting,
@@ -701,7 +716,6 @@ export async function addToGuestListAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "No church" };
 
-    const { addToGuestList } = await import("@/lib/meetings/guest-list");
     const record = await addToGuestList(
       user.churchId,
       meetingId,
@@ -724,7 +738,6 @@ export async function removeFromGuestListAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "No church" };
 
-    const { removeFromGuestList } = await import("@/lib/meetings/guest-list");
     await removeFromGuestList(user.churchId, meetingId, personId);
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
@@ -743,8 +756,6 @@ export async function updateRsvpStatusAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "No church" };
 
-    const { updateRsvpStatus } = await import("@/lib/meetings/guest-list");
-    const { responseStatuses } = await import("@/db/schema/meetings");
     if (!responseStatuses.includes(status as ResponseStatus)) {
       return { success: false, error: "Invalid status" };
     }
@@ -795,7 +806,6 @@ export async function quickAddPersonToGuestListAction(
     );
 
     // Add to guest list
-    const { addToGuestList } = await import("@/lib/meetings/guest-list");
     const record = await addToGuestList(
       user.churchId,
       meetingId,
@@ -863,7 +873,6 @@ export async function addWalkInAttendeeAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "No church" };
 
-    const { addToGuestList } = await import("@/lib/meetings/guest-list");
     const record = await addToGuestList(
       user.churchId,
       meetingId,
@@ -924,7 +933,6 @@ export async function quickAddWalkInAction(
       "meeting_guest_list"
     );
 
-    const { addToGuestList } = await import("@/lib/meetings/guest-list");
     const record = await addToGuestList(
       user.churchId,
       meetingId,

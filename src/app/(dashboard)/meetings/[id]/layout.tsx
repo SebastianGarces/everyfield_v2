@@ -4,17 +4,14 @@ import { getMeeting } from "@/lib/meetings/service";
 import { notFound, redirect } from "next/navigation";
 import { MeetingHeader } from "@/components/meetings/meeting-header";
 import { MeetingTabs } from "@/components/meetings/meeting-tabs";
+// The breadcrumb names the meeting the same way the header directly under it
+// does — one derivation, not two. See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 interface MeetingLayoutProps {
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }
-
-const meetingTypeLabels = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
-} as const;
 
 export default async function MeetingLayout({
   children,
@@ -33,17 +30,12 @@ export default async function MeetingLayout({
     notFound();
   }
 
-  const meetingLabel =
-    meeting.type === "vision_meeting" && meeting.meetingNumber
-      ? `Vision Meeting #${meeting.meetingNumber}`
-      : meeting.title || meetingTypeLabels[meeting.type];
-
   return (
     <>
       <HeaderBreadcrumbs
         items={[
           { label: "Meetings", href: "/meetings" },
-          { label: meetingLabel },
+          { label: meetingDisplayTitle(meeting) },
         ]}
       />
       <div className="flex h-full flex-col">

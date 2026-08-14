@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { isUniqueViolation } from "@/db/errors";
 import {
   churches,
   persons,
@@ -10,6 +11,8 @@ import {
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
+
+import { addCalendarDays } from "@/lib/datetime";
 
 // ============================================================================
 // Event Types
@@ -251,9 +254,11 @@ export async function handleMeetingAttendanceFinalized(
       attendees.map((a) => [a.id, `${a.firstName} ${a.lastName}`])
     );
 
-    const followUpDueDate = new Date(now);
-    followUpDueDate.setDate(followUpDueDate.getDate() + 2);
-    const followUpDueDateStr = followUpDueDate.toISOString().split("T")[0];
+    // Whole UTC days, through the app's one calendar-day helper
+    // (`@/lib/datetime`): the generated task's `due_date` is read back by
+    // surfaces pinned to APP_TIME_ZONE, so the day it names has to be measured
+    // in the same one.
+    const followUpDueDateStr = addCalendarDays(now, 2);
 
     for (const personId of attendeeIds) {
       const personName = attendeeMap.get(personId) ?? "Unknown";
@@ -288,9 +293,7 @@ export async function handleMeetingAttendanceFinalized(
   const meetingInfo = meeting[0];
   const meetingLabel = meetingInfo?.title ?? `Vision Meeting`;
 
-  const evalDueDate = new Date(now);
-  evalDueDate.setDate(evalDueDate.getDate() + 1);
-  const evalDueDateStr = evalDueDate.toISOString().split("T")[0];
+  const evalDueDateStr = addCalendarDays(now, 1);
 
   tasksToCreate.push({
     churchId,
@@ -320,7 +323,7 @@ export async function handleMeetingAttendanceFinalized(
     try {
       await db.insert(tasks).values(tasksToCreate);
     } catch (error) {
-      if (isDuplicateGenerationError(error)) {
+      if (isUniqueViolation(error, TASKS_MEETING_EVALUATION_UNIQUE)) {
         // A concurrent finalize won the race and generated the same set. The
         // whole INSERT rolled back, so there is nothing to clean up.
         console.warn(
@@ -340,50 +343,16 @@ export async function handleMeetingAttendanceFinalized(
   }
 }
 
-/** Postgres `unique_violation`. */
-const PG_UNIQUE_VIOLATION = "23505";
-
-/** The partial unique index that enforces one live evaluation task per meeting. */
-export const MEETING_EVALUATION_UNIQUE_INDEX =
-  "tasks_meeting_evaluation_unique_idx";
-
 /**
- * True when `error` is the follow-up generation race losing to a concurrent
- * finalize — i.e. a unique violation on `tasks_meeting_evaluation_unique_idx`.
+ * The partial unique index that enforces one live evaluation task per meeting.
  *
- * Narrow on purpose: any OTHER unique violation is a real bug and must still
- * propagate, or a finalize could be marked done on a failed insert. Drizzle
- * wraps driver errors, so the cause chain is walked rather than just the top
- * error.
+ * The NAME is what this module owns; the PREDICATE that recognises a violation
+ * of it is `isUniqueViolation` (`src/db/errors.ts`), the one copy every domain
+ * shares. This file carried its own byte-identical walk of the cause chain
+ * until #411 — a second implementation of "the unique index is the concurrency
+ * guard and it just did its job", which is exactly the shape that goes stale in
+ * one place and not the other (a new driver wrapping, a `constraint` field that
+ * stops being populated). Never re-inline it.
  */
-export function isDuplicateGenerationError(error: unknown): boolean {
-  let current: unknown = error;
-
-  for (let depth = 0; current != null && depth < 5; depth += 1) {
-    if (typeof current === "object") {
-      const candidate = current as {
-        code?: unknown;
-        constraint?: unknown;
-        message?: unknown;
-        cause?: unknown;
-      };
-      const message =
-        typeof candidate.message === "string" ? candidate.message : "";
-
-      if (
-        candidate.code === PG_UNIQUE_VIOLATION &&
-        (candidate.constraint === MEETING_EVALUATION_UNIQUE_INDEX ||
-          message.includes(MEETING_EVALUATION_UNIQUE_INDEX))
-      ) {
-        return true;
-      }
-
-      current = candidate.cause;
-      continue;
-    }
-
-    return false;
-  }
-
-  return false;
-}
+export const TASKS_MEETING_EVALUATION_UNIQUE =
+  "tasks_meeting_evaluation_unique_idx";

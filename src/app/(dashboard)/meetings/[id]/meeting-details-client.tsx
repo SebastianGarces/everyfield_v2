@@ -30,6 +30,11 @@ import { MeetingForm } from "@/components/meetings/meeting-form";
 import { MeetingSummaryCards } from "./meeting-summary-cards";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { Location, MeetingStatus } from "@/db/schema";
+// The Edit and Delete dialogs name the meeting the same way the header above
+// them does. This file's own copy fell back to the bare word "Meeting", so an
+// untitled orientation was offered for deletion under a name that appears
+// nowhere else on the page. See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 interface MeetingDetailsProps {
   meeting: MeetingWithCounts;
@@ -47,20 +52,16 @@ const statusTransitions: Record<
   cancelled: null,
 };
 
-function getMeetingTitle(meeting: MeetingWithCounts): string {
-  if (meeting.type === "vision_meeting" && meeting.meetingNumber) {
-    return `Vision Meeting #${meeting.meetingNumber}`;
-  }
-  return meeting.title || "Meeting";
-}
-
 export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
   const router = useRouter();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const status = meeting.status as MeetingStatus;
+  // Read, not cast: `MeetingWithCounts` extends `ChurchMeeting`, whose `status`
+  // column is already typed by the pg enum, so the cast that stood here could
+  // only ever have silenced a real schema change to `statusTransitions` above.
+  const status = meeting.status;
   const transition = statusTransitions[status];
 
   const handleDelete = async () => {
@@ -79,7 +80,7 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
     setIsTransitioning(false);
   };
 
-  const title = getMeetingTitle(meeting);
+  const title = meetingDisplayTitle(meeting);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

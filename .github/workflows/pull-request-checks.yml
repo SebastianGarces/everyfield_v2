@@ -158,3 +158,132 @@ jobs:
           # Same reason: `new Resend(...)` runs at module scope in the email
           # client and the webhook route, and throws on a missing key.
           RESEND_API_KEY: "re_ci_placeholder"
+
+  # ==========================================================================
+  # The live database suites — the seam that makes `LIVE_DB_TESTS=1` mean
+  # something (#411, quality round 1).
+  #
+  # WHY A SECOND JOB. The suites that assert the race guards
+  # (`fork-and-token-race`, `role-seat-race`, `subtask-parent-fk`,
+  # `teams-init-race`, `declaration-race`) skip themselves unless
+  # LIVE_DB_TESTS=1 AND `DATABASE_URL` answers `select 1`. The `validate` job
+  # above deliberately runs hermetically against an unreachable placeholder, so
+  # every one of them skipped on every PR — assertions written, never executed.
+  # They cannot simply move into `validate`: that job must stay hermetic (it is
+  # what proves the build needs no database), and a race suite needs a real
+  # Postgres, three runs deep, which is a slower and differently-shaped job.
+  #
+  # WHY A NEON PROXY AND NOT PLAIN POSTGRES. `db` is a neon-http client, and
+  # neon-http speaks Neon's HTTP protocol — it cannot talk to Postgres over
+  # TCP. Swapping in `drizzle-orm/node-postgres` would change what is under
+  # test: `db.batch()` exists only on the batching drivers, and every write
+  # path here is built on it (`memory/invariants.md` → Transactions). So the
+  # driver stays and the ENDPOINT moves: `local-neon-http-proxy` serves Neon's
+  # HTTP protocol in front of the Postgres service container, and
+  # `scripts/live-db-endpoint.ts` — preloaded by `pnpm test:live` with
+  # `--import`, so it lands before any suite imports `@/db` — points the client
+  # at it. The switch belongs to the TEST RUNNER, which knows this is a live
+  # run; the application's request path has no such seam and no opinion about
+  # hostnames, so nothing about production can be redirected by an environment
+  # variable.
+  #
+  # THIS CHECK IS NOT YET REQUIRED BY THE `main protection` ruleset. It runs
+  # and reports on every PR; making it blocking is a ruleset edit, which is
+  # Sebastian's to make. Its name is therefore not yet a contract — but treat
+  # it as one the moment it is added there.
+  # ==========================================================================
+  live-db-tests:
+    name: Live DB Race Suites
+    runs-on: ubuntu-latest
+
+    services:
+      # pgvector, not plain postgres: migration 0035 creates the `vector`
+      # extension, so `pnpm db:migrate` fails on an image without it.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: main
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      # Neon's HTTP protocol in front of that Postgres. Service containers
+      # share a network and reach each other by label, hence `postgres:5432`.
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/main
+        ports:
+          - 4444:4444
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The proxy authenticates through a MOCK control plane that reads two
+      # objects out of the target database. Without them every query comes back
+      # as HTTP 500 "Control plane request failed" — which looks like a
+      # connection problem and is not.
+      - name: Bootstrap the proxy's mock control plane
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d main -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS neon_control_plane;
+          CREATE TABLE IF NOT EXISTS neon_control_plane.endpoints (
+            endpoint_id VARCHAR(255) PRIMARY KEY,
+            allowed_ips VARCHAR(255)
+          );
+          SQL
+
+      # NOT `pnpm db:migrate`: drizzle-kit picks its driver from what is
+      # installed, the only installed driver is `@neondatabase/serverless`,
+      # and its websocket never reaches a plain TCP Postgres. The HTTP proxy
+      # is no road either — its prepared statements take one command each,
+      # and the hand-written migrations are multi-command. So the versioned
+      # SQL files apply directly with psql, in journal order (their numeric
+      # prefixes), in autocommit because 0025 builds an index CONCURRENTLY.
+      # The guards under test are created HERE — a suite run against an
+      # unmigrated database would pass by proving nothing.
+      - name: Apply migrations
+        run: |
+          for f in src/db/migrations/*.sql; do
+            echo "applying $f"
+            PGPASSWORD=postgres psql -h localhost -U postgres -d main -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      # `test:live`, not `test`: the full suite also carries CORPUS tests
+      # (`templates-live.test.ts`, `article-templates-live.test.ts`) that gate
+      # on reachability alone and assert against the 90 published wiki
+      # articles. This database is migrated but unseeded, so they would fail
+      # here for a reason that has nothing to do with a race. Seeding the
+      # corpus is a different job; `src/db/live-suite-coverage.test.ts` keeps
+      # the `test:live` list from drifting away from the suites that opt in,
+      # and pins the `--import` preload the whole job depends on.
+      - name: Run the live suites
+        run: LIVE_DB_TESTS=1 pnpm test:live
+        env:
+          # The suites' SQL goes through the proxy; the migrate step above
+          # went straight to Postgres with psql. Both URLs are named
+          # explicitly; no hostname is being interpreted.
+          NEON_HTTP_PROXY_URL: "http://localhost:4444/sql"
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/main"
+          RESEND_API_KEY: "re_ci_placeholder"

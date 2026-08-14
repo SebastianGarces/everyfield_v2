@@ -9,7 +9,7 @@
 // - getTemplates() returns church forks in place of their system originals
 // ============================================================================
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   messageTemplates,
@@ -146,17 +146,13 @@ export async function createTemplate(
 }
 
 /**
- * Fork a system template into a church-specific copy (copy-on-write).
+ * Read the church's fork of one system template, if it has one. At most one row
+ * can match — `message_templates_church_fork_unique_idx` is what says so.
  */
-export async function forkTemplate(
+async function findExistingFork(
   systemTemplateId: string,
   churchId: string
-): Promise<MessageTemplate> {
-  const source = await findTemplateById(systemTemplateId);
-  if (!source) throw new Error("Source template not found");
-  if (!source.isSystem) throw new Error("Can only fork system templates");
-
-  // Check if fork already exists
+): Promise<MessageTemplate | undefined> {
   const [existing] = await db
     .select()
     .from(messageTemplates)
@@ -167,8 +163,35 @@ export async function forkTemplate(
       )
     )
     .limit(1);
+  return existing;
+}
 
-  if (existing) return existing;
+/**
+ * Fork a system template into a church-specific copy (copy-on-write).
+ *
+ * IDEMPOTENT PER (CHURCH, SOURCE), AND THE DATABASE IS WHAT MAKES IT SO (#407
+ * D1, migration 0038). The INSERT below carries `ON CONFLICT … DO NOTHING`
+ * inferred against `message_templates_church_fork_unique_idx`, so the claim
+ * lives in the SAME statement as the row it speaks for. This used to be a
+ * SELECT ("does a fork exist?") followed by an unconditional INSERT — the shape
+ * `memory/invariants.md` → Transactions refuses — and two edits of one system
+ * template a few milliseconds apart both passed the read. `getTemplates()`
+ * hides a system row once its fork exists, so the church then saw the template
+ * twice with no way to tell which copy the next edit would land on.
+ *
+ * AN EMPTY `returning()` IS NOT AN ERROR — it means another caller won the
+ * claim, so the fork is re-read and returned. That read is the second half of
+ * the guard and cannot be dropped: without it the loser of a race gets
+ * `undefined` where the signature promises a template, and `updateTemplate`
+ * then writes its edits to `fork.id` of nothing.
+ */
+export async function forkTemplate(
+  systemTemplateId: string,
+  churchId: string
+): Promise<MessageTemplate> {
+  const source = await findTemplateById(systemTemplateId);
+  if (!source) throw new Error("Source template not found");
+  if (!source.isSystem) throw new Error("Can only fork system templates");
 
   const [fork] = await db
     .insert(messageTemplates)
@@ -185,8 +208,25 @@ export async function forkTemplate(
       isSystem: false,
       sourceTemplateId: systemTemplateId,
     })
+    .onConflictDoNothing({
+      target: [messageTemplates.churchId, messageTemplates.sourceTemplateId],
+      // The index predicate, repeated byte for byte. A mismatch is not subtle:
+      // "there is no unique or exclusion constraint matching the ON CONFLICT
+      // specification", on every fork.
+      where: sql`${messageTemplates.sourceTemplateId} is not null`,
+    })
     .returning();
-  return fork;
+
+  if (fork) return fork;
+
+  const existing = await findExistingFork(systemTemplateId, churchId);
+  if (!existing) {
+    // The winner's row was deleted between the conflict and this read — a
+    // planter deleting their fork in another tab. Say so rather than returning
+    // a row that does not exist.
+    throw new Error("Source template not found");
+  }
+  return existing;
 }
 
 /**
