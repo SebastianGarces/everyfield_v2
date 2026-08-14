@@ -91,8 +91,11 @@ stop.
 
 **Exclude `risk:high` unless the caller explicitly opted in** (`dispatch high-risk`). Not because the
 DoD cannot handle it — HR1–HR4 exist precisely so high-risk work can go autonomously to PR — but
-because *unattended and recurring* is a different axis from *autonomous*. Schema, auth and tenancy
+because *unattended and recurring* is a different axis from *autonomous*. Auth, tenancy and payments
 changes should start when someone is around to notice. Say how many were skipped for this reason.
+Schema and migrations are no longer part of that set — pre-release they are not `risk:high` at all
+(ruled 2026-08-13, #435; `ops/agent-os/labels.md` carries the revert condition), so a migration
+track dispatches unattended like any other and still owes HR1–HR3.
 
 Empty frontier → stop with what the board is waiting on (the blocked list, and what blocks it).
 
@@ -193,7 +196,9 @@ merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a
 five hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
 in it carries `hold: true`, no warning was classified `spec-question`, and no review finding survived
 the quality rounds unresolved. Reviewer findings (Critical + structural) are **fixed in the same
-pass** by the review-fix loop, ≤2 rounds per site (scoped and integration); a track with unresolved
+pass** by the review-fix loop, ≤2 rounds per site — and *per site* is the ruled reading, each of
+scoped review, integration verify and post-integration quality carrying its own two (ruled
+2026-08-13 on PR #428; `ops/agent-os/dod.md` §The review-fix loop); a track with unresolved
 findings HOLDs with a DECISION comment — never merged with findings, never `agent:blocked` for them
 (#399, RULED 2026-08-10). Spec-question warnings hold exactly as before. See §12 and §13 of
 `product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
@@ -259,7 +264,7 @@ scope because the frontier looked thin.
   passed every gate with no spec-question raised; it is not a judgement this skill gets to make about
   a PR it is looking at. If a PR is held, it is held — reaching past the gate to merge it is the same
   class of error as clearing another run's claim.
-- **Never merge a `risk:high` PR, auto or otherwise.** Schema, auth and tenancy keep a human.
+- **Never merge a `risk:high` PR, auto or otherwise.** Auth, tenancy and payments keep a human.
 - **Never merge a factory change, auto or otherwise.** Mark its units `hold: true` on the way in;
   do not reach past the gate on the way out.
 - **Never clear an `agent:in-progress` claim** that this pass did not set.

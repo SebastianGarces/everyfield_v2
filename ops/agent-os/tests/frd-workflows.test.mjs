@@ -1033,7 +1033,10 @@ test("risk:high never auto-merges, even on a spotless pass", async () => {
   );
   assert.ok(
     !calls.some((c) => c.label === "merge:alpha"),
-    "schema/auth/tenancy is where a bad merge is unrecoverable"
+    // Schema left this list on 2026-08-13 (#435): pre-release there is no
+    // separate production DB, so a bad migration is a dev-DB reset. What stays
+    // is where a bad merge is genuinely unrecoverable.
+    "auth/tenancy/payments is where a bad merge is unrecoverable"
   );
   const hold = calls.find((c) => c.label === "hold:alpha");
   assert.match(hold.prompt, /risk:high/);

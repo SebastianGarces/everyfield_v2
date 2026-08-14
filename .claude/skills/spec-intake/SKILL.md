@@ -23,8 +23,18 @@ up on the board (`product-docs/board-design-2026-07.md` §13).
 2. **Write the issue** using the template below. The non-negotiable part is **acceptance criteria that
    are observable** — each AC must name *how it will be proven* (a UI assertion, an API response, a test).
    If you can't state how an AC is verified, it isn't an AC yet.
-3. **Classify risk.** `risk:high` iff it touches schema/migrations, auth/permissions, multi-tenant
-   boundaries, or payments. (Still autonomous-to-PR, but gets the extra DoD gates + second verifier.)
+3. **Classify risk.** `risk:high` iff it touches auth/permissions, multi-tenant isolation, or
+   payments. (Still autonomous-to-PR, but gets the extra DoD gates + second verifier.)
+
+   **Schema and migrations are NOT `risk:high` pre-release** — RULED 2026-08-13 (#435). There is no
+   separate production database serving real client data, so a wrong migration costs a dev-DB reset,
+   not a recovery, and the label's real price — attended dispatch only, a diverse-lens pass, never
+   an auto-merge — buys nothing against that. The migration *proofs* are untouched: `dod.md`
+   HR1–HR3 key on **the track's diff carrying a migration**, at any risk tier, so a `risk:medium`
+   schema track still owes the dry-run, the rollback and the DDL delta in the PR body.
+   **Revert condition:** the moment alpha or beta serves real client data from a separate
+   production database, schema/migrations return to `risk:high`. That reversal is a new ruling and
+   a new ledger row — not a judgement call at intake time.
 4. **Guess file ownership, then cut the workstreams.** List the files/dirs the work will likely create
    or edit, from `memory/` + a quick look. Then split them into workstreams: one per agent, each with
    its own AC subset, its own file list, and a `depends on:` line. One workstream is the normal case;

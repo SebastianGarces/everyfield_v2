@@ -56,7 +56,7 @@ So the gates split by what they can actually see:
 | Scope | Gates | Where it runs |
 |---|---|---|
 | **Per workstream** | G0, G2-subset, G5 | that workstream's own worktree, in parallel with its siblings |
-| **Integration** | G1, G2 (full), G3, G4, G6 (+ HR1–HR4) | once, on the track branch, after the last stage merges |
+| **Integration** | G1, G2 (full), G3, G4, G6 (+ HR1–HR3 if the diff carries a migration, HR4 if `risk:high`) | once, on the track branch, after the last stage merges |
 
 **The split falls on what is scopable, not on what is convenient.** G0 is about *this* workstream's
 ACs, G5 is a diff against *this* workstream's declared files, and a test subset covering its changed
@@ -277,9 +277,20 @@ individually correct and jointly wrong.*
 - **Evidence:** reviewer verdict + findings.
 
 **The review-fix loop.** Critical and structural findings return to an implementer agent and are
-fixed **in the same pass**, at BOTH review sites — scoped (per workstream) and integration (G6) —
-with at most **2 quality rounds per site**. Rounds are not attempts, but a re-review verdict of
-FAIL is a real gate failure and spends an attempt. When any integration round lands commits, the
+fixed **in the same pass**, at EVERY review site, with at most **2 quality rounds per site**.
+
+> **"Per site" is the ruled reading, not an open interpretation** — RULED 2026-08-13, on PR #428
+> (issue #430). There are three review sites and each carries its own cap of 2: the **scoped
+> review** (per workstream, in its own worktree), the **integration verify** (G6 on the assembled
+> track branch), and any **post-integration quality** round opened on that branch after G6. Rounds
+> spent at one site never subtract from another's budget. Read instead as a per-track budget, a
+> track whose scoped reviews spent two rounds would arrive at G6 with none left and would have to
+> hold on its first integration finding — which is not what the loop does and never was. PR #428
+> and the U411-WIKI track both had to guess at this, which is why it is written here rather than
+> left to be re-derived per pass.
+
+Rounds are not attempts, but a re-review verdict of FAIL is a real gate failure and spends an
+attempt. When any integration round lands commits, the
 functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge — CI re-anchors
 G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
 gate never ran at that sha.
@@ -307,16 +318,31 @@ gates passed). Never merged with findings. Suggestions never gate and never trig
 
 ---
 
-## High-risk units (extra gates)
+## Migration proofs and high-risk units (extra gates)
 
-A unit is **high-risk** if it touches: DB schema/migrations, auth/permissions/roles, multi-tenant
-boundaries, or payments/billing. These are **still autonomous to PR** (the PR review is the human
-checkpoint), but they must additionally satisfy:
+**Two triggers live here, and they are keyed differently on purpose.**
 
-- **HR1 Migration dry-run** — migration applied to a scratch DB and the resulting schema diff captured.
-- **HR2 Rollback verified** — down-migration (or documented rollback) proven to restore prior state.
-- **HR3 Schema diff in PR body** — the exact DDL delta is shown to the reviewer.
-- **HR4 Diverse-lens sign-off** — after G6, three *independent* reviewers each examine the branch
+**HR1–HR3 fire whenever the track's diff carries a migration — at ANY risk tier.** They are proofs
+about the DDL, not privileges the label buys, so a `risk:medium` track that adds a file under
+`src/db/migrations/` owes all three exactly as a `risk:high` one does. The question the verifier
+asks is *does this diff contain a migration?*, never *what is this issue labelled?*.
+
+**A unit is `risk:high` if it touches auth/permissions/roles, multi-tenant isolation, or
+payments/billing.** Schema and migrations are deliberately NOT on that list — RULED 2026-08-13
+(#435; ledger row 435 in `product-docs/decisions.md`). Pre-release there is no separate production
+database serving real client data, so a wrong migration costs a dev-DB reset rather than a
+recovery, and what `risk:high` actually buys — HR4, attended dispatch only, never an auto-merge —
+is priced for damage that cannot yet happen. **Revert condition:** the moment alpha or beta serves
+real client data from a separate production database, schema/migrations return to `risk:high`; that
+reversal is a new ruling and a new ledger row, never a verifier's judgement call.
+
+High-risk units are **still autonomous to PR** (the PR review is the human checkpoint). The four
+gates, each carrying the trigger that fires it:
+
+- **HR1 Migration dry-run** *(any tier, whenever the diff carries a migration)* — migration applied to a scratch DB and the resulting schema diff captured.
+- **HR2 Rollback verified** *(any tier, whenever the diff carries a migration)* — down-migration (or documented rollback) proven to restore prior state.
+- **HR3 Schema diff in PR body** *(any tier, whenever the diff carries a migration)* — the exact DDL delta is shown to the reviewer.
+- **HR4 Diverse-lens sign-off** *(`risk:high` only)* — after G6, three *independent* reviewers each examine the branch
   through **one** lens, and **every one must clear**. Any FAIL blocks; a lens whose agent dies also
   blocks, because missing evidence is a FAIL everywhere else in this document.
 
@@ -354,7 +380,7 @@ WORKSTREAM DONE = G0 + G2-subset + G5 all PASS, in its own worktree
         → the track cannot integrate; block as below
 
 TRACK DONE = every workstream DONE  AND  G1 + G2 (full) + G3 + G4 + G6 PASS
-             (+ HR1..HR4 if high-risk)
+             (+ HR1..HR3 if the diff carries a migration; + HR4 if high-risk)
         → open PR, attach evidence, label every issue the track closes `agent:in-review`
         unresolved review findings after the fix loop → HOLD with a DECISION
              (ships held; never merges, never blocks)
