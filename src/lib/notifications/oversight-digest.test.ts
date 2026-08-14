@@ -550,6 +550,9 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
       skipped: 0,
       considered: 0,
       failed: 0,
+      // This fake never produces a cross-paired row: its recipients are ids,
+      // not `users` rows, so the pairing has nothing to fail on.
+      misprovisioned: 0,
     };
 
     for (const recipient of this.recipientsOf(churchId)) {

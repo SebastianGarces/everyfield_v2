@@ -6,7 +6,7 @@ import { and, eq, exists, sql as rawSql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
-import { churches, users } from "@/db/schema";
+import { churches, userRoles, users, type UserRole } from "@/db/schema";
 
 import {
   NOTIFICATION_CATEGORIES,
@@ -29,6 +29,7 @@ import {
   announceInvitationDeclined,
   announceLaunchDateChanged,
   announcePhaseAdvanced,
+  classifyOversightCandidate,
   composeMilestone,
   fanOutToOversight,
   oversightMilestoneKinds,
@@ -37,15 +38,23 @@ import {
   invitingOrgForInvitation,
   listOversightAdminsOfOrg,
   oversightAudienceCondition,
+  oversightReachCondition,
   type InvitingInvitation,
   type OversightFanOutDeps,
+  type OversightMisprovisioning,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
   announceSendingChurchDeclinedNetwork,
   announceSendingChurchJoinedNetwork,
   announceSendingChurchLeftNetwork,
 } from "./oversight";
-import type { OversightOrgIds } from "./oversight-admin";
+import {
+  noOversightOrg,
+  OVERSIGHT_ADMIN,
+  OVERSIGHT_ADMIN_ROWS,
+  oversightOrgOfKind,
+  type OversightOrgIds,
+} from "./oversight-admin";
 
 // ----------------------------------------------------------------------------
 // The oversight model, tested at the seam `enqueue` sits behind.
@@ -555,6 +564,7 @@ test("with the plant sharing, every oversight recipient gets a row", async () =>
     created: 2,
     skipped: 0,
     failed: 0,
+    misprovisioned: 0,
   });
   assert.deepEqual(
     deps.written.map((row) => row.recipientUserId),
@@ -1552,4 +1562,210 @@ test("the non-nullable call is STATICALLY SQL, so the digest cannot re-open the 
     .toSQL();
 
   assert.match(sql.replace(/"/g, ""), /owed_digest_recipient\.role = \$\d+/);
+});
+
+// ----------------------------------------------------------------------------
+// The cross-paired admin: a data defect, counted rather than hidden
+// (ruled 2026-08-13, #411 → #427)
+// ----------------------------------------------------------------------------
+//
+// Both oversight FKs live on one `users` row and neither implies the other, so
+// a row can carry a sending church's id while holding `network_admin` — or hold
+// no oversight role at all. `oversightAudienceCondition` pairs the role with the
+// FK and is right to exclude such a row. What was wrong was that the exclusion
+// happened inside a `WHERE`, where nothing could count it: the defect was
+// invisible to the product, which is why it went unnoticed.
+//
+// The rows below therefore travel as far as the fan-out and are turned away
+// there — with a count and a log line, and with no notification.
+
+/** The pairing, and the OTHER pairing's role — the cross of the two. */
+const CROSS_PAIRED: OversightMisprovisioning = {
+  role: OVERSIGHT_ADMIN.network.role,
+  reachedBy: OVERSIGHT_ADMIN.sending_church.fk,
+};
+
+test("a cross-paired row is counted and logged, and gets no notification", async (t) => {
+  const logged: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    logged.push(...args);
+  });
+
+  // The defective row sits in the MIDDLE, for the same reason the failing
+  // recipient does above: a `continue` that ran off the end would take the
+  // recipient AFTER it with no test noticing.
+  const deps = new FakeOversightEnqueue([
+    { id: ADMIN_A },
+    { id: ADMIN_OF_OTHER_ORG, misprovisioned: CROSS_PAIRED },
+    { id: ADMIN_B },
+  ]);
+
+  const report = await fanOutToOversight(deps, CHURCH, (recipientId) =>
+    composeMilestone(facts("phase_advanced"), recipientId)
+  );
+
+  assert.equal(report.misprovisioned, 1);
+
+  // The signal is counted WITHIN `considered`, so the report still adds up.
+  assert.equal(report.considered, 3);
+  assert.equal(
+    report.recorded + report.skipped + report.failed + report.misprovisioned,
+    report.considered
+  );
+
+  // And nothing was enqueued for them — not written, not even attempted, so
+  // the exclusion does not depend on `enqueue` refusing it a second time.
+  assert.deepEqual(
+    deps.written.map((row) => row.recipientUserId),
+    [ADMIN_A, ADMIN_B]
+  );
+  assert.deepEqual(
+    deps.calls.map((row) => row.recipientUserId),
+    [ADMIN_A, ADMIN_B]
+  );
+
+  // The log names the row AND why it was turned away. A count with no
+  // identifier cannot be acted on, which is the state this ruling ends.
+  const context = logged.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === "object" && entry !== null
+  );
+  assert.ok(context);
+  assert.equal(context.recipientUserId, ADMIN_OF_OTHER_ORG);
+  assert.equal(context.role, CROSS_PAIRED.role);
+  assert.equal(context.reachedBy, CROSS_PAIRED.reachedBy);
+});
+
+test("a clean fan-out reports zero, so the signal means something", async () => {
+  // The counter is only useful if it is normally silent — asserted here rather
+  // than assumed, because a count that is always non-zero is not a signal.
+  const deps = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }]);
+
+  const report = await fanOutToOversightOrg(deps, INVITER, (recipientId) =>
+    composeMilestone(facts("invitation_accepted"), recipientId)
+  );
+
+  assert.equal(report.misprovisioned, 0);
+  assert.equal(report.recorded, 2);
+});
+
+// ----------------------------------------------------------------------------
+// …and the classification itself, over the whole role × FK grid
+// ----------------------------------------------------------------------------
+
+/** A `users` row as the candidate query projects it. */
+function candidate(
+  role: UserRole,
+  org: Partial<OversightOrgIds> = {}
+): Parameters<typeof classifyOversightCandidate>[0] {
+  return { id: ADMIN_A, role, ...noOversightOrg(), ...org };
+}
+
+test("the role that administers the named org is an ordinary recipient", () => {
+  // One case per row of the pairing table, derived from it — a third org kind
+  // is covered here on the day it is added.
+  for (const [kind, { role, fk }] of OVERSIGHT_ADMIN_ROWS) {
+    const org = oversightOrgOfKind(kind, SENDING_CHURCH);
+    const classified = classifyOversightCandidate(
+      candidate(role, { [fk]: SENDING_CHURCH }),
+      org
+    );
+
+    assert.deepEqual(classified, { id: ADMIN_A }, kind);
+  }
+});
+
+test("every OTHER role carrying that FK is flagged, never enqueued", () => {
+  // The defect, stated over every role the pairing does NOT name for this FK —
+  // the other oversight role and the three church roles alike. A `planter` with
+  // a stray `sending_church_id` is the same defect as a cross-paired admin.
+  for (const [kind, { role, fk }] of OVERSIGHT_ADMIN_ROWS) {
+    const org = oversightOrgOfKind(kind, SENDING_CHURCH);
+
+    for (const other of userRoles.filter(
+      (candidateRole) => candidateRole !== role
+    )) {
+      assert.deepEqual(
+        classifyOversightCandidate(
+          candidate(other, { [fk]: SENDING_CHURCH }),
+          org
+        ),
+        { id: ADMIN_A, misprovisioned: { role: other, reachedBy: fk } },
+        `${kind} reached by ${other}`
+      );
+    }
+  }
+});
+
+test("a row that administers ONE of the named orgs is a recipient, not a defect", () => {
+  // The plant-wide audience names both orgs at once, and one row can carry both
+  // FKs. Judging it FK-by-FK would flag a legitimate network admin because its
+  // sending-church id also matched — so the question is asked of the row's own
+  // role first, and a match anywhere makes it a recipient.
+  const both: OversightOrgIds = {
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  assert.deepEqual(
+    classifyOversightCandidate(
+      candidate(OVERSIGHT_ADMIN.network.role, {
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      }),
+      both
+    ),
+    { id: ADMIN_A }
+  );
+});
+
+test("a row matching neither named org is not in this audience at all", () => {
+  assert.equal(
+    classifyOversightCandidate(
+      candidate(OVERSIGHT_ADMIN.sending_church.role, {
+        sendingChurchId: "44444444-4444-4444-8444-444444444444",
+      }),
+      oversightOrgOfKind("sending_church", SENDING_CHURCH)
+    ),
+    null
+  );
+});
+
+// ----------------------------------------------------------------------------
+// `oversightReachCondition` — the probe, and what it is NOT
+// ----------------------------------------------------------------------------
+
+test("the probe matches on the FK alone, and the audience still does not", () => {
+  const org = oversightOrgOfKind("sending_church", SENDING_CHURCH);
+
+  const reach = db
+    .select({ id: users.id })
+    .from(users)
+    .where(oversightReachCondition(users, org))
+    .toSQL();
+  const audience = db
+    .select({ id: users.id })
+    .from(users)
+    .where(oversightAudienceCondition(users, org))
+    .toSQL();
+
+  // The probe names the FK and no role — that is the whole widening, and it is
+  // why its rows must never be enqueued without `classifyOversightCandidate`.
+  assert.match(reach.sql.replace(/"/g, ""), /users\.sending_church_id = \$\d+/);
+  assert.doesNotMatch(reach.sql.replace(/"/g, ""), /users\.role/);
+
+  // The audience is unchanged: still the pairing, role included.
+  assert.match(audience.sql.replace(/"/g, ""), /users\.role = \$\d+/);
+});
+
+test("the probe naming no org matches nobody, never everybody", () => {
+  // The same fail-open the audience builder must not have. `undefined` is the
+  // whole safety of the empty case, and `listOversightAudience` guards on it.
+  assert.equal(
+    oversightReachCondition(users, {
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
+    undefined
+  );
 });
