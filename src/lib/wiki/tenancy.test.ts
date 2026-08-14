@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { codeOf } from "@/lib/auth/server-action-surface";
+import {
+  codeOf,
+  valueExportStatements,
+} from "@/lib/auth/server-action-surface";
 
 import * as getArticlesModule from "./get-articles";
 import {
@@ -253,18 +256,46 @@ const QUERY_BUILDER_MODULES = [
   "write-queries.ts",
 ];
 
+/** `export function visibleDraftsQuery(…)` / `export async function …Query(…)`. */
+const QUERY_FUNCTION_DECLARATION =
+  /export\s+(?:async\s+)?function\s+\w+Query\b/;
+
+/** `export const visibleDraftsQuery = (churchId) => db.select()…`. */
+const QUERY_VALUE_BINDING = /^export\s+(?:const|let|var)\s+\w+Query\b/;
+
+/**
+ * Does this module publish a `*Query` builder, IN EITHER SPELLING?
+ *
+ * The function-declaration regex above is the same blind spot `functionBodies`
+ * has one file over, and this guard had it for the same reason: `export const
+ * visibleDraftsQuery = (churchId) => …` is a statement builder by every rule
+ * this domain has and matches no `function` pattern, so a third wiki module
+ * publishing one would have sat outside the tenancy loops AND outside the guard
+ * written to catch exactly that — with the suite green. `valueExportStatements`
+ * is the repo's shared reader for the forms a declaration scan cannot read, and
+ * it is the one `write-paths.test.ts` and `service.test.ts` close the same hole
+ * with (`memory/invariants.md` → Wiki Articles: a guard's own completeness is
+ * derived, never asserted in prose).
+ */
+function declaresQueryBuilder(code: string): boolean {
+  return (
+    QUERY_FUNCTION_DECLARATION.test(code) ||
+    valueExportStatements(code).some((statement) =>
+      QUERY_VALUE_BINDING.test(statement)
+    )
+  );
+}
+
 test("a wiki statement builder is declared only where a suite owns it (#411)", () => {
   const declaring = wikiSourceFiles()
-    .filter((file) =>
-      /export\s+(?:async\s+)?function\s+\w+Query\b/.test(codeOf(file))
-    )
+    .filter((file) => declaresQueryBuilder(codeOf(file)))
     .map((file) => path.basename(file))
     .sort();
 
   assert.deepEqual(
     declaring,
     [...QUERY_BUILDER_MODULES].sort(),
-    "a wiki module declares a statement builder that neither tenancy.test.ts nor write-paths.test.ts renders — a reader-facing read belongs in get-articles.ts, where the predicates that must travel together are declared"
+    "a wiki module declares a statement builder — as a function or as a value binding — that neither tenancy.test.ts nor write-paths.test.ts renders: a reader-facing read belongs in get-articles.ts, where the predicates that must travel together are declared"
   );
 });
 
