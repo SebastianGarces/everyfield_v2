@@ -234,7 +234,7 @@ describe("the print contract, across every file that holds a piece of it", () =>
     // A new divergence is caught by the behavioural test that pins it (images,
     // below) or not at all.
     assert.ok(
-      ARTICLE_ACTIONS.includes("TWO KNOWN DIVERGENCES"),
+      ARTICLE_ACTIONS.includes("THREE KNOWN DIVERGENCES"),
       "the divergence count must match the list below it"
     );
     assert.ok(
@@ -247,12 +247,16 @@ describe("the print contract, across every file that holds a piece of it", () =>
       ),
       "the nesting gap is named"
     );
+    assert.ok(
+      /An ITALIC inline-code run holding/.test(ARTICLE_ACTIONS),
+      "the italic inline-code gap is named"
+    );
   });
 
   test("an image is dropped from the PDF, as the comment now says", () => {
     // The print stylesheet keeps `img`; the extractor has no IMG case, so the
     // image falls to the recursive default and contributes nothing. This test
-    // is what makes divergence 2 a documented fact rather than a surprise.
+    // is what makes divergence 1 a documented fact rather than a surprise.
     assert.match(printBlock, /\[data-print-root\] img \{/);
 
     const blocks = extractPrintBlocks(
@@ -310,7 +314,7 @@ describe("the print contract, across every file that holds a piece of it", () =>
     // share a line to a BARE STRING child — no `<p>` — so the extractor's block
     // walk, which reads `children` and therefore elements only, found nothing
     // inside and dropped the entire callout: box, type and sentence. That is
-    // strictly worse than divergence 3 promises ("keeps its words and loses its
+    // strictly worse than divergence 2 promises ("keeps its words and loses its
     // box"), and no divergence covered it.
     //
     // Pinned end to end, the way the image gap is pinned, because the two halves
@@ -368,7 +372,7 @@ describe("the print contract, across every file that holds a piece of it", () =>
     assert.match(printBlock, /\[data-print-hide\]\s*\{\s*display:\s*none/);
   });
 
-  test("a callout nested in a list item flattens, as divergence 3 says", () => {
+  test("a callout nested in a list item flattens, as divergence 2 says", () => {
     // Pinned beside the image gap, for the same reason: a limitation nobody
     // asserts is a limitation nobody notices has changed. `inlineRuns` reads a
     // list item, a blockquote and a table cell as ONE LINE, so a callout inside

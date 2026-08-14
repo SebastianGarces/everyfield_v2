@@ -34,11 +34,11 @@
 //
 // THE FACES THEMSELVES ARE NOT NAMED HERE. `src/lib/documents/pdf/fonts.ts`
 // owns the table, because the F6 document templates are set in the same faces
-// and the two paths pinned the standard-14 names separately until #398 — which
-// is how the download kept corrupting every character outside WinAnsi (`→`,
-// `↓`, `✓`, box drawing) while the printed page rendered them correctly. That
-// file is import-free at runtime, so naming it here costs the click-path bundle
-// nothing.
+// and the two paths pinned the standard-14 names separately until that table
+// existed — which is how the download corrupted every character outside
+// WinAnsi (`→`, `↓`, `✓`, box drawing) while the printed page rendered them
+// correctly. That file is import-free at runtime, so naming it here costs the
+// click-path bundle nothing.
 // ============================================================================
 
 import { type ReactElement } from "react";

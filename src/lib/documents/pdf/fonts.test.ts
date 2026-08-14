@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { readFile as readFileAsync } from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -337,6 +337,102 @@ describe("the shipped faces", () => {
       drawn(await renderSample(PDF_FONT.mono)),
       SAMPLE.length,
       "and every other mono face draws the whole line"
+    );
+  });
+});
+
+// --- the one place a face may be named --------------------------------------
+
+const TEMPLATE_DIRECTORY = path.join(
+  process.cwd(),
+  "src",
+  "lib",
+  "documents",
+  "pdf"
+);
+
+/** The standard-14 families, which resolve with no asset and corrupt silently. */
+const STANDARD_14 =
+  /\b(Helvetica|Courier|Times-Roman|Times-Bold|Times-Italic|Times-BoldItalic|Symbol|ZapfDingbats)\b/;
+
+/**
+ * Comments removed, so the guard below reads CODE only.
+ *
+ * A header that explains what WinAnsi cost is the point of these files; a
+ * `fontFamily: "Helvetica-Bold"` is the defect. Without this, naming the fault
+ * in prose would fail the test that exists to forbid shipping it.
+ */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+/**
+ * Every template source on the F6 path, minus this table and its own test.
+ *
+ * The DIRECTORY is walked rather than a list of file names kept here: a new
+ * template that pins `"Helvetica"` by hand is exactly the regression this
+ * guards, and a hardcoded list would let the new file be the one that slips
+ * past.
+ */
+function templateSources(): { file: string; code: string }[] {
+  const exempt = new Set(["fonts.ts", "fonts.test.ts"]);
+  return readdirSync(TEMPLATE_DIRECTORY, {
+    recursive: true,
+    encoding: "utf-8",
+  })
+    .filter(
+      (entry) => /\.tsx?$/.test(entry) && !exempt.has(path.basename(entry))
+    )
+    .map((entry) => ({
+      file: entry,
+      code: codeOnly(
+        readFileSync(path.join(TEMPLATE_DIRECTORY, entry), "utf-8")
+      ),
+    }));
+}
+
+describe("the F6 templates name a role, never a face", () => {
+  test("no template under src/lib/documents/pdf/ spells a standard-14 family", () => {
+    // The wiki half is guarded next door — `article-pdf/render.test.ts` pins
+    // every emphasis combination to a face this table registers. This is the
+    // same guard for the server half, and it has to hold the same way: a
+    // standard-14 name RESOLVES without an asset, so re-pinning one here brings
+    // the WinAnsi corruption back with nothing failing.
+    const sources = templateSources();
+
+    assert.ok(
+      sources.some(({ file }) => file === "styles.ts"),
+      "the shared stylesheet must be scanned"
+    );
+    assert.ok(
+      sources.length >= 3,
+      "the directory walk found almost nothing — it is scanning the wrong place"
+    );
+
+    for (const { file, code } of sources) {
+      const found = code.match(STANDARD_14);
+      assert.equal(
+        found?.[0],
+        undefined,
+        `${file} names ${found?.[0]} — use a PDF_FONT role instead`
+      );
+      assert.ok(
+        !/font(Weight|Style)\s*:/.test(code),
+        `${file} sets a font axis — a single-source family throws on one`
+      );
+    }
+  });
+
+  test("the guard can see the shape it forbids", () => {
+    // A scan that cannot fail is a scan nobody notices has stopped matching.
+    assert.ok(STANDARD_14.test('fontFamily: "Helvetica-Bold",'));
+    assert.ok(STANDARD_14.test('fontFamily: "Courier",'));
+    assert.ok(!STANDARD_14.test("fontFamily: PDF_FONT.bold,"));
+    assert.equal(
+      codeOnly('// fontFamily: "Helvetica"\nconst a = 1;').trim(),
+      "const a = 1;"
     );
   });
 });

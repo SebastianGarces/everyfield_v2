@@ -1,5 +1,5 @@
 // ============================================================================
-// Document PDFs — the faces every generated PDF is set in (#398)
+// Document PDFs — the faces every generated PDF is set in
 // ============================================================================
 //
 // WHY THIS FILE EXISTS
@@ -61,8 +61,8 @@ export const PDF_FONT_BASE_PATH = "/fonts";
 /**
  * The eight faces, by role.
  *
- * `standard` is the standard-14 family this role was set in before #398 — the
- * behaviour a failed font load falls back to, and the reason the fallback is an
+ * `standard` is the standard-14 family this role was set in before this table
+ * existed — the behaviour a failed font load falls back to, and why it is an
  * ALIAS rather than a re-registration. See `register` at the bottom.
  */
 const FACES = {
@@ -166,8 +166,8 @@ const registrations = new WeakMap<PdfFontRegistry, Promise<boolean>>();
  * Register the Unicode faces on `Font`, reading their bytes through `load`.
  *
  * Resolves `true` when the shipped faces are in use and `false` when every face
- * fell back to its standard-14 family — that is, to the behaviour before #398:
- * a document with corrupt arrows rather than no document at all.
+ * fell back to its standard-14 family — that is, to the behaviour under the
+ * standard-14 faces: a document with corrupt arrows rather than no document.
  *
  * ALL OR NOTHING. Every face is read BEFORE anything is registered, so one
  * missing file cannot leave a document set half in DejaVu and half in
@@ -209,9 +209,9 @@ async function register(
     //
     // Pointing the family at the SAME `FontFamily` object the built-in name
     // resolves to makes the two entries in that stack identical, which is
-    // exactly the shape a document had before #398. The degrade is then today's
-    // file, byte for byte — corrupt arrows and all — rather than a new failure
-    // mode invented for the unhappy path.
+    // exactly the shape a document had under the standard-14 faces. The degrade
+    // is then today's file, byte for byte — corrupt arrows and all — rather than
+    // a new failure mode invented for the unhappy path.
     const families = Font.getRegisteredFonts();
     for (const face of PDF_FACES) {
       families[face.family] = families[face.standard];

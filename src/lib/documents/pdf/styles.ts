@@ -6,7 +6,7 @@
 // be the standard-14 names, which carry WinAnsi encoding only — so any
 // character a user typed outside WinAnsi (an arrow, a check mark, a
 // box-drawing rule pasted into a field) reached the file as the WRONG GLYPH.
-// See the header of `./fonts.ts` for the whole story (#398).
+// See the header of `./fonts.ts` for the whole story.
 // ============================================================================
 
 import { StyleSheet } from "@react-pdf/renderer";

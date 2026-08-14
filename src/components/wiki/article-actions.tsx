@@ -30,7 +30,7 @@
 // `article-pdf/` halves and `globals.css`, and fails when only one of them
 // draws the grid or keeps a word bold.
 //
-// TWO KNOWN DIVERGENCES, tracked rather than hidden:
+// THREE KNOWN DIVERGENCES, tracked rather than hidden:
 //
 //   1. Images print and do not download. `globals.css` keeps `img` on the
 //      printed page, but `collectBlocks` has no `IMG` case, so an image falls
@@ -48,6 +48,11 @@
 //      Unflattening means those three becoming block containers like a callout
 //      is, which is a change to the block model rather than a missing case.
 //      Owned by `article-pdf/extract.ts`.
+//   3. An ITALIC inline-code run holding `✓`, `✗` or `⚠` stops at that
+//      character and loses the rest of itself — DejaVu Sans Mono Oblique has no
+//      glyph for the three upstream, and `fontSubstitution` ends the run where
+//      nothing in the stack can draw. The browser prints all of it. Owned by
+//      `public/fonts/`.
 //
 // WHERE THE REST OF THE PIPELINE LIVES
 //
@@ -69,14 +74,15 @@
 //
 // The standard-14 fonts `@react-pdf/renderer` ships carry WinAnsi encoding
 // only, and they do not REFUSE a character outside it — they write the wrong
-// glyph (`→` became `’`, box drawing became NUL). That was the first item on
-// the list above until #398 closed it, and renumbered the two that remain. The
-// fix is a real Unicode font, so the eight faces under `public/fonts/` are
-// fetched from this app's own origin alongside the renderer.
+// glyph (`→` became `’`, box drawing became NUL). Under those faces that was a
+// divergence of its own, on EVERY such character; registering a real Unicode
+// font is what reduced it to divergence 3 above. The eight faces under
+// `public/fonts/` are fetched from this app's own origin alongside the
+// renderer.
 //
 // A face that will not load is not fatal: `registerPdfFonts` points the eight
-// families back at the standard-14 ones, and the reader gets the file they got
-// before #398 rather than an error toast.
+// families back at the standard-14 ones, and the reader gets the file those
+// faces produced rather than an error toast.
 //
 // WHY THE PDF IS BUILT CLIENT-SIDE, FROM THE DOM
 //

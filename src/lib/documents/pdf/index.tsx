@@ -5,12 +5,11 @@
 // Maps a template id to its react-pdf component and renders it to a Buffer.
 // Server-only (imports @react-pdf/renderer). Called from the generation route.
 //
-// It also owns the SERVER half of font registration (#398): the same eight
-// faces the browser fetches from `/fonts/`, read straight off disk here. The
-// read is deliberately allowed to fail — `registerPdfFonts` then points the
-// eight families back at the standard-14 ones these templates were set in
-// before #398. A missing font asset must never turn a working download into a
-// 500.
+// It also owns the SERVER half of font registration: the same eight faces the
+// browser fetches from `/fonts/`, read straight off disk here. The read is
+// deliberately allowed to fail — `registerPdfFonts` then points the eight
+// families back at the standard-14 ones these templates used to be set in. A
+// missing font asset must never turn a working download into a 500.
 // ============================================================================
 
 import { renderToBuffer, Font } from "@react-pdf/renderer";
@@ -48,7 +47,7 @@ export const PDF_TEMPLATE_IDS: readonly string[] = Object.keys(PDF_COMPONENTS);
  * `public/` rather than over HTTP — this runs inside the app, so there is no
  * origin to ask. A rejection is not a defect: `registerPdfFonts` answers it with
  * the standard-14 fallback, so a deployment that does not carry `public/` into
- * the function still generates documents, exactly as it did before #398.
+ * the function still generates documents, exactly as it did under those faces.
  */
 const readFontFile = (file: string): Promise<Uint8Array> =>
   readFile(path.join(process.cwd(), "public", "fonts", file));
