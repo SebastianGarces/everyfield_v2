@@ -3,10 +3,16 @@ import { test } from "node:test";
 
 import type { NotificationPreference } from "@/db/schema";
 
-import type { NotificationCategory } from "../categories";
+import {
+  defaultChannelEnabled,
+  NOTIFICATION_CATEGORIES,
+  type NotificationCategory,
+} from "../categories";
 import {
   preferenceOwnerFromUnsubscribeToken,
+  preferenceValueIsInheritable,
   resolvePreference,
+  UNSUBSCRIBE_CHANNEL,
 } from "../preferences";
 import {
   applyEmailOptIn,
@@ -230,6 +236,27 @@ function preferenceRow(
     createdAt: NOW,
     updatedAt: NOW,
   } as NotificationPreference;
+}
+
+/**
+ * Change a CODED DEFAULT for the duration of one test, and hand back the undo.
+ *
+ * The registry `defaultChannelEnabled` reads is the thing mutated, so what runs
+ * afterwards is the real resolver against a real default — not a stub agreeing
+ * with the assertion. This is the only honest way to test "survives a later flip
+ * of the default" without waiting for the product to make one.
+ */
+function flipCodedDefault(
+  category: NotificationCategory,
+  channel: "email" | "in_app",
+  value: boolean
+): () => void {
+  const defaults = NOTIFICATION_CATEGORIES[category].defaults;
+  const previous = defaults[channel];
+  defaults[channel] = value;
+  return () => {
+    defaults[channel] = previous;
+  };
 }
 
 function emailedToken(userId = USER, category: NotificationCategory = "tasks") {
@@ -566,17 +593,13 @@ test("an unconfigured environment refuses the token instead of throwing at the p
   }
 });
 
-test("the undo records a value the resolver treats as INHERITED, not as a choice", () => {
-  // The corrected claim from this module's header (#411 sweep). The undo writes
-  // `enabled: true`, which EQUALS the coded default for every category's email
-  // channel — and `preferenceValueIsInheritable` (#237) resolves such a row as
-  // `source: "default"`, because a row that restates the default says nothing.
-  //
-  // So the header's old promise — "only the explicit write is guaranteed to be
-  // [on]; a category whose default was later reconsidered would make a
-  // delete-based undo silently do nothing" — is false of the explicit write
-  // too. Pinned as it BEHAVES, so a ruling that changes which rule wins fails
-  // here and forces the comment to move with it.
+test("the undo records a CHOICE, not a value that agrees with today's default", () => {
+  // Ruled 2026-08-13 (#411 → #427), reversing what this test used to pin. The
+  // undo writes `enabled: true`, which EQUALS the coded default for every
+  // category's email channel, and #237's value-equality rule therefore read it
+  // as `source: "default"` — a row that says nothing. For a reader who pressed
+  // "keep sending these" that reading is wrong: they made a decision about
+  // their own consent, and `UNSUBSCRIBE_CHANNEL` is now exempt from the rule.
   const resolved = resolvePreference(
     [preferenceRow("tasks", true)],
     "tasks",
@@ -586,13 +609,12 @@ test("the undo records a value the resolver treats as INHERITED, not as a choice
   assert.equal(resolved.enabled, true);
   assert.equal(
     resolved.source,
-    "default",
-    "an undo that agrees with the coded default is inherited, not explicit"
+    "explicit",
+    "the undo's write is the reader's own choice and is recorded as one"
   );
 
-  // The opt-OUT is the asymmetric half and is genuinely explicit — it disagrees
-  // with the default, so it is honoured as the choice it is and is never
-  // re-defaulted back on. That half of the module's promise is intact.
+  // The opt-OUT was always explicit — it disagrees with the default — and the
+  // exemption must not have disturbed it.
   const optedOut = resolvePreference(
     [preferenceRow("tasks", false)],
     "tasks",
@@ -600,4 +622,67 @@ test("the undo records a value the resolver treats as INHERITED, not as a choice
   );
   assert.equal(optedOut.enabled, false);
   assert.equal(optedOut.source, "explicit");
+});
+
+test("the undo survives a later flip of the coded default", () => {
+  // The scenario the ruling exists for, run rather than described: the reader
+  // unsubscribed, changed their mind, and LATER the product reconsiders whether
+  // this category's email is on by default.
+  //
+  // The flip is simulated at the seam the resolver reads defaults through
+  // (`defaultChannelEnabled`), so the fixture cannot pass by agreeing with a
+  // hand-written expectation — it is the real resolver answering against a real
+  // default of `false`.
+  const row = preferenceRow("tasks", true);
+
+  assert.equal(
+    defaultChannelEnabled("tasks", "email"),
+    true,
+    "the premise: today's coded default is what the undo happened to write"
+  );
+
+  const beforeFlip = resolvePreference([row], "tasks", "email");
+  assert.equal(beforeFlip.enabled, true);
+
+  const restore = flipCodedDefault("tasks", "email", false);
+  try {
+    assert.equal(defaultChannelEnabled("tasks", "email"), false);
+
+    // Absence follows the new default — that is #237's rule, untouched.
+    assert.equal(resolvePreference([], "tasks", "email").enabled, false);
+
+    // The reader who pressed "keep sending these" still receives them.
+    const afterFlip = resolvePreference([row], "tasks", "email");
+    assert.equal(
+      afterFlip.enabled,
+      true,
+      "a flipped default silently unsubscribed the reader who had undone it"
+    );
+    assert.equal(afterFlip.source, "explicit");
+  } finally {
+    restore();
+  }
+});
+
+test("the exempt channel IS the channel this module writes to", () => {
+  // The ruling names a channel, and two modules have to agree on which one:
+  // the resolver exempts `UNSUBSCRIBE_CHANNEL`, and every write here is pinned
+  // to it. They are one constant, and this asserts it from both ends — the SQL
+  // the link actually issues, and the rule the resolver actually applies.
+  const resolved = ownerFor("tasks");
+  const { params } = unsubscribeWriteQuery(
+    resolved.owner,
+    resolved.category,
+    true
+  ).toSQL();
+
+  assert.ok(params.includes(UNSUBSCRIBE_CHANNEL));
+  assert.equal(
+    preferenceValueIsInheritable(
+      "tasks",
+      UNSUBSCRIBE_CHANNEL,
+      defaultChannelEnabled("tasks", UNSUBSCRIBE_CHANNEL)
+    ),
+    false
+  );
 });

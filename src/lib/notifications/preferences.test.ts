@@ -41,6 +41,7 @@ import {
   setDigestCadenceQuery,
   setPreferenceQuery,
   setPreferenceSchema,
+  UNSUBSCRIBE_CHANNEL,
   UnauthenticatedPreferenceAccessError,
   type DigestCadenceChoiceView,
   type PreferenceMatrixView,
@@ -78,17 +79,21 @@ function makeRow(
 // ----------------------------------------------------------------------------
 
 test("a present row that AGREES with the coded default stays inheritable", () => {
-  // #237. `tasks`/`email` defaults to on, so a stored `true` says nothing the
+  // #237. `tasks`/`in_app` defaults to on, so a stored `true` says nothing the
   // default did not — and reading it as a CHOICE is what pinned users to
   // today's defaults, keeping N-019's role-aware defaults from ever reaching
   // them. The value is the same either way; the attribution is the fix.
+  //
+  // Stated on `in_app` rather than on `email`, because `email` is
+  // `UNSUBSCRIBE_CHANNEL` and is exempt from this rule as of 2026-08-13 — see
+  // the exemption's own tests below.
   const rows = [
-    makeRow({ category: "tasks", channel: "email", enabled: true }),
+    makeRow({ category: "tasks", channel: "in_app", enabled: true }),
   ];
-  const resolved = resolvePreference(rows, "tasks", "email");
+  const resolved = resolvePreference(rows, "tasks", "in_app");
 
   assert.equal(resolved.enabled, true);
-  assert.equal(resolved.enabled, defaultChannelEnabled("tasks", "email"));
+  assert.equal(resolved.enabled, defaultChannelEnabled("tasks", "in_app"));
   assert.equal(resolved.source, "default");
 });
 
@@ -1115,6 +1120,120 @@ test("inheritable is decided against the CURRENT default, per audience", () => {
     resolvePreference(optIn, "digest", "in_app", "oversight").source,
     "default"
   );
+});
+
+// ----------------------------------------------------------------------------
+// …except on the unsubscribe channel (ruled 2026-08-13, #411 → #427)
+// ----------------------------------------------------------------------------
+
+/**
+ * Every category whose unsubscribe-channel cell the exemption covers — that is,
+ * all of them except the one cell the cadence selector has to write to. The
+ * carve-out is expressed as the condition that creates it (the two channel
+ * constants coinciding), so a future move of the cadence to another channel
+ * widens this list on its own rather than leaving a stale exclusion here.
+ */
+const exemptCategories = notificationCategories.filter(
+  (category) =>
+    !(category === "digest" && UNSUBSCRIBE_CHANNEL === DIGEST_CADENCE_CHANNEL)
+);
+
+test("a row on the unsubscribe channel is a choice even when it agrees", () => {
+  // The ruling: the unsubscribe undo writes a value that happens to equal the
+  // coded default, and that write is still the reader's own decision about
+  // their consent. Asserted over every category the exemption covers, not a
+  // sample, so a seventh category is covered on the day it is added.
+  for (const category of exemptCategories) {
+    const coded = defaultChannelEnabled(category, UNSUBSCRIBE_CHANNEL);
+    const rows = [
+      makeRow({ category, channel: UNSUBSCRIBE_CHANNEL, enabled: coded }),
+    ];
+    const resolved = resolvePreference(rows, category, UNSUBSCRIBE_CHANNEL);
+
+    assert.equal(
+      preferenceValueIsInheritable(category, UNSUBSCRIBE_CHANNEL, coded),
+      false,
+      category
+    );
+    assert.equal(resolved.source, "explicit", category);
+    // The VALUE is unchanged — only the attribution, and with it what a later
+    // change to the default can do to this reader.
+    assert.equal(resolved.enabled, coded, category);
+  }
+});
+
+test("#237's rule is untouched on every OTHER channel", () => {
+  // The other half of the ruling, and the one that keeps this narrow: nothing
+  // but the unsubscribe channel changed. Derived from the channel tuple, so a
+  // third channel is held to #237 by default rather than by an edit here.
+  const others = notificationChannels.filter(
+    (channel) => channel !== UNSUBSCRIBE_CHANNEL
+  );
+  assert.ok(others.length > 0);
+
+  for (const audience of ["church", "oversight"] as const) {
+    for (const category of notificationCategories) {
+      for (const channel of others) {
+        const coded = defaultChannelEnabled(category, channel, audience);
+        const rows = [makeRow({ category, channel, enabled: coded })];
+
+        assert.equal(
+          preferenceValueIsInheritable(category, channel, coded, audience),
+          true,
+          `${audience} ${preferenceKey(category, channel)}`
+        );
+        assert.equal(
+          resolvePreference(rows, category, channel, audience).source,
+          "default",
+          `${audience} ${preferenceKey(category, channel)}`
+        );
+      }
+    }
+  }
+});
+
+test("the cadence carrier is carved back out, so #237's own case still holds", () => {
+  // The exemption is by channel, and the cadence selector writes to that same
+  // channel with an `enabled` the user never chose (the column is NOT NULL, so
+  // the INSERT has to invent one). Exempting it wholesale would have silently
+  // reverted #237 for the one cell it was written for, so that cell keeps the
+  // value-equality rule.
+  const coded = defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL);
+
+  assert.equal(
+    preferenceValueIsInheritable("digest", DIGEST_CADENCE_CHANNEL, coded),
+    true
+  );
+
+  // And the carve-out is exactly one cell wide: the same category on the other
+  // channel, and every other category on this one, are unaffected by it.
+  assert.equal(
+    preferenceValueIsInheritable("tasks", DIGEST_CADENCE_CHANNEL, true),
+    false
+  );
+});
+
+test("the exemption changes no VALUE, so no write becomes a non-no-op", () => {
+  // `preferenceWriteIsNoop` asks about the resolved value, never about its
+  // attribution. If the exemption had moved a value, a screen that saves what
+  // it rendered would start materialising rows again — the defect #237 closed.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+      const coded = defaultChannelEnabled(category, channel, audience);
+      const rows = [makeRow({ category, channel, enabled: coded })];
+
+      assert.equal(
+        resolvePreference(rows, category, channel, audience).enabled,
+        coded,
+        `${audience} ${preferenceKey(category, channel)}`
+      );
+      assert.equal(
+        preferenceWriteIsNoop(rows, category, channel, coded, audience),
+        true,
+        `${audience} ${preferenceKey(category, channel)}`
+      );
+    }
+  }
 });
 
 test("a stored value that DIFFERS from the default is still a choice", () => {

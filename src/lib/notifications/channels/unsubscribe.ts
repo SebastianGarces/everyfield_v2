@@ -11,6 +11,7 @@ import {
   preferenceOwnerFromUnsubscribeToken,
   resolvePreference,
   setPreferenceQuery,
+  UNSUBSCRIBE_CHANNEL,
   type PreferenceOwner,
 } from "../preferences";
 import {
@@ -53,26 +54,22 @@ import {
 // delete would race the resolver's absence rule for no gain and there is no
 // delete path here at all.
 //
-// WHAT IT DOES NOT BUY — corrected in the #411 sweep, because the sentence that
-// used to sit here claimed the opposite and had been false since #237. It read:
-// "only the explicit write is guaranteed to be [on]: a category whose default
-// was later reconsidered would make a delete-based undo silently do nothing."
-// `preferenceValueIsInheritable` (`../preferences.ts`) resolves a stored value
-// that EQUALS the coded default as `source: "default"` — the whole point of
-// #237 being that such a row says nothing — and every category's `email`
-// default is `true`. So the undo's explicit `true` resolves EXACTLY as an
-// absent row does, and the scenario the old sentence named is precisely the one
-// it does not survive: flip that coded default to `false` and the user who
-// pressed "keep sending these" silently stops receiving them.
+// AND THAT WRITE IS NOW A RECORDED CHOICE (ruled 2026-08-13, #411 → #427).
+// It was not, for a while, and the comment that used to sit here said so: #237
+// made a stored value EQUAL to the coded default resolve as `source: "default"`,
+// and every category's `email` default is `true`, so the undo's `true` resolved
+// exactly as an absent row did. Nothing misbehaved today — both readings say
+// "on" — but the day that coded default is reconsidered, the user who pressed
+// "keep sending these" would silently stop receiving them.
 //
-// Nothing behaves differently today (both readings resolve to `true`), which is
-// why this is a corrected comment and not a code change: which rule wins — #237's
-// "a row restating the default is inheritable" or the undo's "record the choice"
-// — is a product decision about consent, so it is RECORDED AS A DECISION on
-// issue #411 (comment 5278189656, 2026-08-13) with its three options, and is
-// not settled here. A comment that vouches for a property the code does not
-// have is the failure this sweep exists to find; it is corrected in place so
-// the next reader is not told the guarantee already exists.
+// The ruling settled it in the consenting direction: `preferenceValueIsInheritable`
+// (`../preferences.ts`) EXEMPTS `UNSUBSCRIBE_CHANNEL` from the value-equality
+// rule, so a row this module wrote resolves `source: "explicit"` and follows the
+// user rather than the default. The exemption is by CHANNEL because nothing
+// stored says who wrote a row — an intent stamp would need a migration and was
+// deferred — and it carves ONE cell back out, the (digest, cadence) row an
+// authenticated cadence save has to invent. Both the carve-out and the residual
+// it leaves are stated at that function.
 //
 // ----------------------------------------------------------------------------
 // Why storage is injected
@@ -86,8 +83,9 @@ import {
 // — no route or page passes one.
 // ============================================================================
 
-/** The channel this token family can ever touch. Fixed, never a parameter. */
-const UNSUBSCRIBE_CHANNEL = "email" as const;
+// The channel this token family can ever touch is fixed and never a parameter —
+// `UNSUBSCRIBE_CHANNEL`, imported from `../preferences` rather than declared
+// here since the resolver keys its consent exemption on the same constant.
 
 /**
  * The write, as a builder — exported so a test can `.toSQL()` it and assert the
