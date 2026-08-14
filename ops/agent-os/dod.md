@@ -414,6 +414,9 @@ TRACK DONE = every workstream DONE  AND  G1 + G2 (full) + G3 + G4 + G6 PASS
   NOT DONE
         → an integration failure that NAMES a workstream goes back to that workstream and
           consumes ITS attempt; an unattributable one consumes a track-level integration attempt
+        → EXCEPT a gate the WORKFLOW synthesized (`G3/preview-sync`, `CI`, `HR1-HR3/missing-proofs`,
+          `HR3/pr-body`, `HR4/<lens>`, or a dead verifier): the whole attempt is RE-RUN, and no
+          implementation or repair agent is spawned at all
 EXHAUSTED (max attempts or token reserve hit)
         → DO NOT open a PR; label issue `agent:blocked`, comment the failing gate + evidence,
           alert the human. Never stop silently.
@@ -422,6 +425,16 @@ EXHAUSTED (max attempts or token reserve hit)
 **A workstream that passed is never re-implemented.** Attempt accounting is per workstream precisely
 because the flat `G0..G6` verdict this replaced re-ran the entire track over one failing AC and burned
 an attempt for every healthy unit in it.
+
+**Only a VERIFIER-authored FAIL routes to an agent, because only a verifier can name a
+`failingWorkstream`.** The gates `verify-and-ship.js` composes itself are answerable by the verifier
+(HR1/HR2 owe a dry-run and a rollback transcript) or by the release agent (HR3 owes the PR body) —
+never by an implementer, which is forbidden to push and may not run `gh pr edit`. So they re-run the
+integration attempt instead: `build-until-done.js` short-circuits them ahead of attribution, keyed on
+the SLASH in the composed name, and both HR reports clear `failingWorkstream` after spreading the
+verifier's report so a stray value cannot route the failure either. A bare `HR1`/`HR2`/`HR3` is
+different — that is a verifier reporting a migration that genuinely will not apply, and it stays
+attributable. Pinned in `ops/agent-os/tests/frd-workflows.test.mjs`.
 
 **A failure in GitHub state is not a failure in code, and it never burns a build attempt.** When the
 named cause of an integration FAIL is publish/anchor state — the PR head is not the validated sha, no

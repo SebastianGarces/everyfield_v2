@@ -430,23 +430,37 @@ async function runBuild(units, reply, over = {}) {
   // runtime gives, pinned here so a recipe or verify-and-ship that tries to
   // nest fails the test suite loudly.
   globals.workflow = async (spec, wfArgs) => {
-    calls.push({ kind: "workflow", scriptPath: spec.scriptPath, args: wfArgs });
-    if (workflowImpl) return workflowImpl(spec, wfArgs);
-    const childSource = load(spec.scriptPath.replace(".claude/workflows/", ""));
-    const childGlobals = {
-      ...globals,
+    // The child's RETURN is recorded next to the call: the parent only surfaces
+    // `failingGate` in its summary, so a test about any other field of the
+    // child's report (`failingWorkstream`, say) has nowhere else to read it.
+    const call = {
+      kind: "workflow",
+      scriptPath: spec.scriptPath,
       args: wfArgs,
-      workflow: () => {
-        throw new Error(
-          "workflow() nesting is one level deep — a child must never call workflow()"
-        );
-      },
     };
-    const childFn = new Function(
-      ...Object.keys(childGlobals),
-      `return (async () => { ${childSource} })()`
-    );
-    return childFn(...Object.values(childGlobals));
+    calls.push(call);
+    const run = async () => {
+      if (workflowImpl) return workflowImpl(spec, wfArgs);
+      const childSource = load(
+        spec.scriptPath.replace(".claude/workflows/", "")
+      );
+      const childGlobals = {
+        ...globals,
+        args: wfArgs,
+        workflow: () => {
+          throw new Error(
+            "workflow() nesting is one level deep — a child must never call workflow()"
+          );
+        },
+      };
+      const childFn = new Function(
+        ...Object.keys(childGlobals),
+        `return (async () => { ${childSource} })()`
+      );
+      return childFn(...Object.values(childGlobals));
+    };
+    call.result = await run();
+    return call.result;
   };
   const fn = new Function(
     ...Object.keys(globals),
@@ -1302,6 +1316,130 @@ test("a PR body with no Schema diff block fails the attempt instead of merging",
     !calls.some((c) => c.label === "merge:alpha"),
     "and the merge gate — which does not hold on migrations — is never reached"
   );
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: an HR gate the WORKFLOW synthesized is RE-RUN, never repaired
+//
+// `HR3/pr-body` and `HR1-HR3/missing-proofs` are composed by verify-and-ship,
+// not authored by a verifier — and the agent that can answer either is the
+// VERIFIER (it owes the dry-run and the rollback transcript) or the RELEASE
+// agent (it owns the PR body). An implementer can answer neither: the repair
+// prompt forbids it to push, and `HR3/pr-body`'s fixInstructions ask for a
+// `gh pr view` it may not run. Routing one there burns an agent whose only
+// available answer is an unrelated commit on a branch that is one PR-agent
+// retry away from auto-merging. `CI` is the precedent — same shape, same list.
+// ---------------------------------------------------------------------------
+
+/** Every agent label the loop used to build or repair code. */
+const codeAgentLabels = (calls) =>
+  calls
+    .filter(
+      (c) =>
+        c.kind === "agent" &&
+        (c.label?.startsWith("repair:") ||
+          c.label?.startsWith("impl:") ||
+          c.label?.startsWith("fix:"))
+    )
+    .map((c) => c.label);
+
+test("an HR3/pr-body failure retries the attempt instead of spawning a repair agent", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passingWithProofs(), null, () => ({
+            opened: true,
+            url: "https://gh/pr/1",
+            checkConclusion: "success",
+            bodyHasSchemaDiff: false,
+          }))(prompt, opts),
+    { autoMerge: true, maxAttempts: 2 }
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("repair:")),
+    "a PR body is not a thing a code implementer is allowed to touch"
+  );
+  assert.deepEqual(
+    codeAgentLabels(calls),
+    ["impl:alpha-s0w1#1"],
+    "nothing beyond the original build ran — no re-run, no repair, no commit on the track branch"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "pr:alpha#2"),
+    "the whole integration attempt is retried, which is the only thing that can rewrite the body"
+  );
+  assert.equal(result.blocked[0].failingGate, "HR3/pr-body");
+});
+
+test("an HR1-HR3/missing-proofs failure retries the attempt instead of spawning a repair agent", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: true, maxAttempts: 2 }
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("repair:")),
+    "the fixInstructions are addressed to the verifier — handing them to an implementer is a burnt agent"
+  );
+  assert.deepEqual(
+    codeAgentLabels(calls),
+    ["impl:alpha-s0w1#1"],
+    "the proofs are owed by the verifier of the assembled branch; no code agent runs at all"
+  );
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("verify:alpha#")).length,
+    2,
+    "the attempt is re-run, so a verifier that skipped the dry-run gets a second chance to run it"
+  );
+  assert.equal(result.blocked[0].failingGate, "HR1-HR3/missing-proofs");
+});
+
+test("a stray failingWorkstream on the verify report cannot route an HR failure to a workstream", async () => {
+  // Both synthesized reports SPREAD the verifier's own report, whose schema
+  // carries `failingWorkstream`. A PASS report that left one set would hit
+  // `byWorkstream.get(...)` and send a PR body to an implementer in one
+  // workstream's worktree — so the field is CLEARED, not merely unset.
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? carriesMigration()
+        : replyShip(
+            { ...passingWithProofs(), failingWorkstream: "alpha-s0w1" },
+            null,
+            () => ({
+              opened: true,
+              url: "https://gh/pr/1",
+              checkConclusion: "success",
+              bodyHasSchemaDiff: false,
+            })
+          )(prompt, opts),
+    { autoMerge: true, maxAttempts: 2 }
+  );
+  assert.deepEqual(
+    codeAgentLabels(calls),
+    ["impl:alpha-s0w1#1"],
+    "the named workstream is NOT re-run — it never saw the PR body at all"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "pr:alpha#2"),
+    "the attempt retries, exactly as it does when the field is absent"
+  );
+  // And the field is CLEARED at the source, not merely ignored by the routing
+  // switch above — the two guards are independent, so widening the switch by
+  // accident must not silently re-arm the misattribution.
+  for (const ship of calls.filter((c) => c.kind === "workflow"))
+    assert.equal(
+      ship.result?.report?.failingWorkstream,
+      undefined,
+      "a synthesized HR report must not carry the verifier's stray failingWorkstream"
+    );
+  assert.equal(result.blocked[0].failingGate, "HR3/pr-body");
 });
 
 test("an unanswered bodyHasSchemaDiff is a FAIL, not a pass", async () => {

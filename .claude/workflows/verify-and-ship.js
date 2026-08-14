@@ -734,9 +734,14 @@ function migrationProofsMissing(report, migration) {
     ...report,
     verdict: "FAIL",
     failingGate: "HR1-HR3/missing-proofs",
-    // No `failingWorkstream`: the proofs are owed by the VERIFIER of the
-    // assembled branch, so attributing them to one workstream would send the
-    // re-run to an agent that never had the whole diff.
+    // No `failingWorkstream`, and it is CLEARED rather than merely unset: the
+    // proofs are owed by the VERIFIER of the assembled branch, so attributing
+    // them to one workstream would send the re-run to an agent that never had
+    // the whole diff. The spread above carries the verifier's own report, whose
+    // schema has a `failingWorkstream` field — a stray value on an otherwise
+    // passing report would route this failure to one workstream's implementer,
+    // which is exactly what the comment claimed could not happen.
+    failingWorkstream: undefined,
     fixInstructions: `This track's diff carries a migration (${migration.named}), so HR1–HR3 are owed and the report did not carry them:
 ${failed.map((p) => `  - ${p.id} (${p.owes}) — ${p.why}`).join("\n")}
 Run each proof against the migration files above and report it as its own \`gates\` entry with \`id\` "${failed.map((p) => p.id).join('"/"')}", \`status\` "PASS" and the transcript as \`evidence\`. Do not restate the verdict without running them.`,
@@ -1229,8 +1234,13 @@ if (effectiveMigration && pr?.opened && pr.bodyHasSchemaDiff !== true) {
       ...verify,
       verdict: "FAIL",
       failingGate: "HR3/pr-body",
-      // No `failingWorkstream`: the body is written by the release agent for
-      // the whole assembled branch, so this is never one workstream's failure.
+      // No `failingWorkstream`, and it is CLEARED rather than merely unset: the
+      // body is written by the release agent for the whole assembled branch, so
+      // this is never one workstream's failure. `verify` is the verifier's own
+      // report and its schema carries `failingWorkstream`, so a stray value on
+      // a PASS/PASS_WITH_WARNINGS report would otherwise survive the spread and
+      // hand a PR body to an implementer in one workstream's worktree.
+      failingWorkstream: undefined,
       fixInstructions: `This track's diff carries a migration (${effectiveMigration.named}), so HR3 owes the exact DDL delta in the PR BODY, and reading ${pr.url || "the PR"} back reported \`bodyHasSchemaDiff: ${pr.bodyHasSchemaDiff === false ? "false" : "(not answered)"}\`${pr.schemaDiffExcerpt ? ` with excerpt: ${pr.schemaDiffExcerpt}` : ""}. Update the PR body to include the \`open-pr\` skill's \`Schema diff\` block containing the real DDL delta for those files — not a placeholder — then re-read the body with \`gh pr view <number> --json body\` and report what it printed. The verifier's HR3 gate evidence holds the delta to quote: ${
         (verify.gates || [])
           .filter((g) => isProofGate(g, "HR3"))

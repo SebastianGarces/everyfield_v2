@@ -1796,15 +1796,33 @@ Return {"claimed": [the numbers you edited], "inProgressNow": [every number that
     if (ship.outcome === "verify-failed") {
       const verify = ship.report;
       // Machinery-synthesized failures — a stale preview (G3/preview-sync), a
-      // red CI check, an HR4 dissent, or a verifier that died (no report at
-      // all) — retry the whole integration attempt, exactly as they did before
-      // the extraction. Only a verifier-authored FAIL routes to attribution,
-      // because only a verifier can name a failingWorkstream.
+      // red CI check, an HR1–HR3 proof the report or the PR body never carried,
+      // an HR4 dissent, or a verifier that died (no report at all) — retry the
+      // whole integration attempt, exactly as they did before the extraction.
+      // Only a verifier-authored FAIL routes to attribution, because only a
+      // verifier can name a failingWorkstream.
+      //
+      // EVERY workflow-synthesized HR gate is on this list, and the reason is
+      // the same for all of them: the agent that can fix one is the VERIFIER
+      // (it owes the dry-run and the rollback transcript) or the RELEASE agent
+      // (it owns the PR body) — never an implementer, so these are RE-RUN
+      // rather than repaired. Routing `HR3/pr-body` to a repair agent hands a
+      // code implementer a GitHub body it is explicitly forbidden to push, and
+      // routing `HR1-HR3/missing-proofs` hands it fixInstructions addressed to
+      // the verifier; both burn an agent that can only answer by inventing an
+      // unrelated commit on a branch one retry away from auto-merging.
+      //
+      // ONE regex, keyed on the SLASH, so a fifth synthesized HR gate is
+      // covered by construction: `HR4/<lens>`, `HR3/pr-body` and
+      // `HR1-HR3/missing-proofs` are workflow-composed names, while a BARE
+      // `HR1`/`HR2`/`HR3` is a verifier reporting its own failed dry-run or
+      // rollback — a real defect in the migration, attributable to the
+      // workstream that wrote it, and it must keep routing to attribution.
       const synthesized =
         !verify ||
         verify.failingGate === "G3/preview-sync" ||
         verify.failingGate === "CI" ||
-        /^HR4\//.test(verify.failingGate || "");
+        /^HR\d(-HR\d)?\//.test(verify.failingGate || "");
       if (synthesized) continue;
       // Attributable → send it back to that workstream, which still has its own
       // attempts and its own worktree. Unattributable → the whole track retries.
