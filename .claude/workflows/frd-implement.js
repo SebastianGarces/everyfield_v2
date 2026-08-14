@@ -1,41 +1,24 @@
 export const meta = {
   name: "frd-implement",
   description:
-    "Build everything currently on the board's frontier: read the unblocked, unclaimed issues, fan the file-disjoint ones into isolated git worktrees, implement and code-review each. You merge the resulting branches; the board holds the order.",
+    "Build the board's frontier: read the unblocked, unclaimed issues, fan the file-disjoint ones into isolated git worktrees, implement and code-review each. You merge the resulting branches.",
   whenToUse:
-    "After frd-plan has published the DAG, and whenever blockers have since closed. Takes no wave array — pass nothing to build the whole frontier, or {issues:[...]} to restrict it to a candidate set.",
+    "After frd-plan has published the DAG, and whenever blockers have since closed. Pass nothing to build the whole frontier, or {issues:[...]} to restrict it to a candidate set.",
   phases: [
-    {
-      title: "Frontier",
-      detail:
-        "Read the board for issues whose blockers are all closed and nobody has claimed",
-    },
-    {
-      title: "Implement",
-      detail:
-        "One coding agent per file-disjoint track, each in an isolated git worktree on its own branch",
-    },
+    { title: "Frontier", detail: "Read and claim what is takeable" },
+    { title: "Implement", detail: "One agent per track, in its own worktree" },
     {
       title: "Review",
-      detail: "code-reviewer runs on each track branch as it lands",
+      detail: "The one review per branch; it settles the board",
     },
-    {
-      title: "Settle",
-      detail:
-        "Write each track's outcome back to its issue so the board stays true",
-    },
+    { title: "Settle", detail: "Fallback only: a track that produced nothing" },
   ],
 };
 
 // ---------------------------------------------------------------------------
-// Input — all optional.
-//   {issues:[12,13]}  restrict the frontier to these candidates
-//   {base:"main"}     branch point (default: the current branch)
-//
-// There is deliberately NO units array. The old model passed one wave's units
-// in as an argument, which meant the ordering lived in whatever transcript or
-// file produced it. It now lives on the board, so a run started in a fresh
-// session sees exactly the same picture as one started here.
+// Input — all optional. {issues:[12,13]} restricts the frontier to candidates;
+// {base:"main"} sets the branch point. There is no units array: the order lives
+// on the board, so a fresh session sees the same picture as this one.
 // ---------------------------------------------------------------------------
 const parsedArgs =
   typeof args === "string" && args.trim().startsWith("{")
@@ -46,115 +29,94 @@ const candidates = Array.isArray(parsedArgs)
   : parsedArgs?.issues || null;
 const base = parsedArgs?.base || null;
 
-const FRONTIER_SCHEMA = {
+// Schema builders — the schema IS the contract, so keep the field names exact.
+const str = { type: "string" };
+const num = { type: "number" };
+const noted = (base, description) => ({ ...base, description });
+const list = (items, d) => (d ? { type: "array", items, description: d } : { type: "array", items }); // prettier-ignore
+const obj = (required, properties) => ({
   type: "object",
-  required: ["frontier", "blocked", "notes"],
-  properties: {
-    frontier: {
-      type: "array",
-      description: "takeable now: open, zero OPEN blockers, unassigned",
-      items: {
-        type: "object",
-        required: [
-          "issue",
-          "id",
-          "title",
-          "lane",
-          "files",
-          "summary",
-          "acceptanceCriteria",
-          "risk",
-        ],
-        properties: {
-          issue: { type: "number" },
-          id: { type: "string", description: "short slug for the branch name" },
-          title: { type: "string" },
-          lane: { type: "string", enum: ["frontend", "backend", "fullstack"] },
-          files: { type: "array", items: { type: "string" } },
-          summary: { type: "string" },
-          acceptanceCriteria: { type: "array", items: { type: "string" } },
-          risk: { type: "string", enum: ["low", "medium", "high"] },
-        },
-      },
-    },
-    blocked: {
-      type: "array",
-      description: "queued but NOT takeable, with what each still waits on",
-      items: {
-        type: "object",
-        required: ["issue", "title", "waitingOn"],
-        properties: {
-          issue: { type: "number" },
-          title: { type: "string" },
-          waitingOn: { type: "array", items: { type: "number" } },
-        },
-      },
-    },
-    notes: { type: "string" },
-  },
-};
+  required,
+  properties,
+});
+const enm = (...values) => ({ type: "string", enum: values });
 
-const IMPL_SCHEMA = {
-  type: "object",
-  required: [
-    "branch",
-    "unitsCompleted",
-    "filesChanged",
-    "summary",
-    "selfCheckPassed",
-  ],
-  properties: {
-    branch: { type: "string" },
-    unitsCompleted: { type: "array", items: { type: "string" } },
-    filesChanged: { type: "array", items: { type: "string" } },
-    summary: { type: "string" },
-    selfCheckPassed: {
-      type: "boolean",
-      description: "tsc + lint passed in the worktree",
-    },
-  },
-};
-const REVIEW_SCHEMA = {
-  type: "object",
-  required: ["verdict", "critical", "warnings", "summary"],
-  properties: {
-    verdict: { type: "string", enum: ["PASS", "PASS_WITH_WARNINGS", "FAIL"] },
-    critical: { type: "array", items: { type: "string" } },
-    warnings: { type: "array", items: { type: "string" } },
-    summary: { type: "string" },
-  },
-};
-const SETTLE_SCHEMA = {
-  type: "object",
-  required: ["updated", "notes"],
-  properties: {
-    updated: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["issue", "label"],
-        properties: {
-          issue: { type: "number" },
-          label: { type: "string" },
-        },
-      },
-    },
-    notes: { type: "string" },
-  },
-};
+const LABELLED = list(
+  obj(["issue", "label"], { issue: num, label: str }),
+  "the label each issue ended on"
+);
 
-const CONVENTIONS = `Read AGENTS.md and CLAUDE.md, then memory/entrypoints.md, memory/invariants.md (the one-liner index — every rule is stated there), the memory/invariants/*.md domain files matching the files you own, and relevant memory/contracts/*.md before opening source files. Hard rules: pnpm; Drizzle migrations via db:generate+db:migrate (NEVER db:push); shadcn via pnpm dlx shadcn@latest add; cursor-pointer on clickables; never start a dev server.`;
+const FRONTIER_SCHEMA = obj(["frontier", "blocked", "notes"], {
+  frontier: list(
+    obj(
+      ["issue", "id", "title", "lane", "files", "summary", "acceptanceCriteria", "risk"], // prettier-ignore
+      {
+        issue: num,
+        id: noted(str, "short slug for the branch name"),
+        title: str,
+        lane: enm("frontend", "backend", "fullstack"),
+        files: list(str),
+        summary: str,
+        acceptanceCriteria: list(str),
+        risk: enm("low", "medium", "high"),
+      }
+    ),
+    "takeable now: open, zero OPEN blockers, unassigned"
+  ),
+  blocked: list(
+    obj(["issue", "title", "waitingOn"], {
+      issue: num,
+      title: str,
+      waitingOn: list(num),
+    }),
+    "queued but NOT takeable, with what each still waits on"
+  ),
+  notes: str,
+});
+
+const IMPL_SCHEMA = obj(
+  ["branch", "unitsCompleted", "filesChanged", "summary", "selfCheckPassed"],
+  {
+    branch: str,
+    unitsCompleted: list(str),
+    filesChanged: list(str),
+    summary: str,
+    selfCheckPassed: noted(
+      { type: "boolean" },
+      "tsc + lint passed in the tree"
+    ),
+  }
+);
+
+const REVIEW_SCHEMA = obj(["verdict", "critical", "warnings", "summary"], {
+  verdict: enm("PASS", "PASS_WITH_WARNINGS", "FAIL"),
+  critical: list(str, "actionable findings, each naming its remedy"),
+  warnings: list(
+    str,
+    "non-blocking observations, and the rulings made on them"
+  ),
+  summary: str,
+  updated: LABELLED,
+});
+
+const SETTLE_SCHEMA = obj(["updated", "notes"], {
+  updated: LABELLED,
+  notes: str,
+});
+
+const CONVENTIONS =
+  "Read AGENTS.md, then memory/invariants.md and the domain invariant files covering the files you own.";
 
 // ---------------------------------------------------------------------------
-// 1. Frontier — ask the board what is takeable
+// 1. Frontier — ask the board what is takeable, and claim it
 // ---------------------------------------------------------------------------
 phase("Frontier");
 const board = await agent(
-  `You are reading the delivery board to find takeable work. Read ops/agent-os/labels.md FIRST — it defines the frontier and the label vocabulary. Use the \`gh\` CLI.
+  `Find the takeable work on the delivery board with \`gh\`. The frontier rules and the label vocabulary live in ops/agent-os/labels.md — read it first.
 
-**The frontier** is every issue that is: open, labelled \`agent:queued\`, has **zero OPEN blockers**, and has **no assignee**.
+**The frontier** is every issue that is open, labelled \`agent:queued\`, has **zero OPEN blockers**, and has **no assignee**.
 
-**Read the whole board in ONE call.** The REST list endpoint carries \`issue_dependencies_summary\`, \`assignees\`, \`labels\` AND the full \`body\`, so this single request returns everything the schema needs:
+**Read the whole board in ONE call** — the REST list endpoint carries \`issue_dependencies_summary\`, \`assignees\`, \`labels\` AND the full \`body\`:
 
 \`\`\`bash
 R=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
@@ -162,23 +124,19 @@ gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" 
   --jq '.[] | select(.pull_request == null) | {number, title, body, assignees: (.assignees | length), blocked_by: .issue_dependencies_summary.blocked_by, labels: [.labels[].name]}'
 \`\`\`
 
-Three rules about that command, each of which has already gone wrong here:
-- **Use \`--paginate\`.** \`gh issue list\` defaults to **30** rows; on 2026-08-05 that hid 56 of an 86-issue board from this very query, silently, for weeks.
-- **Keep \`select(.pull_request == null)\`.** The REST issues endpoint returns pull requests too. \`gh issue list\` filters them; \`gh api\` does not, and a PR dispatched as buildable work is a bad day.
-- **Do NOT run \`gh issue view <n>\` per issue.** The body is already in the payload above. Parse it from there — one request for the whole board, not one per issue.
+- **Keep \`--paginate\`** — an unpaginated list truncates at 30 rows and hides most of the board, silently.
+- **Keep \`select(.pull_request == null)\`** — that endpoint returns pull requests alongside issues.
+- **Do NOT run \`gh issue view <n>\` per issue** — the body is already in the payload.
 
-\`blocked_by\` counts only OPEN blockers, so it is a live gate rather than a history.
+\`blocked_by\` counts only OPEN blockers, so it is a live gate, not a history.
 ${candidates ? `\n**Restrict to these candidates only:** ${candidates.join(", ")}. Ignore everything else on the board.\n` : ""}
-**For each frontier issue**, extract the schema's fields **from the payload you already fetched**. \`files\` must come from the issue body's **Likely files** section — it is what keeps parallel tracks from colliding, so copy it faithfully rather than guessing. \`lane\` comes from the Validation plan; \`risk\` from the Risk section. Give each a short kebab-case \`id\` for its branch name.
+Fill the schema **from the payload you already fetched**: \`files\` from the body's **Likely files** section (copy it faithfully — it is what keeps parallel tracks from colliding), \`lane\` from the Validation plan, \`risk\` from the Risk section, plus a short kebab-case \`id\` for the branch name.
 
-**Exclude and report as blocked**, never as frontier:
-- anything with an open blocker (say which, in \`waitingOn\`)
-- anything already assigned — someone else has it
-- anything labelled \`needs-spec\`, \`decision\`, \`deferred\` or \`feature\`; those are not buildable units
+**Report as blocked, never as frontier:** anything with an open blocker (name it in \`waitingOn\`), anything already assigned, anything labelled \`needs-spec\`, \`decision\`, \`deferred\` or \`feature\`.
 
-**Claim what you return:** for each frontier issue, \`gh issue edit <n> --add-assignee @me --add-label agent:in-progress --remove-label agent:queued\`. Claiming is the first write, so two runs cannot pick up the same issue.
+**Claim what you return:** \`gh issue edit <n> --add-assignee @me --add-label agent:in-progress --remove-label agent:queued\`. Claiming is the first write, so two runs cannot pick up the same issue.
 
-If the frontier is empty, return an empty array and say in \`notes\` what the board is waiting on.
+If the frontier is empty, return an empty array and say in \`notes\` what the board waits on.
 Return strictly the schema.`,
   { phase: "Frontier", agentType: "backend", schema: FRONTIER_SCHEMA }
 );
@@ -198,17 +156,14 @@ if (units.length === 0) {
     blocked: board.blocked || [],
     notes: board.notes,
     nextStep:
-      "Every queued issue is waiting on an open blocker or is already claimed. Close the blockers (merge their PRs) and run again.",
+      "Every queued issue waits on an open blocker or is already claimed. Close the blockers and run again.",
   };
 }
 
 // ---------------------------------------------------------------------------
-// 2. Regroup by shared file
-//
-// The frontier is a SEMANTIC guarantee — nothing here waits on anything else
-// here. It is not a guarantee about files. Two unblocked issues can still both
-// own src/db/schema/index.ts, and parallel worktrees would collide. So the
-// file-overlap grouping still runs, exactly as it did per-wave.
+// 2. Regroup by shared file. The frontier guarantees nothing here waits on
+// anything else here; it guarantees nothing about files, and parallel worktrees
+// owning the same file collide.
 // ---------------------------------------------------------------------------
 const normFile = (f) =>
   String(f)
@@ -271,7 +226,8 @@ log(
 );
 
 // ---------------------------------------------------------------------------
-// 3. Implement (isolated worktree) → review, pipelined
+// 3. Implement (isolated worktree) → review, pipelined. That review is the
+// review of record for the branch: nothing downstream reviews it again.
 // ---------------------------------------------------------------------------
 phase("Implement");
 const results = await pipeline(
@@ -292,11 +248,11 @@ ${(u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")}`
 
 Create a NEW branch "${branch}"${base ? ` from ${base}` : ""} and implement the following ${track.units.length} unit(s)${track.units.length > 1 ? " IN ORDER (they share files, so build sequentially in one tree)" : ""}.
 
-These issues are on the board's frontier, which means every issue they were blocked by is already closed and merged. Build on what exists; do not re-create it. If something you depend on is genuinely missing from the base branch, stop and say so rather than rebuilding it — that means the board is wrong, and guessing would hide it.
+These issues are on the frontier, so everything they were blocked by is closed and merged. Build on what exists. If something you depend on is genuinely missing from the base branch, stop and say so — that means the board is wrong, and guessing would hide it.
 
 ${blocks}
 
-Write code and tests, run the project's type-check and lint and fix what you can, then commit to the branch (conventional commits). Reference the issue number in your commit body, but do NOT write "Closes #n" — this workflow does not open PRs and must not close anything. Stay within the listed files unless strictly necessary; note any deviation.
+Write code and tests, run type-check and lint and fix what you can, then commit (conventional commits). Reference the issue number in the commit body, but do NOT write "Closes #n" — this workflow opens no PRs and closes nothing. Stay within the listed files unless strictly necessary; note any deviation.
 Return strictly the schema.`,
       {
         label: `impl:${track.id}`,
@@ -317,8 +273,17 @@ Return strictly the schema.`,
       )
       .join("\n");
     return agent(
-      `You are the code-reviewer. Review the diff on branch "${impl.branch}" (git diff against the base). Apply the code-reviewer checklist (correctness, security, simplicity, performance, project conventions). Verify these acceptance criteria are met:
+      `You are the code-reviewer, and this is the ONE review this branch gets. Review the diff on branch "${impl.branch}" (against the base) for correctness, project conventions (AGENTS.md, plus the memory/invariants files matching the diff), diff hygiene, and whether it meets its acceptance criteria. On a schema, auth or tenancy diff, hold the security lens explicitly and read the matching memory/invariants/*.md.
+
+Acceptance criteria:
 ${criteria}
+
+Split what you find: \`critical\` = actionable findings, each naming its remedy; \`warnings\` = everything else, including spec-questions — rule on those yourself from product-docs/product-values.md, CONTEXT.md and memory/invariants.md, and record the ruling in the warning text.
+
+**Then settle this track's issues** (${track.issues.map((i) => `#${i}`).join(", ")}) with \`gh\`; each is \`agent:in-progress\` and assigned, because this run claimed it.
+- PASS or PASS_WITH_WARNINGS → comment the branch, the verdict and any warnings, and leave the label alone. Passing tracks stay \`agent:in-progress\` — no DoD, no PR, so no \`agent:in-review\`.
+- FAIL → swap \`agent:in-progress\` for \`agent:blocked\`, unassign, and comment the critical findings so the next attempt starts informed.
+Report the label each issue ended on in \`updated\`.
 Return strictly the schema.`,
       {
         label: `review:${track.id}`,
@@ -333,48 +298,25 @@ Return strictly the schema.`,
 const landed = results.filter(Boolean);
 
 // ---------------------------------------------------------------------------
-// 4. Settle — write the outcome back to the board
-//
-// Every issue was claimed as agent:in-progress in the frontier step. Leaving
-// one there after the run is exactly the stale state this whole board exists
-// to prevent, so the outcome is written back before the workflow returns.
-//
-// Note what this deliberately does NOT do: promote to `agent:in-review`. That
-// label means "DoD passed, PR opened", and this workflow runs neither the DoD
-// gates nor open-pr. Claiming review-readiness it has not earned would be the
-// same class of error as trusting a board card over a run log.
+// 4. Settle — fallback only. Each reviewer settled its own issues; a track that
+// produced nothing had no reviewer run, so its issues would stay claimed forever.
 // ---------------------------------------------------------------------------
-phase("Settle");
-const outcomes = landed.map((r) => ({
-  issues: r.track.issues,
-  branch: r.impl?.branch,
-  verdict: r.review?.verdict || "UNKNOWN",
-  critical: r.review?.critical || [],
-  selfCheckPassed: r.impl?.selfCheckPassed,
-}));
 const failedTracks = tracks.filter(
   (t) => !landed.some((r) => r.track.id === t.id)
 );
+let settled = null;
+if (failedTracks.length) {
+  phase("Settle");
+  settled = await agent(
+    `These claimed issues produced nothing — the build agent died, so no reviewer settled them. Label vocabulary: ops/agent-os/labels.md. With \`gh\`, for each issue below: swap \`agent:in-progress\` for \`agent:blocked\`, unassign, and comment that the run produced no branch.
 
-const settled = await agent(
-  `You are writing build outcomes back to the GitHub board so it does not lie. Read ops/agent-os/labels.md first. Use \`gh\`. Every issue below is currently \`agent:in-progress\` and assigned, because this run claimed it.
-
-**Passing tracks** — a branch exists and the code review passed. Leave the issue \`agent:in-progress\` (the work is real but has NOT been through the DoD and has no PR, so it must not be promoted to \`agent:in-review\`). Comment on each issue with the branch name, the review verdict, and any warnings.
-
-**Failing or incomplete tracks** — swap \`agent:in-progress\` for \`agent:blocked\`, unassign, and comment with the specific critical findings so the next attempt starts informed. An issue nobody can act on is worse than one that says why.
-
-${outcomes
-  .map(
-    (o) =>
-      `- issues ${o.issues.map((i) => `#${i}`).join(", ")} — branch \`${o.branch}\`, review ${o.verdict}, selfCheck ${o.selfCheckPassed}${o.critical.length ? `\n    critical: ${o.critical.join("; ")}` : ""}`
-  )
-  .join("\n")}
-${failedTracks.length ? `\n**These tracks produced nothing at all** (the agent died or returned null) — mark every one of their issues \`agent:blocked\` and say so:\n${failedTracks.map((t) => `- issues ${t.issues.map((i) => `#${i}`).join(", ")} (track ${t.id})`).join("\n")}` : ""}
+${failedTracks.map((t) => `- issues ${t.issues.map((i) => `#${i}`).join(", ")} (track ${t.id})`).join("\n")}
 
 Report the label each issue ended on.
 Return strictly the schema.`,
-  { phase: "Settle", agentType: "backend", schema: SETTLE_SCHEMA }
-);
+    { phase: "Settle", agentType: "backend", schema: SETTLE_SCHEMA }
+  );
+}
 
 return {
   summary: `${landed.length}/${tracks.length} tracks implemented & reviewed from a frontier of ${units.length} issue(s)`,
@@ -389,7 +331,10 @@ return {
     filesChanged: r.impl?.filesChanged,
   })),
   stillBlocked: board.blocked || [],
-  boardUpdates: settled?.updated || [],
+  boardUpdates: [
+    ...landed.flatMap((r) => r.review?.updated || []),
+    ...(settled?.updated || []),
+  ],
   nextStep:
-    "Review each branch, address critical findings, and merge the passing ones. Closing their issues (via `Closes #n` on a PR, or by hand) clears the blocking edges — then run frd-implement again and the next set of issues will have become takeable. Repeat until the frontier is empty.",
+    "Merge the passing branches. Closing their issues clears the blocking edges — then run frd-implement again and the next set becomes takeable. Repeat until the frontier is empty.",
 };

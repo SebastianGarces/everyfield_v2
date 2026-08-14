@@ -1,125 +1,119 @@
-# Agent Delivery OS — operating manual
+# Agent Delivery OS — the one doctrine page
 
-> **The loop is plumbing. The skill is the asset.**
-> One loop, written once (`build-until-done`), filled with sharp, tested, named skills that compound.
+This is an autonomous software-delivery environment: you hand it work plus specs, it turns each item
+into a GitHub Issue, builds it in an isolated worktree, and opens a PR only when the Definition of
+Done passes with evidence attached. **You are the product manager** — your manual step is ruling on
+decisions and reviewing PRs.
 
-This is an autonomous software-delivery environment. **You are the product manager.** You hand the
-system a list of work + specs; it turns each item into a GitHub Issue, checks it has the token budget
-to finish, runs a verify-until-done loop per task, and **opens a PR only when the Definition of Done
-passes with evidence attached.** Your only manual step is reviewing PRs.
+## The contract
 
----
+1. **CI green is the merge contract.** The `Format, Lint, Typecheck, Build` check — format:check,
+   lint, typecheck, test, build — is the verdict. A green anchor at the PR head sha IS the gate;
+   never re-derive beside it. Everything an agent reports is a claim.
+2. **Exactly ONE code review per PR.** One review site, one reviewer, one fix round. No scoped
+   per-workstream reviews, no re-review agent.
+3. **Exactly ONE browser look**, at the branch's **Vercel preview** and never `localhost:3000`
+   (localhost serves the main checkout, so it never contains the branch's work), at the final sha.
+4. **Agents rule for themselves**, and record every ruling. See *Rulings* below.
 
-## How you drive it (as PM)
+`risk:high` and factory-path changes (`.claude/workflows/`, the delivery-OS skills, `ops/agent-os/`)
+never auto-merge — the machine that decides what merges keeps a human. Exhaustion is never a silent
+stop: it produces `agent:blocked` plus an evidence comment. Labels are canonical and the Project board
+is a one-way mirror of them; exactly one `agent:*` label per active issue.
 
-| You say… | What happens | Skill / workflow |
-|----------|--------------|------------------|
-| "Build these: …" (a list + specs) | Each item → a rigorous GitHub Issue (`agent:queued`) | `/deliver` → `delivery-orchestrator` → `spec-intake` |
-| (implicit, when a `+Nk` budget directive was given) | "Do we have enough tokens to finish?" → run / split / defer | `token-preflight` (dispatch sizes inline instead) |
-| (implicit, on run) | Decompose into file-disjoint tracks; publish the DAG to the board | `frd-plan` (or inline) |
-| (implicit, per track) | Implement → validate against DoD → fix → … → **open PR** | `build-until-done` |
-| "What's pending?" | Board by status + your PR review queue + running loops | `/standup` → `standup` |
-| "Dispatch" / a schedule fires | One guarded pass over the frontier → reviewed PRs | `/dispatch` → `dispatch` |
+## The pass graph
 
-You never merge by hand-built guesswork: a PR exists **only** because the DoD gate passed, and its
-body carries the evidence (test output, screenshots, lighthouse, console, migration diff).
+```mermaid
+flowchart TD
+  A["setup — claim exactly the named issues,<br/>cut the track worktree from origin/main,<br/>cut one worktree per workstream"]
+  A --> B["implement — one agent per workstream,<br/>in parallel, each in its own worktree"]
+  B --> C["integrate — merge the branches, pnpm typecheck<br/>(only when a stage holds more than one workstream)"]
+  C --> D["review — push, assert origin == HEAD, then THE code review:<br/>spec mapping · conventions + invariants · diff hygiene · structure<br/>(security lens on schema / auth / tenancy diffs)"]
+  D -->|"actionable findings"| E["fix — ONE round, answering each finding.<br/>No re-review agent; CI re-anchors at the new sha"]
+  D -->|"clean"| F
+  E --> F["ship — the ONE browser look at the preview, at the final sha ·<br/>PR with evidence, Manual QA and a Closes line per issue ·<br/>labels written and read back · ⚓ gh pr checks --watch"]
+  F --> G{"risk:high? factory path?<br/>hold? unresolved product question?"}
+  G -->|"no"| H["squash --auto merge — every issue in the track closes"]
+  G -->|"yes"| I["DECISION comment: options to rule on,<br/>direction questions as live prototypes"]
+  D -.->|"exhausted — MAX_ATTEMPTS 2"| J["exit: agent:blocked + evidence comment"]
 
----
-
-## The architecture
-
+  style H fill:#1a7f37,color:#fff
+  style I fill:#9a6700,color:#fff
+  style J fill:#cf222e,color:#fff
 ```
-You (PM): list + specs
-        │
-        ▼
-[spec-intake] ── normalize each item → GitHub Issue            label: agent:queued
-        │           (goal, ACs + verification method, risk, file ownership)
-        ▼
-[token-preflight] ── estimate cost vs remaining budget → run-now / split / defer
-        │
-        ▼
-[frd-plan]* ── file-disjoint tracks, published as issues       (high-risk → a blocking prerequisite)
-        │      with native blocked_by edges. The board holds the order,
-        │      so what runs next is a query, not a plan you carry around.
-        │
-        ▼  per track, in an ISOLATED git worktree:
-┌──────────────────  build-until-done.js  (THE LOOP)  ──────────────────┐
-│  implement / fix ─→ validate against Definition of Done ─→ PASS?       │
-│       ▲                  (independent verifier + MCP)        │         │
-│       └────── feed failing gate + evidence back (attempt++) ─┘         │
-│  PASS  → [open-pr] with evidence bundle      label: agent:in-review     │
-│  EXHAUSTED (max attempts / token reserve) → label agent:blocked,        │
-│       comment the failing gate + evidence, alert you.  NO PR, no silent │
-│       stop.                                                             │
-└────────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-[standup] ── "what's pending?" → gh issues by status + open PRs + running loops
 
-        ── and unattended, on a schedule ──
-[dispatch] ── gate: review queue has room? nothing in flight? tree clean?
-        │      frontier non-empty (risk:high excluded)? budget can finish?
-        │      → at most 2 tracks → build-until-done → PRs → stop.
-        │    Every gate is a normal stop, not an error. A quiet no-op is a success.
-```
-\* `frd-plan` for FRD-scale features; the orchestrator decomposes ad-hoc lists inline with the same
-file-disjoint/track logic.
+A track is a connected component over (shared-file ∪ `dependsOn`) edges: one branch, one worktree, one
+PR. That is the throughput argument — a build, a suite, a preview deployment, a CI round trip and a
+human's attention are each paid once, whether the track holds one workstream or eight.
 
----
+## Rulings
 
-## The two halves (per the thesis)
+An agent rules for itself from `product-docs/product-values.md`, `CONTEXT.md` and
+`memory/invariants.md`, and **records the ruling**: product calls in `product-docs/decisions.md`, code
+calls in the PR body. For a genuinely hard call, convene a short **consulate** — two or three agent
+perspectives on the same question, then one synthesis that decides. A review finding is ruled the same
+way: apply it or waive it, and say which.
 
-- **The loop (plumbing):** `build-until-done.js`. Written once. It does not contain product knowledge —
-  it orchestrates: spawn implementer → spawn independent verifier → branch on the verdict → retry or
-  ship → trip a circuit breaker if it can't converge.
-- **The skills (assets):** the named, reusable knowledge the loop calls — `definition-of-done`,
-  `validate-frontend`, `validate-backend`, `open-pr`, `spec-intake`, `token-preflight`, `standup`.
-  When we do something hard or more than once, it becomes a new skill, and the loop gets sharper for free.
+`needs-spec`, and holding a PR with a DECISION comment, are the **last resort** — reserved for
+irreversible calls and the owner's taste. The human queue holds decisions, never "please re-check what
+the gates already proved". A **direction** question — two or more plausible answers where trying them
+beats reading about them — escalates as **live prototypes**, not prose
+(`.claude/skills/prototype/`): two or three variants behind the switcher on the preview. Prototype code
+never merges.
 
----
+## What makes work delegable
 
-## Definition of Done
+- **R1 — Design the hard parts before dispatch.** Schema, shared contracts, security boundaries and
+  concurrency guards are decided in the issue. Stage 0 *lands* the shared prerequisite and never
+  *invents* it mid-build, because a wrong interface there is rework multiplied by the workstream
+  count. The agent may rule the interface when it is derivable from the invariants; it escalates only
+  when they cannot answer.
+- **R2 — One domain, one module, one implementation per decision.** Feature logic lives in
+  `src/lib/<domain>/`; a decision is a named exported function that every surface calls, so the UI
+  gate and the server gate cannot drift.
+- **R3 — Scope issues to outcomes, workstreams to files.** One observable outcome per issue, each AC
+  naming how it is proven; the unit that stays small and file-disjoint is the workstream. Dependencies
+  are edges, never prose.
 
-The contract lives in [`dod.md`](./dod.md). Summary: G0 spec-mapped · G1 static (typecheck/lint/build)
-· G2 tests · **G3 functional via MCP** (Playwright drives the branch's **Vercel preview deploy**,
-asserts each AC, requires a clean console + screenshots + lighthouse a11y ≥ 90; backend asserts
-contracts + migration) · G4
-conventions/invariants · G5 diff hygiene · G6 independent adversarial sign-off. High-risk adds migration
-dry-run, rollback, schema diff, and **diverse-lens sign-off** — three reviewers, one lens each
-(correctness / security / reproducibility), every one of which must clear. Each lens holds a veto over
-its own axis; the votes are deliberately not pooled.
+The fourth rule needs an anchor of its own, because `memory/invariants.md` and
+`product-docs/product-values.md` cite it by name.
 
-## The board
+## Rules bind at two strengths
 
-GitHub Issues + `agent:*` status labels. See [`labels.md`](./labels.md). Run the setup block there once
-to create the labels.
+The corpus agents read before mutating (`memory/invariants.md`) mixes two strengths, and delegation
+needs them told apart:
 
----
+- **Invariant** — a mechanical or security fact: the stack, the tenant boundary, the auth surface.
+  Never broken. An agent that thinks one is wrong is wrong.
+- **Ruling (⚖)** — a product decision. Never broken *silently*. An agent that believes a ruling no
+  longer fits rules on it per *Rulings* above, records why, and keeps building to the standing ruling
+  meanwhile.
 
-## Safety / circuit breakers
+This is what keeps recorded decisions from calcifying into false physics: the escalation path is cheap,
+so "the rule seems wrong" has somewhere to go other than being ignored or obeyed.
 
-- **Only a human starts the factory.** `delivery-orchestrator` is user-invoked
-  (`disable-model-invocation: true`), so the model cannot decide a message looked like a build list
-  and start opening PRs. Everything the loop *calls* stays model-invocable by design — flagging one
-  of those breaks the loop silently. The rule and the full classification live in
-  [`invocation.md`](./invocation.md); read it before adding a skill.
-- **Max attempts** per track (default 3) — the loop will not iterate forever.
-- **Token reserve** — the loop refuses to *start* an attempt it can't finish; budget sizing gates
-  the whole batch up front (`token-preflight` under a `+Nk` directive, inline arithmetic in
-  dispatch's gate 5). A task that can't finish is **deferred or split**, never half-shipped.
-- **"Wave" now means one frontier pass**, not a pre-computed layer. The word survives in a few skills as
-  shorthand for "the batch running together"; the authority on what may run is always the board —
-  `blocked_by == 0` and unassigned. There is no wave array to keep in sync, which is the point.
-- **No silent stops** — exhaustion always produces an `agent:blocked` issue with the reason.
-- **High-risk → PR, not merge** — the human PR review is the checkpoint for schema/auth/tenancy/payments.
-- **Preview deploys, not localhost** — G3 validates against the branch's Vercel preview, because
-  `localhost:3000` serves the main checkout and never contains the track's work. The loop never
-  starts a server (per `AGENTS.md`); it resolves the preview URL with `scripts/preview-url.sh`.
-  Consequence: a frontend track opens its PR with G3 at ⏳ and edits it to ✅ once validated.
+## Invocation
 
-## Where this lives
+**User-invoked = entry points only. Everything the loop calls stays model-invocable.** A skill with
+`disable-model-invocation: true` is unreachable by subagents *and* from a slash-command body, because
+both are executed by the model. Only `/deliver` and `handoff` carry the flag; `dispatch` is
+schedule-invoked, so its guards live inside the skill (a review-queue cap, a refusal while anything is
+`agent:in-progress`, `risk:high` excluded, a per-pass track cap).
 
-Merged to `main` (#55, #56) — every session and every agent inherits these skills. The loop is
-`.claude/workflows/build-until-done.js`; the skills are `.claude/skills/`; the gate contract is
-[`dod.md`](./dod.md), the board is [`labels.md`](./labels.md), and who may start what is
-[`invocation.md`](./invocation.md).
+> **Hazard.** Flagging anything the loop calls breaks it *silently* — the subagent simply cannot see
+> the skill, and the failure surfaces as an unrelated gate failure minutes later. Same class of trap as
+> renaming the CI job without updating the ruleset: a contract living in two places.
+
+## Where each piece lives
+
+| Piece | File |
+|---|---|
+| The gate contract | `ops/agent-os/dod.md` |
+| Status labels, the board, the frontier query | `ops/agent-os/labels.md` |
+| The build loop | `.claude/workflows/build-until-done.js` |
+| Planning an FRD into tracks / building the frontier | `.claude/workflows/frd-plan.js`, `.claude/workflows/frd-implement.js` |
+| The reviewer brief | `.claude/agents/code-reviewer.md` |
+| Board mirror (labels → columns) | `.github/workflows/board-sync.yml` |
+| Intake · dispatch · PR · validation | `.claude/skills/{spec-intake,dispatch,open-pr,validate,browser-validation,definition-of-done}/` |
+| Ruling a direction question | `.claude/skills/prototype/` |
+| How tradeoffs are decided | `product-docs/product-values.md` |

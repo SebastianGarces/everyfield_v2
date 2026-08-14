@@ -40,7 +40,7 @@ const OWNED_FILES = [
   "scripts/seed-phase-engine-eval.ts",
   "src/app/(auth)/login/dev-accounts.ts",
   ".claude/skills/browser-validation/SKILL.md",
-  ".claude/skills/validate-frontend/SKILL.md",
+  ".claude/skills/validate/SKILL.md",
   "src/app/(auth)/login/dev-accounts.test.ts",
 ];
 
@@ -277,9 +277,9 @@ test("browser-validation's login table quotes the seeded addresses", () => {
   }
 });
 
-test("validate-frontend points at a planter the dev seed creates", () => {
+test("validate points at a planter the dev seed creates", () => {
   assert.ok(
-    read(".claude/skills/validate-frontend/SKILL.md").includes(
+    read(".claude/skills/validate/SKILL.md").includes(
       `planter1@${CURRENT_DOMAIN}`
     )
   );

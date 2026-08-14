@@ -1,29 +1,20 @@
 export const meta = {
   name: "frd-plan",
   description:
-    "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and publish them to the board as issues with native blocking edges. Human-gated work (schema, high-risk) is published as blockers. No code is written.",
+    "Decompose an FRD into file-disjoint tracks and publish them to the board as issues with native blocking edges. No code is written.",
   whenToUse:
-    "Before implementing an FRD. Publishes the dependency DAG onto the board; execute it with frd-implement, which reads the frontier. Pass the FRD path (or {frd, scope, publish:false}) as args.",
+    "Before implementing an FRD. Execute the published DAG with frd-implement, which reads the frontier. Pass the FRD path, or {frd, scope, publish:false}.",
   phases: [
-    {
-      title: "Decompose",
-      detail:
-        "Architect splits the FRD into work units with declared file ownership and dependencies",
-    },
-    {
-      title: "Publish",
-      detail:
-        "Tracks become issues on the board, blockers first, with native blocked_by edges",
-    },
+    { title: "Decompose", detail: "Split the FRD into work units" },
+    { title: "Publish", detail: "Tracks become issues, prerequisites first" },
   ],
 };
 
 // ---------------------------------------------------------------------------
-// Input
+// Input. publish:false plans without touching the board — a dry run.
 // ---------------------------------------------------------------------------
 const frdPath = typeof args === "string" ? args : args?.frd;
 const scope = (typeof args === "object" && args?.scope) || "MVP";
-// publish:false plans without writing to the board — useful for a dry run.
 const publish =
   typeof args === "object" && args?.publish === false ? false : true;
 if (!frdPath)
@@ -31,100 +22,56 @@ if (!frdPath)
     'Pass the FRD path as args, e.g. "product-docs/features/phase-engine/frd.md"'
   );
 
-const DECOMPOSE_SCHEMA = {
+// Schema builders — the schema IS the contract, so keep the field names exact.
+const str = { type: "string" };
+const num = { type: "number" };
+const noted = (base, description) => ({ ...base, description });
+const list = (items, d) => (d ? { type: "array", items, description: d } : { type: "array", items }); // prettier-ignore
+const obj = (required, properties) => ({
   type: "object",
-  required: ["units", "deferred", "notes"],
-  properties: {
-    units: {
-      type: "array",
-      items: {
-        type: "object",
-        required: [
-          "id",
-          "title",
-          "lane",
-          "risk",
-          "files",
-          "summary",
-          "acceptanceCriteria",
-          "dependsOn",
-        ],
-        properties: {
-          id: { type: "string" },
-          title: { type: "string" },
-          lane: { type: "string", enum: ["frontend", "backend", "fullstack"] },
-          risk: { type: "string", enum: ["low", "medium", "high"] },
-          files: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "EVERY file/dir this unit creates or edits — the planner groups units that share a file into one track.",
-          },
-          summary: { type: "string" },
-          acceptanceCriteria: { type: "array", items: { type: "string" } },
-          dependsOn: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "ids of units that must land first (ordering, not file-conflict)",
-          },
-        },
-      },
-    },
-    deferred: {
-      type: "array",
-      description:
-        "HUMAN-GATED units: DB schema/migrations, auth, tenancy, payments. Agent-authorable, but they need approval and run first/alone — everything depending on them is published blocked_by them.",
-      items: {
-        type: "object",
-        required: ["id", "title", "reason"],
-        properties: {
-          id: { type: "string" },
-          title: { type: "string" },
-          reason: { type: "string" },
-        },
-      },
-    },
-    notes: { type: "string" },
-  },
-};
+  required,
+  properties,
+});
+const enm = (...values) => ({ type: "string", enum: values });
 
-const PUBLISH_SCHEMA = {
-  type: "object",
-  required: ["parentIssue", "published", "edges", "notes"],
-  properties: {
-    parentIssue: {
-      type: "number",
-      description:
-        "the `feature` issue these were filed under, 0 if none existed",
-    },
-    published: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["trackId", "issue", "created"],
-        properties: {
-          trackId: { type: "string" },
-          issue: { type: "number" },
-          created: {
-            type: "boolean",
-            description:
-              "false if an existing issue with this title was reused",
-          },
-        },
-      },
-    },
-    edges: {
-      type: "array",
-      description:
-        "the blocked_by edges actually written, as 'blocked<-blocker'",
-      items: { type: "string" },
-    },
-    notes: { type: "string" },
-  },
-};
+const UNIT = obj(
+  ["id", "title", "lane", "risk", "files", "summary", "acceptanceCriteria", "dependsOn"], // prettier-ignore
+  {
+    id: str,
+    title: str,
+    lane: enm("frontend", "backend", "fullstack"),
+    risk: enm("low", "medium", "high"),
+    files: list(str, "EVERY file/dir this unit creates or edits"),
+    summary: str,
+    acceptanceCriteria: list(str),
+    dependsOn: list(str, "ids that must land first — ordering, not overlap"),
+  }
+);
 
-const CONVENTIONS = `Read AGENTS.md and CLAUDE.md, then memory/entrypoints.md, memory/invariants.md (the one-liner index — every rule is stated there), the memory/invariants/*.md domain files matching the files you own, and relevant memory/contracts/*.md before opening source files. Hard rules: pnpm; Drizzle migrations via db:generate+db:migrate (NEVER db:push); shadcn via pnpm dlx shadcn@latest add; cursor-pointer on clickables; never start a dev server.`;
+const DECOMPOSE_SCHEMA = obj(["units", "deferred", "notes"], {
+  units: list(UNIT),
+  deferred: list(
+    obj(["id", "title", "reason"], { id: str, title: str, reason: str }),
+    "prerequisite units (schema/migrations, auth, tenancy, payments): they land first and alone, and everything depending on them publishes blocked_by them"
+  ),
+  notes: str,
+});
+
+const PUBLISH_SCHEMA = obj(["parentIssue", "published", "edges", "notes"], {
+  parentIssue: noted(num, "the `feature` issue these were filed under, 0 if none"), // prettier-ignore
+  published: list(
+    obj(["trackId", "issue", "created"], {
+      trackId: str,
+      issue: num,
+      created: noted({ type: "boolean" }, "false if an issue was reused"),
+    })
+  ),
+  edges: list(str, "the blocked_by edges written, as 'blocked<-blocker'"),
+  notes: str,
+});
+
+const CONVENTIONS =
+  "Read AGENTS.md, then memory/invariants.md and the domain invariant files covering the files you own.";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -161,23 +108,19 @@ log(`Decomposing ${frdPath} (scope: ${scope})`);
 const plan = await agent(
   `You are the architect. ${CONVENTIONS}
 
-Read the FRD at "${frdPath}" and product-docs/system-architecture.md (and any companion files the FRD references, e.g. a rubric). Decompose the ${scope} scope into work units.
-Rules:
-- "files": list EVERY file/dir the unit creates or edits. The planner serializes any units that share a file, so accuracy keeps merges clean. Confine cross-cutting chokepoints (shared barrels, event-bus registries, constants) to a SINGLE owner unit.
-- "dependsOn": logical ordering only — one unit needing another's code to exist. It does NOT mean "touches the same file"; file overlap is handled separately and must not be expressed here.
-- risk "high" = DB schema/migrations, auth/permissions, multi-tenant boundaries, payments → put in "deferred" (human-gated: agent can author, but it needs approval and lands first). Consolidate ALL schema into one deferred unit (only one db:generate is allowed). Anything needing that schema should list it in dependsOn — it becomes a real blocking edge on the board.
+Read the FRD at "${frdPath}", product-docs/system-architecture.md, and any companion file the FRD references. Decompose the ${scope} scope into work units.
+- "files": every file the unit touches. Units sharing a file are serialized into one track, so accuracy keeps merges clean; give each cross-cutting chokepoint (barrel, registry, constants) a single owner unit.
+- "dependsOn": ordering only — one unit needs another's code to exist. File overlap is handled separately and must not appear here.
+- risk "high" = DB schema/migrations, auth, tenancy, payments. Put ALL schema work in one "deferred" unit (only one db:generate may run); anything needing it names it in dependsOn, which becomes a real blocking edge.
 Return strictly the schema.`,
   { phase: "Decompose", agentType: "architect", schema: DECOMPOSE_SCHEMA }
 );
 if (!plan) throw new Error("Decomposition failed");
 
 // ---------------------------------------------------------------------------
-// Deterministic grouping: tracks (shared-file ONLY) + a dependency DAG
-//
-// Two different constraints, deliberately kept apart (ops/agent-os/labels.md):
-//   shared file  -> a SCHEDULING constraint. Same track, same branch, built in order.
-//   dependsOn    -> a SEMANTIC blocking edge. Separate track, published as blocked_by.
-// Collapsing them is what made the old wave model coarser than it needed to be.
+// Deterministic grouping. Two constraints, deliberately kept apart:
+//   shared file -> SCHEDULING. Same track, same branch, built in order.
+//   dependsOn   -> SEMANTIC. Separate track, published as a blocked_by edge.
 // ---------------------------------------------------------------------------
 const gated = [...plan.deferred];
 const gatedIds = new Set(gated.map((d) => d.id));
@@ -224,14 +167,9 @@ const tracks = [...trackMembers.entries()].map(([root, units]) => ({
     files: u.files,
     summary: u.summary,
     acceptanceCriteria: u.acceptanceCriteria,
-    // Intra-track ordering, kept rather than dropped.
-    //
-    // The track-level graph below deliberately ignores an edge whose endpoints
-    // landed in the same track (`if (from !== to)`), because as a BOARD edge it
-    // would be a self-block. But it is still real: it says which of these units
-    // has to exist before the others compile. That is exactly what
-    // build-until-done now needs to split a track into a prerequisite stage and
-    // a parallel fan-out, so it travels with the unit instead of dying here.
+    // Intra-track ordering. The track graph below skips an edge inside a track
+    // (as a board edge it would self-block), but build-until-done reads this one
+    // to run the prerequisite workstream before the parallel fan-out.
     dependsOn: (u.dependsOn || []).filter((d) =>
       units.some((sibling) => sibling.id === d)
     ),
@@ -243,9 +181,8 @@ const tracks = [...trackMembers.entries()].map(([root, units]) => ({
       : "fullstack",
 }));
 
-// Track-level dependency graph. Unlike the old model, a dependency on a gated
-// unit is NOT dropped — it becomes an edge onto that prerequisite's issue, so
-// "the schema must land first" is durable state rather than a sentence in a plan.
+// A dependency on a prerequisite is kept, not dropped: it becomes an edge onto
+// that prerequisite's issue, so "the schema lands first" is durable state.
 const byId = new Map(implementable.map((u) => [u.id, u]));
 const trackDeps = new Map(tracks.map((t) => [t.root, new Set()]));
 const gatedDeps = new Map(tracks.map((t) => [t.root, new Set()]));
@@ -262,20 +199,15 @@ for (const u of implementable) {
   }
 }
 
-// Depth is now used ONLY to order the writes — publish a blocker before the
-// thing it blocks, so `--blocked-by` can reference a real issue number. It is
-// no longer an execution barrier; the frontier decides what runs.
+// Depth orders the WRITES only, so `--blocked-by` can name a real issue number.
 const depthMemo = new Map();
 const visiting = new Set();
 function depth(root) {
   if (depthMemo.has(root)) return depthMemo.get(root);
-  if (visiting.has(root)) {
-    // A cycle would deadlock the frontier permanently — every member stays
-    // blocked forever. Surface it here rather than on the board.
+  if (visiting.has(root))
     throw new Error(
       `Dependency cycle detected at track "${root}". A cycle can never reach the frontier — fix dependsOn in the decomposition.`
     );
-  }
   visiting.add(root);
   let d = 0;
   for (const dep of trackDeps.get(root)) d = Math.max(d, 1 + depth(dep));
@@ -291,7 +223,7 @@ const rootCount = tracks.filter(
   (t) => trackDeps.get(t.root).size === 0 && gatedDeps.get(t.root).size === 0
 ).length;
 log(
-  `${implementable.length} units → ${tracks.length} file-disjoint tracks; ${rootCount} start unblocked; ${gated.length} human-gated prerequisite(s)`
+  `${implementable.length} units → ${tracks.length} file-disjoint tracks; ${rootCount} start unblocked; ${gated.length} prerequisite(s)`
 );
 if (sharedFiles.length)
   log(
@@ -322,35 +254,31 @@ if (!publish) {
     dag,
     sharedFileClusters: sharedFiles,
     decompositionNotes: plan.notes,
-    howToRun:
-      "Dry run only. Re-run without publish:false to write the DAG onto the board.",
+    howToRun: "Dry run. Re-run without publish:false to write to the board.",
   };
 }
 
 phase("Publish");
 const published = await agent(
-  `You are publishing a planned build onto the GitHub board. Read ops/agent-os/labels.md and .claude/skills/spec-intake/SKILL.md FIRST — they define the issue shape, the label vocabulary and the parent rule. Use the \`gh\` CLI (>= 2.96, so --parent and --blocked-by are available).
+  `Publish this planned build onto the GitHub board with \`gh\` (>= 2.96, for --parent and --blocked-by). Read ops/agent-os/labels.md and .claude/skills/spec-intake/SKILL.md first — they hold the issue shape, the label vocabulary and the parent rule.
 
 FRD: ${frdPath}
 
-**1. Find the parent.** \`gh issue list --label feature\` and pick the feature issue for this FRD. If none exists, create it first: a thin body linking the FRD plus the settled scope decisions — an index, not a store. Report its number as parentIssue.
+**1. Parent.** \`gh issue list --label feature\`, pick this FRD's feature issue or create one with a thin body linking the FRD. Report it as parentIssue.
 
-**2. Publish the prerequisites**, each as its own issue with \`--label needs-spec --label risk:high --parent <parent>\`. These are human-gated: they are agent-authorable but need approval before they run, which is why they are NOT \`agent:queued\`.
+**2. Prerequisites**, each its own issue, \`--label agent:queued --label risk:high --parent <parent>\`. They are buildable; they carry the high-risk gates and land alone, before anything blocked_by them.
 ${gated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
 
-**3. Publish the tracks IN THE ORDER GIVEN BELOW.** The order is topological, so every blocker already exists by the time something references it. For each: \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`, using the issue numbers you got from earlier steps for the edges.
+**3. Tracks, IN THE ORDER BELOW** (topological, so every blocker exists before it is referenced): \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`.
 
-Each body must follow the spec-intake template: Goal, Context (link the FRD), Acceptance criteria (each with how it is verified), Validation plan, Risk, **Likely files** (list them exactly — that is what keeps parallel tracks from colliding), Out of scope.
-
-**Where a track holds more than one unit, write them as a \`## Workstreams\` section** — one \`### <name>\` block per unit, each carrying its own AC subset, its own **Likely files** line, and a \`depends on:\` line naming the workstreams that must land first (empty for the prerequisite). \`build-until-done\` reads that structure to run the prerequisite alone and then fan the rest out in parallel; without it the whole track collapses back to a single agent working sequentially. The top-level \`## Likely files\` stays as the union.
+Bodies follow the spec-intake template. \`## Likely files\` is the union of the track's files, listed exactly — it is what keeps parallel tracks from colliding. **A track holding more than one unit also gets a \`## Workstreams\` section**: one \`### <name>\` block per unit with its own AC subset, its own **Likely files** line, and a \`depends on:\` line naming the workstreams that must land first. build-until-done reads that to run the prerequisite alone, then fan the rest out in parallel.
 
 ${publishOrder
   .map((t, i) => {
     const deps = [...trackDeps.get(t.root)].map(
       (r) => tracks.find((x) => x.root === r).id
     );
-    const pre = [...gatedDeps.get(t.root)];
-    const blockers = [...deps, ...pre];
+    const blockers = [...deps, ...gatedDeps.get(t.root)];
     return `${i + 1}. trackId "${t.id}" (${t.lane})
    blocked by: ${blockers.length ? blockers.join(", ") : "nothing — starts on the frontier"}
    files: ${t.files.join(", ")}
@@ -359,9 +287,9 @@ ${t.units.map((u) => `     - ${u.title}: ${u.summary}\n       ACs: ${(u.acceptan
   })
   .join("\n\n")}
 
-**Idempotency:** before creating anything, \`gh issue list --state all --search "<title> in:title"\`. If an issue with that exact title already exists, REUSE it (report created:false) and only add missing edges with \`gh issue edit <n> --add-blocked-by <m>\`. Re-running a plan must not duplicate the board.
+**Idempotency:** re-running must not duplicate the board — \`gh issue list --state all --search "<title> in:title"\` first, reuse an exact-title hit (created:false), and add only the missing edges with \`gh issue edit <n> --add-blocked-by <m>\`.
 
-**Do not** open PRs, write code, or close anything. Report exactly what you created and every edge you wrote.
+Open no PRs, write no code, close nothing. Report what you created and every edge.
 Return strictly the schema.`,
   { phase: "Publish", agentType: "backend", schema: PUBLISH_SCHEMA }
 );
@@ -385,5 +313,5 @@ return {
   decompositionNotes: plan.notes,
   publishNotes: published.notes,
   howToRun:
-    "Approve and land the prerequisites on the base branch, then close their issues so the edges clear. Run frd-implement to build everything currently on the frontier; merge its branches, close those issues, and run it again. There is no wave array to carry between runs — the board holds the order.",
+    "Land and close the prerequisites so their edges clear, then run frd-implement. Merge its branches, close those issues, run it again — the board holds the order.",
 };

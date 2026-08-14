@@ -38,7 +38,7 @@ import { Callout } from "./callout";
 //
 // The browser half of the acceptance criteria (print-media emulation, the
 // download event) is proved on the branch's Vercel preview by
-// `.claude/skills/validate-frontend`.
+// `.claude/skills/validate`.
 //
 // PREFER A BEHAVIOURAL ASSERTION TO A SOURCE GREP. Reading a file and matching
 // its prose pins the CODE'S COMMENTS, not the code, so it breaks on a rename or

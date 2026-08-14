@@ -1,10 +1,10 @@
 # Wiki Articles
 
-Why and how, for the Wiki Articles rules in [`../invariants.md`](../invariants.md). Two independent things: **who may see a row** (tenancy, below) and **how a slug becomes a path** (the two path builders are not interchangeable).
+Why and how, for the Wiki Articles rules in [`../invariants.md`](../invariants.md). Two independent things: **who may see a row** (tenancy) and **how a slug becomes a path** (the two path builders are not interchangeable).
 
-**Source:** `src/lib/wiki/get-articles.ts` (tenancy), `src/lib/wiki/get-article.ts`, `src/lib/wiki/href.ts`, `src/lib/wiki/service.ts`, `src/lib/wiki/search.ts`, `src/db/schema/wiki.ts`
+**Source:** `src/lib/wiki/get-articles.ts` (tenancy), `src/lib/wiki/get-article.ts`, `src/lib/wiki/href.ts`, `src/lib/wiki/service.ts`, `src/lib/wiki/related-sections.ts`, `src/db/schema/wiki.ts`
 
-## Tenancy: the read is global OR mine (#317, from #16)
+## Tenancy: the read is global OR mine
 
 `wiki_articles.church_id` is nullable and means two different things — NULL is global content every plant sees, a uuid is content belonging to that one church. So the visibility predicate is a disjunction, never an equality:
 
@@ -12,54 +12,34 @@ Why and how, for the Wiki Articles rules in [`../invariants.md`](../invariants.m
 WHERE church_id IS NULL OR church_id = :current_church_id
 ```
 
-`church_id = :id` alone is wrong in the *quiet* direction: a church would lose the ~90-article global corpus and see only its own handful. There is no RLS behind these queries (`../invariants.md` → Multi-Tenancy), so this one predicate **is** the tenant boundary — which is why `tenancy.test.ts` renders each builder with `.toSQL()` and asserts the emitted SQL rather than trusting the call. `visibleToChurch()` is the single implementation; every list, the single-article read, prev/next and related articles all funnel through it.
+`church_id = :id` alone is wrong in the *quiet* direction: a church loses the ~90-article global corpus and sees only its own handful. There is no RLS behind these queries (`../invariants.md` → Multi-Tenancy), so this one predicate **is** the tenant boundary, and the builders are asserted through `.toSQL()` rather than by trusting the call. `visibleToChurch()` is the single implementation.
 
-### Why the `churchId` default is `null`, not required
+**The `churchId` default is `null`, not required.** A forgotten parameter then narrows to global only — the reader loses their own church's articles, which is visible and reportable — whereas a default that widened the read, or a "current church" resolved inside the query layer, turns a missed thread into a cross-tenant leak. Fail closed here means *under*-fetch. It is also why the thread reaches past the article routes: bookmarks, recently-viewed and last-in-progress store rows by **slug with no church on them** and re-resolve each through `getArticle`, so on the default a church's own article resolves to `null` and the surrounding `.filter(Boolean)` drops it silently.
 
-Every reader — `getArticles`, `getArticlesByPrefix`, `getWikiNavigation`, `getArticleNavigation`, `getArticle` — takes `churchId: string | null = null`. A forgotten parameter therefore narrows to **global only**: the reader loses their own church's articles, which is visible and reportable. The alternative defaults all fail dangerously — an omitted argument that widened the read, or a non-null "current church" resolved inside the query layer, turns a missed thread into a cross-tenant leak. Fail closed here means *under*-fetch.
+**A church's copy of a slug overrides the global one.** `wiki_articles_slug_church_idx` is unique on `(slug, church_id)` and the predicate admits exactly two scopes, so **at most two rows** can ever match; `preferChurchOverride()` collapses them to the church's, preserving sort order. `getArticle` runs the same function over a `LIMIT 2`, so the single-article read and the lists cannot disagree about which row wins.
 
-That default is also why threading `churchId` reached further than the article routes. `getBookmarks`, `getRecentlyViewed` and `getLastInProgress` (`bookmarks.ts`, `progress.ts`) store rows by **slug with no church on them** and re-resolve each slug through `getArticle`. Left on the default they resolved a church's own article to `null`, and the surrounding `.filter(Boolean)` dropped it — a bookmarked article silently vanishing from the sidebar rather than erroring.
+**`getArticles` is request-cached (`React.cache`), keyed on churchId**, because rendering one article reads the whole visible corpus at least twice with the identical query. The consequence: a mutate-then-read inside one request goes stale. Revalidate and let the next request read, rather than reaching around the cache.
 
-### A church's copy of a slug overrides the global one
+**The older `service.ts` readers are not this path.** `getPublishedArticleRefs`, `getAllPublishedArticles` and `getArticlesByPhase` are hardcoded `church_id IS NULL` — global-only by design, for callers that want the shared corpus. Do not "fix" one by swapping in `eq(churchId)`, which is the mine-alone shape the invariant forbids.
 
-`wiki_articles_slug_church_idx` is unique on `(slug, church_id)`, so a church may hold its own row for a global slug — and the predicate admits exactly two scopes, so **at most two rows** can ever match. `preferChurchOverride()` collapses them to the church's, preserving sort order. Without it the same slug appears twice in navigation, lists and React keys. `getArticle` runs the same function over a `LIMIT 2` so the single-article read and the lists cannot disagree about which row wins.
+## Cross-links live in the column, never in the prose
 
-### `getArticles` is request-cached, keyed on churchId
+`related_article_slugs` is the ONLY place an article's cross-links live, and `RelatedArticles` resolves them against the visible corpus so a renamed, unpublished or other-church target vanishes rather than linking into a 404. The column is **derived-once**: a one-off migration lifted the links out of hand-written `## Related Articles` sections and deleted the prose, and nothing in the product writes it now. So do not re-add such a section to an article's `content` (nothing fails — it renders twice), and do not seed the column, which would overwrite real cross-links with invented ones on every `pnpm db:seed`.
 
-`getArticles` is wrapped in `React.cache`. Rendering one article reads the whole visible corpus at least twice (sidebar navigation in the wiki layout, `getArticleNavigation` in the page) and every read is the identical query, so the memo is what keeps derived affordances free. The consequence: **a mutate-then-read inside one request goes stale** — write an article and re-read within the same request and you get the pre-write corpus. Revalidate and let the next request read (see `wikiRevalidationPath` below), rather than reaching around the cache. Outside a React request scope (the test runner) `cache` calls straight through, so live fixtures set up between reads are seen.
+**The seed wipe cannot reach the corpus either.** `pnpm db:seed` deletes users and churches unscoped and derives everything else from the FK graph, which reaches `wiki_articles` from `churches` like any other dependent. Both wiki tables are therefore `PROTECTED_TABLES`: never deleted **and never walked through**, so nothing downstream of them is dragged in. `assertProtectedTablesAreSafe()` aborts the seed *before its first DELETE* when `wiki_articles.church_id` is non-null anywhere, because the honest answer to that FK is to stop and let a human re-point the rows. Rules: [`../invariants.md`](../invariants.md) → Dev Seeds; mechanics: [`../contracts/db.md`](../contracts/db.md).
 
-### The older `service.ts` readers are not this path
-
-`getPublishedArticleRefs`, `getAllPublishedArticles` and `getArticlesByPhase` are hardcoded `church_id IS NULL` — global-only by design, for callers (PE-024 insight links, admin) that want the shared corpus. They are safe but they are **not** tenant-aware; do not "fix" one by swapping in `eq(churchId)`, which is the mine-alone shape the invariant forbids. Reader-facing article access goes through `get-articles.ts` / `get-article.ts`.
-
-## Cross-links: the column is canonical, the prose is gone (#317)
-
-`related_article_slugs` is the ONLY place an article's cross-links live. `RelatedArticles` renders them at the foot of the page, resolved against the visible corpus so a renamed, unpublished or other-church target vanishes rather than rendering a link into a 404.
-
-That was not true when the column was added. Every one of the 96 articles ended with a hand-written section — `---`, `## Related Articles`, a bullet list of `/wiki/...` links, `---`, a closing `<Callout>` — so the derived component showed the reader the same list a second time. The ruling was that the component is canonical: `scripts/migrate-wiki-related-sections.ts` lifted all 358 links into the column and deleted the prose, in one pass over the shared dev database.
-
-So the column is **derived-once**, not authored and not maintained: it was written from prose by that migration and nothing in the product writes it now. Two consequences:
-
-- **Do not re-add a `## Related Articles` section to an article's `content`.** Nothing fails — it renders, twice, under two headings. Add the slug to the column instead.
-- **Do not seed the column.** `seed-dev-db.ts` used to write a hardcoded fixture (including deliberately dead slugs, to prove they get dropped); that block is gone, because a fixture now overwrites an article's real cross-links with invented ones on every `pnpm db:seed`. `get-articles.test.ts` §4 asserts the seed stays out.
-- **The wipe cannot reach the corpus either (#326).** `pnpm db:seed` deletes all users and all churches unscoped and derives everything else from the FK graph — which reaches `wiki_articles` from `churches` like any other dependent. `wiki_articles` and `wiki_sections` are therefore `PROTECTED_TABLES` in `seed-dev-db.ts`: never deleted **and never walked through**, so nothing downstream of them is dragged in either. And a church-scoped article is not an obstacle to route around — `assertProtectedTablesAreSafe()` aborts the whole seed *before its first DELETE* when `wiki_articles.church_id` is non-null anywhere, because the honest answer to that FK is to stop and let a human re-point the rows, not to delete content the migration alone can produce. Rules: [`../invariants.md`](../invariants.md) → Dev Seeds; mechanics: [`../contracts/db.md`](../contracts/db.md).
-
-The parser lives in `src/lib/wiki/related-sections.ts` rather than in the script, because its boundaries are the whole risk and needed unit tests: the section ends at the end of its **link list**, not at the next heading — it is the last heading in every article, so the obvious rule would have deleted the closing Callout with it — and the leading `---` goes with the section, or the two surviving rules end up adjacent. A list item that is not a plain markdown link aborts that article instead of half-stripping it.
+The section parser lives in `related-sections.ts` because its boundaries are the whole risk: the section ends at the end of its **link list**, not at the next heading — it is the last heading in every article, so the obvious rule deletes the closing Callout with it — and the leading `---` goes with the section.
 
 ## Slugs and paths: the two builders
 
 `wikiHref(slug)` builds every path that will be *parsed as a URL or compared against one*. `wikiRevalidationPath(slug)` builds the argument to `revalidatePath()` — and only that.
 
-### Why `revalidatePath` is different (#310)
+`revalidatePath` uses its argument **verbatim as a cache tag**, and the tag a rendered page carries is derived from the *decoded* pathname with only `/ # ? %2f %23 %3f %5c` re-escaped — not from the encoded href. The two forms coincide for every URL-safe slug, which is exactly why the wrong one survives review; for a slug containing a space, `#`, `?`, `%` or a non-ASCII character, the href form matches no tag and revalidates nothing while still returning 200.
 
-`revalidatePath` uses its argument **verbatim as a cache tag**, and the tag a rendered page carries is derived from the *decoded* pathname with only `/ # ? %2f %23 %3f %5c` re-escaped — not from the encoded href. The two forms coincide for every URL-safe slug, which is exactly why the wrong one survived review. For a slug containing a space, `#`, `?`, `%` or a non-ASCII character, the href form matched no tag and revalidated nothing while still returning 200. `service.test.ts` pins the form against Next's own `decodePathParams` and scans the source so `revalidatePath(wikiHref(` cannot come back.
-
-### Why raw interpolation breaks (precisely)
-
-The earlier claim that "a space breaks the link outright" was wrong. In the WHATWG URL parser's path state:
+Raw interpolation breaks in the WHATWG URL parser's path state, precisely:
 
 - `#` **ends the path** and starts the fragment; `?` ends it and starts the query. Both yield a valid URL aimed at an article that does not exist.
 - `%` passes through **verbatim**, so the damage lands when Next percent-decodes the route param: `100%` throws `URIError`, `50%20off` silently decodes to `50 off`.
 - A **space is in the path percent-encode set**, so the parser escapes it for us — the one character a *parsed* call site survives raw.
 
-The rule still covers every call site, because only some are ever parsed as a URL. The sidebar's active-item check is a **literal** compare against `usePathname()`, which is already encoded — there a raw space is a silent mismatch: no highlighted item, no error. Since encoding is a no-op for well-formed slugs, routing every site through `wikiHref` costs nothing and removes the judgement call at the point of use.
+The rule still covers every call site, because only some are ever parsed as a URL: the sidebar's active-item check is a **literal** compare against `usePathname()`, which is already encoded, so a raw space there is a silent mismatch. Encoding is a no-op for well-formed slugs, so routing every site through `wikiHref` costs nothing and removes the judgement call at the point of use.

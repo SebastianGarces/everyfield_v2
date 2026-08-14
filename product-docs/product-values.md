@@ -2,7 +2,7 @@
 
 **Status: RULED 2026-08-10.**
 
-The companion to `ops/agent-os/delegation-rules.md`: that page governs *how* work is built;
+The companion to `ops/agent-os/README.md`: that page governs *how* work is built;
 this one governs *what* gets built and how tradeoffs are decided. These are tie-breakers —
 they earn their keep when two options both look reasonable and something has to choose.
 
@@ -86,7 +86,8 @@ distrust, it is not a shortcut.
 
 A product decision is a ruling: dated, recorded in one ledger, and binding until a new
 ruling replaces it. Never relitigated by accident — and never immovable on purpose. This
-is the product-side mirror of delegation-rules R6: anyone (human or agent) who believes a
+is the product-side mirror of R6 (`ops/agent-os/README.md` § Rules bind at two strengths):
+anyone (human or agent) who believes a
 ruling no longer serves the mission raises it openly; nobody deviates silently, and
 nobody treats a past decision as physics.
 

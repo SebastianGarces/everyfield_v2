@@ -12,7 +12,7 @@ The single home for dated product and canon decisions. One rule set:
   and each of its rows cites the issue number recorded here, so the two reconcile mechanically.
 - **Settled rows are not re-litigated.** A new ruling supersedes by adding a new dated row —
   never by editing or deleting an old one. Challenges go through a spec-question hold
-  (`ops/agent-os/workflow.md` §4).
+  (`ops/agent-os/README.md` § Rulings).
 - The enforcement form of a ruling — the one-liner an agent must not silently break — lives in
   `memory/invariants.md`, tagged ⚖ and pointing back at the issue recorded here.
 

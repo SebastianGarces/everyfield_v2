@@ -1,12 +1,9 @@
 # The board — labels, structure and the frontier
 
-The durable backlog lives in **GitHub Issues**. Requirements, their status and their blocking edges
-are all here; the repo holds specs and decisions, not status. Design and reasoning:
-`product-docs/board-design-2026-07.md`.
-
-**One rule governs everything below: the labels are canonical.** `build-until-done` writes them,
-`standup` reads them, and the Project board's `Status` field is mirrored one way *from* them. Agents
-read labels, never the board.
+The durable backlog lives in **GitHub Issues**: requirements, their status and their blocking edges.
+The repo holds specs and decisions, not status. **The labels are canonical** — the Project board's
+`Status` field is a one-way mirror of them (`.github/workflows/board-sync.yml`), so agents read
+labels, never the board. Create the labels once with `ops/agent-os/setup-labels.sh` (idempotent).
 
 ## Structure
 
@@ -16,28 +13,14 @@ Feature issue          label: feature      one per FRD — an index, not a store
        └─ unit issue                       only where a requirement needs slicing
 ```
 
-Sub-issues carry the hierarchy (100 children per parent, 8 levels deep, one parent per issue).
-GitHub renders the parent's progress bar, which is what the deleted `checklist.md` files used to be.
+Sub-issues carry the hierarchy and GitHub renders the parent's progress bar. Everything a requirement
+issue needs is in the `spec-intake` template: observable acceptance criteria, a declared validation
+plan, a risk classification, and a `## Likely files` section — lose that section and parallel tracks
+collide silently.
 
-Everything a requirement issue needs is in the `spec-intake` template: observable acceptance
-criteria, a declared validation plan, a risk classification, and a `## Likely files` section.
-
-### Reading an issue's parent — GraphQL, never REST
-
-```bash
-gh issue view <n> --json parent --jq .parent        # the working idiom
-```
-
-**The REST `parent` field is a trap.** `gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns
-`null` on issues that demonstrably have a parent, and it does so *silently* — a read that looks like
-it succeeded. Both live staged-tracks passes hit this: an agent read the REST field, concluded the
-issue was an orphan, and only recovered because it happened to try `gh issue view` afterwards. G0
-treats a missing parent as a finding, so a false `null` there costs a gate.
-
-`gh issue view --json parent` goes through GraphQL, which is where sub-issue relationships actually
-live. Use it in prompts, in docs, and in anything that decides whether work is traceable to a
-requirement. (The REST *list* endpoint is still the right tool for the frontier below — it is the
-`parent` field specifically that lies, not the endpoint family.)
+Read a parent with `gh issue view <n> --json parent --jq .parent` (GraphQL). The REST form
+`gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns `null` even when a parent exists,
+silently — never use it.
 
 ## Status labels (mutually exclusive — exactly one per active issue)
 
@@ -49,82 +32,37 @@ requirement. (The REST *list* endpoint is still the right tool for the frontier 
 | `agent:blocked`         | Loop exhausted attempts/budget; needs a human. See the issue comment. |
 | `agent:delivery-failed` | DoD passed, but pushing/opening the PR failed. The code is fine — retry the delivery. See the issue comment. |
 
-(When the PR merges, the issue closes via `Closes #` — no separate "done" label needed.)
+When the PR merges the issue closes via `Closes #`, so there is no "done" label. Two `agent:*` labels
+at once is a bug, not a state; board-sync fails on it.
 
-`agent:blocked` and `agent:delivery-failed` both mean "a human is needed", and they are kept apart
-because the human does a **different thing**. `agent:blocked` says the work did not reach the
-Definition of Done — read the failing gate, then tighten the spec, raise the budget, or take it
-manually. `agent:delivery-failed` says the work *did* reach it and the commit exists on its branch;
-only the push/PR step failed. Nothing is wrong with the code, so re-reviewing it is wasted attention:
-retry the delivery. Collapsing the two sends a human to debug a build that already passed.
-
-Two labels ever carrying `agent:in-progress` at once on the same issue is a bug, not a state. The
-board-sync workflow logs a warning rather than guessing which one wins.
-
-## Kind labels (what the issue *is*)
+## Kind, modifier and pre-queue labels
 
 | Label        | Meaning                                                                      |
 |--------------|------------------------------------------------------------------------------|
 | `feature`    | A feature parent. Links its FRD, holds scope decisions, owns the progress bar. |
 | `decision`   | An open ruling that gates work. **No PR closes it** — it closes by a ruling recorded in the decision ledger. |
-| `deferred`   | Off the active roadmap: cut, or kept-but-post-beta. Carries no `agent:*` label. |
+| `deferred`   | Off the active roadmap: cut, or kept-but-post-beta. Combines with `feature`. Carries no `agent:*` label. |
+| `risk:high`  | Schema/auth/tenancy/payments → the high-risk rider in `ops/agent-os/dod.md`: migration applies and rolls back, DDL delta in the PR body, never auto-merges. |
+| `needs-spec` | **Not build-ready**, and a last resort — an agent rules for itself wherever `product-docs/product-values.md`, `CONTEXT.md` and `memory/invariants.md` can answer. Reserved for a feature with no spec, or a question that is irreversible or the owner's taste. Carries no `agent:*` label. |
 
-`feature` and `deferred` combine — a cut feature is a closed tombstone, a post-beta feature is an
-open one with no children.
-
-### The follow-ups rollup — REMOVED (2026-08-10, #399)
-
-The `follow-ups` label, its rollup issues, and the takeability rule are gone. Reviewer findings
-(Critical + structural, per `.claude/agents/code-reviewer.md`) are now **fixed in the same pass**
-by the review-fix loop — fix agent, then re-review, capped at 2 quality rounds, at both the scoped
-and integration review sites. A finding that survives the rounds **holds the PR with a DECISION
-comment** (accept as-is, direct a named fix, or take it manually) instead of becoming filed debt —
-never `agent:blocked`, never merge-with-findings. Verifier warnings are spec-questions only.
-Existing open `Follow-ups — <parent title>` issues are untouched: the separate codebase-wide debt
-pass owns them.
-
-## Modifier labels
-
-| Label        | Meaning                                                           |
-|--------------|-------------------------------------------------------------------|
-| `risk:high`  | Touches schema/auth/tenancy/payments → extra DoD gates (HR1–HR4).  |
-
-## Pre-queue labels
-
-| Label        | Meaning                                                              |
-|--------------|----------------------------------------------------------------------|
-| `needs-spec` | **Not build-ready.** No FRD, or an unresolved question inside one.    |
-
-`needs-spec` covers two cases: a feature with no spec at all, and a specced requirement with an open
-question that changes what gets built (`DOC-008`'s schema question, `T-018` waiting on notification
-infrastructure). Neither is eligible for `spec-intake` or the loop, so both carry **no** `agent:*`
-label — the exactly-one rule applies only to active issues. Once it is build-ready, remove
-`needs-spec` and apply `agent:queued`.
+Milestones hold **dates**, not features — one milestone and one parent per issue; `Beta` is the only
+one.
 
 ## Blocking edges and the frontier
 
-Semantic blocking is a **native GitHub dependency**, not a line of prose and not a wave number:
+Semantic blocking is a **native GitHub dependency**, not prose. Older `gh` needs the REST endpoint,
+which takes the blocker's numeric **database id**:
 
 ```bash
 gh issue edit <n> --add-blocked-by <blocker>     # gh >= 2.96
 gh issue create ... --blocked-by <blocker>
-```
 
-Older `gh` needs the REST endpoint, which takes the blocker's numeric **database id** — not its
-`#number`, not its `node_id`:
-
-```bash
 BLOCKER_ID=$(gh api repos/{owner}/{repo}/issues/<blocker> --jq .id)
 gh api --method POST repos/{owner}/{repo}/issues/<n>/dependencies/blocked_by -F issue_id=$BLOCKER_ID
 ```
 
-Every issue reports `issue_dependencies_summary.blocked_by` — **open blockers only**, so it is a live
-gate rather than a historical record. The **frontier** is what that makes queryable: every issue
-whose blockers are all closed and which nobody has claimed.
-
-**Ask for it in one call.** The REST *list* endpoint already carries `issue_dependencies_summary`,
-`assignees`, `labels` and the full `body`, so the whole frontier — and everything needed to size it —
-arrives in a single request:
+`issue_dependencies_summary.blocked_by` counts **open blockers only**, so it is a live gate. The
+**frontier** is every issue whose blockers are all closed and which nobody has claimed — one request:
 
 ```bash
 R={owner}/{repo}
@@ -135,52 +73,16 @@ gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" 
         | .number'
 ```
 
-Three things in that command are load-bearing, and each one has drawn blood:
+Three parts are load-bearing: **`--paginate`, never a bare limit** (`gh issue list` caps at 30 and
+silently answers from a window over the newest issues); **`select(.pull_request == null)`** (the REST
+issues endpoint returns pull requests too, and `gh api` does not filter them, so a PR can otherwise
+enter the frontier as buildable work); and **reuse this payload rather than re-fetching per issue** —
+`body`, `labels` and `assignees` are already in it, so `## Likely files` and the ACs need no second
+call.
 
-- **`--paginate`, not a bare limit.** `gh issue list` defaults to **30**. On 2026-08-05 an 86-issue
-  board answered this question with 30 rows and every dispatch pass silently selected from a window
-  over the newest third of it — for weeks, with no error anywhere. `--paginate` has no ceiling to
-  outgrow, which is why it is preferred here over the `--limit 200` that PR #300 applied to the
-  remaining `gh issue list` calls.
-- **`select(.pull_request == null)`.** The REST issues endpoint returns **pull requests as well as
-  issues** (verified against this repo). `gh issue list` filters them for you; `gh api` does not. Skip
-  this and a PR can enter the frontier and be dispatched as buildable work.
-- **One request, not 1 + 2N.** The previous form looped `gh api` twice per issue — 173 sequential
-  round trips at 86 issues, before a line of code was written. Anything reading the frontier should
-  reuse this payload rather than re-fetching per issue; `body` is already in it, so
-  `## Likely files` and the ACs need no second call.
-
-**A dependency is semantic; file overlap is not.** Two units that both touch
-`src/db/schema/index.ts` do not block each other — they merely cannot run in the same parallel batch.
-Dependencies hold the first; `## Likely files` in the issue body holds the second. Conflating them
-makes batches coarser than they need to be.
-
-The two are read for **different** decisions. Blocking edges decide a track's **stages** (topological
-levels by `dependsOn`); file overlap decides which units inside a stage union into one **workstream**
-— one agent, sequential — and which run in parallel. The frontier query above is still the entry
-point, but a track expands from it along `dependsOn` to pull in the dependents it will build in later
-stages, so a track legitimately contains issues that are blocked *by the track itself*. `blocked_by`
-against anything **outside** the track is still a hard stop (`ops/agent-os/dod.md` G0).
-
-## Milestones
-
-Milestones hold **dates**, not features — an issue gets one milestone and one parent, and sub-issues
-already do grouping better. One exists: `Beta`.
-
-## One-time setup
-
-```bash
-gh label create "agent:queued"      --color FBCA04 --description "Spec accepted, awaiting build" --force
-gh label create "agent:in-progress" --color 0E8A16 --description "build-until-done loop running"  --force
-gh label create "agent:in-review"   --color 1D76DB --description "DoD passed, PR in review queue" --force
-gh label create "agent:blocked"     --color B60205 --description "Loop exhausted, needs a human"  --force
-gh label create "agent:delivery-failed" --color E99695 --description "DoD passed but the PR/delivery step failed — retry delivery; the code is fine" --force
-gh label create "risk:high"         --color D93F0B --description "Schema/auth/tenancy/payments"   --force
-gh label create "needs-spec"        --color 5319E7 --description "Not build-ready — no FRD, or an open question inside one" --force
-gh label create "feature"           --color 0052CC --description "Feature parent issue — the FRD's home on the board" --force
-gh label create "decision"          --color 8B5CF6 --description "An open ruling that gates work; resolution lands in the decision ledger" --force
-gh label create "deferred"          --color BFDADC --description "Off the active roadmap — cut or post-beta" --force
-# "follow-ups" was removed 2026-08-10 (#399): findings are fixed in-pass by the review-fix loop; existing rollup issues stay with the debt pass.
-```
-
-`--force` makes this idempotent (safe to re-run).
+**A dependency is semantic; file overlap is not.** Two units touching `src/db/schema/index.ts` do not
+block each other — they merely cannot run in the same parallel batch. Blocking edges decide a track's
+**stages**; file overlap decides which units inside a stage union into one **workstream** and which
+run in parallel. A track expands from the frontier along `dependsOn`, so it legitimately contains
+issues blocked *by the track itself*; `blocked_by` against anything **outside** the track is a hard
+stop.
