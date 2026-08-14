@@ -185,6 +185,41 @@ const PUSH_SCHEMA = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// The HR1–HR3 trigger: the DIFF, never the label.
+//
+// RULED 2026-08-13 (#435, ledger row 435 (a); stated in ops/agent-os/dod.md).
+// The migration proofs are proofs ABOUT THE DDL, not privileges `risk:high`
+// buys, so they fire whenever the track's diff carries a file under
+// `src/db/migrations/` — at ANY risk tier. HR4, attended-only dispatch and
+// never-auto-merge stay keyed to `risk:high`; that split IS the ruling.
+//
+// This used to read `track.risk === "high"`, which was correct only while
+// schema work was labelled high-risk. #435 narrowed the label to
+// auth/permissions, multi-tenant isolation and payments — so the label test
+// would have gone false for exactly the tracks that carry migrations and the
+// proofs would silently never have been asked for again.
+// ---------------------------------------------------------------------------
+const DIFF_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["carriesMigration", "migrationFiles"],
+  properties: {
+    carriesMigration: {
+      type: "boolean",
+      description:
+        "whether the printed paths included any file under src/db/migrations/",
+    },
+    migrationFiles: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "every printed path that starts with src/db/migrations/, verbatim",
+    },
+    detail: { type: "string" },
+  },
+};
+
 // A merged track owns its own leftovers; a held or blocked one hands them over.
 const CLEANUP_SCHEMA = {
   type: "object",
@@ -553,8 +588,43 @@ The loop compares those two and will NOT run the functional gate until they are 
   return { ok: true, remoteSha };
 }
 
+/**
+ * Does this track's diff carry a migration? Read off `git diff --name-only`
+ * against the merge-base with the base branch — never off `track.risk`, never
+ * off the issue labels (see DIFF_SCHEMA's header for the ruling).
+ *
+ * FAILS CLOSED. An undecided diff owes the proofs: a missing answer must never
+ * be the reason a DDL change shipped without a dry-run or a rollback.
+ */
+async function migrationHighRiskLine() {
+  const diff = await agent(
+    `Report whether branch ${branch} in worktree ${wt} changes any database migration file.
+
+Run exactly this, and read the answer off what it prints:
+\`git -C ${wt} diff --name-only $(git -C ${wt} merge-base ${BASE} HEAD)...HEAD\`
+
+Put every printed path beginning with \`src/db/migrations/\` into \`migrationFiles\`, and set \`carriesMigration\` to whether that list is non-empty. Transcribe what git printed — do NOT infer from the issue, its labels, the branch name or the commit messages. If the command failed, explain in \`detail\`, return \`carriesMigration: true\` and an empty list: an undecided diff owes the migration proofs rather than skipping them. Do not push, do not commit, do not open a PR. Return strictly the schema.`,
+    {
+      label: `diff:${track.id}#${attempt}`,
+      phase: "Verify",
+      // One diff and one merge-base, and the answer is a substring test.
+      model: "haiku",
+      effort: "low",
+      schema: DIFF_SCHEMA,
+    }
+  );
+  // A dead agent is an undecided diff, which fails closed exactly as above.
+  const files = Array.isArray(diff?.migrationFiles) ? diff.migrationFiles : [];
+  const carries = diff ? diff.carriesMigration !== false : true;
+  if (!carries) return "";
+  const named = files.length
+    ? files.join(", ")
+    : `the diff could not be read (${diff?.detail || "no detail returned"}), so it is treated as carrying one`;
+  return `THIS DIFF CARRIES A MIGRATION (${named}): also run HR1–HR3 — migration dry-run against a scratch DB, rollback proof, and the exact DDL delta in the PR body. That trigger is the DIFF, not the label (\`ops/agent-os/dod.md\`, RULED 2026-08-13 #435), so it applies at ANY risk tier — \`risk:medium\` included.`;
+}
+
 // Independent verifier (G6): a DIFFERENT agent runs the integration gates.
-async function integrationVerify(remoteSha) {
+async function integrationVerify(remoteSha, hrLine) {
   return agent(
     `You are the code-reviewer and the INDEPENDENT verifier. Use the \`definition-of-done\` skill and \`ops/agent-os/dod.md\`. Validate branch ${branch} in worktree ${wt} for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}.
 This track was built by ${wsSummaries.length} workstream(s), each of which already passed its OWN scoped gates (G0, a G2 subset, and G5 against its own declared files) in its own worktree. Those verdicts are inputs, not conclusions — your job is the whole assembled branch, which no scoped verifier has ever seen:
@@ -569,7 +639,7 @@ Run every INTEGRATION gate yourself — do not trust the implementers, and do no
 - G4 conventions, and G5 across the WHOLE track (the union of every workstream's declared files, against \`origin/main\`).
 Acceptance criteria to prove — all of them, across every workstream:
 ${criteria}
-${track.risk === "high" ? "This is HIGH-RISK: also run HR1–HR3 (migration dry-run + schema diff + rollback proof)." : ""}
+${hrLine || ""}
 Default to FAIL when evidence is missing or unconvincing.
 
 **If a failure belongs to one workstream, say which** in \`failingWorkstream\` — one of: ${wsIds.join(", ")}. That sends the fix to that workstream alone and spends only its attempt, instead of re-opening the whole track. Leave it empty when the failure is genuinely of the assembly — a contradiction between two workstreams, a build that only breaks once both are present — because attributing that to one of them sends the fix to an agent that cannot see the other half.
@@ -720,7 +790,11 @@ log(
   `🧪 ${track.id} — integration verify attempt ${attempt} (origin/${branch} @ ${finalSha.slice(0, 7)})`
 );
 
-const verify = await integrationVerify(finalSha);
+// Keyed on the DIFF, not on `track.risk` — see DIFF_SCHEMA's header (#435).
+const hrLine = await migrationHighRiskLine();
+if (hrLine) log(`🧱 ${track.id} — the diff carries a migration; HR1–HR3 apply`);
+
+const verify = await integrationVerify(finalSha, hrLine);
 if (!verify) return failResult(null);
 
 if (!(verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS"))
@@ -1029,8 +1103,11 @@ if (!labelState.settled) {
 //
 // Five things must all hold, and each is a different kind of guarantee:
 //   1. the DoD passed AND the real CI check is green (proven above),
-//   2. the track is not risk:high — schema/auth/tenancy is where a bad
-//      merge is unrecoverable, so those keep a human regardless,
+//   2. the track is not risk:high — auth/permissions, multi-tenant isolation
+//      and payments are where a bad merge is unrecoverable, so those keep a
+//      human regardless (schema/migrations left that list on 2026-08-13,
+//      #435: pre-release a wrong migration is a dev-DB reset, and the
+//      migration proofs HR1–HR3 key on the diff instead — see DIFF_SCHEMA),
 //   3. the track is not `hold` — the standing policy is that a change to
 //      the factory itself (this loop, the delivery-OS skills, ops/agent-os)
 //      keeps a human, because the thing being changed is the thing that

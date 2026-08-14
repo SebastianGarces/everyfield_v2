@@ -101,8 +101,10 @@ refused without a re-review. On exhaust the track **HOLDs with a DECISION commen
 take it manually — never `agent:blocked`, never merge-with-findings. Suggestions never gate and
 never trigger a round. The follow-ups rollup this replaced is gone; `ops/agent-os/labels.md`
 records the removal.
-`risk:high` (schema/auth/tenancy) never auto-merges, because that is where a bad merge is
-unrecoverable.
+`risk:high` (auth/permissions, multi-tenant isolation, payments) never auto-merges, because that is
+where a bad merge is unrecoverable. Schema and migrations left that list on 2026-08-13 (#435 —
+`dod.md` carries the ruling and its revert condition); the migration proofs they owe are keyed on
+the DIFF instead, so HR1–HR3 fire on any tier whose diff touches `src/db/migrations/`.
 
 Two other things never auto-merge, and both arrive as a per-unit **`hold: true`** flag that dispatch
 sets on the way in: an issue whose body declares never-auto-merge, and — always — any unit whose files

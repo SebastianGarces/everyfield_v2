@@ -32,7 +32,10 @@ Work the gates in order; **stop early on the first hard failure** that the imple
 6. **G5 Diff hygiene** — `git diff --stat` vs the declared file list; scan for secrets/debug/dead code.
 7. **G6 Independent sign-off** — this gate is satisfied by the verifier being a *separate* agent from the implementer. Default to reject when evidence is thin.
 
-**High-risk** (schema/auth/tenancy/payments): additionally run HR1–HR4 from `dod.md` (migration dry-run + schema diff, rollback proof, two verifiers).
+**Two extra triggers, keyed differently on purpose** — see `dod.md`, "Migration proofs and high-risk units":
+
+- **A migration in the diff** (ANY risk tier — ask `git diff --name-only` whether the branch touches `src/db/migrations/`, never ask the label): additionally run **HR1–HR3** from `dod.md` — migration dry-run, rollback proof, and the exact DDL delta in the PR body.
+- **`risk:high`** (auth/permissions, multi-tenant isolation, payments — schema/migrations are NOT high-risk, RULED 2026-08-13 #435, with the revert condition stated in `dod.md`): additionally run **HR4**, the three-lens sign-off (`correctness`, `security`, `reproducibility`; every lens must clear).
 
 ## Output — the DoD report (the evidence bundle)
 

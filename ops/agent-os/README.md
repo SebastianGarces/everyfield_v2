@@ -111,7 +111,7 @@ to create the labels.
   shorthand for "the batch running together"; the authority on what may run is always the board —
   `blocked_by == 0` and unassigned. There is no wave array to keep in sync, which is the point.
 - **No silent stops** — exhaustion always produces an `agent:blocked` issue with the reason.
-- **High-risk → PR, not merge** — the human PR review is the checkpoint for schema/auth/tenancy/payments.
+- **High-risk → PR, not merge** — the human PR review is the checkpoint for auth/permissions, multi-tenant isolation and payments. Schema/migrations are not high-risk pre-release (#435, 2026-08-13; the ruling and its revert condition live in `dod.md`) — they owe HR1–HR3 instead, keyed on the diff carrying a migration rather than on the label.
 - **Preview deploys, not localhost** — G3 validates against the branch's Vercel preview, because
   `localhost:3000` serves the main checkout and never contains the track's work. The loop never
   starts a server (per `AGENTS.md`); it resolves the preview URL with `scripts/preview-url.sh`.

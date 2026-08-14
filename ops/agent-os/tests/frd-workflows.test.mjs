@@ -630,6 +630,9 @@ const replyShip = (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
   if (l.startsWith("tree:")) return treeReady(prompt);
   if (l.startsWith("refs:")) return noRefs();
   if (l.startsWith("push:")) return pushedOk();
+  // The default branch carries no migration; the tests that care override it.
+  if (l.startsWith("diff:"))
+    return { carriesMigration: false, migrationFiles: [] };
   if (l.startsWith("cleanup:")) return { removed: ["everything"] };
   if (l.startsWith("impl:") || l.startsWith("repair:"))
     return {
@@ -1040,6 +1043,88 @@ test("risk:high never auto-merges, even on a spotless pass", async () => {
   );
   const hold = calls.find((c) => c.label === "hold:alpha");
   assert.match(hold.prompt, /risk:high/);
+});
+
+// ---------------------------------------------------------------------------
+// verify-and-ship: the HR1–HR3 trigger is the DIFF, not the label (#435)
+//
+// The migration proofs used to be requested behind `track.risk === "high"`,
+// which worked only while schema work carried that label. #435 narrowed
+// `risk:high` to auth/permissions, multi-tenant isolation and payments — so
+// the label test went false for exactly the tracks that carry migrations, and
+// no verifier would ever have been asked for a dry-run, a rollback proof or a
+// DDL delta again. ops/agent-os/dod.md says the trigger is the diff; these
+// tests are what stops the prompt and that sentence drifting apart again.
+// ---------------------------------------------------------------------------
+
+const verifyPrompt = (calls, track = "alpha") =>
+  calls.find((c) => c.label === `verify:${track}#1`)?.prompt || "";
+
+test("a migration in the diff buys HR1–HR3 at a non-high risk tier", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "medium" }],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? {
+            carriesMigration: true,
+            migrationFiles: ["src/db/migrations/0042_add_thing.sql"],
+          }
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: false }
+  );
+
+  const diff = calls.find((c) => c.label?.startsWith("diff:"));
+  assert.ok(diff, "the trigger must be READ off the diff, never off the label");
+  assert.match(
+    diff.prompt,
+    /git -C \S+ diff --name-only \$\(git -C \S+ merge-base origin\/main HEAD\)\.\.\.HEAD/,
+    "the diff is taken against the merge-base with the base branch"
+  );
+  assert.match(
+    diff.prompt,
+    /do NOT infer from the issue, its labels/,
+    "an agent that guesses from the label reintroduces the bug this replaced"
+  );
+
+  const prompt = verifyPrompt(calls);
+  assert.match(
+    prompt,
+    /also run HR1–HR3/,
+    "a risk:medium track whose diff adds a migration owes all three proofs"
+  );
+  assert.match(
+    prompt,
+    /src\/db\/migrations\/0042_add_thing\.sql/,
+    "the verifier is told WHICH file made the trigger fire"
+  );
+  assert.match(prompt, /ANY risk tier/);
+});
+
+test("a risk:high track with no migration is not asked for the migration proofs", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "high" }],
+    replyShip(passing([])),
+    { autoMerge: false }
+  );
+  assert.doesNotMatch(
+    verifyPrompt(calls),
+    /HR1/,
+    "an auth track with no DDL has no migration to dry-run or roll back"
+  );
+});
+
+test("a diff that could not be read still owes the migration proofs", async () => {
+  // Fail closed: a missing answer must never be the reason a DDL change
+  // shipped without a dry-run.
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("diff:")
+        ? null
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: false }
+  );
+  assert.match(verifyPrompt(calls), /also run HR1–HR3/);
 });
 
 // ---------------------------------------------------------------------------

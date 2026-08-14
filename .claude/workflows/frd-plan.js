@@ -1,7 +1,7 @@
 export const meta = {
   name: "frd-plan",
   description:
-    "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and publish them to the board as issues with native blocking edges. Human-gated work (schema, high-risk) is published as blockers. No code is written.",
+    "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and publish them to the board as issues with native blocking edges. Prerequisites — `risk:high` work (human-gated) and the schema consolidation (ordering-gated) — are published as blockers. No code is written.",
   whenToUse:
     "Before implementing an FRD. Publishes the dependency DAG onto the board; execute it with frd-implement, which reads the frontier. Pass the FRD path (or {frd, scope, publish:false}) as args.",
   phases: [
@@ -71,17 +71,25 @@ const DECOMPOSE_SCHEMA = {
         },
       },
     },
+    // PREREQUISITES: units that run first and alone. TWO different gates live
+    // here and `gate` is what tells them apart — see the Decompose prompt.
     deferred: {
       type: "array",
       description:
-        "HUMAN-GATED units: DB schema/migrations, auth, tenancy, payments. Agent-authorable, but they need approval and run first/alone — everything depending on them is published blocked_by them.",
+        "PREREQUISITE units — they run first/alone and everything depending on them is published blocked_by them. Two kinds, told apart by `gate`: `human` (risk:high — auth/permissions, multi-tenant isolation, payments) and `ordering` (the single DB schema/migration unit, which is agent-buildable and needs no approval; only one db:generate is allowed, so it must be one unit and it must land first).",
       items: {
         type: "object",
-        required: ["id", "title", "reason"],
+        required: ["id", "title", "reason", "gate"],
         properties: {
           id: { type: "string" },
           title: { type: "string" },
           reason: { type: "string" },
+          gate: {
+            type: "string",
+            enum: ["human", "ordering"],
+            description:
+              "`human` = risk:high, needs approval before it runs. `ordering` = it only has to land FIRST (the schema consolidation); it is NOT risk:high and gets no approval gate.",
+          },
         },
       },
     },
@@ -165,7 +173,8 @@ Read the FRD at "${frdPath}" and product-docs/system-architecture.md (and any co
 Rules:
 - "files": list EVERY file/dir the unit creates or edits. The planner serializes any units that share a file, so accuracy keeps merges clean. Confine cross-cutting chokepoints (shared barrels, event-bus registries, constants) to a SINGLE owner unit.
 - "dependsOn": logical ordering only — one unit needing another's code to exist. It does NOT mean "touches the same file"; file overlap is handled separately and must not be expressed here.
-- risk "high" = DB schema/migrations, auth/permissions, multi-tenant boundaries, payments → put in "deferred" (human-gated: agent can author, but it needs approval and lands first). Consolidate ALL schema into one deferred unit (only one db:generate is allowed). Anything needing that schema should list it in dependsOn — it becomes a real blocking edge on the board.
+- risk "high" = auth/permissions, multi-tenant isolation, payments → put in "deferred" with \`gate: "human"\` (agent can author, but it needs approval and lands first). DB schema/migrations are NOT high-risk pre-release (RULED 2026-08-13, #435 — the revert condition is in ops/agent-os/dod.md); they still owe the HR1–HR3 migration proofs at verify time, because that trigger is the DIFF carrying a migration, not the label.
+- Consolidate ALL schema into ONE deferred unit with \`gate: "ordering"\` — only one db:generate is allowed, so it must be a single unit and it must land first. That is an ORDERING constraint, not a risk one: it is published agent-buildable, with no approval gate and no risk:high label. Anything needing that schema should list it in dependsOn — it becomes a real blocking edge on the board.
 Return strictly the schema.`,
   { phase: "Decompose", agentType: "architect", schema: DECOMPOSE_SCHEMA }
 );
@@ -179,15 +188,30 @@ if (!plan) throw new Error("Decomposition failed");
 //   dependsOn    -> a SEMANTIC blocking edge. Separate track, published as blocked_by.
 // Collapsing them is what made the old wave model coarser than it needed to be.
 // ---------------------------------------------------------------------------
-const gated = [...plan.deferred];
+// A prerequisite's GATE decides how it is published, and the default is the
+// strict one: an item that did not say is treated as human-gated. Only an
+// explicit `gate: "ordering"` (the schema consolidation) skips the approval —
+// schema stopped being risk:high on 2026-08-13 (#435), but "only one
+// db:generate" is still a reason to land it first and alone.
+const gated = plan.deferred.map((d) => ({
+  ...d,
+  gate: d.gate === "ordering" ? "ordering" : "human",
+}));
 const gatedIds = new Set(gated.map((d) => d.id));
 const implementable = [];
 for (const u of plan.units) {
   if (u.risk === "high") {
-    gated.push({ id: u.id, title: u.title, reason: "risk=high (auto-gated)" });
+    gated.push({
+      id: u.id,
+      title: u.title,
+      reason: "risk=high (auto-gated)",
+      gate: "human",
+    });
     gatedIds.add(u.id);
   } else implementable.push(u);
 }
+const humanGated = gated.filter((g) => g.gate === "human");
+const orderingGated = gated.filter((g) => g.gate === "ordering");
 
 const ids = implementable.map((u) => u.id);
 const dsu = makeDSU(ids);
@@ -291,7 +315,7 @@ const rootCount = tracks.filter(
   (t) => trackDeps.get(t.root).size === 0 && gatedDeps.get(t.root).size === 0
 ).length;
 log(
-  `${implementable.length} units → ${tracks.length} file-disjoint tracks; ${rootCount} start unblocked; ${gated.length} human-gated prerequisite(s)`
+  `${implementable.length} units → ${tracks.length} file-disjoint tracks; ${rootCount} start unblocked; ${humanGated.length} human-gated + ${orderingGated.length} ordering-gated prerequisite(s)`
 );
 if (sharedFiles.length)
   log(
@@ -335,8 +359,13 @@ FRD: ${frdPath}
 
 **1. Find the parent.** \`gh issue list --label feature\` and pick the feature issue for this FRD. If none exists, create it first: a thin body linking the FRD plus the settled scope decisions — an index, not a store. Report its number as parentIssue.
 
-**2. Publish the prerequisites**, each as its own issue with \`--label needs-spec --label risk:high --parent <parent>\`. These are human-gated: they are agent-authorable but need approval before they run, which is why they are NOT \`agent:queued\`.
-${gated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
+**2. Publish the prerequisites.** They run first and alone, but they carry TWO different gates and the labels are NOT the same — do not collapse the two lists.
+
+**2a. Human-gated prerequisites** — \`gh issue create --label needs-spec --label risk:high --parent <parent>\`. \`risk:high\` is auth/permissions, multi-tenant isolation and payments; they are agent-authorable but need approval before they run, which is why they are NOT \`agent:queued\`.
+${humanGated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
+
+**2b. Ordering-gated prerequisites** — \`gh issue create --label agent:queued --parent <parent>\`, with **no \`risk:high\` and no \`needs-spec\`**. This is the DB schema/migration consolidation: schema is NOT high-risk pre-release (RULED 2026-08-13, #435 — see ops/agent-os/dod.md for the ruling and its revert condition), and the only reason it is a prerequisite is that one \`db:generate\` produces one migration, so it must be a single unit that lands before its dependents. It needs no approval; the blocking edges in step 3 are what enforce the order. The migration proofs still apply — HR1–HR3 fire at verify time because the DIFF carries a migration, not because of any label.
+${orderingGated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
 
 **3. Publish the tracks IN THE ORDER GIVEN BELOW.** The order is topological, so every blocker already exists by the time something references it. For each: \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`, using the issue numbers you got from earlier steps for the edges.
 
@@ -385,5 +414,5 @@ return {
   decompositionNotes: plan.notes,
   publishNotes: published.notes,
   howToRun:
-    "Approve and land the prerequisites on the base branch, then close their issues so the edges clear. Run frd-implement to build everything currently on the frontier; merge its branches, close those issues, and run it again. There is no wave array to carry between runs — the board holds the order.",
+    "Approve the human-gated prerequisites (risk:high) and land them; the ordering-gated schema prerequisite needs no approval and is already on agent:queued, so frd-implement will take it as soon as it runs. Close every prerequisite's issue once it lands so the edges clear. Then run frd-implement to build everything currently on the frontier; merge its branches, close those issues, and run it again. There is no wave array to carry between runs — the board holds the order.",
 };
