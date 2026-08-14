@@ -273,10 +273,10 @@ describe("extractPrintBlocks", () => {
     assert.deepEqual(extractPrintBlocks(el("div", [calloutEl("Tip")])), []);
   });
 
-  test("still drops an image-only callout, as divergence 2 says", () => {
+  test("still drops an image-only callout, as divergence 1 says", () => {
     // The fallback is deliberately blind to an image: an `<img>` contributes no
     // runs, so a callout holding nothing else stays dropped rather than becoming
-    // an empty frame. Divergence 2 is unchanged by the one-line fix.
+    // an empty frame. Divergence 1 is unchanged by the one-line fix.
     assert.deepEqual(
       extractPrintBlocks(
         el("div", [calloutEl("Insight", el("img", [], { src: "/plan.png" }))])
