@@ -233,7 +233,22 @@ G3 and name the sha the preview came from** rather than reporting on it anyway.
   does not require it).
 - Tenancy / auth boundaries respected (`memory/invariants.md`, plus the `memory/invariants/*.md`
   domain files matching the files touched).
-- **Evidence:** checklist with the specific lines/files touched.
+- **No provenance in source comments**, over the track's **added non-test source lines**
+  (`ops/agent-os/delegation-rules.md` R7 — RULED 2026-08-13, while reviewing PR #432). A comment
+  states a constraint the code cannot show; issue and PR numbers, ruling dates, review-round
+  stamps and attempt counters are not that, and belong in the commit message, the PR body and
+  `memory/`. Compute it, do not recall it:
+  ```bash
+  git diff -U0 $(git merge-base <track-branch> HEAD)...HEAD -- src \
+    ':(exclude)*.test.*' ':(exclude)*.test.tsx' \
+    | grep -E '^\+' | grep -E '(//|/\*|^\+\s*\*)' \
+    | grep -Ei '#[0-9]{2,}|ruled [0-9]{4}-|round [0-9]|PR #|attempt [0-9]'
+  ```
+  Any hit is a finding, not a note: move the sentence to the commit message and keep the
+  constraint in the file. A comment that cites the invariant it obeys or the test that pins it
+  is an enforcement pointer (R5), not provenance, and stays.
+- **Evidence:** checklist with the specific lines/files touched, plus that command's output
+  (empty is the pass).
 
 ### G5 — Diff hygiene
 *Scope: per workstream — against **that workstream's** declared file set, not the track's union.

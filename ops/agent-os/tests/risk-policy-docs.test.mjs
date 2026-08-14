@@ -1,9 +1,12 @@
-// Pins for the two factory rulings of 2026-08-13:
+// Pins for the three factory rulings of 2026-08-13:
 //
 //   #435 — `risk:high` narrows to auth/permissions, multi-tenant isolation and
 //          payments. Schema and migrations are NOT high-risk pre-release, and
 //          the migration proofs (HR1-HR3) re-key from the LABEL onto the DIFF.
 //   #430 — the 2-round review-fix cap counts PER REVIEW SITE (ruled on PR #428).
+//   #435 (b) — a source comment states a constraint; provenance (issue numbers,
+//          ruling dates, round stamps) lives in commit messages, PR bodies and
+//          `memory/`, never in source (ruled while reviewing PR #432).
 //
 // Both are doc-only rulings, so nothing a stubbed workflow run can observe
 // enforces them: the sentences ARE the mechanism, which is exactly the shape
@@ -37,6 +40,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const SPEC_INTAKE = ".claude/skills/spec-intake/SKILL.md";
 const DISPATCH = ".claude/skills/dispatch/SKILL.md";
 const DOD_SKILL = ".claude/skills/definition-of-done/SKILL.md";
+const VALIDATE_BACKEND = ".claude/skills/validate-backend/SKILL.md";
+const DELEGATION = "ops/agent-os/delegation-rules.md";
 const FRD_PLAN = ".claude/workflows/frd-plan.js";
 const VERIFY_AND_SHIP = ".claude/workflows/verify-and-ship.js";
 const LABELS = "ops/agent-os/labels.md";
@@ -56,6 +61,7 @@ const RULE_SITES = [SPEC_INTAKE, LABELS, DOD];
 const POINTER_SITES = [
   DISPATCH,
   DOD_SKILL,
+  VALIDATE_BACKEND,
   FRD_PLAN,
   VERIFY_AND_SHIP,
   WORKFLOW,
@@ -268,6 +274,25 @@ test("the definition-of-done skill splits the triggers the same way dod.md does"
   );
 });
 
+test("the G3 backend skill owes HR1-HR3 on the diff, in its body AND its description", () => {
+  // This skill is what a backend verifier actually executes, and its frontmatter
+  // description is what the agent reads before opening it. Both said "high-risk",
+  // so the running gate asked for the proofs on a strictly narrower set than
+  // dod.md now owes them on.
+  const text = read(VALIDATE_BACKEND);
+  const [, frontmatter] = text.split("---");
+  assert.match(
+    frontmatter,
+    /roll back whenever the diff carries a migration/,
+    "the description is the summary an agent routes on; it must not still say high-risk"
+  );
+  assert.match(
+    text,
+    /\*\*HR1[–-]HR3 — owed whenever the diff carries a migration, at ANY risk tier\*\*/,
+    "the migration step's own heading carries the trigger"
+  );
+});
+
 test("the planner classifies and labels by the ruled policy", () => {
   const text = read(FRD_PLAN);
   assert.match(
@@ -345,10 +370,88 @@ test("dispatch cites the same ruling rather than re-deriving the cap", () => {
 });
 
 // ---------------------------------------------------------------------------
+// #435 (b) — a comment states a constraint; provenance lives outside the source
+// ---------------------------------------------------------------------------
+
+test("delegation-rules.md states the comment-provenance rule as a numbered rule", () => {
+  const text = read(DELEGATION);
+  assert.match(
+    text,
+    /^## R7 — A comment states a constraint; provenance lives outside the source$/m,
+    "the rule is R7, so it is citable the way R2/R4/R5 already are"
+  );
+  assert.match(
+    text,
+    /RULED 2026-08-13 \(Sebastian, while reviewing PR #432\)/,
+    "a ruling with no date and no origin is an opinion by the time it is read"
+  );
+  assert.doesNotMatch(
+    text,
+    /^Six rules that decide/m,
+    "the header counts the rules; a seventh rule that the opening paragraph does not count is a rule readers skip"
+  );
+  assert.match(text, /^Seven rules that decide/m);
+  // The three homes for provenance are the point of the rule — a version that
+  // only forbids it in source tells an agent to delete the sentence instead of
+  // to move it.
+  for (const home of [/commit\s+message/i, /PR bod(y|ies)/i, /`memory\/`/])
+    assert.match(
+      text,
+      home,
+      `the rule must name where provenance does live (${home})`
+    );
+  assert.match(
+    text,
+    /enforcement pointer/i,
+    "citing the invariant or test that pins a constraint must be exempted by name, or the rule eats R5"
+  );
+  assert.match(
+    text,
+    /Test files are outside the rule/,
+    "the G4 check runs over non-test lines; the rule must say so where the rule is stated"
+  );
+  assert.match(
+    text,
+    /\*\*Enforced:\*\* G4's convention checklist runs the check over the track's \*\*added non-test source\s+lines\*\*/,
+    "R5 requires every recorded rule to name its enforcement, and this one's is G4"
+  );
+});
+
+test("dod.md G4 carries the matching check, computed over added non-test source lines", () => {
+  const text = read(DOD);
+  const g4 = text.slice(
+    text.indexOf("### G4 — Conventions & invariants"),
+    text.indexOf("### G5 — Diff hygiene")
+  );
+  assert.ok(g4.length > 0, "G4 must still be its own section above G5");
+  assert.match(
+    g4,
+    /\*\*No provenance in source comments\*\*/,
+    "the check belongs on G4's checklist, which is what a verifier walks"
+  );
+  assert.match(
+    g4,
+    /added non-test source lines/i,
+    "the scope is added lines, not the whole tree — the rule is not retroactive"
+  );
+  assert.match(
+    g4,
+    /delegation-rules\.md` R7/,
+    "the check points at the rule rather than restating it in full"
+  );
+  assert.match(g4, /RULED 2026-08-13/, "and dates it");
+  assert.match(
+    g4,
+    /git diff -U0 \$\(git merge-base <track-branch> HEAD\)\.\.\.HEAD/,
+    "G4 is an attested gate, so the one thing that can be computed must be computed — cf. G5's 'compute the file list, do not recall it'"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The ledger — where a ruling is supposed to be findable from
 // ---------------------------------------------------------------------------
 
-test("both rulings have dated ledger rows", () => {
+test("all three rulings have dated ledger rows", () => {
   const text = read(LEDGER);
   const section = text.slice(
     text.indexOf(
@@ -378,5 +481,20 @@ test("both rulings have dated ledger rows", () => {
     section,
     /\| 430 \| \*\*The 2-round review-fix cap counts PER REVIEW SITE/,
     "the per-site cap row"
+  );
+  assert.match(
+    section,
+    /\| 435 \(b\) \| \*\*A source comment states a constraint; provenance never appears in source\.\*\*/,
+    "the comment-provenance row"
+  );
+  assert.match(
+    section,
+    /Prompt-level wiring[^|]*deliberately deferred/,
+    "the row must say what was deliberately NOT done, or the next pass reads the gap as an oversight and closes it unasked"
+  );
+  assert.match(
+    section,
+    /^Three rulings about the delivery factory itself/m,
+    "the section preamble counts its own rows"
   );
 });

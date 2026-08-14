@@ -1,6 +1,6 @@
 # Delegation rules — what makes work delegable
 
-Six rules that decide whether a piece of work can be handed to the build loop with a real
+Seven rules that decide whether a piece of work can be handed to the build loop with a real
 chance of coming back done. The delivery machinery (`workflow.md`, `dod.md`, `spec-intake`)
 enforces *process*; these rules govern the *inputs* — the design, the codebase shape, and the
 task definition that process runs on. A track that fails repeatedly usually violated one of
@@ -137,6 +137,39 @@ somewhere to go other than being ignored or obeyed.
 
 **Enforced:** `memory/invariants.md` carries the two-strength header and ⚖ tags on ruling
 lines; the hold/ruling machinery (`workflow.md` §4) is where an escalation goes.
+
+## R7 — A comment states a constraint; provenance lives outside the source
+
+RULED 2026-08-13 (Sebastian, while reviewing PR #432). Agent-written code had begun narrating
+its own delivery history in the files it touched, and the two kinds of sentence read alike
+until you ask who they are for.
+
+- **A comment earns its place by saying what the code cannot show** — why this statement is
+  first, which invariant the order upholds, what breaks if the obvious simplification is
+  applied, which named function owns the decision this one must not re-implement. That is the
+  sentence the next reader of the file needs, and it is true independently of how it got there.
+- **Provenance is not that sentence, and it never appears in source.** Issue and PR numbers,
+  ruling dates, review-round stamps ("round 2 of the sweep", "RULED 2026-08-13", "fixes the
+  finding from review round 1"), attempt counters and agent names belong in the **commit
+  message**, the **PR body** and **`memory/`** — the three places that are already dated,
+  attributed, ordered and searchable. `git log`/`gh` answer "how did this get here"; the file
+  answers "what may I change".
+- **Why the split is load-bearing.** A comment carries no date and no repo state, so provenance
+  in source ages into a claim about a codebase that has moved — a round stamp outlives its
+  round, an issue number outlives the issue, and neither can be verified from where it sits.
+  It also grows without bound: every later round appends its own stamp to the same block, and
+  the constraint the comment existed to state is pushed under a changelog nobody prunes.
+- **Not the same thing as an enforcement pointer.** R5 requires a recorded rule to name what
+  pins it, so a comment may cite the invariant it obeys or the test that guards it
+  (`memory/invariants.md` → Transactions, `assertBatchedWrites`) — that is a live constraint
+  with an address, not a history entry. The tell: an enforcement pointer names something a
+  reader can go and read *now*; provenance names an event that already happened.
+- **Test files are outside the rule.** A suite quoting a spelling in order to forbid it, or
+  naming the round that produced a regression case, is stating its subject.
+
+**Enforced:** G4's convention checklist runs the check over the track's **added non-test source
+lines** (`ops/agent-os/dod.md` G4); G6's reviewer reports a hit as a finding, fixed in the pass
+by moving the sentence to the commit message and leaving the constraint behind.
 
 ---
 

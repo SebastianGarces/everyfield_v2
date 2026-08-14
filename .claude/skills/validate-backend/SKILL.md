@@ -1,6 +1,6 @@
 ---
 name: validate-backend
-description: Functionally validate a backend/API/data-layer change by exercising the real route or server action and asserting response shape/status against the contract, plus verifying Drizzle migrations apply (and roll back, for high-risk). This is DoD gate G3 for backend units.
+description: Functionally validate a backend/API/data-layer change by exercising the real route or server action and asserting response shape/status against the contract, plus verifying Drizzle migrations apply and roll back whenever the diff carries a migration. This is DoD gate G3 for backend units.
 ---
 
 # validate-backend (DoD gate G3 — backend/API/data)
@@ -36,8 +36,10 @@ check `memory/contracts/api.md` and `memory/contracts/db.md` for non-obvious beh
    - `pnpm db:migrate` applies cleanly. Capture output.
    - Confirm the generated SQL lives in `src/db/migrations/` (generated via `pnpm db:generate`, **never**
      `db:push`).
-   - **High-risk (HR1–HR3):** apply on a scratch/shadow DB, capture the **schema diff** (DDL delta), and
-     prove **rollback** (down-migration or a documented, tested restore path) returns prior state.
+   - **HR1–HR3 — owed whenever the diff carries a migration, at ANY risk tier** (RULED 2026-08-13, #435;
+     the proofs key on the diff, not on the label): apply on a scratch/shadow DB, capture the **schema
+     diff** (DDL delta), and prove **rollback** (down-migration or a documented, tested restore path)
+     returns prior state.
 
 ## Output
 
