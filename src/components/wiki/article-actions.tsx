@@ -17,7 +17,7 @@
 // markup (ruling on PR #391, 2026-08-12 — option (c), "the file must match the
 // page"). Before that ruling a Warning arrived in the file as ordinary prose.
 // A callout NESTED inside a list item, a blockquote or a table cell is
-// divergence 3 below: those three reduce to a single line of text, so nothing
+// divergence 2 below: those three reduce to a single line of text, so nothing
 // inside one can stay a block.
 //
 //   Print     hands the page to the browser. The print stylesheet in
@@ -30,14 +30,9 @@
 // `article-pdf/` halves and `globals.css`, and fails when only one of them
 // draws the grid or keeps a word bold.
 //
-// THREE KNOWN DIVERGENCES, tracked rather than hidden:
+// TWO KNOWN DIVERGENCES, tracked rather than hidden:
 //
-//   1. Characters outside WinAnsi (`→`, `↓`, box drawing) print correctly and
-//      corrupt in the downloaded file, because the standard-14 fonts this
-//      document pins cannot encode them. The fix is a registered Unicode TTF,
-//      which means shipping a font asset — deferred by the ruling on PR #391
-//      and tracked as #398. Owned by `article-pdf/render.tsx`.
-//   2. Images print and do not download. `globals.css` keeps `img` on the
+//   1. Images print and do not download. `globals.css` keeps `img` on the
 //      printed page, but `collectBlocks` has no `IMG` case, so an image falls
 //      to the recursive default, has no children, and drops silently. Carrying
 //      it across means fetching and embedding the bytes, so it stayed out of
@@ -46,7 +41,7 @@
 //      and no runs, so the whole aside drops — frame, type label and all —
 //      rather than downloading as an empty box. Owned by
 //      `article-pdf/extract.ts`.
-//   3. Nesting inside a list item, a blockquote or a table cell FLATTENS. Those
+//   2. Nesting inside a list item, a blockquote or a table cell FLATTENS. Those
 //      three are read out as one line of runs, so anything structural inside
 //      one loses its structure: a callout there keeps its words and loses its
 //      box, a table there loses its grid. The browser draws all of it on paper.
@@ -62,9 +57,26 @@
 //                             the font names emphasis resolves to.
 //   `callout.tsx`             the framed aside, and the marker that tells this
 //                             path its type in words.
+//   `@/lib/documents/pdf/fonts`
+//                             the eight faces, shared with the F6 templates.
+//                             Import-free, so naming it here costs the bundle
+//                             nothing.
 //
 // This file is only the control: it finds the prose, joins those two, and hands
 // the reader a file.
+//
+// THE FONT IS FETCHED ON CLICK TOO
+//
+// The standard-14 fonts `@react-pdf/renderer` ships carry WinAnsi encoding
+// only, and they do not REFUSE a character outside it — they write the wrong
+// glyph (`→` became `’`, box drawing became NUL). That was the first item on
+// the list above until #398 closed it, and renumbered the two that remain. The
+// fix is a real Unicode font, so the eight faces under `public/fonts/` are
+// fetched from this app's own origin alongside the renderer.
+//
+// A face that will not load is not fatal: `registerPdfFonts` points the eight
+// families back at the standard-14 ones, and the reader gets the file they got
+// before #398 rather than an error toast.
 //
 // WHY THE PDF IS BUILT CLIENT-SIDE, FROM THE DOM
 //
@@ -87,6 +99,10 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  PDF_FONT_BASE_PATH,
+  registerPdfFonts,
+} from "@/lib/documents/pdf/fonts";
 import { wikiHref } from "@/lib/wiki/href";
 
 import { extractPrintBlocks } from "./article-pdf/extract";
@@ -94,6 +110,24 @@ import { pdfStyles, renderBlock } from "./article-pdf/render";
 
 /** The element holding the article's rendered prose — the PDF's only source. */
 export const PRINT_BODY_SELECTOR = "[data-print-body]";
+
+/**
+ * One font face's bytes, from THIS app's origin.
+ *
+ * A relative path, never an absolute URL: the renderer runs in the reader's
+ * browser, so a third-party font host would be a request to somebody else on
+ * every download. `force-cache` is what stops the second download re-fetching
+ * ~590 KB the browser already has.
+ */
+async function fetchFontFile(file: string): Promise<Uint8Array> {
+  const response = await fetch(`${PDF_FONT_BASE_PATH}/${file}`, {
+    cache: "force-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Font ${file} responded ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
 
 /**
  * How long the blob URL stays alive after the click.
@@ -157,8 +191,14 @@ export function ArticleActions({
       }
 
       const blocks = extractPrintBlocks(body);
-      const { pdf, Document, Page, Text, View } =
+      const { pdf, Document, Font, Page, Text, View } =
         await import("@react-pdf/renderer");
+
+      // Before `pdf()`: `pdfStyles` already names the Unicode families, so they
+      // have to resolve to something by layout time. The result is deliberately
+      // ignored — `false` means every face fell back to its standard-14 family,
+      // which is a file with corrupt arrows rather than no file at all.
+      await registerPdfFonts(Font, fetchFontFile);
 
       const document_ = (
         <Document title={title} subject={description} author="EveryField">

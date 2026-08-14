@@ -1,8 +1,17 @@
 // ============================================================================
 // Document Templates — Shared PDF styles (F6)
 // ============================================================================
+//
+// The faces come from `./fonts.ts` and are never spelled out here. They used to
+// be the standard-14 names, which carry WinAnsi encoding only — so any
+// character a user typed outside WinAnsi (an arrow, a check mark, a
+// box-drawing rule pasted into a field) reached the file as the WRONG GLYPH.
+// See the header of `./fonts.ts` for the whole story (#398).
+// ============================================================================
 
 import { StyleSheet } from "@react-pdf/renderer";
+
+import { PDF_FONT } from "./fonts";
 
 /** Page sizes in points (72pt = 1in). */
 export const PAGE_SIZE = {
@@ -24,23 +33,23 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 1.5,
     color: colors.ink,
-    fontFamily: "Helvetica",
+    fontFamily: PDF_FONT.body,
   },
   cardPage: {
     padding: 22,
     fontSize: 9,
     lineHeight: 1.4,
     color: colors.ink,
-    fontFamily: "Helvetica",
+    fontFamily: PDF_FONT.body,
   },
   h1: {
     fontSize: 20,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: PDF_FONT.bold,
     marginBottom: 4,
   },
   h2: {
     fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: PDF_FONT.bold,
     marginBottom: 6,
     marginTop: 14,
   },
@@ -51,13 +60,13 @@ export const styles = StyleSheet.create({
   },
   centerHeading: {
     fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: PDF_FONT.bold,
     textAlign: "center",
     letterSpacing: 1,
   },
   centerChurch: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: PDF_FONT.bold,
     textAlign: "center",
     marginBottom: 10,
   },
@@ -100,7 +109,7 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.faint,
   },
   th: {
-    fontFamily: "Helvetica-Bold",
+    fontFamily: PDF_FONT.bold,
     fontSize: 10,
     padding: 6,
   },

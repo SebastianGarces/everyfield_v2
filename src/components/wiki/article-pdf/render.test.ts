@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
 
+import { PDF_FONT } from "@/lib/documents/pdf/fonts";
+
 import type { PrintRun } from "./extract";
 import { renderBlock, runFontFamily } from "./render";
 import { childrenOf, plain, primitives, type Rendered } from "./test-doubles";
@@ -107,7 +109,7 @@ describe("renderBlock — the table grid in the downloaded PDF", () => {
       childrenOf(tableRow).flatMap(childrenOf);
 
     for (const cell of textOf(rows[0])) {
-      assert.equal(cell.props.style?.fontFamily, "Helvetica-Bold");
+      assert.equal(cell.props.style?.fontFamily, PDF_FONT.bold);
     }
     for (const cell of textOf(rows[1])) {
       assert.equal(cell.props.style?.fontFamily, undefined);
@@ -148,14 +150,14 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
     const bold = children[1] as Rendered;
     const mono = children[3] as Rendered;
     assert.equal(bold.type, "Text");
-    assert.equal(bold.props.style?.fontFamily, "Helvetica-Bold");
-    assert.equal(mono.props.style?.fontFamily, "Courier");
+    assert.equal(bold.props.style?.fontFamily, PDF_FONT.bold);
+    assert.equal(mono.props.style?.fontFamily, PDF_FONT.mono);
   });
 
   test("names the combined face inside a bold block, never a second axis", () => {
-    // A heading is already set in `Helvetica-Bold`, a single-source family:
+    // A heading is already set in the bold face, a single-source family:
     // asking it for an italic CHILD resolves nothing and throws in
-    // `@react-pdf/font`, so the italic word has to name `Helvetica-BoldOblique`
+    // `@react-pdf/font`, so the italic word has to name the bold-italic face
     // outright.
     const heading = renderBlock(
       {
@@ -168,7 +170,7 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
     ) as unknown as Rendered;
 
     const [, emphasized] = childrenOf(heading);
-    assert.equal(emphasized.props.style?.fontFamily, "Helvetica-BoldOblique");
+    assert.equal(emphasized.props.style?.fontFamily, PDF_FONT.boldItalic);
   });
 
   test("keeps a header cell bold when a word inside it is emphasized", () => {
@@ -194,23 +196,17 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
       return run.props.style?.fontFamily;
     };
 
-    assert.equal(faceOf(0), "Helvetica-BoldOblique");
-    assert.equal(faceOf(1), "Helvetica-Oblique");
+    assert.equal(faceOf(0), PDF_FONT.boldItalic);
+    assert.equal(faceOf(1), PDF_FONT.italic);
   });
 
-  test("resolves every combination to a standard-14 face", () => {
-    // Standard-14 only: the fix carries no font asset, which is what kept it
-    // inside the ruling. Anything outside this set would need one.
-    const standard14 = new Set([
-      "Helvetica",
-      "Helvetica-Bold",
-      "Helvetica-Oblique",
-      "Helvetica-BoldOblique",
-      "Courier",
-      "Courier-Bold",
-      "Courier-Oblique",
-      "Courier-BoldOblique",
-    ]);
+  test("resolves every combination to a face the shared table registers", () => {
+    // Nothing may resolve to a face nobody registers. Before #398 the set was
+    // the standard-14 names, which `@react-pdf/font` knows without an asset —
+    // so an unregistered name still rendered, in WinAnsi, corrupting every
+    // arrow. Now an unlisted name would THROW, and this is the guard that says
+    // so at the unit level instead of at download time.
+    const registered = new Set<string>(Object.values(PDF_FONT));
 
     for (const bold of [undefined, true] as const) {
       for (const italic of [undefined, true] as const) {
@@ -222,7 +218,7 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
               assert.equal(face, undefined, "a plain run inherits its block");
               continue;
             }
-            assert.ok(face && standard14.has(face), `unknown face ${face}`);
+            assert.ok(face && registered.has(face), `unknown face ${face}`);
           }
         }
       }
@@ -295,7 +291,7 @@ describe("renderBlock — the callout box in the downloaded PDF", () => {
     const [label, ...rest] = partsOf(callout);
     assert.equal(label.type, "Text");
     assert.equal(label.props.children, "Warning");
-    assert.equal(label.props.style?.fontFamily, "Helvetica-Bold");
+    assert.equal(label.props.style?.fontFamily, PDF_FONT.bold);
     assert.equal(rest.length, 2);
   });
 

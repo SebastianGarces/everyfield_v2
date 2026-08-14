@@ -21,31 +21,29 @@
 // renderers name the same type (ruling on PR #391, 2026-08-12). Only a callout
 // that reached `extract.ts` as a BLOCK arrives here: one nested in a list item,
 // a blockquote or a table cell was flattened to text before this file sees it
-// (divergence 3 in `article-actions.tsx`).
+// (divergence 2 in `article-actions.tsx`).
 //
 // EMPHASIS IS A FONT NAME, NEVER AN AXIS.
 //
-// Each styled run names a STANDARD-14 FONT outright (`Helvetica-Bold`,
-// `Helvetica-Oblique`, …) and never sets `fontWeight` or `fontStyle`. That is
-// not a stylistic preference. `@react-pdf/font` registers those names as
-// single-source compatibility families, and it resolves a face by filtering on
-// `fontStyle` FIRST — so asking a `Helvetica-Bold` block for an italic child
-// finds nothing and THROWS, turning a bold heading with one italic word into a
-// failed download. Naming the combined face cannot miss. It also needs no font
-// asset, which is what kept this fix inside the ruling.
+// Each styled run names a SINGLE-SOURCE FAMILY outright (`PDF_FONT.bold`,
+// `PDF_FONT.italic`, …) and never sets `fontWeight` or `fontStyle`. That is not
+// a stylistic preference. `@react-pdf/font` resolves a face by filtering on
+// `fontStyle` FIRST — so asking a bold family for an italic child finds nothing
+// and THROWS, turning a bold heading with one italic word into a failed
+// download. Naming the combined face cannot miss.
 //
-// DIVERGENCE 1 FROM THE PRINTED PAGE is owned here: the standard-14 faces
-// cannot encode characters outside WinAnsi (`→`, `↓`, box drawing), so those
-// print correctly and corrupt in the downloaded file. The fix is a registered
-// Unicode TTF, which means shipping a font asset (#398).
-//
-// The numbering is `article-actions.tsx`'s list, which is the ONE place that
-// states how many divergences there are. Cite an item by number from here;
-// never restate the total, or two files can disagree about it — this comment
-// claimed "two" for a while after that list grew to three.
+// THE FACES THEMSELVES ARE NOT NAMED HERE. `src/lib/documents/pdf/fonts.ts`
+// owns the table, because the F6 document templates are set in the same faces
+// and the two paths pinned the standard-14 names separately until #398 — which
+// is how the download kept corrupting every character outside WinAnsi (`→`,
+// `↓`, `✓`, box drawing) while the printed page rendered them correctly. That
+// file is import-free at runtime, so naming it here costs the click-path bundle
+// nothing.
 // ============================================================================
 
 import { type ReactElement } from "react";
+
+import { PDF_FONT } from "@/lib/documents/pdf/fonts";
 
 import type { PrintBlock, PrintRun } from "./extract";
 import { columnWidths } from "./extract";
@@ -87,17 +85,17 @@ const TABLE_BORDER = 0.5;
  */
 const CALLOUT_BORDER = 1;
 
-// The faces, by name. Every one of these is a standard-14 font, so the document
-// carries no font asset; see the header comment for why an emphasized run names
-// its face instead of asking for a weight or a style.
-const FONT_BODY = "Helvetica";
-const FONT_BOLD = "Helvetica-Bold";
-const FONT_ITALIC = "Helvetica-Oblique";
-const FONT_BOLD_ITALIC = "Helvetica-BoldOblique";
-const FONT_MONO = "Courier";
-const FONT_MONO_BOLD = "Courier-Bold";
-const FONT_MONO_ITALIC = "Courier-Oblique";
-const FONT_MONO_BOLD_ITALIC = "Courier-BoldOblique";
+// The faces, by role. `article-actions.tsx` registers them on the way to
+// building the file; see the header comment for why an emphasized run names its
+// face instead of asking for a weight or a style.
+const FONT_BODY = PDF_FONT.body;
+const FONT_BOLD = PDF_FONT.bold;
+const FONT_ITALIC = PDF_FONT.italic;
+const FONT_BOLD_ITALIC = PDF_FONT.boldItalic;
+const FONT_MONO = PDF_FONT.mono;
+const FONT_MONO_BOLD = PDF_FONT.monoBold;
+const FONT_MONO_ITALIC = PDF_FONT.monoItalic;
+const FONT_MONO_BOLD_ITALIC = PDF_FONT.monoBoldItalic;
 
 export const pdfStyles = {
   page: {
