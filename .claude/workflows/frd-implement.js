@@ -295,11 +295,17 @@ Return strictly the schema.`,
   }
 );
 
-const landed = results.filter(Boolean);
+// A reviewer that died settled nothing, so its track is NOT landed — counting
+// it as reviewed would leave its issues claimed forever, which is a silent stop.
+const returned = results.filter(Boolean);
+const landed = returned.filter((r) => r.review);
+const branchOf = new Map(
+  returned.filter((r) => !r.review).map((r) => [r.track.id, r.impl?.branch])
+);
 
 // ---------------------------------------------------------------------------
-// 4. Settle — fallback only. Each reviewer settled its own issues; a track that
-// produced nothing had no reviewer run, so its issues would stay claimed forever.
+// 4. Settle — fallback only. Each reviewer settled its own issues; a track whose
+// build OR review produced nothing had none, so its issues stay claimed forever.
 // ---------------------------------------------------------------------------
 const failedTracks = tracks.filter(
   (t) => !landed.some((r) => r.track.id === t.id)
@@ -308,9 +314,9 @@ let settled = null;
 if (failedTracks.length) {
   phase("Settle");
   settled = await agent(
-    `These claimed issues produced nothing — the build agent died, so no reviewer settled them. Label vocabulary: ops/agent-os/labels.md. With \`gh\`, for each issue below: swap \`agent:in-progress\` for \`agent:blocked\`, unassign, and comment that the run produced no branch.
+    `These claimed issues were never settled — their build or their review agent died. Label vocabulary: ops/agent-os/labels.md. With \`gh\`, for each issue below: swap \`agent:in-progress\` for \`agent:blocked\`, unassign, and comment what happened. Where a branch is named, the code EXISTS and is unreviewed — name that branch in the comment so the work is not lost and the next attempt does not rebuild it.
 
-${failedTracks.map((t) => `- issues ${t.issues.map((i) => `#${i}`).join(", ")} (track ${t.id})`).join("\n")}
+${failedTracks.map((t) => `- issues ${t.issues.map((i) => `#${i}`).join(", ")} (track ${t.id}) — ${branchOf.has(t.id) ? `branch \`${branchOf.get(t.id) || "unnamed"}\` exists, but no review landed` : "no branch was produced"}`).join("\n")}
 
 Report the label each issue ended on.
 Return strictly the schema.`,

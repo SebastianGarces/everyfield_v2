@@ -69,6 +69,9 @@ The change is demonstrated against a running deployment of **this sha**, once, a
   ```bash
   git diff --name-only $(git merge-base origin/main HEAD)...HEAD
   ```
+- **Comment provenance** — an added non-test source line may state a constraint the code cannot
+  show; it may not carry provenance. Issue numbers, ruling dates and review-round stamps belong in
+  the commit message, the PR body and `memory/`, never in a source comment.
 - **Structure** — a second implementation of a decision that already has one is a finding; so is new
   logic reachable only through a browser when a pure seam was available.
 
@@ -83,26 +86,29 @@ the record, and a label you did not observe is not a label you may report.
 
 ---
 
-## High-risk rider
+## Migrations, and the high-risk rider
 
-A unit is high-risk when it touches DB schema/migrations, auth/permissions/roles, tenant boundaries,
-or payments/billing.
+A unit is **high-risk** when it touches auth/permissions/roles, tenant boundaries, or
+payments/billing. Pre-release, schema and migrations are *not* high-risk on their own: no separate
+production database holds client data (ruled 2026-08-13). **Revert condition:** the day alpha or
+beta serves real client data from its own production DB, schema and migrations return to `risk:high`.
 
-- Prove the migration **applies and rolls back** on a scratch DB.
-- Paste the exact **DDL delta** into the PR body.
-- The reviewer holds the security lens (gate 3) and reads every matching `memory/invariants/*.md`.
-- Label the PR `risk:high`. **It never auto-merges** — the human PR review is the checkpoint, and
-  this is the one class of change a revert cannot undo. Factory-path changes
-  (`.claude/workflows/`, delivery-OS skills, `ops/agent-os/`) hold the same way: the machine that
-  decides what merges keeps a human.
+- **Whenever the diff carries a migration, at any risk tier:** prove it **applies and rolls back** on
+  a scratch DB, and paste the exact **DDL delta** into the PR body.
+- **`risk:high` only:** the reviewer holds the security lens (gate 3) and reads every matching
+  `memory/invariants/*.md`; the PR is labelled `risk:high` and **never auto-merges** — the human PR
+  review is the checkpoint, and this is the one class of change a revert cannot undo. Factory-path
+  changes (`.claude/workflows/`, delivery-OS skills, `ops/agent-os/`) hold the same way: the machine
+  that decides what merges keeps a human.
 
 ---
 
 ## Verdict
 
 ```
-DONE = gates 1–4 all PASS on the assembled branch  → PR, evidence attached,
-       every issue the track closes labelled agent:in-review
+DONE = gates 1–4 all PASS on the assembled branch (+ the migration proofs if the
+       diff carries a migration; + the security lens if risk:high) → PR, evidence
+       attached, every issue the track closes labelled agent:in-review
 FAIL → ONE retry, and it must answer the NAMED cause verbatim. The retry prompt quotes
        the failing gate's evidence, not a paraphrase; a fix that answers no finding is
        refused. "Could not fix it, here is why" beats a fix report for something else.
@@ -139,4 +145,6 @@ same change**; a new route or table alone does not.
 - The *why* goes in the matching `memory/invariants/<domain>.md` file **only when it is not derivable
   from the source**. Never write elaboration without the index line — the index is what agents read.
 - Point at the source; never mirror it. No incident narration, no dates, no test-file citations.
-- The tree stays under budget: `memory/invariants.md` ≤ 50 KB, the whole tree ≤ 100 KB.
+- The tree stays under the budget stated in `memory/index.md` and enforced by
+  `ops/agent-os/tests/memory-budget.test.mjs`. That budget is deliberately tight: adding a rule may
+  require shortening another. Raising the number is a ruling, not a fix.

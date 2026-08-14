@@ -41,11 +41,12 @@ automatically — that is how two loops end up on one branch.
 not re-derive one. Expand each track along `dependsOn` to pull in the dependents it will build in
 later stages — a blocker *inside* the track lands on the track branch first, one outside it is a
 hard stop. **Skip `risk:high` unless the caller opted in** (`dispatch high-risk`): unattended and
-recurring is a different axis from autonomous, so schema, auth and tenancy changes start when
+recurring is a different axis from autonomous, so auth and tenancy changes start when
 someone is around. Say how many you skipped. Empty frontier → stop with what the board waits on.
 
 **4. The budget can finish what it starts.** Do not start a stage you cannot finish. No arithmetic
-here — the per-workstream reserve and `MAX_ATTEMPTS` inside the loop are the real guards.
+here — the per-attempt reserve before each integration attempt and before each stage, plus
+`MAX_ATTEMPTS`, are the real guards inside the loop.
 
 ## The pass
 

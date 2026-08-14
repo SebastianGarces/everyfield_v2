@@ -52,14 +52,16 @@ An agent rules for itself from `product-docs/product-values.md`, `CONTEXT.md` an
 `memory/invariants.md`, and **records the ruling**: product calls in `product-docs/decisions.md`, code
 calls in the PR body. For a genuinely hard call, convene a short **consulate** — two or three agent
 perspectives on the same question, then one synthesis that decides. A review finding is ruled the same
-way: apply it or waive it, and say which.
+way: apply it or waive it, and say which. Provenance never enters the code: a source comment states a
+constraint the code cannot show, while issue numbers, ruling dates and review rounds live in the
+commit message, the PR body and `memory/`.
 
 `needs-spec`, and holding a PR with a DECISION comment, are the **last resort** — reserved for
 irreversible calls and the owner's taste. The human queue holds decisions, never "please re-check what
-the gates already proved". A **direction** question — two or more plausible answers where trying them
-beats reading about them — escalates as **live prototypes**, not prose
-(`.claude/skills/prototype/`): two or three variants behind the switcher on the preview. Prototype code
-never merges.
+the gates already proved". A **UI direction** question the owner's taste decides escalates as **live
+prototypes**, not prose (`.claude/skills/prototype/`): two or three variants behind the switcher on the
+preview, and prototype code never merges. Behavior and policy questions are not that class — rule them
+yourself from product-values / CONTEXT / invariants and record the ruling.
 
 ## What makes work delegable
 
@@ -80,8 +82,8 @@ The fourth rule needs an anchor of its own, because `memory/invariants.md` and
 
 ## Rules bind at two strengths
 
-The corpus agents read before mutating (`memory/invariants.md`) mixes two strengths, and delegation
-needs them told apart:
+R6: the corpus agents read before mutating (`memory/invariants.md`) mixes two strengths, and
+delegation needs them told apart:
 
 - **Invariant** — a mechanical or security fact: the stack, the tenant boundary, the auth surface.
   Never broken. An agent that thinks one is wrong is wrong.
@@ -96,9 +98,10 @@ so "the rule seems wrong" has somewhere to go other than being ignored or obeyed
 
 **User-invoked = entry points only. Everything the loop calls stays model-invocable.** A skill with
 `disable-model-invocation: true` is unreachable by subagents *and* from a slash-command body, because
-both are executed by the model. Only `/deliver` and `handoff` carry the flag; `dispatch` is
-schedule-invoked, so its guards live inside the skill (a review-queue cap, a refusal while anything is
-`agent:in-progress`, `risk:high` excluded, a per-pass track cap).
+both are executed by the model. `handoff` is the only skill carrying the flag; `/deliver` is a slash
+command, so it is user-invoked by construction and needs none. `dispatch` is schedule-invoked, so its
+guards live inside the skill (a review-queue cap, a refusal while anything is `agent:in-progress`,
+`risk:high` excluded, a per-pass track cap).
 
 > **Hazard.** Flagging anything the loop calls breaks it *silently* — the subagent simply cannot see
 > the skill, and the failure surfaces as an unrelated gate failure minutes later. Same class of trap as

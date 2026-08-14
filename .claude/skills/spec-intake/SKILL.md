@@ -14,8 +14,11 @@ The front door of the factory. A loop is only as good as the target it is pointe
    note it in the issue.
 2. **Write the issue** from the template. The non-negotiable part is observable ACs: each names how
    it will be proven. If you cannot say how, it is not an AC yet.
-3. **Classify risk.** `risk:high` iff it touches schema/migrations, auth/permissions, multi-tenant
-   boundaries, or payments. Still autonomous-to-PR; the label routes it and stops auto-merge.
+3. **Classify risk.** `risk:high` iff it touches auth/permissions, multi-tenant isolation, or
+   payments. Schema and migrations are **not** high-risk pre-release — no separate production
+   database holds client data (ruled 2026-08-13); they return to `risk:high` the day alpha or beta
+   serves one. Still autonomous-to-PR; the label routes it and stops auto-merge, and a migration
+   carries its own proofs at any tier (`ops/agent-os/dod.md`).
 4. **Guess file ownership, then cut the workstreams.** **One workstream is the default**; a second
    must state its reason — real file disjointness plus parallel time saved — because each buys
    another implement agent. A shared prerequisite (schema, contract, types) goes in the workstream
@@ -52,7 +55,7 @@ The front door of the factory. A loop is only as good as the target it is pointe
 ## Validation plan
 - Lane: frontend | backend | fullstack
 - WORKS method: browser (flows: …) | request (routes: …)
-- Extra (high-risk): migration applies + rollback proven
+- Extra (any migration in the diff): applies + rollback proven, DDL delta in the PR body
 
 ## Risk
 low | medium | high   <!-- high → label risk:high -->

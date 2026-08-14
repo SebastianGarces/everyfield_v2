@@ -1,13 +1,14 @@
 ---
 name: open-pr
-description: Open a GitHub PR for a completed track — but ONLY when the Definition of Done verdict is PASS. Writes the DoD evidence bundle into the PR body, links the issue with Closes #, and flips the issue label to agent:in-review. Use as the final step of build-until-done. Refuses to open a PR on a FAIL verdict.
+description: The PR body template and the label-write discipline for a completed track. Use when opening or updating a PR from a Definition of Done bundle — the loop's ship pass applies this inline. Refuses to open a PR on a FAIL verdict.
 ---
 
 # open-pr
 
-The only sanctioned way a PR enters existence. Precondition: a `definition-of-done` verdict of `PASS`
-or `PASS_WITH_WARNINGS`. On `FAIL`, or with required evidence missing, do not open a PR — return
-control to the loop.
+**The authority for the PR body template and the label discipline.** The loop's ship pass applies
+both inline rather than calling this skill; anything opening a PR by hand follows it directly.
+Precondition either way: a `definition-of-done` verdict of `PASS` or `PASS_WITH_WARNINGS`. On `FAIL`,
+or with required evidence missing, do not open a PR — return control to the loop.
 
 ## Procedure
 
@@ -61,6 +62,11 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 
 ### Acceptance criteria
 - [x] <AC 1> — <verification method + result>
+
+## Rulings
+<Only when the review ruled on something, or left a finding standing.>
+- <the call> — <the source that ruled it: product-values, CONTEXT, or the invariant>
+- <a standing finding, verbatim, as a decision: merge as-is / a named fix / take it manually>
 
 ## 👀 Manual QA
 

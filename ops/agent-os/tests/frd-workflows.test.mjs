@@ -215,20 +215,51 @@ test("a prerequisite publishes as buildable work, never as a human gate", async 
   // An agent rules for itself from the values and the invariants; needs-spec is
   // the last resort, not the default for a whole risk class.
   const { calls } = await runPlan(
-    planWith([unit("schema", { risk: "high", files: ["src/db/schema.ts"] })]),
+    planWith(
+      [unit("service")],
+      [{ id: "schema", title: "SCHEMA", reason: "one db:generate may run" }]
+    ),
     { frd: "f.md" },
     { parentIssue: 72, published: [], edges: [], notes: "" }
   );
   const prompt = promptOf(calls, "Publish");
-  assert.match(
-    prompt,
-    /--label agent:queued --label risk:high --parent <parent>/
-  );
+  assert.match(prompt, /--label agent:queued --parent <parent>/);
   assert.doesNotMatch(
     prompt,
     /needs-spec/,
-    "risk:high is a gate on the DoD, not a hold for a human"
+    "a prerequisite is a gate on the DoD, not a hold for a human"
   );
+});
+
+test("schema serializes as a prerequisite WITHOUT being labelled risk:high", async () => {
+  // Pre-release there is no separate production database, so schema work is
+  // ordered, not dangerous. risk:high is auth, tenancy and payments only.
+  const { calls } = await runPlan(
+    planWith(
+      [unit("service")],
+      [{ id: "schema", title: "SCHEMA", reason: "one db:generate may run" }]
+    ),
+    { frd: "f.md" },
+    { parentIssue: 72, published: [], edges: [], notes: "" }
+  );
+  const prompt = promptOf(calls, "Publish");
+  assert.doesNotMatch(
+    prompt,
+    /\[schema\] SCHEMA {2}← also --label risk:high/,
+    "a schema prerequisite carries no automatic risk:high"
+  );
+  assert.match(prompt, /schema and migrations are ordered, not dangerous/);
+});
+
+test("an auth unit is the thing that still publishes risk:high", async () => {
+  const { calls } = await runPlan(
+    planWith([unit("auth-guard", { risk: "high", files: ["src/auth.ts"] })]),
+    { frd: "f.md" },
+    { parentIssue: 72, published: [], edges: [], notes: "" }
+  );
+  const prompt = promptOf(calls, "Publish");
+  assert.match(prompt, /\[auth-guard\] AUTH-GUARD {2}← also --label risk:high/);
+  assert.match(prompt, /risk=high — auth, tenancy or payments/);
 });
 
 test("the publish prompt keeps the structural headings frd-implement reads", async () => {
@@ -249,6 +280,31 @@ test("the publish prompt keeps the structural headings frd-implement reads", asy
     /gh issue list --state all --search "<title> in:title"/,
     "re-running must reuse issues, not duplicate the board"
   );
+});
+
+test("each workstream block carries its OWN files, order and criteria", async () => {
+  // The script computes the intra-track order; if the prompt does not render it
+  // per unit, build-until-done reads a track it cannot stage.
+  const { calls } = await runPlan(
+    planWith([
+      unit("barrel", { files: ["src/shared.ts", "src/barrel.ts"] }),
+      unit("consumer", { files: ["src/shared.ts"], dependsOn: ["barrel"] }),
+    ]),
+    { frd: "f.md" },
+    { parentIssue: 72, published: [], edges: [], notes: "" }
+  );
+  const prompt = promptOf(calls, "Publish");
+  assert.match(
+    prompt,
+    /files: src\/shared\.ts, src\/barrel\.ts/,
+    "a unit's own file list must appear under its own workstream block"
+  );
+  assert.match(
+    prompt,
+    /depends on: barrel/,
+    "intra-track ordering is what the board carries to the builder"
+  );
+  assert.match(prompt, /ACs: consumer works/);
 });
 
 // ---------------------------------------------------------------------------
@@ -431,6 +487,29 @@ test("a track that produced nothing still gets its issues settled", async () => 
   );
   assert.match(settle.prompt, /swap `agent:in-progress` for `agent:blocked`, unassign/); // prettier-ignore
   assert.match(settle.prompt, /ops\/agent-os\/labels\.md/);
+  assert.match(settle.prompt, /no branch was produced/);
+});
+
+test("a reviewer that dies leaves a failed track, not a reviewed one", async () => {
+  // The silent stop this guards: the branch exists, nobody reviewed it, and the
+  // issues stay agent:in-progress and assigned — wedging every later pass.
+  const { result, calls } = await runImplement(
+    { frontier: [frontierUnit("solo")], blocked: [], notes: "" },
+    {},
+    { Review: () => null }
+  );
+  assert.equal(
+    result.branches.length,
+    0,
+    "an unreviewed track has not landed, whatever it committed"
+  );
+  const settle = calls.find((c) => c.kind === "agent" && c.phase === "Settle");
+  assert.ok(settle, "the fallback must cover a dead reviewer, not just a dead builder"); // prettier-ignore
+  assert.match(
+    settle.prompt,
+    /branch `feature\/solo` exists, but no review landed/,
+    "the branch is named so the committed work is not lost or rebuilt"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -572,6 +651,7 @@ const DEFAULTS = {
     summary: "fixed it",
     perFinding: Array.from({ length: findingCount(p) }, (_, i) => ({
       finding: `finding ${i + 1}`,
+      fixed: true,
       addressed: "fixed and proven",
     })),
     rootCause: "the named cause",
@@ -740,19 +820,45 @@ test("the agent cap chunks the tracks: a cap of one serializes them", async () =
   );
 });
 
-test("the fan-in guard reports a track that returned no verdict at all", async () => {
+test("the cap counts AGENTS, so a wide track shrinks how many tracks run at once", async () => {
+  // Applied per level, the real ceiling would be the cap squared. A track whose
+  // widest stage is 3 may only run one-at-a-time under a cap of 4.
+  const wide = (name, base) => [
+    buildUnit(name, base),
+    { ...buildUnit(`${name}-a`, base + 1), dependsOn: [name] },
+    { ...buildUnit(`${name}-b`, base + 2), dependsOn: [name] },
+    { ...buildUnit(`${name}-c`, base + 3), dependsOn: [name] },
+  ];
+  const { calls } = await runBuild(
+    [...wide("alpha", 100), ...wide("beta", 200)],
+    stub(),
+    { maxConcurrentAgents: 4 }
+  );
+  const labels = calls.filter((c) => c.kind === "agent").map((c) => c.label);
+  assert.ok(
+    labels.indexOf("ship:alpha#1") < labels.indexOf("setup:beta"),
+    "4 agents ÷ a 3-wide stage = one track at a time"
+  );
+});
+
+test("the fan-in guard reports a track that returned no verdict — and still settles it", async () => {
   // A track whose buildTrack threw comes back as a hole. A filtered-out hole is
   // a unit nobody built and nobody was told about.
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
-    // The claim guard throws inside buildTrack, which is the cheapest way to
-    // produce the hole the guard exists for.
-    stub({ "setup:": () => ({ ...DEFAULTS["setup:"](""), claimed: [999] }) })
+    stub({
+      "setup:": () => {
+        throw new Error("the runtime died under this track");
+      },
+    })
   );
   assert.ok(!calls.some((c) => c.label?.startsWith("impl:")));
   assert.equal(result.lost.length, 1);
   assert.equal(result.lost[0].track, "alpha");
   assert.match(result.summary, /lost without a verdict/);
+  const exit = one(calls, "exit:");
+  assert.ok(exit, "a hole still owes every issue a comment and a label");
+  assert.match(exit.prompt, /--add-label agent:blocked --remove-label agent:in-progress/); // prettier-ignore
 });
 
 // ---------------------------------------------------------------------------
@@ -793,7 +899,13 @@ test("a claim that swept issues the pass does not own aborts before building", a
     "building against a corrupted board is the thing the guard exists to prevent"
   );
   assert.equal(result.shipped.length, 0);
-  assert.equal(result.lost.length, 2, "both aborted tracks are surfaced");
+  assert.equal(
+    result.blocked.length,
+    2,
+    "a swept claim is answered, not thrown — the claim it just wrote is real"
+  );
+  assert.equal(result.lost.length, 0);
+  assert.match(result.blocked[0].reason, /belong to no one here/);
 });
 
 test("a claim confined to the pass's own issues proceeds to implement", async () => {
@@ -1067,6 +1179,60 @@ test("an unanswered finding holds the merge and reaches the PR as a decision", a
   assert.equal(result.blocked.length, 0, "a decision is not a block");
 });
 
+test("a finding the fixer DECLINES stays unresolved and reaches the PR", async () => {
+  // The fail-closed half of perFinding: a row that answers at length but sets
+  // `fixed: false` is a refusal, and a refusal is exactly what must be decided
+  // by a human rather than merged.
+  const declined = finding("critical", "no tenant scope on the new query");
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "review:": () => review({ findings: [declined] }),
+      "fix:": () => ({
+        committed: true,
+        filesChanged: [],
+        summary: "considered it",
+        perFinding: [
+          {
+            finding: "no tenant scope",
+            fixed: false,
+            addressed: "not addressed — I judged it out of scope",
+          },
+        ],
+      }),
+    }),
+    { autoMerge: true }
+  );
+  const ship = one(calls, "ship:").prompt;
+  assert.ok(!/gh pr merge/.test(ship), "a declined critical finding cannot merge itself away"); // prettier-ignore
+  assert.ok(ship.includes("no tenant scope on the new query"));
+  assert.deepEqual(result.shipped[0].unresolvedFindings, [
+    "no tenant scope on the new query",
+  ]);
+});
+
+test("a review FAIL hands the fixer the findings, not just the failing gate", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "review:": () =>
+        review({
+          verdict: "FAIL",
+          failingGate: "correctness",
+          summary: CRASH,
+          findings: [finding("critical", "the null row is never handled")],
+        }),
+    })
+  );
+  const fix = one(calls, "fix:").prompt;
+  assert.ok(fix.includes(CRASH), "the named cause still travels verbatim");
+  assert.ok(
+    fix.includes("the null row is never handled"),
+    "each finding carries its own remedy — dropping them re-derives the review"
+  );
+  assert.ok(fix.includes('What "fixed" looks like'));
+});
+
 test("a review FAIL spends an attempt, is fixed once, and blocks on exhaustion", async () => {
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
@@ -1109,7 +1275,11 @@ test("the ship pass proves a UI change on the preview, once, at the final sha", 
   );
   const prompt = one(calls, "ship:").prompt;
   assert.match(prompt, /\.claude\/skills\/validate\/SKILL\.md/);
-  assert.match(prompt, /scripts\/preview-url\.sh --wait --bypass/);
+  assert.match(
+    prompt,
+    /scripts\/preview-url\.sh feature\/alpha --wait --bypass/,
+    "unnamed, it resolves whatever HEAD the agent's shell is on"
+  );
   assert.match(
     prompt,
     /never localhost:3000/,
@@ -1142,6 +1312,11 @@ test("the PR body carries the evidence, the Manual QA and the Closes edges", asy
     "human attention is the scarcest thing here"
   );
   assert.match(prompt, /Closes #101, Closes #102/);
+  assert.match(
+    prompt,
+    /\.claude\/skills\/open-pr\/SKILL\.md/,
+    "the body template and the label discipline have one home, and the shipper must reach it"
+  );
   assert.match(prompt, /gh pr checks <number> --watch --fail-fast/);
   assert.match(
     prompt,
@@ -1184,17 +1359,46 @@ test("a WORKS failure that survives both attempts blocks with its evidence", asy
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     stub({
+      // A ship pass that obeyed the abort: no PR, no labels, no merge.
       "ship:": (p) => ({
         ...DEFAULTS["ship:"](p),
         works: { status: "FAIL", evidence: CRASH },
+        opened: false,
+        url: "",
+        checkConclusion: "none",
+        labels: [],
+        mergeState: "not-attempted",
       }),
-    })
+    }),
+    { autoMerge: true }
   );
   assert.equal(result.shipped.length, 0);
+  assert.equal(result.deliveryFailed.length, 0, "WORKS is a gate, not a delivery step"); // prettier-ignore
   assert.equal(result.blocked[0].failingGate, "WORKS");
   assert.ok(
     one(calls, "exit:").prompt.includes(CRASH),
     "the evidence goes to the human verbatim, as it does to a fixer"
+  );
+});
+
+test("the ship pass is told to STOP before the PR when WORKS fails", async () => {
+  // Without the abort the agent opens the PR, flips the labels and (under
+  // autoMerge) squashes a branch that does not work onto main — and only THEN
+  // does the loop read works.status.
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub(), {
+    autoMerge: true,
+  });
+  const prompt = one(calls, "ship:").prompt;
+  assert.match(prompt, /\*\*If WORKS is FAIL, STOP HERE\.\*\*/);
+  assert.match(
+    prompt,
+    /do NOT open a PR, edit labels or merge/,
+    "the loop decides the retry; the ship agent must not deliver a broken branch first"
+  );
+  assert.ok(
+    prompt.indexOf("If WORKS is FAIL, STOP HERE") <
+      prompt.indexOf("3. **PR.**"),
+    "the abort has to come before the step it aborts"
   );
 });
 
@@ -1241,6 +1445,12 @@ test("a track whose issue does not read agent:in-review is errored, not shipped"
     "the observed board state is carried into the report, not summarised away"
   );
   assert.match(result.nextStep, /before trusting the board/);
+  // A `log()` alone leaves the issue reading agent:in-progress, which halts the
+  // next unattended pass. Every non-shipped outcome takes the exit.
+  const exit = one(calls, "exit:");
+  assert.ok(exit, "an unconfirmed label still owes the issue a comment");
+  assert.match(exit.prompt, /--add-label agent:in-review --remove-label agent:in-progress/); // prettier-ignore
+  assert.match(exit.prompt, /nothing needs rebuilding or re-reviewing/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1307,6 +1517,31 @@ test("a unit's hold flag holds its whole track, and only that track", async () =
   assert.equal(result.shipped.find((s) => s.track === "clean").merge, "merged");
 });
 
+test("a factory-path unit holds itself, whether or not the caller declared it", async () => {
+  // The machine that decides what merges keeps a human. Deriving it from the
+  // files means a caller that forgets `hold: true` cannot merge the loop's own
+  // rules to main unattended.
+  const { calls } = await runBuild(
+    [
+      { ...buildUnit("factory", 101), files: [".claude/workflows/x.js"] },
+      { ...buildUnit("doctrine", 102), files: ["ops/agent-os/dod.md"] },
+      buildUnit("clean", 103),
+    ],
+    stub(),
+    { autoMerge: true }
+  );
+  for (const id of ["factory", "doctrine"]) {
+    const held = agents(calls, "ship:").find((c) => c.label.includes(id));
+    assert.ok(!/gh pr merge/.test(held.prompt), `${id} must never auto-merge`);
+    assert.match(held.prompt, /hold — a factory change/);
+  }
+  assert.match(
+    agents(calls, "ship:").find((c) => c.label.includes("clean")).prompt,
+    /gh pr merge/,
+    "an ordinary track is unaffected"
+  );
+});
+
 test("a spec-question holds the track for a human; a ruling ships with the PR", async () => {
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
@@ -1351,11 +1586,14 @@ test("a DoD pass whose delivery fails lands on agent:delivery-failed, not agent:
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     stub({
+      // The real shape: WORKS passed, no PR exists, so no check exists either.
       "ship:": (p) => ({
         ...DEFAULTS["ship:"](p),
         opened: false,
         url: "",
         reason: PUSH_REJECTED,
+        checkConclusion: "none",
+        labels: [],
       }),
     })
   );
@@ -1371,6 +1609,11 @@ test("a DoD pass whose delivery fails lands on agent:delivery-failed, not agent:
     exit.includes(PUSH_REJECTED),
     "the delivery error is the diagnosis"
   );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("fix:")),
+    "a failed PR step is not a code failure — it must not burn a fix agent and a second ship"
+  );
+  assert.equal(agents(calls, "ship:").length, 1);
   assert.equal(result.blocked.length, 0);
   assert.equal(result.deliveryFailed.length, 1);
   assert.equal(result.deliveryFailed[0].failingGate, "delivery");
@@ -1438,8 +1681,12 @@ test("an attempt that cannot be funded stops before it starts", async () => {
     !calls.some((c) => c.label?.startsWith("review:")),
     "stopping mid-tail is the expensive failure — one flat check before the tail"
   );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "the implement stages are the expensive part; a wave must not build work it can never ship"
+  );
   assert.equal(result.blocked.length, 1);
-  assert.match(result.blocked[0].reason, /token reserve hit/);
+  assert.match(result.blocked[0].reason, /token reserve hit before stage 0/);
 });
 
 test("each step runs at its ruled tier", async () => {
@@ -1475,7 +1722,17 @@ test("each step runs at its ruled tier", async () => {
   // Ship transcribes GitHub's answer and can mutate main: it must not drop to
   // the quick-command tier.
   assert.deepEqual(tier("ship:"), ["opus", undefined]);
-  assert.deepEqual(tier("exit:"), ["sonnet", undefined]);
+  assert.deepEqual(tier("exit:"), ["haiku", undefined], "transcribe and label");
+});
+
+test("the gate contract has one home, and both judging passes point at it", async () => {
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
+  for (const prefix of ["review:", "ship:"])
+    assert.match(
+      one(calls, prefix).prompt,
+      /ops\/agent-os\/dod\.md/,
+      `${prefix} must cite the gate contract rather than carry a copy of it`
+    );
 });
 
 test("the implementer is told the conventions and told not to ship", async () => {

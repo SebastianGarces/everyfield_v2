@@ -145,10 +145,15 @@ const FIX_PROPS = {
   filesChanged: arr(str()),
   summary: str(),
   perFinding: arr(
-    obj(["finding", "addressed"], {
+    obj(["finding", "fixed", "addressed"], {
       finding: str("restated in your own words"),
+      fixed: {
+        type: "boolean",
+        description:
+          "true ONLY if the item is gone. Declining it is `false`, and false sends it to the PR as a decision — which is the point.",
+      },
       addressed: str(
-        "what you changed so it is gone and the output proving it — or a plain 'not addressed, here is why'. Empty means unanswered."
+        "what you changed so it is gone and the output proving it — or a plain 'not addressed, here is why'"
       ),
     }),
     "one row per item you were given, in the order given"
@@ -265,18 +270,27 @@ function clusterByFile(us) {
   return [...groups.values()];
 }
 
-const summarise = (us, extra = {}) => ({
-  units: us,
-  issues: [...new Set(us.map((u) => u.issue).filter((x) => x != null))],
-  files: [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))],
-  risk: us.some((u) => u.risk === "high") ? "high" : us[0].risk || "low",
-  // One-way: a unit can only make its track MORE held. `hold` is the declared
-  // never-auto-merge flag — a factory change, or an issue that says so.
-  hold: us.some((u) => u.hold === true),
-  lane:
-    [...new Set(us.map((u) => u.lane))].length === 1 ? us[0].lane : "fullstack",
-  ...extra,
-});
+// The machine that decides what merges keeps a human: a diff touching it never
+// auto-merges, whether or not the caller remembered to declare it.
+const FACTORY_PATH = /^(\.claude\/(workflows|skills)|ops\/agent-os)\//;
+
+const summarise = (us, extra = {}) => {
+  const files = [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))];
+  return {
+    units: us,
+    issues: [...new Set(us.map((u) => u.issue).filter((x) => x != null))],
+    files,
+    risk: us.some((u) => u.risk === "high") ? "high" : us[0].risk || "low",
+    // One-way: a unit can only make its track MORE held — either the caller
+    // declared it or the paths did.
+    hold: us.some((u) => u.hold === true) || files.some((f) => FACTORY_PATH.test(f)), // prettier-ignore
+    lane:
+      [...new Set(us.map((u) => u.lane))].length === 1
+        ? us[0].lane
+        : "fullstack",
+    ...extra,
+  };
+};
 
 const trackDsu = makeDSU(units.map((u) => u.id));
 const byUnitId = new Map(units.map((u) => [u.id, u]));
@@ -448,8 +462,8 @@ const treeLines = (trees) =>
     .join("\n") || "  (none)";
 
 /**
- * `parallel()` with a ceiling, so a track with eight workstreams cannot put
- * eight agents in flight at once. Chunking is enough: a stage is a barrier.
+ * `parallel()` with a ceiling. Chunking is enough, because both callers are
+ * barriers: a stage waits for its workstreams, a chunk of tracks for its tracks.
  */
 async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
   const out = [];
@@ -459,22 +473,25 @@ async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
 }
 
 // ---------------------------------------------------------------------------
-// exit — the only failure exit. One agent comments the verbatim evidence AND
-// writes the label AND reads it back. The two labels stay distinct: one sends a
-// human to a failing gate, the other to a retry of work that already passed.
+// exit — the only failure exit, and every non-shipped outcome takes it. One
+// agent comments the verbatim evidence AND writes the label AND reads it back.
+// The labels stay distinct: they send the human to a failing gate, to a retry
+// of work that already passed, or to a board that disagrees with a green PR.
 // ---------------------------------------------------------------------------
+// kind → [label, result status, the sentence that tells the human what to do].
+const EXIT = {
+  blocked: ["agent:blocked", "blocked", "The work did not reach the Definition of Done. The human needs the failing gate and its evidence, then a decision: tighten the spec, raise the budget, or take it manually."], // prettier-ignore
+  "delivery-failed": ["agent:delivery-failed", "pr-failed", "Every gate PASSED and only the delivery step failed: say plainly that the human should retry the delivery (push the branch, open the PR) and must NOT re-review or rebuild code that already passed."], // prettier-ignore
+  errored: ["agent:in-review", "errored", "The PR is open and its check is green — only the board write did not stick. Name the PR, say that nothing needs rebuilding or re-reviewing, and set the label the ship pass could not confirm."], // prettier-ignore
+};
+
 async function exitTrack(track, kind, { reason, report = null, trees = [] }) {
-  const label =
-    kind === "delivery-failed" ? "agent:delivery-failed" : "agent:blocked";
+  const [label, status, brief] = EXIT[kind];
   log(`⛔ ${track.id} ${kind}: ${reason}`);
   const done = await agent(
     `A build loop for issue(s) ${hashes(track.issues)} stopped. Reason: ${reason}.
 
-${
-  kind === "delivery-failed"
-    ? "Every gate PASSED and only the delivery step failed: say plainly that the human should retry the delivery (push the branch, open the PR) and must NOT re-review or rebuild code that already passed."
-    : "The work did not reach the Definition of Done. The human needs the failing gate and its evidence, then a decision: tighten the spec, raise the budget, or take it manually."
-}
+${brief}
 
 The evidence, verbatim — put it in the comment as-is:
 \`\`\`
@@ -488,7 +505,7 @@ Then label it and prove it: \`gh issue edit n --add-label ${label} --remove-labe
     {
       label: `exit:${track.id}`,
       phase: "Ship",
-      model: "sonnet",
+      model: "haiku",
       effort: "low",
       schema: EXIT_SCHEMA,
     }
@@ -501,7 +518,7 @@ Then label it and prove it: \`gh issue edit n --add-label ${label} --remove-labe
     );
   return {
     track,
-    status: kind === "delivery-failed" ? "pr-failed" : "blocked",
+    status,
     reason,
     lastReport: report,
     labelSettled: missing.length === 0,
@@ -536,11 +553,15 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
 
   const claimed = (ready?.claimed || []).map(Number);
   const strays = claimed.filter((n) => !track.issues.includes(n));
+  // A throw here would vanish the track into the fan-in hole — and the claim it
+  // just wrote would go unanswered. It stops as a blocked exit instead.
   if (strays.length || claimed.length !== track.issues.length)
-    throw new Error(
-      `setup claimed ${claimed.length} issue(s) (${claimed.join(", ") || "none"}) for a track that owns exactly ${track.issues.length} (${track.issues.join(", ") || "none"})` +
-        `${strays.length ? `; ${strays.join(", ")} belong to no one here` : ""}. Aborting ${track.id} rather than building against a corrupted board — revert the strays to agent:queued and re-run.`
-    );
+    return {
+      ok: false,
+      reason:
+        `setup claimed ${claimed.length} issue(s) (${claimed.join(", ") || "none"}) for a track that owns exactly ${track.issues.length} (${track.issues.join(", ") || "none"})` +
+        `${strays.length ? `; ${strays.join(", ")} belong to no one here` : ""}. Nothing was built against a corrupted board — revert the strays to agent:queued and re-run.`,
+    };
 
   if (ready?.conflicted === true)
     return {
@@ -684,7 +705,7 @@ Then run \`pnpm typecheck\` in ${trackWt}: two individually-correct workstreams 
 // ---------------------------------------------------------------------------
 async function reviewPass(track, branch, wt, wsOutcomes, attempt) {
   return agent(
-    `You are the code-reviewer, and this is the ONE review branch ${branch} (worktree ${wt}) gets before it merges — issue(s) ${hashes(track.issues)}. It was built by ${wsOutcomes.length} workstream(s):
+    `You are the code-reviewer, and this is the ONE review branch ${branch} (worktree ${wt}) gets before it merges — issue(s) ${hashes(track.issues)}. The gate contract is \`ops/agent-os/dod.md\`; you are gate REVIEWED. It was built by ${wsOutcomes.length} workstream(s):
 ${wsOutcomes.map((r) => `- **${r.ws.id}** — ${r.summary || "no summary given"}`).join("\n")}
 
 FIRST publish, so nothing downstream validates a sha the remote does not have: \`git -C ${wt} push -u origin ${branch}\`, \`git -C ${wt} fetch origin ${branch}\`, then report VERBATIM what \`git -C ${wt} rev-parse HEAD\` and \`git -C ${wt} rev-parse origin/${branch}\` printed, as \`headSha\` and \`remoteSha\`. If they differ, stop: verdict FAIL, failingGate \`publish\`, the two shas as evidence.
@@ -738,7 +759,7 @@ ${
 \`\`\`
 ${evidenceBlock(report)}
 \`\`\`
-
+${findings.length ? `\nIt also filed these, verbatim — answer every one:\n\n${findingsBlock(findings)}\n` : ""}
 Fix THAT, and answer it: \`rootCause\` (the named cause in your own words) and \`rootCauseAddressed\` (what you changed, and the output proving it is gone). An honest "not addressed, here is why" is worth more than a fix report for something else.`
     : `The reviewer passed the gates and left findings fixed in this ONE round — there is no second round and no re-review, so answer them now or say plainly that you did not. Verbatim:
 
@@ -747,7 +768,7 @@ ${findingsBlock(findings)}`
 
 Work in ${wt} on ${branch}. Fix this and nothing else. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, open a PR, edit labels or issues, or merge.
 
-Fill \`perFinding\` for every item above, in order: restate it, then what you changed and the output proving it — or plainly that you did not and why. Return strictly the schema.`,
+Fill \`perFinding\` for every item above, in order: restate it, set \`fixed\` (true only when it is gone — declining one is \`false\`, and the PR carries it as a decision), and say what you changed with the output proving it. Return strictly the schema.`,
     {
       label: `fix:${track.id}#${attempt}`,
       phase: "Build",
@@ -757,11 +778,14 @@ Fill \`perFinding\` for every item above, in order: restate it, then what you ch
     }
   );
 
-  // One row per finding, in the order given: a missing or empty row is an
-  // unanswered finding, and that holds the PR as a decision.
+  // One row per finding, in the order given, and it fails closed: only an
+  // explicit `fixed: true` clears an item. A missing row, an empty answer or a
+  // declined finding all stand, and a standing finding holds the PR as a
+  // decision — a fixer must not be able to make one disappear.
   const rows = fix?.perFinding || [];
   const unresolved = findings.filter(
-    (_, i) => !String(rows[i]?.addressed || "").trim()
+    (_, i) =>
+      rows[i]?.fixed !== true || !String(rows[i]?.addressed || "").trim()
   );
   if (findings.length && unresolved.length === findings.length)
     log(`↩️  ${track.id} fix round answered nothing — the findings stand`);
@@ -786,7 +810,7 @@ async function shipPass(
     : "";
 
   return agent(
-    `You are the release agent for branch ${branch} (worktree ${wt}), issue(s) ${hashes(track.issues)}. It passed the one code review. Do all of this, in order, in one pass.
+    `You are the release agent for branch ${branch} (worktree ${wt}), issue(s) ${hashes(track.issues)}. It passed the one code review. The gate contract is \`ops/agent-os/dod.md\`. Do all of this, in order, in one pass.
 
 1. **PUBLISH.** \`git -C ${wt} push -u origin ${branch}\`, then \`git -C ${wt} fetch origin ${branch}\`. Report VERBATIM what \`git -C ${wt} rev-parse HEAD\` and \`git -C ${wt} rev-parse origin/${branch}\` printed. If they differ, stop: nothing is validated or merged at a sha the remote lacks.
 
@@ -794,12 +818,14 @@ async function shipPass(
 ${
   track.lane === "backend"
     ? `   Make ONE real request against the route or server action this track changed — the real handler, not a mock — and assert the status AND the response shape against the contract. A tsx harness in the worktree is fine. For a migration, prove it applies and rolls back on a scratch DB, and put the DDL delta in the PR body.`
-    : `   Drive the branch's VERCEL PREVIEW (\`scripts/preview-url.sh --wait --bypass\`), never localhost:3000 — localhost serves main and would pass code this track never wrote. Confirm the deployment was built from \`remoteSha\`; if it was built from anything else, report works FAIL and name that sha. Assert EACH criterion and screenshot it, require a clean console (the toolbar's 403 is the one allowed entry), and run a lighthouse a11y audit — below 90 is a FAIL. Judge what no gate can while you are there: layout, hierarchy, copy. Tear the browser down when you finish.`
+    : `   Drive the branch's VERCEL PREVIEW (\`scripts/preview-url.sh ${branch} --wait --bypass\` — name the branch, or it resolves whatever HEAD your shell is on), never localhost:3000 — localhost serves main and would pass code this track never wrote. Confirm the deployment was built from \`remoteSha\`; if it was built from anything else, report works FAIL and name that sha. Assert EACH criterion and screenshot it, require a clean console (the toolbar's 403 is the one allowed entry), and run a lighthouse a11y audit — below 90 is a FAIL. Judge what no gate can while you are there: layout, hierarchy, copy. Tear the browser down when you finish.`
 }
    Criteria to prove:
 ${allCriteria(track)}
 
-3. **PR.** Update the existing PR for this branch if there is one — never open a second. Otherwise \`gh pr create\` against main with \`--label agent:in-review\`${track.risk === "high" ? " --label risk:high" : ""}. The body carries the evidence bundle (review verdict, the criteria checklist with evidence, the works evidence and screenshots), ${ruled.length ? `a **Rulings** section quoting each of these verbatim — ${ruled.map((w) => `${w.summary} (${w.detail || "no source named"})`).join(" | ")} — ` : ""}\`Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}\`, and a **## 👀 Manual QA** section naming WHAT THE AUTOMATION COULD NOT JUDGE: the judgement calls and any edge case no criterion asserted. Do NOT restate the acceptance criteria there — step 2 proved them, and human attention is the scarcest thing here. "Nothing to eyeball" in one line is a valid answer.${menu}
+   **If WORKS is FAIL, STOP HERE.** Report \`works.status: "FAIL"\` with its evidence, \`opened: false\`, \`checkConclusion: "none"\`, \`mergeState: "not-attempted"\`, and do NOT open a PR, edit labels or merge. A branch that does not work must not reach main while someone decides; the loop reads that and decides the retry.
+
+3. **PR.** Follow \`.claude/skills/open-pr/SKILL.md\` for the body template and the label discipline — every write there is idempotent, so retry one that did not stick. Update the existing PR for this branch if there is one — never open a second. Otherwise \`gh pr create\` against main with \`--label agent:in-review\`${track.risk === "high" ? " --label risk:high" : ""}. The body carries the evidence bundle (review verdict, the criteria checklist with evidence, the works evidence and screenshots), ${ruled.length ? `a **Rulings** section quoting each of these verbatim — ${ruled.map((w) => `${w.summary} (${w.detail || "no source named"})`).join(" | ")} — ` : ""}\`Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}\`, and a **## 👀 Manual QA** section naming WHAT THE AUTOMATION COULD NOT JUDGE: the judgement calls and any edge case no criterion asserted. Do NOT restate the acceptance criteria there — step 2 proved them, and human attention is the scarcest thing here. "Nothing to eyeball" in one line is a valid answer.${menu}
 
 4. **LABELS, once.** For each issue n: \`gh issue edit n --add-label agent:in-review --remove-label agent:in-progress\`, dropping any other \`agent:*\` it carries, and \`gh pr edit <number> --add-label agent:in-review\`. Then READ THEM BACK with \`gh issue view n --json labels --jq '[.labels[].name]'\` and report in \`labels\` EXACTLY what that printed, even when it is not what you expected — the loop compares it and errors this track if the board disagrees with you.
 
@@ -846,8 +872,17 @@ async function buildTrack(track) {
       trees: trees(),
     });
 
+  const starved = (what) =>
+    budget.total && budget.remaining() < RESERVE
+      ? `token reserve hit before ${what} (${Math.round(budget.remaining() / 1000)}k left < ${Math.round(RESERVE / 1000)}k)`
+      : null;
+
   const wsOutcomes = [];
   for (const [i, stage] of track.stages.entries()) {
+    // Building work the budget can never review or ship is the expensive way to
+    // fail, so the same flat check guards every stage, not just the tail.
+    const broke = starved(`stage ${i}`);
+    if (broke) return exitTrack(track, "blocked", { reason: broke, trees: trees() }); // prettier-ignore
     const result = await runStage(track, stage, i, branch, wt);
     if (!result.ok)
       return exitTrack(track, "blocked", {
@@ -866,9 +901,10 @@ async function buildTrack(track) {
   let lastReport = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (budget.total && budget.remaining() < RESERVE)
+    const broke = starved(`integration attempt ${attempt}`);
+    if (broke)
       return exitTrack(track, "blocked", {
-        reason: `token reserve hit before integration attempt ${attempt} (${Math.round(budget.remaining() / 1000)}k left < ${Math.round(RESERVE / 1000)}k)`,
+        reason: broke,
         report: lastReport,
         trees: trees(),
       });
@@ -877,7 +913,7 @@ async function buildTrack(track) {
       review = await reviewPass(track, branch, wt, wsOutcomes, attempt);
       if (!review) {
         lastReport = {
-          failingGate: "review",
+          failingGate: "REVIEWED",
           summary: `${track.id}: the reviewer returned nothing`,
         };
         continue;
@@ -896,7 +932,11 @@ async function buildTrack(track) {
           `❌ ${track.id} attempt ${attempt}: ${review.failingGate || "review FAIL"}`
         );
         if (attempt < MAX_ATTEMPTS)
-          await fixPass(track, branch, wt, { report: review, attempt });
+          await fixPass(track, branch, wt, {
+            report: review,
+            findings: actionableFindings(review.findings),
+            attempt,
+          });
         continue;
       }
       const actionable = actionableFindings(review.findings);
@@ -937,17 +977,19 @@ async function buildTrack(track) {
       continue;
     }
 
-    if (ship.works?.status === "FAIL" || ship.checkConclusion !== "success") {
-      lastReport = {
-        ...review,
-        verdict: "FAIL",
-        ...(ship.works?.status === "FAIL"
-          ? { failingGate: "WORKS", summary: ship.works.evidence }
-          : {
+    // Order matters: a WORKS failure aborts the ship pass BEFORE the PR, so
+    // "no PR" only means a delivery failure once WORKS has passed.
+    const gateFailure =
+      ship.works?.status === "FAIL"
+        ? { failingGate: "WORKS", summary: ship.works.evidence }
+        : ship.opened && ship.checkConclusion !== "success"
+          ? {
               failingGate: "CI",
               summary: `CI reported "${ship.checkConclusion}" on ${ship.url || "the PR"}. ${ship.checkSummary || "no summary returned"}`,
-            }),
-      };
+            }
+          : null;
+    if (gateFailure) {
+      lastReport = { ...review, verdict: "FAIL", ...gateFailure };
       log(
         `🔴 ${track.id} attempt ${attempt}: ${lastReport.failingGate} failed`
       );
@@ -968,12 +1010,19 @@ async function buildTrack(track) {
       ship.labels,
       "agent:in-review"
     );
-    if (missing.length)
-      log(
-        `🚨 ${track.id} opened ${ship.url} with a green check, but issue(s) ${missing.join(", ")} do not read agent:in-review — ERRORED: a PR whose issue still reads agent:in-progress is indistinguishable from a failure.`
-      );
+    // A PR whose issue still reads agent:in-progress is indistinguishable from
+    // a failure, and it halts the next unattended pass — so it takes the exit
+    // too, and the label the ship pass could not confirm gets one more writer.
+    const errored = missing.length
+      ? await exitTrack(track, "errored", {
+          reason: `${ship.url || "the PR"} is open and green, but issue(s) ${missing.join(", ")} do not read agent:in-review`,
+          report: review,
+          trees: trees(),
+        })
+      : null;
 
     return {
+      ...(errored || {}),
       track,
       status: missing.length ? "errored" : "shipped",
       reason: missing.length
@@ -1003,19 +1052,39 @@ async function buildTrack(track) {
 // Run
 // ---------------------------------------------------------------------------
 phase("Build");
-const results = await boundedParallel(tracks.map((t) => () => buildTrack(t)));
+// A track puts its widest stage in flight at once, so the TRACK limit is the
+// agent ceiling divided by that width — otherwise the real ceiling is the
+// product of the two, not the number the caller set.
+const peakStageLoad = Math.max(
+  1,
+  ...tracks.map((t) => Math.max(...t.stages.map((s) => s.length)))
+);
+const results = await boundedParallel(
+  tracks.map((t) => () => buildTrack(t)),
+  Math.max(1, Math.floor(MAX_CONCURRENT_AGENTS / peakStageLoad))
+);
 
 // Fan-in guard: `parallel()` resolves a thunk that threw to null, so a track
 // whose buildTrack died comes back as a hole — and a filtered-out hole is a
 // unit nobody built and nobody was told about. The count in must equal the
-// count out.
+// count out, and each hole still gets its comment and its label.
 const lost = tracks.filter((_, i) => !results[i]);
-if (lost.length)
+if (lost.length) {
   log(
     `🚨 FAN-IN GAP: launched ${tracks.length} track(s), ${results.length - lost.length} returned. ` +
       `${lost.map((t) => `${t.id} (issues ${hashes(t.issues) || "none"})`).join("; ")} vanished without a verdict — ` +
-      `NOT blocked and NOT shipped, still reading agent:in-progress, and no one was told.`
+      `NOT blocked and NOT shipped, and their issues still read agent:in-progress.`
   );
+  for (const t of lost)
+    await exitTrack(t, "blocked", {
+      reason: `the track's loop died mid-flight and returned no verdict at all — nothing was reviewed and nothing shipped`,
+      trees: survivingTrees(
+        t,
+        `feature/${t.id}`,
+        `.claude/worktrees/bud-${t.id}`
+      ),
+    });
+}
 
 const done = results.filter(Boolean);
 const shipped = done.filter((r) => r.status === "shipped");
@@ -1045,7 +1114,7 @@ return {
     track: t.id,
     issues: t.issues,
     reason:
-      "no result — agent died or the budget threw; still agent:in-progress",
+      "no result — the loop died mid-flight; an exit pass commented and labelled it agent:blocked",
   })),
   shipped: shipped.map((r) => ({
     ...base(r),
@@ -1089,6 +1158,6 @@ return {
       ? ` 📦 ${deliveryFailed.length} delivery-failed: push the named branch and open the PR — the code already passed.`
       : "") +
     (lost.length
-      ? " ⚠️ The lost tracks got no verdict and no issue comment. Re-queue them."
+      ? " ⚠️ The lost tracks died without a verdict; they were commented and blocked, so re-queue them."
       : ""),
 };

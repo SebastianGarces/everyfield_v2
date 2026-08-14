@@ -14,11 +14,13 @@ deployment: the branch, built and served. Validate there.
 
 ## 1. Get the preview URL
 
-The push creates the preview, so validation happens **on the PR**: open it with the browser gate at
-⏳, validate, then edit the body with the evidence.
+The push creates the preview, so the branch is all you need — and the look happens **before the PR
+exists**. Resolve it by branch, validate, and return the evidence to the ship pass, which writes the
+PR body afterwards.
 
 ```bash
-./scripts/preview-url.sh --wait --bypass <pr-number>
+./scripts/preview-url.sh --wait --bypass <branch>
+./scripts/preview-url.sh --wait --bypass <pr-number>   # amendment pass only, once a PR exists
 ```
 
 `--wait` blocks until the deployment is ready (~2 min). `--bypass` appends the protection-bypass
@@ -99,5 +101,5 @@ load, from the Vercel toolbar's `HEAD` request; verify that is what you have bef
 The last browser action is closing what you opened: Playwright → `browser_close`; chrome-devtools →
 `list_pages`, then `close_page` for every page you created. A leaked browser outlives the agent and
 a long pass leaks until the machine is out of RAM; `scripts/cleanup-mcp-browsers.sh` only catches
-agents that died first. Delete any stray `.png` too, then write the outcome into the PR in place of
-the ⏳.
+agents that died first. Delete any stray `.png` too, then return the outcome to the ship pass, which
+writes it into the PR body (on an amendment pass, edit the body in place).

@@ -52,7 +52,7 @@ const DECOMPOSE_SCHEMA = obj(["units", "deferred", "notes"], {
   units: list(UNIT),
   deferred: list(
     obj(["id", "title", "reason"], { id: str, title: str, reason: str }),
-    "prerequisite units (schema/migrations, auth, tenancy, payments): they land first and alone, and everything depending on them publishes blocked_by them"
+    "prerequisite units — all schema/migration work in ONE, plus anything else that must land first and alone; everything depending on one publishes blocked_by it"
   ),
   notes: str,
 });
@@ -111,7 +111,7 @@ const plan = await agent(
 Read the FRD at "${frdPath}", product-docs/system-architecture.md, and any companion file the FRD references. Decompose the ${scope} scope into work units.
 - "files": every file the unit touches. Units sharing a file are serialized into one track, so accuracy keeps merges clean; give each cross-cutting chokepoint (barrel, registry, constants) a single owner unit.
 - "dependsOn": ordering only — one unit needs another's code to exist. File overlap is handled separately and must not appear here.
-- risk "high" = DB schema/migrations, auth, tenancy, payments. Put ALL schema work in one "deferred" unit (only one db:generate may run); anything needing it names it in dependsOn, which becomes a real blocking edge.
+- risk "high" = auth and permissions, multi-tenant isolation, payments — those units stay in "units" with risk high. Schema and migrations are NOT high (there is no separate production database yet), but ALL schema work still goes in ONE "deferred" unit because only one db:generate may run; anything needing it names it in dependsOn, which becomes a real blocking edge.
 Return strictly the schema.`,
   { phase: "Decompose", agentType: "architect", schema: DECOMPOSE_SCHEMA }
 );
@@ -122,12 +122,19 @@ if (!plan) throw new Error("Decomposition failed");
 //   shared file -> SCHEDULING. Same track, same branch, built in order.
 //   dependsOn   -> SEMANTIC. Separate track, published as a blocked_by edge.
 // ---------------------------------------------------------------------------
+// Two reasons to be a prerequisite, and only one of them is risk. A schema unit
+// lands alone because one db:generate may run, not because it is dangerous.
 const gated = [...plan.deferred];
 const gatedIds = new Set(gated.map((d) => d.id));
 const implementable = [];
 for (const u of plan.units) {
   if (u.risk === "high") {
-    gated.push({ id: u.id, title: u.title, reason: "risk=high (auto-gated)" });
+    gated.push({
+      id: u.id,
+      title: u.title,
+      reason: "risk=high — auth, tenancy or payments",
+      high: true,
+    });
     gatedIds.add(u.id);
   } else implementable.push(u);
 }
@@ -266,8 +273,8 @@ FRD: ${frdPath}
 
 **1. Parent.** \`gh issue list --label feature\`, pick this FRD's feature issue or create one with a thin body linking the FRD. Report it as parentIssue.
 
-**2. Prerequisites**, each its own issue, \`--label agent:queued --label risk:high --parent <parent>\`. They are buildable; they carry the high-risk gates and land alone, before anything blocked_by them.
-${gated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
+**2. Prerequisites**, each its own issue, \`--label agent:queued --parent <parent>\`. They are buildable, and they land alone before anything blocked_by them. Add \`--label risk:high\` ONLY to the lines marked high below — risk:high means auth, tenancy or payments; schema and migrations are ordered, not dangerous.
+${gated.map((g) => `  - [${g.id}] ${g.title}${g.high ? "  ← also --label risk:high" : ""}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
 
 **3. Tracks, IN THE ORDER BELOW** (topological, so every blocker exists before it is referenced): \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`.
 
@@ -282,8 +289,15 @@ ${publishOrder
     return `${i + 1}. trackId "${t.id}" (${t.lane})
    blocked by: ${blockers.length ? blockers.join(", ") : "nothing — starts on the frontier"}
    files: ${t.files.join(", ")}
-   units:
-${t.units.map((u) => `     - ${u.title}: ${u.summary}\n       ACs: ${(u.acceptanceCriteria || []).join(" | ")}`).join("\n")}`;
+   units — each becomes one \`### <name>\` workstream block, with these lines:
+${t.units
+  .map(
+    (u) => `     - ${u.title} (${u.lane}): ${u.summary}
+       files: ${(u.files || []).map(normFile).join(", ") || "(none)"}
+       depends on: ${(u.dependsOn || []).join(", ") || "nothing"}
+       ACs: ${(u.acceptanceCriteria || []).join(" | ")}`
+  )
+  .join("\n")}`;
   })
   .join("\n\n")}
 

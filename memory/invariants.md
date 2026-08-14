@@ -5,7 +5,7 @@
 Rules bind at two strengths (`ops/agent-os/README.md` → Rules bind at two strengths):
 
 - An **untagged line is an invariant** — a mechanical or security fact. Never break it; a change that needs to is wrong.
-- A line tagged **⚖ is a ruling** — a dated product decision. Never break it *silently*: build to it, and if it no longer fits what you are building, raise a spec-question hold with options instead of deviating. A new ruling changes it; nothing else does.
+- A line tagged **⚖ is a ruling** — a dated product decision. Never break it *silently*: build to it, and if it no longer fits what you are building, rule on it per `ops/agent-os/README.md` → Rulings and record why. A new ruling changes it; nothing else does.
 - A line starting **Accepted residual** is a known gap, carried deliberately until the named condition retires it.
 
 Each section links `invariants/<domain>.md` for the why, the pattern and the worked examples. Read the domain file for the files you are touching; read all of them as the security lens.
@@ -28,7 +28,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Both answers to an empty planter seat, the No as well as the Yes, open with `SELECT … FROM churches … FOR UPDATE` and gate on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.
 - `createHouseholdWithHead` is ONE `db.batch` whose household INSERT is an `insert … select` from the person row — never re-add a pre-flight SELECT — and stays FIRST, because `persons.household_id` FKs `households.id`.
-- Accepted residual: those two statements take separate READ COMMITTED snapshots, so a person soft-deleted between them commits an orphan household — the JS throw fires after COMMIT.
+- Accepted residual: those two statements take separate READ COMMITTED snapshots, so a person soft-deleted between them commits an orphan household.
 - Accepted residual: the task→communication log entry has only a SELECT-then-INSERT on `communication_recipients.external_id`, so a double-clicked Complete writes two entries.
 - Accepted residual: `meeting.attendance.recorded` is non-strict — a failed prospect → attendee advance is swallowed rather than blocking finalization.
 
@@ -41,10 +41,10 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A person-scoped write whose service does not itself scope the person by church calls `assertPersonInChurch` FIRST, and the commitment check precedes the upload so no object lands for a foreign person.
 - Hierarchy is SendingNetwork → SendingChurch → Church, every hierarchy FK nullable, and a plant's two oversight FKs are INDEPENDENT.
 - An accept never replaces an existing association: both statements carry `fk IS NULL OR fk = <this org>`, and the guard sits on the CLAIM so a refusal writes nothing.
-- An invitation may name no target — that is the register path. Only `bindOpenInvitationTarget` (CAS on pending + both targets null + unexpired) gives it one, which makes a link single-use.
+- An invitation may name no target — that is the register path. Only `bindOpenInvitationTarget` (CAS on pending + both targets null + unexpired) gives it one, which makes a link single-use; registration BINDS before accepting, never after.
 - ⚖ An existing account MAY be targeted, but EVERY refusal reachable after the address resolves to a target is the ONE message `ACCOUNT_NOT_INVITABLE_MESSAGE`. The property is positional: anything downstream of `resolveInvitationTarget` speaks about a STRANGER.
 - ⚖ No invitation that cannot be answered, for every role: each TYPE that can name an existing account has an in-app surface where that role answers it AND leaves the association.
-- The two leave endpoints are separate and neither takes an entity id: the planter's takes a two-valued KIND, the sending church's takes NOTHING. One endpoint with a role branch would put the authority rule in the client's hands.
+- The two leave endpoints are separate and neither takes an entity id: the planter's takes a two-valued KIND, the sending church's takes NOTHING. Never one endpoint with a role branch.
 - ⚖ One inviting org may address ONE email at most `INVITES_PER_INVITEE_PER_WINDOW` (3) times per `INVITATION_EXPIRY_DAYS`, counting EVERY status. The cap runs BEFORE target resolution and covers open invitations.
 - ⚖ …and it RESETS AFTER A SEVER: both count queries drop every invitation older than that org's most recent `association_events` row about the same subject. A decline writes no event, so that loop stays capped.
 - Both create-time caps count the resolved TARGET as well as the address, because one org is reachable through several accounts. That refusal is `ACCOUNT_NOT_INVITABLE_MESSAGE`.
@@ -53,27 +53,27 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - ⚖ The create-invitation success notice shows ONE neutral message for both kinds and never says whether an account exists.
 - ⚖ The rule covers the WHOLE `/oversight/invitations` page, notice AND pending list: nothing derived from either target column reaches the client, and no admin surface renders a `/register?invitation=` link.
 - ⚖ The rule is TRANSITIVE and `type` is target-derived, so a caption off `invitation.type` flips for an address holding an account of the other kind. An `InvitationListRow` carries five fields, built by `toInvitationListRow`.
-- Pin that by CALLING the row mapper over both target shapes and asserting the two rendered rows are deep-equal; regexes and allowed-field whitelists passed while the property was false.
+- Pin that by CALLING the row mapper over both target shapes and asserting the two rendered rows are deep-equal, never by a regex or an allowed-field whitelist.
 - ⚖ The rule reaches `/register` and BOTH readers of the row, and the two verbs have DIFFERENT indistinguishable sets: the GET for {targeted, answered, nonexistent}, the POST for those plus an open row submitted with a NON-matching address. ONE predicate decides it.
 - An invitation token buys TWO things on `/register`, a described invitation and a beta-gate bypass. When a rule is about a ROUTE, enumerate that route's readers of the row.
 - ⚖ The anonymous `/register` POST returns NO per-row message: a wrong-address submit falls through to the ordinary sign-up exactly as an unknown id does. One decision is made once and read by every later branch.
-- Accepted residual: an OPEN row stays distinguishable at `/register` — the GET renders the redeeming form with a pre-filled address, and the matching POST redeems. It retires with invite-at-registration.
+- Accepted residual: an OPEN row stays distinguishable at `/register` — the GET renders the redeeming form with a pre-filled `readOnly` address (never `disabled`, which submits nothing), and the matching POST redeems. It retires with invite-at-registration.
 - Pin BOTH readers by CALLING them over rows the real resolver produced, never by a regex over the source.
 - `redeemable` is deleted rather than left constant; `accountType` survives only because every described row is open.
 - ⚖ `association_events` names a SUBJECT, not a plant (migration 0036): `subject_type` ∈ {church, sending_church}, one nullable FK per kind, a CHECK that exactly one is set. `acceptInvitationAs` has exactly ONE batch shape, `[lock, claim, association, audit]`; `requireAssociationPair` decides which ids a type implies.
 - ⚖ A notification is anchored to a CHURCH or to an ORG (`anchor_type`, `anchor_org_id`, CHECK exactly-one) — ONE table, never a parallel org table, and neither tenancy coalesces with the other.
-- The org anchor gets its OWN unique index on a single NON-NULL `anchor_org_id`: per-kind nullable columns would put a NULL in every org row's index key, and NULLs never collide in a btree unique index.
-- Gate 1 for an org-anchored row is `recipientAdministersOrg` — the user's own org FK equals the anchor AND their role administers THAT KIND of org. Both org FKs live on one `users` row, so "any oversight role" leaks another org's rows.
+- The org anchor gets its OWN unique index on a single NON-NULL `anchor_org_id`, never per-kind nullable columns: NULLs never collide in a btree unique index.
+- Gate 1 for an org-anchored row is `recipientAdministersOrg` — the user's own org FK equals the anchor AND their role administers THAT KIND of org. "Any oversight role" is too coarse — both org FKs live on one `users` row.
 - The role↔org-kind↔FK pairing is ONE TABLE, `OVERSIGHT_ADMIN`; no reader in `src/lib/notifications/` writes an oversight role literal or an FK column name.
 - That table is a TYPE-IMPORT-ONLY leaf, tied to `OVERSIGHT_ROLES` by test rather than by copy, and outside `@/lib/auth/access`, which opens with `@/db`.
-- An audience builder returning `SQL | undefined` NEVER reaches a bare `and()`: drizzle DROPS undefined arms, so "no recipients" deletes itself and the `exists (…)` matches every row. The builder is OVERLOADED, so it is a compile error.
-- No `inArray(role, OVERSIGHT_ROLES)` floor beside that audience: each arm already names its role from the pairing table, so an arm edited to another role would be silently ANDed to zero rows.
+- An audience builder returning `SQL | undefined` NEVER reaches a bare `and()`: drizzle DROPS undefined arms, so the `exists (…)` matches every row. The builder is OVERLOADED, so it is a compile error.
+- No `inArray(role, OVERSIGHT_ROLES)` floor beside that audience — each arm already names its role from the pairing table, and the floor would silently AND a mis-edited arm to zero rows.
 - A decline names the ADDRESS THE ORG TYPED, never the plant — the refused org never associated with it. Every OTHER milestone names the plant, which is why the field is `MilestoneFacts.subject`.
 - `status = 'pending'` is not "answerable": expiry is LAZY, so every list that OFFERS an answer carries `(expires_at is null or expires_at > now)`.
 - An invite token is bound to the invited ADDRESS, not the link holder. Fix a wrong address by revoking, never by re-aiming a live invitation.
 - The invitation email is TRANSACTIONAL and bypasses the notifications machinery — no category, no preference gate, no `enqueue`, no `List-Unsubscribe`. It is best-effort and NEVER fails the create.
 - The invitation id is a BEARER CREDENTIAL, so neither it nor any URL built from it reaches a log, an error message or an analytics event; failure logs carry the TYPE and a reason code only.
-- The `?invitation=` link has ONE spelling, in the IMPORT-FREE leaf `src/lib/invitations/register-path.ts`, called only by the invitation EMAIL. A leaf whose contents are ALSO served from the trunk is not a leaf: re-exporting it puts the ~687 KB Resend SDK one import from any client component. The property holds for EVERY import-free leaf in the domain, and `export … from` is an import.
+- The `?invitation=` link has ONE spelling, in the IMPORT-FREE leaf `src/lib/invitations/register-path.ts`, called only by the invitation EMAIL. A leaf whose contents are ALSO served from the trunk is not a leaf. The property holds for EVERY import-free leaf in the domain, and `export … from` is an import.
 - THE SAME LEAF RULE, SECOND INSTANCE: `src/lib/oversight/org-label.ts` owns the two words for an oversight org's kind and is import-free because a `"use client"` dialog renders them. `presentation.ts` must NEVER re-export them.
 - "Is the slot free" is asked twice and the two are not interchangeable: at create for a legible refusal, at accept as the guard.
 - The inviting org's name comes from `invitation.type`, never from whichever FK is set, through ONE exhaustive implementation.
@@ -81,20 +81,20 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - ⚖ A pending invitation carries a "Resend email" action so a failed or missed send is recoverable. NOTHING is persisted about delivery, because provider acceptance is not a delivery receipt.
 - A deliberate resend must never be deduped away by the provider: the `Idempotency-Key` stays invitation-scoped, and a resend adds a window suffix (`RESEND_DEDUPE_WINDOW_MS` = 60s).
 - ⚖ After a successful resend the button is DISABLED for the rest of that 60s bucket and counts it down. ONE arithmetic feeds the key suffix and the countdown, and only DURATIONS cross to the browser.
-- Accepted residual — ⚖ that cooldown is PER CLIENT SESSION: it lives in `useActionState`, so a reload or a second tab mounts with none. Closing it needs a durable last-send record, which the no-persistence ruling forbids.
+- Accepted residual — ⚖ that cooldown is PER CLIENT SESSION: it lives in `useActionState`, so a reload or a second tab mounts with none. Retired only by reversing the no-persistence ruling.
 - ⚖ AND THE ADMIN LINK DOES NOT COME BACK: the create result carries `{ inviteeEmail, emailSent }` and no path, and no notice or row renders a link or a Copy control. The rule reaches the refusal copy too.
-- …AND THE GREP IS A TEST, over COMMENTS TOO, scanning the DIRECTORY rather than a hand-list: a docblock describing a retired stopgap as the design misleads the next reader.
-- A source-shaped test in this domain never slices with a bare `indexOf` and never anchors on a comment: `sourceReader(code, label).span(from, to)` / `.after(from)` (`src/lib/testing/source-span.ts`) THROW on a moved anchor, where `indexOf` returns -1 and `slice(-1, end)` returns the EMPTY STRING, which every `doesNotMatch` is true of. ORDER rots independently, so `assertInOrder` uses the same throw-on-missing lookup.
+- …AND THE GREP IS A TEST, over COMMENTS TOO, scanning the DIRECTORY rather than a hand-list.
+- A source-shaped test in this domain never slices with a bare `indexOf` and never anchors on a comment: `sourceReader(code, label).span(from, to)` / `.after(from)` (`src/lib/testing/source-span.ts`) THROW on a moved anchor, where `indexOf` silently cuts the wrong span. ORDER rots independently, so `assertInOrder` uses the same throw-on-missing lookup.
 - ⚖ THREE SEVERS, one per side of the two associations. None calls the bare `disassociate*` primitives, which stay out of every `"use server"` module — a sever's FK write must assert the org it is severing.
 - ⚖ A sever ships only where the audit table can hold its subject: a type-to-confirm, a notification AND an `association_events` row are required. A sending church can only be severed FROM a network.
 - The org side takes a CHURCH id and nothing else — which org, its kind and the actor come from the session — so cross-org severing is structurally impossible rather than checked.
 - The association audit has ONE reader, whose WHERE names the plant AND the caller's own org.
-- The removal notice to the plant's planter is a CHURCH-role notification, never an `oversight.milestone.*` type — the exemption lists are keyed on type strings.
-- A sever's FK null and its `association_events` row are ONE statement, because an UPDATE that matched nothing is not a batch error and would otherwise audit a sever that never happened.
+- The removal notice to the plant's planter is a CHURCH-role notification, never an `oversight.milestone.*` type.
+- A sever's FK null and its `association_events` row are ONE statement, or a refused sever audits a sever that never happened.
 - An oversight admin is told about a plant they can no longer reach in exactly two cases (a declined invitation, an association ended), and gate 1 rests both on a RECORDED relationship.
-- That probe PAIRS THE ROLE TO THE ORG KIND, taking the RECIPIENT rather than a pair of ids: OR-ing both FKs let a network admin with a stray `sending_church_id` rest on another org's invitation.
+- That probe PAIRS THE ROLE TO THE ORG KIND, taking the RECIPIENT rather than a pair of ids; never OR both FKs.
 - Accepted residual: ORG-ANCHORED NOTIFICATIONS are write-only in-app — the feed viewer returns null whenever `session.user.churchId` is null, so those milestones arrive by EMAIL only. Retired by the org notification screen.
-- Accepted residual: `notifications.anchor_org_id` carries NO FK and NO cascade, so deleting an org orphans its rows while `church_id` cascades. Per-kind nullable columns would break `dedupeKey`.
+- Accepted residual: `notifications.anchor_org_id` carries NO FK and NO cascade, so deleting an org orphans its rows while `church_id` cascades.
 - Accepted residual: a sending-church-subject `association_events` row is WRITE-ONLY, because the one reader filters on `church_id`. Retired by the first surface that shows it, widening the query by SUBJECT.
 
 ## Hierarchical Access Control
@@ -111,8 +111,8 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Three notification types are consent-EXEMPT and all three are the org's OWN relationship changing: an invitation accepted, an invitation declined, an association ended. The exemption relaxes consent, never the category allow-list.
 - ⚖ The consent copy NAMES ALL THREE in one sentence with the reason: "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends." The reversibility bullet sits ABOVE it; pin the copy by a map keyed on the exempt-type list.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE`.
-- EVERY `/oversight` route opens with `requireOversightUser()` and no page re-states the role test. THE 404 IS NOT PART OF IT: `/oversight/sending-churches` refuses a `sending_church_admin` with `notFound()`, because there the ROUTE's existence is the disclosure.
-- NO `/oversight` page reads the database. `getOversightPortfolio` refuses a non-oversight role ITSELF before any `@/db` edge; `getAccessibleChurchIds` does not decide this, and leaning on it rendered a one-plant "portfolio".
+- EVERY `/oversight` route opens with `requireOversightUser()` and no page re-states the role test. THE 404 IS NOT PART OF IT: `/oversight/sending-churches` refuses a `sending_church_admin` with `notFound()`, never the shared redirect.
+- NO `/oversight` page reads the database. `getOversightPortfolio` refuses a non-oversight role ITSELF before any `@/db` edge; `getAccessibleChurchIds` does not decide this and may never be leaned on for it.
 - Accepted residual: ministry-team write actions check only session + `church_id`, so any authenticated user in a church can mutate any team. Team-leader scoping is ruled canon; the `risk:high` enforcement unit retires this line.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target. ONE implementation: `daysUntilTarget` (`src/lib/launch/countdown.ts`).
 
@@ -166,7 +166,7 @@ Three lib modules are ONE concept each: `fact-phrases.ts` the phrase VOCABULARY,
 
 - THE MANUAL-SIGNAL VOCABULARY IS ONE DECLARATION AND IT BINDS THE WRITER TOO: `MANUAL_SIGNALS` (import-free, because a `"use client"` island renders it) holds `key`, `label`, `description` and the citation `clause` per signal, and the clause map is BUILT from it; a `satisfies` pairing catches a MISSING clause but never DRIFTED wording.
 - A manual attestation is citable TWO legal ways and BOTH are correct: the manual block is written twice, and which spelling the judge picks is a coin-flip.
-- ⚖ ATTRIBUTION resolves the array spelling onto its signal, reading entry N's `signalKey` out of the assessment's OWN snapshot. Never a bare `manual.` prefix rule — each attested gate measures ONE signal.
+- ⚖ ATTRIBUTION resolves the array spelling onto its signal, reading entry N's `signalKey` out of the assessment's OWN snapshot; `normalizeManualCitation` then rewrites the citation to `manual.byKey.<signal>` before a criterion is matched. Never a bare `manual.` prefix rule — each attested gate measures ONE signal.
 - An UNRESOLVABLE row (out-of-range index, non-numeric index, no `signalKey`) attributes to NOTHING and is never guessed onto a gate; the criterion then reads `not_addressed`.
 - ⚖ WORDING is unified across all three surfaces from that same reading, and it is a READ-LAYER fix because a component holds no snapshot: resolved signals ride on `AssessedInsight.citedFactSignals`.
 - ⚖ The folding path is a COUNTER and MUST NEVER BECOME A LISTER: one distinct attestation in a group reads the drill-down's own sentence, and two disagreeing collapse to a count.
@@ -175,10 +175,10 @@ Three lib modules are ONE concept each: `fact-phrases.ts` the phrase VOCABULARY,
 - ⚖ THE LEAF TAXONOMY IS ONE TABLE, `ATTESTATION_LEAVES` (`value` / `signalKey` / `attestedAt`), and every leaf answers all THREE questions from one row — `groupKey`, `counted`, `specific` — so a fourth leaf is one row that must supply all three. Two invariants below are structural:
   - `counted` returns `Phrase`, NEVER `Phrase | null` — a `null` reaches `fallbackPhrase` and its ledger-shaped label, and the return type forbids it.
   - `specificAtOne` is the ONE implementation of "drop the specifics above one row"; a leaf gets that rule by using the builder, never by re-deriving `rows === 1`.
-- BOTH spellings hand the leaf the SAME `asserted`: the array spelling has no `=`, so the resolved signal is substituted. Otherwise one spelling takes a different branch of the one shared template.
+- BOTH spellings hand the leaf the SAME `asserted`: a bare `manual.attestations.N.signalKey` carries no `=value`, so the resolved signal is substituted. Otherwise one spelling takes a different branch of the one shared template.
 - The TWO legal spellings are declared ONCE in `attestation-citation.ts`, plus the module-private index-collapsed form, and every reader imports them. The pair once lived one letter apart in two modules.
 - ONE dispatcher decides what a citation asserts — `citationRendering`, with the singular and plural formatters as thin wrappers over it.
-- The RAW citation is NEVER rewritten: the drill-down's `data-path` is what the judge wrote, and `buildEvidence` re-resolves that path verbatim against the snapshot.
+- `normalizeManualCitation` rewrites for MATCHING only; the RAW citation is NEVER rewritten — the drill-down's `data-path` is what the judge wrote, and `buildEvidence` re-resolves that path verbatim against the snapshot.
 - A CITED PATH IS UNTRUSTED INPUT — the judge writes it, so a segment may be `constructor`, `toString` or `__proto__` — and the rule binds every read of a judge-written key AND the write that assembles `manual.byKey`. Exactly three shapes are sanctioned: a `Map` read with `.get`, a `Record` read through `Object.hasOwn`, or a prototype-free `Object.create(null)` for an untrusted-key accumulator; never a bare `in` or `[key]`.
 - Pin the WRITE half and all four reads, including the WALK itself rather than one caller's symptom, driving the cases off `Object.keys(ATTESTATION_LEAVES)`.
 
@@ -201,7 +201,7 @@ Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route
 - Every wiki article read is `church_id IS NULL OR church_id = :current_church_id` — global PLUS the reader's own, never "mine" alone. This predicate IS the boundary.
 - A church's own row for a slug OVERRIDES the global article of that name; the slug/church index is unique, so at most two rows match and the church's wins.
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches rather than leaking another church's content.
-- Cross-links live ONLY in `related_article_slugs`, never in an article's prose. Writing one back into `content` renders the list twice, and no test catches it.
+- Cross-links live ONLY in `related_article_slugs`, never in an article's prose and never seeded. No test catches a violation.
 
 ## Communication — Resend & Delivery Figures
 
@@ -220,7 +220,7 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - The SERVER is the gate, never the editor — every compose/task action is a POSTable endpoint that never saw the toolbar — and there is ONE sanitiser, `sanitizeRichText`, allow-list only.
 - ONE door converts a stored value for reading or editing, `toRichTextHtml`, and ONE read-only renderer draws it, `RichText`. A hand-rolled `dangerouslySetInnerHTML` is a second copy of both.
 - `sanitizeUrl` runs BEFORE merge substitution, so a `{{token}}` may decide NEITHER the SCHEME nor the AUTHORITY of an href — in either spelling, `/` or `\`, since every URL parser folds the two.
-- A body is MARKUP by the time a surface decorates it, so a decoration over it is TEXT-NODE-AWARE, never a string-wide `replace`. A blind replace wrote the unresolved-token pill inside an `href` — a broken link and no warning, on the very token it exists to catch.
+- A body is MARKUP by the time a surface decorates it, so a decoration over it is TEXT-NODE-AWARE, never a string-wide `replace`, which lands the unresolved-token pill inside an `href`.
 
 ## Tasks, Subtasks & Recurrence
 
@@ -231,10 +231,10 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - ⚖ A subtask is a checklist item, not a task. Anything reporting a NUMBER of tasks applies `topLevelTasksOnly()`, so badges and list count one population.
 - ⚖ A new subtask inherits its parent's assignee — a default, not a lock. An unowned checklist item reaches no "My tasks" view.
 - ⚖ The checklist is part of a recurring task's TEMPLATE: completing one mints the successor with EVERY item copied across, unticked.
-- Copied children get explicit `created_at` stamps one millisecond apart, because subtasks sort by `created_at` and one multi-row INSERT stamps every default identically.
+- Copied children get explicit `created_at` stamps one millisecond apart; a multi-row INSERT stamps every default identically and loses checklist order.
 - ⚖ Exactly ONE instance of a recurring series is open at a time, minted on completion, never by a cron. The guard runs BEFORE the successor insert.
 - `completionEvent` is never copied to a successor: it is backed by a partial unique index, so copying it aborts the second insert. Recurrence mints plain work; hooks stay with the generator.
-- A completion is written FIRST and its successor second — the reverse of the durable-marker-last rule. A successor with no completion leaves two open instances; the reverse is repairable.
+- A completion is written FIRST and its successor second — the reverse of the durable-marker-last rule, because only that order's failure is repairable.
 - A task description is rich text on the SAME editor and sanitiser as a message body (T-021), and `normalizeTaskDescription` is the one write gate all FOUR writers go through. Enumerate the writers.
 - `description` means ONE thing on every row, the stored HTML; a LIST row carries the readable summary BESIDE it, as `descriptionPreview`.
 - The checklist catalog has TWO entrances: `/tasks/templates` is the standing route, a static segment beside `/tasks/[id]`. Remove it and the URL resolves to a task with id `"templates"` and 500s.
@@ -242,16 +242,16 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - The prompt is DERIVED, never stored: the latest `kind = 'transition'` row plus the code-defined catalog. An `initial_declaration` row prompts nothing.
 - ⚖ The one stored thing is the ANSWER, a ROW in `phase_prompt_answers` unique on `transition_id`, which re-arms the prompt by itself. The cookie is a fast path and may never restore a prompt the row suppresses.
 - ⚖ Accepting is IDEMPOTENT per transition, on any device: the claim is written with `ON CONFLICT DO NOTHING` BEFORE the first import, which runs only if the claim returned a row.
-- The claim happens AFTER the requested keys are filtered against the live prompt: a forged key list must buy nothing, and spending the planter's one answer is something.
+- The claim happens AFTER the requested keys are filtered against the live prompt, or a forged key list spends the planter's one answer.
 - Accepting dates the checklist from the TRANSITION instant, never from the press, re-filtering the keys against a freshly derived prompt.
-- A claim whose import wrote NOTHING is released, so the prompt returns; a claim whose import got part-way is KEPT, because re-offering an imported checklist is how a planter imports it twice.
+- A claim whose import wrote NOTHING is released, so the prompt returns; a claim whose import got part-way is KEPT, or the planter imports it twice.
 - ⚖ The answer belongs to the PLANT, not to the planter: the key is the transition alone and `/tasks` has no role gate, so any church member who opens it first answers for everyone.
 - Because that answer cannot be un-answered, "Not now" carries a STALENESS GUARD: no row is written unless the posted `transitionId` EQUALS the plant's current transition. It is a GUARD, never an AIM.
 - ⚖ Import REFUSES an empty selection: the button disables while no checklist is ticked, says why beside itself, and "Not now" stays live as the only way out.
-- That tick count has TWO WRITERS and ONE reader: React 19 restores an uncontrolled form to its `defaultChecked` state after a `<form action>` settles and fires NO `change`, so a `useEffect` keyed on BOTH outcomes re-reads it. The DOM-subscription case, not data sync.
-- A part-way import RETURNS `partial`, it does not throw, and its receipt is SERVER markup driven by a flash cookie — never client state in the island, whose next render has no prompt in it. The decoder never throws — that cookie is the browser's to forge.
+- That tick count has TWO WRITERS — the second is React 19 restoring `defaultChecked` after a settle, firing NO `change` — and ONE reader, so a `useEffect` keyed on BOTH outcomes re-reads it. The DOM-subscription case, not data sync.
+- A part-way import RETURNS `partial`, it does not throw, and its receipt is SERVER markup driven by a flash cookie, never client state in the island. The decoder never throws — that cookie is the browser's to forge.
 - The receipt CARRIES THE TRANSITION IT REPORTS ON and is drawn for no other: one beaten by a new prompt is never shown and so never spent, and a later clean answer would raise an alert in which every clause is false.
-- The phase-template prompt announces through exactly ONE `role="alert"`, derived from the last button pressed, because each `useActionState` hook keeps its last result forever.
+- The phase-template prompt announces through exactly ONE `role="alert"`, derived from the last button pressed.
 
 ## Meetings — Evaluation Comparison
 
@@ -274,17 +274,19 @@ Applies to `src/lib/people/**` and the `/people` surfaces.
 - `peopleTextSearch` is the ONE people text predicate — list, search and export all call it. Never a second copy under any name.
 - The import preview carries REDACTED duplicate matches only — `{id, displayName}` — and the matcher loads no tags. Restoring the full record re-opens the PII round trip to the client.
 
-Status advances one hop at a time. `autoAdvanceStatus` (`src/lib/people/events.ts`) moves a person only when their CURRENT status is exactly the `from` below, so an event never demotes and never skips, and a failed advance is logged rather than thrown. Every other hop is manual; `getStatusWarnings` warns on backward, skipped and out-of-order moves without blocking them.
+Status advances one hop at a time. `autoAdvanceStatus` (`src/lib/people/events.ts`) moves a person only when their CURRENT status is exactly the `from` below, so an event-driven hop never demotes and never skips, and a failed advance is logged rather than thrown. Every other hop is unguarded; `getStatusWarnings` warns on backward, skipped and out-of-order moves without blocking them.
 
 | Event | From | To | Handler |
 |---|---|---|---|
 | `person.created` | — | `prospect` | initial status |
 | `meeting.attendance.recorded` (vision meetings) | `prospect` | `attendee` | `handleVisionMeetingAttendance` |
 | `follow_up.initiated` | `attendee` | `following_up` | `handleFollowUpInitiated` (deferred, unwired) |
-| interview completed | `following_up` | `interviewed` | manual |
-| commitment recorded | `interviewed` | `core_group` | manual |
+| interview completed | (unguarded) | `interviewed` | `createInterviewAction` |
+| commitment recorded | (unguarded) | `core_group` | `createCommitmentAction` |
 | `team.member.assigned` | `core_group` | `launch_team` | `handleTeamMemberAssigned` |
 | `team.leader.assigned` | `launch_team` | `leader` | `handleTeamLeaderAssigned` |
+
+Those two server actions write their hop through `changeStatus`, which enforces no `from`: recording an interview or a commitment for a later-stage person DEMOTES them.
 
 ## Migrations
 
@@ -339,18 +341,18 @@ Applies to `src/app/globals.css` and every stylesheet under `src/app/`; colour m
 - ⚖ WCAG AA (4.5:1) is the standard that BINDS `--muted-foreground`; APCA is advisory and never a reason to lighten it — the token sits at APCA Lc 68.2 on `--muted` and ships anyway.
 - The cost of darkening is INLINE-LINK SEPARATION: as `--muted-foreground` darkens it converges on `--primary`, so a link in muted prose drops under the 3:1 SC 1.4.1 asks.
 - ⚖ That cost is paid in CSS, never by capping the token's lightness: `p a[href]` carries a permanent underline at REST. Never delete that rule and never put `no-underline` on a link inside prose.
-- The underline rule is NOT paid once: it lives in `@layer base`, the WEAKEST place in the cascade, and an UNLAYERED normal declaration beats a layered one at ANY specificity. Every unlayered stylesheet under `src/app/` touching `text-decoration` on a bare `a` owes its own scoped underline rule.
+- The underline rule is NOT paid once: it lives in `@layer base`, which any UNLAYERED declaration beats at ANY specificity. Every unlayered stylesheet under `src/app/` touching `text-decoration` on a bare `a` owes its own scoped underline rule.
 - The diagnostic for that failure is an asymmetry in computed style: `text-underline-offset: 4px` present while `text-decoration-line` is `none`. Only the browser or the stylesheet guard sees it.
 - Accepted residual: `--ring` is 2.4:1 on `--background` light and ~1.5:1 once `focus-visible:ring-ring/50` composites, so focus indicators fail SC 1.4.11; Lighthouse scores 100 anyway. Retired by the focus-indicator redesign.
 - ⚖ `--destructive` is DESIGN.md's ruled `danger` #B4432F, NOT a red chosen to clear 4.5:1 — the app shares the palette. If danger has to move, it moves in DESIGN.md FIRST and `globals.css` follows.
-- …and that pin READS DESIGN.md: both guards parse `ink` and `danger` out of its `colors:` block at test time and never declare the hexes as literals — a literal in the guard is a THIRD owner of a one-owner colour.
+- …and that pin READS DESIGN.md: both guards parse `ink` and `danger` out of its `colors:` block at test time and never declare the hexes as literals.
 - `--ink` is the SOLE declaration of DESIGN.md's ink #181D19: every ink-coloured token says `var(--ink)`. The check is derived from the `:root` block, so pasting the literal onto a NEW token fails too.
-- An `asChild` Button call site selects its colour with `variant`, NEVER by hand-painting `bg-*`/`text-*` in `className`: tailwind-merge is not in that path, because Radix's Slot CONCATENATES `buttonVariants()` with the child's className. Hand-painted Delete buttons shipped both pairs, and source order picked `bg-primary`.
+- An `asChild` Button call site selects its colour with `variant`, NEVER by hand-painting `bg-*`/`text-*` in `className`: Radix's Slot CONCATENATES `buttonVariants()` with the child's className, so tailwind-merge is not in that path and CSS source order picks the wrong fill.
 - Any `*-foreground` utility in shipped markup owes a token declared in `:root`/`.dark` AND exported through `@theme inline`: an undeclared utility emits NO CSS. The converse is NOT a rule.
-- A token-identity check compares COLOURS, channel-wise (`isSameColour`), never `contrastRatio`, which is relative luminance and throws hue and chroma away: a magenta passes as the ruled danger red at 1.0058:1.
+- A token-identity check compares COLOURS, channel-wise (`isSameColour`), never `contrastRatio`, which is relative luminance and throws hue and chroma away.
 - `globals.css` states what a token IS and what it is FOR; it never names a MEASURED contrast ratio, only the standard's thresholds. Put each measured number in the guard that measures it.
 - `--ef-field` is a STATE-carrying icon colour (the wiki bookmark is the only cue an article is saved), so it owes SC 1.4.11 3:1 on all eight surfaces in BOTH themes.
 - `--ef-dark` is the ink that reads on GREEN and deliberately has no dark value, so `.dark` inherits the light one: paint it ONLY where `bg-ef` is under it, never as page or card text.
-- Test-only support code lives in `src/lib/testing/`, NOT under `src/app/`, and the shipped-markup walk skips that DIRECTORY. A module naming a utility to describe a rule reads as a shipped USE of it.
-- Accepted residual (DECISION): `bg-destructive/10 text-destructive` — twelve call sites — measures 4.07:1 light and 3.89:1 at `dark:bg-destructive/20`. The tint is made from the token it carries, so no token value fixes it; the remedy is a solid ground or a text-on-tint role token, both design rulings.
-- ⚖ The person-status badges are the TINTED EDITORIAL scale: each status that carries colour paints ONE hue three ways in `src/lib/people/status-colors.ts` — pale ground, deep ink, hairline border — and the dark theme MIRRORS it, so every entry spells six classes. `prospect` stays NEUTRAL; `attendee`/`launch_team` share ONE hue at different TINT LEVELS. All fourteen pairs must clear AA.
+- Test-only support code lives in `src/lib/testing/`, NOT under `src/app/`, and the shipped-markup walk skips that DIRECTORY, never a path equality on one file.
+- Accepted residual (DECISION): `bg-destructive/10 text-destructive` — twelve call sites — measures 4.07:1 light and 3.89:1 at `dark:bg-destructive/20`. NO token value fixes it; the remedy is a solid ground or a text-on-tint role token, both design rulings.
+- ⚖ The person-status badges are the TINTED EDITORIAL scale: each status that carries colour paints ONE hue three ways in `src/lib/people/status-colors.ts` — pale ground, deep ink, hairline border — and the dark theme MIRRORS it, so every entry spells six classes. `prospect` stays NEUTRAL; `attendee`/`launch_team` share ONE hue at different TINT LEVELS. All fourteen pairs must clear AA and there is NO deferral list — none may be added.
