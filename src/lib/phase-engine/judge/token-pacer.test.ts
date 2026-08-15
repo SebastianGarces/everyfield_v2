@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { virtualClock } from "./testing";
 import {
   DEFAULT_TOKENS_PER_ASSESSMENT,
   DEFAULT_TPM_LIMIT,
   MAX_SINGLE_WAIT_MS,
   resolveTpmLimit,
   TokenPacer,
-  type PacerClock,
 } from "./token-pacer";
 
 // ----------------------------------------------------------------------------
@@ -17,27 +17,6 @@ import {
 // it, so a 27-second pacing wait is asserted in microseconds. That is also the
 // point of injecting the clock — the throttle is otherwise untestable.
 // ----------------------------------------------------------------------------
-
-interface VirtualClock extends PacerClock {
-  readonly sleeps: number[];
-  advance(ms: number): void;
-}
-
-function virtualClock(start = 0): VirtualClock {
-  let t = start;
-  const sleeps: number[] = [];
-  return {
-    sleeps,
-    now: () => t,
-    async sleep(ms: number) {
-      sleeps.push(ms);
-      if (ms > 0) t += ms;
-    },
-    advance(ms: number) {
-      t += ms;
-    },
-  };
-}
 
 // --- Bootstrap --------------------------------------------------------------
 

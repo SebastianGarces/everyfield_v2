@@ -159,6 +159,13 @@ export function isRateLimitDeferral(
  * the provider's own ("bad gateway"), not ours. Marking out-of-band records WHY
  * the ladder stopped without touching what the error says, what it serializes
  * to, or what `instanceof` reports.
+ *
+ * The cost of that choice is a contract on every frame between here and the
+ * batch runner's `catch`: each one must rethrow the IDENTICAL object. A wrapper
+ * — even `new Error(msg, { cause: error })` — is a different key in this set, no
+ * type says so, and the failure mode is a clock problem paging someone as a
+ * broken judge. `deadline-truncation-chain.test.ts` drives the whole chain and
+ * is what fails if a link starts wrapping.
  */
 const deadlineTruncatedFailures = new WeakSet<object>();
 

@@ -289,3 +289,15 @@ only closed.
 |---|----------|-------------|
 | 430 | **One code review and one fix round per PR — the per-review-site 2-round cap is retired, not re-read.** The 2026-08-13 ruling capped review-fix rounds per review site; the simplified loop has exactly one review site, so the cap collapses into the pipeline itself. | `QUALITY_ROUNDS` and the scoped per-workstream reviews are gone. Findings the single fix round does not resolve reach the PR body as recorded rulings or a DECISION comment — they are never re-reviewed by another agent. #430's request to record the per-site reading is answered by this row. |
 | — | **The memory size budget has one authority: `memory/index.md`** — `invariants.md` ≤ 62 KB, the whole tree ≤ 175 KB, enforced by `ops/agent-os/tests/memory-budget.test.mjs`. (The rewrite pinned 50/140; re-pinned same day, ruled by Sebastian, when the #432 race-guard rulings and #434 wiki security rounds merged in — their memory additions were compressed into the rewritten register, every rule kept, and the pins moved to where the merged tree honestly lands: 60.8/172.) | `ops/agent-os/dod.md` points at it instead of restating numbers, so the contract cannot disagree with itself. The budget is deliberately tight: adding a rule may require shortening another, and raising the number is a new ruling rather than a fix for a red test. |
+
+## 2026-08-15 — Recorded late: the deadline-truncated assessment failure (#389, ruled 2026-08-10)
+
+Ruled on 2026-08-10 while reviewing #374/#375 and shipped in PR #389, but only ever written into
+`memory/contracts/api.md` and the code — a grep of this ledger for #374, #375, #389 or "truncat"
+returned nothing. It is recorded here, keyed to its own PR, because the ledger is where a ruling
+is looked up (follow-up #396). Nothing above is edited: this row is the ruling's first entry, not
+a supersession.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 389 | **A judge failure whose 5xx retry ladder the RUN's own clock cut short stays `failed`; only its WARNING softens.** The provider answered and the answer was broken, so the status is unchanged and `plant_assessments` records `failed` exactly as before — what changes is that the run outcome carries `truncatedByDeadline` and logs on `console.warn` rather than `console.error`. Rejected: a fifth status, and recording it as `deferred` — both would have filed a broken judge into a bucket nobody is paged on. | Since #375 bounded the 5xx retry branch by the run deadline, a truncated ladder can report a failure after a SINGLE attempt, which on its own is indistinguishable from a provider that is genuinely down; the 07:00 Actions log now tells the two apart. **The property the ruling was not allowed to lose:** a ladder that spent its LAST attempt is deliberately NOT marked, so `console.error` still means a genuinely down provider. Enforcement lives in `memory/invariants.md` (⚖, Phase Engine — Assessment Status). The mark is carried by OBJECT IDENTITY through a module-level `WeakSet`, so a rethrow that wraps the error drops it silently — proven over the real judge → orchestrator → runner chain by the guard added in #396. |
