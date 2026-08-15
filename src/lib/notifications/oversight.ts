@@ -7,7 +7,7 @@ import {
 import {
   listOversightAdminsOfOrg,
   listOversightRecipientsForChurch,
-  type OversightRecipient,
+  type OversightAudience,
 } from "./oversight-audience";
 import {
   anchorId,
@@ -181,7 +181,8 @@ export interface OversightFanOutReport {
   /**
    * Rows the org FK reached whose ROLE does not administer that kind of org —
    * a data defect, counted and logged instead of silently dropped. Nothing is
-   * enqueued for them; see `OversightRecipient` (`./oversight-audience.ts`).
+   * enqueued for them; see `OversightAudience` (`./oversight-audience.ts`),
+   * whose second array they arrive in.
    *
    * It is a sub-count of `considered`, so
    * `considered === recorded + skipped + failed + misprovisioned` still holds.
@@ -209,7 +210,7 @@ interface OversightEnqueueDep {
 /** The PLANT-wide audience: everyone with oversight of this plant. */
 export interface OversightFanOutDeps extends OversightEnqueueDep {
   /** Who oversees this plant right now. */
-  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+  listOversightRecipients(churchId: string): Promise<OversightAudience>;
 }
 
 /**
@@ -222,7 +223,7 @@ export interface OversightFanOutDeps extends OversightEnqueueDep {
  * deps object happened to expose it.
  */
 export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
-  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightRecipient[]>;
+  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightAudience>;
 }
 
 /**
@@ -232,38 +233,36 @@ export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
  * the index includes `recipient_user_id`, so one key per EVENT does not let
  * admin #1 swallow admin #2's row.
  *
- * IT IS ALSO THE ONE PLACE A MISPROVISIONED ROW IS TURNED AWAY, and that is
- * deliberate: `enqueue` is called from exactly one statement here, so "a
- * cross-paired row is never enqueued" is a property of this function rather
- * than a rule each of the six emitters has to remember.
+ * IT TAKES A PARTITIONED AUDIENCE, so "a cross-paired row is never enqueued" is
+ * not something this function does — it is something it cannot help doing. The
+ * defects are not in `recipients`, so there is no branch here to skip them with
+ * and none to get wrong. What is left to do is REPORT them, which is the loop
+ * below: `console.error`, not `warn`, because a row provisioned with an
+ * oversight FK its role cannot use is a defect in stored data, and the whole
+ * point of the ruling is that it stops being something only a database query
+ * could notice.
  */
 async function fanOutTo(
   deps: OversightEnqueueDep,
-  recipients: OversightRecipient[],
+  audience: OversightAudience,
   compose: (recipientId: string) => EnqueueNotificationInput,
   context: Record<string, unknown>
 ): Promise<OversightFanOutReport> {
   const report = emptyReport();
-  report.considered = recipients.length;
+  report.considered =
+    audience.recipients.length + audience.misprovisioned.length;
+  report.misprovisioned = audience.misprovisioned.length;
 
-  for (const recipient of recipients) {
-    // The row reached us through an FK its role does not administer
-    // (`classifyOversightCandidate` in `./oversight-audience.ts` decides that).
-    // It is not a recipient and never was; what the ruling changed is that the
-    // product SAYS SO, once per occurrence, instead of losing the row in a
-    // `WHERE` clause. `console.error`, not `warn`: this is a defect in stored
-    // data, and the whole point is that it stops being something only a
-    // database query could notice.
-    if (recipient.misprovisioned) {
-      report.misprovisioned += 1;
-      console.error("oversight fan-out reached a cross-paired admin", {
-        ...context,
-        recipientUserId: recipient.id,
-        ...recipient.misprovisioned,
-      });
-      continue;
-    }
+  for (const row of audience.misprovisioned) {
+    console.error("oversight fan-out reached a cross-paired admin", {
+      ...context,
+      recipientUserId: row.id,
+      role: row.role,
+      reachedBy: row.reachedBy,
+    });
+  }
 
+  for (const recipient of audience.recipients) {
     try {
       const result = await deps.enqueue(compose(recipient.id));
       if (result.status === "recorded") {

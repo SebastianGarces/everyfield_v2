@@ -565,7 +565,7 @@ async function main() {
   // section would pass just as well against a plant that only ever had one org.
   const plantWide = await listOversightRecipientsForChurch(plant.id);
   assert.deepEqual(
-    plantWide.map((row) => row.id).sort(),
+    plantWide.recipients.map((row) => row.id).sort(),
     [adminA.id, adminB.id, sendingChurchAdmin.id].sort(),
     "the fixture does not actually reproduce the dual-org plant"
   );

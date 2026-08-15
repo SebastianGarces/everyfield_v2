@@ -206,41 +206,67 @@ const oversightCandidateColumns = {
 type OversightCandidate = OversightAdminColumns & { id: string };
 
 /**
- * A `users` row a plant's — or an org's — audience reached.
+ * A `users` row the pairing ACCEPTED — an admin of one of the orgs addressed,
+ * and the only shape that is ever enqueued.
  *
- * Usually a recipient. Sometimes a DATA DEFECT wearing a recipient's clothes:
- * see `misprovisioned`, which is what turns the audience's silent exclusion of
- * such a row into something a reader of the report can count.
+ * It carries an id and nothing else, deliberately. This type used to hold an
+ * optional `misprovisioned` field, which made one type mean "a recipient, OR a
+ * data defect" and left the difference to a field a consumer had to remember to
+ * read. Forgetting it mails a cross-paired admin another tenant's milestone,
+ * and it compiles. The two populations are separate arrays now
+ * ({@link OversightAudience}), so the reminder is not needed.
  */
 export interface OversightRecipient {
   id: string;
-  /**
-   * Set when this row was reached by an org FK ITS ROLE DOES NOT ADMINISTER.
-   * Absent on every ordinary recipient.
-   *
-   * Both oversight FKs live on one `users` row and neither implies the other
-   * (`memory/invariants.md` → Multi-Tenancy), so a row can carry a sending
-   * church's id while holding `network_admin` — or hold no oversight role at
-   * all. The audience is right to exclude it: acting on the FK alone is the
-   * hierarchy walk this repo forbids, arriving through the role instead of
-   * through the FK. What was wrong was doing it SILENTLY. Such a row is a
-   * provisioning defect somewhere upstream, and it stayed invisible precisely
-   * because the SQL made it disappear before any code could count it.
-   *
-   * So it now travels as far as the fan-out, which counts it, logs it, and
-   * enqueues NOTHING for it (`fanOutTo`). The exclusion is unchanged; only the
-   * silence is.
-   */
-  misprovisioned?: OversightMisprovisioning;
 }
 
-/** Why a reached row is not a recipient — the log's whole payload. */
-export interface OversightMisprovisioning {
+/**
+ * A `users` row an org FK reached whose ROLE DOES NOT ADMINISTER that kind of
+ * org — a provisioning defect, and the log's whole payload.
+ *
+ * Both oversight FKs live on one `users` row and neither implies the other
+ * (`memory/invariants.md` → Multi-Tenancy), so a row can carry a sending
+ * church's id while holding `network_admin` — or hold no oversight role at all.
+ * The audience is right to exclude it: acting on the FK alone is the hierarchy
+ * walk this repo forbids, arriving through the role instead of through the FK.
+ * What was wrong was doing it SILENTLY, inside a `WHERE` where no code could
+ * count it — a defect nothing in the product could see.
+ *
+ * So such a row travels as far as the fan-out, which counts it, logs it, and
+ * enqueues NOTHING for it (`fanOutTo` in `./oversight.ts`). The exclusion is
+ * unchanged; only the silence is.
+ */
+export interface OversightMisprovisionedRow {
+  id: string;
   /** The role the `users` row actually carries. */
   role: UserRole;
   /** The org FK that reached them, which that role does not administer. */
   reachedBy: OversightAdminPairing["fk"];
 }
+
+/**
+ * EVERYONE THE ORGS REACHED, SPLIT BY WHAT THEY TURNED OUT TO BE.
+ *
+ * A PARTITION, not one list carrying a flag, because "a cross-paired row is
+ * never enqueued" has to be something the compiler holds. Behind a flag it was
+ * a `continue` inside one loop, so every future consumer of an audience had to
+ * write that branch again from memory — and the cost of forgetting is
+ * cross-tenant: an admin of another org, mailed this plant's milestone. Split,
+ * the defects are not in the array a fan-out iterates, so there is no branch to
+ * forget and nothing to remember.
+ *
+ * Still ONE query. The split happens in TypeScript, over exactly the rows the
+ * audience was resolved from (`listOversightAudience`).
+ */
+export interface OversightAudience {
+  recipients: OversightRecipient[];
+  misprovisioned: OversightMisprovisionedRow[];
+}
+
+/** What one reached row is — the two populations, told apart by `kind`. */
+export type OversightCandidateClass =
+  | ({ kind: "recipient" } & OversightRecipient)
+  | ({ kind: "misprovisioned" } & OversightMisprovisionedRow);
 
 /**
  * Is this reached row a recipient, or the data defect the ruling asks us to
@@ -261,7 +287,7 @@ export interface OversightMisprovisioning {
 export function classifyOversightCandidate(
   candidate: OversightCandidate,
   org: OversightOrgIds
-): OversightRecipient | null {
+): OversightCandidateClass | null {
   const administers = recipientOrgOf(candidate);
 
   const named = OVERSIGHT_ADMIN_ROWS.map(([, { fk }]) => fk).filter(
@@ -271,7 +297,7 @@ export function classifyOversightCandidate(
   // The role administers one of the orgs addressed — an ordinary recipient, and
   // the only shape that is ever enqueued.
   if (named.some((fk) => administers[fk] === org[fk])) {
-    return { id: candidate.id };
+    return { kind: "recipient", id: candidate.id };
   }
 
   // Otherwise: which named org's FK did reach them? That FK, paired with the
@@ -281,8 +307,10 @@ export function classifyOversightCandidate(
   if (!reachedBy) return null;
 
   return {
+    kind: "misprovisioned",
     id: candidate.id,
-    misprovisioned: { role: candidate.role, reachedBy },
+    role: candidate.role,
+    reachedBy,
   };
 }
 
@@ -301,19 +329,36 @@ export function classifyOversightCandidate(
  */
 async function listOversightAudience(
   org: OversightOrgIds
-): Promise<OversightRecipient[]> {
+): Promise<OversightAudience> {
+  const audience: OversightAudience = { recipients: [], misprovisioned: [] };
+
   // No org named — nobody, never everybody.
-  if (!namesAnOversightOrg(org)) return [];
+  if (!namesAnOversightOrg(org)) return audience;
 
   const rows = await db
     .select(oversightCandidateColumns)
     .from(users)
     .where(oversightReachCondition(users, org));
 
-  return rows.flatMap((row) => {
+  for (const row of rows) {
     const classified = classifyOversightCandidate(row, org);
-    return classified ? [classified] : [];
-  });
+    if (classified === null) continue;
+
+    // Each side is REBUILT field by field rather than spread: the classifier's
+    // `kind` is how this loop decides, and it has no business travelling on into
+    // an audience nobody else discriminates.
+    if (classified.kind === "recipient") {
+      audience.recipients.push({ id: classified.id });
+    } else {
+      audience.misprovisioned.push({
+        id: classified.id,
+        role: classified.role,
+        reachedBy: classified.reachedBy,
+      });
+    }
+  }
+
+  return audience;
 }
 
 /**
@@ -331,7 +376,7 @@ async function listOversightAudience(
  */
 export async function listOversightRecipientsForChurch(
   churchId: string
-): Promise<OversightRecipient[]> {
+): Promise<OversightAudience> {
   const [plant] = await db
     .select({
       sendingChurchId: churches.sendingChurchId,
@@ -341,7 +386,7 @@ export async function listOversightRecipientsForChurch(
     .where(eq(churches.id, churchId))
     .limit(1);
 
-  if (!plant) return [];
+  if (!plant) return { recipients: [], misprovisioned: [] };
 
   // Each returned row is paired role-to-FK before it counts as a recipient — see
   // `classifyOversightCandidate`. A `team_member` carrying a `sending_church_id`
@@ -350,8 +395,8 @@ export async function listOversightRecipientsForChurch(
   // `canAccessChurch`), but a fan-out that reports "considered 40" when 38 of
   // them were never candidates is lying to whoever reads the report.
   //
-  // What the cross-paired rows now do is arrive FLAGGED rather than not at all:
-  // still no notification, but a count and a log line.
+  // What the cross-paired rows now do is come back in their OWN array rather
+  // than not at all: still no notification, but a count and a log line.
   return listOversightAudience(plant);
 }
 
@@ -370,15 +415,15 @@ export async function listOversightRecipientsForChurch(
  *
  * The pairing is applied by `classifyOversightCandidate`, so the FK is still
  * paired with its own role (#304 ruling 4, item 6) and this function writes no
- * role literal of its own. A row that fails the pairing comes back flagged
- * rather than missing and is counted by the fan-out, which enqueues nothing for
- * it.
+ * role literal of its own. A row that fails the pairing comes back in the
+ * audience's `misprovisioned` half rather than missing, and is counted by the
+ * fan-out, which enqueues nothing for it.
  *
  * `org` here is loaded ids, either of which may be null; naming none of them
  * returns nobody, which `listOversightAudience` guards.
  */
 export async function listOversightAdminsOfOrg(
   org: OversightOrgIds
-): Promise<OversightRecipient[]> {
+): Promise<OversightAudience> {
   return listOversightAudience(org);
 }

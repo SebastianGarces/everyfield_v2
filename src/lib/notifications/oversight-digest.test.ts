@@ -82,9 +82,14 @@ class FakeDigestDeps implements OversightDigestDeps {
   }
 
   async listOversightRecipients() {
-    return (this.options.recipients ?? [ADMIN_A, ADMIN_B]).map((id) => ({
-      id,
-    }));
+    return {
+      recipients: (this.options.recipients ?? [ADMIN_A, ADMIN_B]).map((id) => ({
+        id,
+      })),
+      // This fake's audience is ids, not `users` rows, so the pairing has
+      // nothing to fail on and the defect half is always empty.
+      misprovisioned: [],
+    };
   }
 
   async enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult> {
@@ -550,8 +555,8 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
       skipped: 0,
       considered: 0,
       failed: 0,
-      // This fake never produces a cross-paired row: its recipients are ids,
-      // not `users` rows, so the pairing has nothing to fail on.
+      // This fake never produces a cross-paired row: its audience is ids, not
+      // `users` rows, so the pairing has nothing to fail on.
       misprovisioned: 0,
     };
 

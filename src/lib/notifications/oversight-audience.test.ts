@@ -143,14 +143,14 @@ test("each pairing row renders as its own SQL arm AND classifies to itself", () 
         candidate(role, { [fk]: SENDING_CHURCH }),
         org
       ),
-      { id: ADMIN_A },
+      { kind: "recipient", id: ADMIN_A },
       `${kind}: the paired role is a recipient`
     );
 
-    // …and EVERY other role carrying that FK is the defect, flagged and never
-    // enqueued — the other oversight role and the three church roles alike. A
-    // `planter` with a stray `sending_church_id` is the same defect as a
-    // cross-paired admin.
+    // …and EVERY other role carrying that FK classifies to the OTHER side of
+    // the partition, never enqueued — the other oversight role and the three
+    // church roles alike. A `planter` with a stray `sending_church_id` is the
+    // same defect as a cross-paired admin.
     for (const other of userRoles.filter(
       (candidateRole) => candidateRole !== role
     )) {
@@ -159,7 +159,7 @@ test("each pairing row renders as its own SQL arm AND classifies to itself", () 
           candidate(other, { [fk]: SENDING_CHURCH }),
           org
         ),
-        { id: ADMIN_A, misprovisioned: { role: other, reachedBy: fk } },
+        { kind: "misprovisioned", id: ADMIN_A, role: other, reachedBy: fk },
         `${kind} reached by ${other}`
       );
     }
@@ -184,7 +184,7 @@ test("a row that administers ONE of the named orgs is a recipient, not a defect"
       }),
       both
     ),
-    { id: ADMIN_A }
+    { kind: "recipient", id: ADMIN_A }
   );
 });
 
@@ -249,5 +249,8 @@ test("listOversightAdminsOfOrg refuses an org with no ids without touching the d
   // false and the lister returns early, so this asserts the guard rather than
   // the query — and it is the guard that keeps "no org" from becoming a query
   // at all.
-  assert.deepEqual(await listOversightAdminsOfOrg(noOversightOrg()), []);
+  assert.deepEqual(await listOversightAdminsOfOrg(noOversightOrg()), {
+    recipients: [],
+    misprovisioned: [],
+  });
 });

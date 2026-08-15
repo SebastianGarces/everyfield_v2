@@ -37,7 +37,8 @@ import {
   announceSendingChurchLeftNetwork,
 } from "./oversight";
 import type {
-  OversightMisprovisioning,
+  OversightAudience,
+  OversightMisprovisionedRow,
   OversightRecipient,
 } from "./oversight-audience";
 import { OVERSIGHT_ADMIN, type OversightOrgIds } from "./oversight-admin";
@@ -95,16 +96,20 @@ class FakeOversightEnqueue
       sharing?: boolean;
       /** Admins by org id, for the one-org audience. */
       adminsByOrg?: Record<string, OversightRecipient[]>;
+      /** The other half of the partition — rows the pairing rejected. */
+      misprovisioned?: OversightMisprovisionedRow[];
     } = {}
   ) {
     this.sharing = options.sharing ?? true;
     this.adminsByOrg = options.adminsByOrg;
+    this.misprovisioned = options.misprovisioned ?? [];
   }
 
   readonly adminsByOrg?: Record<string, OversightRecipient[]>;
+  readonly misprovisioned: OversightMisprovisionedRow[];
 
-  async listOversightRecipients(): Promise<OversightRecipient[]> {
-    return this.recipients;
+  async listOversightRecipients(): Promise<OversightAudience> {
+    return { recipients: this.recipients, misprovisioned: this.misprovisioned };
   }
 
   /**
@@ -115,15 +120,24 @@ class FakeOversightEnqueue
    */
   async listOversightAdminsOfOrg(
     org: OversightOrgIds
-  ): Promise<OversightRecipient[]> {
+  ): Promise<OversightAudience> {
     this.orgsAsked.push(org);
+    const misprovisioned = this.misprovisioned;
+
     if (this.adminsByOrg) {
       const key = org.sendingChurchId ?? org.sendingNetworkId;
-      return key ? (this.adminsByOrg[key] ?? []) : [];
+      return {
+        recipients: key ? (this.adminsByOrg[key] ?? []) : [],
+        misprovisioned,
+      };
     }
     // Default: the org has the same admins the plant-wide list names, so the
     // body/gate tests below read exactly as they did before the audience split.
-    return org.sendingChurchId || org.sendingNetworkId ? this.recipients : [];
+    return {
+      recipients:
+        org.sendingChurchId || org.sendingNetworkId ? this.recipients : [],
+      misprovisioned,
+    };
   }
 
   async enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult> {
@@ -1327,8 +1341,8 @@ test("the org fan-out cannot widen to the plant", async () => {
   // shape that has no plant-wide lister on it at all, so there is nothing for a
   // future edit to reach for by accident.
   const deps = {
-    async listOversightAdminsOfOrg(): Promise<OversightRecipient[]> {
-      return [{ id: ADMIN_A }];
+    async listOversightAdminsOfOrg(): Promise<OversightAudience> {
+      return { recipients: [{ id: ADMIN_A }], misprovisioned: [] };
     },
     async enqueue(_input: EnqueueNotificationInput): Promise<EnqueueResult> {
       return {
@@ -1482,13 +1496,13 @@ test("a plant-wide milestone composed with an org anchor writes nothing", () => 
 // could count it: the defect was invisible to the product, which is why it went
 // unnoticed.
 //
-// WHICH ROWS ARE FLAGGED is `oversight-audience.test.ts`'s question — it walks
-// the pairing table over the whole role grid. What is asserted here is what the
-// fan-out DOES with a flagged row: it travels this far and is turned away, with
-// a count and a log line, and with no notification.
+// WHICH ROWS ARE CLASSIFIED WHICH WAY is `oversight-audience.test.ts`'s
+// question — it walks the pairing table over the whole role grid. What is
+// asserted here is what the fan-out DOES with the audience's second array: it
+// counts it and logs it, and enqueues for the first array only.
 
 /** The pairing, and the OTHER pairing's role — the cross of the two. */
-const CROSS_PAIRED: OversightMisprovisioning = {
+const CROSS_PAIRED: Omit<OversightMisprovisionedRow, "id"> = {
   role: OVERSIGHT_ADMIN.network.role,
   reachedBy: OVERSIGHT_ADMIN.sending_church.fk,
 };
@@ -1499,14 +1513,13 @@ test("a cross-paired row is counted and logged, and gets no notification", async
     logged.push(...args);
   });
 
-  // The defective row sits in the MIDDLE, for the same reason the failing
-  // recipient does above: a `continue` that ran off the end would take the
-  // recipient AFTER it with no test noticing.
-  const deps = new FakeOversightEnqueue([
-    { id: ADMIN_A },
-    { id: ADMIN_OF_OTHER_ORG, misprovisioned: CROSS_PAIRED },
-    { id: ADMIN_B },
-  ]);
+  // The defect arrives in its own array, so it cannot sit between two
+  // recipients any more — which is the point of the partition. Two recipients
+  // are still named, because the count that matters is that BOTH are enqueued
+  // while the defect is not.
+  const deps = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
+    misprovisioned: [{ id: ADMIN_OF_OTHER_ORG, ...CROSS_PAIRED }],
+  });
 
   const report = await fanOutToOversight(deps, CHURCH, (recipientId) =>
     composeMilestone(facts("phase_advanced"), recipientId)

@@ -777,11 +777,9 @@ async function main() {
       sendingChurchId: sendingChurch.id,
       sendingNetworkId: null,
     });
-    const scRecipientIds = scAudience
-      .filter((row) => !row.misprovisioned)
-      .map((row) => row.id);
+    const scRecipientIds = scAudience.recipients.map((row) => row.id);
     const defectOf = (id: string) =>
-      scAudience.find((row) => row.id === id)?.misprovisioned;
+      scAudience.misprovisioned.find((row) => row.id === id);
 
     assert.ok(scRecipientIds.includes(scAdmin.id));
     assert.ok(scRecipientIds.includes(scAdmin2.id));
@@ -789,8 +787,10 @@ async function main() {
     // RULED 2026-08-13 (#427): the EXCLUSION is unchanged — neither row below is
     // a recipient — but the SILENCE is not. Both used to vanish inside the SQL,
     // which is why the provisioning defect behind them could not be counted.
-    // Asserting their ABSENCE, as this item did until now, is what the ruling
-    // reverses: they must arrive carrying why they are not recipients.
+    // Asserting their ABSENCE, as this item did until then, is what the ruling
+    // reverses: they must arrive carrying why they are not recipients. They now
+    // arrive in their own half of the audience, so "not a recipient" is read off
+    // the partition rather than off a flag.
     //
     // Both rows are hostile shapes on purpose. No path in `src/` writes either:
     // `register/actions.ts` is the only `insert(users)` and it pairs every role
@@ -799,14 +799,22 @@ async function main() {
     // defect worth a count.
     assert.deepEqual(
       defectOf(dualFkNetAdmin.id),
-      { role: "network_admin", reachedBy: "sendingChurchId" },
+      {
+        id: dualFkNetAdmin.id,
+        role: "network_admin",
+        reachedBy: "sendingChurchId",
+      },
       "a network admin with a stray sending_church_id is reported, not hidden"
     );
     assert.ok(!scRecipientIds.includes(dualFkNetAdmin.id));
 
     assert.deepEqual(
       defectOf(scTeammate.id),
-      { role: "team_member", reachedBy: "sendingChurchId" },
+      {
+        id: scTeammate.id,
+        role: "team_member",
+        reachedBy: "sendingChurchId",
+      },
       "…and so is a church-level role carrying an oversight FK"
     );
     assert.ok(!scRecipientIds.includes(scTeammate.id));
@@ -819,7 +827,7 @@ async function main() {
       sendingChurchId: null,
       sendingNetworkId: otherNetwork.id,
     });
-    const netAudienceIds = netAudience.map((row) => row.id);
+    const netAudienceIds = netAudience.recipients.map((row) => row.id);
     assert.ok(netAudienceIds.includes(dualFkNetAdmin.id));
     assert.ok(netAudienceIds.includes(otherNetAdmin.id));
     ok("…and the same row IS an admin of the network it actually administers");

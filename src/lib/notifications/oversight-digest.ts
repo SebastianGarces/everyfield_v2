@@ -38,7 +38,7 @@ import { phaseAdvanceCondition } from "./oversight-events";
 import {
   listOversightRecipientsForChurch,
   oversightAudienceCondition,
-  type OversightRecipient,
+  type OversightAudience,
 } from "./oversight-audience";
 import { fanOutToOversight, type OversightFanOutReport } from "./oversight";
 
@@ -225,7 +225,7 @@ export interface OversightDigestDeps {
     churchId: string,
     window: ActivityWindow
   ): Promise<OversightActivitySummary>;
-  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+  listOversightRecipients(churchId: string): Promise<OversightAudience>;
   enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
 }
 
