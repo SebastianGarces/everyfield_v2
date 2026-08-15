@@ -3,9 +3,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
 import { getTemplateById } from "@/lib/documents";
 import { resolveMergeValues } from "@/lib/documents/merge";
 import {
+  JOURNEY_STAGE_OPTIONS,
   isSkippableOnboardingStep,
   onboardingStep,
 } from "@/lib/onboarding/steps";
@@ -13,6 +17,9 @@ import {
   assembleFactSnapshot,
   type SnapshotInputs,
 } from "@/lib/phase-engine/signals/build-fact-snapshot";
+import { parseElements } from "@/lib/testing/rendered-markup";
+
+import { JourneyStep } from "./journey-step";
 
 // ============================================================================
 // F12 / OB-003 + OB-005 — step 3, the journey declaration.
@@ -272,6 +279,69 @@ test("a validation message is attached to the question that failed", () => {
   assert.match(STEP_CODE, /refuse\("stage",/);
   // A failed SAVE is not a field error — it sits by the button that tried.
   assert.match(STEP_CODE, /refuse\(\s*"form",/);
+});
+
+test("every stage and launch-date radio has an accessible name", () => {
+  // #397. shadcn's `RadioGroupItem` renders `<button type="button"
+  // role="radio">`, and `<label for>` names FORM CONTROLS — it moves a click to
+  // the button and contributes nothing to the accessible name of an element
+  // whose role is `radio`. So all ten radios on this step were unnamed: axe
+  // reported one `button-name` violation over ten nodes, and a screen reader
+  // read "radio button, not checked" ten times with nothing to tell them apart
+  // — on the step the alpha demo path walks through.
+  //
+  // Asserted against the MARKUP THE BROWSER RECEIVES, not against this file's
+  // source. A source regex here would carry both failure modes AC 2 of this
+  // issue exists to remove: it breaks on renaming a local variable no planter
+  // can see, and it cannot see whether the id `aria-labelledby` points at
+  // actually EXISTS — a typo in either template literal, or an id collision,
+  // leaves all ten radios unnamed with the suite green. `parseElements` is the
+  // repo's one reader for attribute-only contracts
+  // (`src/lib/testing/rendered-markup.ts`).
+  const html = renderToStaticMarkup(
+    createElement(JourneyStep, {
+      onDeclared: () => {},
+      onBack: null,
+      onSkip: () => {},
+      onFinish: () => {},
+      busy: false,
+    })
+  );
+  const elements = parseElements(html);
+  const ids = new Set(elements.map((el) => el.attrs.id).filter(Boolean));
+  const radios = elements.filter((el) => el.attrs.role === "radio");
+
+  // Ten: the two launch-date choices, plus the seven phases and the "not sure"
+  // escape hatch.
+  assert.equal(radios.length, 10);
+  assert.equal(JOURNEY_STAGE_OPTIONS.length, 8);
+
+  for (const radio of radios) {
+    const name = radio.attrs["aria-labelledby"];
+    assert.ok(name, `${radio.attrs.id} is an unnamed radio`);
+    assert.ok(ids.has(name), `${radio.attrs.id} is named by a missing element`);
+
+    // The hint (and the phase name beside it) are the DESCRIPTION, announced
+    // after the name rather than folded into it — and every id it points at has
+    // to exist for the same reason the name's does.
+    const described = radio.attrs["aria-describedby"];
+    assert.ok(described, `${radio.attrs.id} has no description`);
+    for (const id of described.split(/\s+/)) {
+      assert.ok(
+        ids.has(id),
+        `${radio.attrs.id} is described by a missing ${id}`
+      );
+    }
+
+    // The hard rule: every clickable carries `cursor-pointer`.
+    assert.match(radio.attrs.class ?? "", /cursor-pointer/);
+  }
+
+  // ONE component draws all ten options, which is why one fix reaches all ten:
+  // the two launch-date choices and the eight stages are the same
+  // `ChoiceOption`, so a name that regressed would regress on every radio.
+  assert.equal((STEP_CODE.match(/<ChoiceOption/g) ?? []).length, 3);
+  assert.equal((STEP_CODE.match(/<RadioGroupItem/g) ?? []).length, 1);
 });
 
 test("revealing the date input moves the caret into it", () => {

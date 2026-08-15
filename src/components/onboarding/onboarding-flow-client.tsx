@@ -15,11 +15,13 @@ import {
   ONBOARDING_STEP_IDS,
   ONBOARDING_STEP_PARAM,
   addressableOnboardingStep,
-  isFirstOnboardingStep,
+  historyWriteFor,
   isSkippableOnboardingStep,
   nextOnboardingStep,
+  onboardingFinishScreen,
   onboardingStep,
   previousOnboardingStep,
+  type OnboardingHistoryWrite,
   type OnboardingStepId,
 } from "@/lib/onboarding/steps";
 import {
@@ -85,26 +87,22 @@ const FINISH_SCREEN_DESCRIPTION =
   "One suggestion for where you said you are, then your dashboard.";
 
 /**
- * The current URL with `?step=` set to `step`, every other param kept (#373).
+ * Apply a write `historyWriteFor` decided on (#397).
  *
- * Built from `window.location` rather than from `usePathname`/`useSearchParams`
- * so it always reflects the address bar AT THE MOMENT of the write, including a
- * param some other client wrote since this render began. Only ever called from
- * an event handler or an effect, so `window` is defined.
+ * THE DECISION IS NOT HERE. This function chooses nothing — which is the whole
+ * point of the split: what the URL should say, and whether saying it adds a
+ * history entry, is a pure function in `@/lib/onboarding/steps` that a test
+ * CALLS. This half only speaks to the browser.
  *
- * `null` REMOVES the param, which is how the finish screen is addressed without
- * being given a step id of its own (ruling 2026-08-10) — see the effect below.
- * `params.set` is also what collapses a repeated `?step=a&step=a` back to one
- * value, so a URL the server declined heals on the next stamp.
+ * Both writes are patched by Next, so `usePathname`/`useSearchParams` — here
+ * AND in the wiki guide's provider — hold the new value without a server render
+ * or an RSC fetch (`.next-docs` → "Shallow routing on the client").
+ * `router.push` would re-run the page for every step change, which is exactly
+ * what this must not do.
  */
-function stepUrl(step: OnboardingStepId | null): string {
-  const params = new URLSearchParams(window.location.search);
-  if (step === null) params.delete(ONBOARDING_STEP_PARAM);
-  else params.set(ONBOARDING_STEP_PARAM, step);
-  const query = params.toString();
-  return query
-    ? `${window.location.pathname}?${query}`
-    : window.location.pathname;
+function applyHistoryWrite(write: OnboardingHistoryWrite): void {
+  if (write.method === "push") window.history.pushState(null, "", write.url);
+  else window.history.replaceState(null, "", write.url);
 }
 
 export function OnboardingFlowClient({
@@ -175,13 +173,16 @@ export function OnboardingFlowClient({
   const [finishScreenStep, setFinishScreenStep] =
     useState<OnboardingStepId | null>(null);
 
-  // Showing while the URL still names the step it was opened from (the frame
-  // before the effect below strips it) and while it names no step at all (every
-  // frame after). What closes it is the URL naming a DIFFERENT step, which is
-  // what browser Back off the screen does.
-  const atFinishScreen =
-    finishScreenStep !== null &&
-    (urlStep === null || urlStep === finishScreenStep);
+  // #397 — TWO QUESTIONS, NOT ONE, and the difference is a frame.
+  //
+  // `open` is "the flow has opened the finish screen", which is what the URL
+  // write below is derived from. `showing` is "the finish screen is what
+  // paints", which additionally requires the URL to have already lost the
+  // param — and the contextual wiki guide reads that same URL, so a painted
+  // finish screen can never carry the journey step's Guide pill. The rule and
+  // the reason live with the rest of the step model (`onboardingFinishScreen`).
+  const finishScreen = onboardingFinishScreen({ urlStep, finishScreenStep });
+  const atFinishScreen = finishScreen.showing;
 
   // The step behind the finish screen keeps answering while it is up — the
   // param is gone from the URL, and "which step would I return to" must not
@@ -230,24 +231,34 @@ export function OnboardingFlowClient({
    *
    * ONE rule, one writer: "the URL says what is showing, and the finish screen
    * is not a step". Everything else — the arrival stamp, the heal after a
-   * declined value — falls out of the same comparison.
+   * declined value — falls out of the same comparison, which is
+   * `historyWriteFor`'s job: it returns `null` when the address bar already
+   * says it, so this writes once and then stays quiet.
    *
-   * `replaceState`, never `pushState`: arriving is not navigating, and a
-   * history entry here would make Back a no-op that appears to do nothing. It
-   * is also self-healing rather than mount-only — the condition is "the URL
-   * disagrees with what is showing", which a `goTo` push has already satisfied
-   * by the time this runs, so it writes once and then stays quiet.
+   * Derived from `finishScreen.open` rather than from `atFinishScreen`: the
+   * screen does not PAINT until the param is gone, so waiting for the paint to
+   * decide to remove it would be a deadlock.
    *
    * A history write is a side effect on an external system, which is what
    * `useEffect` is for. Nothing here copies server data into state
    * (`memory/contracts/data-patterns.md`) — the flow reads FROM the URL.
    */
-  const urlStepParam: OnboardingStepId | null = atFinishScreen ? null : step;
+  const desiredStepParam: OnboardingStepId | null = finishScreen.open
+    ? null
+    : step;
 
   useEffect(() => {
-    if (stepParam === urlStepParam) return;
-    window.history.replaceState(null, "", stepUrl(urlStepParam));
-  }, [stepParam, urlStepParam]);
+    const write = historyWriteFor({
+      from: urlStep,
+      to: desiredStepParam,
+      location: window.location,
+    });
+    if (write) applyHistoryWrite(write);
+    // `stepParam` is a dep as well as `urlStep`: a raw value the client's guard
+    // declined (`?step=journey%20`, a closed step 1) reads as `urlStep === null`
+    // either way, and healing it out of the address bar is a change only the raw
+    // param can see.
+  }, [stepParam, urlStep, desiredStepParam]);
 
   function goTo(next: OnboardingStepId) {
     hasNavigated.current = true;
@@ -256,26 +267,16 @@ export function OnboardingFlowClient({
     // this step does not re-open an offer the planter has moved past.
     setFinishScreenStep(null);
 
-    // Ruled 2026-08-10: STEP 1 IS NOT IN THE HISTORY. The only way off it is
-    // creating the church, so by the time this runs the church exists and step
-    // 1 is not re-enterable — the in-app Back control has always said so
-    // (`backTarget` below), and browser Back said otherwise, landing a planter
-    // on an empty required "Create church plant" form whose second submit is
-    // discarded (`runCreateChurch`'s already-have-church branch). Replacing
-    // rather than pushing takes the entry out of the history instead of asking
-    // step 1 to render a state it has no answer for. The cost is named and
-    // accepted: Back from step 2 now leaves the flow, because behind step 2
-    // there is nothing left to go back to.
-    //
-    // Shallow either way: the URL and the router's view of it change, the
-    // server render does not re-run.
-    if (isFirstOnboardingStep(step)) {
-      window.history.replaceState(null, "", stepUrl(next));
-      return;
-    }
-
-    // The push is what gives Back the step just left.
-    window.history.pushState(null, "", stepUrl(next));
+    // Push or replace is `historyWriteFor`'s decision, not this component's —
+    // including the ruling of 2026-08-10 that STEP 1 IS NOT IN THE HISTORY, and
+    // the reason it is not. Shallow either way: the URL and the router's view
+    // of it change, the server render does not re-run.
+    const write = historyWriteFor({
+      from: step,
+      to: next,
+      location: window.location,
+    });
+    if (write) applyHistoryWrite(write);
   }
 
   function goForward() {

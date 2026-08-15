@@ -527,6 +527,21 @@ function FieldError({ id, message }: { id: string; message: string | null }) {
  *
  * The card is not clickable — the radio and its label are the only targets, so
  * there is one hit area per choice rather than two that behave differently.
+ *
+ * EVERY OPTION IS NAMED BY `aria-labelledby`, NOT BY THE `<label>` (#397).
+ * shadcn's `RadioGroupItem` renders `<button type="button" role="radio">`, and
+ * `<label for>` names FORM CONTROLS — it moves a click to the button, but it
+ * contributes nothing to the accessible name of an element whose role is
+ * `radio`. All ten radios on this step were therefore unnamed: axe reported one
+ * `button-name` violation over ten nodes, and a screen reader read "radio
+ * button, not checked" ten times with nothing to tell them apart, on a step
+ * that is on the alpha demo path. The `htmlFor` stays — it is what makes the
+ * words clickable — and `aria-labelledby` is what makes them the NAME.
+ *
+ * The hint (and the phase name beside it) are the DESCRIPTION, so they are
+ * announced after the name rather than folded into it: "We are forming the
+ * launch team" is the choice; "The core group is becoming a team…" is the
+ * "does this sound like us?" that helps a planter place themselves.
  */
 function ChoiceOption({
   id,
@@ -544,17 +559,42 @@ function ChoiceOption({
   tag?: string;
   children?: React.ReactNode;
 }) {
+  // Derived from the option's own id rather than from `useId`, because the id
+  // is already a stable literal the acceptance criteria name (`#stage-0`,
+  // `#launch-date-known`), and a name that survives a re-render is a name a
+  // test and a screen reader can both rely on.
+  const labelId = `${id}-label`;
+  const hintId = `${id}-hint`;
+  const tagId = `${id}-phase`;
+
   return (
     <div className="border-border has-[button[data-state=checked]]:border-primary has-[button[data-state=checked]]:bg-primary/5 rounded-md border p-3 transition-colors">
       <div className="flex items-start gap-3">
-        <RadioGroupItem id={id} value={value} className="mt-0.5" />
+        <RadioGroupItem
+          id={id}
+          value={value}
+          className="mt-0.5"
+          aria-labelledby={labelId}
+          aria-describedby={tag ? `${hintId} ${tagId}` : hintId}
+        />
         <div className="min-w-0 space-y-1">
-          <Label htmlFor={id} className="cursor-pointer font-medium">
+          <Label
+            id={labelId}
+            htmlFor={id}
+            className="cursor-pointer font-medium"
+          >
             {label}
           </Label>
-          <p className="text-muted-foreground text-sm">{hint}</p>
+          <p id={hintId} className="text-muted-foreground text-sm">
+            {hint}
+          </p>
           {tag && (
-            <p className="text-muted-foreground text-xs tracking-wide">{tag}</p>
+            <p
+              id={tagId}
+              className="text-muted-foreground text-xs tracking-wide"
+            >
+              {tag}
+            </p>
           )}
           {children}
         </div>

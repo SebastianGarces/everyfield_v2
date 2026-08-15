@@ -61,7 +61,13 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
     message: string;
   } | null>(null);
 
-  // Convert search params to a plain object for matching
+  // Convert search params to a plain object for matching.
+  //
+  // `forEach` takes the LAST value of a repeated param, where
+  // `useSearchParams().get()` takes the first — which is why the onboarding
+  // flow's server guard REFUSES `?step=a&step=b` outright rather than resolving
+  // it (`resolveOnboardingStepRequest`): the two readers would otherwise show
+  // one screen with another screen's guide.
   const searchParamsObj = useMemo(() => {
     const obj: Record<string, string> = {};
     searchParams.forEach((value, key) => {
@@ -70,7 +76,17 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
     return obj;
   }, [searchParams]);
 
-  // Resolve the guide entry for the current pathname + search params
+  // Resolve the guide entry for the current pathname + search params.
+  //
+  // THE ENTRY IS A PURE FUNCTION OF THE URL AND MUST STAY ONE. `WikiGuide` is
+  // rendered as a SIBLING of the dashboard's children (`app/(dashboard)/
+  // layout.tsx`), so no screen below it can suppress the pill through context
+  // — the URL is the only channel. The onboarding flow relies on that:
+  // its OB-015 finish screen does not paint until `?step=` has left the URL, so
+  // that the offer can never be painted under the journey step's Guide pill
+  // (`onboardingFinishScreen`, `src/lib/onboarding/steps.ts`). Resolving from
+  // anything the URL does not carry — or deferring this behind a transition of
+  // its own — puts that frame back.
   const entry = useMemo(
     () => resolveGuideEntry(pathname, searchParamsObj),
     [pathname, searchParamsObj]
