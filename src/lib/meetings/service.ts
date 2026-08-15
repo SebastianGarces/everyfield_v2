@@ -55,6 +55,14 @@ import {
   listActiveTeamMemberIds,
   shouldPopulateGuestListFromTeam,
 } from "./guest-list";
+// VM-018 — the F11 queue, consumed. `notifications.ts` owns every rule about
+// who hears about a meeting and when; this module only says WHEN the question
+// is asked. Each call swallows its own failures, so a notification can never
+// fail the write it follows.
+import {
+  cancelMeetingNotifications,
+  syncMeetingNotifications,
+} from "./notifications";
 import { topLevelTasksOnly } from "@/lib/tasks/service";
 import { deriveAttendanceType } from "./attendance-type";
 
@@ -406,6 +414,13 @@ export async function createMeeting(
     );
   }
 
+  // VM-018. AFTER the guest list is populated, never before: the reminder
+  // audience is read from that list, so announcing first would remind the
+  // organiser alone about a meeting a whole team is invited to. `previous:
+  // null` because a row a moment old can have nothing pending, so the cancel
+  // half is skipped.
+  await syncMeetingNotifications(churchId, meeting.id, { previous: null });
+
   return meeting;
 }
 
@@ -486,6 +501,14 @@ export async function updateMeeting(
     throw new Error("Failed to update meeting");
   }
 
+  // An edit may have moved the meeting. A reschedule is cancel + re-enqueue
+  // (N-011), so every pending reminder is dropped and the offsets still in the
+  // future are enqueued against the NEW start — there is no in-place edit of a
+  // pending row, and so no way to leave one at a stale offset. `existing` was
+  // already read above, so an edit that moved nothing a reminder says leaves
+  // the live rows alone.
+  await syncMeetingNotifications(churchId, meetingId, { previous: existing });
+
   return updated;
 }
 
@@ -510,6 +533,12 @@ export async function deleteMeeting(
         eq(churchMeetings.id, meetingId)
       )
     );
+
+  // The subject is gone. `notifications.entity_id` carries no FK, so nothing
+  // cascades — the cancel is what stops a reminder for a meeting that no longer
+  // exists, and it runs AFTER the delete so a failed delete leaves the
+  // reminders in place.
+  await cancelMeetingNotifications(churchId, meetingId);
 }
 
 /**
@@ -539,6 +568,12 @@ export async function updateMeetingStatus(
   if (!updated) {
     throw new Error("Failed to update meeting status");
   }
+
+  // A cancelled or completed meeting is not worth an interruption, and every
+  // other status may have re-opened one that was. `syncMeetingNotifications`
+  // decides which of the two this is — the planner refuses both statuses — so
+  // there is no status branch here to keep in step with it.
+  await syncMeetingNotifications(churchId, meetingId, { previous: existing });
 
   // Emit meeting.completed event when status changes to completed
   if (newStatus === "completed") {
