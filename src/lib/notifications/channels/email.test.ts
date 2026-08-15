@@ -118,6 +118,12 @@ function fakeDeps(
     async settleDelivery() {},
     async finishNotification() {},
     async releaseClaims() {},
+    // #324. Composition is what this file is about, and a suppressed address
+    // never reaches the composer — so the honest fixture here is "nothing is
+    // suppressed", and the suppression path is asserted in `dispatch.test.ts`.
+    async loadSuppressedAddresses() {
+      return [];
+    },
     async sendEmail(message) {
       sent.push(message);
       return (

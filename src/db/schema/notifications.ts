@@ -101,6 +101,21 @@ export const notificationDeliveryStatuses = [
 export type NotificationDeliveryStatus =
   (typeof notificationDeliveryStatuses)[number];
 
+/**
+ * Why an address stopped being mailable (#324, from #262).
+ *
+ * Both values are the PROVIDER's fact, not a count we inferred: a hard bounce
+ * says the mailbox does not exist, a spam complaint says the reader asked us to
+ * stop. Neither is a number of retries away from working. A SOFT bounce is
+ * deliberately absent — a full mailbox empties, and suppressing on one would
+ * silently un-reach a live cohort member.
+ */
+export const emailSuppressionReasons = [
+  "hard_bounce",
+  "spam_complaint",
+] as const;
+export type EmailSuppressionReason = (typeof emailSuppressionReasons)[number];
+
 /** Cadence of the recurring roll-up (N-013). Only meaningful on `digest`. */
 export const digestCadences = ["daily", "weekly"] as const;
 export type DigestCadence = (typeof digestCadences)[number];
@@ -480,6 +495,83 @@ export const notificationDeliveries = pgTable(
   ]
 );
 
+// ----------------------------------------------------------------------------
+// email_suppressions — an ADDRESS we must stop mailing (#324, from #262).
+// ----------------------------------------------------------------------------
+//
+// WHY THIS IS NOT A COLUMN ON `notification_deliveries`. That table records what
+// happened to ONE attempt, and `PERMANENT_FAILURE_PREFIX` on its `error` stops
+// exactly that (notification, channel) pair being retried. It says nothing about
+// the NEXT notification, which gets a fresh row with a fresh attempt count and
+// mails the same dead mailbox again. The exposure compounds: a digest is
+// enqueued per day, so one dead address in the alpha cohort is a bounce a day
+// against a sending domain that takes months to earn back. Suppression is
+// therefore a fact about the ADDRESS, filed once, read by every later send.
+//
+// THE ADDRESS IS THE KEY, not the user. The same mailbox can sit on two
+// accounts, an account can change address, and the provider's webhook names an
+// address and never a user id. `email` is stored ALREADY NORMALISED —
+// `normalizeEmailAddress` in `src/lib/notifications/channels/suppression.ts` is
+// the single writer of that form — because a `lower(email)` expression index
+// would make the `ON CONFLICT` target unspellable (the same reasoning as the
+// rejected `coalesce` index in memory/invariants.md → Transactions).
+//
+// A SUPPRESSION IS NOT A LIFE SENTENCE. `cleared_at` retires a row without
+// deleting it, so the history of "this address bounced in August" survives the
+// clear — an address that bounces, clears and bounces again is three rows and a
+// legible story, not one row overwritten twice. `cleared_reason` is NOT NULL
+// whenever `cleared_at` is (`email_suppressions_cleared_check`): a clear that
+// does not say why is indistinguishable from a bug that cleared it.
+//
+// `email_suppressions_active_email_idx` is PARTIAL — unique on `email` only
+// `where cleared_at is null` — which is what makes "at most one ACTIVE
+// suppression per address" a database property while leaving room for the
+// cleared history beside it. It is also the arbiter for the recorder's
+// `ON CONFLICT … DO NOTHING`, so two webhook deliveries of the same bounce
+// write one row.
+export const emailSuppressions = pgTable(
+  "email_suppressions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Already lowercased and trimmed — see `normalizeEmailAddress`. */
+    email: varchar("email", { length: 320 }).notNull(),
+    reason: varchar("reason", { length: 32 })
+      .$type<EmailSuppressionReason>()
+      .notNull(),
+    /** The provider event that produced it, e.g. `email.bounced`. Diagnostic. */
+    source: varchar("source", { length: 64 }),
+    /** What the provider said, kept verbatim so a dispute has evidence. */
+    detail: text("detail"),
+    suppressedAt: timestamp("suppressed_at").defaultNow().notNull(),
+    /** Non-null = retired. The row stays as history. */
+    clearedAt: timestamp("cleared_at"),
+    /**
+     * The admin who cleared it. NULL with a non-null `cleared_at` is the
+     * self-service path — the address holder re-verified — which has no actor
+     * row to name, so this cannot be the "was it cleared?" test. `cleared_at`
+     * is.
+     */
+    clearedByUserId: uuid("cleared_by_user_id").references(() => users.id),
+    clearedReason: text("cleared_reason"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("email_suppressions_active_email_idx")
+      .on(table.email)
+      .where(sql`${table.clearedAt} is null`),
+    index("email_suppressions_email_idx").on(table.email),
+    check(
+      "email_suppressions_reason_check",
+      sql`${table.reason} in (${inList(emailSuppressionReasons)})`
+    ),
+    check(
+      "email_suppressions_cleared_check",
+      sql`(${table.clearedAt} is null) = (${table.clearedReason} is null)`
+    ),
+  ]
+);
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -495,3 +587,6 @@ export type NewNotificationPreference =
 export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
 export type NewNotificationDelivery =
   typeof notificationDeliveries.$inferInsert;
+
+export type EmailSuppression = typeof emailSuppressions.$inferSelect;
+export type NewEmailSuppression = typeof emailSuppressions.$inferInsert;

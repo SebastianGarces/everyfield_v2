@@ -21,6 +21,10 @@ import {
   composeBatchEmail,
   type OutboundEmail,
 } from "./channels/email";
+import {
+  loadSuppressedAddresses as loadSuppressedAddressesFromDb,
+  normalizeEmailAddress,
+} from "./channels/suppression";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported
@@ -462,6 +466,14 @@ export interface DispatchDeps {
   ): Promise<void>;
   /** Hand claimed rows back to the queue untouched. Nothing else re-pends them. */
   releaseClaims(notificationIds: readonly string[], now: Date): Promise<void>;
+  /**
+   * Which of the run's recipient addresses are suppressed (#324), normalised.
+   *
+   * One query for the whole run, on the same rule as `loadRecipients`: this is
+   * inside a function with a hard timeout, and a per-notification read would be
+   * an N+1 in the hottest loop in F11.
+   */
+  loadSuppressedAddresses(emails: readonly string[]): Promise<string[]>;
   /** The one provider call. */
   sendEmail(message: OutboundEmail): Promise<EmailSendOutcome>;
 }
@@ -491,6 +503,16 @@ export interface DispatchRunSummary {
   deferred: number;
   /** Channel outcomes recorded as `suppressed_by_preference`. */
   suppressed: number;
+  /**
+   * Emails not composed because the recipient's ADDRESS is suppressed (#324).
+   *
+   * COUNTED, not thrown. A suppressed address is a normal, expected outcome —
+   * somebody's mailbox died — and a throw here would strand every claimed row
+   * in the run over one dead address. It is reported separately from
+   * `suppressed` because the two are different refusals: that one is a user's
+   * choice about a category, this one is a mailbox that does not exist.
+   */
+  addressSuppressed: number;
   /** Claimed rows released unprocessed when the budget ran out. */
   released: number;
   durationMs: number;
@@ -638,6 +660,7 @@ export async function runDispatch(
     retryScheduled: 0,
     deferred: 0,
     suppressed: 0,
+    addressSuppressed: 0,
     released: 0,
     durationMs: 0,
   };
@@ -676,6 +699,16 @@ export async function runDispatch(
     deliveries.set(`${row.notificationId}|${row.channel}`, row);
   }
 
+  // #324. A FOURTH batched read, and it has to follow the first three because
+  // it is keyed on the addresses `loadRecipients` just returned. One extra
+  // round trip per run, against a domain reputation that takes months to earn
+  // back.
+  const suppressedAddresses = new Set(
+    await deps.loadSuppressedAddresses(
+      recipientRows.map((row) => row.email).filter(Boolean)
+    )
+  );
+
   const groups = groupForDispatch(claimed);
   summary.groups = groups.length;
 
@@ -704,6 +737,7 @@ export async function runDispatch(
       recipient: recipients.get(groups[index].recipientUserId),
       preferenceRows: preferences.get(groups[index].recipientUserId) ?? [],
       deliveries,
+      suppressedAddresses,
     });
   }
 
@@ -719,6 +753,8 @@ interface GroupContext {
   recipient: DispatchRecipient | undefined;
   preferenceRows: NotificationPreference[];
   deliveries: Map<string, NotificationDelivery>;
+  /** Normalised addresses this run must not mail (#324). */
+  suppressedAddresses: Set<string>;
 }
 
 async function processGroup(
@@ -921,6 +957,47 @@ async function deliverEmailGroup(
         now,
       });
       record(notification.id, { kind: "failed" });
+    }
+    return;
+  }
+
+  // --- #324: is this address suppressed? -----------------------------------
+  //
+  // BEFORE COMPOSING, and REPORTED rather than thrown. A permanently-bounced
+  // address is a normal outcome — somebody's mailbox died — and a throw here
+  // would strand every claimed row in the run over one dead mailbox.
+  //
+  // The shape is deliberately IDENTICAL to the no-address branch above: claim
+  // each notification's email channel, settle it `failed` with the permanent
+  // prefix, and record it. That is what makes the skip answerable — "why did
+  // this never arrive?" reads the delivery row's own error text (N-016), not a
+  // log line that has since rotated — and the prefix is what stops
+  // `channelEligibility` retrying it even after this check is passed.
+  //
+  // The claim still bumps `attempt_count` without a provider call, exactly as
+  // the no-address branch does. That is consistent rather than a lie: the
+  // number counts attempts to DELIVER, and this attempt was made and refused.
+  if (ctx.suppressedAddresses.has(normalizeEmailAddress(ctx.recipient.email))) {
+    const error = `${PERMANENT_FAILURE_PREFIX}address suppressed after a permanent bounce or spam complaint`;
+    for (const notification of candidates) {
+      const claim = await deps.claimDelivery(
+        notification.id,
+        "email",
+        maxAttempts
+      );
+      if (claim.status === "lost") {
+        record(notification.id, { kind: "settled" });
+        continue;
+      }
+      await deps.settleDelivery({
+        notificationId: notification.id,
+        channel: "email",
+        status: "failed",
+        error,
+        now,
+      });
+      record(notification.id, { kind: "failed" });
+      summary.addressSuppressed += 1;
     }
     return;
   }
@@ -1219,6 +1296,10 @@ export const dbDispatchDeps: DispatchDeps = {
           eq(notifications.status, "claimed")
         )
       );
+  },
+
+  loadSuppressedAddresses(emails) {
+    return loadSuppressedAddressesFromDb(emails);
   },
 
   async sendEmail(message) {

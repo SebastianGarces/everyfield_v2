@@ -8,13 +8,22 @@
 //
 // Two numbers, and they are the contract stated in memory/index.md:
 //   - memory/invariants.md   <= 64 KB  (every rule still lives in this one file)
-//   - the whole memory/ tree <= 178 KB
+//   - the whole memory/ tree <= 181 KB
 //
 // Ruled 2026-08-14, and re-pinned twice since on the same procedure — COMPRESSION
 // PASS FIRST, then re-pin what is left: the rewrite pinned ~135 KB; the same-day
 // merge of the #432 race-guard rulings and #434 wiki security rounds re-pinned
 // ~172 KB; and on 2026-08-15 the F11 callers (#321) and the deferred-assessment
 // status (#376) landed ten rules between them, which compressed to ~175.5 KB.
+//
+// RE-PINNED 2026-08-15 to 181 KB, after the same procedure. Two new tables owed
+// `contracts/db.md` an entry — `email_suppressions` (#324, address-level bounce
+// suppression) and `meeting_responses` (#98, VM-014 response cards) — nine rules
+// between them. The compression pass ran on `db.md` FIRST and bought ~0.4 KB
+// back out of the launches, dev-seed and `phase_prompt_answers` prose plus the
+// two new entries themselves, folding what was written as nine sub-bullets into
+// five. The remainder is genuine new contract, which is what the cap is not
+// allowed to refuse.
 //
 // WHAT THE CAP GOVERNS IS RULE LENGTH, NOT RULE COUNT. Each rule stays 1-3
 // sentences and the why that is not derivable from source moves into
@@ -33,7 +42,7 @@ const MEMORY_DIR = path.join(ROOT, "memory");
 
 const KB = 1024;
 const INVARIANTS_LIMIT = 64 * KB;
-const TREE_LIMIT = 178 * KB;
+const TREE_LIMIT = 181 * KB;
 
 /** Every file under memory/, with its size in bytes. */
 function walk(dir) {
@@ -57,7 +66,7 @@ test("memory/invariants.md stays under 64 KB", () => {
   );
 });
 
-test("the memory/ tree stays under 178 KB", () => {
+test("the memory/ tree stays under 181 KB", () => {
   const files = walk(MEMORY_DIR);
   const total = files.reduce((sum, file) => sum + file.bytes, 0);
   const biggest = [...files]

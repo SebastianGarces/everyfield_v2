@@ -6,9 +6,11 @@ import { communicationRecipients } from "@/db/schema/communication";
 import type { RecipientStatus } from "@/db/schema/communication";
 import { notificationDeliveries } from "@/db/schema/notifications";
 import {
+  addressSuppressionForEvent,
   notificationDeliveryOutcome,
   WEBHOOK_OVERWRITABLE_DELIVERY_STATUSES,
 } from "@/lib/notifications/channels/delivery-events";
+import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 import { RECIPIENT_STATUS_RANK } from "@/lib/communication/queries";
 
 // Initialize Resend client for webhook verification
@@ -76,6 +78,53 @@ async function applyNotificationDeliveryEvent(
 }
 
 /**
+ * Suppress the ADDRESS a permanent failure names (#324, from #262).
+ *
+ * SEPARATE FROM THE DELIVERY UPDATE ABOVE, and deliberately not conditional on
+ * it. The update stops one attempt being retried; this stops every future send
+ * to the mailbox, whether the bounced message was a notification, a
+ * communication or an invitation. Running it only when a notification delivery
+ * matched would leave the address mailable for the other three.
+ *
+ * WHAT SUPPRESSES IS DECIDED BY `addressSuppressionForEvent`, which is pure,
+ * tested and derived from the same mapping as the delivery outcome — so a soft
+ * bounce cannot suppress here while staying retryable there.
+ *
+ * ONE ROW PER RECIPIENT. `data.to` is an array because a provider message can
+ * carry several; every one of them bounced, so every one is suppressed. Failures
+ * are logged and swallowed: a suppression write must never turn into a non-200
+ * that makes Resend redeliver the whole event.
+ */
+async function applyAddressSuppression(event: WebhookEvent): Promise<void> {
+  const decision = addressSuppressionForEvent({
+    type: event.type,
+    bounceType: event.data.bounce?.type ?? null,
+  });
+  if (!decision.suppress) return;
+
+  const recipients = Array.isArray(event.data.to) ? event.data.to : [];
+
+  for (const address of recipients) {
+    if (typeof address !== "string" || !address.trim()) continue;
+    try {
+      await recordAddressSuppression({
+        email: address,
+        reason: decision.reason,
+        source: event.type,
+        detail: event.data.bounce?.type
+          ? `provider bounce type: ${event.data.bounce.type}`
+          : null,
+      });
+    } catch (err) {
+      console.error(
+        `[WEBHOOK] could not record suppression for a ${decision.reason}:`,
+        err
+      );
+    }
+  }
+}
+
+/**
  * Resend webhook handler for email delivery tracking.
  * Updates communication_recipients and notification_deliveries status based on
  * email events. Verifies webhook signatures to prevent spoofed events.
@@ -110,6 +159,10 @@ export async function POST(req: NextRequest) {
     // F11 notification deliveries. Runs first and independently of the
     // communication path below, which returns early on an unknown id.
     await applyNotificationDeliveryEvent(event, emailId);
+
+    // #324. Address-level, so it runs for EVERY permanent failure — not only
+    // the ones whose message id matched a notification delivery above.
+    await applyAddressSuppression(event);
 
     // Find the recipient record by external ID (Resend email ID)
     const [recipient] = await db

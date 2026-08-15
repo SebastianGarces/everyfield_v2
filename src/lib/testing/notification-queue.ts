@@ -374,6 +374,15 @@ export class FakeNotificationQueue
     }
   }
 
+  /** #324. Normalised addresses this fake treats as permanently bounced. */
+  suppressedAddresses = new Set<string>();
+
+  async loadSuppressedAddresses(emails: readonly string[]): Promise<string[]> {
+    return emails
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => this.suppressedAddresses.has(email));
+  }
+
   async sendEmail(message: OutboundEmail): Promise<EmailSendOutcome> {
     this.sends.push(message);
     return SENT;

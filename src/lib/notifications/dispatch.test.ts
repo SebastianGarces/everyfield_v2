@@ -354,6 +354,19 @@ class FakeDispatchStore implements DispatchDeps {
     }
   }
 
+  /**
+   * #324. Addresses this fake store treats as suppressed — set by a test that
+   * is about suppression, empty for every other test, which is what keeps the
+   * dispatcher's default behaviour unchanged by the feature.
+   */
+  suppressedAddresses = new Set<string>();
+
+  async loadSuppressedAddresses(emails: readonly string[]): Promise<string[]> {
+    return emails
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => this.suppressedAddresses.has(email));
+  }
+
   async sendEmail(message: OutboundEmail): Promise<EmailSendOutcome> {
     this.sends.push({ message });
     return this.outcomes.length > 1
@@ -367,6 +380,134 @@ function storeWithPlanter(): FakeDispatchStore {
   store.addRecipient(PLANTER, "planter@example.test");
   return store;
 }
+
+// ============================================================================
+// #324 — a permanently bounced ADDRESS stops being mailed
+// ============================================================================
+//
+// `PERMANENT_FAILURE_PREFIX` on a delivery row already stops that ONE
+// (notification, channel) pair being retried. It says nothing about the NEXT
+// notification, which gets a fresh row with a fresh attempt count and mails the
+// same dead mailbox again — a digest is enqueued daily, so one dead address is
+// one bounce a day against a domain that takes months to earn back.
+//
+// These tests drive the whole dispatcher, not the predicate: what has to hold
+// is that no provider call is made, and that the delivery log says WHY.
+
+test("a notification to a permanently bounced address is not sent (#324)", async () => {
+  const store = storeWithPlanter();
+  store.suppressedAddresses.add("planter@example.test");
+  const notification = store.addNotification({ scheduledFor: PAST });
+
+  const summary = await runDispatch(store, { now: NOW });
+
+  assert.equal(store.sends.length, 0, "no provider call was made");
+  assert.equal(
+    summary.addressSuppressed,
+    1,
+    "the skip is REPORTED, not thrown — one dead address must not strand a run"
+  );
+
+  const emailRow = store.deliveryFor(notification.id, "email");
+  assert.equal(emailRow?.status, "failed");
+  assert.match(
+    emailRow?.error ?? "",
+    /^permanent: /,
+    "the row carries the permanent marker, so no later run retries it either"
+  );
+  assert.match(
+    emailRow?.error ?? "",
+    /suppress/i,
+    "the delivery log says WHY it never arrived (N-016)"
+  );
+});
+
+test("suppression stops the EMAIL only — the feed row still arrives", async () => {
+  // A dead mailbox is not a reason to stop showing somebody their own
+  // notifications. The in-app channel has nothing to bounce.
+  const store = storeWithPlanter();
+  store.suppressedAddresses.add("planter@example.test");
+  const notification = store.addNotification({ scheduledFor: PAST });
+
+  await runDispatch(store, { now: NOW });
+
+  assert.equal(store.deliveryFor(notification.id, "in_app")?.status, "sent");
+});
+
+test("a SECOND notification to the same address is refused too (#324)", async () => {
+  // The whole point. Per-delivery permanence stops a RETRY of one message;
+  // this is a different message, enqueued later, with its own delivery row.
+  const store = storeWithPlanter();
+  store.suppressedAddresses.add("planter@example.test");
+
+  const first = store.addNotification({ scheduledFor: PAST, title: "One" });
+  await runDispatch(store, { now: NOW });
+
+  const second = store.addNotification({ scheduledFor: PAST, title: "Two" });
+  const summary = await runDispatch(store, { now: plus(NOW, 60_000) });
+
+  assert.equal(store.sends.length, 0, "still no provider call");
+  assert.equal(
+    summary.addressSuppressed,
+    1,
+    "the second is refused on its own"
+  );
+  assert.notEqual(first.id, second.id);
+  assert.match(
+    store.deliveryFor(second.id, "email")?.error ?? "",
+    /suppress/i,
+    "the second delivery row records the reason as well"
+  );
+});
+
+test("clearing the suppression makes the next send go out (#324)", async () => {
+  // A bounce is not a life sentence: the address holder re-verifies, or an
+  // admin clears it. What proves the clear worked is a provider call.
+  const store = storeWithPlanter();
+  store.suppressedAddresses.add("planter@example.test");
+
+  store.addNotification({ scheduledFor: PAST, title: "Refused" });
+  await runDispatch(store, { now: NOW });
+  assert.equal(store.sends.length, 0);
+
+  store.suppressedAddresses.delete("planter@example.test");
+  const afterClear = store.addNotification({
+    scheduledFor: PAST,
+    title: "Delivered",
+  });
+  const summary = await runDispatch(store, { now: plus(NOW, 60_000) });
+
+  assert.equal(store.sends.length, 1, "the send goes out once the clear lands");
+  assert.equal(summary.addressSuppressed, 0);
+  assert.equal(store.deliveryFor(afterClear.id, "email")?.status, "sent");
+});
+
+test("an unsuppressed address is untouched by the feature", async () => {
+  // The regression that matters most: suppression must be invisible when no
+  // address is suppressed.
+  const store = storeWithPlanter();
+  store.addNotification({ scheduledFor: PAST });
+
+  const summary = await runDispatch(store, { now: NOW });
+
+  assert.equal(store.sends.length, 1);
+  assert.equal(summary.addressSuppressed, 0);
+});
+
+test("the suppression check is asked with the address, case-insensitively", async () => {
+  // `users.email` and the provider's webhook can differ in case. The dispatcher
+  // normalises before asking, so a bounce reported for `Planter@…` still stops
+  // a send addressed to `planter@…`.
+  const store = new FakeDispatchStore();
+  store.addRecipient(PLANTER, "Planter@Example.test");
+  store.suppressedAddresses.add("planter@example.test");
+  store.addNotification({ scheduledFor: PAST });
+
+  const summary = await runDispatch(store, { now: NOW });
+
+  assert.equal(store.sends.length, 0);
+  assert.equal(summary.addressSuppressed, 1);
+});
 
 // ============================================================================
 // AC: a run delivers past-due notifications and leaves future ones pending

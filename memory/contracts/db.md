@@ -54,6 +54,23 @@ tenant scope; `created_at`/`updated_at` default now.
 - **Notifications enqueue gate:** oversight recipients can ONLY receive `milestones` + `digest`,
   gated by `share_activity_with_oversight` at enqueue time; a recipient failing the gate is
   skipped and reported, never thrown over (`src/lib/notifications/`).
+- **`email_suppressions` is about an ADDRESS**, not a delivery and not a user (`notifications.ts`,
+  0042, #324): `PERMANENT_FAILURE_PREFIX` stops one (notification, channel) retry, while the NEXT
+  notification gets a fresh row and mails the dead mailbox again. Webhook writes it, dispatch reads
+  it once per run.
+  - `email` is stored **already lowercased and trimmed** by `normalizeEmailAddress`
+    (`notifications/channels/suppression.ts`), its one writer — a `lower(email)` index would make
+    the `ON CONFLICT` target unspellable. Plus-addresses and dots are NOT folded.
+  - **`email_suppressions_active_email_idx` is the guard AND the `ON CONFLICT … DO NOTHING`
+    arbiter**: partial unique on `email` where `cleared_at is null`. Never `DO UPDATE` — the first
+    row's reason and `suppressed_at` survive every webhook redelivery. `cleared_at` non-null =
+    retired and the row stays as history; `..._cleared_check` ties it to `cleared_reason` both
+    ways, and `cleared_by_user_id` is null for a self-service clear.
+  - **`addressSuppressionForEvent`** (`channels/delivery-events.ts`) decides, derived from the
+    delivery-outcome mapping: hard bounce and spam complaint suppress, a SOFT bounce and
+    `email.failed` keep their bounded retries. **Dispatch REPORTS the skip, never throws** —
+    refuses before composing, settles `failed` with the permanent prefix so the log says why
+    (N-016), counts `addressSuppressed`. EMAIL only; the in-app feed row still arrives.
 - **`meeting_responses` is the Response Card (VM-014, `meetings.ts`, 0041), NOT
   `meeting_attendance.response_status`** — that column is the RSVP. **NO ROW means no card came
   back, and is never a refusal**: `not_interested` is the only negative value and it needs a row.
