@@ -28,6 +28,7 @@ import {
   registerTaskStillLivePredicates,
   syncTaskNotifications,
   taskDueAt,
+  taskNotificationsDiffer,
   type TaskNotificationDeps,
   type TaskNotificationFacts,
 } from "./notifications";
@@ -113,9 +114,12 @@ function harness() {
     /**
      * Put a task in the store and enqueue what it owes.
      *
-     * `previous` is threaded exactly as the service threads it: `null` on a
-     * create, the row as it was on an edit, omitted where the caller did not
-     * read the old row.
+     * `previous` is the harness's own convenience, NOT the sync's parameter:
+     * `syncTaskNotifications` takes one honest `mustCancel` boolean, and the
+     * differ that answers it belongs to the caller — `updateTask` and
+     * `reopenTask` compute it exactly this way, and `createTask` /
+     * `createNextRecurrence` pass `false` outright, which is what `null` means
+     * here.
      */
     async write(
       row: TaskNotificationFacts,
@@ -127,7 +131,10 @@ function harness() {
       return syncTaskNotifications(row, {
         deps,
         now: options.now ?? NOW,
-        previous,
+        mustCancel:
+          previous !== null &&
+          previous !== undefined &&
+          taskNotificationsDiffer(previous, row),
       });
     },
   };

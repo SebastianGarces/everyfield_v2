@@ -61,7 +61,9 @@ import {
 // fail the write it follows.
 import {
   cancelMeetingNotifications,
+  meetingNotificationsDiffer,
   syncMeetingNotifications,
+  type MeetingNotificationFacts,
 } from "./notifications";
 import { topLevelTasksOnly } from "@/lib/tasks/service";
 import { deriveAttendanceType } from "./attendance-type";
@@ -69,6 +71,33 @@ import { deriveAttendanceType } from "./attendance-type";
 // ============================================================================
 // Internal Helpers
 // ============================================================================
+
+/**
+ * The meeting as it was just written, in the shape the notification differ
+ * reads — so a write path can answer `mustCancel` itself instead of handing
+ * `syncMeetingNotifications` an old row and letting it decide.
+ *
+ * `teamName` comes from the row read BEFORE the write on purpose: neither
+ * `updateMeeting` nor `updateMeetingStatus` can change `team_id` (it is not in
+ * either `set`), so the team the title may name is the same team, and the
+ * alternative is a second join for a value that cannot have moved.
+ */
+function writtenMeetingFacts(
+  written: ChurchMeeting,
+  teamName: string | null
+): MeetingNotificationFacts {
+  return {
+    id: written.id,
+    churchId: written.churchId,
+    type: written.type,
+    title: written.title,
+    meetingNumber: written.meetingNumber,
+    teamName,
+    datetime: written.datetime,
+    status: written.status,
+    createdBy: written.createdBy,
+  };
+}
 
 /**
  * Get the next vision meeting number for a church.
@@ -416,10 +445,10 @@ export async function createMeeting(
 
   // VM-018. AFTER the guest list is populated, never before: the reminder
   // audience is read from that list, so announcing first would remind the
-  // organiser alone about a meeting a whole team is invited to. `previous:
-  // null` because a row a moment old can have nothing pending, so the cancel
-  // half is skipped.
-  await syncMeetingNotifications(churchId, meeting.id, { previous: null });
+  // organiser alone about a meeting a whole team is invited to.
+  // `mustCancel: false` because a row a moment old can have nothing pending, so
+  // the cancel half is skipped.
+  await syncMeetingNotifications(churchId, meeting.id, { mustCancel: false });
 
   return meeting;
 }
@@ -507,7 +536,12 @@ export async function updateMeeting(
   // pending row, and so no way to leave one at a stale offset. `existing` was
   // already read above, so an edit that moved nothing a reminder says leaves
   // the live rows alone.
-  await syncMeetingNotifications(churchId, meetingId, { previous: existing });
+  await syncMeetingNotifications(churchId, meetingId, {
+    mustCancel: meetingNotificationsDiffer(
+      existing,
+      writtenMeetingFacts(updated, existing.teamName)
+    ),
+  });
 
   return updated;
 }
@@ -573,7 +607,12 @@ export async function updateMeetingStatus(
   // other status may have re-opened one that was. `syncMeetingNotifications`
   // decides which of the two this is — the planner refuses both statuses — so
   // there is no status branch here to keep in step with it.
-  await syncMeetingNotifications(churchId, meetingId, { previous: existing });
+  await syncMeetingNotifications(churchId, meetingId, {
+    mustCancel: meetingNotificationsDiffer(
+      existing,
+      writtenMeetingFacts(updated, existing.teamName)
+    ),
+  });
 
   // Emit meeting.completed event when status changes to completed
   if (newStatus === "completed") {
@@ -646,6 +685,14 @@ export async function addAttendee(
     })
     .returning();
 
+  // VM-018. `meeting_attendance` IS the reminder audience
+  // (`guestListUserIdsQuery`), and this is a second writer of it: a person added
+  // through the attendee surface before the meeting is owed every offset still
+  // in the future, exactly as one added through `addToGuestList` is.
+  // `mustCancel: false` — adding a recipient needs no cancel; the dedupe keys
+  // absorb everyone already on the list.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: false });
+
   return record;
 }
 
@@ -671,6 +718,14 @@ export async function removeAttendee(
   if (deleted.length === 0) {
     throw new Error("Attendance record not found");
   }
+
+  // The mirror of the add above, and the one that actually loses mail if it is
+  // missing: this row was in the reminder audience, so without the re-sync the
+  // removed person keeps their pending 7/3/1-day reminders and dispatch emails
+  // them. `mustCancel: true` — `cancelByEntity` is entity-wide with no
+  // per-recipient form, so re-enqueuing the audience without them is the only
+  // way those rows stop.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: true });
 }
 
 /**
@@ -1014,6 +1069,16 @@ export async function finalizeAttendance(
  * Record attendance for a meeting in batch (team meeting pattern).
  * Uses upsert logic: updates existing records, creates new ones.
  * Verifies meeting belongs to the church before modifying.
+ *
+ * THE THIRD WRITER OF `meeting_attendance`, AND THE ONE THAT OWES NO RE-SYNC.
+ * The other two — `addAttendee`/`removeAttendee` here and
+ * `addToGuestList`/`removeFromGuestList` in `guest-list.ts` — change the
+ * reminder audience BEFORE the meeting, so both call
+ * `syncMeetingNotifications`. This one is the post-meeting register: it records
+ * who turned up, at which point every reminder offset is behind the start and
+ * the planner refuses the whole set anyway (`in_the_past`). It is exempt BY
+ * NAME in `notifications.test.ts`'s writer scan, so a fourth writer is a failing
+ * test rather than a silent gap.
  */
 export async function recordAttendanceBatch(
   churchId: string,

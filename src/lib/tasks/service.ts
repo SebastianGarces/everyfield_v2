@@ -46,6 +46,7 @@ import {
   cancelTaskNotificationsFor,
   syncTaskNotifications,
   syncTaskNotificationsFor,
+  taskNotificationsDiffer,
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import {
@@ -681,9 +682,9 @@ export async function createTask(
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
-  // call site. `previous: null` because a row a moment old can have nothing
+  // call site. `mustCancel: false` because a row a moment old can have nothing
   // pending, so the cancel half is skipped.
-  await syncTaskNotifications(task, { previous: null });
+  await syncTaskNotifications(task, { mustCancel: false });
 
   return task;
 }
@@ -773,7 +774,9 @@ export async function updateTask(
   // this task and re-enqueue what it now owes (N-011). `existing` was already
   // read above, so an edit that touched none of those leaves the live rows
   // alone instead of replacing them with identical ones.
-  await syncTaskNotifications(updated, { previous: existing });
+  await syncTaskNotifications(updated, {
+    mustCancel: taskNotificationsDiffer(existing, updated),
+  });
 
   return updated;
 }
@@ -1011,7 +1014,7 @@ export async function createNextRecurrence(
   // `completeTask` and the bulk complete both mint successors through this
   // function, and a successor announced from only one of them is a gap that
   // depends on which button the planter pressed.
-  await syncTaskNotifications(next, { previous: null });
+  await syncTaskNotifications(next, { mustCancel: false });
 
   return next;
 }
@@ -1149,7 +1152,9 @@ export async function reopenTask(
   // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
   // key: the unique index is partial on `status <> 'cancelled'`, so the rows
   // this task's completion cancelled do not block the ones it now owes again.
-  await syncTaskNotifications(reopened, { previous: existing });
+  await syncTaskNotifications(reopened, {
+    mustCancel: taskNotificationsDiffer(existing, reopened),
+  });
 
   return reopened;
 }
@@ -1634,7 +1639,7 @@ export async function bulkRescheduleTasks(
   // (N-011). Skipping it would leave every one of these tasks with a pending
   // reminder aimed at the date they no longer have.
   if (writtenIds.length > 0) {
-    await syncTaskNotificationsFor(churchId, writtenIds);
+    await syncTaskNotificationsFor(churchId, writtenIds, { mustCancel: true });
   }
 
   return reconcileBulkTaskOperation(plan, writtenIds, missedReason).result;

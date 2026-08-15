@@ -346,9 +346,13 @@ export async function handleMeetingAttendanceFinalized(
     // come from the write's own `returning()`, so only rows that actually
     // landed are announced; the helper is best-effort and sequential, so this
     // can neither fail the generation nor slow it into a timeout.
+    // `mustCancel: false` for the same reason `importTaskTemplate` passes it:
+    // these ids come from the INSERT's own `returning()`, so every one of them
+    // is seconds old and provably has nothing pending to cancel.
     await syncTaskNotificationsFor(
       churchId,
-      created.map((row) => row.id)
+      created.map((row) => row.id),
+      { mustCancel: false }
     );
 
     if (process.env.NODE_ENV === "development") {

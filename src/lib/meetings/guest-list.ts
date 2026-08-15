@@ -131,14 +131,16 @@ export async function addToGuestList(
     // Re-synced even on the conflict path: the row already existing says
     // nothing about whether this person's reminders were ever enqueued, and the
     // sync is idempotent (the re-enqueue is absorbed by the dedupe keys).
-    await syncMeetingNotifications(churchId, meetingId);
+    await syncMeetingNotifications(churchId, meetingId, { mustCancel: false });
     return existing;
   }
 
-  // `previous` OMITTED, deliberately: the meeting itself did not change, so no
-  // differ would ever say "cancel", and the cancel is exactly what has to run —
-  // the whole audience is then re-enqueued with this guest in it.
-  await syncMeetingNotifications(churchId, meetingId);
+  // `mustCancel: false`, deliberately: ADDING a guest owes no cancel. The
+  // audience is re-read and re-enqueued either way, every recipient already on
+  // it is absorbed by their own dedupe keys, and the new guest has no row to
+  // collide with — so the cancel would only re-mint every pending row's id and
+  // buy a second write per recipient on a plant-sized Core Group.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: false });
 
   return record;
 }
@@ -166,7 +168,11 @@ export async function removeFromGuestList(
       )
     );
 
-  await syncMeetingNotifications(churchId, meetingId);
+  // `mustCancel: true` — this is the direction that needs it. `cancelByEntity`
+  // has no per-recipient form, so dropping the meeting's pending rows and
+  // re-enqueuing the audience without this person is the only way their
+  // reminders stop.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: true });
 }
 
 // ---------------------------------------------------------------------------

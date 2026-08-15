@@ -443,15 +443,28 @@ export async function resolveMeetingAudience(
  * that announcement was delivered is swallowed by the delivered row. Either
  * way the Core Group is told once that the meeting exists.
  *
- * `previous` says what the meeting looked like before the write, and it decides
- * only ONE thing — whether the cancel runs:
+ * `mustCancel` is ONE boolean with ONE meaning — "drop this meeting's pending
+ * rows before re-enqueuing" — and the CALLER decides it, because the caller is
+ * the only one holding the old row:
  *
- *   * `null` — the row was just created, so nothing can be pending.
- *   * a value — cancel only if the notifications would differ
- *     (`meetingNotificationsDiffer`).
- *   * OMITTED — the caller did not read the old row, so the cancel runs
- *     unconditionally. Always safe: at worst an unchanged set is replaced by an
- *     identical one.
+ *   * `createMeeting` passes `false`: a row a moment old can have nothing
+ *     pending.
+ *   * `updateMeeting` / `updateMeetingStatus` pass
+ *     `meetingNotificationsDiffer(existing, written)`.
+ *   * `addToGuestList` passes `false` — ADDING a recipient needs no cancel at
+ *     all. The audience is re-read and re-enqueued either way, the dedupe keys
+ *     absorb every recipient who was already on it, and the new guest has no
+ *     row to collide with. Cancelling would re-mint every pending row's id for
+ *     one extra guest.
+ *   * `removeFromGuestList` passes `true` — REMOVAL is the case that needs it,
+ *     because `cancelByEntity` is entity-wide and has no per-recipient form, so
+ *     re-enqueuing the audience without somebody is the only way their pending
+ *     reminders stop.
+ *
+ * It was an optional `previous` until #321 review round 2, which is one absent
+ * parameter carrying THREE meanings and which forced the add path into a
+ * full cancel-and-rewrite of the queue. A caller that genuinely does not know
+ * passes `true`; that is still always safe, and now it SAYS so.
  *
  * Never throws.
  */
@@ -459,10 +472,10 @@ export async function syncMeetingNotifications(
   churchId: string,
   meetingId: string,
   options: {
+    mustCancel: boolean;
     deps?: MeetingNotificationDeps;
     now?: Date;
-    previous?: MeetingNotificationFacts | null;
-  } = {}
+  }
 ): Promise<MeetingNotifyReport> {
   const deps = options.deps ?? dbMeetingNotificationDeps;
 
@@ -496,11 +509,7 @@ export async function syncMeetingNotifications(
 
   return runNotificationSync<MeetingNotificationReason>({
     ...meetingSubject(churchId, meetingId),
-    mustCancel:
-      options.previous === undefined
-        ? true
-        : options.previous !== null &&
-          meetingNotificationsDiffer(options.previous, written),
+    mustCancel: options.mustCancel,
     // The audience is resolved INSIDE the plan, after the cancel: a guest added
     // or removed since the last sync is the whole reason this runs again.
     plan: async () =>
@@ -652,17 +661,30 @@ export async function listGuestListUserIds(
 }
 
 /**
- * The meeting, with the team name its title may need.
+ * The meeting, with the team name its title may need — as a query builder.
  *
  * A projection of its own rather than a call into `service.ts`: that module
  * imports this one's siblings and a notification read must not be able to
  * cycle back through the service it is called from.
+ *
+ * Exported un-awaited for the same reason as the two audience reads above: the
+ * tenancy of the read can then be asserted with `.toSQL()` without a database.
+ *
+ * THE TEAM JOIN CARRIES THE CHURCH TOO, and it is not decoration. `teamName`
+ * flows into `meetingNotificationTitle` and out through
+ * `composeMeetingReminder` / `composeMeetingScheduled` into an emailed subject
+ * and body, so a `church_meetings.team_id` pointing at another plant's team
+ * would render that plant's team name into this plant's notification. Tenant
+ * isolation here is application-layer with no RLS behind it (`person-user.ts`
+ * says the same about the bridge one read up), so the predicate has to be in
+ * the join condition — with it, a foreign team resolves `teamName` as null and
+ * `meetingDisplayTitle` falls back to the stored-title branch.
  */
-export async function loadMeetingNotificationFacts(
+export function meetingNotificationFactsQuery(
   churchId: string,
   meetingId: string
-): Promise<MeetingNotificationFacts | null> {
-  const [row] = await db
+) {
+  return db
     .select({
       id: churchMeetings.id,
       churchId: churchMeetings.churchId,
@@ -675,7 +697,13 @@ export async function loadMeetingNotificationFacts(
       createdBy: churchMeetings.createdBy,
     })
     .from(churchMeetings)
-    .leftJoin(ministryTeams, eq(churchMeetings.teamId, ministryTeams.id))
+    .leftJoin(
+      ministryTeams,
+      and(
+        eq(churchMeetings.teamId, ministryTeams.id),
+        eq(ministryTeams.churchId, churchId)
+      )
+    )
     .where(
       and(
         eq(churchMeetings.churchId, churchId),
@@ -683,6 +711,14 @@ export async function loadMeetingNotificationFacts(
       )
     )
     .limit(1);
+}
+
+/** The meeting as the notifications need it, or null. */
+export async function loadMeetingNotificationFacts(
+  churchId: string,
+  meetingId: string
+): Promise<MeetingNotificationFacts | null> {
+  const [row] = await meetingNotificationFactsQuery(churchId, meetingId);
 
   return row ?? null;
 }

@@ -7,12 +7,12 @@
 process.env.UNSUBSCRIBE_TOKEN_SECRET = "test-unsubscribe-secret-0123456789";
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
 import { MS_PER_DAY } from "@/lib/datetime";
-import { sourceReader } from "@/lib/testing/source-span";
+import { stripComments } from "@/lib/testing/source-span";
 import {
   clearStillLivePredicates,
   runDispatch,
@@ -28,6 +28,8 @@ import {
   cancelMeetingNotifications,
   coreGroupUserIdsQuery,
   guestListUserIdsQuery,
+  meetingNotificationFactsQuery,
+  meetingNotificationsDiffer,
   meetingReminderType,
   registerMeetingStillLivePredicates,
   syncMeetingNotifications,
@@ -109,7 +111,15 @@ function harness(audience: { coreGroup?: string[]; guests?: string[] } = {}) {
     meetings,
     deps,
     calls: () => enqueueCalls,
-    /** Put a meeting in the store and enqueue what it owes. */
+    /**
+     * Put a meeting in the store and enqueue what it owes.
+     *
+     * `previous` is the harness's own convenience, NOT the sync's parameter:
+     * `syncMeetingNotifications` takes one honest `mustCancel` boolean, and the
+     * differ that answers it belongs to the caller (`updateMeeting` /
+     * `updateMeetingStatus` compute it exactly this way). `null` means a create,
+     * so no cancel.
+     */
     async write(
       row: MeetingNotificationFacts,
       options: { previous?: MeetingNotificationFacts | null; now?: Date } = {}
@@ -122,7 +132,10 @@ function harness(audience: { coreGroup?: string[]; guests?: string[] } = {}) {
       return syncMeetingNotifications(row.churchId, row.id, {
         deps,
         now: options.now ?? NOW,
-        previous,
+        mustCancel:
+          previous !== null &&
+          previous !== undefined &&
+          meetingNotificationsDiffer(previous, row),
       });
     },
   };
@@ -373,17 +386,34 @@ test("a guest invited AFTER the meeting was created is reminded at every future 
     );
   }
 
-  // The guest write happens, and `addToGuestList` re-syncs. `previous` is
-  // OMITTED, so the cancel runs unconditionally and the WHOLE audience is
-  // re-enqueued — the meeting itself did not change, so no differ would ever
-  // have said "cancel".
+  // The guest write happens, and `addToGuestList` re-syncs with
+  // `mustCancel: false` — ADDING a recipient owes no cancel. The audience is
+  // re-read, the organiser's live rows are absorbed by their own dedupe keys,
+  // and the new guest simply has no row to collide with.
   guests.push(GUEST);
+  const pendingBefore = h.queue.pending().map((row) => row.id);
   const report = await syncMeetingNotifications(CHURCH, MEETING, {
     deps: h.deps,
     now: NOW,
+    mustCancel: false,
   });
 
-  assert.ok(report.cancelled > 0, "the cancel ran without a `previous`");
+  assert.equal(
+    report.cancelled,
+    0,
+    "adding a guest cancelled rows — the add path owes no cancel"
+  );
+  assert.equal(
+    report.created,
+    MEETING_REMINDER_OFFSET_DAYS.length,
+    "only the new guest's rows were written — everyone else was absorbed by their dedupe keys"
+  );
+  for (const id of pendingBefore) {
+    assert.ok(
+      h.queue.pending().some((row) => row.id === id),
+      "a row the organiser already held was re-minted with a new id"
+    );
+  }
   for (const { days, rows } of reminders(h.queue)) {
     assert.deepEqual(
       rows.map((row) => row.recipientUserId).sort(),
@@ -404,8 +434,14 @@ test("a guest removed from the list keeps none of their pending reminders", asyn
     "the guest and the organiser were both reminded to begin with"
   );
 
+  // `removeFromGuestList` re-syncs with `mustCancel: true` — the direction that
+  // needs it, because `cancelByEntity` has no per-recipient form.
   guests.length = 0;
-  await syncMeetingNotifications(CHURCH, MEETING, { deps: h.deps, now: NOW });
+  await syncMeetingNotifications(CHURCH, MEETING, {
+    deps: h.deps,
+    now: NOW,
+    mustCancel: true,
+  });
 
   for (const { days, rows } of reminders(h.queue)) {
     assert.deepEqual(
@@ -416,30 +452,99 @@ test("a guest removed from the list keeps none of their pending reminders", asyn
   }
 });
 
-test("both guest-list writes ask for the re-sync", () => {
-  // The behaviour above is only reachable if the guest writes CALL it, and
-  // neither `addToGuestList` nor `removeFromGuestList` can be executed in a unit
-  // test's process — they are `db` writes. So the call sites are pinned at
-  // source, anchored on the declarations (a moved anchor throws rather than
-  // slicing the empty string, `memory/invariants.md` → Multi-Tenancy).
-  const guestList = readFileSync(
-    path.join(process.cwd(), "src/lib/meetings/guest-list.ts"),
-    "utf8"
-  );
-  const reader = sourceReader(guestList, "guest-list.ts");
+// ----------------------------------------------------------------------------
+// AC (VM-018): EVERY writer of `meeting_attendance` re-syncs
+// ----------------------------------------------------------------------------
+//
+// `guestListUserIdsQuery` reads EVERY `meeting_attendance` row for the meeting
+// as the reminder audience, so that table IS the audience and every write of it
+// changes who is owed mail. This was pinned as two anchored spans in
+// `guest-list.ts` — which could not see the two writers in `service.ts`
+// (`addAttendee`, `removeAttendee`), both of them live server actions, and a
+// removed attendee therefore kept pending reminders that dispatch would email.
+//
+// So it is a PROPERTY over the directory, the shape `tasks/notifications.test.ts`
+// already uses for `.insert(tasks)`: find every write of the table, attribute it
+// to the function it sits in, and require that function to ask for the re-sync.
+// A `db` write cannot be executed in a unit test's process, so this is
+// source-shaped by necessity; the behaviour it stands for is covered by the two
+// guest tests above.
 
-  assert.match(
-    reader.span(
-      "export async function addToGuestList",
-      "export async function removeFromGuestList"
-    ),
-    /syncMeetingNotifications\(churchId, meetingId\)/,
-    "addToGuestList does not re-sync — a guest invited after create is never reminded"
+/** Writers that legitimately owe no re-sync, each with the reason. */
+const ATTENDANCE_WRITERS_EXEMPT = new Map<string, string>([
+  [
+    "addTeamMembersToGuestList",
+    "createMeeting populates the roster and then syncs once, for the whole set",
+  ],
+  [
+    "recordAttendanceBatch",
+    "the post-meeting register: every offset is behind the start, so nothing is owed",
+  ],
+]);
+
+/** `source` cut into one chunk per function declaration, keyed by name. */
+function functionChunks(source: string): Map<string, string> {
+  const declaration = /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*[(<]/g;
+  const starts: { name: string; at: number }[] = [];
+  for (const match of source.matchAll(declaration)) {
+    starts.push({ name: match[1], at: match.index });
+  }
+
+  const chunks = new Map<string, string>();
+  starts.forEach(({ name, at }, index) => {
+    chunks.set(name, source.slice(at, starts[index + 1]?.at ?? source.length));
+  });
+  return chunks;
+}
+
+test("no meetings module writes meeting_attendance without asking for the re-sync", () => {
+  const dir = path.join(process.cwd(), "src/lib/meetings");
+  const modules = readdirSync(dir)
+    .filter((name) => /\.ts$/.test(name) && !/\.test\.ts$/.test(name))
+    .map((name) => ({
+      name,
+      source: stripComments(readFileSync(path.join(dir, name), "utf8")),
+    }));
+
+  const writers: { module: string; fn: string; syncs: boolean }[] = [];
+  for (const { name, source } of modules) {
+    for (const [fn, body] of functionChunks(source)) {
+      if (!/\.(insert|delete)\(meetingAttendance\)/.test(body)) continue;
+      writers.push({
+        module: name,
+        fn,
+        syncs: /syncMeetingNotifications\(/.test(body),
+      });
+    }
+  }
+
+  // Vacuity guards: a rename of the table or of the sync must fail here rather
+  // than quietly reduce the scan to nothing.
+  assert.ok(
+    writers.length >= 4,
+    `the writer scan found ${writers.length} writers of meeting_attendance — it has stopped seeing them`
   );
-  assert.match(
-    reader.after("export async function removeFromGuestList"),
-    /syncMeetingNotifications\(churchId, meetingId\)/,
-    "removeFromGuestList does not re-sync — a removed guest keeps their reminders"
+  assert.ok(
+    new Set(writers.map((writer) => writer.module)).size >= 2,
+    "the scan is looking at one module only — it cannot see the second writer file"
+  );
+  for (const exempt of ATTENDANCE_WRITERS_EXEMPT.keys()) {
+    assert.ok(
+      writers.some((writer) => writer.fn === exempt),
+      `"${exempt}" is exempted but is no longer a writer — the exemption now hides nothing, or hides the wrong thing`
+    );
+  }
+
+  const silent = writers
+    .filter(
+      (writer) => !writer.syncs && !ATTENDANCE_WRITERS_EXEMPT.has(writer.fn)
+    )
+    .map((writer) => `${writer.module}:${writer.fn}`);
+
+  assert.deepEqual(
+    silent,
+    [],
+    "a function changes the reminder audience and never re-syncs — a removed person keeps their pending reminders, an added one is never reminded"
   );
 });
 
@@ -589,6 +694,27 @@ test("the guest-list read scopes attendance, persons and users to the church", (
     params.filter((value) => value === CHURCH).length,
     3,
     "every table in the join carries the church id"
+  );
+  assert.ok(params.includes(MEETING));
+});
+
+test("the facts read scopes the meeting AND the team it names to the church", () => {
+  // `teamName` is not a decoration: it flows through `meetingNotificationTitle`
+  // into an emailed subject and body, so a `church_meetings.team_id` pointing at
+  // another plant's team would render THAT plant's team name into THIS plant's
+  // notification. The predicate belongs in the join condition — the WHERE cannot
+  // hold it, because a left join with no match must still return the meeting.
+  const { sql, params } = meetingNotificationFactsQuery(
+    CHURCH,
+    MEETING
+  ).toSQL();
+
+  assert.match(sql, /"church_meetings"\."church_id" = \$\d/);
+  assert.match(sql, /"ministry_teams"\."church_id" = \$\d/);
+  assert.equal(
+    params.filter((value) => value === CHURCH).length,
+    2,
+    "both tables in the join carry the church id"
   );
   assert.ok(params.includes(MEETING));
 });

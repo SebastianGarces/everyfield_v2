@@ -349,17 +349,24 @@ export interface TaskNotificationDeps extends NotificationSyncDeps {
  * the task now owes. N-011 defines reschedule that way, and a create is the
  * case where there was nothing to cancel.
  *
- * `previous` says what the task looked like before the write, and it decides
- * only ONE thing — whether the cancel runs:
+ * `mustCancel` is ONE boolean with ONE meaning — "drop this task's pending rows
+ * before re-enqueuing" — and the CALLER decides it, because the caller is the
+ * only one holding the old row:
  *
- *   * `null` — the row was just created, so nothing can be pending.
- *   * a value — cancel only if the notifications would differ
- *     (`taskNotificationsDiffer`). An edit that touched neither the schedule,
- *     the assignee nor the title leaves the live rows exactly where they are,
- *     and the re-enqueue is absorbed by their dedupe keys.
- *   * OMITTED — the caller did not read the old row. The cancel then runs
- *     unconditionally, which is always safe: at worst an unchanged pair is
- *     replaced by an identical one.
+ *   * a create (`createTask`, `createNextRecurrence`) passes `false`: a row a
+ *     moment old can have nothing pending, and the cancel would be a round trip
+ *     that provably matches zero rows.
+ *   * an edit (`updateTask`, `reopenTask`) passes
+ *     `taskNotificationsDiffer(existing, updated)`: an edit that touched neither
+ *     the schedule, the assignee nor the title leaves the live rows exactly
+ *     where they are, and the re-enqueue is absorbed by their dedupe keys.
+ *
+ * It was an optional `previous` until #321 review round 2, which is one absent
+ * parameter carrying THREE meanings (omitted = cancel unconditionally, `null` =
+ * do not, a value = ask the differ) — and the "omitted" arm was taken by two
+ * paths that provably owe no cancel at all. A caller that genuinely does not
+ * know passes `true`; that is still always safe (at worst an unchanged pair is
+ * replaced by an identical one), and now it SAYS so.
  *
  * Never throws. The task is already written; a failure here costs a
  * notification, not the write.
@@ -367,18 +374,14 @@ export interface TaskNotificationDeps extends NotificationSyncDeps {
 export function syncTaskNotifications(
   facts: TaskNotificationFacts,
   options: {
+    mustCancel: boolean;
     deps?: TaskNotificationDeps;
     now?: Date;
-    previous?: TaskNotificationFacts | null;
-  } = {}
+  }
 ): Promise<TaskNotifyReport> {
   return runNotificationSync<TaskNotificationSkip>({
     ...taskSubject(facts.churchId, facts.id),
-    mustCancel:
-      options.previous === undefined
-        ? true
-        : options.previous !== null &&
-          taskNotificationsDiffer(options.previous, facts),
+    mustCancel: options.mustCancel,
     plan: () => planTaskNotifications(facts, options.now ?? new Date()),
     deps: options.deps ?? dbTaskNotificationDeps,
   });
@@ -419,11 +422,19 @@ export async function cancelTaskNotificationsFor(
  * Sequential on purpose, the same reason `bulkCompleteTasks` emits its events
  * one at a time: a hundred-task reschedule must not fan a hundred concurrent
  * enqueue chains at the database.
+ *
+ * `mustCancel` is the same one boolean, applied to every task in the set,
+ * because a bulk write is one KIND of write: a reschedule
+ * (`bulkRescheduleTasks`) passes `true`, and the two paths that INSERT the rows
+ * they are announcing — `importTaskTemplate` and
+ * `handleMeetingAttendanceFinalized` — pass `false`, because a task seconds old
+ * cannot have a pending notification and a per-task cancel there is forty
+ * round trips that match nothing.
  */
 export async function syncTaskNotificationsFor(
   churchId: string,
   taskIds: readonly string[],
-  options: { deps?: TaskNotificationDeps; now?: Date } = {}
+  options: { mustCancel: boolean; deps?: TaskNotificationDeps; now?: Date }
 ): Promise<TaskNotifyReport[]> {
   const deps = options.deps ?? dbTaskNotificationDeps;
   if (taskIds.length === 0) return [];
@@ -433,7 +444,11 @@ export async function syncTaskNotificationsFor(
     const reports: TaskNotifyReport[] = [];
     for (const row of facts) {
       reports.push(
-        await syncTaskNotifications(row, { deps, now: options.now })
+        await syncTaskNotifications(row, {
+          deps,
+          now: options.now,
+          mustCancel: options.mustCancel,
+        })
       );
     }
     return reports;

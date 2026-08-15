@@ -211,10 +211,13 @@ export async function importTaskTemplate(
   // and these are precisely the tasks a planter did not type and is therefore
   // most likely to forget. Best-effort and sequential inside the helper, so it
   // can neither fail the import nor fan a whole checklist's worth of enqueue
-  // chains at the database at once.
+  // chains at the database at once. `mustCancel: false`: these rows were
+  // INSERTed a statement ago, so a cancel would be one round trip per imported
+  // task against a task that cannot yet have a pending notification.
   await syncTaskNotificationsFor(
     input.churchId,
-    created.map((task) => task.id)
+    created.map((task) => task.id),
+    { mustCancel: false }
   );
 
   return {
