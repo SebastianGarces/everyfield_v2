@@ -1,0 +1,79 @@
+-- #376 — `deferred` joins the `plant_assessments.status` vocabulary, and the
+-- vocabulary becomes a CHECK constraint.
+--
+-- WHY THIS EXISTS. `generateAssessment` marked the pending row `failed` on ANY
+-- throw, `RateLimitDeferralError` included. So `plant_assessments` — the
+-- surface an operator queries after a bad run, once the run's own log lines are
+-- gone — showed a plant the provider throttled out of the run and a plant whose
+-- judge answered with garbage as identical rows. That is precisely the
+-- ambiguity #36 was filed about: #372 shipped the distinction in the run
+-- summary and the log (`deferred` vs `failed`), and this is its DB half, which
+-- could not ship with it because it is a schema change.
+--
+-- WHY A CHECK AND NOT `ALTER TYPE … ADD VALUE`. There is no Postgres enum here
+-- to extend: `status` is `varchar(20)` and `AssessmentStatus` is a `.$type<>()`
+-- brand, which is a compile-time fact and nothing else (the same reasoning as
+-- 0024/0031/0032/0033). So the value needed no DDL to become storable — and
+-- that is the problem this file also fixes. Until now nothing in the DATABASE
+-- said which four words this column may hold, so a typo'd status was as
+-- writable as a real one and would sit in the table forever, invisible to the
+-- `status = 'complete'` reads that are supposed to consult it. The constraint
+-- is what makes `status = 'deferred'` mean "throttled" rather than "whatever
+-- the last writer happened to spell".
+--
+-- ADDITIVE AND NON-REWRITING. One statement, validated against existing rows
+-- with a scan, no rewrite and no lock beyond the ALTER's own. Only
+-- `generateAssessment` has ever written this column — `pending` on insert,
+-- `complete` on success, `failed` on a throw — and no seed or script inserts a
+-- `plant_assessments` row at all, so every existing row already satisfies the
+-- predicate. If validation ever DOES fail, do not widen the list: a row holding
+-- a fourth spelling is a bug to read, not a vocabulary to bless.
+--
+-- DEPLOY IN EITHER ORDER, and this claim is checked rather than inherited (the
+-- 0038 correction of 2026-08-13: "either order" was written there and was
+-- false, because `ON CONFLICT (…) WHERE …` against a database lacking the index
+-- is 42P10 on every call). Nothing here is inferred against a constraint:
+--   - code first — the build writes `deferred` into an UNCONSTRAINED varchar,
+--     which stores exactly as before; the distinction is already live, it is
+--     merely not yet enforced. Then this migration validates those rows and
+--     passes, because `deferred` is in the list it adds.
+--   - migration first — the old build writes only `pending`/`complete`/
+--     `failed`, all three in the list.
+-- Nothing in this repo applies migrations on deploy (`package.json` has only
+-- `"build": "next build"`), so code-first is the DEFAULT unless an operator
+-- runs `pnpm db:migrate`. That is safe HERE and is not a licence to assume it
+-- elsewhere.
+--
+-- NO READ PATH CHANGES. Every reader of this column selects `complete`
+-- POSITIVELY — `getLatestAssessment`, `getLatestCompleteSnapshot`,
+-- `selectPlantsForAssessment` and `readSnapshotHistory` — so a fourth value
+-- alters no selection, no count and no UI. A deferred plant contributes no
+-- `generatedAt` to the selection map, which is what keeps it looking
+-- never-assessed and re-selects it on the next run.
+--
+-- ROLLBACK (HR2). One statement, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "plant_assessments" DROP CONSTRAINT IF EXISTS "plant_assessments_status_check";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0040 hash>';
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033: the journal is the repository's
+-- list of migrations, `drizzle.__drizzle_migrations` is the database's record
+-- of what ran, and only the ledger row is deleted. Removing the journal entry
+-- instead makes drizzle-kit forget the migration while the ledger still claims
+-- it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0040 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0040_assessment_deferred_status.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786751032170;
+--
+-- Rolling back drops the ENFORCEMENT only. `deferred` rows stay valid and
+-- readable, and the application half needs no revert — which is why this is a
+-- safe migration to roll back alone, unlike 0033.
+ALTER TABLE "plant_assessments" ADD CONSTRAINT "plant_assessments_status_check" CHECK ("plant_assessments"."status" in ('pending', 'complete', 'failed', 'deferred'));

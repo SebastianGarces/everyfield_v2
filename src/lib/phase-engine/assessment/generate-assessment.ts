@@ -12,17 +12,23 @@
 //      snapshot with the what-changed delta, mark the assessment `complete`
 //   6. emit `plant.assessment.created`
 //
-// On any failure after step 3, the pending row is marked `failed` (status only)
-// — the last good complete snapshot is never touched, so instant reads keep
+// On any failure after step 3, the pending row is marked `failed` — or
+// `deferred` when the provider throttled us out of the run (#376) — status
+// only. The last good complete snapshot is never touched, so instant reads keep
 // serving the previous assessment (PE-011).
 // ============================================================================
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { plantAssessments, type PlantAssessment } from "@/db/schema";
+import {
+  plantAssessments,
+  type AssessmentFailureStatus,
+  type PlantAssessment,
+} from "@/db/schema";
 import { buildFactSnapshot } from "@/lib/phase-engine/signals";
 import {
+  isRateLimitDeferral,
   runAssessment,
   type AssessmentResult,
   type RateLimitEvent,
@@ -73,6 +79,66 @@ export interface AssessmentRunOptions {
   deadlineAt?: number;
 }
 
+/**
+ * How a run that produced no judgement is RECORDED (#376).
+ *
+ * ONE decision, exported, so the row an operator queries after a bad run and
+ * the summary `/api/phase-engine/assess` prints during it cannot disagree: a
+ * `RateLimitDeferralError` is throttling — the provider refused every attempt,
+ * so we learned nothing about the judge — and everything else is a judge
+ * failure. `isRateLimitDeferral` is the same predicate the runner branches on,
+ * imported rather than re-derived; a second `error.name === …` copy here is how
+ * the log and the table drift apart again.
+ *
+ * A deferral is NOT swallowed: the error is still re-thrown, so the runner
+ * keeps counting it, and the plant keeps its last good `complete` snapshot,
+ * stays dirty and is re-selected on the next run.
+ *
+ * A failure whose retry ladder was cut short by the RUN's clock
+ * (`isDeadlineTruncatedFailure`) deliberately stays `failed` here, exactly as
+ * it stays `failed` in the run summary: the provider answered and the answer
+ * was broken. Only the deadline flavour of the WARNING differs, and that is the
+ * runner's business, not the row's.
+ */
+export function assessmentStatusForFailure(
+  error: unknown
+): AssessmentFailureStatus {
+  return isRateLimitDeferral(error) ? "deferred" : "failed";
+}
+
+/**
+ * The status-only write that ends a run without a judgement.
+ *
+ * Exported as a STATEMENT rather than performed inline so its rendered SQL can
+ * be asserted without a live database — the `portfolioPlantsStatement` idiom.
+ * It sets `status` and nothing else: the `factSnapshot` recorded up-front stays
+ * exactly as the judge saw it, and the plant's last good `complete` row is
+ * never touched (PE-011).
+ *
+ * The write is a COMPARE-AND-SET on `status = 'pending'`, and that guard is what
+ * keeps a completed run from being demoted by a failure in step 6: the `try`
+ * this serves does not end at the `complete` flip — `emitPlantAssessmentCreated`
+ * runs after the insights are persisted and the row is already `complete`, so a
+ * throw from there would otherwise overwrite a good assessment with `failed` (or
+ * `deferred`) and hide it from every read, which all name `complete` positively.
+ * An empty rowcount is NOT an error: it means the run already reached a
+ * judgement, which is precisely the case that must not be demoted.
+ */
+export function markAssessmentUnjudgedStatement(
+  assessmentId: string,
+  error: unknown
+) {
+  return db
+    .update(plantAssessments)
+    .set({ status: assessmentStatusForFailure(error) })
+    .where(
+      and(
+        eq(plantAssessments.id, assessmentId),
+        eq(plantAssessments.status, "pending")
+      )
+    );
+}
+
 export interface GenerateAssessmentResult {
   assessment: PlantAssessment;
   result: AssessmentResult;
@@ -86,9 +152,10 @@ export interface GenerateAssessmentResult {
  *
  * @throws re-throws the underlying error AFTER the pending row is marked
  *         `failed`, so callers can observe/retry without the last good snapshot
- *         being overwritten. A `RateLimitDeferralError` travels the same path:
- *         the plant keeps its last good complete snapshot, stays dirty, and is
- *         re-selected on the next run (#36).
+ *         being overwritten. A `RateLimitDeferralError` travels the same path
+ *         and is RECORDED APART, as `deferred` (#376): the plant keeps its last
+ *         good complete snapshot, stays dirty, and is re-selected on the next
+ *         run (#36).
  */
 export async function generateAssessment(
   churchId: string,
@@ -169,12 +236,11 @@ export async function generateAssessment(
       persistedInsightCount: rows.length,
     };
   } catch (error) {
-    // Mark failed (status only). The last good complete snapshot is untouched,
-    // so instant reads keep serving the previous assessment (PE-011).
-    await db
-      .update(plantAssessments)
-      .set({ status: "failed" })
-      .where(eq(plantAssessments.id, pending.id));
+    // Mark the run unjudged (status only): `deferred` if the provider throttled
+    // us out of this run, `failed` if the judge answered badly (#376). The last
+    // good complete snapshot is untouched either way, so instant reads keep
+    // serving the previous assessment (PE-011).
+    await markAssessmentUnjudgedStatement(pending.id, error);
     throw error;
   }
 }

@@ -37,13 +37,40 @@ import { users } from "./user";
 // Enums
 // ----------------------------------------------------------------------------
 
-/** Lifecycle of a judge run snapshot. */
+/**
+ * Lifecycle of a judge run snapshot.
+ *
+ * `deferred` AND `failed` ARE BOTH "THE RUN ENDED WITHOUT A JUDGEMENT", AND
+ * TELLING THEM APART IS THE POINT (#36 → #376). A plant whose call was refused
+ * by the provider for every attempt (`RateLimitDeferralError`) says NOTHING
+ * about the health of the judge: the run was throttled, the plant keeps its
+ * last good `complete` snapshot, stays dirty and is re-selected on the next
+ * run. A plant whose judge answered with something broken is a defect somebody
+ * has to look at. `/api/phase-engine/assess` already reports the two apart in
+ * its log lines and its run summary (`deferred` vs `failed`, #372); this column
+ * is the surface an operator queries AFTERWARDS, when the run's own output is
+ * gone, and while both wrote `failed` it was the one place the distinction was
+ * lost — which is what made #36 hard to diagnose in the first place.
+ *
+ * NOTHING TREATS "NOT COMPLETE" AS "FAILED", and nothing may start: every read
+ * path selects `status = 'complete'` POSITIVELY (`getLatestAssessment`,
+ * `getLatestCompleteSnapshot`, `selectPlantsForAssessment`,
+ * `readSnapshotHistory`), so a fourth value changes no selection and no count.
+ * A read that wants failures must name `failed`, never `<> 'complete'`.
+ */
 export const assessmentStatuses = [
   "pending", // selected/queued, judge not yet run
   "complete", // judge run succeeded, insights written
-  "failed", // judge run errored; retained for observability
+  "failed", // the judge answered and the answer was broken
+  "deferred", // throttled out of this run; retried next run, NOT a failure
 ] as const;
 export type AssessmentStatus = (typeof assessmentStatuses)[number];
+
+/** How a run that produced no judgement ended — the two terminal non-`complete` states. */
+export type AssessmentFailureStatus = Extract<
+  AssessmentStatus,
+  "failed" | "deferred"
+>;
 
 /** Who an insight is written for. Network insights are privacy-gated (PE-012). */
 export const insightAudiences = ["planter", "network"] as const;
@@ -225,6 +252,15 @@ export const plantAssessments = pgTable(
       table.generatedAt
     ),
     index("plant_assessments_status_idx").on(table.status),
+    // The vocabulary, in the data (#376). `.$type<>()` on a varchar is a
+    // compile-time brand and nothing else — same reasoning as 0024/0031/0032/
+    // 0033 — so the status an operator queries this table by is closed here
+    // rather than by convention. It is what makes `status = 'deferred'` mean
+    // "throttled" and not "whatever the last writer happened to spell".
+    check(
+      "plant_assessments_status_check",
+      sql`${table.status} in (${inList(assessmentStatuses)})`
+    ),
   ]
 );
 
