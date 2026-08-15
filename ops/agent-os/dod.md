@@ -145,6 +145,7 @@ same change**; a new route or table alone does not.
 - The *why* goes in the matching `memory/invariants/<domain>.md` file **only when it is not derivable
   from the source**. Never write elaboration without the index line — the index is what agents read.
 - Point at the source; never mirror it. No incident narration, no dates, no test-file citations.
-- The tree stays under the budget stated in `memory/index.md` and enforced by
-  `ops/agent-os/tests/memory-budget.test.mjs`. That budget is deliberately tight: adding a rule may
-  require shortening another. Raising the number is a ruling, not a fix.
+- **Keep each rule to 1–3 sentences.** There is no byte cap any more (ruled 2026-08-15 — the cap was
+  re-pinned four times in two days and had become a tax on unrelated passes), so brevity is the
+  reviewer's job rather than a test's. The failure it now guards against is prose, not rule count: a
+  rule that needs a paragraph is a rule whose *why* belongs in `memory/invariants/<domain>.md`.

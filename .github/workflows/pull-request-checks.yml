@@ -57,11 +57,11 @@ jobs:
       # skipping the workflow would silently block the merge.
       #
       # Anything that is not markdown — including .json, .yml, and this
-      # workflow itself — takes the full path. So does anything under memory/,
-      # even though every file there is markdown: the size budget in
-      # memory/index.md is enforced by ops/agent-os/tests/memory-budget.test.mjs,
-      # and skipping the suite would make that test inert on exactly the PRs it
-      # exists to police.
+      # workflow itself — takes the full path. memory/ no longer does: it was
+      # carved out only to keep ops/agent-os/tests/memory-budget.test.mjs live
+      # on the PRs it policed, and that test was deleted with its budget on
+      # 2026-08-15. No test reads memory/ now, so its files are ordinary
+      # markdown. Restore the carve-out the day one does again.
       #
       # This shortcut is defined by a PR's file list, so it only applies to a
       # `pull_request` event. A manual run has no `github.event.pull_request`,
@@ -84,8 +84,7 @@ jobs:
             --jq '.[].filename')
           echo "Changed files:"
           printf '%s\n' "$files"
-          non_docs=$( { printf '%s\n' "$files" | grep -vE '\.md$'
-                        printf '%s\n' "$files" | grep -E '^memory/'; } || true )
+          non_docs=$(printf '%s\n' "$files" | grep -vE '\.md$' || true)
           if [ -n "$files" ] && [ -z "$non_docs" ]; then
             echo "Markdown only — skipping install, format, lint, typecheck and build."
             echo "docs_only=true" >> "$GITHUB_OUTPUT"

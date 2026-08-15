@@ -150,7 +150,7 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-010** | Notifications are church-scoped: a query for a user's notifications can never return another church's rows. |
 | **N-011** | A pending notification can be **cancelled by entity reference**, so a caller that deletes or reschedules the underlying thing does not send a stale notification. |
 | **N-012** | Multiple pending notifications in the same category for the same recipient within a batching window collapse into **one** email listing them, rather than one email each. The in-app feed keeps them as separate rows. |
-| **N-013** | A recurring digest summarises the recipient's open items for the period. Its cadence is a per-user preference within the `digest` category. |
+| **N-013** | A recurring digest summarises the recipient's open items for the period. Two owners decide different halves: **the recipient** sets whether they get one and how often, as a per-user preference within the `digest` category; **the church** sets the day and hour it lands, in church settings. The default is **Sunday 16:00 in the church's timezone** — after the gathering, facing the week the reader is about to act in. The hour is part of the requirement, not a detail: delivered at the period boundary in UTC, a Sunday digest arrives Saturday evening in the Americas. The weekday governs the weekly cadence; the hour governs both. |
 | **N-014** | Nothing is sent for a subject that is in the past or already resolved at dispatch time — a task completed before its overdue notice fires produces no notice. |
 | **N-015** | A failed delivery is retried with backoff up to a bounded attempt count, then recorded as failed with its error. A permanent failure (invalid address, hard bounce) is not retried. |
 | **N-016** | Delivery outcome per channel is recorded — queued, sent, failed, cancelled, suppressed-by-preference — so "did it send?" is answerable without reading provider logs. |
@@ -164,7 +164,7 @@ that no longer exists is worse than no notification, because it teaches the user
 
 | ID | Requirement |
 |----|-------------|
-| **N-018** | Quiet hours: a user-configurable window during which email is held rather than sent. **Requires a per-user timezone** (see Open Questions). |
+| **N-018** | Quiet hours: a user-configurable window during which email is held rather than sent. Reads the church timezone that N-013's send hour establishes; a per-user zone would layer on top of it, and is not assumed here. |
 | **N-019** | Role-aware preference defaults — a coach's sensible defaults differ from a planter's. |
 | **N-020** | An admin-visible delivery log for support ("did this planter get their reminder?"). |
 
@@ -443,11 +443,5 @@ dispatch works.
 
 ## Open Questions
 
-1. **Where does a per-user timezone come from?** Quiet hours (N-018) and any "send at 8am local" behaviour
-   need one, which raises a backfill question: infer it from the church location, ask at signup, or default
-   to a single zone? **N-018 is Should Have and gated on this ruling** — it is called out rather than
-   quietly assumed.
-2. **Digest cadence default.** Weekly is assumed. Whether the default is weekly-on-Monday, weekly-on-Sunday
-   (before a Sunday-heavy week) or user-chosen at first send is unruled. Affects N-013's default only.
-3. **In-app retention.** How long a read notification stays in the feed before pruning. Unbounded growth is
+1. **In-app retention.** How long a read notification stays in the feed before pruning. Unbounded growth is
    a real cost at cohort scale; no ruling needed for v1 correctness.
