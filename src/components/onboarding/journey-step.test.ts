@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { getTemplateById } from "@/lib/documents";
 import { resolveMergeValues } from "@/lib/documents/merge";
 import {
+  JOURNEY_STAGE_OPTIONS,
   isSkippableOnboardingStep,
   onboardingStep,
 } from "@/lib/onboarding/steps";
@@ -272,6 +273,38 @@ test("a validation message is attached to the question that failed", () => {
   assert.match(STEP_CODE, /refuse\("stage",/);
   // A failed SAVE is not a field error — it sits by the button that tried.
   assert.match(STEP_CODE, /refuse\(\s*"form",/);
+});
+
+test("every stage and launch-date radio has an accessible name", () => {
+  // #397. shadcn's `RadioGroupItem` renders `<button type="button"
+  // role="radio">`, and `<label for>` names FORM CONTROLS — it moves a click to
+  // the button and contributes nothing to the accessible name of an element
+  // whose role is `radio`. So all ten radios on this step were unnamed: axe
+  // reported one `button-name` violation over ten nodes, and a screen reader
+  // read "radio button, not checked" ten times with nothing to tell them apart
+  // — on the step the alpha demo path walks through.
+  //
+  // `aria-labelledby` pointing at the label is the fix, and the `htmlFor` stays
+  // because it is what makes the words clickable. Both halves are asserted:
+  // dropping either one is a regression with no other symptom in this suite.
+  assert.match(STEP_CODE, /aria-labelledby=\{labelId\}/);
+  assert.match(STEP_CODE, /<Label\s+id=\{labelId\}\s+htmlFor=\{id\}/);
+  assert.match(STEP_CODE, /const labelId = `\$\{id\}-label`;/);
+
+  // The hint (and the phase name beside it) are the DESCRIPTION, announced
+  // after the name rather than folded into it.
+  assert.match(
+    STEP_CODE,
+    /aria-describedby=\{tag \? `\$\{hintId\} \$\{tagId\}` : hintId\}/
+  );
+  assert.match(STEP_CODE, /<p id=\{hintId\}/);
+
+  // ONE component draws all ten options, which is why one fix reaches all ten:
+  // the two launch-date choices and the eight stages (seven phases plus the
+  // "not sure" escape hatch) are the same `ChoiceOption`.
+  assert.equal((STEP_CODE.match(/<ChoiceOption/g) ?? []).length, 3);
+  assert.equal(JOURNEY_STAGE_OPTIONS.length, 8);
+  assert.equal((STEP_CODE.match(/<RadioGroupItem/g) ?? []).length, 1);
 });
 
 test("revealing the date input moves the caret into it", () => {
