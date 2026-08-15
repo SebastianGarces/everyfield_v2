@@ -2,12 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { and, eq, exists, sql as rawSql, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
-
-import { db } from "@/db";
-import { churches, users } from "@/db/schema";
-
 import {
   NOTIFICATION_CATEGORIES,
   OVERSIGHT_CONSENT_SURFACES,
@@ -35,17 +29,19 @@ import {
   oversightMilestoneType,
   fanOutToOversightOrg,
   invitingOrgForInvitation,
-  listOversightAdminsOfOrg,
-  oversightAudienceCondition,
   type InvitingInvitation,
   type OversightFanOutDeps,
   type OversightOrgFanOutDeps,
-  type OversightRecipient,
   announceSendingChurchDeclinedNetwork,
   announceSendingChurchJoinedNetwork,
   announceSendingChurchLeftNetwork,
 } from "./oversight";
-import type { OversightOrgIds } from "./oversight-admin";
+import type {
+  OversightAudience,
+  OversightMisprovisionedRow,
+  OversightRecipient,
+} from "./oversight-audience";
+import { OVERSIGHT_ADMIN, type OversightOrgIds } from "./oversight-admin";
 
 // ----------------------------------------------------------------------------
 // The oversight model, tested at the seam `enqueue` sits behind.
@@ -100,16 +96,20 @@ class FakeOversightEnqueue
       sharing?: boolean;
       /** Admins by org id, for the one-org audience. */
       adminsByOrg?: Record<string, OversightRecipient[]>;
+      /** The other half of the partition — rows the pairing rejected. */
+      misprovisioned?: OversightMisprovisionedRow[];
     } = {}
   ) {
     this.sharing = options.sharing ?? true;
     this.adminsByOrg = options.adminsByOrg;
+    this.misprovisioned = options.misprovisioned ?? [];
   }
 
   readonly adminsByOrg?: Record<string, OversightRecipient[]>;
+  readonly misprovisioned: OversightMisprovisionedRow[];
 
-  async listOversightRecipients(): Promise<OversightRecipient[]> {
-    return this.recipients;
+  async listOversightRecipients(): Promise<OversightAudience> {
+    return { recipients: this.recipients, misprovisioned: this.misprovisioned };
   }
 
   /**
@@ -120,15 +120,24 @@ class FakeOversightEnqueue
    */
   async listOversightAdminsOfOrg(
     org: OversightOrgIds
-  ): Promise<OversightRecipient[]> {
+  ): Promise<OversightAudience> {
     this.orgsAsked.push(org);
+    const misprovisioned = this.misprovisioned;
+
     if (this.adminsByOrg) {
       const key = org.sendingChurchId ?? org.sendingNetworkId;
-      return key ? (this.adminsByOrg[key] ?? []) : [];
+      return {
+        recipients: key ? (this.adminsByOrg[key] ?? []) : [],
+        misprovisioned,
+      };
     }
     // Default: the org has the same admins the plant-wide list names, so the
     // body/gate tests below read exactly as they did before the audience split.
-    return org.sendingChurchId || org.sendingNetworkId ? this.recipients : [];
+    return {
+      recipients:
+        org.sendingChurchId || org.sendingNetworkId ? this.recipients : [],
+      misprovisioned,
+    };
   }
 
   async enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult> {
@@ -555,6 +564,7 @@ test("with the plant sharing, every oversight recipient gets a row", async () =>
     created: 2,
     skipped: 0,
     failed: 0,
+    misprovisioned: 0,
   });
   assert.deepEqual(
     deps.written.map((row) => row.recipientUserId),
@@ -1331,8 +1341,8 @@ test("the org fan-out cannot widen to the plant", async () => {
   // shape that has no plant-wide lister on it at all, so there is nothing for a
   // future edit to reach for by accident.
   const deps = {
-    async listOversightAdminsOfOrg(): Promise<OversightRecipient[]> {
-      return [{ id: ADMIN_A }];
+    async listOversightAdminsOfOrg(): Promise<OversightAudience> {
+      return { recipients: [{ id: ADMIN_A }], misprovisioned: [] };
     },
     async enqueue(_input: EnqueueNotificationInput): Promise<EnqueueResult> {
       return {
@@ -1355,19 +1365,6 @@ test("the org fan-out cannot widen to the plant", async () => {
 
   assert.equal(report.considered, 1);
   assert.equal(report.created, 1);
-});
-
-test("listOversightAdminsOfOrg refuses an org with no ids without touching the database", async () => {
-  // The production function, called directly. `reaches.length === 0` returns
-  // early, so this asserts the guard rather than the query — and it is the
-  // guard that keeps "no org" from becoming "no WHERE clause".
-  assert.deepEqual(
-    await listOversightAdminsOfOrg({
-      sendingChurchId: null,
-      sendingNetworkId: null,
-    }),
-    []
-  );
 });
 
 // ----------------------------------------------------------------------------
@@ -1488,68 +1485,87 @@ test("a plant-wide milestone composed with an org anchor writes nothing", () => 
 });
 
 // ----------------------------------------------------------------------------
-// `oversightAudienceCondition` itself — the fail-open it must not have (#411)
+// The cross-paired admin: a data defect, counted rather than hidden
+// (ruled 2026-08-13, #411 → #427)
 // ----------------------------------------------------------------------------
+//
+// Both oversight FKs live on one `users` row and neither implies the other, so
+// a row can carry a sending church's id while holding `network_admin` — or hold
+// no oversight role at all. The pairing is right to exclude such a row. What
+// was wrong was that the exclusion happened inside a `WHERE`, where nothing
+// could count it: the defect was invisible to the product, which is why it went
+// unnoticed.
+//
+// WHICH ROWS ARE CLASSIFIED WHICH WAY is `oversight-audience.test.ts`'s
+// question — it walks the pairing table over the whole role grid. What is
+// asserted here is what the fan-out DOES with the audience's second array: it
+// counts it and logs it, and enqueues for the first array only.
 
-test("naming no org matches nobody, never everybody", () => {
-  // The `undefined` return is the whole safety of the builder's empty case: an
-  // `and()` whose only arm is undefined collapses to "every row in `users`".
-  assert.equal(
-    oversightAudienceCondition(users, {
-      sendingChurchId: null,
-      sendingNetworkId: null,
-    }),
-    undefined
-  );
+/** The pairing, and the OTHER pairing's role — the cross of the two. */
+const CROSS_PAIRED: Omit<OversightMisprovisionedRow, "id"> = {
+  role: OVERSIGHT_ADMIN.network.role,
+  reachedBy: OVERSIGHT_ADMIN.sending_church.fk,
+};
 
-  // THE FAIL-OPEN, RENDERED. What "the caller turns undefined into no
-  // recipients" is protecting against, shown rather than asserted in prose: hand
-  // that `undefined` to `and()` — as the digest's clause 4 did — and drizzle
-  // DROPS the arm, so the correlated `exists (…)` keeps only "the rest" and is
-  // satisfied by every row in `users`. Every plant is then owed a digest
-  // forever, which is a worse version of the starvation this builder fixes.
-  const collapsed = db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        oversightAudienceCondition(users, {
-          sendingChurchId: null,
-          sendingNetworkId: null,
-        }),
-        eq(users.role, "planter")
-      )
-    )
-    .toSQL();
-
-  assert.doesNotMatch(collapsed.sql, /sending_church_id|sending_network_id/);
-});
-
-test("the non-nullable call is STATICALLY SQL, so the digest cannot re-open the fail-open", () => {
-  // The compiler carries this one. Both refs below are columns, never null, so
-  // the builder's first overload applies and the annotation below type-checks —
-  // exactly the call `plantsOwedDigestQuery` makes. Make either ref nullable and
-  // `tsc` fails HERE and at the digest, instead of `and()` silently swallowing
-  // the audience at run time. `pnpm typecheck` is the assertion; this runtime
-  // check only pins that the value really is a rendered predicate.
-  const owedDigestRecipient = alias(users, "owed_digest_recipient");
-  const audience: SQL = oversightAudienceCondition(owedDigestRecipient, {
-    sendingChurchId: churches.sendingChurchId,
-    sendingNetworkId: churches.sendingNetworkId,
+test("a cross-paired row is counted and logged, and gets no notification", async (t) => {
+  const logged: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    logged.push(...args);
   });
 
-  const { sql } = db
-    .select({ id: churches.id })
-    .from(churches)
-    .where(
-      exists(
-        db
-          .select({ one: rawSql`1` })
-          .from(users)
-          .where(audience)
-      )
-    )
-    .toSQL();
+  // The defect arrives in its own array, so it cannot sit between two
+  // recipients any more — which is the point of the partition. Two recipients
+  // are still named, because the count that matters is that BOTH are enqueued
+  // while the defect is not.
+  const deps = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
+    misprovisioned: [{ id: ADMIN_OF_OTHER_ORG, ...CROSS_PAIRED }],
+  });
 
-  assert.match(sql.replace(/"/g, ""), /owed_digest_recipient\.role = \$\d+/);
+  const report = await fanOutToOversight(deps, CHURCH, (recipientId) =>
+    composeMilestone(facts("phase_advanced"), recipientId)
+  );
+
+  assert.equal(report.misprovisioned, 1);
+
+  // The signal is counted WITHIN `considered`, so the report still adds up.
+  assert.equal(report.considered, 3);
+  assert.equal(
+    report.recorded + report.skipped + report.failed + report.misprovisioned,
+    report.considered
+  );
+
+  // And nothing was enqueued for them — not written, not even attempted, so
+  // the exclusion does not depend on `enqueue` refusing it a second time.
+  assert.deepEqual(
+    deps.written.map((row) => row.recipientUserId),
+    [ADMIN_A, ADMIN_B]
+  );
+  assert.deepEqual(
+    deps.calls.map((row) => row.recipientUserId),
+    [ADMIN_A, ADMIN_B]
+  );
+
+  // The log names the row AND why it was turned away. A count with no
+  // identifier cannot be acted on, which is the state this ruling ends.
+  const context = logged.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === "object" && entry !== null
+  );
+  assert.ok(context);
+  assert.equal(context.recipientUserId, ADMIN_OF_OTHER_ORG);
+  assert.equal(context.role, CROSS_PAIRED.role);
+  assert.equal(context.reachedBy, CROSS_PAIRED.reachedBy);
+});
+
+test("a clean fan-out reports zero, so the signal means something", async () => {
+  // The counter is only useful if it is normally silent — asserted here rather
+  // than assumed, because a count that is always non-zero is not a signal.
+  const deps = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }]);
+
+  const report = await fanOutToOversightOrg(deps, INVITER, (recipientId) =>
+    composeMilestone(facts("invitation_accepted"), recipientId)
+  );
+
+  assert.equal(report.misprovisioned, 0);
+  assert.equal(report.recorded, 2);
 });

@@ -91,7 +91,7 @@ import {
   type InvitationRequest,
 } from "@/lib/invitations/core";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
-import { listOversightAdminsOfOrg } from "@/lib/notifications/oversight";
+import { listOversightAdminsOfOrg } from "@/lib/notifications/oversight-audience";
 import { listOversightPlants } from "@/lib/oversight/read";
 
 const KEEP = process.argv.includes("--keep");
@@ -777,23 +777,57 @@ async function main() {
       sendingChurchId: sendingChurch.id,
       sendingNetworkId: null,
     });
-    const scAudienceIds = scAudience.map((row) => row.id);
+    const scRecipientIds = scAudience.recipients.map((row) => row.id);
+    const defectOf = (id: string) =>
+      scAudience.misprovisioned.find((row) => row.id === id);
 
-    assert.ok(scAudienceIds.includes(scAdmin.id));
-    assert.ok(scAudienceIds.includes(scAdmin2.id));
-    assert.ok(
-      !scAudienceIds.includes(dualFkNetAdmin.id),
-      "a network admin with a stray sending_church_id is not this org's admin"
+    assert.ok(scRecipientIds.includes(scAdmin.id));
+    assert.ok(scRecipientIds.includes(scAdmin2.id));
+
+    // RULED 2026-08-13 (#427): the EXCLUSION is unchanged — neither row below is
+    // a recipient — but the SILENCE is not. Both used to vanish inside the SQL,
+    // which is why the provisioning defect behind them could not be counted.
+    // Asserting their ABSENCE, as this item did until then, is what the ruling
+    // reverses: they must arrive carrying why they are not recipients. They now
+    // arrive in their own half of the audience, so "not a recipient" is read off
+    // the partition rather than off a flag.
+    //
+    // Both rows are hostile shapes on purpose. No path in `src/` writes either:
+    // `register/actions.ts` is the only `insert(users)` and it pairs every role
+    // with its own FK, nulling the others. So a row reaching here at all means
+    // something outside the application wrote it, which is exactly the class of
+    // defect worth a count.
+    assert.deepEqual(
+      defectOf(dualFkNetAdmin.id),
+      {
+        id: dualFkNetAdmin.id,
+        role: "network_admin",
+        reachedBy: "sendingChurchId",
+      },
+      "a network admin with a stray sending_church_id is reported, not hidden"
     );
-    // …and the church-level member of the sending church never was.
-    assert.ok(!scAudienceIds.includes(scTeammate.id));
-    ok("a sending church's audience is its OWN admins, by role and by FK");
+    assert.ok(!scRecipientIds.includes(dualFkNetAdmin.id));
+
+    assert.deepEqual(
+      defectOf(scTeammate.id),
+      {
+        id: scTeammate.id,
+        role: "team_member",
+        reachedBy: "sendingChurchId",
+      },
+      "…and so is a church-level role carrying an oversight FK"
+    );
+    assert.ok(!scRecipientIds.includes(scTeammate.id));
+
+    ok(
+      "a sending church's audience is its OWN admins; every cross-paired row is counted, not hidden"
+    );
 
     const netAudience = await listOversightAdminsOfOrg({
       sendingChurchId: null,
       sendingNetworkId: otherNetwork.id,
     });
-    const netAudienceIds = netAudience.map((row) => row.id);
+    const netAudienceIds = netAudience.recipients.map((row) => row.id);
     assert.ok(netAudienceIds.includes(dualFkNetAdmin.id));
     assert.ok(netAudienceIds.includes(otherNetAdmin.id));
     ok("…and the same row IS an admin of the network it actually administers");

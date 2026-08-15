@@ -1,15 +1,14 @@
-import { and, eq, or, type SQL, type SQLWrapper } from "drizzle-orm";
-import type { alias } from "drizzle-orm/pg-core";
-
-import { db } from "@/db";
-import { churches, users, type OrganizationInvitationType } from "@/db/schema";
+import type { OrganizationInvitationType } from "@/db/schema";
 import {
   noOversightOrg,
-  OVERSIGHT_ADMIN_ROWS,
   oversightOrgOfKind,
-  type OversightAdminPairing,
   type OversightOrgIds,
 } from "./oversight-admin";
+import {
+  listOversightAdminsOfOrg,
+  listOversightRecipientsForChurch,
+  type OversightAudience,
+} from "./oversight-audience";
 import {
   anchorId,
   churchAnchor,
@@ -54,10 +53,11 @@ import {
 // Enqueue stays the single gatekeeper
 // ----------------------------------------------------------------------------
 //
-// Nothing here reads `church_privacy_settings`. These functions resolve WHO the
-// oversight recipients of a plant are and compose WHAT to say; whether the
-// plant is sharing at all is `enqueue`'s question, asked per recipient, at the
-// moment the row would be written. Two consequences worth stating:
+// Nothing here reads `church_privacy_settings`. These functions compose WHAT to
+// say and fan it out — WHO the audience is belongs to `./oversight-audience.ts`
+// — and whether the plant is sharing at all is `enqueue`'s question, asked per
+// recipient, at the moment the row would be written. Two consequences worth
+// stating:
 //
 //   * A plant that is not sharing gets no row, ever — not a row that is later
 //     filtered, not a suppressed delivery. The refusal is total, because it
@@ -104,11 +104,6 @@ export type OversightMilestoneKind = (typeof oversightMilestoneKinds)[number];
 /** The `type` discriminator carried on the notification row. */
 export function oversightMilestoneType(kind: OversightMilestoneKind): string {
   return `oversight.milestone.${kind}`;
-}
-
-/** One oversight recipient of a plant. */
-export interface OversightRecipient {
-  id: string;
 }
 
 /** The shape of an `organization_invitations` row this module reads. */
@@ -179,10 +174,22 @@ export interface OversightFanOutReport {
   created: number;
   /** Recipients `enqueue` refused — not sharing, or not eligible. */
   skipped: number;
-  /** Recipients considered at all. Zero means the plant has no oversight. */
+  /** Rows considered at all. Zero means the plant has no oversight. */
   considered: number;
   /** Infrastructure failures, swallowed so the caller's action survives. */
   failed: number;
+  /**
+   * Rows the org FK reached whose ROLE does not administer that kind of org —
+   * a data defect, counted and logged instead of silently dropped. Nothing is
+   * enqueued for them; see `OversightAudience` (`./oversight-audience.ts`),
+   * whose second array they arrive in.
+   *
+   * It is a sub-count of `considered`, so
+   * `considered === recorded + skipped + failed + misprovisioned` still holds.
+   * A non-zero value is never normal and never the fan-out's fault: it says a
+   * `users` row was provisioned with an oversight FK its role cannot use.
+   */
+  misprovisioned: number;
 }
 
 const emptyReport = (): OversightFanOutReport => ({
@@ -191,6 +198,7 @@ const emptyReport = (): OversightFanOutReport => ({
   skipped: 0,
   considered: 0,
   failed: 0,
+  misprovisioned: 0,
 });
 
 /** Enqueueing is the only thing every fan-out shares. */
@@ -202,7 +210,7 @@ interface OversightEnqueueDep {
 /** The PLANT-wide audience: everyone with oversight of this plant. */
 export interface OversightFanOutDeps extends OversightEnqueueDep {
   /** Who oversees this plant right now. */
-  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+  listOversightRecipients(churchId: string): Promise<OversightAudience>;
 }
 
 /**
@@ -215,7 +223,7 @@ export interface OversightFanOutDeps extends OversightEnqueueDep {
  * deps object happened to expose it.
  */
 export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
-  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightRecipient[]>;
+  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightAudience>;
 }
 
 /**
@@ -224,17 +232,37 @@ export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
  * skipped and the loop continues. A shared `dedupeKey` is safe and intended —
  * the index includes `recipient_user_id`, so one key per EVENT does not let
  * admin #1 swallow admin #2's row.
+ *
+ * IT TAKES A PARTITIONED AUDIENCE, so "a cross-paired row is never enqueued" is
+ * not something this function does — it is something it cannot help doing. The
+ * defects are not in `recipients`, so there is no branch here to skip them with
+ * and none to get wrong. What is left to do is REPORT them, which is the loop
+ * below: `console.error`, not `warn`, because a row provisioned with an
+ * oversight FK its role cannot use is a defect in stored data, and the whole
+ * point of the ruling is that it stops being something only a database query
+ * could notice.
  */
 async function fanOutTo(
   deps: OversightEnqueueDep,
-  recipients: OversightRecipient[],
+  audience: OversightAudience,
   compose: (recipientId: string) => EnqueueNotificationInput,
   context: Record<string, unknown>
 ): Promise<OversightFanOutReport> {
   const report = emptyReport();
-  report.considered = recipients.length;
+  report.considered =
+    audience.recipients.length + audience.misprovisioned.length;
+  report.misprovisioned = audience.misprovisioned.length;
 
-  for (const recipient of recipients) {
+  for (const row of audience.misprovisioned) {
+    console.error("oversight fan-out reached a cross-paired admin", {
+      ...context,
+      recipientUserId: row.id,
+      role: row.role,
+      reachedBy: row.reachedBy,
+    });
+  }
+
+  for (const recipient of audience.recipients) {
     try {
       const result = await deps.enqueue(compose(recipient.id));
       if (result.status === "recorded") {
@@ -804,146 +832,6 @@ export function announceLaunchDateChanged(
 // ----------------------------------------------------------------------------
 // Production wiring
 // ----------------------------------------------------------------------------
-
-/**
- * A `users` table reference — the base table, or an `alias()` of it, so a
- * correlated subquery can name its own candidate recipient.
- *
- * BOTH ARMS ARE CONCRETE, deliberately. A structural `{ role: AnyColumn; … }`
- * also accepts both, and reads as the more permissive, more honest type — but
- * `AnyColumn` is drizzle's `any`-shaped column, so every `eq()` in the builder
- * below loses BOTH of its operand checks: `eq(ref.role, "not_a_role")` and
- * `eq(ref.sendingChurchId, 12345)` compile clean, on the one predicate in this
- * domain that decides a multi-tenant audience. The union keeps drizzle's own
- * typing, so the role literal is checked against the `user_role` enum and the
- * org id against a uuid column, by the compiler rather than by a `satisfies`
- * someone has to remember to write.
- */
-type UsersRef = typeof users | ReturnType<typeof alias<typeof users, string>>;
-
-/**
- * An org id to match against: a literal loaded by an earlier query, or a COLUMN
- * to correlate with (the sweep's `churches.sending_*_id` of the outer row). The
- * same idiom `ChurchIdRef` uses in `./oversight-digest.ts`, and for the same
- * reason: one definition of the audience, asked two ways.
- *
- * `SQLWrapper` rather than `AnyColumn` for the correlated half — a column IS
- * one, and it leaves `eq()` free to reject a value that is not what a uuid
- * column compares against.
- */
-type OrgIdRef = string | SQLWrapper;
-
-/**
- * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
- * SQL. One arm per row of `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), in the
- * table's order, with the role and the FK both read off the row; why the
- * pairing is a table and why the arms carry no `OVERSIGHT_ROLES` floor are in
- * that header and in `memory/invariants/multi-tenancy.md`.
- *
- * NAMING NO ORG RETURNS `undefined` — "no recipients" — AND THE OVERLOADS, NOT
- * A COMMENT, MAKE THE CALLER FACE IT: drizzle's `and()` reads it as the
- * opposite (`memory/invariants.md` → Multi-Tenancy). Non-nullable refs in,
- * `SQL` out; nullable refs in, `SQL | undefined` out and the guard is not
- * optional. The arms test `null` explicitly rather than truthiness so the first
- * overload's `SQL` promise is a property of the code, not of the values passed.
- */
-export function oversightAudienceCondition(
-  table: UsersRef,
-  org: Record<OversightAdminPairing["fk"], OrgIdRef>
-): SQL;
-export function oversightAudienceCondition(
-  table: UsersRef,
-  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
-): SQL | undefined;
-export function oversightAudienceCondition(
-  table: UsersRef,
-  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
-): SQL | undefined {
-  const reaches = OVERSIGHT_ADMIN_ROWS.map(([, { role, fk }]) => {
-    const orgId = org[fk];
-
-    return orgId === null || orgId === undefined
-      ? undefined
-      : and(eq(table.role, role), eq(table[fk], orgId));
-  }).filter((clause) => clause !== undefined);
-
-  if (reaches.length === 0) return undefined;
-
-  return or(...reaches);
-}
-
-/**
- * The oversight recipients of a plant: the admins of the sending church it
- * belongs to, and the admins of the network it belongs to.
- *
- * Derived from the plant's own FKs rather than from a stored recipient list, so
- * a plant that leaves a network stops being reported on immediately. Both FKs
- * are nullable (memory/invariants.md → Multi-Tenancy) and a plant with neither
- * simply has no oversight — the fan-out considers nobody and writes nothing.
- *
- * A projection, not `select()`: this answers "who", so it must not pull
- * `password_hash` into application memory (same reasoning as `accessColumns`
- * in `enqueue.ts`).
- */
-export async function listOversightRecipientsForChurch(
-  churchId: string
-): Promise<OversightRecipient[]> {
-  const [plant] = await db
-    .select({
-      sendingChurchId: churches.sendingChurchId,
-      sendingNetworkId: churches.sendingNetworkId,
-    })
-    .from(churches)
-    .where(eq(churches.id, churchId))
-    .limit(1);
-
-  if (!plant) return [];
-
-  // Each arm pairs the role with its own FK — see `oversightAudienceCondition`.
-  // A `team_member` carrying a `sending_church_id` is not oversight, and neither
-  // is a `network_admin` carrying one: `enqueue` would refuse both anyway (a
-  // role with no access to this plant fails `canAccessChurch`), but a fan-out
-  // that reports "considered 40" when 38 of them were never candidates is lying
-  // to whoever reads the report — and the digest sweep reads exactly this
-  // audience to decide who is still owed a row.
-  const audience = oversightAudienceCondition(users, plant);
-  if (!audience) return [];
-
-  const rows = await db.select({ id: users.id }).from(users).where(audience);
-
-  return rows;
-}
-
-/**
- * The oversight admins of ONE named organisation.
- *
- * Deliberately does NOT touch `churches`: the audience of the consent-exempt
- * invitation milestone is defined by the invitation, and reading the plant's
- * FKs is exactly the step that let a second, uninvolved org in. Nothing here
- * can widen — a caller has to name the org, and only the org's own admins come
- * back.
- *
- * A projection, not `select()`, for the same reason as
- * `listOversightRecipientsForChurch`: this answers "who", so `password_hash`
- * must not enter application memory.
- *
- * The audience comes from `oversightAudienceCondition` above, so each arm pairs
- * the FK with its own role (#304 ruling 4, item 6; HR4 2026-08-09) and this
- * function writes no role literal of its own.
- *
- * `org` here is loaded ids, either of which may be null, so this call gets the
- * `SQL | undefined` overload and the guard below is not optional.
- */
-export async function listOversightAdminsOfOrg(
-  org: OversightOrgIds
-): Promise<OversightRecipient[]> {
-  const audience = oversightAudienceCondition(users, org);
-
-  // No org named — no recipients. Never "everyone".
-  if (!audience) return [];
-
-  return db.select({ id: users.id }).from(users).where(audience);
-}
 
 export const dbOversightFanOutDeps: OversightFanOutDeps &
   OversightOrgFanOutDeps = {

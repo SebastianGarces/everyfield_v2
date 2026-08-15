@@ -61,6 +61,36 @@ import {
 // wrote it and whichever direction it points — an opt-out is never re-defaulted
 // back on, and an opt-IN against a default that is off is never dropped.
 //
+// ----------------------------------------------------------------------------
+// …EXCEPT ON THE UNSUBSCRIBE CHANNEL (ruled 2026-08-13, #411 / #427)
+// ----------------------------------------------------------------------------
+//
+// The rule above is right wherever a row can be a by-product. It is wrong on
+// `UNSUBSCRIBE_CHANNEL`, because that channel has a writer whose every row IS a
+// choice: the logged-out unsubscribe undo (`./channels/unsubscribe.ts`). A
+// stranger who followed an emailed link, read a page that said the category was
+// now off, and pressed "keep sending these" made a decision about their own
+// consent — and under the value-equality rule that decision resolved as
+// `source: "default"` and would be reversed the day the coded default flipped.
+//
+// So the exemption is BY CHANNEL, and it is a consent decision rather than a
+// resolution one: on the unsubscribe channel a stored row is honoured as
+// written, however it agrees with today's default. Every other channel keeps
+// #237's behaviour unchanged, because no unauthenticated writer reaches them.
+//
+// It is coarse — it cannot tell the undo's row from any other `email` row,
+// because nothing stored says who wrote one. The precise fix is an intent stamp
+// on the row, which needs a migration; that option was considered and rejected
+// for now (#411 DECISION, 2026-08-13), and coarse-in-the-consenting-direction
+// is the safe way to be coarse: the cost is a row that keeps following the user
+// instead of the default, never a preference the user set being dropped.
+//
+// ONE CELL IS CARVED BACK OUT, and it is the cadence row this section opened
+// with — `digest` on `DIGEST_CADENCE_CHANNEL`, which is the same channel. That
+// row's `enabled` is invented by an authenticated save rather than chosen by
+// anyone, so #237 keeps it. `preferenceValueIsInheritable` states the carve-out
+// and the residual it leaves.
+//
 // Resolution is pure (`resolvePreference`, `buildPreferenceMap`) so the
 // dispatcher can load a user's rows once and answer many questions from them
 // without a query per channel.
@@ -254,6 +284,19 @@ export function buildPreferenceMap(
 }
 
 /**
+ * The channel the logged-out unsubscribe link — and its undo — can ever write.
+ *
+ * It lives HERE rather than in `./channels/unsubscribe.ts`, which is the module
+ * that acts on it, because the resolver now keys a consent rule on it (see
+ * `preferenceValueIsInheritable`) and `unsubscribe.ts` already imports this
+ * module: the constant cannot sit on the far side of that edge without a cycle.
+ * One spelling, imported by the writer, so "which channel the emailed link
+ * touches" and "which channel is exempt from the value-equality rule" cannot
+ * drift into two different answers.
+ */
+export const UNSUBSCRIBE_CHANNEL: NotificationChannel = "email";
+
+/**
  * Is a stored `enabled` indistinguishable from having chosen nothing? (#237)
  *
  * True when it equals the coded default for this audience. Such a value tells
@@ -270,6 +313,26 @@ export function buildPreferenceMap(
  * coded default for `digest`/`in_app` differs between the plant's team and an
  * oversight recipient (N-027), so the same stored `false` is inheritable for
  * one and a deliberate opt-out for the other.
+ *
+ * THE UNSUBSCRIBE CHANNEL IS EXEMPT (ruled 2026-08-13) — see the module header.
+ * A row on it is honoured as written, so the undo's "keep sending these"
+ * survives a later flip of the coded default. The exemption is a property of
+ * the CHANNEL, not of the row, because nothing stored says who wrote a row.
+ *
+ * ONE PAIR IS CARVED BACK OUT OF THE EXEMPTION, and it is #237's own case:
+ * (`digest`, `DIGEST_CADENCE_CHANNEL`) — the cell the cadence selector has to
+ * INSERT a row for, because cadence has nowhere else to live and `enabled` is
+ * NOT NULL. That row's `enabled` is a copy of the coded default that the user
+ * never chose, it is written by an authenticated screen rather than by the
+ * emailed link, and treating it as explicit is exactly the defect #237 fixed.
+ * The two channels are the same channel today, so without this carve-out the
+ * exemption would silently revert #237 for the one cell it was written for.
+ *
+ * Accepted residual, and stated so it is not discovered later: an undo on the
+ * `digest` category lands on that carved-out cell, so THAT one undo still
+ * follows the coded default. Closing it needs the intent stamp the ruling
+ * deferred (a migration), because a cadence row and an undo row are otherwise
+ * the same row.
  */
 export function preferenceValueIsInheritable(
   category: NotificationCategory,
@@ -277,7 +340,21 @@ export function preferenceValueIsInheritable(
   enabled: boolean,
   audience: NotificationAudience = "church"
 ): boolean {
+  if (channel === UNSUBSCRIBE_CHANNEL && !isCadenceCarrier(category, channel)) {
+    return false;
+  }
   return enabled === defaultChannelEnabled(category, channel, audience);
+}
+
+/**
+ * Is this the one cell whose row the cadence selector has to invent an `enabled`
+ * for? See `DIGEST_CADENCE_CHANNEL` and `setDigestCadenceQuery`.
+ */
+function isCadenceCarrier(
+  category: NotificationCategory,
+  channel: NotificationChannel
+): boolean {
+  return category === "digest" && channel === DIGEST_CADENCE_CHANNEL;
 }
 
 /**
@@ -287,6 +364,10 @@ export function preferenceValueIsInheritable(
  * - row inheritable  → the coded default, marked `default`. The stored value
  *                      agrees with it and so adds nothing; see
  *                      `preferenceValueIsInheritable` and the module header.
+ *                      A row on `UNSUBSCRIBE_CHANNEL` is never inheritable
+ *                      (with the one carve-out that function names), so an
+ *                      agreeing row there is a CHOICE and takes the branch
+ *                      below.
  * - row differs      → its `enabled`, marked `explicit` (true AND false alike;
  *                      a stored `false` is a deliberate opt-out and must not be
  *                      re-defaulted back on, and a stored `true` against a
@@ -381,7 +462,9 @@ export function isChannelEnabled(
  * materialise a second row the user never asked for, doubling the surface the
  * inheritable rule has to keep harmless for no gain. One row is enough, and
  * `preferenceValueIsInheritable` is what stops that row reading as a choice
- * (#237). See `resolveDigestCadence` for the read side.
+ * (#237) — which is why this pair is the one cell carved back out of the
+ * unsubscribe-channel exemption, the two channels being the same channel. See
+ * `resolveDigestCadence` for the read side.
  */
 export const DIGEST_CADENCE_CHANNEL: NotificationChannel = "email";
 

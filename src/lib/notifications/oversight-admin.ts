@@ -21,11 +21,12 @@ import type { AssociationOrgType, UserRole } from "@/db/schema";
  * IT. A table holding the ROLE alone still left every reader writing its own
  * `kind === "sending_church" ? … : …`, which is half a pairing spelled per
  * site. Every reader now INDEXES this table and none of them names a column:
- * the SQL audience `oversightAudienceCondition` and its `invitingOrgForInvitation`
- * / `orgAudienceOfKind` inputs (`./oversight.ts`), the per-recipient gate
- * `recipientAdministersOrg` (`./enqueue.ts`), and the recorded-relationship
- * probe's `recipientOrgOf`, `invitationRelationship` and `auditRelationship`
- * (`./oversight-relationship.ts`).
+ * the SQL audience `oversightAudienceCondition` and the per-row classifier
+ * `classifyOversightCandidate` (`./oversight-audience.ts`), their
+ * `invitingOrgForInvitation` / `orgAudienceOfKind` inputs (`./oversight.ts`),
+ * the per-recipient gate `recipientAdministersOrg` (`./enqueue.ts`), and the
+ * recorded-relationship probe's `recipientOrgOf`, `invitationRelationship` and
+ * `auditRelationship` (`./oversight-relationship.ts`).
  *
  * WHAT A THIRD KIND OF OVERSIGHT ORG COSTS: the probe and its observed tsc
  * output are recorded once, in memory/invariants/multi-tenancy.md.

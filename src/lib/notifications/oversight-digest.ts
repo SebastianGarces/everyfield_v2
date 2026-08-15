@@ -36,12 +36,11 @@ import {
 } from "./enqueue";
 import { phaseAdvanceCondition } from "./oversight-events";
 import {
-  fanOutToOversight,
   listOversightRecipientsForChurch,
   oversightAudienceCondition,
-  type OversightFanOutReport,
-  type OversightRecipient,
-} from "./oversight";
+  type OversightAudience,
+} from "./oversight-audience";
+import { fanOutToOversight, type OversightFanOutReport } from "./oversight";
 
 // ============================================================================
 // The oversight activity digest (N-025, ruled 2026-07-27).
@@ -226,7 +225,7 @@ export interface OversightDigestDeps {
     churchId: string,
     window: ActivityWindow
   ): Promise<OversightActivitySummary>;
-  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+  listOversightRecipients(churchId: string): Promise<OversightAudience>;
   enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
 }
 
@@ -826,9 +825,24 @@ export async function runOversightDigestSweep(
 const owedDigestRecipient = alias(users, "owed_digest_recipient");
 
 /**
- * Clause 4's audience, CORRELATED with the outer `churches` row — the same
- * builder `listOversightRecipientsForChurch` fans out to, so "who is owed a row"
- * and "who will be written one" are one predicate.
+ * Clause 4's audience, CORRELATED with the outer `churches` row — the SQL HALF
+ * of the pairing, and the fan-out answers the same question in TypeScript.
+ *
+ * "Who is owed a row" and "who will be written one" are ONE DECISION IN TWO
+ * ENCODINGS, not one predicate: a `WHERE` cannot call a TypeScript function, so
+ * this correlated condition is `oversightAudienceCondition` while
+ * `listOversightRecipientsForChurch` resolves its rows through
+ * `classifyOversightCandidate` (both in `./oversight-audience.ts`). Both read
+ * their arms off `OVERSIGHT_ADMIN`, and the tie is a test rather than this
+ * sentence — `oversight-audience.test.ts` walks the pairing table and fails if
+ * either half is edited alone. Drift between the two is what starved a plant of
+ * its digest before the table existed.
+ *
+ * ACCEPTED RESIDUAL, because this clause uses the PAIRED audience: a plant whose
+ * only oversight `users` row is cross-paired is never selected here, so the
+ * fan-out never runs for it and its misprovisioned row is never counted. The
+ * defect reaches the log through the milestone fan-outs, which call the lister
+ * directly, and not through the digest.
  *
  * THE `SQL` ANNOTATION IS THE GUARD, not decoration: an `SQL | undefined`
  * audience reaching the `and()` below deletes itself from the statement and

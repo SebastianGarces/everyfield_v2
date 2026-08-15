@@ -110,6 +110,11 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   // `networkAudience` — beside a `memory/` paragraph claiming every site read
   // the table. A sweep that names two of the three files is how that happens.
   //
+  // SO EVERY READER IN THE DIRECTORY IS LISTED, and the list grows with the
+  // directory: `oversight-audience.ts` now owns both encodings of the pairing
+  // (the SQL audience and the per-row classifier), so it is swept here from the
+  // day it exists rather than on the day somebody notices it is missing.
+  //
   // AND THE LIST STOPS AT THIS DIRECTORY, deliberately. The one hand-built
   // `OversightOrgIds` left in the repo is outside it —
   // `announceAssociationEndedFor` in `src/lib/invitations/core.ts` — and this
@@ -126,13 +131,15 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   const read = (relative: string) =>
     noComments(readFileSync(path.join(process.cwd(), relative), "utf8"));
 
-  const audience = read("src/lib/notifications/oversight.ts");
+  const emitters = read("src/lib/notifications/oversight.ts");
+  const audience = read("src/lib/notifications/oversight-audience.ts");
   const gate = read("src/lib/notifications/enqueue.ts");
   const probe = read("src/lib/notifications/oversight-relationship.ts");
 
   // No reader names an oversight FK column or an oversight role literal.
   for (const [label, code] of [
-    ["oversight.ts", audience],
+    ["oversight.ts", emitters],
+    ["oversight-audience.ts", audience],
     ["enqueue.ts", gate],
     ["oversight-relationship.ts", probe],
   ] as const) {
@@ -163,13 +170,18 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   // leaves it silently returning an audience missing a key. `oversightOrgOfKind`
   // takes the KIND and lets the table pick the column, so no `: null` for
   // another kind's FK is written anywhere in the module.
-  assert.doesNotMatch(
-    audience,
-    /sendingChurchId: null|sendingNetworkId: null/,
-    "oversight.ts builds an org audience from the pairing table, not from a hand-nulled literal"
-  );
-  assert.match(audience, /oversightOrgOfKind\(/);
-  assert.match(audience, /noOversightOrg\(\)/);
+  for (const [label, code] of [
+    ["oversight.ts", emitters],
+    ["oversight-audience.ts", audience],
+  ] as const) {
+    assert.doesNotMatch(
+      code,
+      /sendingChurchId: null|sendingNetworkId: null/,
+      `${label} builds an org audience from the pairing table, not from a hand-nulled literal`
+    );
+  }
+  assert.match(emitters, /oversightOrgOfKind\(/);
+  assert.match(emitters, /noOversightOrg\(\)/);
 
   // And the gate has no ORG-KIND ternary left — that else-branch WAS the silent
   // absorber. Spanned through the reader rather than grepped module-wide: the
