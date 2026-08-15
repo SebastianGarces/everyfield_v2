@@ -19,12 +19,17 @@ import { sendEmail as sendProviderEmail } from "@/lib/email/client";
 import {
   batchSubject,
   composeBatchEmail,
+  type ComposeBatchEmailOptions,
+  type NotificationEmailItem,
+  type NotificationEmailRecipient,
   type OutboundEmail,
 } from "./channels/email";
 import {
   loadSuppressedAddresses as loadSuppressedAddressesFromDb,
   normalizeEmailAddress,
 } from "./channels/suppression";
+import { composePlanterDigestEmail } from "./channels/digest-email";
+import { PLANTER_DIGEST_TYPE } from "./digest";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported
@@ -389,6 +394,84 @@ export function groupIdempotencyKey(
 ): string {
   const fingerprint = [...notificationIds].sort().join(",");
   return `notif:${anchorId}:${recipientUserId}:${category}:${hash(fingerprint)}`;
+}
+
+// ----------------------------------------------------------------------------
+// Which template a group renders through
+// ----------------------------------------------------------------------------
+
+/**
+ * A composer turns one dispatched group into the one email it becomes.
+ *
+ * `composeBatchEmail` is the shape, and every alternative has to be
+ * signature-compatible with it: the dispatcher picks one and calls it, and
+ * nothing downstream of the pick knows which it got.
+ */
+export type GroupEmailComposer = (
+  recipient: NotificationEmailRecipient,
+  category: NotificationCategory,
+  items: readonly NotificationEmailItem[],
+  idempotencyKey: string,
+  options?: ComposeBatchEmailOptions
+) => Promise<OutboundEmail>;
+
+/**
+ * The types that render through something other than the generic template.
+ *
+ * A STATIC DECISION, deliberately, and not a registry like
+ * `registerStillLivePredicate` above. A registry has to be ARMED by a call in
+ * the runtime that dispatches — the bug `./register-consumers.ts` exists to
+ * close — and an unarmed composer registry would silently fall back to the
+ * generic template in the cron runtime while every test passed. A decision
+ * spelled in code cannot be unarmed.
+ *
+ * The cost is one edge from F11 back into a feature module, which is the same
+ * cost `register-consumers.ts` already pays and for the same reason.
+ *
+ * WHY A FUNCTION AND NOT A MODULE-SCOPE TABLE. `./digest` reaches back into
+ * this module through the tasks feature's own F11 registration
+ * (`digest.ts` → `@/lib/tasks/service` → `@/lib/tasks/notifications` → here),
+ * so the two modules are in a cycle. A `Record` built at module scope reads
+ * `PLANTER_DIGEST_TYPE` while `./digest` is still initialising and throws a TDZ
+ * `ReferenceError` on the import order that starts at `./digest` — which the
+ * test suite for the digest does. Resolved on CALL, both modules finish loading
+ * whichever is entered first.
+ *
+ * It also makes the lookup an EQUALITY rather than an index, so a stored `type`
+ * of `"constructor"` cannot resolve through `Object.prototype` into something
+ * callable (memory/invariants.md → the string-keyed accessor rule).
+ *
+ * Keyed on `type` rather than on `category`, because the `digest` CATEGORY
+ * carries two unrelated things — this planter digest and the oversight activity
+ * digest (`./oversight-digest.ts`), whose body has a different shape entirely.
+ * Keying on the category would have rendered one through the other's template.
+ */
+function specialComposerFor(type: string): GroupEmailComposer | undefined {
+  if (type === PLANTER_DIGEST_TYPE) return composePlanterDigestEmail;
+  return undefined;
+}
+
+/**
+ * The composer for one group, defaulting to the generic batch template.
+ *
+ * A MIXED group falls back. A special composer speaks for its own type and
+ * knows how to read its own bodies; handed somebody else's rows it would render
+ * them as blank lines, which is worse than the generic template rendering all
+ * of them plainly. In practice a group is (anchor, recipient, category) so a
+ * mix is only reachable if two types ever share a category for one recipient —
+ * but that is exactly the case this guard is cheap insurance against.
+ */
+export function emailComposerForGroup(
+  items: readonly Notification[]
+): GroupEmailComposer {
+  const first = items[0];
+  if (!first) return composeBatchEmail;
+
+  const composer = specialComposerFor(first.type);
+  if (!composer) return composeBatchEmail;
+  if (items.some((item) => item.type !== first.type)) return composeBatchEmail;
+
+  return composer;
 }
 
 /** Small stable digest — this only has to be collision-resistant per group. */
@@ -1030,7 +1113,10 @@ async function deliverEmailGroup(
   // escape `runDispatch` and strand every claimed row in the run.
   let message: OutboundEmail;
   try {
-    message = await composeBatchEmail(
+    // WHICH TEMPLATE is decided from the rows themselves, not from the
+    // category: see `emailComposerForGroup`. The failure containment below is
+    // unchanged and covers every composer equally.
+    message = await emailComposerForGroup(items)(
       ctx.recipient,
       group.category,
       items,
