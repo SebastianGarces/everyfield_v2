@@ -231,9 +231,19 @@ export type OnboardingHistoryWrite = {
  *  - `from === null` → REPLACE. The URL named no step, so nothing is being left
  *    behind — this is the ARRIVAL stamp (a planter resuming onto step 3 must
  *    end up at `/dashboard?step=journey` or the wiki guide never matches for
- *    exactly the planters it is for), or the heal after a declined value.
- *    Arriving is not navigating, and a history entry here would make the first
- *    Back a no-op that appears to do nothing.
+ *    exactly the planters it is for), or the heal after a value the client
+ *    declined (`?step=journey%20`, or a step 1 the church closed — both read
+ *    back as no step). Arriving is not navigating, and a history entry here
+ *    would make the first Back a no-op that appears to do nothing.
+ *  - `from === to` → REPLACE. A write that does not change WHICH step is named
+ *    is a HEAL, never a navigation: the URL is being tidied while the planter
+ *    stays exactly where they are. It is its own rule rather than a case of
+ *    `from === null`, because `searchParams.get()` returns the FIRST value of a
+ *    repeated `?step=journey&step=journey` — so `from` is `"journey"`, not
+ *    null, on the very URL `params.set` exists to collapse. Same for a
+ *    valueless or space-bearing neighbour param that `URLSearchParams` re-spells
+ *    (`?step=journey&foo` → `foo=`). A history entry for any of them is the
+ *    no-op Back the rule above names.
  *  - `from` is step 1 → REPLACE. Ruled 2026-08-10: STEP 1 IS NOT IN THE
  *    HISTORY. The only way off it is creating the church, so by the time this
  *    runs step 1 is not re-enterable, and browser Back was landing planters on
@@ -255,7 +265,8 @@ export function historyWriteFor({
   const url = onboardingStepUrl(location, to);
   if (url === `${location.pathname}${location.search}`) return null;
 
-  const replace = to === null || from === null || isFirstOnboardingStep(from);
+  const replace =
+    to === null || from === null || from === to || isFirstOnboardingStep(from);
   return { method: replace ? "replace" : "push", url };
 }
 

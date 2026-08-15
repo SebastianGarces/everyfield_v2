@@ -532,9 +532,10 @@ test("a write is owed exactly when the address bar does not already say it", () 
 });
 
 test("push or replace is decided by the step being LEFT, and by nothing else", () => {
-  // Three replacements, one push, and each replacement has its own reason:
+  // Four replacements, one push, and each replacement has its own reason:
   //   - to === null   the finish screen is not a step and not a navigation
   //   - from === null arriving (or healing a declined value) is not navigating
+  //   - from === to   the URL is being healed, not navigated
   //   - from is step 1 ruled 2026-08-10: step 1 is not in the history, because
   //                   the only way off it is creating the church
   assert.equal(
@@ -566,6 +567,36 @@ test("push or replace is decided by the step being LEFT, and by nothing else", (
     })?.method,
     "push"
   );
+
+  // A write that does not change WHICH step is named is a HEAL, and a heal is
+  // never a navigation. `.get()` takes the FIRST value of a repeated param, so
+  // `from` is `"journey"` here rather than null — the only consumer of this
+  // path is the flow's stamping effect, and every write it can produce has to
+  // be a replace or the first Back is a no-op that appears to do nothing.
+  assert.deepEqual(
+    historyWriteFor({
+      from: "journey",
+      to: "journey",
+      location: {
+        pathname: "/dashboard",
+        search: "?step=journey&step=journey",
+      },
+    }),
+    { method: "replace", url: "/dashboard?step=journey" }
+  );
+  // Same shape, reached by a neighbour param `URLSearchParams` re-spells: a
+  // valueless `&foo` becomes `foo=`, and a space becomes `+`.
+  for (const search of ["?step=journey&foo", "?step=journey&note=a%20b"]) {
+    assert.equal(
+      historyWriteFor({
+        from: "journey",
+        to: "journey",
+        location: { pathname: "/dashboard", search },
+      })?.method,
+      "replace",
+      search
+    );
+  }
 
   // The push is the general case: every step after the first gives Back the
   // step just left.

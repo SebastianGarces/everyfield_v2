@@ -207,11 +207,12 @@ Applies to `plant_assessments.status` and every reader and writer of it.
 
 ## Onboarding — the flow's `?step=` URL
 
-Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route of its own — it renders AS `/dashboard` while `onboarding_completed_at` is null — so the step it shows lives in the URL.
+Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route of its own — it renders AS `/dashboard` while `onboarding_completed_at` is null — so its step lives in the URL.
 
 - A `?step=` value becomes an onboarding step in exactly ONE place, `resolveOnboardingStepRequest`, with a client mirror and a finished-dashboard half honouring `leadership` alone. A REPEATED param is REFUSED, because `.get()` takes the FIRST value and the wiki guide's provider the LAST.
 - ⚖ Step 1 (`basics`) is addressable EXACTLY WHILE THERE IS NO CHURCH, and every later step exactly once there is; step 1 never enters browser history. When step 1 is closed the server answers `none`, NOT `refuse`.
 - ⚖ The finish screen has NO `?step=` of its own: it is `/dashboard` with the param REMOVED, which is also how the contextual wiki guide is suppressed there. Never invent a fifth step value.
+- It does not PAINT until the param has actually left: `onboardingFinishScreen` answers `open` (the history write) and `showing` (the render). One boolean is a defect either way — it repaints the journey Guide pill over the offer for a frame, or deadlocks "Finish setup later".
 
 ## Wiki Articles
 
@@ -222,7 +223,7 @@ Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route
 - `revalidatePath()` is the one wiki path `wikiHref` must NOT build — use `wikiRevalidationPath()`. The tag comes from the DECODED pathname, so the href form matches no tag and still returns 200.
 - MDX compiles at request time via `next-mdx-remote/rsc`; search is a weighted tsvector (title A > excerpt B > content C); revalidation needs `REVALIDATION_SECRET`.
 - Every wiki article read is `church_id IS NULL OR church_id = :current_church_id` — global PLUS the reader's own, never "mine" alone. This predicate IS the boundary.
-- A church's own PUBLISHED row for a slug OVERRIDES the global one, and that decision has ONE implementation, a PREDICATE: `notOverriddenByChurch` (`get-articles.ts`), carried by EVERY reader-facing read — lists, the single-article read (`LIMIT 1`; the statement returns the winner), search, and the PE-024 slug index. A JS collapse cannot answer for a RANKED read (the church's copy need not survive the `ts_rank` cut), so the SQL form is the survivor and `preferChurchOverride` is deleted; the subquery's `published` term must match the read's own `status` filter, or a DRAFT church copy hides a global article.
+- A church's own PUBLISHED row for a slug OVERRIDES the global one, and that decision has ONE implementation, a PREDICATE: `notOverriddenByChurch` (`get-articles.ts`), carried by EVERY reader-facing read — lists, the single-article read (`LIMIT 1`; the statement returns the winner), search, and the PE-024 slug index. A JS collapse cannot answer for a RANKED read (the church's copy need not survive the `ts_rank` cut), so the SQL form is the only one; the subquery's `published` term must match the read's own `status` filter, or a DRAFT church copy hides a global article.
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches rather than leaking another church's content.
 - `searchWikiArticles` REFUSES BY REJECTING, and "could not answer" has ONE shape — a rejection: its catch logs and RETHROWS, never `return []`, so "No articles found" is never said about a search that never ran. Every caller routes through `runWikiSearch` (`search-request.ts`); the dialog holds the outcome as ONE union state and announces through ONE unconditional `role="status"` region beside (never inside) the cmdk listbox.
 - A wiki write NEVER spreads a caller-supplied object into a SET — `progressUpsertQuery` builds its DO UPDATE SET field by field from `status` and `scrollPosition` only — and BOTH parameters of every write endpoint are zod-parsed below the session mint (`write-input.ts`: `progressPatchSchema`, `wikiSlugSchema`). The slug schema is deliberately NARROWER than what `encodeWikiSlug` can address; `write-paths.test.ts` runs hostile bodies and slugs through the real builders.
@@ -234,7 +235,7 @@ Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route
 
 Applies to every `@react-pdf/renderer` path: the F6 templates under `src/lib/documents/pdf/` and the wiki article download under `src/components/wiki/article-pdf/`.
 
-- Every PDF face is a ROLE from `PDF_FONT` (`src/lib/documents/pdf/fonts.ts`), never a standard-14 name (`Helvetica`, `Courier`, `Times-Roman` and their Bold/Oblique variants) and never a `fontWeight`/`fontStyle` axis — the standard-14 faces write a WRONG GLYPH for anything outside WinAnsi instead of failing, and `@react-pdf/font` filters on `fontStyle` first, so an axis on a single-source family throws. A standard-14 name resolves with no asset, so the corruption returns silently; `src/lib/documents/pdf/fonts.test.ts` scans the whole directory and `src/components/wiki/article-pdf/render.test.ts` pins every emphasis combination.
+- Every PDF face is a ROLE from `PDF_FONT` (`src/lib/documents/pdf/fonts.ts`), never a standard-14 name (`Helvetica`, `Courier`, `Times-Roman` and their Bold/Oblique variants) and never a `fontWeight`/`fontStyle` axis — the standard-14 faces write a WRONG GLYPH for anything outside WinAnsi instead of failing, and `@react-pdf/font` filters on `fontStyle` first, so an axis on a single-source family throws. A standard-14 name resolves with no asset, so the corruption returns silently.
 
 ## Communication — Resend & Delivery Figures
 
