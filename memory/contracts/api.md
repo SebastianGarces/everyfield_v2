@@ -20,8 +20,10 @@ from a quick read:
   - The log channel splits on "is the judge broken?", NOT on status. A `failed` whose 5xx retry
     ladder the deadline cut short carries `truncatedByDeadline` and logs on `console.warn` — the
     5xx counterpart of a `time_budget` deferral. A ladder that spent its last attempt is
-    deliberately NOT marked, so `console.error` still means a genuinely down provider. Counting
-    is unaffected: the summary counts by status, not by channel.
+    deliberately NOT marked, so `console.error` still means a genuinely down provider. The mark
+    is OBJECT IDENTITY (a `WeakSet`), so every link between the judge and the runner rethrows the
+    SAME object; a wrapper drops it silently. Counting is unaffected: the summary counts by
+    status, not by channel.
   - `attempted` means "handed to the judge, so it may have cost tokens", NOT "assessed" — it
     includes a throttled plant, which is `attempted: true` after up to `MAX_ATTEMPTS_PER_PLANT`
     real provider calls. `deferredUnattempted` is the subset of `deferred` that never reached the
