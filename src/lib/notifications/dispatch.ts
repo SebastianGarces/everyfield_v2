@@ -25,6 +25,7 @@ import {
   loadSuppressedAddresses as loadSuppressedAddressesFromDb,
   normalizeEmailAddress,
 } from "./channels/suppression";
+import { PERMANENT_FAILURE_PREFIX } from "./permanent-failure";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported
@@ -146,12 +147,10 @@ export const RETRY_BASE_DELAY_MS = 5 * 60_000;
 /** Ceiling on the exponential, so a long-failing channel still ticks. */
 export const MAX_RETRY_DELAY_MS = 60 * 60_000;
 
-/**
- * Prefix on `notification_deliveries.error` marking a failure that must never
- * be retried. It is the durable record of permanence — the attempt count stays
- * truthful about how many provider calls actually happened.
- */
-export const PERMANENT_FAILURE_PREFIX = "permanent: ";
+// `PERMANENT_FAILURE_PREFIX` used to be declared here. It now lives in the
+// import-free leaf `./permanent-failure`, so the webhook route can reach it
+// without pulling this module's graph (#263 item 2). It is deliberately NOT
+// re-exported: importers name the leaf.
 
 /** Backoff before attempt N+1, given the attempt count that just failed. */
 export function retryDelayMs(attemptCount: number): number {

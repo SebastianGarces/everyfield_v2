@@ -47,7 +47,6 @@ import {
   groupIdempotencyKey,
   isPermanentEmailError,
   MAX_DELIVERY_ATTEMPTS,
-  PERMANENT_FAILURE_PREFIX,
   registerStillLivePredicate,
   resolveLiveness,
   retryDelayMs,
@@ -60,6 +59,7 @@ import {
   type EmailSendOutcome,
   type OutboundEmail,
 } from "./dispatch";
+import { PERMANENT_FAILURE_PREFIX } from "./permanent-failure";
 
 // ============================================================================
 // The scheduled dispatcher (N-003, N-004, N-012, N-014, N-015, N-016, N-017).

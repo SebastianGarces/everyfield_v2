@@ -1,6 +1,9 @@
 import type { EmailSuppressionReason } from "@/db/schema/notifications";
 
-import { PERMANENT_FAILURE_PREFIX } from "../dispatch";
+// The import-free leaf, NOT `../dispatch` (#263 item 2): this module is in
+// `/api/webhooks/resend`'s graph, and the dispatcher opens with `@/db`, the
+// schema barrel and the Resend client.
+import { PERMANENT_FAILURE_PREFIX } from "../permanent-failure";
 
 // ============================================================================
 // Provider delivery webhooks → `notification_deliveries` (N-016).

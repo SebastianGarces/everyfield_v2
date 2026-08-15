@@ -134,11 +134,29 @@ const TTL_BY_PURPOSE: Record<UnsubscribeTokenPurpose, number> = {
 };
 
 /**
- * Shortest secret we will mint with. Not a cryptographic bound (the key is a
- * SHA-256 of it either way) — it is a guard against a placeholder value like
- * `"changeme"` silently becoming production's capability key.
+ * Shortest secret we will mint with.
+ *
+ * RAISED FROM 16 (#263 item 3). Sixteen was described as a placeholder guard
+ * rather than a cryptographic bound, and that reasoning was wrong here: the key
+ * is a SINGLE SHA-256 of the secret, not a KDF, so anyone holding one genuine
+ * token holds an OFFLINE VERIFICATION ORACLE. They can guess a secret, derive
+ * the key, and try to open the token — billions of guesses a second on
+ * commodity hardware, with no request to us and nothing to rate-limit. A
+ * sixteen-character human string ("EveryField2026!!") does not survive that.
+ *
+ * WHY 32. Length is the only thing this function can measure, so the floor is
+ * set at the length that carries ~128 bits under the WEAKEST encoding an
+ * operator plausibly pastes: hex, at 4 bits per character. Base64 (6 bits per
+ * character) clears 128 bits by 22, and `.env.example`'s advised
+ * `openssl rand -base64 32` produces 44 characters — comfortably over, which is
+ * the point: the advice stops being advisory. A shorter secret now fails the
+ * mint loudly instead of shipping a forgeable capability quietly.
+ *
+ * Length is NOT entropy — this cannot tell `"a".repeat(32)` from 32 random
+ * characters — so it is a floor, never a certificate. The generator in
+ * `.env.example` is what supplies the entropy.
  */
-const MIN_SECRET_LENGTH = 16;
+const MIN_SECRET_LENGTH = 32;
 
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
@@ -146,45 +164,80 @@ const TAG_BYTES = 16;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Thrown when the app is asked to mint or open a token with no secret set. */
+/** Thrown when the app is asked to mint or open a token with no usable secret. */
 export class MissingUnsubscribeSecretError extends Error {
-  constructor() {
+  constructor(message?: string) {
     super(
-      "UNSUBSCRIBE_TOKEN_SECRET (or CRON_SECRET) is unset or too short — notification emails cannot carry a working unsubscribe link without it"
+      message ??
+        `UNSUBSCRIBE_TOKEN_SECRET (or CRON_SECRET outside production) is unset or shorter than ${MIN_SECRET_LENGTH} characters — notification emails cannot carry a working unsubscribe link without it. Generate one with: openssl rand -base64 32`
     );
     this.name = "MissingUnsubscribeSecretError";
   }
 }
 
 /**
+ * Is this a production runtime?
+ *
+ * `NODE_ENV`, not `VERCEL_ENV`: `next build` and `next start` set it to
+ * `production` wherever they run, so a self-hosted or preview deployment is
+ * held to the same bar as Vercel production, and no platform-specific variable
+ * has to be present for the rule to bind. `pnpm test` and `next dev` leave it
+ * at `test` / `development`, which is the ONLY window in which the fallback
+ * below exists.
+ */
+function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+/**
  * The configured secret.
  *
- * Fails CLOSED when neither variable is set. The alternative — falling back to
+ * Fails CLOSED when no usable value is set. The alternative — falling back to
  * a derived or empty key — would mean an environment that forgot the variable
  * still mints links, and those links are forgeable by anyone who can read this
  * file. A loud failure costs one retry of one email; a quiet fallback costs the
  * guarantee.
  *
- * `CRON_SECRET` is an accepted fallback, and the reason is the key derivation
- * below rather than convenience: the key is `SHA-256(purpose : secret)`, so the
- * same bytes used for a different purpose produce an unrelated key and a
- * compromised unsubscribe token tells you nothing about the cron bearer token
- * (or the reverse). It means an environment that can already run the dispatcher
- * can also mint the links that dispatcher needs, instead of sending mail with a
- * dead opt-out. `UNSUBSCRIBE_TOKEN_SECRET` is still preferred: rotating the
- * opt-out capability should not require rotating the scheduler's credential.
+ * ----------------------------------------------------------------------------
+ * `CRON_SECRET` IS NO LONGER A FALLBACK IN PRODUCTION (#263 item 4)
+ * ----------------------------------------------------------------------------
+ *
+ * It used to be one everywhere, argued from the key derivation: the key is
+ * `SHA-256(purpose : secret)`, so the same bytes under another purpose produce
+ * an unrelated key. That argument is about DERIVED KEYS and says nothing about
+ * the SECRET, which is the thing that actually leaks. One set of bytes guarded
+ * two unrelated capabilities — the scheduler's bearer token and every
+ * unsubscribe link in flight — so a `CRON_SECRET` disclosed by a log line, a
+ * workflow file or a rotated-out Actions secret silently handed the holder the
+ * ability to forge opt-outs for six months, and rotating either capability
+ * forced rotation of the other. Domain separation makes the two keys
+ * independent; it cannot make the two secrets independent.
+ *
+ * So in production the dedicated variable is REQUIRED and nothing stands in for
+ * it. Outside production the fallback earns its keep: a developer who has set
+ * `CRON_SECRET` to run the dispatcher locally gets working links rather than a
+ * throw in the middle of an unrelated feature, and a local secret guards
+ * nothing anybody wants.
  *
  * The throw is for the MINT path only. `verifyUnsubscribeToken` catches it and
  * refuses the token instead, because its callers are public pages that must not
  * turn a deployment fault into a 500 in front of a stranger.
  */
 export function unsubscribeTokenSecret(): string {
-  const secret =
-    process.env.UNSUBSCRIBE_TOKEN_SECRET ?? process.env.CRON_SECRET ?? "";
-  if (secret.length < MIN_SECRET_LENGTH) {
-    throw new MissingUnsubscribeSecretError();
+  const dedicated = process.env.UNSUBSCRIBE_TOKEN_SECRET ?? "";
+  if (dedicated.length >= MIN_SECRET_LENGTH) return dedicated;
+
+  if (isProductionRuntime()) {
+    throw new MissingUnsubscribeSecretError(
+      `UNSUBSCRIBE_TOKEN_SECRET is required in production and must be at least ${MIN_SECRET_LENGTH} characters — CRON_SECRET is NOT accepted here, because one set of bytes must not guard both the scheduler and every unsubscribe link in flight. Generate one with: openssl rand -base64 32`
+    );
   }
-  return secret;
+
+  // Local and test runtimes only, per the block above.
+  const fallback = process.env.CRON_SECRET ?? "";
+  if (fallback.length >= MIN_SECRET_LENGTH) return fallback;
+
+  throw new MissingUnsubscribeSecretError();
 }
 
 /**

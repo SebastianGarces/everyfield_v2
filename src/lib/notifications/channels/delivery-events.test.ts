@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  channelEligibility,
-  MAX_DELIVERY_ATTEMPTS,
-  PERMANENT_FAILURE_PREFIX,
-} from "../dispatch";
+import { channelEligibility, MAX_DELIVERY_ATTEMPTS } from "../dispatch";
+import { PERMANENT_FAILURE_PREFIX } from "../permanent-failure";
 import type { NotificationDelivery } from "@/db/schema";
 
 import {

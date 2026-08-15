@@ -28,6 +28,13 @@ import { BaseLayout } from "../components/base-layout";
 // A GROUP renders as one email with one <li> per notification — deliberately a
 // list, not a concatenation, so twenty task notifications read as twenty
 // things in one message rather than twenty messages glued together (N-012).
+//
+// 3. ONE ITEM IS NOT A SPECIAL CASE (#263 item 1). This file used to branch on
+//    `items.length === 1` into a block that rendered byte-for-byte what the map
+//    below renders for a one-entry list. A reader could not tell whether the
+//    two were meant to diverge later or whether one of them was already dead,
+//    and the map is the only shape either arm can produce — so the branch is
+//    gone rather than left ambiguous. A single notification is a group of one.
 // ============================================================================
 
 export interface NotificationEmailItemProps {
@@ -55,26 +62,17 @@ function NotificationBatchEmail({
   unsubscribeUrl,
   preferencesUrl,
 }: NotificationBatchEmailProps) {
-  const single = items.length === 1;
-
   return (
     <BaseLayout preview={items[0]?.title ?? categoryLabel}>
       <Heading style={heading}>{categoryLabel}</Heading>
       {recipientName ? <Text style={text}>Hi {recipientName},</Text> : null}
 
-      {single ? (
-        <Section style={itemBox}>
-          <Text style={itemTitle}>{items[0].title}</Text>
-          <Text style={itemBody}>{items[0].body}</Text>
+      {items.map((item, index) => (
+        <Section key={`${item.title}-${index}`} style={itemBox}>
+          <Text style={itemTitle}>{item.title}</Text>
+          <Text style={itemBody}>{item.body}</Text>
         </Section>
-      ) : (
-        items.map((item, index) => (
-          <Section key={`${item.title}-${index}`} style={itemBox}>
-            <Text style={itemTitle}>{item.title}</Text>
-            <Text style={itemBody}>{item.body}</Text>
-          </Section>
-        ))
-      )}
+      ))}
 
       <Hr style={rule} />
 

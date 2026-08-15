@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { test } from "node:test";
 
 import {
@@ -349,11 +350,179 @@ test("the secret fails closed when the environment supplies neither variable", (
   process.env.UNSUBSCRIBE_TOKEN_SECRET = SECRET;
   assert.equal(unsubscribeTokenSecret(), SECRET);
 
-  // CRON_SECRET is the documented fallback, and only when the dedicated
-  // variable is absent.
+  // CRON_SECRET is the documented fallback OUTSIDE PRODUCTION, and only when
+  // the dedicated variable is absent. The production rule is asserted below.
   delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
   process.env.CRON_SECRET = OTHER_SECRET;
   assert.equal(unsubscribeTokenSecret(), OTHER_SECRET);
+});
+
+// ============================================================================
+// THE SECRET'S FLOOR AND ITS PROVENANCE (#263 items 3 and 4, via #324 WS2)
+//
+// Two separate hardenings of the same lookup, and they fail in different ways,
+// so they are asserted separately.
+//
+// ITEM 3 — the floor. The key is a SINGLE SHA-256 of this value, not a KDF, so
+// one genuine token in an attacker's hands is an offline verification oracle
+// they can run billions of times a second with no request to us. The old floor
+// of 16 accepted a human-typed string. The new floor is the length that carries
+// ~128 bits under the weakest encoding an operator plausibly pastes (hex, at 4
+// bits a character), and `.env.example`'s `openssl rand -base64 32` clears it
+// with 44 characters — which is what turns that advice into an enforced rule.
+//
+// ITEM 4 — the provenance. `CRON_SECRET` stood in for the dedicated variable
+// everywhere, which made one set of bytes guard two unrelated capabilities: the
+// scheduler's bearer token and every unsubscribe link in flight. Domain
+// separation makes the two KEYS independent and can do nothing about the two
+// SECRETS being the same bytes. In production the dedicated variable is now
+// required outright.
+// ============================================================================
+
+/**
+ * `NODE_ENV` is typed read-only by `@types/node`, which is right for
+ * application code and wrong for a test whose whole subject is what the value
+ * changes. One narrow escape hatch, here, rather than a cast at each site.
+ */
+function setNodeEnv(value: string | undefined): void {
+  const env = process.env as Record<string, string | undefined>;
+  if (value === undefined) delete env.NODE_ENV;
+  else env.NODE_ENV = value;
+}
+
+/** Save and restore the three variables the lookup reads. */
+function withCleanEnv(t: import("node:test").TestContext): void {
+  const previous = {
+    dedicated: process.env.UNSUBSCRIBE_TOKEN_SECRET,
+    cron: process.env.CRON_SECRET,
+    nodeEnv: process.env.NODE_ENV as string | undefined,
+  };
+  t.after(() => {
+    if (previous.dedicated === undefined)
+      delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+    else process.env.UNSUBSCRIBE_TOKEN_SECRET = previous.dedicated;
+    if (previous.cron === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previous.cron;
+    setNodeEnv(previous.nodeEnv);
+  });
+
+  delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  delete process.env.CRON_SECRET;
+  setNodeEnv(undefined);
+}
+
+test("a secret shorter than 32 characters is refused, in every runtime", (t) => {
+  withCleanEnv(t);
+
+  // 31 random-looking characters: long enough to look serious, short enough to
+  // be brute-forcible against a single SHA-256 if it came from a human.
+  const justUnder = "Kj8mQ2wR7tYp4Zx9Lc3Vb6Nn1Fh5Gd0";
+  assert.equal(justUnder.length, 31, "fixture drifted off the boundary");
+
+  process.env.UNSUBSCRIBE_TOKEN_SECRET = justUnder;
+  assert.throws(() => unsubscribeTokenSecret(), MissingUnsubscribeSecretError);
+
+  // The same value with one more character clears the floor, so the refusal is
+  // the LENGTH RULE and not something else about the string.
+  process.env.UNSUBSCRIBE_TOKEN_SECRET = `${justUnder}A`;
+  assert.equal(unsubscribeTokenSecret(), `${justUnder}A`);
+
+  // The old floor is genuinely gone: a value that used to pass no longer does.
+  process.env.UNSUBSCRIBE_TOKEN_SECRET = "0123456789abcdef";
+  assert.equal(process.env.UNSUBSCRIBE_TOKEN_SECRET.length, 16);
+  assert.throws(() => unsubscribeTokenSecret(), MissingUnsubscribeSecretError);
+
+  // A short CRON_SECRET is no way around it either, in the one runtime where
+  // CRON_SECRET is consulted at all.
+  delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  process.env.CRON_SECRET = "0123456789abcdef";
+  assert.throws(() => unsubscribeTokenSecret(), MissingUnsubscribeSecretError);
+});
+
+test("what `.env.example` tells an operator to generate is accepted", (t) => {
+  withCleanEnv(t);
+
+  // `openssl rand -base64 32` — 32 bytes, base64, 44 characters including the
+  // single `=` pad. Generated here rather than pasted so the test states the
+  // rule instead of a sample.
+  const generated = randomBytes(32).toString("base64");
+  assert.equal(generated.length, 44, "base64 of 32 bytes is 44 characters");
+
+  process.env.UNSUBSCRIBE_TOKEN_SECRET = generated;
+  assert.equal(unsubscribeTokenSecret(), generated);
+
+  // And it seals a real token, so the floor did not become a shape rule that
+  // only some encodings survive.
+  const token = mintUnsubscribeToken({ userId: USER, category: "tasks" });
+  const verified = verifyUnsubscribeToken(token);
+  assert.ok(verified.valid);
+  assert.equal(verified.userId, USER);
+});
+
+test("production REQUIRES the dedicated variable — CRON_SECRET is not accepted", (t) => {
+  withCleanEnv(t);
+  setNodeEnv("production");
+
+  // A perfectly good CRON_SECRET, long enough to clear the floor. Outside
+  // production this is the sanctioned fallback; here it must buy nothing.
+  process.env.CRON_SECRET = OTHER_SECRET;
+  assert.ok(OTHER_SECRET.length >= 32, "fixture is below the floor");
+
+  assert.throws(
+    () => unsubscribeTokenSecret(),
+    (error: unknown) => {
+      assert.ok(error instanceof MissingUnsubscribeSecretError);
+      assert.match(
+        error.message,
+        /UNSUBSCRIBE_TOKEN_SECRET is required in production/,
+        "the production refusal must say which variable is missing — a deploy reads this line and nothing else"
+      );
+      return true;
+    },
+    "a production runtime accepted CRON_SECRET as the unsubscribe key — one set of bytes now guards the scheduler AND every unsubscribe link in flight"
+  );
+
+  // Setting the dedicated variable is the only thing that fixes it.
+  process.env.UNSUBSCRIBE_TOKEN_SECRET = SECRET;
+  assert.equal(unsubscribeTokenSecret(), SECRET);
+});
+
+test("the mint path in production fails fast rather than sending a dead link", (t) => {
+  withCleanEnv(t);
+  setNodeEnv("production");
+  process.env.CRON_SECRET = OTHER_SECRET;
+
+  // The observable consequence of the rule: composing an email throws, which
+  // `deliverEmailGroup` records as a delivery failure. The alternative — a
+  // token sealed under the cron bearer — is the thing being refused.
+  assert.throws(
+    () => mintUnsubscribeToken({ userId: USER, category: "tasks", now: NOW }),
+    MissingUnsubscribeSecretError
+  );
+
+  // And the public read path still degrades rather than 500ing at a stranger,
+  // exactly as it does for every other unusable environment.
+  const verified = verifyUnsubscribeToken("not-a-token", { now: NOW });
+  assert.equal(verified.valid, false);
+});
+
+test("outside production CRON_SECRET still stands in, and only then", (t) => {
+  withCleanEnv(t);
+
+  for (const runtime of ["development", "test"]) {
+    setNodeEnv(runtime);
+    delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+    process.env.CRON_SECRET = OTHER_SECRET;
+    assert.equal(
+      unsubscribeTokenSecret(),
+      OTHER_SECRET,
+      `the local fallback stopped working in NODE_ENV=${runtime}`
+    );
+
+    // The dedicated variable always wins where both are set.
+    process.env.UNSUBSCRIBE_TOKEN_SECRET = SECRET;
+    assert.equal(unsubscribeTokenSecret(), SECRET);
+  }
 });
 
 test("verification REFUSES rather than throws when the environment has no secret", (t) => {
