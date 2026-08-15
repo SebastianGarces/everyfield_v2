@@ -10,7 +10,8 @@ import {
   runPacedCall,
   type RateLimitEvent,
 } from "./paced-call";
-import { TokenPacer, type PacerClock } from "./token-pacer";
+import { virtualClock } from "./testing";
+import { TokenPacer } from "./token-pacer";
 
 // ----------------------------------------------------------------------------
 // #36: the retry policy that replaced the AI SDK's blind exponential backoff.
@@ -21,23 +22,6 @@ import { TokenPacer, type PacerClock } from "./token-pacer";
 // out of attempts against a rate limit is reported as a DEFERRAL, not a
 // failure.
 // ----------------------------------------------------------------------------
-
-interface VirtualClock extends PacerClock {
-  readonly sleeps: number[];
-}
-
-function virtualClock(): VirtualClock {
-  let t = 0;
-  const sleeps: number[] = [];
-  return {
-    sleeps,
-    now: () => t,
-    async sleep(ms: number) {
-      sleeps.push(ms);
-      if (ms > 0) t += ms;
-    },
-  };
-}
 
 function apiError(
   statusCode: number,

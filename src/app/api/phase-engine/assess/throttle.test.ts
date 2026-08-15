@@ -10,6 +10,8 @@ import {
   TokenPacer,
   type PacerClock,
 } from "@/lib/phase-engine/judge";
+import { virtualClock } from "@/lib/phase-engine/judge/testing";
+import { captureConsole } from "@/lib/testing/console-capture";
 
 import {
   MAX_ATTEMPTS_PER_PLANT,
@@ -32,23 +34,6 @@ import {
 // Everything runs on a virtual clock, so a batch that would take four minutes
 // of wall time is asserted in milliseconds.
 // ============================================================================
-
-interface VirtualClock extends PacerClock {
-  readonly sleeps: number[];
-}
-
-function virtualClock(): VirtualClock {
-  let t = 0;
-  const sleeps: number[] = [];
-  return {
-    sleeps,
-    now: () => t,
-    async sleep(ms: number) {
-      sleeps.push(ms);
-      if (ms > 0) t += ms;
-    },
-  };
-}
 
 /** Format milliseconds the way OpenAI formats `x-ratelimit-reset-*`. */
 function goDuration(ms: number): string {
@@ -221,24 +206,6 @@ function depsFor(
       >;
     },
     ...overrides,
-  };
-}
-
-/** Capture console output so the log-shape assertions are real assertions. */
-function captureConsole() {
-  const warns: string[] = [];
-  const errors: string[] = [];
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  console.warn = (...args: unknown[]) => warns.push(args.join(" "));
-  console.error = (...args: unknown[]) => errors.push(args.join(" "));
-  return {
-    warns,
-    errors,
-    restore() {
-      console.warn = originalWarn;
-      console.error = originalError;
-    },
   };
 }
 

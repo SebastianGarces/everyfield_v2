@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { generateAssessment } from "@/lib/phase-engine/assessment";
-import {
-  runAssessment,
-  TokenPacer,
-  type PacerClock,
-} from "@/lib/phase-engine/judge";
+import { runAssessment, TokenPacer } from "@/lib/phase-engine/judge";
 import { isDeadlineTruncatedFailure } from "@/lib/phase-engine/judge/paced-call";
+import { virtualClock } from "@/lib/phase-engine/judge/testing";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
+import { captureConsole } from "@/lib/testing/console-capture";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 import {
@@ -46,21 +44,12 @@ import {
 // never links in it.
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// A virtual clock, so a run whose ladder would sleep for a minute is asserted
-// in milliseconds. The stubbed fetch resolves immediately and advances nothing,
-// which is what makes the run deadline the only thing that can stop the ladder.
-// ----------------------------------------------------------------------------
-
-function virtualClock(): PacerClock {
-  let t = 0;
-  return {
-    now: () => t,
-    async sleep(ms: number) {
-      if (ms > 0) t += ms;
-    },
-  };
-}
+// The clock is the shared `virtualClock` from the judge's own test support, so
+// a run whose ladder would sleep for a minute is asserted in milliseconds. The
+// stubbed fetch resolves immediately and advances nothing, which is what makes
+// the run deadline the only thing that can stop the ladder. This suite reads
+// neither `sleeps` nor `advance` — it asserts the OUTCOME of the ladder, not
+// its shape.
 
 /** A minimal but complete snapshot fixture (the `judge.test.ts` shape). */
 function makeSnapshot(churchId: string): PlantFactSnapshot {
@@ -202,24 +191,6 @@ function stubTheProvider(): ProviderStub {
         process.env.LANGFUSE_PUBLIC_KEY = originalLangfusePublic;
       if (originalLangfuseSecret !== undefined)
         process.env.LANGFUSE_SECRET_KEY = originalLangfuseSecret;
-    },
-  };
-}
-
-/** Capture console output so the channel assertions are real assertions. */
-function captureConsole() {
-  const warns: string[] = [];
-  const errors: string[] = [];
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  console.warn = (...args: unknown[]) => warns.push(args.join(" "));
-  console.error = (...args: unknown[]) => errors.push(args.join(" "));
-  return {
-    warns,
-    errors,
-    restore() {
-      console.warn = originalWarn;
-      console.error = originalError;
     },
   };
 }
@@ -400,40 +371,36 @@ test("§1b the same chain, with the clock out of the way, is an unmarked failure
 // have to reverse-engineer the requirement from.
 // ----------------------------------------------------------------------------
 
-const RETHROW_SITES = [
-  {
-    file: "src/lib/phase-engine/judge/run-assessment.ts",
-    from: "} catch (error) {",
-    to: "}",
-  },
-  {
-    file: "src/lib/phase-engine/assessment/generate-assessment.ts",
-    from: "} catch (error) {",
-    to: "}",
-  },
-] as const;
+// Both anchors are the same at both sites, so a site is just its path: the
+// span runs from the catch that receives the judge's throw to the rethrow that
+// hands it on. `span` resolves BOTH ends through the reader, so the mutation
+// this test exists to catch — a `throw new Error(msg, { cause: error })` in
+// place of the bare rethrow — deletes the end anchor and the reader THROWS
+// "<file> (comments stripped) no longer contains: throw error;". A hand-cut
+// tail plus a bare `indexOf` would instead have degraded into a claim about
+// the whole file, which is the rot `source-span.ts` exists to stop.
+const RETHROW_SITES: readonly string[] = [
+  "src/lib/phase-engine/judge/run-assessment.ts",
+  "src/lib/phase-engine/assessment/generate-assessment.ts",
+];
 
 test("§2 every link between the judge and the runner rethrows the IDENTICAL object", async () => {
   const { readFileSync } = await import("node:fs");
   const path = await import("node:path");
 
-  for (const site of RETHROW_SITES) {
+  for (const file of RETHROW_SITES) {
     const code = stripComments(
-      readFileSync(path.join(process.cwd(), site.file), "utf8")
+      readFileSync(path.join(process.cwd(), file), "utf8")
     );
-    const block = sourceReader(code, `${site.file} (comments stripped)`).after(
-      site.from
+    const block = sourceReader(code, `${file} (comments stripped)`).span(
+      "} catch (error) {",
+      "throw error;"
     );
 
-    assert.match(
-      block,
-      /^\s*[\s\S]*?\bthrow error;/,
-      `${site.file}: the failure path must rethrow the caught object itself — \`isDeadlineTruncatedFailure\` is a WeakSet lookup, so a new error here is a different key`
-    );
     assert.doesNotMatch(
-      block.slice(0, block.indexOf("throw error;")),
+      block,
       /new Error\(|cause:/,
-      `${site.file}: wrapping the error (even with \`{ cause }\`) loses the deadline mark, and the loss is silent — no type, no \`instanceof\`, just a clock problem paging someone at 07:00 (#389)`
+      `${file}: wrapping the error (even with \`{ cause }\`) loses the deadline mark, and the loss is silent — no type, no \`instanceof\`, just a clock problem paging someone at 07:00 (#389)`
     );
   }
 });
