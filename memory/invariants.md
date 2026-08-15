@@ -212,7 +212,7 @@ Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route
 - A `?step=` value becomes an onboarding step in exactly ONE place, `resolveOnboardingStepRequest`, with a client mirror and a finished-dashboard half honouring `leadership` alone. A REPEATED param is REFUSED, because `.get()` takes the FIRST value and the wiki guide's provider the LAST.
 - ⚖ Step 1 (`basics`) is addressable EXACTLY WHILE THERE IS NO CHURCH, and every later step exactly once there is; step 1 never enters browser history. When step 1 is closed the server answers `none`, NOT `refuse`.
 - ⚖ The finish screen has NO `?step=` of its own: it is `/dashboard` with the param REMOVED, which is also how the contextual wiki guide is suppressed there. Never invent a fifth step value.
-- It does not PAINT until the param has actually left: `onboardingFinishScreen` answers `open` (the history write) and `showing` (the render). One boolean is a defect either way — it repaints the journey Guide pill over the offer for a frame, or deadlocks "Finish setup later".
+- It does not PAINT until the param has left: `onboardingFinishScreen` answers `open` (the history write) and `showing` (the render), never one boolean.
 
 ## Wiki Articles
 
