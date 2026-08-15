@@ -191,6 +191,16 @@ Three lib modules are ONE concept each: `fact-phrases.ts` the phrase VOCABULARY,
 - A CITED PATH IS UNTRUSTED INPUT — the judge writes it, so a segment may be `constructor`, `toString` or `__proto__` — and the rule binds every read of a judge-written key AND the write that assembles `manual.byKey`. Exactly three shapes are sanctioned: a `Map` read with `.get`, a `Record` read through `Object.hasOwn`, or a prototype-free `Object.create(null)` for an untrusted-key accumulator; never a bare `in` or `[key]`.
 - Pin the WRITE half and all four reads, including the WALK itself rather than one caller's symptom, driving the cases off `Object.keys(ATTESTATION_LEAVES)`.
 
+## Phase Engine — Assessment Status
+
+Applies to `plant_assessments.status` and every reader and writer of it.
+
+- The column is FOUR values and `deferred` is NOT `failed` (#376): a `RateLimitDeferralError` is throttling and says nothing about the judge, so the row is `deferred` and the plant is re-selected next run; every other throw is `failed`, the deadline-truncated one included.
+- ONE decider, `assessmentStatusForFailure`, built on the runner's own `isRateLimitDeferral`, so the row and the `/api/phase-engine/assess` summary cannot disagree.
+- Every read names `complete` POSITIVELY — never `<> 'complete'`, which folds the two back together.
+- The vocabulary is closed by `plant_assessments_status_check` (migration 0040): `.$type<>()` on a varchar is a compile-time brand and nothing else.
+- The unjudged-run write is a COMPARE-AND-SET on `status = 'pending'`: the emit that ends `generateAssessment` runs after the row is already `complete`, so a bare `where(id)` demotes a persisted assessment. An empty rowcount is the guard working, never an error.
+
 ## Onboarding — the flow's `?step=` URL
 
 Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route of its own — it renders AS `/dashboard` while `onboarding_completed_at` is null — so the step it shows lives in the URL.
