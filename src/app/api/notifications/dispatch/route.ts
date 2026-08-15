@@ -18,11 +18,13 @@
 // CONSTANT-TIME (#266). See `src/lib/security/constant-time.ts` for why `===`
 // and a plain length guard are both oracles.
 //
-// It also carries the DAILY oversight activity digest (ruled 2026-08-01). That
-// is not a second job bolted on: the digest needs a once-a-day trigger, this app
-// has no daily scheduler to spare, and the sweep's "already done today" test is
-// derived from the rows it writes — so hanging it off a 15-minute tick produces
-// exactly one digest per plant per day. See `sweepOversightDigests` below.
+// It also carries BOTH digest sweeps — the daily oversight activity digest
+// (ruled 2026-08-01) and the recurring planter digest (N-013). Neither is a
+// second job bolted on: each needs a recurring trigger, this app has no
+// scheduler to spare, and each sweep's "already done for this period" test is
+// derived from the rows it writes — so hanging them off a 15-minute tick
+// produces exactly one digest per plant per day and one per recipient per
+// period. See `sweepOversightDigests` and `sweepPlanterDigests` below.
 //
 // Schedule: every 15 minutes, from `.github/workflows/notifications-dispatch.yml`
 // — NOT from vercel.json, which since #36 carries no crons at all (the phase
@@ -50,6 +52,10 @@ import {
   RUN_BUDGET_MS,
   type DispatchRunSummary,
 } from "@/lib/notifications/dispatch";
+import {
+  runDailyPlanterDigestSweep,
+  type PlanterDigestSweepSummary,
+} from "@/lib/notifications/digest";
 import {
   runDailyOversightDigestSweep,
   type OversightDigestSweepSummary,
@@ -98,7 +104,41 @@ export interface DispatchResponseBody extends DispatchRunSummary {
    * out today?" is answered by the same tick log as "did the reminders?".
    */
   oversightDigest: OversightDigestSweepSummary | null;
+  /**
+   * The PLANTER digest sweep this tick performed, or null if it threw (N-013).
+   * Same reason it is reported here as the line above: one tick, one log line,
+   * one answer to "did it go out?".
+   */
+  planterDigest: PlanterDigestSweepSummary | null;
 }
+
+/**
+ * The three things one tick does.
+ *
+ * A seam rather than three direct calls, and it exists for exactly one reason:
+ * the interesting behaviour of this file is the ORDER and the never-fail
+ * contract, and neither is assertable if proving them needs a Postgres. With
+ * this, `route.test.ts` runs a whole tick against fakes and asserts that a
+ * digest sweep that throws still returns 200 with an intact dispatch summary —
+ * the property the two `catch` blocks below exist for.
+ *
+ * Production passes `PRODUCTION_TICK`; nothing else ever supplies these.
+ */
+export interface DispatchTickDeps {
+  dispatch(): Promise<DispatchRunSummary>;
+  sweepOversightDigests(at: Date): Promise<OversightDigestSweepSummary>;
+  sweepPlanterDigests(at: Date): Promise<PlanterDigestSweepSummary>;
+}
+
+const PRODUCTION_TICK: DispatchTickDeps = {
+  dispatch: () =>
+    dispatchNotifications({
+      maxBatch: MAX_DISPATCH_BATCH,
+      budgetMs: RUN_BUDGET_MS,
+    }),
+  sweepOversightDigests: runDailyOversightDigestSweep,
+  sweepPlanterDigests: runDailyPlanterDigestSweep,
+};
 
 /**
  * The daily oversight digest, hung off this tick (ruled 2026-08-01).
@@ -125,16 +165,98 @@ export interface DispatchResponseBody extends DispatchRunSummary {
  * data in the response, not an exception.
  */
 async function sweepOversightDigests(
+  deps: DispatchTickDeps,
   at: Date
 ): Promise<OversightDigestSweepSummary | null> {
   try {
-    return await runDailyOversightDigestSweep(at);
+    return await deps.sweepOversightDigests(at);
   } catch (error) {
     console.error(
       "[notifications/dispatch] oversight digest sweep failed:",
       error
     );
     return null;
+  }
+}
+
+/**
+ * The recurring PLANTER digest, hung off this same tick (N-013).
+ *
+ * WHY HERE, and it is the same answer as the oversight digest's above: this app
+ * has no scheduler to give it. The Hobby plan's one-a-day Vercel cron is
+ * unusable (which is why `vercel.json` schedules nothing) and a third GitHub
+ * workflow would be a scheduler to maintain for one query. The 15-minute tick
+ * already runs, and 15 minutes is exactly the frequency this sweep is designed
+ * for: its once-a-period guard is DERIVED from the rows it writes, not from a
+ * clock, so firing 96 times a day still produces one digest per recipient per
+ * period, and a dropped tick is a delay rather than a loss.
+ *
+ * WHY AFTER BOTH. Draining due notifications is the time-sensitive obligation
+ * (N-017) and neither roll-up is. The oversight sweep keeps its place ahead of
+ * this one because it reports a day that is already over; this one reports what
+ * is open right now and loses nothing by being last.
+ *
+ * WHY IT CANNOT FAIL THE RUN. Identical to the oversight case: a throw here
+ * would turn a successful dispatch — emails already sent, rows already marked
+ * delivered — into a 500, and the caller's only recovery is to tick again,
+ * which re-runs nothing and re-attempts the same broken sweep. So the failure is
+ * data in the response, not an exception.
+ *
+ * NOTE the production prerequisite this makes live: the digest is the first
+ * feature in the product that enqueues on a schedule, so from this call
+ * onwards `UNSUBSCRIBE_TOKEN_SECRET` must be set in production — the digest
+ * email throws rather than ship a dead unsubscribe link.
+ */
+async function sweepPlanterDigests(
+  deps: DispatchTickDeps,
+  at: Date
+): Promise<PlanterDigestSweepSummary | null> {
+  try {
+    return await deps.sweepPlanterDigests(at);
+  } catch (error) {
+    console.error(
+      "[notifications/dispatch] planter digest sweep failed:",
+      error
+    );
+    return null;
+  }
+}
+
+/**
+ * One authorised tick: dispatch, then both digest sweeps, then the summary.
+ *
+ * Separate from `GET` so the tick can be exercised without a request and
+ * without a database. `GET` is the guard; this is the work.
+ */
+export async function runDispatchTick(
+  deps: DispatchTickDeps = PRODUCTION_TICK
+): Promise<NextResponse> {
+  try {
+    const summary = await deps.dispatch();
+
+    if (summary.remainingPending > 0) {
+      console.warn(
+        `[notifications/dispatch] ${summary.remainingPending} due notification(s) left pending after a batch of ${summary.claimed}; they roll over to the next tick.`
+      );
+    }
+
+    const oversightDigest = await sweepOversightDigests(deps, new Date());
+    const planterDigest = await sweepPlanterDigests(deps, new Date());
+
+    return NextResponse.json({
+      ok: true,
+      ...summary,
+      oversightDigest,
+      planterDigest,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    // A thrown run has already released or left claimed whatever it touched;
+    // nothing is dropped, and the next tick retries. The one thing that must
+    // NOT happen is a duplicate send on recovery, which the per-channel claim
+    // prevents regardless of how this run ended.
+    console.error("[notifications/dispatch] run failed:", error);
+    return NextResponse.json({ error: "Dispatch run failed" }, { status: 500 });
   }
 }
 
@@ -150,32 +272,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const summary = await dispatchNotifications({
-      maxBatch: MAX_DISPATCH_BATCH,
-      budgetMs: RUN_BUDGET_MS,
-    });
-
-    if (summary.remainingPending > 0) {
-      console.warn(
-        `[notifications/dispatch] ${summary.remainingPending} due notification(s) left pending after a batch of ${summary.claimed}; they roll over to the next tick.`
-      );
-    }
-
-    const oversightDigest = await sweepOversightDigests(new Date());
-
-    return NextResponse.json({
-      ok: true,
-      ...summary,
-      oversightDigest,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    // A thrown run has already released or left claimed whatever it touched;
-    // nothing is dropped, and the next tick retries. The one thing that must
-    // NOT happen is a duplicate send on recovery, which the per-channel claim
-    // prevents regardless of how this run ended.
-    console.error("[notifications/dispatch] run failed:", error);
-    return NextResponse.json({ error: "Dispatch run failed" }, { status: 500 });
-  }
+  return runDispatchTick();
 }

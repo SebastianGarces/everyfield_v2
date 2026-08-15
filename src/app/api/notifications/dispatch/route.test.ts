@@ -3,11 +3,20 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { GET, isAuthorized, maxDuration } from "./route";
+import {
+  GET,
+  isAuthorized,
+  maxDuration,
+  runDispatchTick,
+  type DispatchTickDeps,
+} from "./route";
 import {
   RUN_BUDGET_MS,
   stillLivePredicateFor,
+  type DispatchRunSummary,
 } from "@/lib/notifications/dispatch";
+import type { PlanterDigestSweepSummary } from "@/lib/notifications/digest";
+import type { OversightDigestSweepSummary } from "@/lib/notifications/oversight-digest";
 import { MEETING_NOTIFICATION_TYPES } from "@/lib/meetings/notifications";
 import { TASK_NOTIFICATION_TYPES } from "@/lib/tasks/notifications";
 
@@ -307,5 +316,186 @@ test("the run budget sits under the declared function timeout (N-017)", () => {
   assert.ok(
     RUN_BUDGET_MS < maxDuration * 1000,
     `budget ${RUN_BUDGET_MS}ms must be under ${maxDuration}s`
+  );
+});
+
+// ----------------------------------------------------------------------------
+// AC (#135): the planter digest sweep is actually CALLED by the one recurring
+// tick this app has — and cannot take a successful dispatch down with it
+//
+// This is the probe that was red before the fix. `runDailyPlanterDigestSweep`
+// had no caller anywhere in `src/`, so every digest acceptance criterion held
+// inside the unit suite and nowhere else: in production no digest was composed,
+// no row was enqueued, and the whole module plus its email template was
+// unreachable code.
+//
+// The tick runs against injected deps rather than the database, which is what
+// makes the ORDER and the never-fail contract assertable at all — the real
+// `dispatch()` needs Postgres, and a test that cannot get past it proves
+// nothing about what happens after it.
+// ----------------------------------------------------------------------------
+
+const DISPATCH_SUMMARY: DispatchRunSummary = {
+  claimed: 3,
+  remainingPending: 0,
+  groups: 2,
+  emailsSent: 2,
+  delivered: 2,
+  cancelled: 0,
+  failed: 0,
+  retryScheduled: 0,
+  deferred: 0,
+  suppressed: 0,
+  addressSuppressed: 0,
+  released: 0,
+  durationMs: 12,
+};
+
+const OVERSIGHT_SUMMARY: OversightDigestSweepSummary = {
+  dayKey: "2026-08-14",
+  selected: 1,
+  plantsScanned: 1,
+  pages: 1,
+  digested: 1,
+  quiet: 0,
+  unknown: 0,
+  failed: 0,
+  budgetExhausted: false,
+  durationMs: 4,
+};
+
+const PLANTER_SUMMARY: PlanterDigestSweepSummary = {
+  selected: 2,
+  plantsScanned: 2,
+  pages: 1,
+  created: 5,
+  deduped: 1,
+  quiet: 0,
+  failed: 0,
+  budgetExhausted: false,
+  durationMs: 7,
+};
+
+/** The three steps of a tick, named as the recorder and the failure list name them. */
+type TickStep = "dispatch" | "oversight" | "planter";
+
+/**
+ * A tick whose three steps record that they ran, in the order they ran, and
+ * throw where asked to.
+ *
+ * The recording happens BEFORE the throw on purpose: "the sweep ran and blew
+ * up" and "the sweep was never called" are the two outcomes this file exists to
+ * tell apart, and a fake that throws without recording cannot.
+ */
+function tickDeps(failing: readonly TickStep[] = []): {
+  deps: DispatchTickDeps;
+  calls: TickStep[];
+  sweptAt: Date[];
+} {
+  const calls: TickStep[] = [];
+  const sweptAt: Date[] = [];
+
+  function record(step: TickStep): void {
+    calls.push(step);
+    if (failing.includes(step)) throw new Error(`${step} exploded`);
+  }
+
+  const deps: DispatchTickDeps = {
+    async dispatch() {
+      record("dispatch");
+      return DISPATCH_SUMMARY;
+    },
+    async sweepOversightDigests() {
+      record("oversight");
+      return OVERSIGHT_SUMMARY;
+    },
+    async sweepPlanterDigests(at) {
+      record("planter");
+      sweptAt.push(at);
+      return PLANTER_SUMMARY;
+    },
+  };
+
+  return { deps, calls, sweptAt };
+}
+
+test("an authorised tick runs the planter digest sweep, after the dispatch", async () => {
+  const { deps, calls, sweptAt } = tickDeps();
+
+  const response = await runDispatchTick(deps);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    calls,
+    ["dispatch", "oversight", "planter"],
+    "draining what is due is the time-sensitive obligation; a roll-up never runs first"
+  );
+  assert.deepEqual(body.planterDigest, PLANTER_SUMMARY);
+  assert.deepEqual(body.oversightDigest, OVERSIGHT_SUMMARY);
+  assert.equal(body.claimed, DISPATCH_SUMMARY.claimed);
+  assert.ok(
+    sweptAt[0] instanceof Date,
+    "the sweep is given the instant the tick fired — every period is derived from it"
+  );
+});
+
+test("a planter digest sweep that throws still returns 200 with the dispatch intact", async () => {
+  // A throw here would turn a successful dispatch — emails already sent, rows
+  // already marked delivered — into a 500, and the caller's only recovery is to
+  // tick again, which re-runs nothing and re-attempts the same broken sweep.
+  const { deps, calls } = tickDeps(["planter"]);
+
+  const response = await runDispatchTick(deps);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(
+    body.planterDigest,
+    null,
+    "the failure is data, not an exception"
+  );
+  assert.deepEqual(body.oversightDigest, OVERSIGHT_SUMMARY);
+  assert.equal(body.claimed, DISPATCH_SUMMARY.claimed);
+  assert.equal(body.delivered, DISPATCH_SUMMARY.delivered);
+  assert.deepEqual(calls, ["dispatch", "oversight", "planter"]);
+});
+
+test("an oversight sweep that throws does not cost the planter digest its tick", async () => {
+  // The two roll-ups are independent; neither catch may swallow the other's run.
+  const { deps } = tickDeps(["oversight"]);
+
+  const body = await (await runDispatchTick(deps)).json();
+
+  assert.equal(body.oversightDigest, null);
+  assert.deepEqual(body.planterDigest, PLANTER_SUMMARY);
+});
+
+test("a dispatch that throws is still a 500, and no sweep runs behind it", async () => {
+  const { deps, calls } = tickDeps(["dispatch"]);
+
+  const response = await runDispatchTick(deps);
+
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: "Dispatch run failed" });
+  assert.deepEqual(calls, ["dispatch"]);
+});
+
+test("GET does the authorisation and nothing else — the tick is one call", () => {
+  // The guard and the work are separate so the work can be tested; that split
+  // is only honest while GET keeps delegating rather than growing a second copy
+  // of the body.
+  const route = readFileSync(
+    path.join(process.cwd(), "src/app/api/notifications/dispatch/route.ts"),
+    "utf8"
+  );
+  const getBody = route.slice(route.indexOf("export async function GET("));
+
+  assert.match(getBody, /return runDispatchTick\(\);/);
+  assert.doesNotMatch(
+    getBody,
+    /dispatchNotifications\(/,
+    "GET re-implements the tick instead of calling it"
   );
 });

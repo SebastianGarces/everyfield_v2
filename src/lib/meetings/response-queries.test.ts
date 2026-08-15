@@ -4,6 +4,12 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  assertInOrder,
+  sourceReader,
+  stripComments,
+} from "@/lib/testing/source-span";
+
+import {
   attendanceRowQuery,
   meetingAttendedCountQuery,
   meetingResponseCountsQuery,
@@ -101,6 +107,47 @@ test("the denominator counts `attended` positively, never `not absent`", () => {
   assert.match(text, /"meeting_attendance"\."status" = \$\d/);
   assert.doesNotMatch(text, /"status" (<>|!=)/);
   assert.ok(params.includes("attended"));
+});
+
+test("the numerator counts only cards whose person is still on the list", () => {
+  // The two figures are one population or the Outcomes tab can claim more cards
+  // than attendees. The correlated probe is what says so, and it carries the
+  // church in its own WHERE like every other read here.
+  const { sql: text, params } = meetingResponseCountsQuery(
+    CHURCH_A,
+    MEETING_A
+  ).toSQL();
+
+  assert.match(text, /exists/i, "the numerator has no attendance probe at all");
+  assert.match(text, /"meeting_attendance"\."church_id" = \$\d/);
+  assert.match(text, /"meeting_attendance"\."meeting_id" = \$\d/);
+  assert.match(
+    text,
+    /"meeting_attendance"\."person_id" = "meeting_responses"\."person_id"/,
+    "the probe is correlated on the person, or it matches any attendee"
+  );
+  assert.ok(!params.includes(CHURCH_B));
+});
+
+test("the denominator admits an attendee who handed a card in, whatever their status", () => {
+  // `status` is editable after the fact. Without this arm, flipping somebody to
+  // `absent` after their card was keyed dropped them out of the denominator
+  // while their card stayed in the numerator — "2 of 1 attendee handed a card
+  // in" (product value V5).
+  const { sql: text } = meetingAttendedCountQuery(CHURCH_A, MEETING_A).toSQL();
+
+  assert.match(text, /exists/i, "the denominator is attendance-status only");
+  assert.match(
+    text,
+    /"meeting_responses"\."person_id" = "meeting_attendance"\."person_id"/,
+    "the probe is correlated on the person"
+  );
+  assert.match(
+    text,
+    /"meeting_responses"\."church_id" = \$\d/,
+    "the correlated probe names the church in its own WHERE"
+  );
+  assert.match(text, /"meeting_responses"\."meeting_id" = \$\d/);
 });
 
 // ============================================================================
@@ -208,5 +255,47 @@ test("the upsert's SET is built field by field, never spread from the caller", (
     body,
     /set:\s*\{[^}]*personId/,
     "the person is never rewritten by an update"
+  );
+});
+
+// ============================================================================
+// Removing an attendee takes their card with them
+// ============================================================================
+
+/** The body of `removeAttendee`, comments stripped. */
+function removeBody(): string {
+  const service = sourceReader(SERVICE, "meetings/service.ts");
+  return stripComments(
+    service.span(
+      "export async function removeAttendee",
+      "export async function listAttendees"
+    )
+  );
+}
+
+test("removing an attendee deletes their response card, in one batch", () => {
+  // A card is something somebody handed in AT this meeting; once they are off
+  // its list the card references nobody. Leaving it behind was one of the two
+  // reachable paths to "2 of 1 attendee handed a card in" — and there is no FK
+  // doing this for us, since meeting_responses cascades from church_meetings
+  // and persons only.
+  const body = removeBody();
+
+  assert.match(
+    body,
+    /meetingResponseDeleteQuery\(churchId, meetingId, personId\)/,
+    "the removal leaves the person's card behind"
+  );
+  assert.match(
+    body,
+    /db\.batch\(\[/,
+    "both writes are known up front, so they are one batch (memory/invariants.md → Atomicity)"
+  );
+
+  assertInOrder(
+    body,
+    "removeAttendee",
+    ["db.batch([", "meetingResponseDeleteQuery(", ".delete(meetingAttendance)"],
+    "the card goes first, so a call that throws on a missing attendance row has still cleared an orphan"
   );
 });

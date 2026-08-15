@@ -29,7 +29,7 @@ import {
   normalizeEmailAddress,
 } from "./channels/suppression";
 import { composePlanterDigestEmail } from "./channels/digest-email";
-import { PLANTER_DIGEST_TYPE } from "./digest";
+import { PLANTER_DIGEST_TYPE } from "./digest-content";
 import { PERMANENT_FAILURE_PREFIX } from "./permanent-failure";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
@@ -424,21 +424,18 @@ export type GroupEmailComposer = (
  * generic template in the cron runtime while every test passed. A decision
  * spelled in code cannot be unarmed.
  *
- * The cost is one edge from F11 back into a feature module, which is the same
- * cost `register-consumers.ts` already pays and for the same reason.
+ * The cost is one edge from F11 into the digest's CONTENT LEAF
+ * (`./digest-content`, which imports `@/lib/datetime` and nothing else) — not
+ * into `./digest.ts`, whose `@/db` graph reaches back here through the tasks
+ * feature's own F11 registration. That edge used to close a cycle; taking the
+ * constant from the leaf is what opens it.
  *
- * WHY A FUNCTION AND NOT A MODULE-SCOPE TABLE. `./digest` reaches back into
- * this module through the tasks feature's own F11 registration
- * (`digest.ts` → `@/lib/tasks/service` → `@/lib/tasks/notifications` → here),
- * so the two modules are in a cycle. A `Record` built at module scope reads
- * `PLANTER_DIGEST_TYPE` while `./digest` is still initialising and throws a TDZ
- * `ReferenceError` on the import order that starts at `./digest` — which the
- * test suite for the digest does. Resolved on CALL, both modules finish loading
- * whichever is entered first.
- *
- * It also makes the lookup an EQUALITY rather than an index, so a stored `type`
- * of `"constructor"` cannot resolve through `Object.prototype` into something
- * callable (memory/invariants.md → the string-keyed accessor rule).
+ * WHY A FUNCTION AND NOT A MODULE-SCOPE TABLE: it makes the lookup an EQUALITY
+ * rather than an index, so a stored `type` of `"constructor"` cannot resolve
+ * through `Object.prototype` into something callable (memory/invariants.md →
+ * the string-keyed accessor rule). That is the whole reason now — the module
+ * initialisation order that used to make a `Record` throw a TDZ
+ * `ReferenceError` is gone with the cycle.
  *
  * Keyed on `type` rather than on `category`, because the `digest` CATEGORY
  * carries two unrelated things — this planter digest and the oversight activity

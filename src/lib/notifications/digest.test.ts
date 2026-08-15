@@ -22,26 +22,25 @@ import type {
 
 import { composePlanterDigestEmail } from "./channels/digest-email";
 import {
-  composePlanterDigestBody,
-  composePlanterDigestTitle,
-  currentDigestDedupeKeys,
-  DEFAULT_WEEKLY_DIGEST_WEEKDAY,
-  digestLinesFromBody,
-  digestPeriodFor,
-  DIGEST_SECTION_KEYS,
-  DIGEST_SECTIONS,
   plantsOwedPlanterDigestQuery,
-  planterDigestDedupeKey,
-  PLANTER_DIGEST_TYPE,
   runPlanterDigest,
   runPlanterDigestSweep,
-  totalOutstanding,
-  widestPeriodEnd,
-  type DigestCounts,
-  type DigestPeriod,
   type PlanterDigestDeps,
   type PlanterDigestSweepDeps,
 } from "./digest";
+// The pure half of the digest lives in the leaf, and so do its own cases — see
+// `digest-content.test.ts`. What is imported here is what the RUN needs.
+import {
+  composePlanterDigestBody,
+  composePlanterDigestTitle,
+  currentDigestDedupeKeys,
+  digestPeriodFor,
+  planterDigestDedupeKey,
+  PLANTER_DIGEST_TYPE,
+  widestPeriodEnd,
+  type DigestCounts,
+  type DigestPeriod,
+} from "./digest-content";
 import {
   emailComposerForGroup,
   runDispatch,
@@ -191,59 +190,6 @@ class FakeDigestDeps implements PlanterDigestDeps {
     };
   }
 }
-
-// ----------------------------------------------------------------------------
-// The default cadence day — FRD Open Question 2, decided here
-// ----------------------------------------------------------------------------
-
-test("a weekly digest defaults to landing on a Monday", () => {
-  assert.equal(DEFAULT_WEEKLY_DIGEST_WEEKDAY, 1, "1 is Monday in UTC");
-
-  // Every day of one week resolves to the SAME Monday, which is both halves of
-  // the ruling: the day it lands on, and the fact that the period is stable.
-  const monday = "2026-08-17";
-  for (let offset = 0; offset < 7; offset += 1) {
-    const at = new Date(`2026-08-${17 + offset}T13:45:00.000Z`);
-    const period = digestPeriodFor("weekly", at);
-    assert.equal(period.key, monday, `day +${offset} belongs to ${monday}`);
-    assert.equal(period.start.getUTCDay(), DEFAULT_WEEKLY_DIGEST_WEEKDAY);
-  }
-
-  // ...and the next day opens the next period, seven days later.
-  const next = digestPeriodFor("weekly", new Date("2026-08-24T00:00:00.000Z"));
-  assert.equal(next.key, "2026-08-24");
-});
-
-test("a daily period is the calendar day, and the two cadences never share a key", () => {
-  const daily = digestPeriodFor("daily", NOW);
-  assert.equal(daily.key, "2026-08-19");
-  assert.equal(daily.end.toISOString(), "2026-08-20T00:00:00.000Z");
-
-  // A Monday is both the DAY 2026-08-17 and the WEEK of 2026-08-17, so only the
-  // cadence in the key keeps a cadence switch from swallowing a digest.
-  const monday = new Date("2026-08-17T06:00:00.000Z");
-  assert.notEqual(
-    planterDigestDedupeKey(digestPeriodFor("daily", monday)),
-    planterDigestDedupeKey(digestPeriodFor("weekly", monday))
-  );
-
-  assert.deepEqual(currentDigestDedupeKeys(monday).sort(), [
-    `${PLANTER_DIGEST_TYPE}:daily:2026-08-17`,
-    `${PLANTER_DIGEST_TYPE}:weekly:2026-08-17`,
-  ]);
-});
-
-test("the sweep's lookahead is the widest any cadence could ask for", () => {
-  for (const at of [
-    new Date("2026-08-17T00:00:00.000Z"),
-    NOW,
-    new Date("2026-08-23T23:59:59.000Z"),
-  ]) {
-    const widest = widestPeriodEnd(at);
-    assert.ok(widest >= digestPeriodFor("daily", at).end);
-    assert.ok(widest >= digestPeriodFor("weekly", at).end);
-  }
-});
 
 // ----------------------------------------------------------------------------
 // AC — one digest per eligible recipient
@@ -399,85 +345,6 @@ test("a daily recipient gets one per day, and cadence is read per recipient", as
     "the default cadence is weekly"
   );
   assert.equal(nextDay.created, 1, "only the daily recipient earned a new row");
-});
-
-// ----------------------------------------------------------------------------
-// AC — content and links
-// ----------------------------------------------------------------------------
-
-test("the body summarises the outstanding work, and omits what is zero", () => {
-  assert.equal(
-    composePlanterDigestBody(BUSY),
-    [
-      "2 tasks are overdue",
-      "3 tasks are due before your next digest",
-      "1 meeting is coming up",
-    ].join("\n")
-  );
-
-  assert.equal(
-    composePlanterDigestBody({
-      overdue_tasks: 0,
-      tasks_due_soon: 0,
-      upcoming_meetings: 1,
-    }),
-    "1 meeting is coming up",
-    "a zero section is omitted, never printed as 0"
-  );
-});
-
-test("the title names the period, never 'today'", () => {
-  const weekly = composePlanterDigestTitle(digestPeriodFor("weekly", NOW));
-  const daily = composePlanterDigestTitle(digestPeriodFor("daily", NOW));
-
-  assert.match(weekly, /^What needs your attention — week of /);
-  assert.match(daily, /^What needs your attention — /);
-  assert.doesNotMatch(weekly, /today/i);
-  assert.doesNotMatch(daily, /today/i);
-});
-
-test("composing and re-reading a body is a lossless round trip", () => {
-  // Every combination of "present / absent" across the three sections, with a
-  // singular and a plural count so both phrases are exercised.
-  for (const overdue of [0, 1, 7]) {
-    for (const dueSoon of [0, 1, 4]) {
-      for (const meetings of [0, 1, 2]) {
-        const counts: DigestCounts = {
-          overdue_tasks: overdue,
-          tasks_due_soon: dueSoon,
-          upcoming_meetings: meetings,
-        };
-        if (totalOutstanding(counts) === 0) continue;
-
-        const lines = digestLinesFromBody(composePlanterDigestBody(counts));
-
-        assert.deepEqual(
-          Object.fromEntries(lines.map((line) => [line.section, line.count])),
-          Object.fromEntries(
-            DIGEST_SECTION_KEYS.filter((key) => counts[key] > 0).map((key) => [
-              key,
-              counts[key],
-            ])
-          ),
-          `round trip failed for ${JSON.stringify(counts)}`
-        );
-
-        for (const line of lines) {
-          assert.equal(line.path, DIGEST_SECTIONS[line.section].path);
-          assert.equal(line.linkLabel, DIGEST_SECTIONS[line.section].linkLabel);
-        }
-      }
-    }
-  }
-});
-
-test("a line this module did not write resolves to nothing, never to a wrong link", () => {
-  assert.deepEqual(digestLinesFromBody("3 widgets need polishing"), []);
-  assert.deepEqual(digestLinesFromBody("tasks are overdue"), []);
-  assert.deepEqual(digestLinesFromBody(""), []);
-  assert.deepEqual(digestLinesFromBody("constructor"), []);
-  // A count that does not match the phrase's grammar is not that section.
-  assert.deepEqual(digestLinesFromBody("2 task is overdue"), []);
 });
 
 test("the digest email carries a link into the app for every line it reports", async () => {

@@ -27,7 +27,19 @@ import type {
   MeetingCreateInput,
   MeetingUpdateInput,
 } from "@/lib/validations/meetings";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   defaultAgendaTemplatesForType,
   parseAgenda,
@@ -708,23 +720,48 @@ export async function addAttendee(
 }
 
 /**
- * Remove an attendee from a meeting.
+ * Remove an attendee from a meeting — and with them, their response card.
+ *
+ * THE CARD GOES TOO, in the same `db.batch` and the same (church, meeting,
+ * person) scope. A response card is a thing somebody handed in AT this meeting;
+ * once they are off its list the card references nobody, and leaving it behind
+ * broke the Outcomes tab's arithmetic in a way a planter could read: the
+ * numerator counted the orphan while the denominator lost the attendance row it
+ * came from, so "2 of 1 attendee handed a card in" was reachable through this
+ * very function (VM-014, product value V5 — honest numbers).
+ *
+ * ONE `db.batch`, not two awaits: both writes are known up front
+ * (memory/invariants.md → Atomicity), so an attendance row must never survive
+ * its card's deletion or the other way round.
+ *
+ * THE CARD IS DELETED FIRST, and the order carries a meaning. If no attendance
+ * row exists this call still throws — but the card it removed on the way was
+ * already an orphan referencing nobody, so removing it is the correct outcome of
+ * "this person is not on this meeting's list" rather than a side effect of a
+ * failed call.
+ *
+ * There is no FK between the two tables to do this for us: `meeting_responses`
+ * cascades from `church_meetings` and from `persons` (migration 0041), and
+ * neither of those is what a removal touches.
  */
 export async function removeAttendee(
   churchId: string,
   meetingId: string,
   personId: string
 ): Promise<void> {
-  const deleted = await db
-    .delete(meetingAttendance)
-    .where(
-      and(
-        eq(meetingAttendance.churchId, churchId),
-        eq(meetingAttendance.meetingId, meetingId),
-        eq(meetingAttendance.personId, personId)
+  const [, deleted] = await db.batch([
+    meetingResponseDeleteQuery(churchId, meetingId, personId),
+    db
+      .delete(meetingAttendance)
+      .where(
+        and(
+          eq(meetingAttendance.churchId, churchId),
+          eq(meetingAttendance.meetingId, meetingId),
+          eq(meetingAttendance.personId, personId)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (deleted.length === 0) {
     throw new Error("Attendance record not found");
@@ -856,11 +893,19 @@ export async function getAttendanceSummary(
  *
  * The attendance guard is a separate read, which is a race: an attendance row
  * deleted between the two statements commits a response for somebody no longer
- * on the list. That is the same accepted shape as `createHouseholdWithHead`'s
- * and it is BENIGN here — the breakdown reads `meeting_responses` scoped to the
- * church, so a stray row inflates one meeting's recorded count and can never
- * cross a tenant boundary. `buildResponseBreakdown` floors `notRecordedCount`
- * at zero for exactly that case.
+ * on the list — the same accepted shape as `createHouseholdWithHead`'s.
+ *
+ * WHAT THAT RESIDUAL COSTS, now that it costs nothing readable. It used to be
+ * called benign because the stray row could not cross a tenant boundary, which
+ * was true and was not the point: it still inflated the Outcomes tab's recorded
+ * count above its attendee count, and a figure a planter reads as "2 of 1
+ * attendee handed a card in" is a false number on the feature's headline screen
+ * (product value V5). Both readable paths into that state are closed by
+ * construction now — `removeAttendee` deletes the card with the attendance row,
+ * and both breakdown queries below count ONE population, cards that still have
+ * an attendance row and attendance rows that attended or hold a card. A row this
+ * race leaves behind is counted by neither, so it is invisible rather than
+ * wrong.
  */
 export async function recordMeetingResponse(
   churchId: string,
@@ -1005,6 +1050,13 @@ export async function listMeetingResponses(
  * and the response counts are the cards. A LEFT JOIN would give the same numbers
  * today and the wrong ones the moment a response outlives its attendance row.
  *
+ * The two are nonetheless ONE POPULATION, and each query says so in its own
+ * WHERE: a card is counted only while its person still has an attendance row,
+ * and an attendance row is counted when it attended OR holds a card. That is
+ * what makes `recordedCount <= attendeeCount` true of every pair these two
+ * queries can return, rather than something the arithmetic downstream has to
+ * survive.
+ *
  * Both queries name `church_id` in their own WHERE. That is the tenancy
  * boundary — a meeting id from another church returns zeroes rather than
  * another plant's meeting (`response-summary.test.ts` runs the two-church
@@ -1028,14 +1080,25 @@ export async function getMeetingResponseBreakdown(
 }
 
 /**
- * How many cards of each type came back, church-scoped.
+ * How many cards of each type came back, church-scoped — counting only cards
+ * belonging to somebody still on this meeting's list.
+ *
+ * THE `EXISTS` IS WHAT MAKES THE NUMERATOR AND THE DENOMINATOR ONE POPULATION.
+ * Every counted card now implies an attendance row, and every attendance row
+ * with a card is counted by `meetingAttendedCountQuery` below — so
+ * `recordedCount <= attendeeCount` is a property of the SQL rather than
+ * something the display layer has to defend against. It also answers the plainer
+ * question: a card from somebody no longer on the meeting's list is not a
+ * finding about that meeting, and reporting it is reporting a person who is not
+ * there.
  *
  * A `*Query` BUILDER rather than an inline statement, on the same terms as
  * `meetingFollowUpCountQuery`: tenancy here is application-enforced with no RLS
  * behind it, so what has to be assertable is the SQL that reaches the database —
  * a read that stopped scoping by church still type-checks and still returns
  * rows. `response-queries.test.ts` renders this with `.toSQL()` against a
- * two-church fixture.
+ * two-church fixture. The correlated probe carries the church in its own WHERE
+ * for the same reason the outer read does.
  */
 export function meetingResponseCountsQuery(
   churchId: string,
@@ -1050,19 +1113,44 @@ export function meetingResponseCountsQuery(
     .where(
       and(
         eq(meetingResponses.churchId, churchId),
-        eq(meetingResponses.meetingId, meetingId)
+        eq(meetingResponses.meetingId, meetingId),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(meetingAttendance)
+            .where(
+              and(
+                eq(meetingAttendance.churchId, churchId),
+                eq(meetingAttendance.meetingId, meetingId),
+                eq(meetingAttendance.personId, meetingResponses.personId)
+              )
+            )
+        )
       )
     )
     .groupBy(meetingResponses.responseType);
 }
 
 /**
- * The population the cards came out of: attendees marked `attended`.
+ * The population the cards could have come out of: everyone marked `attended`,
+ * PLUS anyone on this meeting's list who handed a card in.
  *
  * `status = 'attended'` POSITIVELY, never `<> 'absent'`, because the column has
  * three values — `excused` is neither. Counting the guest list instead would put
  * everyone who did not turn up into `notRecordedCount`, which reads as "we did
  * not get a card from them" about people who were never in the room.
+ *
+ * WHY THE SECOND ARM. `status` is editable after the fact, so flipping an
+ * attendee from `attended` to `absent` once their card was keyed used to drop
+ * them out of this count while their card stayed in the numerator — "2 of 1
+ * attendee handed a card in" on the feature's headline screen. The fix is the
+ * right POPULATION, not a clamp downstream (product value V5): somebody who
+ * handed a card in was demonstrably in the room, whatever the attendance row was
+ * later edited to say, so they belong in the denominator and their card is never
+ * destroyed by a status correction.
+ *
+ * Both arms are church- AND meeting-scoped in their own WHERE, the correlated
+ * one included.
  */
 export function meetingAttendedCountQuery(churchId: string, meetingId: string) {
   return db
@@ -1072,7 +1160,21 @@ export function meetingAttendedCountQuery(churchId: string, meetingId: string) {
       and(
         eq(meetingAttendance.churchId, churchId),
         eq(meetingAttendance.meetingId, meetingId),
-        eq(meetingAttendance.status, "attended")
+        or(
+          eq(meetingAttendance.status, "attended"),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(meetingResponses)
+              .where(
+                and(
+                  eq(meetingResponses.churchId, churchId),
+                  eq(meetingResponses.meetingId, meetingId),
+                  eq(meetingResponses.personId, meetingAttendance.personId)
+                )
+              )
+          )
+        )
       )
     );
 }

@@ -199,3 +199,30 @@ export async function isAddressSuppressed(email: string): Promise<boolean> {
   const suppressed = await loadSuppressedAddresses([email]);
   return suppressed.length > 0;
 }
+
+// ----------------------------------------------------------------------------
+// The self-service clear, in words
+// ----------------------------------------------------------------------------
+//
+// Both constants live HERE rather than in the settings action that uses them,
+// and not by preference: every VALUE export of a `"use server"` module is a
+// published endpoint, so an action module may export async functions and types
+// and nothing else (`server-action-surface.test.ts`). Beside the write is also
+// where they read best — the reason string is what `clearedReason` will hold
+// forever.
+
+/**
+ * Why a self-service clear says it happened. Stored verbatim on the row, so a
+ * later "who lifted this, and on what basis?" has an answer rather than a
+ * timestamp.
+ */
+export const SUPPRESSION_SELF_CLEAR_REASON = "holder re-verified from settings";
+
+/**
+ * What the reader is told when the clear itself failed.
+ *
+ * It promises nothing about the mailbox — the write did not happen, and that is
+ * all this sentence knows.
+ */
+export const SUPPRESSION_CLEAR_FAILED_MESSAGE =
+  "We could not turn email back on. Try again in a moment.";

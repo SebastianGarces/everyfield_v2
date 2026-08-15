@@ -8,6 +8,7 @@ import { responseCardRecordSchema } from "@/lib/validations/meetings";
 
 import {
   buildResponseBreakdown,
+  type ResponseCardCounts,
   parseResponseCardType,
   responseCardLabel,
   RESPONSE_CARD_OPTIONS,
@@ -220,11 +221,161 @@ test("zero-count rows are kept, so the breakdown has one shape", () => {
   );
 });
 
-test("more cards than attendees floors the unrecorded count at zero", () => {
-  // Reachable: `recordMeetingResponse` guards on an attendance row in a
-  // separate statement, so a row deleted between the two leaves a response
-  // behind. Benign — one meeting's count is high — but it must never render a
-  // negative.
+// ============================================================================
+// THE OTHER RULE: the numerator never exceeds its denominator
+// ============================================================================
+//
+// "2 of 1 attendee handed a card in" was reachable through two ordinary UI
+// paths — removing an attendee, and flipping one from `attended` to `absent`
+// after their card was keyed — because the cards and the attendees were counted
+// over populations that could diverge. Product value V5 is explicit: for every
+// displayed number someone must be able to say what it counts and over what
+// denominator.
+//
+// The fix is in the SQL (`meetingResponseCountsQuery` and
+// `meetingAttendedCountQuery`), so what is asserted here is that the arithmetic
+// holds for EVERY pair those two queries can now produce. The model below is the
+// two WHERE clauses restated over a plain list of rows; `response-queries.test.ts`
+// asserts the real statements still say the same thing.
+// ----------------------------------------------------------------------------
+
+interface AttendanceRow {
+  personId: string;
+  status: "attended" | "absent" | "excused";
+}
+
+interface ResponseRow {
+  personId: string;
+  responseType: ResponseCardType;
+}
+
+/** `meetingResponseCountsQuery`: cards whose person still has an attendance row. */
+function modelCounts(
+  attendance: readonly AttendanceRow[],
+  responses: readonly ResponseRow[]
+): ResponseCardCounts {
+  const counts: ResponseCardCounts = {};
+
+  for (const response of responses) {
+    if (!attendance.some((row) => row.personId === response.personId)) continue;
+    counts[response.responseType] = (counts[response.responseType] ?? 0) + 1;
+  }
+
+  return counts;
+}
+
+/** `meetingAttendedCountQuery`: attended, OR holding a card for this meeting. */
+function modelAttendeeCount(
+  attendance: readonly AttendanceRow[],
+  responses: readonly ResponseRow[]
+): number {
+  return attendance.filter(
+    (row) =>
+      row.status === "attended" ||
+      responses.some((response) => response.personId === row.personId)
+  ).length;
+}
+
+test("recorded never exceeds attendees, over every population the queries can return", () => {
+  const people = ["a", "b", "c"];
+  const statuses: AttendanceRow["status"][] = ["attended", "absent", "excused"];
+  // `undefined` is "no attendance row"; `null` is "on the list, no card".
+  const attendanceStates = [undefined, ...statuses];
+  const cardStates = [null, "ready_commit", "not_interested"] as const;
+
+  let cases = 0;
+
+  for (const a of attendanceStates)
+    for (const b of attendanceStates)
+      for (const c of attendanceStates)
+        for (const cardA of cardStates)
+          for (const cardB of cardStates)
+            for (const cardC of cardStates) {
+              const attendanceStatuses = [a, b, c];
+              const cards = [cardA, cardB, cardC];
+
+              const attendance: AttendanceRow[] = people
+                .map((personId, index) => ({
+                  personId,
+                  status: attendanceStatuses[index],
+                }))
+                .filter(
+                  (row): row is AttendanceRow => row.status !== undefined
+                );
+
+              const responses: ResponseRow[] = people.flatMap(
+                (personId, index) => {
+                  const responseType = cards[index];
+                  return responseType === null
+                    ? []
+                    : [{ personId, responseType }];
+                }
+              );
+
+              const breakdown = buildResponseBreakdown(
+                modelCounts(attendance, responses),
+                modelAttendeeCount(attendance, responses)
+              );
+
+              cases += 1;
+              assert.ok(
+                breakdown.recordedCount <= breakdown.attendeeCount,
+                `${breakdown.recordedCount} of ${breakdown.attendeeCount}: a card was counted whose person is not in the denominator`
+              );
+              assert.equal(
+                breakdown.notRecordedCount,
+                breakdown.attendeeCount - breakdown.recordedCount,
+                "the unrecorded line is the honest remainder, never a floored one"
+              );
+            }
+
+  assert.equal(cases, 4 ** 3 * 3 ** 3, "every combination ran");
+});
+
+test("a status flip after a card is keyed keeps both the card and its denominator", () => {
+  // The second reachable path. Nobody's card is destroyed by a correction to
+  // their attendance status, and the person who handed it in stays in the
+  // population it is reported against.
+  const attendance: AttendanceRow[] = [
+    { personId: "a", status: "absent" },
+    { personId: "b", status: "attended" },
+  ];
+  const responses: ResponseRow[] = [
+    { personId: "a", responseType: "ready_commit" },
+  ];
+
+  const breakdown = buildResponseBreakdown(
+    modelCounts(attendance, responses),
+    modelAttendeeCount(attendance, responses)
+  );
+
+  assert.equal(breakdown.recordedCount, 1);
+  assert.equal(breakdown.attendeeCount, 2, "the card's owner is still counted");
+  assert.equal(breakdown.notRecordedCount, 1);
+});
+
+test("a card from somebody off the list is counted by neither number", () => {
+  // `removeAttendee` deletes the card with the row, so this is only reachable
+  // through the write race `recordMeetingResponse` documents. It must be
+  // invisible rather than wrong.
+  const breakdown = buildResponseBreakdown(
+    modelCounts(
+      [{ personId: "b", status: "attended" }],
+      [{ personId: "ghost", responseType: "interested" }]
+    ),
+    modelAttendeeCount(
+      [{ personId: "b", status: "attended" }],
+      [{ personId: "ghost", responseType: "interested" }]
+    )
+  );
+
+  assert.equal(breakdown.recordedCount, 0);
+  assert.equal(breakdown.attendeeCount, 1);
+});
+
+test("the floor stays, as defence in depth for a caller that counts differently", () => {
+  // Not the fix — the queries are — but a future caller must still never render
+  // a negative row.
   const breakdown = buildResponseBreakdown({ interested: 5 }, 3);
 
   assert.equal(breakdown.recordedCount, 5);

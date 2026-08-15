@@ -1,6 +1,6 @@
 import { digestEmail } from "@/lib/email/templates/digest";
 
-import { digestLinesFromBody } from "../digest";
+import { digestLinesFromBody } from "../digest-content";
 
 import {
   appBaseUrl,
@@ -33,8 +33,14 @@ import type { NotificationCategory } from "../categories";
 //      scoped to the top level precisely because composition lives one directory
 //      down.
 //
-// So `../digest.ts` owns WHAT the digest says and this file owns WHAT IT LOOKS
-// LIKE, with `digestLinesFromBody` as the seam between them.
+// So `../digest-content.ts` owns WHAT the digest says and this file owns WHAT
+// IT LOOKS LIKE, with `digestLinesFromBody` as the seam between them.
+//
+// The parser comes from THE LEAF, never from `../digest.ts`. That module opens
+// with `@/db`, the schema barrel and `@/lib/tasks/service`, and this file is
+// reached from the dispatcher — importing the trunk for one pure function is
+// the edge `../digest-content.ts` exists to cut, and re-closing it is what put
+// `../dispatch.ts` and `../digest.ts` in a cycle in the first place.
 // ============================================================================
 
 /**

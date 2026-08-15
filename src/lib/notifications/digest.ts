@@ -24,13 +24,24 @@ import {
   notifications,
   tasks,
   users,
-  type DigestCadence,
   type NotificationPreference,
 } from "@/db/schema";
 import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
-import { formatDate, MS_PER_DAY, toCalendarDate } from "@/lib/datetime";
+import { toCalendarDate } from "@/lib/datetime";
 import { topLevelTasksOnly } from "@/lib/tasks/service";
 
+import {
+  composePlanterDigestBody,
+  composePlanterDigestTitle,
+  currentDigestDedupeKeys,
+  digestPeriodFor,
+  planterDigestDedupeKey,
+  PLANTER_DIGEST_TYPE,
+  totalOutstanding,
+  widestPeriodEnd,
+  type DigestCounts,
+  type DigestPeriod,
+} from "./digest-content";
 import {
   enqueue,
   type EnqueueNotificationInput,
@@ -112,299 +123,24 @@ import { buildPreferenceMap, resolveDigestCadence } from "./preferences";
 // sweep had to fall back on.
 // ============================================================================
 
-/** The `type` every planter digest row carries. One constant, four readers. */
-export const PLANTER_DIGEST_TYPE = "digest.planter";
-
-/**
- * THE DEFAULT DAY A WEEKLY DIGEST LANDS ON — **Monday**, in `APP_TIME_ZONE`.
- *
- * The FRD leaves this open (Open Question 2: "weekly-on-Monday,
- * weekly-on-Sunday or user-chosen at first send is unruled"), so this is a
- * choice made here and stated in the PR rather than assumed silently.
- *
- * MONDAY, for two reasons:
- *
- *   1. The digest is FORWARD-looking — "here is what needs your attention" —
- *      so it wants to arrive at the start of the working week the reader will
- *      act in, not at the end of the one they have finished.
- *   2. Sunday is the busiest ministry day a church planter has. A digest that
- *      lands on it competes with the gathering itself and is the one most
- *      likely to go unread, which is the precise failure this feature exists to
- *      avoid.
- *
- * `1` is `Date#getUTCDay()`'s Monday, and `APP_TIME_ZONE` is UTC — the app has
- * no per-user timezone (memory/invariants.md → Date & Time Rendering), and
- * send-time-of-day is N-018, deliberately out of scope until one exists.
- */
-export const DEFAULT_WEEKLY_DIGEST_WEEKDAY = 1;
-
 // ----------------------------------------------------------------------------
-// The period
+// WHAT THE DIGEST SAYS lives next door, in `./digest-content.ts`
 // ----------------------------------------------------------------------------
-
-/**
- * The stretch of time ONE digest speaks for: it lands at `start` and covers
- * everything due before `end`, when the next one arrives.
- *
- * `key` is the period's IDENTITY — half of the dedupe key — so it is derived
- * the same way on every machine and never from the runtime's calendar.
- */
-export interface DigestPeriod {
-  cadence: DigestCadence;
-  start: Date;
-  end: Date;
-  /** `YYYY-MM-DD` of `start`, in `APP_TIME_ZONE`. */
-  key: string;
-}
-
-/** Whole days in one period of each cadence. */
-const PERIOD_DAYS: Record<DigestCadence, number> = { daily: 1, weekly: 7 };
-
-/** Midnight of the `APP_TIME_ZONE` day `at` falls in. */
-function startOfDay(at: Date): Date {
-  return new Date(`${toCalendarDate(at)}T00:00:00.000Z`);
-}
-
-/**
- * The period `at` falls inside, for one cadence.
- *
- * Daily periods are the calendar day. Weekly periods start on
- * `DEFAULT_WEEKLY_DIGEST_WEEKDAY` and run seven days, so every instant in a
- * week resolves to the same `key` — which is what makes "one per week" a
- * property of the key rather than of when the sweep happened to fire.
- *
- * UTC-day arithmetic is valid because `APP_TIME_ZONE` is UTC, whose days are
- * exactly 24h and aligned to the epoch. The same assumption `relativeDayOffset`
- * states in `src/lib/datetime.ts`; a zone with DST would need both changed
- * together.
- */
-export function digestPeriodFor(
-  cadence: DigestCadence,
-  at: Date
-): DigestPeriod {
-  const today = startOfDay(at);
-
-  const start =
-    cadence === "daily"
-      ? today
-      : new Date(
-          today.getTime() -
-            ((today.getUTCDay() - DEFAULT_WEEKLY_DIGEST_WEEKDAY + 7) % 7) *
-              MS_PER_DAY
-        );
-
-  return {
-    cadence,
-    start,
-    end: new Date(start.getTime() + PERIOD_DAYS[cadence] * MS_PER_DAY),
-    key: toCalendarDate(start),
-  };
-}
-
-/**
- * The digest's identity, per recipient.
- *
- * Church-free on purpose — see the module header. Carries the cadence because
- * the two cadences name different periods that can share a calendar date.
- */
-export function planterDigestDedupeKey(period: DigestPeriod): string {
-  return `${PLANTER_DIGEST_TYPE}:${period.cadence}:${period.key}`;
-}
-
-/**
- * Every dedupe key a digest could legitimately carry at instant `at` — one per
- * cadence, so exactly two.
- *
- * The sweep's owed-set test is "this recipient holds none of these", and it is
- * a two-element `IN` rather than a per-user lookup because the cadence lives in
- * a preference row the selection query would otherwise have to join.
- */
-export function currentDigestDedupeKeys(at: Date): string[] {
-  return (Object.keys(PERIOD_DAYS) as DigestCadence[]).map((cadence) =>
-    planterDigestDedupeKey(digestPeriodFor(cadence, at))
-  );
-}
-
-/**
- * The WIDEST period end of any cadence at `at`.
- *
- * The sweep cannot know a recipient's cadence without joining their preference
- * rows, so its "is anything outstanding?" probe uses the widest lookahead any
- * cadence could ask for. That can only make the selection OVER-offer a plant,
- * which costs one wasted summary; under-offering would cost a digest. The
- * per-recipient summary remains the authority for what is actually reported.
- */
-export function widestPeriodEnd(at: Date): Date {
-  return (Object.keys(PERIOD_DAYS) as DigestCadence[])
-    .map((cadence) => digestPeriodFor(cadence, at).end)
-    .reduce((widest, end) => (end > widest ? end : widest));
-}
-
+//
+// The type constant, the period arithmetic, the dedupe keys, the section
+// vocabulary and the body/title composer with its inverse are all pure, and
+// three modules need pieces of them — this one, `./dispatch.ts` and
+// `./channels/digest-email.ts`. They live in a LEAF that imports no database so
+// the other two do not have to pull this module's `@/db` graph in behind one
+// string constant. See that file's header for the cycle it cuts.
+//
+// NOTHING FROM IT IS RE-EXPORTED HERE. A leaf whose contents are also served
+// from the trunk is not a leaf; every importer names `./digest-content`
+// directly, exactly as `./permanent-failure.ts` requires for its own constant.
+//
+// What is left in this file is everything that needs the database: what counts
+// as outstanding, the per-plant run, and the sweep.
 // ----------------------------------------------------------------------------
-// What the digest says — ONE table, read by the composer AND its inverse
-// ----------------------------------------------------------------------------
-
-export const DIGEST_SECTION_KEYS = [
-  "overdue_tasks",
-  "tasks_due_soon",
-  "upcoming_meetings",
-] as const;
-
-export type DigestSectionKey = (typeof DIGEST_SECTION_KEYS)[number];
-
-/** The counts one digest reports. Every field is a non-negative integer. */
-export type DigestCounts = Record<DigestSectionKey, number>;
-
-export interface DigestSectionDefinition {
-  /** Phrase for exactly one item. */
-  one: string;
-  /** Phrase for none or several. */
-  many: string;
-  /** Where in the app the reader goes to act on it. App-relative. */
-  path: string;
-  /** The link's own words, in the email. */
-  linkLabel: string;
-}
-
-/**
- * THE DIGEST'S VOCABULARY, DECLARED ONCE.
- *
- * Three things read this table and they must agree, which is the whole reason
- * it exists: `composePlanterDigestBody` writes the body from it,
- * `digestLinesFromBody` reads that body back through it to hang the email's
- * links off, and `outstandingConditions` names one SQL condition per key. A
- * `Record` keyed on the union makes a new section a compile error in all three
- * places rather than a silently missing line.
- *
- * The phrases are what the body literally contains, so they are the parse
- * table too — see `digestLinesFromBody`, which is the exact inverse and is
- * pinned by a round-trip test rather than by this sentence.
- */
-export const DIGEST_SECTIONS: Record<
-  DigestSectionKey,
-  DigestSectionDefinition
-> = {
-  overdue_tasks: {
-    one: "task is overdue",
-    many: "tasks are overdue",
-    path: "/tasks",
-    linkLabel: "Open your tasks",
-  },
-  tasks_due_soon: {
-    one: "task is due before your next digest",
-    many: "tasks are due before your next digest",
-    path: "/tasks",
-    linkLabel: "Open your tasks",
-  },
-  upcoming_meetings: {
-    one: "meeting is coming up",
-    many: "meetings are coming up",
-    path: "/meetings",
-    linkLabel: "Open your meetings",
-  },
-};
-
-/** Total outstanding items — the "is anything owed?" answer. */
-export function totalOutstanding(counts: DigestCounts): number {
-  return DIGEST_SECTION_KEYS.reduce((sum, key) => sum + counts[key], 0);
-}
-
-/** The one line a section renders as, e.g. `3 tasks are overdue`. */
-function sectionLine(key: DigestSectionKey, n: number): string {
-  const section = DIGEST_SECTIONS[key];
-  return `${n} ${n === 1 ? section.one : section.many}`;
-}
-
-/**
- * The digest body: one line per NON-ZERO section, in table order.
- *
- * Zero counts are omitted rather than printed as "0 meetings are coming up" —
- * a reader skimming an inbox wants the two things that need them, not the one
- * that does and the two that do not. A digest with every count at zero is never
- * composed at all (`runPlanterDigest` returns before this is called).
- *
- * Newline-separated because the body is stored on `notifications.body` and read
- * back by BOTH the in-app feed and `digestLinesFromBody`; a line is the unit
- * both of them work in.
- */
-export function composePlanterDigestBody(counts: DigestCounts): string {
-  return DIGEST_SECTION_KEYS.filter((key) => counts[key] > 0)
-    .map((key) => sectionLine(key, counts[key]))
-    .join("\n");
-}
-
-/** One rendered line, resolved back onto the section that wrote it. */
-export interface DigestLine {
-  section: DigestSectionKey;
-  count: number;
-  /** The line verbatim, as it is stored and as the feed shows it. */
-  text: string;
-  path: string;
-  linkLabel: string;
-}
-
-/**
- * THE EXACT INVERSE of `composePlanterDigestBody`.
- *
- * The digest's structure has to survive the trip through `notifications.body`,
- * because that column is where the enqueued row keeps it and the dispatcher's
- * email composer runs long afterwards with nothing else to go on. There is no
- * JSON column on `notifications` and inventing one would be a migration for a
- * projection the feed already renders as text.
- *
- * So the round trip is made SAFE rather than avoided: both directions read
- * `DIGEST_SECTIONS`, the match is an exact equality against the phrase this
- * module itself wrote (never a substring or a regex over free text), and
- * `digest.test.ts` drives the pair over every combination of counts. A line
- * this module did not write matches nothing and is dropped, so a body from an
- * older shape of this code degrades to an email with no link — never to a
- * wrong one.
- */
-export function digestLinesFromBody(body: string): DigestLine[] {
-  const lines: DigestLine[] = [];
-
-  for (const raw of body.split("\n")) {
-    const text = raw.trim();
-    if (!text) continue;
-
-    const separator = text.indexOf(" ");
-    if (separator <= 0) continue;
-
-    const count = Number(text.slice(0, separator));
-    if (!Number.isInteger(count) || count < 0) continue;
-
-    const phrase = text.slice(separator + 1);
-    const key = DIGEST_SECTION_KEYS.find(
-      (candidate) => sectionLine(candidate, count) === `${count} ${phrase}`
-    );
-    if (!key) continue;
-
-    lines.push({
-      section: key,
-      count,
-      text,
-      path: DIGEST_SECTIONS[key].path,
-      linkLabel: DIGEST_SECTIONS[key].linkLabel,
-    });
-  }
-
-  return lines;
-}
-
-/**
- * The digest's title.
- *
- * It NAMES THE PERIOD, and it names it the same way in every case: the digest
- * may be retried, may be composed hours after the period opened, and a reader
- * with two in the inbox has no other way to tell them apart. "Today" would be
- * wrong in each of those.
- */
-export function composePlanterDigestTitle(period: DigestPeriod): string {
-  const day = formatDate(period.start, "short");
-  return period.cadence === "weekly"
-    ? `What needs your attention — week of ${day}`
-    : `What needs your attention — ${day}`;
-}
 
 // ----------------------------------------------------------------------------
 // The run
@@ -1003,8 +739,10 @@ export async function runPlanterDigestSweep(
 
 export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
   selectPlantsOwed: selectPlantsOwedPlanterDigest,
-  runDigest: (churchId, at) =>
-    runPlanterDigest(dbPlanterDigestDeps, { churchId, at }),
+  // The per-plant entrypoint itself, not a second copy of its body: one wiring
+  // of `dbPlanterDigestDeps` in the module, so a plant swept and a plant run by
+  // hand cannot be run with different dependencies.
+  runDigest: runDailyPlanterDigest,
 };
 
 /**
@@ -1015,9 +753,8 @@ export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
  * database, which is what makes the once-a-period guard survive a dropped tick,
  * an overlapping tick and a cold serverless start alike.
  *
- * IT NEEDS ONE CALLER, and it belongs in the same place the oversight digest's
- * sweep already sits: `src/app/api/notifications/dispatch/route.ts`, beside
- * `sweepOversightDigests`, wrapped in the same never-fail-the-run try/catch and
+ * ITS ONE CALLER is `src/app/api/notifications/dispatch/route.ts`, beside the
+ * oversight digest's sweep, wrapped in the same never-fail-the-run try/catch and
  * reported in the same response body. This app has no scheduler of its own to
  * give a recurring job (the Hobby plan's one-a-day Vercel cron is unusable,
  * which is why `vercel.json` schedules nothing), and the dispatcher tick already
@@ -1025,6 +762,11 @@ export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
  * which is exactly the frequency this sweep is designed to be called at, since
  * the once-a-period guard is derived from the rows it writes rather than from a
  * clock.
+ *
+ * That call is what makes `UNSUBSCRIBE_TOKEN_SECRET` a live production
+ * prerequisite: this is the first feature in the product that enqueues on a
+ * schedule, and the digest email throws rather than ship a dead unsubscribe
+ * link.
  */
 export function runDailyPlanterDigestSweep(
   at: Date = new Date()

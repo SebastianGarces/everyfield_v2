@@ -129,8 +129,14 @@ export interface ResponseBreakdown {
    * ITS OWN NUMBER, never folded into `not_interested`. VM-014's acceptance
    * criterion is exactly this distinction: a planter who did not get a card
    * back learned nothing, and reporting that silence as a refusal invents a no
-   * that nobody said. Floored at zero so a stray response from someone since
-   * removed from attendance cannot render a negative.
+   * that nobody said.
+   *
+   * Floored at zero as DEFENCE IN DEPTH, not as the fix for anything: the two
+   * queries that feed this function count one population, so `recordedCount`
+   * cannot exceed `attendeeCount` (see `meetingResponseCountsQuery` and
+   * `meetingAttendedCountQuery` in `service.ts`). The floor is what stops a
+   * FUTURE caller that computes its counts some other way rendering a negative
+   * — it never again stands in for a denominator that is missing people.
    */
   notRecordedCount: number;
   /** One row per option, in `RESPONSE_CARD_OPTIONS` order, zero counts kept. */
