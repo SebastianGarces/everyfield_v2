@@ -778,24 +778,52 @@ async function main() {
       sendingNetworkId: null,
     });
     const scAudienceIds = scAudience.map((row) => row.id);
+    const scRecipientIds = scAudience
+      .filter((row) => !row.misprovisioned)
+      .map((row) => row.id);
 
-    assert.ok(scAudienceIds.includes(scAdmin.id));
-    assert.ok(scAudienceIds.includes(scAdmin2.id));
+    assert.ok(scRecipientIds.includes(scAdmin.id));
+    assert.ok(scRecipientIds.includes(scAdmin2.id));
+
+    // RULED 2026-08-13 (#427): the exclusion is unchanged, the SILENCE is not.
+    // The cross-paired row used to disappear inside the SQL, which is why the
+    // provisioning defect behind it stayed invisible. It now travels as far as
+    // the report carrying WHY it is not a recipient, and is enqueued for
+    // nothing. Asserting its absence here is what this ruling reverses.
+    const dualFk = scAudience.find((row) => row.id === dualFkNetAdmin.id);
     assert.ok(
-      !scAudienceIds.includes(dualFkNetAdmin.id),
-      "a network admin with a stray sending_church_id is not this org's admin"
+      dualFk,
+      "a network admin with a stray sending_church_id reaches the report"
     );
-    // …and the church-level member of the sending church never was.
+    assert.deepEqual(
+      dualFk.misprovisioned,
+      { role: "network_admin", reachedBy: "sendingChurchId" },
+      "…carrying the role it holds and the FK that reached it"
+    );
+    assert.ok(
+      !scRecipientIds.includes(dualFkNetAdmin.id),
+      "…and it is still not this org's admin: counted, never enqueued"
+    );
+
+    // …and the church-level member of the sending church never was — no role
+    // pairing reaches them at all, so they are absent, not merely excluded.
     assert.ok(!scAudienceIds.includes(scTeammate.id));
-    ok("a sending church's audience is its OWN admins, by role and by FK");
+    ok(
+      "a sending church's audience is its OWN admins; the cross-paired row is counted, not hidden"
+    );
 
     const netAudience = await listOversightAdminsOfOrg({
       sendingChurchId: null,
       sendingNetworkId: otherNetwork.id,
     });
-    const netAudienceIds = netAudience.map((row) => row.id);
-    assert.ok(netAudienceIds.includes(dualFkNetAdmin.id));
-    assert.ok(netAudienceIds.includes(otherNetAdmin.id));
+    const netRecipientIds = netAudience
+      .filter((row) => !row.misprovisioned)
+      .map((row) => row.id);
+    // The SAME row, addressed through the org its role does administer, is an
+    // ordinary recipient carrying no defect — which is what makes the pairing,
+    // not the row, the thing being judged.
+    assert.ok(netRecipientIds.includes(dualFkNetAdmin.id));
+    assert.ok(netRecipientIds.includes(otherNetAdmin.id));
     ok("…and the same row IS an admin of the network it actually administers");
 
     // ------------------------------------------------------------------------

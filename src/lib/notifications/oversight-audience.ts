@@ -220,8 +220,11 @@ export interface OversightRecipient {
    *
    * Both oversight FKs live on one `users` row and neither implies the other
    * (`memory/invariants.md` → Multi-Tenancy), so a row can carry a sending
-   * church's id while holding `network_admin` — or hold no oversight role at
-   * all. The audience is right to exclude it: acting on the FK alone is the
+   * church's id while holding `network_admin`. A row holding NO oversight role
+   * is a different thing and is absent rather than counted — staff membership
+   * is what that FK ordinarily records.
+   *
+   * The audience is right to exclude a cross-paired admin: acting on the FK alone is the
    * hierarchy walk this repo forbids, arriving through the role instead of
    * through the FK. What was wrong was doing it SILENTLY. Such a row is a
    * provisioning defect somewhere upstream, and it stayed invisible precisely
@@ -274,9 +277,20 @@ export function classifyOversightCandidate(
     return { id: candidate.id };
   }
 
+  // Holds no oversight role AT ALL — an ordinary member of the org, reached by
+  // the FK that records their membership. Not a recipient, and emphatically not
+  // a defect: a `team_member` carrying `sending_church_id` is how a sending
+  // church's own staff are recorded, so counting it would fire the signal on
+  // the most ordinary row in the table and bury the real cross-pairings under
+  // it. The ruling names CROSS-PAIRED ADMINS — a role that administers some
+  // OTHER kind of org — and this is the line that keeps it to those.
+  if (!OVERSIGHT_ADMIN_ROWS.some(([, { role }]) => candidate.role === role)) {
+    return null;
+  }
+
   // Otherwise: which named org's FK did reach them? That FK, paired with the
-  // role the row actually carries, IS the defect — it is what the log has to
-  // say, because a count alone cannot be acted on.
+  // oversight role the row actually carries, IS the defect — it is what the log
+  // has to say, because a count alone cannot be acted on.
   const reachedBy = named.find((fk) => candidate[fk] === org[fk]);
   if (!reachedBy) return null;
 
