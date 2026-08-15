@@ -135,6 +135,24 @@ function SubjectCard({
             <>
               We will keep sending <strong>{label}</strong> emails to{" "}
               <strong>{subject.email}</strong>.
+              {/* The digest is the ONE category whose undo we cannot promise
+                  will hold. Its cell is `(digest, email)`, which is both the
+                  unsubscribe channel and the cadence channel — the same string
+                  — so it is carved out of the exemption that makes an undo
+                  explicit (`preferenceValueIsInheritable`, memory/invariants.md).
+                  A stored value equal to the coded default stays inheritable
+                  there, so a later flip of that default silently stops these.
+                  Saying so is the V2 rule that copy never claims more than the
+                  code enforces. We deliberately do NOT point the reader at
+                  their preferences: setting it there writes the same carved-out
+                  cell and would not hold either. #443 retires this sentence. */}
+              {subject.category === "digest" ? (
+                <>
+                  {" "}
+                  One caveat for digests: if we later change how often digests
+                  go out by default, this choice may not carry over.
+                </>
+              ) : null}
             </>
           ) : (
             <>
