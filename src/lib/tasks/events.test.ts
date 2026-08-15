@@ -52,8 +52,13 @@ test("the constant names the index the migration creates", () => {
 });
 
 test("the race is classified by the shared predicate, not a local copy", () => {
+  // Anchored on the INSERT's opening, not its whole one-line form: the
+  // statement gained a `.returning({ id: tasks.id })` when T-018 wired the
+  // generated follow-ups into the notification queue, and the anchor throwing on
+  // that move is the guard working (`memory/invariants.md` → Multi-Tenancy, on
+  // why a moved anchor must throw rather than slice the empty string).
   const catchBlock = sourceReader(EVENTS_SOURCE, "events.ts").span(
-    "await db.insert(tasks).values(tasksToCreate);",
+    ".insert(tasks)",
     "throw error;"
   );
 

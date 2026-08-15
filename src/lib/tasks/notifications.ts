@@ -5,17 +5,22 @@ import { tasks, type TaskStatus } from "@/db/schema";
 import { MS_PER_DAY, formatDayLong } from "@/lib/datetime";
 import type { NotificationCategory } from "@/lib/notifications/categories";
 import {
-  registerStillLivePredicate,
+  registerStillLivePredicates,
   type StillLivePredicate,
 } from "@/lib/notifications/dispatch";
 import {
   cancelByEntity,
+  clampNotificationTitle,
   enqueue,
-  type CancelByEntityInput,
-  type CancelByEntityResult,
   type EnqueueNotificationInput,
-  type EnqueueResult,
 } from "@/lib/notifications/enqueue";
+import {
+  cancelEntityNotifications,
+  runNotificationSync,
+  type NotificationSubject,
+  type NotificationSyncDeps,
+  type NotificationSyncReport,
+} from "@/lib/notifications/sync";
 
 // ============================================================================
 // T-018 — task due / overdue notifications, on the shared F11 queue.
@@ -51,6 +56,15 @@ import {
 //      predicate is registered for both types as the second line of defence —
 //      the cancel cannot reach a row a dispatch run has already claimed, and it
 //      cannot run at all for a task completed by a path that forgot to call it.
+//      Registration is a CALL, made by `registerNotificationConsumers()` from
+//      the dispatch route; see `src/lib/notifications/register-consumers.ts` for
+//      why this module must not arm it as a load-time side effect of its own.
+//
+// WHAT IS THIS MODULE'S, AND WHAT IS THE QUEUE'S. Only the facts shape, the
+// planner, the differ, the deps and the predicate are here. The sync skeleton —
+// cancel, plan, enqueue, tally, swallow — is `@/lib/notifications/sync`, and the
+// 255-char title clamp is `enqueue`'s: both were written per-feature once and
+// shipped as byte-identical copies beside `src/lib/meetings/notifications.ts`.
 //
 // BEST-EFFORT AT THE CALL SITE. Every entrypoint here swallows its own
 // failures and returns a report: a notification must never be able to fail, or
@@ -137,9 +151,21 @@ export function taskOverdueAt(dueAt: Date): Date {
   return new Date(dueAt.getTime() + TASK_OVERDUE_AFTER_DAYS * MS_PER_DAY);
 }
 
-/** Titles are `varchar(255)`; task titles are `varchar(500)`. */
-function clampTitle(value: string): string {
-  return value.length <= 255 ? value : `${value.slice(0, 254)}…`;
+/**
+ * The entity reference and category every row here shares — what a cancel aims
+ * at, and what the feed links back to.
+ *
+ * `entityType`/`entityId` are never optional on a task row: they are how
+ * `cancelByEntity` reaches every recipient's copy at once.
+ */
+function taskSubject(churchId: string, taskId: string): NotificationSubject {
+  return {
+    churchId,
+    entityType: "task",
+    entityId: taskId,
+    category: TASK_NOTIFICATION_CATEGORY,
+    label: "task",
+  };
 }
 
 /**
@@ -171,7 +197,7 @@ export function composeTaskDue(
     recipientUserId,
     category: TASK_NOTIFICATION_CATEGORY,
     type: TASK_DUE_TYPE,
-    title: clampTitle(`Task due: ${facts.title}`),
+    title: clampNotificationTitle(`Task due: ${facts.title}`),
     body: `"${facts.title}" is due ${formatDayLong(dueAt)}.`,
     // The entity reference is what the feed links to AND what a cancel aims
     // at, so it is never optional on a task row.
@@ -193,7 +219,7 @@ export function composeTaskOverdue(
     recipientUserId,
     category: TASK_NOTIFICATION_CATEGORY,
     type: TASK_OVERDUE_TYPE,
-    title: clampTitle(`Task overdue: ${facts.title}`),
+    title: clampNotificationTitle(`Task overdue: ${facts.title}`),
     body: `"${facts.title}" was due ${formatDayLong(dueAt)} and is still open.`,
     entityType: "task",
     entityId: facts.id,
@@ -290,37 +316,15 @@ export function taskNotificationsDiffer(
   );
 }
 
-/** What a sync did, without throwing. Mirrors `PlantNotifyReport` (F11). */
-export interface TaskNotifyReport {
-  /** Pending rows cancelled before the re-enqueue. */
-  cancelled: number;
-  /** Enqueue calls made — one per (task, condition). */
-  considered: number;
-  recorded: number;
-  created: number;
-  skipped: number;
-  failed: number;
-  /** Why nothing was enqueued, when nothing was. */
-  reason: TaskNotificationSkip | null;
-}
+/**
+ * What a sync did, without throwing.
+ *
+ * The SHAPE is F11's (`NotificationSyncReport`), because the tally is the
+ * queue's and not this feature's; only the `reason` vocabulary is a task's.
+ */
+export type TaskNotifyReport = NotificationSyncReport<TaskNotificationSkip>;
 
-function emptyReport(): TaskNotifyReport {
-  return {
-    cancelled: 0,
-    considered: 0,
-    recorded: 0,
-    created: 0,
-    skipped: 0,
-    failed: 0,
-    reason: null,
-  };
-}
-
-export interface TaskNotificationDeps {
-  /** The real `enqueue` — the gate, and the only writer. */
-  enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
-  /** The real `cancelByEntity`. */
-  cancelByEntity(input: CancelByEntityInput): Promise<CancelByEntityResult>;
+export interface TaskNotificationDeps extends NotificationSyncDeps {
   /** The still-live re-check's read: what the task looks like NOW. */
   loadTask(
     churchId: string,
@@ -360,7 +364,7 @@ export interface TaskNotificationDeps {
  * Never throws. The task is already written; a failure here costs a
  * notification, not the write.
  */
-export async function syncTaskNotifications(
+export function syncTaskNotifications(
   facts: TaskNotificationFacts,
   options: {
     deps?: TaskNotificationDeps;
@@ -368,57 +372,16 @@ export async function syncTaskNotifications(
     previous?: TaskNotificationFacts | null;
   } = {}
 ): Promise<TaskNotifyReport> {
-  const deps = options.deps ?? dbTaskNotificationDeps;
-  const report = emptyReport();
-
-  const mustCancel =
-    options.previous === undefined
-      ? true
-      : options.previous !== null &&
-        taskNotificationsDiffer(options.previous, facts);
-
-  try {
-    if (mustCancel) {
-      const cancelled = await deps.cancelByEntity({
-        churchId: facts.churchId,
-        entityType: "task",
-        entityId: facts.id,
-        category: TASK_NOTIFICATION_CATEGORY,
-      });
-      report.cancelled = cancelled.cancelledCount;
-    }
-
-    const plan = planTaskNotifications(facts, options.now ?? new Date());
-    report.reason = plan.skipped;
-    report.considered = plan.notifications.length;
-
-    for (const input of plan.notifications) {
-      try {
-        const result = await deps.enqueue(input);
-        if (result.status === "recorded") {
-          report.recorded += 1;
-          if (result.created) report.created += 1;
-        } else {
-          report.skipped += 1;
-        }
-      } catch (error) {
-        // One condition's failure must not cost the other one.
-        report.failed += 1;
-        console.error("task notification enqueue failed", {
-          taskId: facts.id,
-          type: input.type,
-          error,
-        });
-      }
-    }
-  } catch (error) {
-    console.error("task notification sync failed", {
-      taskId: facts.id,
-      error,
-    });
-  }
-
-  return report;
+  return runNotificationSync<TaskNotificationSkip>({
+    ...taskSubject(facts.churchId, facts.id),
+    mustCancel:
+      options.previous === undefined
+        ? true
+        : options.previous !== null &&
+          taskNotificationsDiffer(options.previous, facts),
+    plan: () => planTaskNotifications(facts, options.now ?? new Date()),
+    deps: options.deps ?? dbTaskNotificationDeps,
+  });
 }
 
 /**
@@ -428,23 +391,12 @@ export async function syncTaskNotifications(
  * resolves to zero rather than throwing, so neither path has to know whether
  * the task ever had a notification.
  */
-export async function cancelTaskNotifications(
+export function cancelTaskNotifications(
   churchId: string,
   taskId: string,
   deps: TaskNotificationDeps = dbTaskNotificationDeps
 ): Promise<number> {
-  try {
-    const result = await deps.cancelByEntity({
-      churchId,
-      entityType: "task",
-      entityId: taskId,
-      category: TASK_NOTIFICATION_CATEGORY,
-    });
-    return result.cancelledCount;
-  } catch (error) {
-    console.error("task notification cancel failed", { taskId, error });
-    return 0;
-  }
+  return cancelEntityNotifications(taskSubject(churchId, taskId), deps);
 }
 
 /** `cancelTaskNotifications` over a set of ids, one at a time. */
@@ -531,18 +483,24 @@ export function taskStillLivePredicate(
 /**
  * Register the predicate for BOTH task types.
  *
- * A module-load side effect, the way `src/lib/events/subscriptions.ts` wires
- * event handlers: importing this module is what arms the check. The loop is
- * over `TASK_NOTIFICATION_TYPES`, so a third condition cannot ship registered
- * for only two of them.
+ * A CALL, and NOT a module-load side effect of this file. It was one, on the
+ * theory that "importing this module arms the check" — but the only runtime that
+ * READS a predicate is the dispatcher, whose entrypoint imports no feature
+ * module, so both task types were unregistered in the cron runtime and
+ * `resolveLiveness` called every one of them live. `registerNotificationConsumers()`
+ * (`src/lib/notifications/register-consumers.ts`) is the one caller, and the
+ * dispatch route calls it. Idempotent: registration replaces, never stacks.
+ *
+ * The loop is over `TASK_NOTIFICATION_TYPES`, so a third condition cannot ship
+ * registered for only two of them.
  */
 export function registerTaskStillLivePredicates(
   deps: TaskNotificationDeps = dbTaskNotificationDeps
 ): void {
-  const predicate = taskStillLivePredicate(deps);
-  for (const type of TASK_NOTIFICATION_TYPES) {
-    registerStillLivePredicate(type, predicate);
-  }
+  registerStillLivePredicates(
+    TASK_NOTIFICATION_TYPES,
+    taskStillLivePredicate(deps)
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -604,9 +562,3 @@ export const dbTaskNotificationDeps: TaskNotificationDeps = {
     return taskNotificationFactsQuery(churchId, taskIds);
   },
 };
-
-// The registration itself. Importing this module arms the still-live check for
-// both task types; `src/lib/tasks/service.ts` imports it on every write path,
-// and the dispatcher's own entrypoint must import it too for the check to be
-// armed in the cron runtime.
-registerTaskStillLivePredicates();

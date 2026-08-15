@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
   churchMeetings,
+  meetingAttendance,
   ministryTeams,
   persons,
   users,
@@ -13,19 +14,28 @@ import {
 import { MS_PER_DAY, formatDateTime } from "@/lib/datetime";
 import type { NotificationCategory } from "@/lib/notifications/categories";
 import {
-  registerStillLivePredicate,
+  registerStillLivePredicates,
   type StillLivePredicate,
 } from "@/lib/notifications/dispatch";
 import {
   cancelByEntity,
+  clampNotificationTitle,
   enqueue,
-  type CancelByEntityInput,
-  type CancelByEntityResult,
   type EnqueueNotificationInput,
-  type EnqueueResult,
 } from "@/lib/notifications/enqueue";
+import {
+  cancelEntityNotifications,
+  emptyNotificationSyncReport,
+  runNotificationSync,
+  type NotificationSubject,
+  type NotificationSyncDeps,
+  type NotificationSyncReport,
+} from "@/lib/notifications/sync";
+import {
+  personHoldsLoginFilter,
+  personIsUserInChurch,
+} from "@/lib/people/person-user";
 
-import { listGuestListUserIds } from "./guest-list";
 import { meetingDisplayTitle } from "./labels";
 
 // ============================================================================
@@ -53,7 +63,22 @@ import { meetingDisplayTitle } from "./labels";
 //   4. A CANCELLED MEETING IS NOT ANNOUNCED (N-014). Cancelling cancels the
 //      pending rows, and a still-live predicate is registered for every type as
 //      the second line of defence — the cancel cannot reach a row a dispatch
-//      run has already claimed.
+//      run has already claimed. Registration is a CALL, made by
+//      `registerNotificationConsumers()` from the dispatch route; see
+//      `src/lib/notifications/register-consumers.ts` for why this module must
+//      not arm it as a load-time side effect of its own.
+//
+// WHAT IS THIS MODULE'S, AND WHAT IS THE QUEUE'S. Only the facts shape, the
+// audience, the planner, the differ, the deps and the predicate are here. The
+// sync skeleton — cancel, plan, enqueue, tally, swallow — is
+// `@/lib/notifications/sync`, and the 255-char title clamp is `enqueue`'s.
+//
+// THE AUDIENCE IS RE-READ ON EVERY SYNC, never frozen at create. A vision
+// meeting's guest list starts EMPTY and is filled afterwards (`guest-list.ts` →
+// VM-006), so a create-time snapshot would leave the flagship meeting type with
+// a permanent audience of `[createdBy]`. `addToGuestList`/`removeFromGuestList`
+// therefore re-sync, which is why `resolveMeetingAudience` runs inside the plan
+// thunk rather than beside the facts read.
 //
 // WHY THE DEDUPE KEY CARRIES THE START INSTANT. Cancelling frees a PENDING
 // row's key; a DELIVERED row keeps reserving it for ever (that announcement
@@ -165,9 +190,21 @@ export function reminderInstant(startsAt: Date, days: number): Date {
   return new Date(startsAt.getTime() - days * MS_PER_DAY);
 }
 
-/** Titles are `varchar(255)`. */
-function clampTitle(value: string): string {
-  return value.length <= 255 ? value : `${value.slice(0, 254)}…`;
+/**
+ * The entity reference and category every row here shares — what a cancel aims
+ * at, and what the feed links back to.
+ */
+function meetingSubject(
+  churchId: string,
+  meetingId: string
+): NotificationSubject {
+  return {
+    churchId,
+    entityType: "meeting",
+    entityId: meetingId,
+    category: MEETING_NOTIFICATION_CATEGORY,
+    label: "meeting",
+  };
 }
 
 /**
@@ -201,7 +238,7 @@ export function composeMeetingReminder(
     recipientUserId,
     category: MEETING_NOTIFICATION_CATEGORY,
     type: meetingReminderType(days),
-    title: clampTitle(
+    title: clampNotificationTitle(
       days === 1 ? `Tomorrow: ${name}` : `In ${days} days: ${name}`
     ),
     body: `${name} is on ${when}.`,
@@ -236,7 +273,7 @@ export function composeMeetingScheduled(
     recipientUserId,
     category: MEETING_NOTIFICATION_CATEGORY,
     type: MEETING_SCHEDULED_TYPE,
-    title: clampTitle(`Scheduled: ${name}`),
+    title: clampNotificationTitle(`Scheduled: ${name}`),
     body: `${name} is on ${formatDateTime(facts.datetime)}.`,
     entityType: "meeting",
     entityId: facts.id,
@@ -334,32 +371,22 @@ export function meetingNotificationsDiffer(
   );
 }
 
-/** What a sync did, without throwing. */
-export interface MeetingNotifyReport {
-  cancelled: number;
-  considered: number;
-  recorded: number;
-  created: number;
-  skipped: number;
-  failed: number;
-  reason: MeetingNotificationSkip | "not_found" | null;
-}
+/**
+ * Every reason a sync can report — the planner's two, plus the one only the
+ * sync itself can reach (the meeting was gone by the time it was asked).
+ */
+export type MeetingNotificationReason = MeetingNotificationSkip | "not_found";
 
-function emptyReport(): MeetingNotifyReport {
-  return {
-    cancelled: 0,
-    considered: 0,
-    recorded: 0,
-    created: 0,
-    skipped: 0,
-    failed: 0,
-    reason: null,
-  };
-}
+/**
+ * What a sync did, without throwing.
+ *
+ * The SHAPE is F11's (`NotificationSyncReport`); only the `reason` vocabulary
+ * is a meeting's.
+ */
+export type MeetingNotifyReport =
+  NotificationSyncReport<MeetingNotificationReason>;
 
-export interface MeetingNotificationDeps {
-  enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
-  cancelByEntity(input: CancelByEntityInput): Promise<CancelByEntityResult>;
+export interface MeetingNotificationDeps extends NotificationSyncDeps {
   /** The meeting as it is now — the facts, resolved server-side. */
   loadMeeting(
     churchId: string,
@@ -438,74 +465,52 @@ export async function syncMeetingNotifications(
   } = {}
 ): Promise<MeetingNotifyReport> {
   const deps = options.deps ?? dbMeetingNotificationDeps;
-  const report = emptyReport();
 
+  // Re-read rather than trusting the caller's copy: this runs after the write
+  // and the row it must describe is the written one. It is also the one read
+  // that has to happen BEFORE the shared skeleton, because its answer decides
+  // whether the cancel runs alone.
+  let facts: MeetingNotificationFacts | null;
   try {
-    // Re-read rather than trusting the caller's copy: this runs after the write
-    // and the row it must describe is the written one.
-    const facts = await deps.loadMeeting(churchId, meetingId);
-    if (!facts) {
-      // Gone between the write and this call. Nothing can be announced about a
-      // meeting that does not exist, so whatever is pending is cancelled — the
-      // one case where the cancel runs on its own.
-      report.reason = "not_found";
-      report.cancelled = await cancelMeetingNotifications(
-        churchId,
-        meetingId,
-        deps
-      );
-      return report;
-    }
+    facts = await deps.loadMeeting(churchId, meetingId);
+  } catch (error) {
+    console.error("meeting notification sync failed", { meetingId, error });
+    return emptyNotificationSyncReport<MeetingNotificationReason>();
+  }
 
-    const mustCancel =
+  if (!facts) {
+    // Gone between the write and this call. Nothing can be announced about a
+    // meeting that does not exist, so whatever is pending is cancelled — the
+    // one case where the cancel runs on its own.
+    const report = emptyNotificationSyncReport<MeetingNotificationReason>();
+    report.reason = "not_found";
+    report.cancelled = await cancelMeetingNotifications(
+      churchId,
+      meetingId,
+      deps
+    );
+    return report;
+  }
+
+  const written = facts;
+
+  return runNotificationSync<MeetingNotificationReason>({
+    ...meetingSubject(churchId, meetingId),
+    mustCancel:
       options.previous === undefined
         ? true
         : options.previous !== null &&
-          meetingNotificationsDiffer(options.previous, facts);
-
-    if (mustCancel) {
-      const cancelled = await deps.cancelByEntity({
-        churchId,
-        entityType: "meeting",
-        entityId: meetingId,
-        category: MEETING_NOTIFICATION_CATEGORY,
-      });
-      report.cancelled = cancelled.cancelledCount;
-    }
-
-    const audience = await resolveMeetingAudience(facts, deps);
-    const plan = planMeetingNotifications(
-      facts,
-      audience,
-      options.now ?? new Date()
-    );
-    report.reason = plan.skipped;
-    report.considered = plan.notifications.length;
-
-    for (const input of plan.notifications) {
-      try {
-        const result = await deps.enqueue(input);
-        if (result.status === "recorded") {
-          report.recorded += 1;
-          if (result.created) report.created += 1;
-        } else {
-          report.skipped += 1;
-        }
-      } catch (error) {
-        // One recipient's failure must not cost the others theirs.
-        report.failed += 1;
-        console.error("meeting notification enqueue failed", {
-          meetingId,
-          type: input.type,
-          error,
-        });
-      }
-    }
-  } catch (error) {
-    console.error("meeting notification sync failed", { meetingId, error });
-  }
-
-  return report;
+          meetingNotificationsDiffer(options.previous, written),
+    // The audience is resolved INSIDE the plan, after the cancel: a guest added
+    // or removed since the last sync is the whole reason this runs again.
+    plan: async () =>
+      planMeetingNotifications(
+        written,
+        await resolveMeetingAudience(written, deps),
+        options.now ?? new Date()
+      ),
+    deps,
+  });
 }
 
 /**
@@ -514,23 +519,12 @@ export async function syncMeetingNotifications(
  *
  * Safe when nothing is pending: it resolves to zero rather than throwing.
  */
-export async function cancelMeetingNotifications(
+export function cancelMeetingNotifications(
   churchId: string,
   meetingId: string,
   deps: MeetingNotificationDeps = dbMeetingNotificationDeps
 ): Promise<number> {
-  try {
-    const result = await deps.cancelByEntity({
-      churchId,
-      entityType: "meeting",
-      entityId: meetingId,
-      category: MEETING_NOTIFICATION_CATEGORY,
-    });
-    return result.cancelledCount;
-  } catch (error) {
-    console.error("meeting notification cancel failed", { meetingId, error });
-    return 0;
-  }
+  return cancelEntityNotifications(meetingSubject(churchId, meetingId), deps);
 }
 
 // ----------------------------------------------------------------------------
@@ -573,31 +567,37 @@ export function meetingStillLivePredicate(
 /**
  * Register the predicate for every meeting type this module composes.
  *
- * A module-load side effect, the way `src/lib/events/subscriptions.ts` wires
- * event handlers: importing this module arms the check. The loop is over
- * `MEETING_NOTIFICATION_TYPES`, which is derived from the offsets — so a fourth
- * offset cannot ship unregistered.
+ * A CALL, and NOT a module-load side effect of this file — see
+ * `registerTaskStillLivePredicates` and
+ * `src/lib/notifications/register-consumers.ts` for the failure that rule
+ * exists to close. The loop is over `MEETING_NOTIFICATION_TYPES`, which is
+ * derived from the offsets, so a fourth offset cannot ship unregistered.
  */
 export function registerMeetingStillLivePredicates(
   deps: MeetingNotificationDeps = dbMeetingNotificationDeps
 ): void {
-  const predicate = meetingStillLivePredicate(deps);
-  for (const type of MEETING_NOTIFICATION_TYPES) {
-    registerStillLivePredicate(type, predicate);
-  }
+  registerStillLivePredicates(
+    MEETING_NOTIFICATION_TYPES,
+    meetingStillLivePredicate(deps)
+  );
 }
 
 // ----------------------------------------------------------------------------
-// Production wiring
+// Production wiring — the two audience reads
 // ----------------------------------------------------------------------------
+//
+// Both cross the person↔user bridge, and both cross it through the ONE spelling
+// of it (`@/lib/people/person-user`). A guest list and a core group are lists of
+// PEOPLE; F11 addresses USERS. See that module for why the join condition is not
+// written here.
+//
+// Both live in THIS module rather than beside the tables they read, which is
+// what keeps the module graph acyclic: `guest-list.ts` calls
+// `syncMeetingNotifications` when the list changes (VM-018 Workflow 2), so it
+// imports this file and this file must not import it back.
 
 /**
  * The Core Group of one plant, as USER ids.
- *
- * The same person↔user bridge the guest-list read uses, and for the same
- * reason (`guest-list.ts` → VM-018): the Core Group is a set of PEOPLE, and
- * only the ones who also hold a login in this plant can be a notification's
- * recipient. Both sides carry the church id, in the join and in the where.
  *
  * Exported un-awaited so the tenancy of the read can be asserted with
  * `.toSQL()` without a database.
@@ -606,25 +606,48 @@ export function coreGroupUserIdsQuery(churchId: string) {
   return db
     .selectDistinct({ userId: users.id })
     .from(persons)
-    .innerJoin(
-      users,
-      and(
-        eq(users.churchId, churchId),
-        sql`lower(${users.email}) = lower(${persons.email})`
-      )
-    )
+    .innerJoin(users, personIsUserInChurch(churchId))
     .where(
       and(
-        eq(persons.churchId, churchId),
-        inArray(persons.status, [...CORE_GROUP_STATUSES]),
-        isNull(persons.deletedAt),
-        isNotNull(persons.email)
+        personHoldsLoginFilter(churchId),
+        inArray(persons.status, [...CORE_GROUP_STATUSES])
       )
     );
 }
 
 export async function listCoreGroupUserIds(churchId: string) {
   const rows = await coreGroupUserIdsQuery(churchId);
+  return [...new Set(rows.map((row) => row.userId))];
+}
+
+/**
+ * The users on a meeting's guest list, as a query builder.
+ *
+ * Un-awaited for the same reason as the read above. Attendance is scoped to the
+ * church in its own right — never inferred from the meeting id — so all three
+ * tables in the join carry it.
+ */
+export function guestListUserIdsQuery(churchId: string, meetingId: string) {
+  return db
+    .selectDistinct({ userId: users.id })
+    .from(meetingAttendance)
+    .innerJoin(persons, eq(meetingAttendance.personId, persons.id))
+    .innerJoin(users, personIsUserInChurch(churchId))
+    .where(
+      and(
+        eq(meetingAttendance.churchId, churchId),
+        eq(meetingAttendance.meetingId, meetingId),
+        personHoldsLoginFilter(churchId)
+      )
+    );
+}
+
+/** The user ids of everyone on a meeting's guest list who holds a login. */
+export async function listGuestListUserIds(
+  churchId: string,
+  meetingId: string
+): Promise<string[]> {
+  const rows = await guestListUserIdsQuery(churchId, meetingId);
   return [...new Set(rows.map((row) => row.userId))];
 }
 
@@ -671,9 +694,3 @@ export const dbMeetingNotificationDeps: MeetingNotificationDeps = {
   listCoreGroup: listCoreGroupUserIds,
   listGuests: listGuestListUserIds,
 };
-
-// The registration itself. Importing this module arms the still-live check for
-// every meeting type; `src/lib/meetings/service.ts` imports it on every write
-// path, and the dispatcher's own entrypoint must import it too for the check to
-// be armed in the cron runtime.
-registerMeetingStillLivePredicates();

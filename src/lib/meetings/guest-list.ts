@@ -4,9 +4,23 @@
 //
 // Simple CRUD for the meeting guest list using the meeting_attendance table.
 // People are added before the meeting, attendance is marked after.
+//
+// THE GUEST LIST IS THE REMINDER AUDIENCE (VM-018 Workflow 2), so every write
+// that changes it re-syncs the meeting's notifications. It is not a nicety: a
+// vision meeting's guest list starts EMPTY and is filled afterwards (see
+// VM-006 below), so an audience frozen at create time would be permanently
+// `[createdBy]` for the flagship meeting type and no invited guest would ever
+// be reminded. Removal needs the same call in the other direction —
+// `cancelByEntity` is entity-wide and has no per-recipient form, so the only
+// way to drop one person's pending reminders is to re-enqueue the audience
+// without them.
+//
+// The re-sync swallows its own failures (`notifications.ts`), so it can never
+// fail the guest write it follows, and it runs AFTER that write for the same
+// reason.
 // ============================================================================
 
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   meetingAttendance,
@@ -17,7 +31,8 @@ import {
 } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import { teamMemberships } from "@/db/schema/ministry-teams";
-import { users } from "@/db/schema/user";
+
+import { syncMeetingNotifications } from "./notifications";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,6 +90,10 @@ export async function getGuestList(
 /**
  * Add a person to the guest list.
  * Uses upsert to handle duplicates gracefully.
+ *
+ * Re-syncs the meeting's reminders afterwards: a guest invited after the
+ * meeting was created is the NORMAL path for a vision meeting, and they are owed
+ * every offset still in the future (VM-018 Workflow 2).
  */
 export async function addToGuestList(
   churchId: string,
@@ -108,14 +127,29 @@ export async function addToGuestList(
         )
       )
       .limit(1);
+
+    // Re-synced even on the conflict path: the row already existing says
+    // nothing about whether this person's reminders were ever enqueued, and the
+    // sync is idempotent (the re-enqueue is absorbed by the dedupe keys).
+    await syncMeetingNotifications(churchId, meetingId);
     return existing;
   }
+
+  // `previous` OMITTED, deliberately: the meeting itself did not change, so no
+  // differ would ever say "cancel", and the cancel is exactly what has to run —
+  // the whole audience is then re-enqueued with this guest in it.
+  await syncMeetingNotifications(churchId, meetingId);
 
   return record;
 }
 
 /**
  * Remove a person from the guest list.
+ *
+ * Re-syncs for the same reason `addToGuestList` does, in the other direction:
+ * `cancelByEntity` cancels a meeting's rows for EVERY recipient, so cancelling
+ * and re-enqueuing the audience without this person is the only way their
+ * pending reminders stop.
  */
 export async function removeFromGuestList(
   churchId: string,
@@ -131,6 +165,8 @@ export async function removeFromGuestList(
         eq(meetingAttendance.personId, personId)
       )
     );
+
+  await syncMeetingNotifications(churchId, meetingId);
 }
 
 // ---------------------------------------------------------------------------
@@ -270,67 +306,11 @@ export async function addTeamMembersToGuestList(
 // VM-018 — which guests can actually be NOTIFIED
 // ---------------------------------------------------------------------------
 //
-// A guest list is a list of PEOPLE; F11 addresses USERS ("a `person` with no
-// login is not a recipient" — `enqueue.ts`). Most guests are neither, and never
-// will be: a vision-meeting invitee is a contact in the CRM, not an account.
-// So a reminder can only reach the guests who also hold a login in this plant,
-// and the bridge between the two records is the ADDRESS they share.
-//
-// It is a bridge, not an identity claim. Two rails keep it honest:
-//
-//   1. BOTH SIDES ARE SCOPED TO THE SAME CHURCH. A person and a user matching
-//      on address across tenants would mail one plant's meeting to another
-//      plant's planter, and tenant isolation here is application-layer
-//      (`memory/invariants.md` → Multi-Tenancy) — so the church id is in the
-//      JOIN and in the WHERE, never inferred from the meeting id.
-//   2. `enqueue` RE-ASKS THE QUESTION. Whatever this returns, gate 1 of
-//      `recipientMayBeNotified` resolves the recipient's own access to the
-//      church and skips anyone who fails it. This read decides WHO to offer;
-//      it does not decide who is allowed.
-//
-// Addresses are compared case-insensitively because `users.email` is stored
-// lowercased (`src/lib/invitations/core.ts`) while `persons.email` is typed by
-// hand and is not. A NULL person address matches nothing, which is the correct
-// answer rather than an accident.
-
-/**
- * The users on a meeting's guest list, as a query builder.
- *
- * Un-awaited so the tenancy of the read can be asserted with `.toSQL()`
- * without a database — the same technique `activeTeamMemberIdsQuery` above is
- * shaped for.
- */
-export function guestListUserIdsQuery(churchId: string, meetingId: string) {
-  return db
-    .selectDistinct({ userId: users.id })
-    .from(meetingAttendance)
-    .innerJoin(persons, eq(meetingAttendance.personId, persons.id))
-    .innerJoin(
-      users,
-      and(
-        eq(users.churchId, churchId),
-        sql`lower(${users.email}) = lower(${persons.email})`
-      )
-    )
-    .where(
-      and(
-        eq(meetingAttendance.churchId, churchId),
-        eq(meetingAttendance.meetingId, meetingId),
-        eq(persons.churchId, churchId),
-        isNull(persons.deletedAt),
-        isNotNull(persons.email)
-      )
-    );
-}
-
-/** The user ids of everyone on a meeting's guest list who holds a login. */
-export async function listGuestListUserIds(
-  churchId: string,
-  meetingId: string
-): Promise<string[]> {
-  const rows = await guestListUserIdsQuery(churchId, meetingId);
-  return [...new Set(rows.map((row) => row.userId))];
-}
+// That read is NOT here. `guestListUserIdsQuery` / `listGuestListUserIds` live
+// in `./notifications` beside the Core Group read they share a person↔user
+// bridge with, because this module now calls that one and the graph must stay
+// acyclic. The bridge itself has exactly one spelling, in
+// `@/lib/people/person-user`.
 
 /**
  * Update RSVP status (confirmed/declined) for a guest.

@@ -6,6 +6,7 @@ import type { PhaseNumber } from "@/lib/constants";
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
 
 import { normalizeTaskDescription } from "./descriptions";
+import { syncTaskNotificationsFor } from "./notifications";
 import {
   UNKNOWN_TEMPLATE_ERROR,
   findTaskTemplate,
@@ -204,6 +205,17 @@ export async function importTaskTemplate(
   }));
 
   const created = await db.insert(tasks).values(values).returning();
+
+  // T-018. Every imported row carries an assignee (the importer) and a computed
+  // due date, so every one of them owes a due and an overdue notification —
+  // and these are precisely the tasks a planter did not type and is therefore
+  // most likely to forget. Best-effort and sequential inside the helper, so it
+  // can neither fail the import nor fan a whole checklist's worth of enqueue
+  // chains at the database at once.
+  await syncTaskNotificationsFor(
+    input.churchId,
+    created.map((task) => task.id)
+  );
 
   return {
     templateKey: plan.templateKey,

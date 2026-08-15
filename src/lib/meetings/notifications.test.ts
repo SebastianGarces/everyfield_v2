@@ -7,9 +7,12 @@
 process.env.UNSUBSCRIBE_TOKEN_SECRET = "test-unsubscribe-secret-0123456789";
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { MS_PER_DAY } from "@/lib/datetime";
+import { sourceReader } from "@/lib/testing/source-span";
 import {
   clearStillLivePredicates,
   runDispatch,
@@ -17,7 +20,6 @@ import {
 } from "@/lib/notifications/dispatch";
 import { FakeNotificationQueue } from "@/lib/testing/notification-queue";
 
-import { guestListUserIdsQuery } from "./guest-list";
 import {
   CORE_GROUP_STATUSES,
   MEETING_NOTIFICATION_TYPES,
@@ -25,6 +27,7 @@ import {
   MEETING_SCHEDULED_TYPE,
   cancelMeetingNotifications,
   coreGroupUserIdsQuery,
+  guestListUserIdsQuery,
   meetingReminderType,
   registerMeetingStillLivePredicates,
   syncMeetingNotifications,
@@ -346,12 +349,125 @@ test("a save that moves nothing a reminder says leaves the live rows alone", asy
 });
 
 // ----------------------------------------------------------------------------
+// AC (VM-018 Workflow 2): the reminder audience follows the GUEST LIST, and the
+// guest list is filled AFTER the meeting is created
+// ----------------------------------------------------------------------------
+//
+// A team meeting is the only kind whose guest list is populated at create time
+// (from the team roster, VM-006); a vision meeting — the flagship — starts with
+// an empty one and is invited into afterwards. An audience read once, at create,
+// is therefore permanently `[createdBy]` for exactly the meetings that matter
+// most, and every guest the planter invites hears nothing at 7, 3 or 1 days.
+
+test("a guest invited AFTER the meeting was created is reminded at every future offset", async () => {
+  const guests: string[] = [];
+  const h = harness({ guests });
+  await h.write(facts(), { previous: null });
+
+  // Nobody but the organiser, so far — the vision-meeting starting state.
+  for (const { days, rows } of reminders(h.queue)) {
+    assert.deepEqual(
+      rows.map((row) => row.recipientUserId),
+      [ORGANISER],
+      `the ${days}-day reminder already has a guest on it`
+    );
+  }
+
+  // The guest write happens, and `addToGuestList` re-syncs. `previous` is
+  // OMITTED, so the cancel runs unconditionally and the WHOLE audience is
+  // re-enqueued — the meeting itself did not change, so no differ would ever
+  // have said "cancel".
+  guests.push(GUEST);
+  const report = await syncMeetingNotifications(CHURCH, MEETING, {
+    deps: h.deps,
+    now: NOW,
+  });
+
+  assert.ok(report.cancelled > 0, "the cancel ran without a `previous`");
+  for (const { days, rows } of reminders(h.queue)) {
+    assert.deepEqual(
+      rows.map((row) => row.recipientUserId).sort(),
+      [ORGANISER, GUEST].sort(),
+      `the new guest has no ${days}-day reminder`
+    );
+  }
+});
+
+test("a guest removed from the list keeps none of their pending reminders", async () => {
+  const guests: string[] = [GUEST];
+  const h = harness({ guests });
+  await h.write(facts(), { previous: null });
+
+  assert.equal(
+    h.queue.pending(meetingReminderType(7)).length,
+    2,
+    "the guest and the organiser were both reminded to begin with"
+  );
+
+  guests.length = 0;
+  await syncMeetingNotifications(CHURCH, MEETING, { deps: h.deps, now: NOW });
+
+  for (const { days, rows } of reminders(h.queue)) {
+    assert.deepEqual(
+      rows.map((row) => row.recipientUserId),
+      [ORGANISER],
+      `the removed guest still has a ${days}-day reminder`
+    );
+  }
+});
+
+test("both guest-list writes ask for the re-sync", () => {
+  // The behaviour above is only reachable if the guest writes CALL it, and
+  // neither `addToGuestList` nor `removeFromGuestList` can be executed in a unit
+  // test's process — they are `db` writes. So the call sites are pinned at
+  // source, anchored on the declarations (a moved anchor throws rather than
+  // slicing the empty string, `memory/invariants.md` → Multi-Tenancy).
+  const guestList = readFileSync(
+    path.join(process.cwd(), "src/lib/meetings/guest-list.ts"),
+    "utf8"
+  );
+  const reader = sourceReader(guestList, "guest-list.ts");
+
+  assert.match(
+    reader.span(
+      "export async function addToGuestList",
+      "export async function removeFromGuestList"
+    ),
+    /syncMeetingNotifications\(churchId, meetingId\)/,
+    "addToGuestList does not re-sync — a guest invited after create is never reminded"
+  );
+  assert.match(
+    reader.after("export async function removeFromGuestList"),
+    /syncMeetingNotifications\(churchId, meetingId\)/,
+    "removeFromGuestList does not re-sync — a removed guest keeps their reminders"
+  );
+});
+
+// ----------------------------------------------------------------------------
 // AC: a still-live predicate is registered for the meeting types
 // ----------------------------------------------------------------------------
 
-test("every meeting type has a still-live predicate registered", () => {
-  // Registration is a module-load side effect; importing this module armed it.
+test("the registrar arms every meeting type, and only through a call", async (t) => {
+  // WHAT THIS PROVES, AND WHAT IT DOES NOT. Importing this module registers
+  // NOTHING — asserted first, and that is the point: a module-load side effect
+  // armed the check in every runtime EXCEPT the dispatcher's, which imports no
+  // feature module. Whether production calls the registrar is asserted over the
+  // ROUTE's own module graph, in
+  // `src/app/api/notifications/dispatch/route.test.ts`.
+  //
+  // KEEP THIS THE FIRST TEST IN THE FILE THAT TOUCHES THE REGISTRY.
   assert.equal(MEETING_NOTIFICATION_TYPES.length, 4);
+  for (const type of MEETING_NOTIFICATION_TYPES) {
+    assert.equal(
+      stillLivePredicateFor(type),
+      undefined,
+      `importing this module registered "${type}" — arming must be a call the dispatcher makes, not an import side effect`
+    );
+  }
+
+  registerMeetingStillLivePredicates(harness().deps);
+  t.after(() => clearStillLivePredicates());
+
   for (const type of MEETING_NOTIFICATION_TYPES) {
     assert.ok(
       stillLivePredicateFor(type),

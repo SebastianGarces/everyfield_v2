@@ -4,7 +4,12 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { GET, isAuthorized, maxDuration } from "./route";
-import { RUN_BUDGET_MS } from "@/lib/notifications/dispatch";
+import {
+  RUN_BUDGET_MS,
+  stillLivePredicateFor,
+} from "@/lib/notifications/dispatch";
+import { MEETING_NOTIFICATION_TYPES } from "@/lib/meetings/notifications";
+import { TASK_NOTIFICATION_TYPES } from "@/lib/tasks/notifications";
 
 // The scheduled entrypoint. All of the dispatch behaviour is covered in
 // `src/lib/notifications/dispatch.test.ts` against injected deps; what is left
@@ -217,6 +222,83 @@ test("vercel.json schedules nothing at all", () => {
     [],
     "a cron is back in vercel.json — both scheduled routes are driven by GitHub Actions"
   );
+});
+
+// ----------------------------------------------------------------------------
+// AC (N-014): the still-live re-check is ARMED in the runtime that dispatches
+//
+// This is the probe that was red before the fix, and it is deliberately made
+// over THIS module's graph. `stillLivePredicateFor` is asked only after
+// `./route` has been imported at the top of this file, and NOTHING here imports
+// a feature module for its side effects — the two type tuples below are plain
+// `const` arrays, and both feature modules stopped registering at load time in
+// the same change. So a green result can only come from the route's own
+// `registerNotificationConsumers()` call.
+//
+// Why it matters, in one line: `resolveLiveness` treats an unregistered type as
+// LIVE (by design — a caller with no resolution concept must not have its
+// notifications silently swallowed), so an unarmed dispatcher emails a task the
+// planter already finished and logs it as delivered.
+//
+// The feature suites CANNOT prove this. Each one calls its registrar by hand
+// before dispatching, which proves the predicate's logic and says nothing about
+// whether production ever arms it.
+// ----------------------------------------------------------------------------
+
+const CONSUMER_TYPES = [
+  ...TASK_NOTIFICATION_TYPES,
+  ...MEETING_NOTIFICATION_TYPES,
+];
+
+test("importing the dispatch route arms every consumer's still-live predicate", () => {
+  assert.equal(
+    CONSUMER_TYPES.length,
+    6,
+    "the two consumers compose six types between them"
+  );
+
+  for (const type of CONSUMER_TYPES) {
+    assert.ok(
+      stillLivePredicateFor(type),
+      `no still-live predicate is registered for "${type}" in the dispatcher's own module graph — N-014's second line of defence is inert in the cron runtime`
+    );
+  }
+});
+
+test("the route is the ONLY place that arms them", () => {
+  // The property, not the instance. Registration used to be a module-load side
+  // effect in each feature — which type-checked, passed both feature suites and
+  // armed nothing in production, because this route imports neither feature. A
+  // third consumer must therefore join `registerNotificationConsumers()` rather
+  // than arming itself where nobody dispatching will see it.
+  const registrar = readFileSync(
+    path.join(process.cwd(), "src/lib/notifications/register-consumers.ts"),
+    "utf8"
+  );
+  assert.match(registrar, /registerTaskStillLivePredicates\(\)/);
+  assert.match(registrar, /registerMeetingStillLivePredicates\(\)/);
+
+  const route = readFileSync(
+    path.join(process.cwd(), "src/app/api/notifications/dispatch/route.ts"),
+    "utf8"
+  );
+  assert.match(
+    route,
+    /^registerNotificationConsumers\(\);$/m,
+    "the dispatch route no longer calls registerNotificationConsumers() at module scope"
+  );
+
+  for (const consumer of [
+    "src/lib/tasks/notifications.ts",
+    "src/lib/meetings/notifications.ts",
+  ]) {
+    const source = readFileSync(path.join(process.cwd(), consumer), "utf8");
+    assert.doesNotMatch(
+      source,
+      /^register(Task|Meeting)StillLivePredicates\(\);$/m,
+      `${consumer} arms itself at module load again — the runtime that reads a predicate imports no feature module, so that registration is invisible where it counts`
+    );
+  }
 });
 
 test("the run budget sits under the declared function timeout (N-017)", () => {

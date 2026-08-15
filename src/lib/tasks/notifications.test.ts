@@ -7,6 +7,8 @@
 process.env.UNSUBSCRIBE_TOKEN_SECRET = "test-unsubscribe-secret-0123456789";
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -15,6 +17,7 @@ import {
   stillLivePredicateFor,
 } from "@/lib/notifications/dispatch";
 import { FakeNotificationQueue } from "@/lib/testing/notification-queue";
+import { stripComments } from "@/lib/testing/source-span";
 
 import {
   TASK_DUE_TYPE,
@@ -320,8 +323,29 @@ test("the cancel reaches every recipient's row for the entity", async () => {
 // AC: a still-live predicate is registered for the task types
 // ----------------------------------------------------------------------------
 
-test("both task types have a still-live predicate registered", () => {
-  // Registration is a module-load side effect; importing this module armed it.
+test("the registrar arms every task type, and only through a call", async (t) => {
+  // WHAT THIS PROVES, AND WHAT IT DOES NOT. Importing this module registers
+  // NOTHING — that is asserted first, and it is the whole reason the registrar
+  // is a function: a module-load side effect here armed the check in every
+  // runtime EXCEPT the one that reads it, because the dispatcher's entrypoint
+  // imports no feature module. Whether production actually calls it is asserted
+  // over the ROUTE's own module graph, in
+  // `src/app/api/notifications/dispatch/route.test.ts`.
+  //
+  // KEEP THIS THE FIRST TEST IN THE FILE THAT TOUCHES THE REGISTRY: the "not
+  // registered" half can only speak for module load if nothing has registered
+  // yet. The route suite's source guard says the same thing order-independently.
+  for (const type of TASK_NOTIFICATION_TYPES) {
+    assert.equal(
+      stillLivePredicateFor(type),
+      undefined,
+      `importing this module registered "${type}" — arming must be a call the dispatcher makes, not an import side effect`
+    );
+  }
+
+  registerTaskStillLivePredicates(harness().deps);
+  t.after(() => clearStillLivePredicates());
+
   for (const type of TASK_NOTIFICATION_TYPES) {
     assert.ok(
       stillLivePredicateFor(type),
@@ -413,5 +437,50 @@ test("reopening a task re-enqueues, because cancelling released the key", async 
     h.queue.pending().length,
     2,
     "a cancelled row must not keep reserving its dedupe key"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// AC (T-018): every path that WRITES a task asks for its notifications
+// ----------------------------------------------------------------------------
+//
+// The rows a planter never typed are the ones they are most likely to forget: a
+// phase-template import mints a whole dated checklist, and a finalised meeting
+// mints a follow-up per attendee plus an evaluation task — all with an assignee
+// and a due date, and all silent while `import.ts` and `events.ts` were the two
+// modules that inserted into `tasks` without asking.
+//
+// Pinned as a PROPERTY over the directory rather than as two call sites: nothing
+// about the notification module distinguishes those rows, so the only thing that
+// can go wrong again is a THIRD writer that does not ask. A `db.insert(tasks)`
+// cannot be executed in a unit test's process, so this is source-shaped by
+// necessity — the behaviour it stands for is covered by every
+// `syncTaskNotificationsFor` test above.
+
+test("no module inserts into tasks without asking for notifications", () => {
+  const dir = path.join(process.cwd(), "src/lib/tasks");
+  const writers = readdirSync(dir)
+    .filter((name) => /\.ts$/.test(name) && !/\.test\.ts$/.test(name))
+    .map((name) => ({
+      name,
+      source: readFileSync(path.join(dir, name), "utf8"),
+    }))
+    .filter(({ source }) => /\.insert\(tasks\)/.test(stripComments(source)));
+
+  assert.ok(writers.length >= 3, "the writer scan found nothing to check");
+
+  const silent = writers
+    .filter(
+      ({ source }) =>
+        !/(sync|cancel)Task(Notifications|NotificationsFor)\(/.test(
+          stripComments(source)
+        )
+    )
+    .map(({ name }) => name);
+
+  assert.deepEqual(
+    silent,
+    [],
+    "a module writes tasks and never asks for their due/overdue notifications — those rows are silent for ever"
   );
 });
