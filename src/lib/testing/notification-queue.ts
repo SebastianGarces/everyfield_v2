@@ -24,7 +24,7 @@ import type {
   OutboundEmail,
   SettleDeliveryInput,
 } from "@/lib/notifications/dispatch";
-import { PERMANENT_FAILURE_PREFIX } from "@/lib/notifications/dispatch";
+import { PERMANENT_FAILURE_PREFIX } from "@/lib/notifications/permanent-failure";
 import type { NotificationAnchor } from "@/lib/notifications/anchor";
 
 // ============================================================================

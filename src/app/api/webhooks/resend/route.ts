@@ -13,6 +13,22 @@ import {
 import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 import { RECIPIENT_STATUS_RANK } from "@/lib/communication/queries";
 
+// ============================================================================
+// THIS ROUTE DOES NOT IMPORT THE DISPATCHER (#263 item 2).
+//
+// It reads a signed provider event and writes two rows. It never enqueues,
+// never claims, never calls a provider — so `src/lib/notifications/dispatch.ts`
+// has no business in its module graph, and until this change it was in it
+// anyway: `channels/delivery-events` imported the whole dispatcher (which opens
+// with `@/db`, the schema barrel and the Resend client) for ONE string constant,
+// `PERMANENT_FAILURE_PREFIX`. That constant now lives in the import-free leaf
+// `src/lib/notifications/permanent-failure.ts`.
+//
+// The edge is TRANSITIVE, so an eyeball on this import list cannot police it.
+// `route.test.ts` walks the graph from this file and fails if the dispatcher
+// reappears anywhere below it.
+// ============================================================================
+
 // Initialize Resend client for webhook verification
 const resend = new Resend(process.env.RESEND_API_KEY);
 
