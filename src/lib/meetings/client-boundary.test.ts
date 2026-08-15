@@ -111,11 +111,26 @@ function bundleReach(
 
 const SERVICE = path.join(SRC, "lib/meetings/service.ts");
 
-test("no client component reaches the meetings data-access module", () => {
-  assert.ok(
-    TS_FILES.includes(SERVICE),
-    `${rel(SERVICE)} does not exist — this guard is watching a file that moved`
-  );
+/**
+ * Every db-touching module in the domain, not just the biggest one.
+ *
+ * The rule is about `@/db` reaching the browser, so it binds each module that
+ * opens with it. `response-queries.ts` (VM-014) was carved out of `service.ts`
+ * and is the same graph behind a different specifier; naming only `service.ts`
+ * would let the split quietly move the edge out from under the guard.
+ */
+const DB_MODULES = [
+  SERVICE,
+  path.join(SRC, "lib/meetings/response-queries.ts"),
+];
+
+test("no client component reaches a meetings data-access module", () => {
+  for (const file of DB_MODULES) {
+    assert.ok(
+      TS_FILES.includes(file),
+      `${rel(file)} does not exist — this guard is watching a file that moved`
+    );
+  }
 
   // Same semicolon-agnostic prologue rule as the server side: a `"use client"`
   // written without one is still a client entry, and missing it would take the
@@ -135,14 +150,18 @@ test("no client component reaches the meetings data-access module", () => {
     resolve: resolveModule,
   });
 
-  if (seen.has(SERVICE)) {
-    assert.fail(
-      `a "use client" module reaches @/lib/meetings/service, which opens with @/db and drizzle — take the symbol from copy.ts or agenda.ts, or pass it down as a prop:\n  ${pathTo(
-        SERVICE
-      )
-        .map(rel)
-        .join(" → ")}`
-    );
+  for (const file of DB_MODULES) {
+    if (seen.has(file)) {
+      assert.fail(
+        `a "use client" module reaches ${rel(
+          file
+        )}, which opens with @/db and drizzle — take the symbol from copy.ts, agenda.ts or response-card.ts, or pass it down as a prop:\n  ${pathTo(
+          file
+        )
+          .map(rel)
+          .join(" → ")}`
+      );
+    }
   }
 });
 

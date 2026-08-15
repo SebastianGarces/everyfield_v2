@@ -15,9 +15,9 @@ tenant scope; `created_at`/`updated_at` default now.
   role.
 - **`churches` has NO `launch_date` column.** Launch Sunday is the `launches` entity, at most one
   row per church. Read with `getLaunchForChurch` / `getLaunchDatesForChurches`
-  (`src/lib/launch/queries.ts`); write ONLY through `setLaunchDate`
-  (`src/lib/launch/service.ts`), which journals the change and fires `launch_date_changed`.
-  Nothing under `src/lib/launch/` carries `"use server"`.
+  (`src/lib/launch/queries.ts`); write ONLY through `setLaunchDate` (`src/lib/launch/service.ts`),
+  which journals the change and fires `launch_date_changed`. Nothing under `src/lib/launch/`
+  carries `"use server"`.
   - `launches.target_date` is nullable **only** while `status = 'planning'`;
     `launches_target_date_check` makes "scheduled with no day" unrepresentable, so countdown
     readers never defend against it. `planning | scheduled | completed | postponed` is
@@ -26,16 +26,16 @@ tenant scope; `created_at`/`updated_at` default now.
     because two concurrent first schedules both pass a SELECT-then-INSERT. The insert carries
     `ON CONFLICT (church_id) DO NOTHING`, and the loser writes nothing at all, journal included.
   - The write is ONE statement, not a `db.batch`: a `WITH` chain that locks the row
-    (`SELECT … FOR UPDATE`), inserts-or-compare-and-sets, then journals from what was written.
-    The journal needs the OLD values the update destroys, and an id the insert has yet to mint.
+    (`SELECT … FOR UPDATE`), inserts-or-compare-and-sets, then journals from what was written —
+    the journal needs the OLD values the update destroys and an id the insert has yet to mint.
   - **`launch_events` is APPEND-ONLY** on the same terms as `association_events` below.
     `previous_target_date` null = the first commitment, a fact rather than a gap; `moved` vs
-    `postponed` follows the CALLER's intent. Milestone links live in `launch_milestone_tasks`,
-    so `tasks` carries no launch-shaped column.
+    `postponed` follows the CALLER's intent. Milestone links live in `launch_milestone_tasks`, so
+    `tasks` carries no launch-shaped column.
   - **Cleanup order trap:** `launches.church_id`, `launch_events.actor_user_id` and
     `tasks.created_by_id` do NOT cascade, so a scheduled launch's seeded `launch_prep` tasks
-    outlive their milestone links and then refuse a users delete. `planWipe()` derives that
-    order; never write it down as a list.
+    outlive their milestone links and then refuse a users delete. `planWipe()` derives that order;
+    never write it down as a list.
 - **`phase_transitions.kind`** (`phase-engine.ts`): `transition` (default) |
   `initial_declaration`, CHECK-closed. The second is history the planter DECLARED, so no rows
   exist for the phases behind it (declaring 3 writes nothing for 1–2), and
@@ -46,15 +46,37 @@ tenant scope; `created_at`/`updated_at` default now.
   `transition_id` ALONE — pairing it with `church_id` would let a forged church id claim a second
   answer. `acceptPhaseTemplatePrompt` writes it with `ON CONFLICT DO NOTHING` BEFORE the import
   it guards and gates that import on the claim's rowcount (`../invariants.md` → Transactions,
-  claim-first). This row is the ONLY record: `PHASE_TEMPLATE_PROMPT_COOKIE` was deleted (#411) — it saved no query
-  (the answer arrives on the transition's own LEFT JOIN) and was a year-long browser-held copy of an
-  answer the plant owns.
+  claim-first). This row is the ONLY record — `PHASE_TEMPLATE_PROMPT_COOKIE` was deleted (#411),
+  and nothing browser-held may answer a prompt again.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.
 - **Notifications enqueue gate:** oversight recipients can ONLY receive `milestones` + `digest`,
   gated by `share_activity_with_oversight` at enqueue time; a recipient failing the gate is
   skipped and reported, never thrown over (`src/lib/notifications/`).
+- **`email_suppressions` is about an ADDRESS**, not a delivery and not a user (`notifications.ts`,
+  0042, #324): `PERMANENT_FAILURE_PREFIX` stops one (notification, channel) retry, while the NEXT
+  notification gets a fresh row and mails the dead mailbox again. Webhook writes it, dispatch reads
+  it once per run.
+  - `email` is stored **already lowercased and trimmed** by `normalizeEmailAddress`
+    (`notifications/channels/suppression.ts`), its one writer — a `lower(email)` index would make
+    the `ON CONFLICT` target unspellable. Plus-addresses and dots are NOT folded.
+  - **`email_suppressions_active_email_idx` is the guard AND the `ON CONFLICT … DO NOTHING`
+    arbiter**: partial unique on `email` where `cleared_at is null`. Never `DO UPDATE` — the first
+    row's reason and `suppressed_at` survive every webhook redelivery. `cleared_at` non-null =
+    retired and the row stays as history; `..._cleared_check` ties it to `cleared_reason` both
+    ways, and `cleared_by_user_id` is null for a self-service clear.
+  - **`addressSuppressionForEvent`** (`channels/delivery-events.ts`) decides, derived from the
+    delivery-outcome mapping: hard bounce and spam complaint suppress, a SOFT bounce and
+    `email.failed` keep their bounded retries. **Dispatch REPORTS the skip, never throws** —
+    refuses before composing, settles `failed` with the permanent prefix so the log says why
+    (N-016), counts `addressSuppressed`. EMAIL only; the in-app feed row still arrives.
+- **`meeting_responses` is the Response Card (VM-014, `meetings.ts`, 0041), NOT
+  `meeting_attendance.response_status`** — that column is the RSVP. **NO ROW means no card came
+  back, and is never a refusal**: `not_interested` is the only negative value and it needs a row.
+  Read only through `buildResponseBreakdown` (`lib/meetings/response-card.ts`), which reports
+  `notRecordedCount` separately. One upserted row per (meeting, person),
+  `meeting_responses_meeting_person_unique`, so a double submit cannot double-count.
 - **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation** — the
   invitee had no account when the admin typed `invitee_email`. `bindOpenInvitationTarget`
   (`src/lib/invitations/core.ts`) fills it in at registration, and its compare-and-set is what
@@ -94,16 +116,16 @@ Rules: `../invariants.md` → Dev Seeds. What the source does not tell you:
 
 - **`pnpm db:seed` is not scoped to the rows it creates.** `WIPE_ROOTS` is `users` + `churches`,
   both cleared with a bare `DELETE FROM`, so the fixture IS the whole database — which is why it
-  takes real logins with it on a shared branch.
-- **The guard is positive detection, and it is code.** `assertDatabaseIsWipeable()` refuses if
-  any user address matches a sentinel in `PROTECTED_ACCOUNTS`
+  takes real logins on a shared branch.
+- **The guard is positive detection, and it is code.** `assertDatabaseIsWipeable()` refuses if any
+  user address matches a `PROTECTED_ACCOUNTS` sentinel
   (`src/lib/dev-seed/protected-database.ts`); `--allow-protected-db` is the only way past.
-  Recognising a database as SAFE instead fails open — an unfamiliar connection string or a
-  pooled host reads as "not development".
+  Recognising a database as SAFE instead fails open — an unfamiliar connection string or a pooled
+  host reads as "not development".
 - **The order is derived, not enumerated.** `planWipe()` reads every `public` foreign key from
-  `pg_constraint`, walks out from the roots, and emits children before parents. A table
-  unreachable from a user or a church is left alone (`sending_networks`, `sending_churches`), and
-  a cycle of non-cascading keys throws with the table names rather than half-wiping.
+  `pg_constraint`, walks out from the roots, and emits children before parents. A table unreachable
+  from a user or a church is left alone (`sending_networks`, `sending_churches`); a cycle of
+  non-cascading keys throws with the table names rather than half-wiping.
 - **`wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`**: never deleted, _and_ never
   walked THROUGH, so nothing downstream of them is dragged in either.
   `assertProtectedTablesAreSafe()` aborts the seed BEFORE the first DELETE if a protected row

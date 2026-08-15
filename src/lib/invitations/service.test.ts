@@ -946,6 +946,17 @@ const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
         wellFormed: ["daily"],
         malformed: ["hourly"],
       },
+      {
+        // #324's escape hatch. It takes NOTHING — the address it clears is the
+        // session's own — so both argument columns are empty and the "no
+        // argument" case below is the whole surface. Declared here anyway,
+        // because this list IS the auth surface: an un-suppress endpoint that
+        // answered an anonymous caller would be a lever on the sending domain's
+        // reputation, not just on one row.
+        name: "clearMyEmailSuppressionAction",
+        wellFormed: [],
+        malformed: [],
+      },
     ],
   },
   {

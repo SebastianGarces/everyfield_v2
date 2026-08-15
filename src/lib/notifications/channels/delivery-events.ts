@@ -1,4 +1,9 @@
-import { PERMANENT_FAILURE_PREFIX } from "../dispatch";
+import type { EmailSuppressionReason } from "@/db/schema/notifications";
+
+// The import-free leaf, NOT `../dispatch` (#263 item 2): this module is in
+// `/api/webhooks/resend`'s graph, and the dispatcher opens with `@/db`, the
+// schema barrel and the Resend client.
+import { PERMANENT_FAILURE_PREFIX } from "../permanent-failure";
 
 // ============================================================================
 // Provider delivery webhooks → `notification_deliveries` (N-016).
@@ -109,6 +114,53 @@ export function notificationDeliveryOutcome(
     default:
       return { kind: "ignored" };
   }
+}
+
+// ============================================================================
+// Address-level suppression (#324) — the POLICY half.
+//
+// `notificationDeliveryOutcome` above says what an event means for ONE attempt.
+// This says what it means for the ADDRESS, which is a different lifetime: the
+// delivery row stops one retry, the suppression stops every future send. The
+// two are DERIVED FROM THE SAME FUNCTION rather than written twice, so a
+// bounce type that is permanent for one and transient for the other is
+// unrepresentable.
+//
+// The store that acts on this lives in `./suppression.ts`; this stays pure, so
+// the whole policy is assertable without a signed request or a database.
+// ============================================================================
+
+export type AddressSuppressionOutcome =
+  | { suppress: true; reason: EmailSuppressionReason }
+  /** Not permanent, or not a failure at all. The address stays mailable. */
+  | { suppress: false };
+
+/**
+ * Should this provider event stop us mailing the address altogether?
+ *
+ * ONLY when the SAME mapping already called the failure permanent. A soft
+ * bounce (`Transient`) keeps its bounded retries and suppresses NOTHING: a full
+ * mailbox empties and a greylisting expires, and suppressing on one would
+ * silently un-reach a live cohort member — the expensive direction of this
+ * trade, because nothing tells us we stopped mailing somebody who wanted the
+ * mail. A generic `email.failed` is the same: the provider could not hand it
+ * off, which is usually about us and never about the mailbox.
+ */
+export function addressSuppressionForEvent(
+  event: ProviderDeliveryEvent
+): AddressSuppressionOutcome {
+  const outcome = notificationDeliveryOutcome(event);
+  if (outcome.kind !== "failed" || !outcome.permanent)
+    return { suppress: false };
+
+  // The reason is the EVENT's, not the outcome's: both are permanent, but a
+  // dead mailbox and an offended reader are cleared by different people, and a
+  // suppression that cannot say which is one an admin cannot rule on.
+  return {
+    suppress: true,
+    reason:
+      event.type === "email.complained" ? "spam_complaint" : "hard_bounce",
+  };
 }
 
 /**

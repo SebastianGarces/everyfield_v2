@@ -43,6 +43,11 @@ import {
   emitMeetingCompleted,
 } from "./events";
 import { kitTemplate } from "./kit-template";
+// The ONE thing this module wants from the response-card queries: `removeAttendee`
+// deletes an attendee's card in the same batch as their attendance row. Everything
+// else about response cards lives in `./response-queries.ts` and is imported from
+// there by the actions module and the two pages, never re-exported through here.
+import { meetingResponseDeleteQuery } from "./response-queries";
 import type {
   AttendanceSummary,
   AttendanceWithPerson,
@@ -697,23 +702,48 @@ export async function addAttendee(
 }
 
 /**
- * Remove an attendee from a meeting.
+ * Remove an attendee from a meeting — and with them, their response card.
+ *
+ * THE CARD GOES TOO, in the same `db.batch` and the same (church, meeting,
+ * person) scope. A response card is a thing somebody handed in AT this meeting;
+ * once they are off its list the card references nobody, and leaving it behind
+ * broke the Outcomes tab's arithmetic in a way a planter could read: the
+ * numerator counted the orphan while the denominator lost the attendance row it
+ * came from, so "2 of 1 attendee handed a card in" was reachable through this
+ * very function (VM-014, product value V5 — honest numbers).
+ *
+ * ONE `db.batch`, not two awaits: both writes are known up front
+ * (memory/invariants.md → Atomicity), so an attendance row must never survive
+ * its card's deletion or the other way round.
+ *
+ * THE CARD IS DELETED FIRST, and the order carries a meaning. If no attendance
+ * row exists this call still throws — but the card it removed on the way was
+ * already an orphan referencing nobody, so removing it is the correct outcome of
+ * "this person is not on this meeting's list" rather than a side effect of a
+ * failed call.
+ *
+ * There is no FK between the two tables to do this for us: `meeting_responses`
+ * cascades from `church_meetings` and from `persons` (migration 0041), and
+ * neither of those is what a removal touches.
  */
 export async function removeAttendee(
   churchId: string,
   meetingId: string,
   personId: string
 ): Promise<void> {
-  const deleted = await db
-    .delete(meetingAttendance)
-    .where(
-      and(
-        eq(meetingAttendance.churchId, churchId),
-        eq(meetingAttendance.meetingId, meetingId),
-        eq(meetingAttendance.personId, personId)
+  const [, deleted] = await db.batch([
+    meetingResponseDeleteQuery(churchId, meetingId, personId),
+    db
+      .delete(meetingAttendance)
+      .where(
+        and(
+          eq(meetingAttendance.churchId, churchId),
+          eq(meetingAttendance.meetingId, meetingId),
+          eq(meetingAttendance.personId, personId)
+        )
       )
-    )
-    .returning();
+      .returning(),
+  ]);
 
   if (deleted.length === 0) {
     throw new Error("Attendance record not found");

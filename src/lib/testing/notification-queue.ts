@@ -24,7 +24,7 @@ import type {
   OutboundEmail,
   SettleDeliveryInput,
 } from "@/lib/notifications/dispatch";
-import { PERMANENT_FAILURE_PREFIX } from "@/lib/notifications/dispatch";
+import { PERMANENT_FAILURE_PREFIX } from "@/lib/notifications/permanent-failure";
 import type { NotificationAnchor } from "@/lib/notifications/anchor";
 
 // ============================================================================
@@ -372,6 +372,15 @@ export class FakeNotificationQueue
       row.status = "pending";
       row.updatedAt = now;
     }
+  }
+
+  /** #324. Normalised addresses this fake treats as permanently bounced. */
+  suppressedAddresses = new Set<string>();
+
+  async loadSuppressedAddresses(emails: readonly string[]): Promise<string[]> {
+    return emails
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => this.suppressedAddresses.has(email));
   }
 
   async sendEmail(message: OutboundEmail): Promise<EmailSendOutcome> {

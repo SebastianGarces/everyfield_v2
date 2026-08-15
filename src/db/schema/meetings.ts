@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -13,6 +15,7 @@ import {
 import { churches } from "./church";
 import { ministryTeams } from "./ministry-teams";
 import { persons } from "./people";
+import { inList } from "./sql";
 import { users } from "./user";
 
 // ============================================================================
@@ -63,6 +66,40 @@ export const responseStatuses = [
   "not_interested",
 ] as const;
 export type ResponseStatus = (typeof responseStatuses)[number];
+
+/**
+ * VM-014 — what came back on a Response Card.
+ *
+ * A SECOND vocabulary beside `responseStatuses` on purpose. `response_status`
+ * on `meeting_attendance` is the RSVP: did this person say they were coming.
+ * This one is what they wrote on the paper card F6 prints (DOC-010) once they
+ * were in the room. Folding the two together would make "declined the
+ * invitation" and "not interested in the plant" the same stored word, and the
+ * second is the one a planter plans around.
+ *
+ * The order is the commitment ladder, strongest first, and the first four are
+ * the printed card's four tick boxes in the card's own order of weight:
+ *
+ *   ready_commit    "I want to join the core group."
+ *   interested      "I'd like to learn more about the church plant."
+ *   prayer_request  "I'd like someone to pray for me."
+ *   stay_informed   "Please add me to the email list."
+ *
+ * `not_interested` has no tick box — nobody prints a "no thanks" checkbox — but
+ * a planter who is told no in the room needs somewhere to put it, and it is the
+ * only value that carries a NEGATIVE meaning. That matters because NO ROW AT
+ * ALL is the common case (VM-014's own acceptance criterion): an attendee who
+ * handed nothing in is *unrecorded*, never a refusal, and the absence of a row
+ * is what says so.
+ */
+export const responseCardTypes = [
+  "ready_commit",
+  "interested",
+  "prayer_request",
+  "stay_informed",
+  "not_interested",
+] as const;
+export type ResponseCardType = (typeof responseCardTypes)[number];
 
 export const invitationStatuses = [
   "invited",
@@ -213,6 +250,81 @@ export const meetingAttendance = pgTable(
 
 export type MeetingAttendanceRecord = typeof meetingAttendance.$inferSelect;
 export type NewMeetingAttendanceRecord = typeof meetingAttendance.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// Meeting Responses - What an attendee said on their Response Card (VM-014)
+// ----------------------------------------------------------------------------
+//
+// ITS OWN TABLE, NOT A COLUMN ON `meeting_attendance`. Three reasons:
+//
+//   1. A response is a DATED artifact — a card handed in at a moment, by a
+//      person, recorded by whoever collected it. `recorded_at` and
+//      `recorded_by_id` are the record of that, and neither belongs on the
+//      attendance row, whose timestamps are about the guest list.
+//   2. `meeting_attendance` already carries `response_status` (the RSVP) and
+//      `notes` (the attendee note surface). A third meaning on that row would
+//      make "response" ambiguous in exactly the place a planter reads it.
+//   3. ABSENCE HAS TO BE CHEAP AND OBVIOUS. "No card came back" is *no row*,
+//      which no reader can mistake for a refusal. A nullable column on a row
+//      that always exists puts the same fact behind a null check every reader
+//      has to remember to write.
+//
+// AT MOST ONE PER (meeting, person), enforced by
+// `meeting_responses_meeting_person_unique`: a card is one card, and a
+// correction overwrites it rather than adding a second opinion. The writer is
+// an upsert on that index, so a double-submitted form cannot make one attendee
+// count twice in the breakdown.
+// ----------------------------------------------------------------------------
+export const meetingResponses = pgTable(
+  "meeting_responses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    meetingId: uuid("meeting_id")
+      .references(() => churchMeetings.id, { onDelete: "cascade" })
+      .notNull(),
+    personId: uuid("person_id")
+      .references(() => persons.id, { onDelete: "cascade" })
+      .notNull(),
+    responseType: varchar("response_type", { length: 32 })
+      .$type<ResponseCardType>()
+      .notNull(),
+    /** Whatever the card said beyond its tick box — a prayer request, a question. */
+    notes: text("notes"),
+    /** Who keyed the card in. Nullable: the collector may since have left. */
+    recordedById: uuid("recorded_by_id").references(() => users.id),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    unique("meeting_responses_meeting_person_unique").on(
+      table.meetingId,
+      table.personId
+    ),
+    // The breakdown reads (church, meeting) together and never a meeting alone,
+    // because tenancy is application-enforced here (no RLS) — so the index is
+    // the shape the one hot query actually uses.
+    index("meeting_responses_church_meeting_idx").on(
+      table.churchId,
+      table.meetingId
+    ),
+    index("meeting_responses_person_id_idx").on(table.personId),
+    // `.$type<>()` on a varchar is a compile-time brand and nothing else
+    // (0040's lesson). The CHECK is what stops a typo'd response type sitting
+    // in the table forever, invisible to every count that filters on the five
+    // words the code knows.
+    check(
+      "meeting_responses_type_check",
+      sql`${table.responseType} in (${inList(responseCardTypes)})`
+    ),
+  ]
+);
+
+export type MeetingResponse = typeof meetingResponses.$inferSelect;
+export type NewMeetingResponse = typeof meetingResponses.$inferInsert;
 
 // ----------------------------------------------------------------------------
 // Invitations - Tracking who invited whom (vision-meeting focused)

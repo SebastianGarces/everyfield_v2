@@ -19,8 +19,18 @@ import { sendEmail as sendProviderEmail } from "@/lib/email/client";
 import {
   batchSubject,
   composeBatchEmail,
+  type ComposeBatchEmailOptions,
+  type NotificationEmailItem,
+  type NotificationEmailRecipient,
   type OutboundEmail,
 } from "./channels/email";
+import {
+  loadSuppressedAddresses as loadSuppressedAddressesFromDb,
+  normalizeEmailAddress,
+} from "./channels/suppression";
+import { composePlanterDigestEmail } from "./channels/digest-email";
+import { PLANTER_DIGEST_TYPE } from "./digest-content";
+import { PERMANENT_FAILURE_PREFIX } from "./permanent-failure";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported
@@ -142,12 +152,10 @@ export const RETRY_BASE_DELAY_MS = 5 * 60_000;
 /** Ceiling on the exponential, so a long-failing channel still ticks. */
 export const MAX_RETRY_DELAY_MS = 60 * 60_000;
 
-/**
- * Prefix on `notification_deliveries.error` marking a failure that must never
- * be retried. It is the durable record of permanence — the attempt count stays
- * truthful about how many provider calls actually happened.
- */
-export const PERMANENT_FAILURE_PREFIX = "permanent: ";
+// `PERMANENT_FAILURE_PREFIX` used to be declared here. It now lives in the
+// import-free leaf `./permanent-failure`, so the webhook route can reach it
+// without pulling this module's graph (#263 item 2). It is deliberately NOT
+// re-exported: importers name the leaf.
 
 /** Backoff before attempt N+1, given the attempt count that just failed. */
 export function retryDelayMs(attemptCount: number): number {
@@ -387,6 +395,81 @@ export function groupIdempotencyKey(
   return `notif:${anchorId}:${recipientUserId}:${category}:${hash(fingerprint)}`;
 }
 
+// ----------------------------------------------------------------------------
+// Which template a group renders through
+// ----------------------------------------------------------------------------
+
+/**
+ * A composer turns one dispatched group into the one email it becomes.
+ *
+ * `composeBatchEmail` is the shape, and every alternative has to be
+ * signature-compatible with it: the dispatcher picks one and calls it, and
+ * nothing downstream of the pick knows which it got.
+ */
+export type GroupEmailComposer = (
+  recipient: NotificationEmailRecipient,
+  category: NotificationCategory,
+  items: readonly NotificationEmailItem[],
+  idempotencyKey: string,
+  options?: ComposeBatchEmailOptions
+) => Promise<OutboundEmail>;
+
+/**
+ * The types that render through something other than the generic template.
+ *
+ * A STATIC DECISION, deliberately, and not a registry like
+ * `registerStillLivePredicate` above. A registry has to be ARMED by a call in
+ * the runtime that dispatches — the bug `./register-consumers.ts` exists to
+ * close — and an unarmed composer registry would silently fall back to the
+ * generic template in the cron runtime while every test passed. A decision
+ * spelled in code cannot be unarmed.
+ *
+ * The cost is one edge from F11 into the digest's CONTENT LEAF
+ * (`./digest-content`, which imports `@/lib/datetime` and nothing else) — not
+ * into `./digest.ts`, whose `@/db` graph reaches back here through the tasks
+ * feature's own F11 registration. That edge used to close a cycle; taking the
+ * constant from the leaf is what opens it.
+ *
+ * WHY A FUNCTION AND NOT A MODULE-SCOPE TABLE: it makes the lookup an EQUALITY
+ * rather than an index, so a stored `type` of `"constructor"` cannot resolve
+ * through `Object.prototype` into something callable (memory/invariants.md →
+ * the string-keyed accessor rule). That is the whole reason now — the module
+ * initialisation order that used to make a `Record` throw a TDZ
+ * `ReferenceError` is gone with the cycle.
+ *
+ * Keyed on `type` rather than on `category`, because the `digest` CATEGORY
+ * carries two unrelated things — this planter digest and the oversight activity
+ * digest (`./oversight-digest.ts`), whose body has a different shape entirely.
+ * Keying on the category would have rendered one through the other's template.
+ */
+function specialComposerFor(type: string): GroupEmailComposer | undefined {
+  if (type === PLANTER_DIGEST_TYPE) return composePlanterDigestEmail;
+  return undefined;
+}
+
+/**
+ * The composer for one group, defaulting to the generic batch template.
+ *
+ * A MIXED group falls back. A special composer speaks for its own type and
+ * knows how to read its own bodies; handed somebody else's rows it would render
+ * them as blank lines, which is worse than the generic template rendering all
+ * of them plainly. In practice a group is (anchor, recipient, category) so a
+ * mix is only reachable if two types ever share a category for one recipient —
+ * but that is exactly the case this guard is cheap insurance against.
+ */
+export function emailComposerForGroup(
+  items: readonly Notification[]
+): GroupEmailComposer {
+  const first = items[0];
+  if (!first) return composeBatchEmail;
+
+  const composer = specialComposerFor(first.type);
+  if (!composer) return composeBatchEmail;
+  if (items.some((item) => item.type !== first.type)) return composeBatchEmail;
+
+  return composer;
+}
+
 /** Small stable digest — this only has to be collision-resistant per group. */
 function hash(value: string): string {
   let h = 2166136261;
@@ -462,6 +545,14 @@ export interface DispatchDeps {
   ): Promise<void>;
   /** Hand claimed rows back to the queue untouched. Nothing else re-pends them. */
   releaseClaims(notificationIds: readonly string[], now: Date): Promise<void>;
+  /**
+   * Which of the run's recipient addresses are suppressed (#324), normalised.
+   *
+   * One query for the whole run, on the same rule as `loadRecipients`: this is
+   * inside a function with a hard timeout, and a per-notification read would be
+   * an N+1 in the hottest loop in F11.
+   */
+  loadSuppressedAddresses(emails: readonly string[]): Promise<string[]>;
   /** The one provider call. */
   sendEmail(message: OutboundEmail): Promise<EmailSendOutcome>;
 }
@@ -491,6 +582,16 @@ export interface DispatchRunSummary {
   deferred: number;
   /** Channel outcomes recorded as `suppressed_by_preference`. */
   suppressed: number;
+  /**
+   * Emails not composed because the recipient's ADDRESS is suppressed (#324).
+   *
+   * COUNTED, not thrown. A suppressed address is a normal, expected outcome —
+   * somebody's mailbox died — and a throw here would strand every claimed row
+   * in the run over one dead address. It is reported separately from
+   * `suppressed` because the two are different refusals: that one is a user's
+   * choice about a category, this one is a mailbox that does not exist.
+   */
+  addressSuppressed: number;
   /** Claimed rows released unprocessed when the budget ran out. */
   released: number;
   durationMs: number;
@@ -638,6 +739,7 @@ export async function runDispatch(
     retryScheduled: 0,
     deferred: 0,
     suppressed: 0,
+    addressSuppressed: 0,
     released: 0,
     durationMs: 0,
   };
@@ -676,6 +778,16 @@ export async function runDispatch(
     deliveries.set(`${row.notificationId}|${row.channel}`, row);
   }
 
+  // #324. A FOURTH batched read, and it has to follow the first three because
+  // it is keyed on the addresses `loadRecipients` just returned. One extra
+  // round trip per run, against a domain reputation that takes months to earn
+  // back.
+  const suppressedAddresses = new Set(
+    await deps.loadSuppressedAddresses(
+      recipientRows.map((row) => row.email).filter(Boolean)
+    )
+  );
+
   const groups = groupForDispatch(claimed);
   summary.groups = groups.length;
 
@@ -704,6 +816,7 @@ export async function runDispatch(
       recipient: recipients.get(groups[index].recipientUserId),
       preferenceRows: preferences.get(groups[index].recipientUserId) ?? [],
       deliveries,
+      suppressedAddresses,
     });
   }
 
@@ -719,6 +832,8 @@ interface GroupContext {
   recipient: DispatchRecipient | undefined;
   preferenceRows: NotificationPreference[];
   deliveries: Map<string, NotificationDelivery>;
+  /** Normalised addresses this run must not mail (#324). */
+  suppressedAddresses: Set<string>;
 }
 
 async function processGroup(
@@ -925,6 +1040,47 @@ async function deliverEmailGroup(
     return;
   }
 
+  // --- #324: is this address suppressed? -----------------------------------
+  //
+  // BEFORE COMPOSING, and REPORTED rather than thrown. A permanently-bounced
+  // address is a normal outcome — somebody's mailbox died — and a throw here
+  // would strand every claimed row in the run over one dead mailbox.
+  //
+  // The shape is deliberately IDENTICAL to the no-address branch above: claim
+  // each notification's email channel, settle it `failed` with the permanent
+  // prefix, and record it. That is what makes the skip answerable — "why did
+  // this never arrive?" reads the delivery row's own error text (N-016), not a
+  // log line that has since rotated — and the prefix is what stops
+  // `channelEligibility` retrying it even after this check is passed.
+  //
+  // The claim still bumps `attempt_count` without a provider call, exactly as
+  // the no-address branch does. That is consistent rather than a lie: the
+  // number counts attempts to DELIVER, and this attempt was made and refused.
+  if (ctx.suppressedAddresses.has(normalizeEmailAddress(ctx.recipient.email))) {
+    const error = `${PERMANENT_FAILURE_PREFIX}address suppressed after a permanent bounce or spam complaint`;
+    for (const notification of candidates) {
+      const claim = await deps.claimDelivery(
+        notification.id,
+        "email",
+        maxAttempts
+      );
+      if (claim.status === "lost") {
+        record(notification.id, { kind: "settled" });
+        continue;
+      }
+      await deps.settleDelivery({
+        notificationId: notification.id,
+        channel: "email",
+        status: "failed",
+        error,
+        now,
+      });
+      record(notification.id, { kind: "failed" });
+      summary.addressSuppressed += 1;
+    }
+    return;
+  }
+
   // Claim every notification's email channel BEFORE composing. A notification
   // whose claim is lost to a concurrent run must not appear in the body of an
   // email this run sends, or that run's copy is duplicated in ours.
@@ -953,7 +1109,10 @@ async function deliverEmailGroup(
   // escape `runDispatch` and strand every claimed row in the run.
   let message: OutboundEmail;
   try {
-    message = await composeBatchEmail(
+    // WHICH TEMPLATE is decided from the rows themselves, not from the
+    // category: see `emailComposerForGroup`. The failure containment below is
+    // unchanged and covers every composer equally.
+    message = await emailComposerForGroup(items)(
       ctx.recipient,
       group.category,
       items,
@@ -1219,6 +1378,10 @@ export const dbDispatchDeps: DispatchDeps = {
           eq(notifications.status, "claimed")
         )
       );
+  },
+
+  loadSuppressedAddresses(emails) {
+    return loadSuppressedAddressesFromDb(emails);
   },
 
   async sendEmail(message) {

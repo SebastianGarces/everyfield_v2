@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { EmailSuppressionNotice } from "@/components/notifications/email-suppression-notice";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { verifySession } from "@/lib/auth/session";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
+import { isAddressSuppressed } from "@/lib/notifications/channels/suppression";
 import {
   audienceForRole,
   buildPreferenceMatrixView,
@@ -47,6 +49,12 @@ export default async function SettingsPage() {
     audienceForRole(session.user.role)
   );
 
+  // #324. Asked for the SESSION'S OWN address and nowhere else: this is the one
+  // screen that can say "we stopped emailing you" to the person who can do
+  // something about it. Absent a suppression the read returns false and nothing
+  // renders, so the ordinary case costs one bounded query and shows no notice.
+  const emailSuppressed = await isAddressSuppressed(session.user.email);
+
   const isPlanterWithPlant =
     session.user.role === "planter" && Boolean(session.user.churchId);
 
@@ -74,6 +82,14 @@ export default async function SettingsPage() {
             How EveryField reaches you.
           </p>
         </div>
+
+        {/* ABOVE the matrix, because it changes what every row in it means: a
+            suppressed address makes every `email` switch below inert, and a
+            notice under them would be read after the reader had already
+            concluded their settings were fine. */}
+        {emailSuppressed && (
+          <EmailSuppressionNotice email={session.user.email} />
+        )}
 
         <section
           aria-labelledby="notification-preferences"

@@ -12,6 +12,11 @@ import {
   notificationChannels,
 } from "@/lib/notifications/categories";
 import {
+  clearAddressSuppression,
+  SUPPRESSION_CLEAR_FAILED_MESSAGE,
+  SUPPRESSION_SELF_CLEAR_REASON,
+} from "@/lib/notifications/channels/suppression";
+import {
   audienceForRole,
   digestCadenceWriteIsNoop,
   loadUserPreferences,
@@ -28,11 +33,12 @@ import {
 // The preferences screen's writes (N-006, Screen 2).
 //
 // ----------------------------------------------------------------------------
-// Whose preferences these are is NOT an argument
+// Whose settings these are is NOT an argument
 // ----------------------------------------------------------------------------
 //
-// Neither action accepts a user id, and neither could usefully be given one:
-// every write goes through a `PreferenceOwner`, a branded type mintable only by
+// No action here accepts a user id, and the preference writes could not usefully
+// be given one: every one goes through a `PreferenceOwner`, a branded type
+// mintable only by
 // `preferenceOwnerFromSession` (see the header of
 // `src/lib/notifications/preferences.ts`). A `string` is not assignable to it,
 // so an action that forwarded `formData.get("userId")` into the write path does
@@ -47,6 +53,11 @@ import {
 // The read side is the same shape — the page mints the owner from its own
 // session and `loadUserPreferences` takes nothing else, so there is no query
 // string, route param or form field anywhere in this screen that names a user.
+//
+// The bounce escape hatch at the bottom of this file obeys the same rule with a
+// different mechanism: it takes NO ADDRESS and reads the session's own, because
+// an address parameter would make it an un-suppress endpoint for anybody's
+// mailbox. See its own docblock.
 //
 // ----------------------------------------------------------------------------
 // Why these are actions and not a form POST
@@ -68,8 +79,8 @@ import {
 // 8 of #304)
 // ----------------------------------------------------------------------------
 //
-// Both exports open with `verifySession()`, ABOVE their `safeParse` and above
-// the `try` below. Parsing first was not exploitable here — neither action
+// EVERY export opens with `verifySession()`, ABOVE its `safeParse` (where it has
+// one) and above its `try`. Parsing first was not exploitable here — neither action
 // names a user and neither reaches storage before the mint — but it answered an
 // anonymous caller differently depending on the SHAPE of what they sent: a
 // malformed payload came back `{ success: false, error: "That is not a setting
@@ -98,7 +109,7 @@ import {
 // sees the switch snap back and nothing else — the same thing a mis-click looks
 // like. Only the Zod rejections, which already RETURNED a result, ever spoke.
 //
-// So both bodies return their failures instead. `unstable_rethrow` gets first
+// So every body returns its failures instead. `unstable_rethrow` gets first
 // refusal on every caught value, because `redirect()`, `notFound()` and the
 // framework's dynamic-usage bailouts are thrown as errors but MEAN something —
 // swallowing one would turn a working redirect into a false "we could not save
@@ -227,5 +238,79 @@ export async function setDigestCadenceAction(
     unstable_rethrow(error);
     console.error("[SETTINGS] saving the digest cadence failed:", error);
     return preferenceSaveFailure(error);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The bounce escape hatch (#324)
+// ----------------------------------------------------------------------------
+//
+// A permanent bounce writes an `email_suppressions` row and every later send
+// reads it, which is the whole point — one dead mailbox is otherwise one bounce
+// a day against a sending domain that takes months to earn back. But suppression
+// with no way out is a life sentence served by the recipient: the planter stops
+// getting email and the only remedy is an operator running SQL against
+// production.
+//
+// This is the self-service half, on the screen the recipient already owns. The
+// admin half (`clearedByUserId` naming an actor) is what
+// `email_suppressions_cleared_check` also admits, and it lands with the first
+// admin surface that needs it.
+
+/**
+ * What the un-suppress control tells the caller.
+ *
+ * A TYPE, not a value. Every VALUE export of a `"use server"` module is a
+ * published endpoint — the walk in `server-action-surface.test.ts` bans any
+ * export that is not an `export async function` for exactly that reason — so the
+ * clear's stored reason and its failure sentence live beside the write they
+ * belong to, in `@/lib/notifications/channels/suppression`.
+ */
+export type SuppressionActionResult =
+  | { success: true; cleared: boolean }
+  | { success: false; error: string };
+
+/**
+ * Start sending email to the SESSION'S OWN address again.
+ *
+ * IT TAKES NO ADDRESS, and that is the whole ownership story. An actor or an
+ * entity the actor implies is never a parameter (memory/invariants.md →
+ * Authentication) — every export of a `"use server"` module is a POSTable
+ * endpoint reachable with no UI, so an address parameter here would be an
+ * un-suppress endpoint for anybody's mailbox, which is a deliverability weapon
+ * pointed at the sending domain. The address comes from `verifySession()` and
+ * from nowhere else.
+ *
+ * `clearedByUserId: null` is the self-service path — the address holder
+ * re-verified, and there is no admin to name. `cleared_at` is what says the row
+ * was cleared; the actor column never stood in for it.
+ *
+ * SESSION FIRST AND ABOVE THE `try`, like both actions above: a sessionless call
+ * THROWS rather than being converted into a handled `{ success: false }`.
+ *
+ * `cleared: false` is a SUCCESS. Clearing an address that is not suppressed
+ * writes nothing and the caller's intent — "this address should be mailable" —
+ * already holds; the screen simply stops showing the notice.
+ */
+export async function clearMyEmailSuppressionAction(): Promise<SuppressionActionResult> {
+  const session = await verifySession();
+
+  try {
+    const cleared = await clearAddressSuppression({
+      email: session.user.email,
+      reason: SUPPRESSION_SELF_CLEAR_REASON,
+      clearedByUserId: null,
+    });
+
+    // The notice is server-rendered from `isAddressSuppressed`, so the page has
+    // to re-read to lose it — the same reconciliation the preference switches
+    // get (memory/contracts/data-patterns.md).
+    refresh();
+
+    return { success: true, cleared: cleared > 0 };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] clearing an email suppression failed:", error);
+    return { success: false, error: SUPPRESSION_CLEAR_FAILED_MESSAGE };
   }
 }

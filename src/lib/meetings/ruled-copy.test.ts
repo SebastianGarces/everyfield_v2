@@ -61,10 +61,10 @@ import { meetingEvaluations } from "@/db/schema/meetings";
 // ten schema tables and drizzle, so an import edge from a component that later
 // gains `"use client"` would drag that whole graph into the client bundle.
 // `copy.ts` cannot drag anything, and the last section of this file pins the
-// near half of that split over all SIX db-free siblings: `copy.ts` and
+// near half of that split over all SEVEN db-free siblings: `copy.ts` and
 // `evaluation-comparison.ts` import nothing at all, `agenda.ts`,
-// `meeting-type-filter.ts`, `labels.ts` and `evaluation-factors.ts` import one
-// erased TYPE each and no value. The far
+// `meeting-type-filter.ts`, `labels.ts`, `evaluation-factors.ts` and
+// `response-card.ts` import one erased TYPE each and no value. The far
 // half — that no client component REACHES service.ts, directly or through any
 // non-server-action module — is an architecture guard rather than a copy
 // ruling, and lives in `client-boundary.test.ts` beside it.
@@ -568,6 +568,12 @@ const DB_FREE_SIBLINGS: readonly {
     file: "evaluation-factors.ts",
     allows: "type-only",
     holds: "the ONE evaluation quality-factor list and the rating scale",
+  },
+  {
+    file: "response-card.ts",
+    allows: "type-only",
+    holds:
+      "the ONE response-card vocabulary (VM-014), its parser and the breakdown arithmetic",
   },
 ];
 

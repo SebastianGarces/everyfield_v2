@@ -12,4 +12,4 @@ Memory holds what the code cannot tell you: invariants, rulings, and architectur
 | [contracts/config.md](contracts/config.md) | Env vars (incl. ones absent from `.env.example`) and constants |
 | [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data-sync conventions |
 
-Size budget, enforced by test: `invariants.md` ≤ 64 KB, the whole tree ≤ 178 KB (re-pinned 2026-08-15 when #321 and #376 landed ten rules; compression pass first, then the re-pin — the cap governs rule LENGTH, never rule count). Maintenance is part of the REVIEWED gate — see `ops/agent-os/dod.md` § Memory.
+Size budget, enforced by test: `invariants.md` ≤ 65 KB, the whole tree ≤ 181 KB (the tree re-pinned 2026-08-15 for the `email_suppressions` (#324) and `meeting_responses` (#98) contracts; `invariants.md` re-pinned the same day, after a 1.8 KB compression pass over ~45 lines, for the nine rules those two features and the shared dispatcher deadline establish — the cap governs rule LENGTH, never rule count). Maintenance is part of the REVIEWED gate — see `ops/agent-os/dod.md` § Memory.
