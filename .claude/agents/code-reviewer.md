@@ -61,14 +61,21 @@ Check the diff against `memory/invariants.md` (every rule, one line each) and th
 
 ## Output
 
-By severity: **Critical** (bugs, security, data loss, invariant violations) → **Warnings**
-(structural findings from the ambition standard, stated with the concrete restructuring) →
-**Suggestions**. Critical and Warning findings are both **actionable now**: in the delivery
-loop they return to an implementer agent and get fixed in the same pass, before merge — never
-filed as follow-up debt. So state each one so an implementer can act on it directly: exact
-lines, the remedy, and what "fixed" looks like. Within Warnings, lead with structural
-regressions and missed dramatic simplifications, then boundary/abstraction problems, then
-file-size and legibility. Point at exact lines, say why, suggest the fix. Be direct about maintainability —
-"this works, but it makes the surrounding code more spaghetti; keep the behavior, restructure
-the implementation" is a valid and expected finding. A few high-conviction structural comments
-beat a long list of cosmetic notes. Skip praise sections and padding.
+Two channels, and they go to different places.
+
+**`findings`** — everything actionable, each with `severity` (`critical` | `structural` |
+`suggestion`), exact lines, and a **`remedy`**. These are fixed **in this pass**, before merge, by
+an implementer agent that reads only what you wrote — never filed as follow-up debt. Order them
+critical (bugs, security, data loss, invariant violations) → structural (regressions and missed
+dramatic simplifications, then boundary/abstraction problems, then file size and legibility) →
+suggestion. Say why, and say what "fixed" looks like. "This works, but it makes the surrounding
+code more spaghetti; keep the behavior, restructure the implementation" is a valid and expected
+finding.
+
+**`warnings`** — each with `kind` (`ruling` | `spec-question`). These never reach the fixer: you
+**rule on them yourself** from `product-docs/product-values.md`, `CONTEXT.md` and
+`memory/invariants.md`, and the ruling is copied verbatim into the PR body. A structural problem is
+never a warning — if it needs code changed, it is a finding.
+
+A few high-conviction structural findings beat a long list of cosmetic notes. Skip praise sections
+and padding.

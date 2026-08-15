@@ -7,79 +7,37 @@ description: Work through an in-progress git merge or rebase conflict hunk by hu
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (`resolving-merge-conflicts`).
 
-Conflicts are common here because tracks are built in parallel in isolated worktrees and merged
-afterwards (`frd-implement`, `build-until-done`). Tracks are planned to be file-disjoint, so a
-conflict is itself a signal: **the file ownership guessed at intake was wrong.** Note it — it is
-worth more than the resolution.
+Tracks are planned file-disjoint, so a conflict is itself a signal: **the file ownership guessed at
+intake was wrong.**
 
 ## Never abort
 
-`git merge --abort` / `git rebase --abort` throws away a resolution the next agent will have to
-redo, with less context than you have right now. Always resolve. If you genuinely cannot, stop and
-report which hunk and why — leave the operation in progress for a human.
+`git merge --abort` / `git rebase --abort` throws away a resolution the next agent must redo with
+less context than you have now. Always resolve. If you genuinely cannot, stop and report which hunk
+and why — leave the operation in progress for a human.
 
 ## Process
 
-### 1. See the current state
+1. **See the state.** `git status`, `git log --oneline --graph -15`, `git diff --name-only
+   --diff-filter=U`. Name both sides and what this merge is *for* before touching anything.
 
-```bash
-git status                       # which operation, which files
-git log --oneline --graph -15
-git diff --name-only --diff-filter=U
-```
+2. **Resolve each hunk by intent traced to the issue's acceptance criteria** (`gh issue view <n>`;
+   the PR body states what was proven). A relevant `memory/` invariant beats either side.
+   - **Preserve both intents where possible** — two tracks each adding a field to the same object
+     usually both belong; the conflict is textual, not semantic.
+   - **Where incompatible**, take the side matching the merge's stated goal and note the trade-off
+     in the merge commit message.
+   - **Never resolve to a third thing** — that is a change nobody reviewed. Take one side and raise
+     the third thing separately.
+   - An elaboration added to `memory/invariants/<domain>.md` with no index line in
+     `memory/invariants.md` is not a conflict but an incomplete change: add the missing one-liner.
 
-Name both sides explicitly before touching anything: what is `ours`, what is `theirs`, and what this
-merge is *for*. A resolution without that framing is a guess.
+3. **Finish**, run the cheap local smoke, then push and let the required check be the verdict:
 
-### 2. Find each side's primary source
+   ```bash
+   git merge --continue   # or: git rebase --continue
+   pnpm typecheck && pnpm test
+   ```
 
-Understand deeply **why** each change was made — resolve by intent, never by which hunk looks
-tidier. In this repo the primary sources, in order of authority:
-
-1. **The issue the branch closes** — `gh issue view <n>`. The acceptance criteria are the intent.
-2. **The PR body** — it carries the DoD evidence bundle, so it states what was actually proven.
-3. **Commit messages** and `git log -p <file>` on each side.
-4. **`memory/`** — `invariants.md`, everything under `invariants/`, and `contracts/` settle
-   conflicts that are really contract disagreements. An invariant always wins over either side of
-   the hunk. Along with the DoD's security lens, this is one of the two deliberate full-price
-   readers: read the index AND every domain file, not just the index.
-
-   Conflicts *inside* `memory/invariants.md` are now mostly trivial. Parallel tracks each append
-   their elaboration to a different `invariants/<domain>.md`, so they rarely touch the same file at
-   all; what collides is one-liners under the same domain heading, and the resolution is the union
-   of both lines. A branch that added elaboration with no index line is not a conflict to resolve —
-   it is an incomplete change: add the missing one-liner (see the `memory-maintenance` skill).
-
-### 3. Resolve each hunk
-
-- **Preserve both intents where possible.** Two tracks that each added a field to the same object
-  usually both belong; the conflict is textual, not semantic.
-- **Where incompatible**, pick the one matching the merge's stated goal, and note the trade-off in
-  the merge commit message.
-- **Do not invent new behaviour.** A resolution that is neither side is a change nobody reviewed and
-  nobody's DoD covered. If the correct answer is a third thing, resolve to one side and raise the
-  third thing separately.
-- Check the resolved file against `memory/invariants.md` and the `memory/invariants/*.md` domain
-  files covering it before moving on — tenancy and auth boundaries are exactly what a careless
-  "take both" breaks.
-
-### 4. Finish and verify
-
-Complete the operation (`git merge --continue` / `git rebase --continue`), then run the checks a
-merge can break. These are the same five checks CI's required job runs:
-
-```bash
-pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test
-```
-
-Fix anything the merge broke — a conflict resolution that typechecks is not the same as one that is
-correct, and `pnpm test` is the cheapest evidence you have that both intents survived.
-
-> CI runs Node 24 and its job name `Format, Lint, Typecheck, Build` is a contract with the branch
-> ruleset. A green local run is not the verdict; the required check on the PR is.
-
-### 5. Report the ownership miss
-
-If tracks that were planned as file-disjoint collided, say so, and name the file. That file is a
-chokepoint (a barrel, a constants module, a shared schema) and the next `spec-intake` should assign
-it to exactly one track's `## Likely files`.
+4. **Report the ownership miss.** If tracks planned file-disjoint collided, name the file — it is a
+   chokepoint, and the next `spec-intake` should give it to exactly one track's `## Likely files`.

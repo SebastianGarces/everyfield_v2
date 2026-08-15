@@ -249,11 +249,7 @@ test("rejects an unknown flag and a non-directory target", (t) => {
 
 // --- Wiring: one mechanism, referenced — not copy-pasted per prompt. ---
 
-const REFERENCES = [
-  ".claude/workflows/build-until-done.js",
-  ".claude/skills/validate-backend/SKILL.md",
-  ".claude/skills/validate-frontend/SKILL.md",
-];
+const REFERENCES = [".claude/workflows/build-until-done.js"];
 
 test("the script is executable, so prompts can just call it", () => {
   assert.ok(
@@ -262,7 +258,7 @@ test("the script is executable, so prompts can just call it", () => {
   );
 });
 
-test("the loop's worktree-creation step and the G2 gate point at the script", () => {
+test("the loop's worktree-creation step points at the script", () => {
   const loop = fs.readFileSync(
     path.join(ROOT, ".claude/workflows/build-until-done.js"),
     "utf8"
@@ -272,27 +268,12 @@ test("the loop's worktree-creation step and the G2 gate point at the script", ()
   // pushed the env line past 600 chars without weakening anything.
   const creation = loop.slice(
     loop.indexOf("git worktree add -b"),
-    loop.indexOf("label: `prep:")
+    loop.indexOf("label: `setup:")
   );
   assert.match(
     creation,
     /scripts\/worktree-env\.sh/,
     "worktree creation must set up the env"
-  );
-
-  // The integration verifier prompt (and its G2 line) moved to the
-  // verify-and-ship child in the #399 split; the creation step stays in the
-  // parent, so this test now reads both files.
-  const ship = fs.readFileSync(
-    path.join(ROOT, ".claude/workflows/verify-and-ship.js"),
-    "utf8"
-  );
-  const g2 = ship.split("\n").find((l) => l.includes("- G2 \\`pnpm test"));
-  assert.ok(g2, "the verifier prompt still has a G2 line");
-  assert.match(
-    g2,
-    /scripts\/worktree-env\.sh/,
-    "the verifier must fix a missing env rather than fail the track for it"
   );
 });
 

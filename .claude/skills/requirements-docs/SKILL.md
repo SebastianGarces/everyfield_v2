@@ -49,7 +49,7 @@ forms; all three are prohibited:
   state two incompatible things and bets the reader notices the override.
 
 When a change to code adds or alters a rule agents must not break, that goes to
-`memory/invariants.md` (see the `memory-maintenance` skill) — also not the FRD.
+`memory/invariants.md` (`ops/agent-os/dod.md` § Memory) — also not the FRD.
 
 ## Two naming idioms, one rule behind them
 

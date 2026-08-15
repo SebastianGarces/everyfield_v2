@@ -1,8 +1,7 @@
 # Entrypoints
 
 The codebase is the map — this file only tells you where to start looking. It used to mirror
-every flow in a table; that mirror is gone (git history has it) because a session finds the
-real thing faster with the conventions below.
+every flow in a table; that mirror is gone (git history has it).
 
 ## Where flows start
 
@@ -12,20 +11,15 @@ real thing faster with the conventions below.
   feature libs under `src/lib/<feature>/`. Every export of a `"use server"` module is a public
   POST endpoint — see `invariants.md` → Authentication before touching one.
 - **API route handlers:** `src/app/api/<route>/route.ts`. The non-obvious ones (cron, webhooks,
-  tokened public routes) are listed in `contracts/api.md`.
-- **DB schema:** `src/db/schema/*.ts` (one file per feature area). Non-obvious column semantics:
+  tokened public routes) are in `contracts/api.md`.
+- **DB schema:** `src/db/schema/*.ts`, one file per feature area. Non-obvious column semantics:
   `contracts/db.md`.
 - **The launch date** is not a column on `churches` — it is the `launches` entity
-  (`src/db/schema/launch.ts`, migration 0032). Reads: `src/lib/launch/queries.ts`. The one write
-  path: `setLaunchDate` in `src/lib/launch/service.ts`. Countdown math: `countdown.ts` there, and
-  only there (`invariants.md` → Hierarchical Access Control, the day-vs-instant rule).
+  (`src/db/schema/launch.ts`). Reads: `src/lib/launch/queries.ts`. The one write path:
+  `setLaunchDate` in `src/lib/launch/service.ts`. Countdown math: `countdown.ts` there and only
+  there (`invariants.md` → Hierarchical Access Control, the day-vs-instant rule).
 - **Auth:** `src/lib/auth/` (`session.ts:getCurrentSession()` runs on every authed request).
-- **Events:** `src/lib/events/event-bus.ts`; feature handlers subscribe in `src/lib/tasks/events.ts` etc.
+- **Events:** `src/lib/events/event-bus.ts`; feature handlers subscribe in
+  `src/lib/tasks/events.ts` and its siblings.
 - **Redirect/proxy behavior** (authed users hitting `/`, CSRF exemptions): `src/proxy.ts`.
-
-## Orientation shortcuts
-
-- Flow diagrams (intent, not code): `flows/*.mmd` — auth, wiki-article, request-lifecycle, person-status.
-- Design authority for anything visual: `DESIGN.md` at repo root (sharp system, ruled 2026-07-30).
-- Feature requirements and rulings: `product-docs/features/<feature>/frd.md`; build status lives
-  on the GitHub board (`gh issue list --label feature`), not in a file.
+- **Anything visual:** `DESIGN.md` at the repo root is the design authority.

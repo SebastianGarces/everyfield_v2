@@ -14,6 +14,6 @@ following instructions that cannot be carried out.
 Decisions #18 and #19 in [`product-docs/docs-audit-2026-07.md`](../../../product-docs/docs-audit-2026-07.md).
 
 `work-in-progress` was **not** archived here — it was deleted. Its workflow actively contradicted
-`ops/agent-os/dod.md` (its Risk Gate halts high-risk work; the delivery OS ships high-risk to a PR
-behind the HR4 lens gate), and a contradicting skill is worse than none. The one part worth keeping,
-its memory-maintenance discipline, was extracted to `.claude/skills/memory-maintenance/`.
+`ops/agent-os/dod.md` (its Risk Gate halts high-risk work; the delivery OS ships high-risk to a PR),
+and a contradicting skill is worse than none. The one part worth keeping, its memory-maintenance
+discipline, now lives in `ops/agent-os/dod.md` § Memory.
