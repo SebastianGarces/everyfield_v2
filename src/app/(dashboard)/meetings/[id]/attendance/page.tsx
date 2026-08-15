@@ -1,11 +1,8 @@
 import { redirect } from "next/navigation";
 import { notFound } from "next/navigation";
 import { verifySession } from "@/lib/auth/session";
-import {
-  getMeeting,
-  getAttendanceSummary,
-  listMeetingResponses,
-} from "@/lib/meetings/service";
+import { getMeeting, getAttendanceSummary } from "@/lib/meetings/service";
+import { listMeetingResponses } from "@/lib/meetings/response-queries";
 import { getGuestList } from "@/lib/meetings/guest-list";
 import { AttendanceCapture } from "@/components/meetings/attendance-capture";
 import type { ResponseCardType } from "@/db/schema/meetings";

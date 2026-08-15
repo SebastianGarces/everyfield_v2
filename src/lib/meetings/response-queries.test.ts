@@ -14,7 +14,7 @@ import {
   meetingAttendedCountQuery,
   meetingResponseCountsQuery,
   meetingResponseDeleteQuery,
-} from "./service";
+} from "./response-queries";
 
 // ----------------------------------------------------------------------------
 // VM-014 (#98) — response cards are CHURCH-SCOPED, at the query level.
@@ -195,25 +195,20 @@ test("clearing a card is a church-scoped DELETE, not a (meeting, person) one", (
 // The upsert, pinned on the source
 // ============================================================================
 
-const SERVICE = readFileSync(path.join(__dirname, "service.ts"), "utf8");
+const QUERIES = readFileSync(
+  path.join(__dirname, "response-queries.ts"),
+  "utf8"
+);
 
 /** The body of `recordMeetingResponse`, comments stripped. */
 function recordBody(): string {
-  const from = SERVICE.indexOf("export async function recordMeetingResponse");
-  assert.notEqual(
-    from,
-    -1,
-    "recordMeetingResponse moved — this guard is blind"
+  const queries = sourceReader(QUERIES, "meetings/response-queries.ts");
+  return stripComments(
+    queries.span(
+      "export async function recordMeetingResponse",
+      "export async function clearMeetingResponse"
+    )
   );
-  const to = SERVICE.indexOf(
-    "export async function clearMeetingResponse",
-    from
-  );
-  assert.notEqual(to, -1, "clearMeetingResponse moved — this guard is blind");
-
-  return SERVICE.slice(from, to)
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
 }
 
 test("a re-keyed card overwrites, through the unique index and not a SELECT", () => {
@@ -262,9 +257,12 @@ test("the upsert's SET is built field by field, never spread from the caller", (
 // Removing an attendee takes their card with them
 // ============================================================================
 
-/** The body of `removeAttendee`, comments stripped. */
+/** The body of `removeAttendee`, comments stripped. It stays in `service.ts`. */
 function removeBody(): string {
-  const service = sourceReader(SERVICE, "meetings/service.ts");
+  const service = sourceReader(
+    readFileSync(path.join(__dirname, "service.ts"), "utf8"),
+    "meetings/service.ts"
+  );
   return stripComments(
     service.span(
       "export async function removeAttendee",

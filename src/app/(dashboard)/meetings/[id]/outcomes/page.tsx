@@ -2,10 +2,8 @@ import { notFound, redirect } from "next/navigation";
 
 import { ResponseSummary } from "@/components/meetings/response-summary";
 import { verifySession } from "@/lib/auth/session";
-import {
-  getMeeting,
-  getMeetingResponseBreakdown,
-} from "@/lib/meetings/service";
+import { getMeetingResponseBreakdown } from "@/lib/meetings/response-queries";
+import { getMeeting } from "@/lib/meetings/service";
 
 export const dynamic = "force-dynamic";
 

@@ -134,7 +134,7 @@ export interface ResponseBreakdown {
    * Floored at zero as DEFENCE IN DEPTH, not as the fix for anything: the two
    * queries that feed this function count one population, so `recordedCount`
    * cannot exceed `attendeeCount` (see `meetingResponseCountsQuery` and
-   * `meetingAttendedCountQuery` in `service.ts`). The floor is what stops a
+   * `meetingAttendedCountQuery` in `response-queries.ts`). The floor is what stops a
    * FUTURE caller that computes its counts some other way rendering a negative
    * — it never again stands in for a denominator that is missing people.
    */

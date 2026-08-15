@@ -8,6 +8,7 @@ import {
   isAuthorized,
   maxDuration,
   runDispatchTick,
+  TICK_DEADLINE_MS,
   type DispatchTickDeps,
 } from "./route";
 import {
@@ -319,6 +320,20 @@ test("the run budget sits under the declared function timeout (N-017)", () => {
   );
 });
 
+test("the tick's whole deadline sits under the timeout, with the dispatch inside it", () => {
+  // The arithmetic that broke: three steps in series, each budgeted against the
+  // SAME leftover, summing past the platform ceiling. One deadline is what makes
+  // it un-breakable by a module that cannot see the others.
+  assert.ok(
+    TICK_DEADLINE_MS < maxDuration * 1000,
+    `the tick deadline ${TICK_DEADLINE_MS}ms must leave room to serialise the response inside ${maxDuration}s`
+  );
+  assert.ok(
+    RUN_BUDGET_MS < TICK_DEADLINE_MS,
+    "the dispatch must finish inside the tick's deadline, leaving something for the sweeps"
+  );
+});
+
 // ----------------------------------------------------------------------------
 // AC (#135): the planter digest sweep is actually CALLED by the one recurring
 // tick this app has — and cannot take a successful dispatch down with it
@@ -470,6 +485,95 @@ test("an oversight sweep that throws does not cost the planter digest its tick",
 
   assert.equal(body.oversightDigest, null);
   assert.deepEqual(body.planterDigest, PLANTER_SUMMARY);
+});
+
+// ----------------------------------------------------------------------------
+// ONE ALLOWANCE, spent in order — not two constants sized in isolation
+//
+// The three steps run strictly in series inside ONE platform invocation, so
+// what each may spend is what the ones ahead of it left. Two independent 10s
+// sweep budgets on top of a 45s dispatch budgeted 65s against a 60s ceiling;
+// the invocation is then killed MID-SWEEP, which returns no body at all and
+// bypasses both `catch` blocks — the tick becomes indistinguishable from a
+// dispatch failure and the summary this file exists to produce is lost.
+//
+// A fake clock, because the property is arithmetic and cannot be asserted by
+// waiting: each fake step advances the clock, and what the deps are HANDED is
+// the assertion.
+// ----------------------------------------------------------------------------
+
+/** A tick whose steps advance a fake clock and record the budget they were given. */
+function budgetedTick(spend: { dispatch: number; oversight: number }): {
+  deps: DispatchTickDeps;
+  budgets: number[];
+  calls: TickStep[];
+  now: () => number;
+} {
+  let clock = 1_000; // Non-zero, so an absent start stamp cannot pass by accident.
+  const budgets: number[] = [];
+  const calls: TickStep[] = [];
+
+  const deps: DispatchTickDeps = {
+    async dispatch() {
+      calls.push("dispatch");
+      clock += spend.dispatch;
+      return DISPATCH_SUMMARY;
+    },
+    async sweepOversightDigests(_at, budgetMs) {
+      calls.push("oversight");
+      budgets.push(budgetMs);
+      clock += spend.oversight;
+      return OVERSIGHT_SUMMARY;
+    },
+    async sweepPlanterDigests(_at, budgetMs) {
+      calls.push("planter");
+      budgets.push(budgetMs);
+      return PLANTER_SUMMARY;
+    },
+  };
+
+  return { deps, budgets, calls, now: () => clock };
+}
+
+test("the second sweep gets the REMAINDER of the tick, never a fresh budget", async () => {
+  const { deps, budgets, now } = budgetedTick({
+    dispatch: 44_000,
+    oversight: 9_000,
+  });
+
+  await runDispatchTick(deps, { now });
+
+  assert.deepEqual(
+    budgets,
+    [TICK_DEADLINE_MS - 44_000, TICK_DEADLINE_MS - 53_000],
+    "each sweep is handed what is left of the ONE deadline when it starts"
+  );
+  assert.ok(
+    budgets[0]! + budgets[1]! <= TICK_DEADLINE_MS,
+    "two sweeps may never together be allowed past the deadline"
+  );
+});
+
+test("a sweep with no time left is SKIPPED, not started", async () => {
+  // Skipped rather than started with zero or a negative: a sweep that begins
+  // only checks its budget BETWEEN plants, so starting one with nothing left is
+  // exactly the overshoot the deadline exists to prevent. It rolls over.
+  const { deps, calls, now } = budgetedTick({
+    dispatch: TICK_DEADLINE_MS + 1_000,
+    oversight: 0,
+  });
+
+  const body = await (await runDispatchTick(deps, { now })).json();
+
+  assert.deepEqual(calls, ["dispatch"], "no sweep was started");
+  assert.equal(
+    body.ok,
+    true,
+    "an out-of-time tick is still a 200 with a summary"
+  );
+  assert.equal(body.oversightDigest, null);
+  assert.equal(body.planterDigest, null);
+  assert.equal(body.claimed, DISPATCH_SUMMARY.claimed);
 });
 
 test("a dispatch that throws is still a 500, and no sweep runs behind it", async () => {

@@ -7,7 +7,7 @@
 // only thing that stops the regrowth.
 //
 // Two numbers, and they are the contract stated in memory/index.md:
-//   - memory/invariants.md   <= 64 KB  (every rule still lives in this one file)
+//   - memory/invariants.md   <= 65 KB  (every rule still lives in this one file)
 //   - the whole memory/ tree <= 181 KB
 //
 // Ruled 2026-08-14, and re-pinned twice since on the same procedure — COMPRESSION
@@ -25,6 +25,18 @@
 // five. The remainder is genuine new contract, which is what the cap is not
 // allowed to refuse.
 //
+// RE-PINNED 2026-08-15, invariants.md 64 -> 65 KB, same procedure and the first
+// time THIS cap has moved since the rewrite. #98/#324/#135 establish nine rules
+// the file had no line for: two ON CONFLICT arbiter indexes and one accepted
+// residual (Transactions), the digest's cadence-in-the-dedupe-key and its Monday
+// ruling and the dispatcher tick's ONE shared wall-clock allowance
+// (Notifications), the production floor on UNSUBSCRIBE_TOKEN_SECRET
+// (Authentication), a third and fourth import-free leaf, and a corrected
+// db-free-sibling count. The compression pass ran FIRST and bought 1.8 KB back
+// across ~45 lines — history clauses, repeated `src/lib/` prefixes and one
+// cosmetic note that bound nothing — against 2.0 KB of new contract. Every rule
+// stayed; what went was wording.
+//
 // WHAT THE CAP GOVERNS IS RULE LENGTH, NOT RULE COUNT. Each rule stays 1-3
 // sentences and the why that is not derivable from source moves into
 // memory/invariants/<domain>.md; a feature that earns a genuine invariant is not
@@ -41,7 +53,7 @@ const ROOT = path.resolve(import.meta.dirname, "../../..");
 const MEMORY_DIR = path.join(ROOT, "memory");
 
 const KB = 1024;
-const INVARIANTS_LIMIT = 64 * KB;
+const INVARIANTS_LIMIT = 65 * KB;
 const TREE_LIMIT = 181 * KB;
 
 /** Every file under memory/, with its size in bytes. */
@@ -56,7 +68,7 @@ function walk(dir) {
 
 const asKb = (bytes) => `${(bytes / KB).toFixed(1)} KB`;
 
-test("memory/invariants.md stays under 64 KB", () => {
+test("memory/invariants.md stays under 65 KB", () => {
   const bytes = fs.statSync(path.join(MEMORY_DIR, "invariants.md")).size;
   assert.ok(
     bytes <= INVARIANTS_LIMIT,

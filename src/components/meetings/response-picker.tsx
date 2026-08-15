@@ -1,6 +1,7 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
+import { toast } from "sonner";
 
 import {
   Select,
@@ -38,6 +39,18 @@ import type { ResponseCardType } from "@/db/schema/meetings";
 // token below. It is module-private and never stored: choosing it calls the
 // CLEAR action, which deletes the row, and the absence of a row is what the
 // breakdown reads as "handed nothing in".
+//
+// A REFUSED WRITE IS SAID OUT LOUD. Both actions RETURN their failures rather
+// than throwing, and neither revalidates on one — so a discarded result means
+// the optimistic value shows, the transition ends, `useOptimistic` falls back to
+// the unchanged prop, and the picker snaps back with nothing said. On a
+// data-entry control that reads as a mis-click, and the planter moves on
+// believing the card was recorded. It is reachable, not theoretical: the write's
+// attendance guard refuses when the row was removed in another tab. So the
+// result is CHECKED on both branches and raised through the root `<Toaster>` —
+// a sibling nothing in this subtree can unmount, which is what a message
+// accompanying a revalidation requires (memory/invariants.md → Client/Server
+// Data Synchronization), and the same shape `EmailSuppressionNotice` uses.
 // ============================================================================
 
 /** Reserved, never a stored value — the CHECK constraint would refuse it. */
@@ -69,15 +82,17 @@ export function ResponsePicker({
     startTransition(async () => {
       setOptimistic(parsed);
 
-      if (parsed === null) {
-        await clearResponseCardAction(meetingId, personId);
-        return;
-      }
+      const result =
+        parsed === null
+          ? await clearResponseCardAction(meetingId, personId)
+          : await recordResponseCardAction(meetingId, {
+              personId,
+              responseType: parsed,
+            });
 
-      await recordResponseCardAction(meetingId, {
-        personId,
-        responseType: parsed,
-      });
+      // Only the failure is announced: the success is already on screen, and
+      // the revalidation the action fired is what makes it permanent.
+      if (!result.success) toast.error(result.error);
     });
   };
 

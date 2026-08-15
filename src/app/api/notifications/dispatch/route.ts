@@ -84,6 +84,27 @@ registerNotificationConsumers();
  */
 export const maxDuration = 60;
 
+/**
+ * THE TICK'S ONE WALL-CLOCK ALLOWANCE, and everything under it shares it.
+ *
+ * Five seconds under `maxDuration`, which is what is left to serialise the
+ * response after the last step stops. Every step below measures against THIS
+ * deadline from the same start stamp: the dispatch takes its `RUN_BUDGET_MS`
+ * (45s), and each sweep is handed what is actually LEFT of the deadline rather
+ * than a budget of its own.
+ *
+ * WHY IT IS ONE NUMBER. Each sweep once carried its own 10s constant, sized in
+ * isolation against the same "headroom between 45s and 60s". Two modules were
+ * individually correct and 45 + 10 + 10 = 65 > 60, so a slow tick was killed by
+ * the platform MID-SWEEP: no response body, and — worse — both `catch` blocks
+ * below bypassed, which is the entire reason the sweeps are wrapped. The tick
+ * then looks exactly like a dispatch failure in the workflow log and the
+ * observability summary this file exists to produce is lost. A leftover is not
+ * divisible into two independent allowances; it is one remainder, spent in
+ * order.
+ */
+export const TICK_DEADLINE_MS = 55_000;
+
 /** True when the request carries a valid `Authorization: Bearer <CRON_SECRET>`. */
 export function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -99,15 +120,18 @@ export interface DispatchResponseBody extends DispatchRunSummary {
   ok: true;
   timestamp: string;
   /**
-   * The oversight digest sweep this tick performed, or null if it threw. The
-   * summary is here — not in a separate endpoint — because "did the digest go
-   * out today?" is answered by the same tick log as "did the reminders?".
+   * The oversight digest sweep this tick performed. Null when it threw, or when
+   * the tick's shared deadline left it no time and it was skipped rather than
+   * started — either way the day rolls over to the next tick, and the console
+   * line says which happened. The summary is here — not in a separate endpoint
+   * — because "did the digest go out today?" is answered by the same tick log as
+   * "did the reminders?".
    */
   oversightDigest: OversightDigestSweepSummary | null;
   /**
-   * The PLANTER digest sweep this tick performed, or null if it threw (N-013).
-   * Same reason it is reported here as the line above: one tick, one log line,
-   * one answer to "did it go out?".
+   * The PLANTER digest sweep this tick performed, on the same terms (N-013):
+   * null for a throw or for no time left. Same reason it is reported here as
+   * the line above: one tick, one log line, one answer to "did it go out?".
    */
   planterDigest: PlanterDigestSweepSummary | null;
 }
@@ -126,8 +150,19 @@ export interface DispatchResponseBody extends DispatchRunSummary {
  */
 export interface DispatchTickDeps {
   dispatch(): Promise<DispatchRunSummary>;
-  sweepOversightDigests(at: Date): Promise<OversightDigestSweepSummary>;
-  sweepPlanterDigests(at: Date): Promise<PlanterDigestSweepSummary>;
+  /**
+   * `budgetMs` is what is LEFT of `TICK_DEADLINE_MS` when this sweep starts —
+   * never a constant of the sweep's own. Both sweeps take it, and the second
+   * one takes what the first did not spend.
+   */
+  sweepOversightDigests(
+    at: Date,
+    budgetMs: number
+  ): Promise<OversightDigestSweepSummary>;
+  sweepPlanterDigests(
+    at: Date,
+    budgetMs: number
+  ): Promise<PlanterDigestSweepSummary>;
 }
 
 const PRODUCTION_TICK: DispatchTickDeps = {
@@ -166,10 +201,18 @@ const PRODUCTION_TICK: DispatchTickDeps = {
  */
 async function sweepOversightDigests(
   deps: DispatchTickDeps,
-  at: Date
+  at: Date,
+  budgetMs: number
 ): Promise<OversightDigestSweepSummary | null> {
+  if (budgetMs <= 0) {
+    console.warn(
+      "[notifications/dispatch] no time left in the tick for the oversight digest sweep; it rolls over."
+    );
+    return null;
+  }
+
   try {
-    return await deps.sweepOversightDigests(at);
+    return await deps.sweepOversightDigests(at, budgetMs);
   } catch (error) {
     console.error(
       "[notifications/dispatch] oversight digest sweep failed:",
@@ -196,6 +239,12 @@ async function sweepOversightDigests(
  * this one because it reports a day that is already over; this one reports what
  * is open right now and loses nothing by being last.
  *
+ * WHAT LAST COSTS, stated plainly: it is handed what the two steps ahead of it
+ * left of `TICK_DEADLINE_MS`, so a slow tick starves this sweep before it
+ * starves the ones in front. That is the right order — a starved sweep rolls
+ * over to a tick 15 minutes later, and the once-a-period guard is derived from
+ * the rows it writes, so nothing is lost by waiting.
+ *
  * WHY IT CANNOT FAIL THE RUN. Identical to the oversight case: a throw here
  * would turn a successful dispatch — emails already sent, rows already marked
  * delivered — into a 500, and the caller's only recovery is to tick again,
@@ -209,10 +258,18 @@ async function sweepOversightDigests(
  */
 async function sweepPlanterDigests(
   deps: DispatchTickDeps,
-  at: Date
+  at: Date,
+  budgetMs: number
 ): Promise<PlanterDigestSweepSummary | null> {
+  if (budgetMs <= 0) {
+    console.warn(
+      "[notifications/dispatch] no time left in the tick for the planter digest sweep; it rolls over."
+    );
+    return null;
+  }
+
   try {
-    return await deps.sweepPlanterDigests(at);
+    return await deps.sweepPlanterDigests(at, budgetMs);
   } catch (error) {
     console.error(
       "[notifications/dispatch] planter digest sweep failed:",
@@ -227,10 +284,27 @@ async function sweepPlanterDigests(
  *
  * Separate from `GET` so the tick can be exercised without a request and
  * without a database. `GET` is the guard; this is the work.
+ *
+ * `now` is the tick's clock, injectable for exactly one reason: the budget
+ * arithmetic below is the property `route.test.ts` asserts, and it cannot be
+ * asserted by waiting.
  */
 export async function runDispatchTick(
-  deps: DispatchTickDeps = PRODUCTION_TICK
+  deps: DispatchTickDeps = PRODUCTION_TICK,
+  options: { now?: () => number } = {}
 ): Promise<NextResponse> {
+  const now = options.now ?? Date.now;
+  const tickStartedAt = now();
+
+  /**
+   * What is left of the ONE deadline. Floored at zero, so a sweep with nothing
+   * left is skipped rather than started with a negative or a fresh allowance —
+   * which is the whole point: the two sweeps share a remainder, they do not
+   * each get one.
+   */
+  const remainingMs = (): number =>
+    Math.max(TICK_DEADLINE_MS - (now() - tickStartedAt), 0);
+
   try {
     const summary = await deps.dispatch();
 
@@ -240,8 +314,16 @@ export async function runDispatchTick(
       );
     }
 
-    const oversightDigest = await sweepOversightDigests(deps, new Date());
-    const planterDigest = await sweepPlanterDigests(deps, new Date());
+    const oversightDigest = await sweepOversightDigests(
+      deps,
+      new Date(),
+      remainingMs()
+    );
+    const planterDigest = await sweepPlanterDigests(
+      deps,
+      new Date(),
+      remainingMs()
+    );
 
     return NextResponse.json({
       ok: true,

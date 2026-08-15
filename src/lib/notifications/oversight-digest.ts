@@ -628,10 +628,16 @@ export const MAX_DIGEST_SWEEP_BATCH = 25;
 export const MAX_DIGEST_SWEEP_PLANTS = 500;
 
 /**
- * Wall-clock budget for the sweep, sized to fit in the headroom between the
- * dispatcher's own `RUN_BUDGET_MS` (45s) and the route's `maxDuration` (60s).
- * Crossing it stops between plants; nothing is left half-written, because each
- * plant's digest is its own independent set of enqueues.
+ * FALLBACK wall-clock budget, for a caller that names none.
+ *
+ * It is NOT a headroom calculation and must never become one again: the sweep
+ * shares one deadline with everything else in the tick, so the scheduled caller
+ * passes `budgetMs` computed from what is actually left of `TICK_DEADLINE_MS`
+ * (`/api/notifications/dispatch/route.ts`). Two constants each sized against the
+ * same leftover is how the tick came to budget 65s against a 60s ceiling.
+ *
+ * Crossing the budget stops between plants; nothing is left half-written,
+ * because each plant's digest is its own independent set of enqueues.
  */
 export const DIGEST_SWEEP_BUDGET_MS = 10_000;
 
@@ -972,9 +978,14 @@ export const dbOversightDigestSweepDeps: OversightDigestSweepDeps = {
  *
  * `at` is "when the tick fired". Everything else — which day, which plants —
  * is derived from it and from what is already in the database.
+ *
+ * `budgetMs` is the tick's REMAINING allowance, passed by the caller that owns
+ * the deadline. Omitted, it falls back to `DIGEST_SWEEP_BUDGET_MS` — which is
+ * for a hand-run sweep, never for the scheduled one.
  */
 export function runDailyOversightDigestSweep(
-  at: Date = new Date()
+  at: Date = new Date(),
+  budgetMs?: number
 ): Promise<OversightDigestSweepSummary> {
-  return runOversightDigestSweep(dbOversightDigestSweepDeps, { at });
+  return runOversightDigestSweep(dbOversightDigestSweepDeps, { at, budgetMs });
 }

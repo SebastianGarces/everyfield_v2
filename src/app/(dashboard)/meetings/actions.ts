@@ -46,20 +46,22 @@ import {
 import { createLocation, updateLocation } from "@/lib/meetings/locations";
 import {
   addAttendee,
-  clearMeetingResponse,
   createEvaluation,
   createMeeting,
   deleteMeeting,
   finalizeAttendance,
   FinalizeAttendanceError,
-  MeetingResponseError,
   recordAttendanceBatch,
-  recordMeetingResponse,
   removeAttendee,
   updateChecklistItem,
   updateMeeting,
   updateMeetingStatus,
 } from "@/lib/meetings/service";
+import {
+  clearMeetingResponse,
+  MeetingResponseError,
+  recordMeetingResponse,
+} from "@/lib/meetings/response-queries";
 import type { ActionResult } from "@/lib/meetings/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";

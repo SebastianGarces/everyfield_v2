@@ -513,7 +513,17 @@ export const MAX_PLANTER_DIGEST_SWEEP_BATCH = 25;
 /** Hard ceiling on plants CONSIDERED in one tick. A backstop, not the limit. */
 export const MAX_PLANTER_DIGEST_SWEEP_PLANTS = 500;
 
-/** Wall-clock budget for one sweep. Crossing it stops between plants. */
+/**
+ * FALLBACK wall-clock budget, for a caller that names none. Crossing it stops
+ * between plants.
+ *
+ * It is NOT sized against the scheduled run's headroom, and must never be: this
+ * sweep runs LAST in a tick that has ONE deadline, and its caller passes the
+ * remainder of that deadline as `budgetMs`
+ * (`/api/notifications/dispatch/route.ts`). A second constant sized in isolation
+ * against the same leftover is how the tick came to budget 65s against a 60s
+ * ceiling.
+ */
 export const PLANTER_DIGEST_SWEEP_BUDGET_MS = 10_000;
 
 export interface OwedPlanterDigestPageQuery {
@@ -767,9 +777,14 @@ export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
  * prerequisite: this is the first feature in the product that enqueues on a
  * schedule, and the digest email throws rather than ship a dead unsubscribe
  * link.
+ *
+ * `budgetMs` is the REMAINDER of that tick's one deadline, passed by the caller
+ * that owns it. This sweep runs last, so it gets what the dispatch and the
+ * oversight sweep left — never an allowance of its own.
  */
 export function runDailyPlanterDigestSweep(
-  at: Date = new Date()
+  at: Date = new Date(),
+  budgetMs?: number
 ): Promise<PlanterDigestSweepSummary> {
-  return runPlanterDigestSweep(dbPlanterDigestSweepDeps, { at });
+  return runPlanterDigestSweep(dbPlanterDigestSweepDeps, { at, budgetMs });
 }
