@@ -6,6 +6,10 @@
 // claim, batching, the still-live re-check, bounded retry — lives in
 // `src/lib/notifications/dispatch.ts`; this file is the guard, not the logic.
 //
+// The ONE piece of wiring it owns: `registerNotificationConsumers()` below. A
+// predicate that is not registered in THIS process does not exist, whatever any
+// feature module does at its own import time.
+//
 // Security: `Authorization: Bearer <CRON_SECRET>`. It FAILS CLOSED — an unset
 // secret rejects everything rather than opening the endpoint, because this
 // route sends email to real users and an open one is a spam cannon pointed at
@@ -50,11 +54,22 @@ import {
   runDailyOversightDigestSweep,
   type OversightDigestSweepSummary,
 } from "@/lib/notifications/oversight-digest";
+import { registerNotificationConsumers } from "@/lib/notifications/register-consumers";
 import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 // Claims rows and calls a provider — never cache it, never prerender it.
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// N-014, ARMED. `resolveLiveness` treats a type with no registered predicate as
+// LIVE, so this call is what stops a completed task or a cancelled meeting being
+// emailed off a row a run had already claimed. It has to be HERE, in the
+// dispatcher's own entrypoint: the feature modules used to arm themselves as a
+// load-time side effect, this file imports neither of them, and so all six types
+// were unregistered in the cron runtime while both feature suites passed (they
+// register by hand). Idempotent — registration replaces rather than stacks.
+// `route.test.ts` asserts the six over THIS module's graph.
+registerNotificationConsumers();
 
 /**
  * Platform function timeout. `RUN_BUDGET_MS` sits under it deliberately: the

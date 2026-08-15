@@ -180,16 +180,34 @@ const stillLivePredicates = new Map<string, StillLivePredicate>();
 /**
  * Register the predicate for one notification `type`.
  *
- * Registration is a module-load side effect in the owning feature, the same way
- * `src/lib/events/subscriptions.ts` wires event handlers. Re-registering the
- * same type replaces the predicate rather than stacking, so a hot reload does
- * not accumulate.
+ * Re-registering the same type REPLACES the predicate rather than stacking,
+ * which is what makes arming idempotent: `registerNotificationConsumers()`
+ * (`src/lib/notifications/register-consumers.ts`) may be called any number of
+ * times, and a hot reload does not accumulate handlers.
+ *
+ * REGISTRATION IS A CALL, NOT AN IMPORT. It used to be a module-load side effect
+ * in the owning feature — and the dispatcher's own entrypoint imports no feature
+ * module, so every predicate was MISSING in the cron runtime and
+ * `resolveLiveness` treated all six types as live. See `register-consumers.ts`.
  */
 export function registerStillLivePredicate(
   type: string,
   predicate: StillLivePredicate
 ): void {
   stillLivePredicates.set(type, predicate);
+}
+
+/**
+ * The same registration for a whole family of types — a feature's tuple, so a
+ * fourth reminder offset cannot ship registered for only three.
+ */
+export function registerStillLivePredicates(
+  types: readonly string[],
+  predicate: StillLivePredicate
+): void {
+  for (const type of types) {
+    registerStillLivePredicate(type, predicate);
+  }
 }
 
 export function unregisterStillLivePredicate(type: string): void {

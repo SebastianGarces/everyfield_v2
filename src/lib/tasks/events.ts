@@ -14,6 +14,8 @@ import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
 
 import { addCalendarDays } from "@/lib/datetime";
 
+import { syncTaskNotificationsFor } from "./notifications";
+
 // ============================================================================
 // Event Types
 // ============================================================================
@@ -320,8 +322,12 @@ export async function handleMeetingAttendanceFinalized(
   // conflicting evaluation row and happily insert the loser's follow-ups,
   // which is the duplication this is here to prevent. We want the violation.
   if (tasksToCreate.length > 0) {
+    let created: { id: string }[];
     try {
-      await db.insert(tasks).values(tasksToCreate);
+      created = await db
+        .insert(tasks)
+        .values(tasksToCreate)
+        .returning({ id: tasks.id });
     } catch (error) {
       if (isUniqueViolation(error, TASKS_MEETING_EVALUATION_UNIQUE)) {
         // A concurrent finalize won the race and generated the same set. The
@@ -333,6 +339,21 @@ export async function handleMeetingAttendanceFinalized(
       }
       throw error;
     }
+
+    // T-018. Every generated row carries an assignee (the planter) and a due
+    // date, so every one owes a due and an overdue notification — and a
+    // follow-up nobody typed is exactly the kind that gets forgotten. The ids
+    // come from the write's own `returning()`, so only rows that actually
+    // landed are announced; the helper is best-effort and sequential, so this
+    // can neither fail the generation nor slow it into a timeout.
+    // `mustCancel: false` for the same reason `importTaskTemplate` passes it:
+    // these ids come from the INSERT's own `returning()`, so every one of them
+    // is seconds old and provably has nothing pending to cancel.
+    await syncTaskNotificationsFor(
+      churchId,
+      created.map((row) => row.id),
+      { mustCancel: false }
+    );
 
     if (process.env.NODE_ENV === "development") {
       console.log(

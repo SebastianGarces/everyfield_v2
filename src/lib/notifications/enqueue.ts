@@ -107,6 +107,32 @@ import { orgHasRecordedRelationshipWithChurch } from "./oversight-relationship";
 // Validation
 // ----------------------------------------------------------------------------
 
+/**
+ * `notifications.title` is `varchar(255)`, and this is that limit named once.
+ *
+ * The parse below enforces it, and `clampNotificationTitle` is how a caller
+ * whose subject has a longer name of its own gets INSIDE it.
+ */
+export const NOTIFICATION_TITLE_MAX_LENGTH = 255;
+
+/**
+ * Fit a composed title inside the column.
+ *
+ * THE RULE IS F11'S, NOT A FEATURE'S, so it is spelled here beside the schema
+ * that enforces it. Written per-feature it arrived as two byte-for-byte
+ * identical private `clampTitle` helpers in one PR (tasks and meetings) — the
+ * "never a second copy under any name" failure `memory/invariants.md` names,
+ * and the copy is always the one that misses the fix.
+ *
+ * The ellipsis is a CHARACTER of the budget, not an addition to it: 254 kept
+ * plus `…` is exactly the limit, so the clamped value always parses.
+ */
+export function clampNotificationTitle(value: string): string {
+  return value.length <= NOTIFICATION_TITLE_MAX_LENGTH
+    ? value
+    : `${value.slice(0, NOTIFICATION_TITLE_MAX_LENGTH - 1)}…`;
+}
+
 export const enqueueNotificationSchema = z
   .object({
     /**
@@ -145,7 +171,7 @@ export const enqueueNotificationSchema = z
     /** Caller-defined discriminator within the category, e.g. `task.overdue`. */
     type: z.string().trim().min(1).max(64),
     /** Rendered by the caller. F11 does not template feature content. */
-    title: z.string().trim().min(1).max(255),
+    title: z.string().trim().min(1).max(NOTIFICATION_TITLE_MAX_LENGTH),
     body: z.string().trim().min(1),
     /** Closed set — see `notificationEntityTypes` and rule 4 in the header. */
     entityType: z.enum(notificationEntityTypes).optional(),

@@ -287,6 +287,16 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - A task's `related_id` is a value the CLIENT chose, so every read through it carries the caller's church: `getLatestPersonNote(churchId, personId)` inner-joins `persons` for scope — `person_activities` has no `church_id` of its own, so the join IS the boundary.
 - Relative due dates are measured against ONE instant passed down from `/tasks` in `APP_TIME_ZONE`: `now` is REQUIRED on `getDueDateInfo`, `groupTasksByDueDate` and `TaskCardViewProps` — no clock default — or a hydrated card computes a different "Due today" than the server did (React #418).
 
+## Notifications — the shared F11 queue, from a consumer's side
+
+- A still-live predicate (N-014) is ARMED FROM THE DISPATCHER'S OWN ENTRYPOINT — `registerNotificationConsumers()` (`notifications/register-consumers.ts`), at module scope in `/api/notifications/dispatch/route.ts` — never by a load-time side effect in the feature. `resolveLiveness` calls an unregistered type LIVE and that route imports no feature module, so the load-time form armed every runtime EXCEPT the one that reads a predicate. A new consumer joins that one function; `route.test.ts` asserts the types over the ROUTE's graph.
+- ONE sync skeleton, `runNotificationSync` (`notifications/sync.ts`): cancel → plan → tally → swallow, plus `cancelEntityNotifications`; `clampNotificationTitle` (255 chars) lives once, in `enqueue.ts`. A feature owns only its facts, planner, differ, deps and predicate. Accepted residual: the older fan-outs (`oversight.ts`, `plant-association.ts`) never cancel, so each keeps a tally loop; `sync.test.ts` fails on a THIRD.
+- The person↔user bridge has ONE spelling — `personIsUserInChurch` / `personHoldsLoginFilter` (`people/person-user.ts`). TENANCY, not formatting: a copy that drops `users.church_id` mails one plant's meeting to another plant's planter while each consumer's own `.toSQL()` test still passes.
+- Every join in a notification read carries the church IN THE JOIN CONDITION, left joins included: `meetingNotificationFactsQuery`'s `teamName` reaches an emailed subject, and a `WHERE` cannot hold it.
+- `meeting_attendance` IS the reminder audience, re-read on every sync, so EVERY writer of it re-syncs: a DIRECTORY PROPERTY over `src/lib/meetings/`, not a list of call sites, `recordAttendanceBatch` and `addTeamMembersToGuestList` exempt by name. `cancelByEntity` is entity-wide: re-enqueuing without somebody is the only way their reminders stop.
+- Whether the cancel runs is ONE boolean the caller owns — `mustCancel`, never an optional `previous`: create `false`, an edit its own differ, ADD `false`, REMOVE and bulk reschedule `true`.
+- EVERY module that inserts into `tasks` asks for its notifications, `import.ts` and `events.ts` included — a checklist and a meeting's follow-ups are the tasks a planter never typed and will forget. A directory property in `tasks/notifications.test.ts`.
+
 ## Meetings — Evaluation Comparison
 
 - ⚖ `compareEvaluationToHistory` returning `null` is NEVER rendered as "this is your first evaluated meeting": `null` has two causes the card cannot tell apart.

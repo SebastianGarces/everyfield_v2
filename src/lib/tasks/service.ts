@@ -37,6 +37,17 @@ import {
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
+// T-018 — the F11 queue, consumed. `notifications.ts` owns every rule about
+// what a task owes its assignee and when; this module only says WHEN the
+// question is asked. Each call swallows its own failures, so a notification can
+// never fail the write it follows.
+import {
+  cancelTaskNotifications,
+  cancelTaskNotificationsFor,
+  syncTaskNotifications,
+  syncTaskNotificationsFor,
+  taskNotificationsDiffer,
+} from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import {
   nextRecurrenceDueDate,
@@ -669,6 +680,12 @@ export async function createTask(
 
   const [task] = await db.insert(tasks).values(values).returning();
 
+  // The row exists before anything is announced about it (T-018). A task with
+  // no assignee or no due date enqueues nothing — the plan says so, not this
+  // call site. `mustCancel: false` because a row a moment old can have nothing
+  // pending, so the cancel half is skipped.
+  await syncTaskNotifications(task, { mustCancel: false });
+
   return task;
 }
 
@@ -751,6 +768,15 @@ export async function updateTask(
   if (!updated) {
     throw new Error("Failed to update task");
   }
+
+  // An edit may have moved the due date, changed the assignee, or closed the
+  // task. All three are the same operation to F11: cancel what is pending for
+  // this task and re-enqueue what it now owes (N-011). `existing` was already
+  // read above, so an edit that touched none of those leaves the live rows
+  // alone instead of replacing them with identical ones.
+  await syncTaskNotifications(updated, {
+    mustCancel: taskNotificationsDiffer(existing, updated),
+  });
 
   return updated;
 }
@@ -983,6 +1009,13 @@ export async function createNextRecurrence(
     );
   }
 
+  // The successor is ordinary work with its own due date, so it gets its own
+  // due/overdue rows (T-018). Done here rather than at the two call sites —
+  // `completeTask` and the bulk complete both mint successors through this
+  // function, and a successor announced from only one of them is a gap that
+  // depends on which button the planter pressed.
+  await syncTaskNotifications(next, { mustCancel: false });
+
   return next;
 }
 
@@ -1044,6 +1077,11 @@ export async function completeTask(
     // The CAS lost: somebody else completed it between the read and the write.
     throw new Error("Task is already complete");
   }
+
+  // The subject is resolved: nothing pending about this task may still be
+  // announced (N-011). By ENTITY REFERENCE, so it reaches every recipient's row
+  // and every condition at once — the assignee may have changed since.
+  await cancelTaskNotifications(churchId, completed.id);
 
   // Emit task.completed event
   await emitTaskCompleted(
@@ -1111,6 +1149,13 @@ export async function reopenTask(
     throw new Error("Failed to reopen task");
   }
 
+  // Reopen is a re-enqueue, and it works because cancelling RELEASED the dedupe
+  // key: the unique index is partial on `status <> 'cancelled'`, so the rows
+  // this task's completion cancelled do not block the ones it now owes again.
+  await syncTaskNotifications(reopened, {
+    mustCancel: taskNotificationsDiffer(existing, reopened),
+  });
+
   return reopened;
 }
 
@@ -1145,7 +1190,7 @@ export async function deleteTask(
 
   const now = new Date();
 
-  await db
+  const deleted = await db
     .update(tasks)
     .set({ deletedAt: now, updatedAt: now })
     .where(
@@ -1154,7 +1199,17 @@ export async function deleteTask(
         or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
         isNull(tasks.deletedAt)
       )
-    );
+    )
+    .returning({ id: tasks.id });
+
+  // Every row the statement actually touched — the parent AND its checklist
+  // items, which are tasks with due dates of their own. The ids come from the
+  // write's own `returning()` rather than from a second SELECT, so a subtask
+  // added between the read and the write is still covered.
+  await cancelTaskNotificationsFor(
+    churchId,
+    deleted.map((row) => row.id)
+  );
 }
 
 // ============================================================================
@@ -1494,6 +1549,15 @@ export async function bulkCompleteTasks(
     missedReason
   );
 
+  // Completed is completed however it was pressed: the same cancel-by-entity
+  // `completeTask` does, for every row the bulk write actually touched.
+  if (written.length > 0) {
+    await cancelTaskNotificationsFor(
+      churchId,
+      written.map((row) => row.id)
+    );
+  }
+
   // A bulk complete has to advance recurring chains too, or a planter who
   // clears their week with one click quietly loses every repeat.
   if (written.length > 0 && deps.mintRecurrences) {
@@ -1569,6 +1633,13 @@ export async function bulkRescheduleTasks(
     } catch (error) {
       console.error("bulkRescheduleTasks write failed:", error);
     }
+  }
+
+  // A new due date is a reschedule, and a reschedule is cancel + re-enqueue
+  // (N-011). Skipping it would leave every one of these tasks with a pending
+  // reminder aimed at the date they no longer have.
+  if (writtenIds.length > 0) {
+    await syncTaskNotificationsFor(churchId, writtenIds, { mustCancel: true });
   }
 
   return reconcileBulkTaskOperation(plan, writtenIds, missedReason).result;

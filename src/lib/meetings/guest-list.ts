@@ -4,6 +4,20 @@
 //
 // Simple CRUD for the meeting guest list using the meeting_attendance table.
 // People are added before the meeting, attendance is marked after.
+//
+// THE GUEST LIST IS THE REMINDER AUDIENCE (VM-018 Workflow 2), so every write
+// that changes it re-syncs the meeting's notifications. It is not a nicety: a
+// vision meeting's guest list starts EMPTY and is filled afterwards (see
+// VM-006 below), so an audience frozen at create time would be permanently
+// `[createdBy]` for the flagship meeting type and no invited guest would ever
+// be reminded. Removal needs the same call in the other direction —
+// `cancelByEntity` is entity-wide and has no per-recipient form, so the only
+// way to drop one person's pending reminders is to re-enqueue the audience
+// without them.
+//
+// The re-sync swallows its own failures (`notifications.ts`), so it can never
+// fail the guest write it follows, and it runs AFTER that write for the same
+// reason.
 // ============================================================================
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -17,6 +31,8 @@ import {
 } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import { teamMemberships } from "@/db/schema/ministry-teams";
+
+import { syncMeetingNotifications } from "./notifications";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,6 +90,10 @@ export async function getGuestList(
 /**
  * Add a person to the guest list.
  * Uses upsert to handle duplicates gracefully.
+ *
+ * Re-syncs the meeting's reminders afterwards: a guest invited after the
+ * meeting was created is the NORMAL path for a vision meeting, and they are owed
+ * every offset still in the future (VM-018 Workflow 2).
  */
 export async function addToGuestList(
   churchId: string,
@@ -107,14 +127,31 @@ export async function addToGuestList(
         )
       )
       .limit(1);
+
+    // Re-synced even on the conflict path: the row already existing says
+    // nothing about whether this person's reminders were ever enqueued, and the
+    // sync is idempotent (the re-enqueue is absorbed by the dedupe keys).
+    await syncMeetingNotifications(churchId, meetingId, { mustCancel: false });
     return existing;
   }
+
+  // `mustCancel: false`, deliberately: ADDING a guest owes no cancel. The
+  // audience is re-read and re-enqueued either way, every recipient already on
+  // it is absorbed by their own dedupe keys, and the new guest has no row to
+  // collide with — so the cancel would only re-mint every pending row's id and
+  // buy a second write per recipient on a plant-sized Core Group.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: false });
 
   return record;
 }
 
 /**
  * Remove a person from the guest list.
+ *
+ * Re-syncs for the same reason `addToGuestList` does, in the other direction:
+ * `cancelByEntity` cancels a meeting's rows for EVERY recipient, so cancelling
+ * and re-enqueuing the audience without this person is the only way their
+ * pending reminders stop.
  */
 export async function removeFromGuestList(
   churchId: string,
@@ -130,6 +167,12 @@ export async function removeFromGuestList(
         eq(meetingAttendance.personId, personId)
       )
     );
+
+  // `mustCancel: true` — this is the direction that needs it. `cancelByEntity`
+  // has no per-recipient form, so dropping the meeting's pending rows and
+  // re-enqueuing the audience without this person is the only way their
+  // reminders stop.
+  await syncMeetingNotifications(churchId, meetingId, { mustCancel: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +307,16 @@ export async function addTeamMembersToGuestList(
 
   return inserted.length;
 }
+
+// ---------------------------------------------------------------------------
+// VM-018 — which guests can actually be NOTIFIED
+// ---------------------------------------------------------------------------
+//
+// That read is NOT here. `guestListUserIdsQuery` / `listGuestListUserIds` live
+// in `./notifications` beside the Core Group read they share a person↔user
+// bridge with, because this module now calls that one and the graph must stay
+// acyclic. The bridge itself has exactly one spelling, in
+// `@/lib/people/person-user`.
 
 /**
  * Update RSVP status (confirmed/declined) for a guest.
