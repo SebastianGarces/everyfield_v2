@@ -17,7 +17,7 @@ import {
   toAnchorColumns,
 } from "./anchor";
 import { enqueueNotificationSchema, recipientAdministersOrg } from "./enqueue";
-import { oversightAudienceCondition } from "./oversight";
+import { oversightAudienceCondition } from "./oversight-audience";
 import {
   notificationFeedQuery,
   orgNotificationFeedQuery,

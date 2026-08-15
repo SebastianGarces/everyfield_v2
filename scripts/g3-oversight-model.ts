@@ -72,7 +72,7 @@ import {
   runOversightDigestSweep,
 } from "@/lib/notifications/oversight-digest";
 import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
-import { listOversightRecipientsForChurch } from "@/lib/notifications/oversight";
+import { listOversightRecipientsForChurch } from "@/lib/notifications/oversight-audience";
 import {
   isSharingActivityWithOversight,
   setSharingActivityWithOversight,

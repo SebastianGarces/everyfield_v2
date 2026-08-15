@@ -91,7 +91,7 @@ import {
   type InvitationRequest,
 } from "@/lib/invitations/core";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
-import { listOversightAdminsOfOrg } from "@/lib/notifications/oversight";
+import { listOversightAdminsOfOrg } from "@/lib/notifications/oversight-audience";
 import { listOversightPlants } from "@/lib/oversight/read";
 
 const KEEP = process.argv.includes("--keep");
