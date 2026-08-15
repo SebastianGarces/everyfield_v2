@@ -12,7 +12,7 @@
 //   §1 the mapping is ONE exported decision, and it is the runner's own
 //      predicate — a deferral is `deferred`, everything else is `failed`.
 //   §2 the write that ends an unjudged run renders that status, sets NOTHING
-//      else, and targets the pending row by id.
+//      else, and targets the pending row by id AND by its unjudged state.
 //   §3 the orchestrator's catch block routes through that decider, with no
 //      surviving `status: "failed"` literal beside it.
 //   §4 the vocabulary is closed in the DATA, and the schema's CHECK and
@@ -146,25 +146,31 @@ test("§1b the decision is made ONCE, through the runner's own predicate", () =>
 // §2 — the rendered write
 // ----------------------------------------------------------------------------
 
-test("§2 the unjudged-run write renders the right status, and sets only status", () => {
+test("§2 the unjudged-run write renders the right status, sets only status, and only demotes a still-pending row", () => {
   const deferred = markAssessmentUnjudgedStatement(
     ASSESSMENT_ID,
     new RateLimitDeferralError("church", 4, 1200, 900, null)
   ).toSQL();
 
+  // The `status = 'pending'` term is a COMPARE-AND-SET, and it is what keeps a
+  // completed run from being demoted: the `try` this serves does not end at the
+  // `complete` flip — step 6's emit runs after the row is already `complete`
+  // with its insights persisted — so a throw from there would otherwise
+  // overwrite a good assessment and hide it from every read, all of which name
+  // `complete` positively (§5). An empty rowcount is the guard working.
   assert.equal(
     deferred.sql,
-    'update "plant_assessments" set "status" = $1 where "plant_assessments"."id" = $2',
-    "#376/PE-011: status ONLY. The `fact_snapshot` recorded up-front stays as the judge saw it, and the plant's last good `complete` row is a different row entirely"
+    'update "plant_assessments" set "status" = $1 where ("plant_assessments"."id" = $2 and "plant_assessments"."status" = $3)',
+    "#376/PE-011: status ONLY, and only over a row that has not been judged. The `fact_snapshot` recorded up-front stays as the judge saw it, and the plant's last good `complete` row is a different row entirely"
   );
-  assert.deepEqual(deferred.params, ["deferred", ASSESSMENT_ID]);
+  assert.deepEqual(deferred.params, ["deferred", ASSESSMENT_ID, "pending"]);
 
   const failed = markAssessmentUnjudgedStatement(
     ASSESSMENT_ID,
     new Error("judge returned unparseable output")
   ).toSQL();
   assert.equal(failed.sql, deferred.sql, "one statement, two statuses");
-  assert.deepEqual(failed.params, ["failed", ASSESSMENT_ID]);
+  assert.deepEqual(failed.params, ["failed", ASSESSMENT_ID, "pending"]);
 });
 
 // ----------------------------------------------------------------------------
@@ -257,13 +263,15 @@ test("§4 `deferred` is in the vocabulary, and the CHECK is the vocabulary", () 
 //                never-assessed and `filterDirtyOrStale` includes it.
 //   trends.ts  — `readSnapshotHistory`, the four trend series.
 //
-// The WRITER (`generate-assessment.ts`) names the column as a `.set({ status })`
-// key rather than as `plantAssessments.status`, so it is not in this scan; §2
-// and §3 above are its guards.
+// The WRITER (`generate-assessment.ts`) sets the column through a
+// `.set({ status })` key, but it also NAMES it once — the `status = 'pending'`
+// compare-and-set that stops a completed run being demoted — so it is in the
+// scan and gets its own expectation below rather than the readers' one.
 const STATUS_READERS = [
   "src/lib/phase-engine/assessment/queries.ts",
   "src/lib/phase-engine/signals/trends.ts",
 ];
+const STATUS_WRITER = "src/lib/phase-engine/assessment/generate-assessment.ts";
 
 test("§5 every read selects `complete` POSITIVELY — no `not complete` anywhere", () => {
   const namers = [...sourceFilesUnder("lib"), ...sourceFilesUnder("app")]
@@ -272,8 +280,8 @@ test("§5 every read selects `complete` POSITIVELY — no `not complete` anywher
 
   assert.deepEqual(
     namers.sort(),
-    [...STATUS_READERS].sort(),
-    "#376: a new module reading `plant_assessments.status` must be checked against this rule before it is added here"
+    [...STATUS_READERS, STATUS_WRITER].sort(),
+    "#376: a new module naming `plant_assessments.status` must be checked against this rule before it is added here"
   );
 
   for (const file of STATUS_READERS) {
@@ -301,6 +309,17 @@ test("§5 every read selects `complete` POSITIVELY — no `not complete` anywher
       );
     }
   }
+
+  // The writer's single mention is the compare-and-set guard, and it is pinned
+  // here so it cannot be deleted quietly: without it the unjudged-run write
+  // targets the row by id alone, and any throw AFTER the `complete` flip — step
+  // 6's emit — demotes a persisted assessment that every read then drops.
+  const writer = stripComments(read(path.join(process.cwd(), STATUS_WRITER)));
+  assert.deepEqual(
+    writer.match(/plantAssessments\.status[^)]*\)/g),
+    ['plantAssessments.status, "pending")'],
+    "#376: the unjudged-run write is a compare-and-set on the UNJUDGED state — a bare `where(id)` demotes a row that already reached `complete`"
+  );
 });
 
 test("§5b the failure COUNT surface counts run outcomes, and has a deferred bucket", () => {

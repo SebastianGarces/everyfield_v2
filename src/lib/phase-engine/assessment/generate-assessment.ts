@@ -18,7 +18,7 @@
 // serving the previous assessment (PE-011).
 // ============================================================================
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -114,6 +114,15 @@ export function assessmentStatusForFailure(
  * It sets `status` and nothing else: the `factSnapshot` recorded up-front stays
  * exactly as the judge saw it, and the plant's last good `complete` row is
  * never touched (PE-011).
+ *
+ * The write is a COMPARE-AND-SET on `status = 'pending'`, and that guard is what
+ * keeps a completed run from being demoted by a failure in step 6: the `try`
+ * this serves does not end at the `complete` flip — `emitPlantAssessmentCreated`
+ * runs after the insights are persisted and the row is already `complete`, so a
+ * throw from there would otherwise overwrite a good assessment with `failed` (or
+ * `deferred`) and hide it from every read, which all name `complete` positively.
+ * An empty rowcount is NOT an error: it means the run already reached a
+ * judgement, which is precisely the case that must not be demoted.
  */
 export function markAssessmentUnjudgedStatement(
   assessmentId: string,
@@ -122,7 +131,12 @@ export function markAssessmentUnjudgedStatement(
   return db
     .update(plantAssessments)
     .set({ status: assessmentStatusForFailure(error) })
-    .where(eq(plantAssessments.id, assessmentId));
+    .where(
+      and(
+        eq(plantAssessments.id, assessmentId),
+        eq(plantAssessments.status, "pending")
+      )
+    );
 }
 
 export interface GenerateAssessmentResult {
