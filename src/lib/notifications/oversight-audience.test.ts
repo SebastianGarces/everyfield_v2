@@ -147,13 +147,11 @@ test("each pairing row renders as its own SQL arm AND classifies to itself", () 
       `${kind}: the paired role is a recipient`
     );
 
-    // …the OTHER OVERSIGHT role carrying that FK is the defect the ruling names:
-    // an admin of some other kind of org, reached by an FK its role does not
-    // administer. Flagged, counted, and never enqueued.
-    const oversightRoles: UserRole[] = OVERSIGHT_ADMIN_ROWS.map(
-      ([, pairing]) => pairing.role
-    );
-    for (const other of oversightRoles.filter(
+    // …and EVERY other role carrying that FK is the defect, flagged and never
+    // enqueued — the other oversight role and the three church roles alike. A
+    // `planter` with a stray `sending_church_id` is the same defect as a
+    // cross-paired admin.
+    for (const other of userRoles.filter(
       (candidateRole) => candidateRole !== role
     )) {
       assert.deepEqual(
@@ -163,24 +161,6 @@ test("each pairing row renders as its own SQL arm AND classifies to itself", () 
         ),
         { id: ADMIN_A, misprovisioned: { role: other, reachedBy: fk } },
         `${kind} reached by ${other}`
-      );
-    }
-
-    // …and a role that administers NO org is absent from the audience entirely
-    // — neither recipient nor defect. That FK is an ordinary membership column:
-    // a `team_member` carrying `sending_church_id` is how a sending church's
-    // own staff are recorded, so counting them would fire the signal on the
-    // most ordinary row in the table. The ruling names cross-paired ADMINS.
-    for (const other of userRoles.filter(
-      (candidateRole) => !oversightRoles.includes(candidateRole)
-    )) {
-      assert.equal(
-        classifyOversightCandidate(
-          candidate(other, { [fk]: SENDING_CHURCH }),
-          org
-        ),
-        null,
-        `${kind}: an ordinary ${other} of the org is not a defect`
       );
     }
   }

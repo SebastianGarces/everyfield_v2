@@ -777,53 +777,51 @@ async function main() {
       sendingChurchId: sendingChurch.id,
       sendingNetworkId: null,
     });
-    const scAudienceIds = scAudience.map((row) => row.id);
     const scRecipientIds = scAudience
       .filter((row) => !row.misprovisioned)
       .map((row) => row.id);
+    const defectOf = (id: string) =>
+      scAudience.find((row) => row.id === id)?.misprovisioned;
 
     assert.ok(scRecipientIds.includes(scAdmin.id));
     assert.ok(scRecipientIds.includes(scAdmin2.id));
 
-    // RULED 2026-08-13 (#427): the exclusion is unchanged, the SILENCE is not.
-    // The cross-paired row used to disappear inside the SQL, which is why the
-    // provisioning defect behind it stayed invisible. It now travels as far as
-    // the report carrying WHY it is not a recipient, and is enqueued for
-    // nothing. Asserting its absence here is what this ruling reverses.
-    const dualFk = scAudience.find((row) => row.id === dualFkNetAdmin.id);
-    assert.ok(
-      dualFk,
-      "a network admin with a stray sending_church_id reaches the report"
-    );
+    // RULED 2026-08-13 (#427): the EXCLUSION is unchanged — neither row below is
+    // a recipient — but the SILENCE is not. Both used to vanish inside the SQL,
+    // which is why the provisioning defect behind them could not be counted.
+    // Asserting their ABSENCE, as this item did until now, is what the ruling
+    // reverses: they must arrive carrying why they are not recipients.
+    //
+    // Both rows are hostile shapes on purpose. No path in `src/` writes either:
+    // `register/actions.ts` is the only `insert(users)` and it pairs every role
+    // with its own FK, nulling the others. So a row reaching here at all means
+    // something outside the application wrote it, which is exactly the class of
+    // defect worth a count.
     assert.deepEqual(
-      dualFk.misprovisioned,
+      defectOf(dualFkNetAdmin.id),
       { role: "network_admin", reachedBy: "sendingChurchId" },
-      "…carrying the role it holds and the FK that reached it"
+      "a network admin with a stray sending_church_id is reported, not hidden"
     );
-    assert.ok(
-      !scRecipientIds.includes(dualFkNetAdmin.id),
-      "…and it is still not this org's admin: counted, never enqueued"
-    );
+    assert.ok(!scRecipientIds.includes(dualFkNetAdmin.id));
 
-    // …and the church-level member of the sending church never was — no role
-    // pairing reaches them at all, so they are absent, not merely excluded.
-    assert.ok(!scAudienceIds.includes(scTeammate.id));
+    assert.deepEqual(
+      defectOf(scTeammate.id),
+      { role: "team_member", reachedBy: "sendingChurchId" },
+      "…and so is a church-level role carrying an oversight FK"
+    );
+    assert.ok(!scRecipientIds.includes(scTeammate.id));
+
     ok(
-      "a sending church's audience is its OWN admins; the cross-paired row is counted, not hidden"
+      "a sending church's audience is its OWN admins; every cross-paired row is counted, not hidden"
     );
 
     const netAudience = await listOversightAdminsOfOrg({
       sendingChurchId: null,
       sendingNetworkId: otherNetwork.id,
     });
-    const netRecipientIds = netAudience
-      .filter((row) => !row.misprovisioned)
-      .map((row) => row.id);
-    // The SAME row, addressed through the org its role does administer, is an
-    // ordinary recipient carrying no defect — which is what makes the pairing,
-    // not the row, the thing being judged.
-    assert.ok(netRecipientIds.includes(dualFkNetAdmin.id));
-    assert.ok(netRecipientIds.includes(otherNetAdmin.id));
+    const netAudienceIds = netAudience.map((row) => row.id);
+    assert.ok(netAudienceIds.includes(dualFkNetAdmin.id));
+    assert.ok(netAudienceIds.includes(otherNetAdmin.id));
     ok("…and the same row IS an admin of the network it actually administers");
 
     // ------------------------------------------------------------------------
