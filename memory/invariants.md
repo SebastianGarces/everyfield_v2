@@ -202,21 +202,21 @@ Three lib modules are ONE concept each: `fact-phrases.ts` the phrase VOCABULARY,
 
 ## Phase Engine — Assessment Status
 
-Applies to `plant_assessments.status` and every reader and writer of it.
-
-- The column is FOUR values and `deferred` is NOT `failed` (#376): a `RateLimitDeferralError` is throttling and says nothing about the judge, so the row is `deferred` and the plant is re-selected next run; every other throw is `failed`, deadline-truncated included.
-- ONE decider, `assessmentStatusForFailure`, built on the runner's own `isRateLimitDeferral`, so the row and the `/api/phase-engine/assess` summary cannot disagree.
+- `plant_assessments.status` is FOUR values and `deferred` is NOT `failed` (#376): a `RateLimitDeferralError` is throttling and says nothing about the judge, so the row is `deferred` and the plant comes back next run; every other throw is `failed`.
+- ⚖ …the deadline-truncated 5xx included (#389): it stays `failed` and only the WARNING softens. A ladder that spent its LAST attempt is deliberately NOT marked, so `console.error` still means a genuinely down provider.
+- ONE decider, `assessmentStatusForFailure`, on the runner's own `isRateLimitDeferral`, so the row and the `/api/phase-engine/assess` summary cannot disagree.
 - Every read names `complete` POSITIVELY — never `<> 'complete'`, which folds the two back together.
-- The vocabulary is closed by `plant_assessments_status_check` (migration 0040): `.$type<>()` on a varchar is a compile-time brand and nothing else.
-- The unjudged-run write is a COMPARE-AND-SET on `status = 'pending'`: the emit ending `generateAssessment` runs after the row is `complete`, so a bare `where(id)` demotes a persisted assessment. An empty rowcount is the guard working, never an error.
+- The vocabulary is closed by `plant_assessments_status_check` (migration 0040): `.$type<>()` on a varchar is a compile-time brand, nothing more.
+- The unjudged-run write COMPARE-AND-SETS `status = 'pending'`: `generateAssessment`'s closing emit runs after the row is `complete`, so a bare `where(id)` demotes a persisted assessment. An empty rowcount is the guard working, never an error.
 
 ## Onboarding — the flow's `?step=` URL
 
-Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route of its own — it renders AS `/dashboard` while `onboarding_completed_at` is null — so the step it shows lives in the URL.
+Applies to `src/lib/onboarding/steps.ts` and `/dashboard`. The flow has no route of its own — it renders AS `/dashboard` while `onboarding_completed_at` is null — so its step lives in the URL.
 
 - A `?step=` value becomes an onboarding step in ONE place, `resolveOnboardingStepRequest`, with a client mirror and a finished-dashboard half honouring `leadership` alone. A REPEATED param is REFUSED: `.get()` takes the FIRST value and the wiki guide's provider the LAST.
 - ⚖ Step 1 (`basics`) is addressable EXACTLY WHILE THERE IS NO CHURCH, and every later step exactly once there is; step 1 never enters browser history. When step 1 is closed the server answers `none`, NOT `refuse`.
 - ⚖ The finish screen has NO `?step=` of its own: it is `/dashboard` with the param REMOVED, which is also how the contextual wiki guide is suppressed. Never invent a fifth step value.
+- It does not PAINT until the param has left: `onboardingFinishScreen` answers `open` (the history write) and `showing` (the render), never one boolean.
 
 ## Wiki Articles
 

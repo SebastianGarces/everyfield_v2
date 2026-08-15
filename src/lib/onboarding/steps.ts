@@ -155,6 +155,180 @@ export function addressableOnboardingStep(
   return value;
 }
 
+// ============================================================================
+// The flow's URL writes (#397, follow-up 2 of PR #390)
+//
+// WHAT THE URL SAYS IS A DECISION, so it is a function that can be CALLED.
+//
+// It used to live inline in `onboarding-flow-client.tsx` — one ternary and two
+// `window.history.*` calls — and was pinned by regex against that component's
+// source. A regex over source catches a deletion and nothing else: it broke on
+// a local rename that changed no behaviour, and it passed a `pushState` swapped
+// for a `replaceState`, which changes what the browser's Back button does. The
+// decision moved here so the test CALLS it; the component only APPLIES the
+// `{method, url}` it is handed.
+// ============================================================================
+
+/**
+ * The part of `window.location` the URL writes are built from — structural, so
+ * the browser's own `location` satisfies it and a test can pass a literal.
+ */
+export type OnboardingUrlLocation = {
+  pathname: string;
+  search: string;
+};
+
+/**
+ * `location` with `?step=` set to `step`, every OTHER param kept (#373).
+ *
+ * Built from the location handed in rather than from a fresh `URLSearchParams`
+ * so `?churchCreated=true` and anything else on the address bar survives a step
+ * change. The component passes `window.location`, which is what the address bar
+ * says AT THE MOMENT of the write — including a param some other client wrote
+ * since this render began.
+ *
+ * `null` REMOVES the param, which is how the OB-015 finish screen is addressed
+ * without being given a step id of its own (ruled 2026-08-10). `params.set` is
+ * also what collapses a repeated `?step=a&step=a` back to one value, so a URL
+ * the server declined heals on the next stamp.
+ */
+export function onboardingStepUrl(
+  location: OnboardingUrlLocation,
+  step: OnboardingStepId | null
+): string {
+  const params = new URLSearchParams(location.search);
+  if (step === null) params.delete(ONBOARDING_STEP_PARAM);
+  else params.set(ONBOARDING_STEP_PARAM, step);
+  const query = params.toString();
+  return query ? `${location.pathname}?${query}` : location.pathname;
+}
+
+/** A history write the flow is asking for, ready to be applied verbatim. */
+export type OnboardingHistoryWrite = {
+  /**
+   * `push` gives Back the step just left; `replace` takes the current entry out
+   * of the history instead of adding one.
+   */
+  method: "push" | "replace";
+  /** Path + query, as `window.history.pushState`/`replaceState` want it. */
+  url: string;
+};
+
+/**
+ * The flow's ONE history-write decision: given what the URL names now and what
+ * it should name, what write applies — and is any write needed at all?
+ *
+ * `null` means the address bar already says it. That answer is read off the URL
+ * this function would WRITE rather than off `from`, so a value the client
+ * declined (`?step=journey%20`, or a step 1 the church closed) is cleaned up
+ * rather than left sitting there because it names no step either way.
+ *
+ * The method, in the order the rules apply:
+ *
+ *  - `to === null` → REPLACE. The only thing addressed by no step is the
+ *    OB-015 finish screen, which is not a step and not a navigation: it is the
+ *    same screen the planter is already on, minus a param.
+ *  - `from === null` → REPLACE. The URL named no step, so nothing is being left
+ *    behind — this is the ARRIVAL stamp (a planter resuming onto step 3 must
+ *    end up at `/dashboard?step=journey` or the wiki guide never matches for
+ *    exactly the planters it is for), or the heal after a value the client
+ *    declined (`?step=journey%20`, or a step 1 the church closed — both read
+ *    back as no step). Arriving is not navigating, and a history entry here
+ *    would make the first Back a no-op that appears to do nothing.
+ *  - `from === to` → REPLACE. A write that does not change WHICH step is named
+ *    is a HEAL, never a navigation: the URL is being tidied while the planter
+ *    stays exactly where they are. It is its own rule rather than a case of
+ *    `from === null`, because `searchParams.get()` returns the FIRST value of a
+ *    repeated `?step=journey&step=journey` — so `from` is `"journey"`, not
+ *    null, on the very URL `params.set` exists to collapse. Same for a
+ *    valueless or space-bearing neighbour param that `URLSearchParams` re-spells
+ *    (`?step=journey&foo` → `foo=`). A history entry for any of them is the
+ *    no-op Back the rule above names.
+ *  - `from` is step 1 → REPLACE. Ruled 2026-08-10: STEP 1 IS NOT IN THE
+ *    HISTORY. The only way off it is creating the church, so by the time this
+ *    runs step 1 is not re-enterable, and browser Back was landing planters on
+ *    its empty, required form whose second submit `runCreateChurch` discards.
+ *    The cost is named and accepted: Back from step 2 leaves the flow.
+ *  - otherwise → PUSH. The push is what gives Back the step just left.
+ */
+export function historyWriteFor({
+  from,
+  to,
+  location,
+}: {
+  /** The step the URL names now — `null` when it names none the client honours. */
+  from: OnboardingStepId | null;
+  /** The step the URL should name — `null` for the finish screen. */
+  to: OnboardingStepId | null;
+  location: OnboardingUrlLocation;
+}): OnboardingHistoryWrite | null {
+  const url = onboardingStepUrl(location, to);
+  if (url === `${location.pathname}${location.search}`) return null;
+
+  const replace =
+    to === null || from === null || from === to || isFirstOnboardingStep(from);
+  return { method: replace ? "replace" : "push", url };
+}
+
+/**
+ * The OB-015 finish screen, as the two questions the flow actually asks about
+ * it — and the reason they are two (#397, follow-up 1 of PR #390).
+ *
+ * The screen has no `?step=` of its own: it is `/dashboard` with the param
+ * REMOVED, which is also how the contextual wiki guide is suppressed there
+ * (ruled 2026-08-10, option B — a fifth step value would be a shareable URL
+ * that reopens an offer whose gate the planter already answered).
+ *
+ * THE GUIDE IS A PURE FUNCTION OF THE URL and it lives OUTSIDE the flow —
+ * `WikiGuide` is a sibling of the dashboard's children, not an ancestor
+ * (`app/(dashboard)/layout.tsx`), so the URL is the only channel between them.
+ * That is what makes the two questions different:
+ *
+ *  - `open` — the flow has opened the finish screen, so the URL must stop
+ *    naming a step. This is what the history write is derived from.
+ *  - `showing` — the finish screen is what PAINTS, which additionally requires
+ *    the URL to have already lost the param.
+ *
+ * Painting on `open` alone is what put the journey Guide pill over the
+ * ministry-teams offer for one committed frame: `open` flips during render,
+ * the param leaves in an effect, and Next dispatches that URL change inside a
+ * `startTransition` — so no layout effect can pull the guide's re-render back
+ * before the paint. Requiring the URL to agree makes the two mutually exclusive
+ * BY CONSTRUCTION rather than by timing: both the screen and the guide read the
+ * same `useSearchParams()`, so a frame showing the finish screen is a frame
+ * whose URL names no step, and a URL naming no step resolves no guide entry.
+ *
+ * The cost is one frame in which the step behind it is still painted — which is
+ * a pairing that has always been correct, rather than one that never is.
+ */
+export type OnboardingFinishScreenState = {
+  /** The flow has opened it: the URL must name no step. */
+  open: boolean;
+  /** It is what renders: the URL has stopped naming one. */
+  showing: boolean;
+};
+
+export function onboardingFinishScreen({
+  urlStep,
+  finishScreenStep,
+}: {
+  /** The step the URL names, after the client's own guard. */
+  urlStep: OnboardingStepId | null;
+  /** The step the finish screen was opened FROM, or `null` when it is closed. */
+  finishScreenStep: OnboardingStepId | null;
+}): OnboardingFinishScreenState {
+  // Open while the URL still names the step it was opened from (the frames
+  // before the param is stripped) and while it names no step at all (every
+  // frame after). What CLOSES it is the URL naming a DIFFERENT step, which is
+  // what browser Back off the screen does — so a Back lands the planter on the
+  // step they returned to rather than on an offer painted over it.
+  const open =
+    finishScreenStep !== null &&
+    (urlStep === null || urlStep === finishScreenStep);
+
+  return { open, showing: open && urlStep === null };
+}
+
 /**
  * What a FINISHED dashboard does with the `?step=` a request arrived carrying —
  * the resolver's other half (#373 AC 3), for once `onboarding_completed_at` is

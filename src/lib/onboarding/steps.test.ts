@@ -10,9 +10,12 @@ import {
   ONBOARDING_STEPS,
   ONBOARDING_STEP_IDS,
   addressableOnboardingStep,
+  historyWriteFor,
   incompleteOnboardingSteps,
   isLaunchDateChoice,
   journeyStageForPhase,
+  onboardingFinishScreen,
+  onboardingStepUrl,
   phaseForJourneyStage,
   isFirstOnboardingStep,
   isLastOnboardingStep,
@@ -25,6 +28,7 @@ import {
   resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
+  type OnboardingStepId,
 } from "./steps";
 
 // ----------------------------------------------------------------------------
@@ -487,4 +491,191 @@ test("'no date yet' is one of two explicit answers, not a blank field", () => {
   assert.equal(isLaunchDateChoice("date"), true);
   assert.equal(isLaunchDateChoice("maybe"), false);
   assert.equal(isLaunchDateChoice(null), false);
+});
+
+// ----------------------------------------------------------------------------
+// #397 — the flow's URL writes, as a rule that can be CALLED
+//
+// These used to be a ternary and two `window.history.*` calls inside
+// `onboarding-flow-client.tsx`, pinned by regex against that component's
+// source — a pin that broke on a local rename and passed a `pushState` swapped
+// for a `replaceState`. The rule lives here now, so the assertions below are
+// the rule being exercised rather than the component being read.
+// ----------------------------------------------------------------------------
+
+/** The dashboard sitting on `from`'s own URL — what the flow reads at the write. */
+function sittingOn(from: OnboardingStepId | null) {
+  return {
+    pathname: "/dashboard",
+    search: from === null ? "" : `?step=${from}`,
+  };
+}
+
+test("a write is owed exactly when the address bar does not already say it", () => {
+  // Exhaustive over the state space, because "did anything change?" is the
+  // condition that keeps the arrival stamp from fighting every push: a stamp
+  // that fires unconditionally rewrites history on every render.
+  for (const from of [null, ...ONBOARDING_STEP_IDS]) {
+    for (const to of [null, ...ONBOARDING_STEP_IDS]) {
+      const location = sittingOn(from);
+      const write = historyWriteFor({ from, to, location });
+
+      if (from === to) {
+        assert.equal(write, null, `${from} → ${to} needs no write`);
+        continue;
+      }
+
+      assert.ok(write, `${from} → ${to} must be written`);
+      assert.equal(write.url, onboardingStepUrl(location, to));
+    }
+  }
+});
+
+test("push or replace is decided by the step being LEFT, and by nothing else", () => {
+  // Four replacements, one push, and each replacement has its own reason:
+  //   - to === null   the finish screen is not a step and not a navigation
+  //   - from === null arriving (or healing a declined value) is not navigating
+  //   - from === to   the URL is being healed, not navigated
+  //   - from is step 1 ruled 2026-08-10: step 1 is not in the history, because
+  //                   the only way off it is creating the church
+  assert.equal(
+    historyWriteFor({
+      from: "journey",
+      to: null,
+      location: sittingOn("journey"),
+    })?.method,
+    "replace"
+  );
+  assert.equal(
+    historyWriteFor({ from: null, to: "journey", location: sittingOn(null) })
+      ?.method,
+    "replace"
+  );
+  assert.equal(
+    historyWriteFor({
+      from: "basics",
+      to: "leadership",
+      location: sittingOn("basics"),
+    })?.method,
+    "replace"
+  );
+  assert.equal(
+    historyWriteFor({
+      from: "leadership",
+      to: "journey",
+      location: sittingOn("leadership"),
+    })?.method,
+    "push"
+  );
+
+  // A write that does not change WHICH step is named is a HEAL, and a heal is
+  // never a navigation. `.get()` takes the FIRST value of a repeated param, so
+  // `from` is `"journey"` here rather than null — the only consumer of this
+  // path is the flow's stamping effect, and every write it can produce has to
+  // be a replace or the first Back is a no-op that appears to do nothing.
+  assert.deepEqual(
+    historyWriteFor({
+      from: "journey",
+      to: "journey",
+      location: {
+        pathname: "/dashboard",
+        search: "?step=journey&step=journey",
+      },
+    }),
+    { method: "replace", url: "/dashboard?step=journey" }
+  );
+  // Same shape, reached by a neighbour param `URLSearchParams` re-spells: a
+  // valueless `&foo` becomes `foo=`, and a space becomes `+`.
+  for (const search of ["?step=journey&foo", "?step=journey&note=a%20b"]) {
+    assert.equal(
+      historyWriteFor({
+        from: "journey",
+        to: "journey",
+        location: { pathname: "/dashboard", search },
+      })?.method,
+      "replace",
+      search
+    );
+  }
+
+  // The push is the general case: every step after the first gives Back the
+  // step just left.
+  for (const from of ONBOARDING_STEP_IDS.filter(
+    (id) => !isFirstOnboardingStep(id)
+  )) {
+    for (const to of ONBOARDING_STEP_IDS.filter((id) => id !== from)) {
+      assert.equal(
+        historyWriteFor({ from, to, location: sittingOn(from) })?.method,
+        "push",
+        `${from} → ${to}`
+      );
+    }
+  }
+});
+
+test("the step param is edited into the URL, never rebuilt over it", () => {
+  // `?churchCreated=true` is the confetti's only trigger. A step change that
+  // rebuilt the query from scratch would drop it on the way to step 2.
+  assert.equal(
+    onboardingStepUrl(
+      { pathname: "/dashboard", search: "?churchCreated=true" },
+      "journey"
+    ),
+    "/dashboard?churchCreated=true&step=journey"
+  );
+  assert.equal(
+    onboardingStepUrl(
+      { pathname: "/dashboard", search: "?churchCreated=true&step=journey" },
+      null
+    ),
+    "/dashboard?churchCreated=true"
+  );
+  assert.equal(onboardingStepUrl(sittingOn(null), null), "/dashboard");
+});
+
+test("the finish screen is OPEN before it is SHOWING, and that gap is the fix", () => {
+  // Two questions, not one (#397). `open` says the URL must stop naming a step
+  // — it is what the history write is derived from. `showing` says the screen
+  // paints, which additionally requires the URL to have already lost the param.
+  //
+  // Collapsing them back into one is the bug: the wiki guide resolves from the
+  // URL and lives outside the flow, so a screen that paints before the param
+  // leaves is a frame of "You are set up" under the journey step's Guide pill.
+  // Collapsing them the OTHER way (deriving the write from `showing`) is a
+  // deadlock: the param would never leave, so the screen would never paint.
+  assert.deepEqual(
+    onboardingFinishScreen({ urlStep: "journey", finishScreenStep: "journey" }),
+    { open: true, showing: false }
+  );
+  assert.deepEqual(
+    onboardingFinishScreen({ urlStep: null, finishScreenStep: "journey" }),
+    { open: true, showing: true }
+  );
+
+  // Closed while the flow has not opened it...
+  for (const urlStep of [null, ...ONBOARDING_STEP_IDS]) {
+    assert.deepEqual(
+      onboardingFinishScreen({ urlStep, finishScreenStep: null }),
+      { open: false, showing: false }
+    );
+  }
+
+  // ...and closed again once the URL names a DIFFERENT step, which is what
+  // browser Back off the screen does.
+  for (const urlStep of ONBOARDING_STEP_IDS.filter((id) => id !== "journey")) {
+    assert.deepEqual(
+      onboardingFinishScreen({ urlStep, finishScreenStep: "journey" }),
+      { open: false, showing: false },
+      `Back to ${urlStep} closes the screen opened from journey`
+    );
+  }
+
+  // The property the frame invariant rests on: SHOWING implies the URL names
+  // no step, so the screen and any step-scoped guide are mutually exclusive.
+  for (const finishScreenStep of [null, ...ONBOARDING_STEP_IDS]) {
+    for (const urlStep of [null, ...ONBOARDING_STEP_IDS]) {
+      const screen = onboardingFinishScreen({ urlStep, finishScreenStep });
+      if (screen.showing) assert.equal(urlStep, null);
+    }
+  }
 });
