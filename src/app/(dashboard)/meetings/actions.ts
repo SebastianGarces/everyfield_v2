@@ -41,16 +41,20 @@ import {
   meetingCreateSchema,
   meetingStatusSchema,
   meetingUpdateSchema,
+  responseCardRecordSchema,
 } from "@/lib/validations/meetings";
 import { createLocation, updateLocation } from "@/lib/meetings/locations";
 import {
   addAttendee,
+  clearMeetingResponse,
   createEvaluation,
   createMeeting,
   deleteMeeting,
   finalizeAttendance,
   FinalizeAttendanceError,
+  MeetingResponseError,
   recordAttendanceBatch,
+  recordMeetingResponse,
   removeAttendee,
   updateChecklistItem,
   updateMeeting,
@@ -1006,5 +1010,80 @@ export async function addAttendeeNoteAction(
   } catch (error) {
     console.error("addAttendeeNoteAction error:", error);
     return { success: false, error: "Failed to save note" };
+  }
+}
+
+// ============================================================================
+// Response Card Actions (VM-014)
+// ============================================================================
+//
+// SESSION FIRST, ABOVE THE `try`, on both exports (memory/invariants.md →
+// Authentication). Every export of this module is a POSTable endpoint reachable
+// with no session and no UI, so a sessionless caller must THROW rather than
+// become a handled `{ success: false }` — which is what a mint inside the `try`
+// turns it into. The 45 older exports above that do mint inside their `try` are
+// the named residual `TRY_WRAPPED_MINTS`; nothing new joins it.
+//
+// THEN THE PARSE, and it is a `z.strictObject`: `responseCardRecordSchema` is
+// built from the one response-card vocabulary, so what the control offers and
+// what this accepts cannot drift, and an unknown key is a refusal rather than
+// something silently dropped on its way to a SET.
+
+export async function recordResponseCardAction(
+  meetingId: string,
+  input: unknown
+): Promise<ActionResult<null>> {
+  const { user } = await verifySession();
+
+  try {
+    if (!user.churchId) return { success: false, error: "No church" };
+
+    const parsed = responseCardRecordSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: "Invalid response card" };
+    }
+
+    await recordMeetingResponse(user.churchId, meetingId, {
+      personId: parsed.data.personId,
+      responseType: parsed.data.responseType,
+      notes: parsed.data.notes ?? null,
+      recordedById: user.id,
+    });
+
+    revalidatePath(`/meetings/${meetingId}/attendance`);
+    revalidatePath(`/meetings/${meetingId}/outcomes`);
+    return { success: true, data: null };
+  } catch (error) {
+    console.error("recordResponseCardAction error:", error);
+    if (error instanceof MeetingResponseError) {
+      return { success: false, error: "That person is not on this meeting" };
+    }
+    return { success: false, error: "Failed to record the response card" };
+  }
+}
+
+/**
+ * Take a card back off an attendee — the way back to "no card recorded", which
+ * is a different state from every value in the vocabulary, `not_interested`
+ * included. Without it a mis-key could only be corrected to another response,
+ * forcing the planter to assert something nobody said.
+ */
+export async function clearResponseCardAction(
+  meetingId: string,
+  personId: string
+): Promise<ActionResult<null>> {
+  const { user } = await verifySession();
+
+  try {
+    if (!user.churchId) return { success: false, error: "No church" };
+
+    await clearMeetingResponse(user.churchId, meetingId, personId);
+
+    revalidatePath(`/meetings/${meetingId}/attendance`);
+    revalidatePath(`/meetings/${meetingId}/outcomes`);
+    return { success: true, data: null };
+  } catch (error) {
+    console.error("clearResponseCardAction error:", error);
+    return { success: false, error: "Failed to clear the response card" };
   }
 }

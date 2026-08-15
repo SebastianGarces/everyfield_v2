@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   FileText,
   BarChart3,
+  ClipboardList,
   Users,
   Star,
   Package,
@@ -59,6 +60,17 @@ export function MeetingTabs({
 
   // Vision-specific tabs
   if (isVision) {
+    // VM-014 — Outcomes, on BOTH sides of `isCompleted`. The cards come back
+    // during the meeting, so a planter keying them in on the night needs
+    // somewhere to read the running total; and a tab that appears only after
+    // completion would hide the empty state that says where capture lives.
+    tabs.push({
+      id: "outcomes",
+      label: "Outcomes",
+      href: `${base}/outcomes`,
+      icon: ClipboardList,
+    });
+
     if (isCompleted) {
       tabs.push(
         {

@@ -42,6 +42,8 @@ import {
   finalizeAttendanceAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { searchPeopleAction } from "@/app/(dashboard)/communication/actions";
+import { ResponsePicker } from "@/components/meetings/response-picker";
+import type { ResponseCardType } from "@/db/schema/meetings";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,6 +78,19 @@ interface AttendanceCaptureProps {
   meetingId: string;
   guests: GuestEntry[];
   summary: AttendanceSummary;
+  /**
+   * VM-014. Response cards are a VISION MEETING artifact (FRD → VM-014), so the
+   * column is absent rather than empty on an orientation or a team meeting —
+   * an always-present control that is never the right thing to fill in trains a
+   * planter to ignore the column.
+   */
+  showResponseCards?: boolean;
+  /**
+   * The stored card per person id. A person ABSENT from this map has no card
+   * recorded, which is a state of its own and never a refusal — see
+   * `buildResponseBreakdown`.
+   */
+  responseCards?: Record<string, ResponseCardType>;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +147,8 @@ export function AttendanceCapture({
   meetingId,
   guests,
   summary,
+  showResponseCards = false,
+  responseCards = {},
 }: AttendanceCaptureProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -469,6 +486,14 @@ export function AttendanceCapture({
                   >
                     Status
                   </TableHead>
+                  {showResponseCards && (
+                    <TableHead
+                      scope="col"
+                      className="text-muted-foreground text-xs uppercase"
+                    >
+                      Response
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -536,6 +561,23 @@ export function AttendanceCapture({
                           </span>
                         )}
                       </TableCell>
+
+                      {showResponseCards && (
+                        <TableCell>
+                          {/* Only somebody who was in the room can hand a card
+                              in. The control is disabled rather than absent so
+                              the column keeps its shape down the table, and the
+                              reason is the row's own attendance state, which is
+                              already on screen beside it. */}
+                          <ResponsePicker
+                            meetingId={meetingId}
+                            personId={guest.personId}
+                            personName={guestName}
+                            value={responseCards[guest.personId] ?? null}
+                            disabled={!isAttended || isPending}
+                          />
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

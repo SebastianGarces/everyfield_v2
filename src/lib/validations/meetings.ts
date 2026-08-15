@@ -8,12 +8,14 @@ import {
   invitationStatuses,
   checklistCategories,
 } from "@/db/schema";
+import type { ResponseCardType } from "@/db/schema";
 import { z } from "zod";
 import { parseDateTimeLocalValue } from "@/lib/datetime";
 import {
   EVALUATION_QUALITY_FACTORS,
   type EvaluationScoreKey,
 } from "@/lib/meetings/evaluation-factors";
+import { RESPONSE_CARD_OPTIONS } from "@/lib/meetings/response-card";
 
 // ============================================================================
 // Wall-clock datetime
@@ -172,6 +174,33 @@ export const attendeeQuickAddSchema = z.object({
 });
 
 export type AttendeeQuickAddInput = z.infer<typeof attendeeQuickAddSchema>;
+
+// ============================================================================
+// Response card (VM-014)
+// ============================================================================
+
+/**
+ * The five response types, BUILT from the one vocabulary rather than restated.
+ *
+ * `RESPONSE_CARD_OPTIONS` is the list the capture control renders and the
+ * breakdown counts, so deriving the enum from it is what keeps "what the form
+ * offers" and "what the server accepts" the same set — the rule
+ * `evaluationCreateSchema` follows for the eight quality factors.
+ */
+export const responseCardTypeSchema = z.enum(
+  RESPONSE_CARD_OPTIONS.map((option) => option.value) as [
+    ResponseCardType,
+    ...ResponseCardType[],
+  ]
+);
+
+export const responseCardRecordSchema = z.strictObject({
+  personId: z.string().uuid("Invalid person"),
+  responseType: responseCardTypeSchema,
+  notes: z.string().max(2000).optional(),
+});
+
+export type ResponseCardRecordInput = z.infer<typeof responseCardRecordSchema>;
 
 export const attendanceBatchSchema = z.object({
   records: z
