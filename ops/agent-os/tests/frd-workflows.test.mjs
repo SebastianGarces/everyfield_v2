@@ -1325,6 +1325,27 @@ test("the PR body carries the evidence, the Manual QA and the Closes edges", asy
   );
 });
 
+// PR #439 shipped labelled risk:high off a declared-medium track: the body owed a
+// schema diff, the template gated that section on "high-risk only", and the shipper
+// raised the tier to make its own body legal. The tier is the input, never the
+// output — nothing the body has to carry may reach back and change it.
+test("the PR template keys the schema diff to the migration, not to the risk tier", () => {
+  const skill = read(".claude/skills/open-pr/SKILL.md");
+  const summary = skill.match(/<summary>Schema diff \(([^)]*)\)<\/summary>/);
+  assert.ok(summary, "the template still has a schema-diff section");
+  assert.doesNotMatch(
+    summary[1],
+    /high[- ]risk/i,
+    "a migration is owed at any tier — gating the section on risk:high invites the shipper to raise the tier"
+  );
+  assert.match(summary[1], /migration/i, "and it says what does owe it");
+  assert.match(
+    skill,
+    /A migration never sets it/,
+    "HIGH_RISK is auth/tenancy/payments, and the skill has to say so where the flag is set"
+  );
+});
+
 test("a red check fails the attempt, runs one fix, and re-runs ONLY the ship step", async () => {
   let ships = 0;
   const { result, calls } = await runBuild(

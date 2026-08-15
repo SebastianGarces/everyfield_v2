@@ -21,6 +21,10 @@ or with required evidence missing, do not open a PR — return control to the lo
      --body-file <path> --label "agent:in-review" \
      $([ "$HIGH_RISK" = true ] && echo --label risk:high)
    ```
+   `HIGH_RISK` is the track's declared tier — auth, permissions, tenant boundaries or payments, per
+   `ops/agent-os/dod.md`. **A migration never sets it**, and neither does anything else the body has
+   to carry: the schema diff below is owed by any diff carrying a migration, at any tier. Never
+   raise the tier to make a section of the template apply.
 3. Flip **every** issue the track closes, and read each label back:
    ```bash
    for i in <issue>...; do
@@ -82,7 +86,7 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 **Known limitations / deliberate cuts**
 - <scope explicitly excluded, so it does not read as a bug>
 
-<details><summary>Schema diff (high-risk only)</summary>
+<details><summary>Schema diff (whenever the diff carries a migration, at any risk tier)</summary>
 
 ```sql
 <DDL delta>
