@@ -40,6 +40,12 @@ export default async function MeetingsPage({
     parseListMeetingTypeFilter(params.type)
   );
 
+  // One `now` per render: MeetingList is a client component, so the
+  // relative-day badge cannot read the clock itself — that would stamp
+  // different instants on SSR and hydration (React #418).
+  // memory/invariants.md → Date & Time Rendering.
+  const now = new Date();
+
   const [church, upcomingResult, pastResult] = await Promise.all([
     getCurrentUserChurch(),
     view !== "past"
@@ -84,6 +90,7 @@ export default async function MeetingsPage({
             pastMeetings={pastResult.meetings}
             initialView={view}
             timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
+            now={now}
           />
         </div>
       </div>
