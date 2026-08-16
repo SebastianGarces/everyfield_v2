@@ -299,6 +299,7 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - A task dependency edge is church-scoped: both ends share `church_id`, enforced by composite FKs onto `tasks(id, church_id)` and by the `insert … select` that joins both task rows on that id. A task cannot wait on another church's task.
 - Replacing a task's prerequisites is ONE `db.batch`: the insert…select inner-joins every requested id as a live top-level same-church task and emits rows only when that count equals the requested set; dropStale is gated on the same predicate, so a short set writes nothing. Empty means a single delete-all in that same batch.
 - A dependency cycle is refused at write time. Self-loops are a CHECK; longer chains (including A→B→A) are `wouldCreateCycle`. Blocked-ness is DERIVED from incomplete live prerequisites, never stored as `status`.
+- Accepted residual: `wouldCreateCycle` is a SELECT-then-INSERT with no `FOR UPDATE`, so two concurrent writers adding opposite edges each read an acyclic set and commit a cycle; the unique index stops only a duplicate of the same pair. Retired by a serialising guard over the church's edge set.
 
 ## Notifications — the shared F11 queue, from a consumer's side
 
@@ -338,11 +339,14 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 
 ## People — Contacts, Import & Households
 
-Applies to `src/lib/people/**` and the `/people` surfaces.
+Applies to `src/lib/people/**` and the `/people` surfaces, plus the ministry-team roster, which reads a person's background check.
 
 - `createPerson()` is the ONE writer of the `person_created` timeline activity. `activitySource` is a closed union with NO default, so a new creation path must name itself or it does not compile.
 - `peopleTextSearch` is the ONE people text predicate — list, search and export all call it. Never a second copy under any name.
 - The import preview carries REDACTED duplicate matches only — `{id, displayName}` — and the matcher loads no tags. Restoring the full record re-opens the PII round trip to the client.
+- ⚖ A background check is required PER TEAM, never per role, and the roster asks `teamRequiresBackgroundCheck(team.name)` (`ministry-teams/role-templates.ts`) — matched on the team's NAME, because a `ministry_teams` row stores no template key. RENAMING the Children's Ministry team therefore drops the roster's status column silently, and a custom team never shows one; `getTeam` selects `backgroundCheckStatus` for EVERY team, so only that predicate decides.
+- ONE background-check display vocabulary, `people/background-check.ts` — the label, the variant and the tint per status — read through `backgroundCheckBadge`, which keys with `Object.hasOwn` and reads an unrecognised value as `not_started`, and drawn by the ONE `BackgroundCheckBadge`. A second table is how a roster and a profile end up disagreeing about what `flagged` is called.
+- ⚖ `not_started` is the FLOOR, not a null, and the person profile HEADER hides it — every prospect a plant adds starts there, so that badge would sit beside every name saying nothing. The Overview row and the team roster show it like any other value.
 
 Status advances one hop at a time. `autoAdvanceStatus` (`people/events.ts`) moves a person only when their CURRENT status is exactly the `from` below, so an event-driven hop never demotes and never skips, and a failed advance is logged rather than thrown. Every other hop is unguarded; `getStatusWarnings` warns on backward, skipped and out-of-order moves without blocking.
 
@@ -362,6 +366,7 @@ Those two server actions write their hop through `changeStatus`, which enforces 
 
 - RESERVING AN `idx` DOES NOT RESERVE AN ORDER — `when` decides. `drizzle-kit migrate` applies a migration only while the ledger's MAXIMUM `created_at` is below its `when`, so a sibling holding a lower `when` on another branch is SILENTLY SKIPPED: exit 0, nothing applied. Such a migration owes its sibling a FORWARD reconcile in its header.
 - ⚖ A RENUMBERED migration ships with an OPERATOR RECONCILE step or it does not ship: `drizzle-kit migrate` never asks whether THIS migration's row is present, so a database that applied the OLD number is invisible to it, the DDL re-runs and the apply aborts on `column ... already exists`. The header carries the detection and both exits.
+- ⚖ THE LEDGER IS DIAGNOSED READ-ONLY: any write to `drizzle.__drizzle_migrations` is ATTENDED-ONLY, never a side effect of another track, and `_journal.json` is never edited to invent a tag for a hash no committed blob matches. An applied row the journal cannot name is ACCEPTED HISTORY — deleting it hides applied DDL nobody can name; the check and both orphans are in [`contracts/db.md`](contracts/db.md) → Migration ledger vs journal.
 
 ## Dev Seeds
 
