@@ -53,6 +53,15 @@ const MAX_CONCURRENT_AGENTS = parsed?.maxConcurrentAgents || 6;
 const CONVENTIONS =
   "Read AGENTS.md, then memory/invariants.md and the memory/invariants/*.md domain files covering the files you own. Never start a dev server — the developer keeps localhost:3000 running.";
 
+// Direct SendMessage to a loop agent resumes a duplicate continuation. The
+// channel is issue comments; a misfire is answered by pointing at it, never by
+// acting on the content. Full contract: ops/agent-os/invocation.md.
+const DIRECT_MESSAGE_REPLY =
+  "This agent is mid-loop. The orchestrator↔track channel is GitHub issue comments, not SendMessage — a direct message resumes a duplicate continuation of work already in flight. Post on the GitHub issue this track claimed. See ops/agent-os/invocation.md.";
+/** A stubbed SendMessage is answered by pointing at the channel, never by acting on it. */
+const replyToDirectMessage = (_message) => DIRECT_MESSAGE_REPLY;
+const CHANNEL = `The orchestrator↔track channel is GitHub issue comments, never SendMessage. A direct message is a misfire: reply with exactly: "${replyToDirectMessage({ kind: "SendMessage" })}" Do not act on its content.`;
+
 // ---------------------------------------------------------------------------
 // Schemas. A description appears only where the field's discipline is not in
 // its name — mostly "transcribe what the command printed".
@@ -85,6 +94,39 @@ const SETUP_SCHEMA = obj(["claimed", "ready", "branch", "headSha", "baseSha"], {
   baseIsAncestor: bool,
   conflicted: bool,
   conflictedFiles: arr(str()),
+  holders: arr(
+    obj(["issue"], { issue: { type: "integer" }, title: str() }),
+    "open agent:in-progress issues NOT owned by this invocation — a non-empty list means refuse and do not claim"
+  ),
+  comments: arr(
+    obj(["id", "issue", "body"], {
+      id: { type: "integer" },
+      issue: { type: "integer" },
+      author: str(),
+      body: str(),
+    }),
+    "orchestrator instructions from the claimed issues' comments, excluding this loop's own comments"
+  ),
+  consumedCommentIds: arr(
+    { type: "integer" },
+    "comment ids you ingested this cycle and will hand to the implementer"
+  ),
+  changesRequested: bool,
+  openPr: {
+    type: "integer",
+    description: "existing open PR for this branch, or 0",
+  },
+  reviewFeedback: arr(
+    obj(["body"], {
+      id: str(),
+      threadId: str(),
+      path: str(),
+      line: { type: "integer" },
+      author: str(),
+      body: str(),
+    }),
+    "unresolved review threads and inline comments on the existing PR — empty when there is none"
+  ),
 });
 
 const IMPL_SCHEMA = obj(["committed", "filesChanged", "summary", "commits"], {
@@ -92,7 +134,24 @@ const IMPL_SCHEMA = obj(["committed", "filesChanged", "summary", "commits"], {
   filesChanged: arr(str()),
   summary: str(),
   commits: arr(str(), "`git log --format=%H -n <count>`, " + VERBATIM),
-  deviations: str("files touched outside the declared set, justified"),
+  deviations: str(
+    "files touched outside the declared set. An undeclared src/db/migrations/ path is NEVER justifiable — the loop blocks it."
+  ),
+  consumedCommentIds: arr(
+    { type: "integer" },
+    "inbox comment ids you acted on (or explicitly declined) this pass"
+  ),
+  threadReplies: arr(
+    obj(["threadId", "replied", "body"], {
+      threadId: str(),
+      replied: bool,
+      actioned: bool,
+      body: str(
+        "what changed, or not actioned and why — never silently drop a thread"
+      ),
+    }),
+    "one row per review thread you were given; silence is not a reply"
+  ),
 });
 
 const INTEGRATE_SCHEMA = obj(["merged", "conflicts"], {
@@ -274,6 +333,27 @@ function clusterByFile(us) {
 // auto-merges, whether or not the caller remembered to declare it.
 const FACTORY_PATH = /^(\.claude\/(workflows|skills)|\.cursor|ops\/agent-os)\//;
 
+// G5: a migration outside a track that did not declare db/ is blocking. `db/`
+// in a declared path (src/db/schema/..., src/db/migrations/..., db/...) is the
+// declaration; a file named src/lib/db.ts is not.
+const MIGRATION_PATH = /(^|\/)src\/db\/migrations\//;
+const DB_DECLARED = /(^|\/)(src\/)?db(\/|$)/;
+
+const declaresDb = (files) =>
+  (files || []).some((f) => DB_DECLARED.test(normFile(f)));
+
+const undeclaredMigrations = (changed, declared) =>
+  declaresDb(declared)
+    ? []
+    : (changed || []).map(normFile).filter((f) => MIGRATION_PATH.test(f));
+
+const schemaFenceReason = (migrations) =>
+  `G5: undeclared migration(s) ${migrations.join(", ")} — db/ is not in this track's declared files. Halt and re-declare src/db/migrations/ (and the schema it applies) on the workstream; do NOT delete the migration.`;
+
+/** Harness-owned env step. Always runs after `git worktree add`; not an implementer hint. */
+const worktreeEnvStep = (wt) =>
+  `Harness: \`scripts/worktree-env.sh ${wt}\` — this is a numbered harness step, not optional. A tree with no env fails every DB suite.`;
+
 const summarise = (us, extra = {}) => {
   const files = [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))];
   return {
@@ -368,6 +448,12 @@ for (const t of tracks)
       `   ${t.id}: ${t.stages.map((s, i) => `stage ${i} × ${s.length}`).join(" → ")}`
     );
 
+// Issues this invocation owns — a live agent:in-progress on any other number
+// is a foreign loop and setup must refuse rather than claim.
+const PASS_ISSUES = [
+  ...new Set(units.map((u) => u.issue).filter((x) => x != null)),
+];
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -461,6 +547,30 @@ const treeLines = (trees) =>
     .map((t) => `  - \`${t.path}\` on \`${t.branch}\` — ${t.holds}`)
     .join("\n") || "  (none)";
 
+const inboxBlock = (comments) =>
+  (comments || []).length
+    ? `Orchestrator instructions from the issue's comments (the channel — not SendMessage). Consume each and report its id in \`consumedCommentIds\`:\n${(
+        comments || []
+      )
+        .map(
+          (c) =>
+            `--- comment ${c.id} on #${c.issue} (${c.author || "unknown"}) ---\n${c.body}`
+        )
+        .join("\n\n")}`
+    : "";
+
+const reviewFeedbackBlock = (feedback) =>
+  (feedback || []).length
+    ? `This is a changes-requested re-entry. Review threads and inline comments on the existing PR — each must be replied to on GitHub (what changed, or not actioned and why). Report every row in \`threadReplies\`. Silence is not a reply:\n${(
+        feedback || []
+      )
+        .map(
+          (f) =>
+            `--- ${f.threadId || f.id} ${f.path ? `${f.path}:${f.line || ""}` : ""} (${f.author || "reviewer"}) ---\n${f.body}`
+        )
+        .join("\n\n")}`
+    : "";
+
 /**
  * `parallel()` with a ceiling. Chunking is enough, because both callers are
  * barriers: a stage waits for its workstreams, a chunk of tracks for its tracks.
@@ -483,6 +593,7 @@ const EXIT = {
   blocked: ["agent:blocked", "blocked", "The work did not reach the Definition of Done. The human needs the failing gate and its evidence, then a decision: tighten the spec, raise the budget, or take it manually."], // prettier-ignore
   "delivery-failed": ["agent:delivery-failed", "pr-failed", "Every gate PASSED and only the delivery step failed: say plainly that the human should retry the delivery (push the branch, open the PR) and must NOT re-review or rebuild code that already passed."], // prettier-ignore
   errored: ["agent:in-review", "errored", "The PR is open and its check is green — only the board write did not stick. Name the PR, say that nothing needs rebuilding or re-reviewing, and set the label the ship pass could not confirm."], // prettier-ignore
+  refused: ["agent:queued", "refused", "This invocation must not run: another loop already holds a claim. Revert THIS track's issues to agent:queued (never agent:blocked — nothing failed the DoD) and name the holder. Do not build, and do not clear a claim you did not set."], // prettier-ignore
 };
 
 async function exitTrack(track, kind, { reason, report = null, trees = [] }) {
@@ -527,19 +638,23 @@ Then label it and prove it: \`gh issue edit n --add-label ${label} --remove-labe
 }
 
 // ---------------------------------------------------------------------------
-// setup — claim, cut, report the shas. One cheap agent, every answer asserted.
+// setup — serialize, claim, cut, provision env, read inbox. One cheap agent.
 // ---------------------------------------------------------------------------
-async function setupTrack(track, branch, wt) {
+async function setupTrack(track, branch, wt, passIssues) {
+  const owned = (passIssues || track.issues).join(", ") || "(none)";
   const ready = await agent(
-    `Claim this track's issues and prepare its build tree. Run exactly this, in order, and write no code.
+    `Claim this track's issues and prepare its build tree. ${CHANNEL} Run exactly this, in order, and write no code.
 
-1. Label EXACTLY these issues and no others: ${track.issues.join(", ") || "(none)"}
-   For each number n: \`gh issue edit n --remove-label agent:queued --add-label agent:in-progress\`. Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label to decide what to edit — the list above is the complete and only input. The number of issues you edit must be exactly ${track.issues.length}. Report them in \`claimed\`.
-2. \`git fetch origin --prune\` — an unfetched \`${BASE}\` is whatever this checkout last saw.
-3. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
+1. **SERIALIZE.** \`gh issue list --limit 200 --state open --label agent:in-progress --json number,title\`. Holders are issues in that list whose number is NOT one of this invocation's issues (${owned}). If any holders exist: do NOT edit any labels, return \`ready: false\`, \`claimed: []\`, and the holders. Launching a second loop while another holds a claim is forbidden.
+2. Label EXACTLY these issues and no others: ${track.issues.join(", ") || "(none)"}
+   For each number n: \`gh issue edit n --remove-label agent:queued --remove-label agent:changes-requested --add-label agent:in-progress\`. Drop whichever status label it currently carries. Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label to decide what to edit — the list above is the complete and only input. The number of issues you edit must be exactly ${track.issues.length}. Report them in \`claimed\`. If the issue carried \`agent:changes-requested\`, set \`changesRequested: true\`.
+3. \`git fetch origin --prune\` — an unfetched \`${BASE}\` is whatever this checkout last saw.
+4. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
    - **no such branch → FRESH**: \`git worktree add -b ${branch} ${wt} ${BASE}\`, never from a local branch of the same name. Report \`resumed: false\`.
-   - **it exists → RESUME**: a held or blocked track kept this branch and worktree on purpose — do not re-cut, reset or delete anything. Re-attach the tree if it is gone (\`git worktree add ${wt} ${branch}\`, no \`-b\`), then \`git -C ${wt} merge --no-edit ${BASE}\`. If that conflicts, do NOT resolve it: capture \`git -C ${wt} diff --name-only --diff-filter=U\`, \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and those paths. Report \`resumed: true\`.
-4. \`scripts/worktree-env.sh ${wt}\` — idempotent; without it the worktree has no \`.env.local\` and every DB suite fails.
+   - **it exists → RESUME**: a held, blocked, or changes-requested track kept this branch on purpose — do not re-cut, reset or delete anything. Re-attach the tree if it is gone (\`git worktree add ${wt} ${branch}\`, no \`-b\`), then \`git -C ${wt} merge --no-edit ${BASE}\`. If that conflicts, do NOT resolve it: capture \`git -C ${wt} diff --name-only --diff-filter=U\`, \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and those paths. Report \`resumed: true\`. A changes-requested re-entry ALWAYS resumes; never open a second branch.
+5. \`scripts/worktree-env.sh ${wt}\` — harness-owned, not optional. A tree with no env fails every DB suite.
+6. **INBOX.** For each claimed issue, \`gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<n>/comments --jq '.[] | {id, issue: <n>, author: .user.login, body}'\`. Return orchestrator instructions (not this loop's own comments) in \`comments\` and their ids in \`consumedCommentIds\`. This is the defined point the loop reads the channel.
+7. **REVIEW THREADS.** \`gh pr list --head ${branch} --state open --json number --jq '.[0].number'\`. If a PR exists, set \`openPr\` to that number and fetch unresolved review threads plus inline comments (\`gh api\` pulls comments and GraphQL \`reviewThreads\`). Return them in \`reviewFeedback\`. A changes-requested re-entry has no input without this. If none, \`openPr: 0\` and \`reviewFeedback: []\`.
 
 Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HEAD\` → \`branch\`; \`git -C ${wt} rev-parse HEAD\` → \`headSha\`; \`git rev-parse ${BASE}\` → \`baseSha\`; \`git -C ${wt} merge-base --is-ancestor ${BASE} HEAD && echo yes || echo no\` → \`baseIsAncestor\`. The loop checks these rather than trusting you: a FRESH cut has headSha == baseSha, a RESUME has baseIsAncestor true, and nothing is built on a base behind ${BASE}. Return strictly the schema.`,
     {
@@ -552,6 +667,14 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
   );
 
   const claimed = (ready?.claimed || []).map(Number);
+  const holders = ready?.holders || [];
+  if (holders.length)
+    return {
+      ok: false,
+      refused: true,
+      reason: `refused: another loop holds ${holders.map((h) => `#${h.issue}${h.title ? ` (${h.title})` : ""}`).join(", ")}. Never launch a build-until-done while another holds a claim.`,
+    };
+
   const strays = claimed.filter((n) => !track.issues.includes(n));
   // A throw here would vanish the track into the fan-in hole — and the claim it
   // just wrote would go unanswered. It stops as a blocked exit instead.
@@ -588,22 +711,41 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
       ok: false,
       reason: `${branch} was cut from ${head} but ${BASE} is at ${base} — a stale base builds against files that already changed and lands the PR BEHIND main.`,
     };
-  return { ok: true };
+  return {
+    ok: true,
+    comments: ready.comments || [],
+    consumedCommentIds: ready.consumedCommentIds || [],
+    reviewFeedback: ready.reviewFeedback || [],
+    openPr: ready.openPr || 0,
+    changesRequested: ready.changesRequested === true,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // implement — one agent per workstream, one pass. The only build strategy.
 // ---------------------------------------------------------------------------
-async function implementWorkstream(ws, trackBranch) {
+async function implementWorkstream(ws, trackBranch, declaredFiles, inbox = {}) {
   const { branch, wt } = ws;
+  const comments = inbox.comments || [];
+  const feedback = inbox.reviewFeedback || [];
+  const reentry =
+    inbox.changesRequested === true || Number(inbox.openPr) > 0
+      ? `This is a re-entry on existing PR #${inbox.openPr || "?"}. Push to ${branch} and update that PR; never open a second. The full DoD still runs — a human asking for a change does not lower the bar.`
+      : "";
   const impl = await agent(
-    `You are a ${ws.lane} engineer. ${CONVENTIONS}
+    `You are a ${ws.lane} engineer. ${CONVENTIONS} ${CHANNEL}
 
 ${
   ws.solo
-    ? `Work in the existing worktree ${wt}, already on ${branch} with a test env. Just \`cd\` into it.`
-    : `First cut your tree: \`git worktree add -b ${branch} ${wt} ${trackBranch}\` — from the TRACK branch, never from ${BASE}, because it already carries every earlier stage's commits. If the branch survives an earlier run, re-attach instead (no \`-b\`) without resetting it. Then \`scripts/worktree-env.sh ${wt}\` and work there.`
+    ? `Work in the existing worktree ${wt}, already on ${branch}. Env is already provisioned by the harness (do not re-run \`scripts/worktree-env.sh\`). A fresh worktree still has no \`node_modules\`: run \`pnpm install\` in ${wt} before typecheck or tests.`
+    : `First cut your tree, then the harness provisions it — these are numbered harness steps, not optional:
+1. \`git worktree add -b ${branch} ${wt} ${trackBranch}\` — from the TRACK branch, never from ${BASE}, because it already carries every earlier stage's commits. If the branch survives an earlier run, re-attach instead (no \`-b\`) without resetting it.
+2. ${worktreeEnvStep(wt)}
+3. \`pnpm install\` in ${wt} — a fresh worktree has no \`node_modules\`; env alone does not make \`pnpm test\` run.
+Then work there.`
 }
+
+${reentry}
 
 You own ONE workstream of a larger track. Implement exactly the unit(s) below and nothing else — other agents are writing other workstreams in parallel, and every file outside your declared list may be theirs.
 
@@ -611,6 +753,11 @@ ${unitBlocks(ws)}
 
 Your declared files — stay inside them:
 ${(ws.files || []).map((f) => `  - ${f}`).join("\n") || "  (none declared)"}
+A new file under \`src/db/migrations/\` when \`db/\` is not in that list is a blocking G5 halt: re-declare the migration (do not delete it).
+
+${inboxBlock(comments)}
+${reviewFeedbackBlock(feedback)}
+Fill \`threadReplies\` for every review thread you were given. Reply on the GitHub thread itself. Feedback you choose not to action still gets a reply naming the reason — never drop it silently.
 
 Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt}. Commit to ${branch} (conventional commits) and report every commit sha. Do NOT push, open a PR, edit labels or issues, or merge — the loop integrates, reviews and ships. Return strictly the schema.`,
     {
@@ -629,11 +776,28 @@ Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt}. Commit 
       branch,
       reason: `${ws.id}: the implementer ${!impl ? "returned nothing" : "committed nothing"}`,
     };
-  return { ok: true, ws, branch, wt, summary: impl.summary || "" };
+  const migrations = undeclaredMigrations(impl.filesChanged, declaredFiles);
+  if (migrations.length)
+    return {
+      ok: false,
+      ws,
+      branch,
+      reason: `${ws.id}: ${schemaFenceReason(migrations)}`,
+    };
+  return {
+    ok: true,
+    ws,
+    branch,
+    wt,
+    summary: impl.summary || "",
+    consumedCommentIds:
+      impl.consumedCommentIds || inbox.consumedCommentIds || [],
+    threadReplies: impl.threadReplies || [],
+  };
 }
 
 /** One stage: its workstreams in parallel, then merged back onto the track. */
-async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
+async function runStage(track, stage, stageIndex, trackBranch, trackWt, inbox) {
   const solo = stage.length === 1;
   log(
     `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}`
@@ -647,7 +811,9 @@ async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
   }
 
   const results = await boundedParallel(
-    stage.map((ws) => () => implementWorkstream(ws, trackBranch))
+    stage.map(
+      (ws) => () => implementWorkstream(ws, trackBranch, track.files, inbox)
+    )
   );
   // `parallel()` resolves a thunk that threw to null, so a dead agent comes
   // back as a hole — and a hole inside a passing stage would ship a track with
@@ -705,7 +871,7 @@ Then run \`pnpm typecheck\` in ${trackWt}: two individually-correct workstreams 
 // ---------------------------------------------------------------------------
 async function reviewPass(track, branch, wt, wsOutcomes, attempt) {
   return agent(
-    `You are the code-reviewer, and this is the ONE review branch ${branch} (worktree ${wt}) gets before it merges — issue(s) ${hashes(track.issues)}. The gate contract is \`ops/agent-os/dod.md\`; you are gate REVIEWED. It was built by ${wsOutcomes.length} workstream(s):
+    `You are the code-reviewer, and this is the ONE review branch ${branch} (worktree ${wt}) gets before it merges — issue(s) ${hashes(track.issues)}. ${CHANNEL} The gate contract is \`ops/agent-os/dod.md\`; you are gate REVIEWED. It was built by ${wsOutcomes.length} workstream(s):
 ${wsOutcomes.map((r) => `- **${r.ws.id}** — ${r.summary || "no summary given"}`).join("\n")}
 
 FIRST publish, so nothing downstream validates a sha the remote does not have: \`git -C ${wt} push -u origin ${branch}\`, \`git -C ${wt} fetch origin ${branch}\`, then report VERBATIM what \`git -C ${wt} rev-parse HEAD\` and \`git -C ${wt} rev-parse origin/${branch}\` printed, as \`headSha\` and \`remoteSha\`. If they differ, stop: verdict FAIL, failingGate \`publish\`, the two shas as evidence.
@@ -713,7 +879,7 @@ FIRST publish, so nothing downstream validates a sha the remote does not have: \
 Then review the assembled diff (\`git -C ${wt} diff ${BASE}...HEAD\`), running \`pnpm typecheck\` and the tests covering the changed files yourself, on four axes:
 - **correctness** against the criteria below, including the cases none of them names — empty state, the second call, concurrent writes, a null row. For a migration, the DDL itself: nullability, defaults, indexes, cascade, and whether existing data survives.
 - **conventions**: AGENTS.md, then memory/invariants.md and the memory/invariants/*.md domain files covering the changed paths. Every rule there is hard.
-- **diff hygiene**: files outside the declared set, debris, unrelated churn. Declared: ${track.files.join(", ") || "(none)"}.
+- **diff hygiene**: files outside the declared set, debris, unrelated churn. Declared: ${track.files.join(", ") || "(none)"}. A new file under \`src/db/migrations/\` when \`db/\` is not in that set is G5: FAIL, re-declare, do not delete the migration.
 - **spec mapping**: each criterion to the code that satisfies it, with evidence.
 On a schema, auth or multi-tenancy diff, hold the security lens explicitly and say so: auth on every new entrypoint, whether org A can reach org B's rows through anything this adds, unsafe interpolation, secrets or internal data reaching a client bundle or a log, SELECTs that widen a response. You are the only reviewer on that axis.
 
@@ -750,7 +916,7 @@ async function fixPass(
 ) {
   const gateFail = Boolean(report);
   const fix = await agent(
-    `You are fixing branch ${branch} in worktree ${wt} (issue(s) ${hashes(track.issues)}). ${CONVENTIONS}
+    `You are fixing branch ${branch} in worktree ${wt} (issue(s) ${hashes(track.issues)}). ${CONVENTIONS} ${CHANNEL}
 
 ${
   gateFail
@@ -810,7 +976,7 @@ async function shipPass(
     : "";
 
   return agent(
-    `You are the release agent for branch ${branch} (worktree ${wt}), issue(s) ${hashes(track.issues)}. It passed the one code review. The gate contract is \`ops/agent-os/dod.md\`. Do all of this, in order, in one pass.
+    `You are the release agent for branch ${branch} (worktree ${wt}), issue(s) ${hashes(track.issues)}. ${CHANNEL} It passed the one code review. The gate contract is \`ops/agent-os/dod.md\`. Do all of this, in order, in one pass.
 
 1. **PUBLISH.** \`git -C ${wt} push -u origin ${branch}\`, then \`git -C ${wt} fetch origin ${branch}\`. Report VERBATIM what \`git -C ${wt} rev-parse HEAD\` and \`git -C ${wt} rev-parse origin/${branch}\` printed. If they differ, stop: nothing is validated or merged at a sha the remote lacks.
 
@@ -865,12 +1031,22 @@ async function buildTrack(track) {
   const wt = `.claude/worktrees/bud-${track.id}`;
   const trees = () => survivingTrees(track, branch, wt);
 
-  const setup = await setupTrack(track, branch, wt);
+  const setup = await setupTrack(track, branch, wt, PASS_ISSUES);
   if (!setup.ok)
-    return exitTrack(track, "blocked", {
-      reason: `could not prepare ${wt} on ${branch}: ${setup.reason}`,
+    return exitTrack(track, setup.refused ? "refused" : "blocked", {
+      reason: setup.refused
+        ? setup.reason
+        : `could not prepare ${wt} on ${branch}: ${setup.reason}`,
       trees: trees(),
     });
+
+  const inbox = {
+    comments: setup.comments || [],
+    consumedCommentIds: setup.consumedCommentIds || [],
+    reviewFeedback: setup.reviewFeedback || [],
+    openPr: setup.openPr || 0,
+    changesRequested: setup.changesRequested === true,
+  };
 
   const starved = (what) =>
     budget.total && budget.remaining() < RESERVE
@@ -883,7 +1059,7 @@ async function buildTrack(track) {
     // fail, so the same flat check guards every stage, not just the tail.
     const broke = starved(`stage ${i}`);
     if (broke) return exitTrack(track, "blocked", { reason: broke, trees: trees() }); // prettier-ignore
-    const result = await runStage(track, stage, i, branch, wt);
+    const result = await runStage(track, stage, i, branch, wt, inbox);
     if (!result.ok)
       return exitTrack(track, "blocked", {
         reason: result.reason,
@@ -1038,6 +1214,13 @@ async function buildTrack(track) {
       // A merged track cleaned up after itself; every other outcome hands its
       // trees to the reviewer named in the PR comment.
       survivingTrees: ship.mergeState === "merged" ? [] : trees(),
+      consumedCommentIds: [
+        ...new Set(
+          (inbox.consumedCommentIds || []).concat(
+            wsOutcomes.flatMap((r) => r.consumedCommentIds || [])
+          )
+        ),
+      ],
     };
   }
 
@@ -1089,6 +1272,7 @@ if (lost.length) {
 const done = results.filter(Boolean);
 const shipped = done.filter((r) => r.status === "shipped");
 const blocked = done.filter((r) => r.status === "blocked");
+const refused = done.filter((r) => r.status === "refused");
 // Separate from blocked because the human action differs: these passed every
 // gate and only the delivery call failed, so they want a retried push.
 const deliveryFailed = done.filter((r) => r.status === "pr-failed");
@@ -1096,7 +1280,7 @@ const deliveryFailed = done.filter((r) => r.status === "pr-failed");
 const errored = done.filter((r) => r.status === "errored");
 
 log(
-  `Done: ${shipped.length} shipped, ${blocked.length} blocked${deliveryFailed.length ? `, ${deliveryFailed.length} delivery-failed` : ""}${errored.length ? `, ${errored.length} ERRORED (label unconfirmed)` : ""}${lost.length ? `, ${lost.length} LOST` : ""}.`
+  `Done: ${shipped.length} shipped, ${blocked.length} blocked${refused.length ? `, ${refused.length} refused (serialize)` : ""}${deliveryFailed.length ? `, ${deliveryFailed.length} delivery-failed` : ""}${errored.length ? `, ${errored.length} ERRORED (label unconfirmed)` : ""}${lost.length ? `, ${lost.length} LOST` : ""}.`
 );
 
 const kinds = (r, kind) =>
@@ -1109,7 +1293,7 @@ const base = (r) => ({
 });
 
 return {
-  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${deliveryFailed.length ? `; 📦 ${deliveryFailed.length} passed the gates but failed to deliver` : ""}${errored.length ? `; 🚨 ${errored.length} errored with an unconfirmed label` : ""}${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
+  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${refused.length ? `; ${refused.length} refused (another loop holds a claim)` : ""}${deliveryFailed.length ? `; 📦 ${deliveryFailed.length} passed the gates but failed to deliver` : ""}${errored.length ? `; 🚨 ${errored.length} errored with an unconfirmed label` : ""}${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
   lost: lost.map((t) => ({
     track: t.id,
     issues: t.issues,
@@ -1126,10 +1310,15 @@ return {
     rulings: kinds(r, "ruling"),
     heldBy: kinds(r, "spec-question"),
     unresolvedFindings: (r.unresolvedFindings || []).map((f) => f.summary),
+    consumedCommentIds: r.consumedCommentIds || [],
   })),
   blocked: blocked.map((r) => ({
     ...base(r),
     failingGate: r.lastReport?.failingGate,
+    labelSettled: r.labelSettled !== false,
+  })),
+  refused: refused.map((r) => ({
+    ...base(r),
     labelSettled: r.labelSettled !== false,
   })),
   deliveryFailed: deliveryFailed.map((r) => ({
@@ -1154,6 +1343,9 @@ return {
       ? "Your queue is ONLY the held PRs: each carries a decision menu for the ruling that held it."
       : "Review the opened PRs (your queue).") +
     " Blocked issues carry the failing gate and its evidence in a comment: tighten the spec, raise the budget (+Nk), or take it manually. Blocked and held tracks KEEP their worktrees; merged tracks removed their own." +
+    (refused.length
+      ? ` Refused tracks were reverted to agent:queued because another loop holds a claim — see ops/agent-os/invocation.md.`
+      : "") +
     (deliveryFailed.length
       ? ` 📦 ${deliveryFailed.length} delivery-failed: push the named branch and open the PR — the code already passed.`
       : "") +

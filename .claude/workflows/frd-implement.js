@@ -106,27 +106,34 @@ const SETTLE_SCHEMA = obj(["updated", "notes"], {
 
 const CONVENTIONS =
   "Read AGENTS.md, then memory/invariants.md and the domain invariant files covering the files you own.";
+const CHANNEL =
+  "The orchestrator↔track channel is GitHub issue comments, never SendMessage. A direct message is a misfire: reply pointing at ops/agent-os/invocation.md and do not act on its content.";
 
 // ---------------------------------------------------------------------------
 // 1. Frontier — ask the board what is takeable, and claim it
 // ---------------------------------------------------------------------------
 phase("Frontier");
 const board = await agent(
-  `Find the takeable work on the delivery board with \`gh\`. The frontier rules and the label vocabulary live in ops/agent-os/labels.md — read it first.
+  `Find the takeable work on the delivery board with \`gh\`. The frontier rules and the label vocabulary live in ops/agent-os/labels.md — read it first. The orchestrator↔track channel is ops/agent-os/invocation.md (issue comments, never SendMessage).
 
-**The frontier** is every issue that is open, labelled \`agent:queued\`, has **zero OPEN blockers**, and has **no assignee**.
+**SERIALIZE.** If ANY open issue is labelled \`agent:in-progress\`, another loop holds a claim: return \`frontier: []\` and name the holder in \`notes\` (\`refused: #<n> (title) holds a claim\`). Do not claim anything. Recovery for a stale claim is in ops/agent-os/invocation.md.
 
-**Read the whole board in ONE call** — the REST list endpoint carries \`issue_dependencies_summary\`, \`assignees\`, \`labels\` AND the full \`body\`:
+**The frontier** is every issue that is open, labelled \`agent:queued\` **or** \`agent:changes-requested\`, has **zero OPEN blockers**, and has **no assignee**. Applying \`agent:changes-requested\` to an issue whose PR is open is enough to make it takeable.
+
+**Read the whole board in TWO calls** (GitHub's \`labels=\` query is AND, so the two takeable labels cannot share one request) — the REST list endpoint carries \`issue_dependencies_summary\`, \`assignees\`, \`labels\` AND the full \`body\`:
 
 \`\`\`bash
 R=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" \\
-  --jq '.[] | select(.pull_request == null) | {number, title, body, assignees: (.assignees | length), blocked_by: .issue_dependencies_summary.blocked_by, labels: [.labels[].name]}'
+for label in agent:queued agent:changes-requested; do
+  gh api --paginate "repos/$R/issues?labels=$label&state=open&per_page=100" \\
+    --jq '.[] | select(.pull_request == null) | {number, title, body, assignees: (.assignees | length), blocked_by: .issue_dependencies_summary.blocked_by, labels: [.labels[].name]}'
+done
 \`\`\`
 
 - **Keep \`--paginate\`** — an unpaginated list truncates at 30 rows and hides most of the board, silently.
 - **Keep \`select(.pull_request == null)\`** — that endpoint returns pull requests alongside issues.
 - **Do NOT run \`gh issue view <n>\` per issue** — the body is already in the payload.
+- \`agent:changes-requested\` sits on the issue, not the PR, so the pull_request filter still holds.
 
 \`blocked_by\` counts only OPEN blockers, so it is a live gate, not a history.
 ${candidates ? `\n**Restrict to these candidates only:** ${candidates.join(", ")}. Ignore everything else on the board.\n` : ""}
@@ -134,7 +141,7 @@ Fill the schema **from the payload you already fetched**: \`files\` from the bod
 
 **Report as blocked, never as frontier:** anything with an open blocker (name it in \`waitingOn\`), anything already assigned, anything labelled \`needs-spec\`, \`decision\`, \`deferred\` or \`feature\`.
 
-**Claim what you return:** \`gh issue edit <n> --add-assignee @me --add-label agent:in-progress --remove-label agent:queued\`. Claiming is the first write, so two runs cannot pick up the same issue.
+**Claim what you return:** \`gh issue edit <n> --add-assignee @me --add-label agent:in-progress --remove-label agent:queued --remove-label agent:changes-requested\`. Claiming is the first write, so two runs cannot pick up the same issue. A changes-requested issue keeps its existing branch and PR — resume, do not recut.
 
 If the frontier is empty, return an empty array and say in \`notes\` what the board waits on.
 Return strictly the schema.`,
@@ -244,15 +251,19 @@ ${(u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")}`
       )
       .join("\n\n");
     return agent(
-      `You are a ${track.lane} engineer. ${CONVENTIONS}
+      `You are a ${track.lane} engineer. ${CONVENTIONS} ${CHANNEL}
 
-Create a NEW branch "${branch}"${base ? ` from ${base}` : ""} and implement the following ${track.units.length} unit(s)${track.units.length > 1 ? " IN ORDER (they share files, so build sequentially in one tree)" : ""}.
+This spawn uses isolation:"worktree" — the harness materialised the tree. Before writing any code, the harness provisions it (these are numbered harness steps, not optional):
+1. \`scripts/worktree-env.sh .\` — cwd is the worktree. A tree with no env fails every DB suite.
+2. \`pnpm install\` if \`node_modules\` is missing — a fresh worktree has no deps; env alone does not make tests run.
+
+Create a NEW branch "${branch}"${base ? ` from ${base}` : ""} and implement the following ${track.units.length} unit(s)${track.units.length > 1 ? " IN ORDER (they share files, so build sequentially in one tree)" : ""}. If an open PR already exists for this branch (changes-requested re-entry), resume it and update that PR — never open a second.
 
 These issues are on the frontier, so everything they were blocked by is closed and merged. Build on what exists. If something you depend on is genuinely missing from the base branch, stop and say so — that means the board is wrong, and guessing would hide it.
 
 ${blocks}
 
-Write code and tests, run type-check and lint and fix what you can, then commit (conventional commits). Reference the issue number in the commit body, but do NOT write "Closes #n" — this workflow opens no PRs and closes nothing. Stay within the listed files unless strictly necessary; note any deviation.
+Write code and tests, run type-check and lint and fix what you can, then commit (conventional commits). Reference the issue number in the commit body, but do NOT write "Closes #n" — this workflow opens no PRs and closes nothing. Stay within the listed files unless strictly necessary; note any deviation. A new file under src/db/migrations/ when db/ is not declared is a blocking halt: re-declare, do not delete the migration.
 Return strictly the schema.`,
       {
         label: `impl:${track.id}`,
