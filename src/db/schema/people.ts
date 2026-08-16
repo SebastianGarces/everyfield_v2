@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   date,
   index,
   integer,
@@ -11,6 +13,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { users } from "./user";
 
 // ============================================================================
@@ -41,6 +44,23 @@ export type PersonSource = (typeof personSources)[number];
 
 export const householdRoles = ["head", "spouse", "child", "other"] as const;
 export type HouseholdRole = (typeof householdRoles)[number];
+
+/**
+ * Where a person stands in the church's own background-check process.
+ *
+ * Manually tracked: nothing here talks to a screening provider, so the value
+ * is whatever a church member last recorded. `not_started` is the floor rather
+ * than a null, because "nobody has said" and "nobody has started" are the same
+ * fact about a volunteer and two spellings of it would make every reader
+ * coalesce.
+ */
+export const backgroundCheckStatuses = [
+  "not_started",
+  "in_progress",
+  "cleared",
+  "flagged",
+] as const;
+export type BackgroundCheckStatus = (typeof backgroundCheckStatuses)[number];
 
 export const interviewStatuses = ["pass", "fail", "concern"] as const;
 export type InterviewStatus = (typeof interviewStatuses)[number];
@@ -150,6 +170,10 @@ export const persons = pgTable(
       .notNull()
       .default("prospect"),
     source: varchar("source", { length: 50 }).$type<PersonSource>(),
+    backgroundCheckStatus: varchar("background_check_status", { length: 20 })
+      .$type<BackgroundCheckStatus>()
+      .notNull()
+      .default("not_started"),
     sourceDetails: text("source_details"),
     notes: text("notes"),
     photoUrl: varchar("photo_url", { length: 500 }),
@@ -171,6 +195,14 @@ export const persons = pgTable(
     index("persons_email_idx").on(table.email),
     index("persons_household_id_idx").on(table.householdId),
     index("persons_deleted_at_idx").on(table.deletedAt),
+    // The vocabulary, in the data. `.$type<>()` on a varchar is a compile-time
+    // brand and nothing else, and this column is the one a children's-ministry
+    // roster reads to say a volunteer is cleared — so what may be stored in it
+    // is closed by the database rather than by convention.
+    check(
+      "persons_background_check_status_check",
+      sql`${table.backgroundCheckStatus} in (${inList(backgroundCheckStatuses)})`
+    ),
   ]
 );
 

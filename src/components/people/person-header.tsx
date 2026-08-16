@@ -37,6 +37,7 @@ import {
   Trash,
 } from "lucide-react";
 import { useState } from "react";
+import { BackgroundCheckBadge } from "./background-check-badge";
 import { StatusChangeModal } from "./status-change-modal";
 
 interface PersonHeaderProps {
@@ -74,6 +75,12 @@ export function PersonHeader({
     <Badge variant="outline">{person.status}</Badge>
   );
 
+  // The header carries the background check only once somebody has moved it off
+  // the floor. Every prospect a plant ever adds starts at `not_started`, so a
+  // badge for that value would sit beside every name in the church saying
+  // nothing; the Overview tab always shows the row, floor included.
+  const showsBackgroundCheck = person.backgroundCheckStatus !== "not_started";
+
   return (
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div className="flex items-start gap-4">
@@ -87,6 +94,12 @@ export function PersonHeader({
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight">{fullName}</h1>
             {statusBadge}
+            {showsBackgroundCheck && (
+              <BackgroundCheckBadge
+                status={person.backgroundCheckStatus}
+                labelled
+              />
+            )}
           </div>
           {household && (
             <p className="text-muted-foreground text-sm">{household.name}</p>

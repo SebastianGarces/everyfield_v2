@@ -1,4 +1,5 @@
 import {
+  backgroundCheckStatuses,
   commitmentTypes,
   householdRoles,
   interviewResults,
@@ -16,6 +17,7 @@ import { z } from "zod";
 
 export const personStatusSchema = z.enum(personStatuses);
 export const personSourceSchema = z.enum(personSources);
+export const backgroundCheckStatusSchema = z.enum(backgroundCheckStatuses);
 export const householdRoleSchema = z.enum(householdRoles);
 export const interviewStatusSchema = z.enum(interviewStatuses);
 export const interviewResultSchema = z.enum(interviewResults);
@@ -52,6 +54,10 @@ export const personCreateSchema = z.object({
   postalCode: z.string().max(20).optional(),
   country: z.string().max(100).optional().default("US"),
   status: personStatusSchema.optional().default("prospect"),
+  // No zod default, deliberately: the COLUMN's `DEFAULT 'not_started'` is the
+  // one declaration of the floor, and a creation path that says nothing gets it
+  // from the database rather than from a second copy here.
+  backgroundCheckStatus: backgroundCheckStatusSchema.optional(),
   source: personSourceSchema.optional(),
   sourceDetails: z.string().optional(),
   notes: z.string().optional(),

@@ -2,6 +2,7 @@
 export type {
   ActivityType,
   Assessment,
+  BackgroundCheckStatus,
   Commitment,
   CommitmentType,
   Household,
@@ -34,6 +35,7 @@ export type {
 // Re-export enum arrays for use in components
 export {
   activityTypes,
+  backgroundCheckStatuses,
   commitmentTypes,
   householdRoles,
   interviewResults,
