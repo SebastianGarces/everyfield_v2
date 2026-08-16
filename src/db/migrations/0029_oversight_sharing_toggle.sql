@@ -92,7 +92,7 @@
 --     TS schema.
 --
 -- So: EXPAND now (add the column, widen the CHECKs — old code unaffected),
--- CONTRACT later. The contract half is `0043_drop_share_phase_digest.sql`
+-- CONTRACT later. The contract half is `0045_drop_share_phase_digest.sql`
 -- (#255), applied after #224 closed and nothing in `src/` still selected the
 -- dead columns.
 --

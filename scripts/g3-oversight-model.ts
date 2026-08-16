@@ -7,7 +7,7 @@
  * has had every migration applied by `pnpm db:migrate`. Nothing is faked. The
  * unit tests cover the logic; this covers what the database actually does with
  * it, including the migration's own effect — the new column exists at false for
- * every church, and 0043 has dropped the two columns 0029 superseded.
+ * every church, and 0045 has dropped the two columns 0029 superseded.
  *
  *   pnpm g3:oversight
  *
@@ -293,7 +293,7 @@ async function run(created: Created) {
   // 1. MIGRATION — the single toggle exists and defaults to false for everyone,
   //    and the two per-category columns it replaces are no longer READ.
   //
-  //    0029 was expand-only. 0043 is the contract half: the superseded
+  //    0029 was expand-only. 0045 is the contract half: the superseded
   //    columns are gone from the database, not only from the schema.
   // --------------------------------------------------------------------------
   const columns = await db.execute<{ column_name: string }>(sql`
@@ -322,9 +322,9 @@ async function run(created: Created) {
   assert.ok(
     !columnNames.includes("share_phase") &&
       !columnNames.includes("share_digest"),
-    "0043 did not drop share_phase / share_digest"
+    "0045 did not drop share_phase / share_digest"
   );
-  ok("0043 dropped the dead share_phase / share_digest columns");
+  ok("0045 dropped the dead share_phase / share_digest columns");
 
   // Read back through the shipped reader — every church starts at OFF, which is
   // the substance of the ruling, not a detail of the DDL.

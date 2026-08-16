@@ -1,0 +1,49 @@
+-- Church-level IANA timezone. Church-scoped surfaces render in this zone
+-- rather than UTC: relative-day badges, training/membership dates, a
+-- message's sentAt. Meeting `datetime` stays a UTC wall clock.
+--
+-- WHY A FIXED DEFAULT, NOT INFERENCE. city / state_region / country are
+-- individually nullable — a planter who knows the city but not the region
+-- must not be blocked — so inference from the address fails open for
+-- exactly the planters who skipped them. A silently-wrong zone is worse
+-- than an obviously-default one. America/Chicago is the default and the
+-- backfill; a planter changes it in church settings. Onboarding gains no
+-- step.
+--
+-- WHY NO CHECK CONSTRAINT. The accepted ids are IANA's, and `Intl` is the
+-- runtime authority. A CHECK would freeze a copy. Invalid ids are rejected
+-- on write in application code (`isValidTimeZone` in src/lib/datetime.ts).
+--
+-- THE DEFAULT IS THE BACKFILL. ADD COLUMN … DEFAULT 'America/Chicago'
+-- NOT NULL makes every existing row read as Chicago without a separate
+-- UPDATE. Postgres 11+ stores a constant default in the catalog, so this
+-- does not rewrite the table.
+--
+-- PURELY ADDITIVE. One column on "churches". No index, no FK, nothing
+-- outside this table is touched. New inserts that omit the column get
+-- the same default, so seed and onboarding paths do not have to name it.
+--
+-- ROLLBACK — run the drop, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "time_zone";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786859500000;
+--
+-- Unconditionally clean: dropping the column cannot fail on data, and no
+-- other object depends on it. What a rollback DISCARDS is every planter's
+-- chosen zone; re-applying restores the default, not the chosen values.
+-- Revert the application code first, or together — readers select
+-- churches.time_zone.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023-0042: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted.
+--
+-- SIBLING RECONCILE. #75 landed first as 0043_true_cammi (`when`
+-- 1786859463138). This unit's original 0043_church_time_zone held a
+-- lower `when` (1786859434921) and would have been silently skipped, so
+-- it is now 0044_church_time_zone at 1786859500000. A later sibling
+-- with a `when` above this one owes it a forward reconcile.
+
+ALTER TABLE "churches" ADD COLUMN "time_zone" varchar(64) DEFAULT 'America/Chicago' NOT NULL;

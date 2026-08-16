@@ -29,9 +29,17 @@
 // `invitationActorFromSession(await verifySession())` — and reads the id off it.
 // A bare `{ id: string }` is not assignable, so "attribute this to whoever the
 // request said" cannot be written by accident, let alone reached by a forged
-// POST. The type is imported with `import type`, so this module does not pull
-// the invitation logic layer into anybody's module graph at runtime: importing
-// the audit writer must not silently widen what a caller can reach.
+// POST.
+//
+// EVERY REACH INTO `./core` IS AN `import type`, THE PAIR INCLUDED, and that is
+// what keeps this module cheap to import: a value import would pull the whole
+// invitation logic layer — and behind it the notification fan-outs and the email
+// send path — into the module graph of anybody who wanted to write an audit row,
+// and it would close a cycle, since `./core` imports the two statement builders
+// below. It is also why `auditableAssociationOrg` at the foot of this file takes
+// an already-resolved `AssociationPair` instead of an invitation: deciding which
+// two ids a `type` implies is `requireAssociationPair`'s job, over there, and
+// asking it from here is the one thing this module may not do.
 //
 // ATOMICITY. `associationEventStatement` builds the INSERT without executing it,
 // so a caller can put the audit row in the SAME `db.batch([...])` as the write
@@ -58,7 +66,7 @@ import {
   type NewAssociationEvent,
 } from "@/db/schema";
 
-import type { InvitationActor } from "./core";
+import type { AssociationPair, InvitationActor } from "./core";
 
 /**
  * WHOSE association the event is about — the subject discriminator #351 ruled
@@ -436,4 +444,88 @@ export function associationOrg(org: {
     return { orgType: "network", orgId: org.sendingNetworkId };
   }
   return null;
+}
+
+/**
+ * WHAT AN ACCEPTED INVITATION AUDITS — whose association it is and which org it
+ * is with, in the audit's own vocabulary, derived from the invitation's `type`
+ * and never from whichever of its FK columns happens to be populated.
+ *
+ * It lives HERE, beside the statement it feeds, and that is the point: the
+ * derivation and `acceptedAssociationEventStatement` are two halves of one
+ * OV-008 invariant, and they used to sit 730 lines apart in `./core` — far
+ * enough that a `default:` arm falling off the end of the switch below read as
+ * correct at both ends. `acceptInvitationAs` is now the only caller, and the
+ * only thing it does with the answer is spread it into the statement.
+ *
+ * Same derivation rule, and the same reason, as `invitingOrgForInvitation` in
+ * `@/lib/notifications/oversight`: nothing constrains an
+ * `organization_invitations` row to one FK and `insertInvitation` validates
+ * none, so a `church_to_sending_church` row carrying a stray network id would
+ * otherwise get an audit row naming a network that associated nobody.
+ *
+ * ALL THREE TYPES RETURN A SUBJECT (#304 WS3, ruling #351, migration 0036). The
+ * `sending_church_to_network` arm used to return `null` — not because that
+ * association was unworthy of an audit, but because `association_events` made a
+ * CHURCH its mandatory subject, and a sending church joining a network names no
+ * church. 0036 gave the table the subject discriminator its own header had asked
+ * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
+ * the network as org.
+ *
+ * IT IS TOTAL, AND ITS PARAMETER IS WHY. An `AssociationPair` is the narrowed
+ * output of `requireAssociationPair`, so this switch can see neither a null id
+ * nor a `type` outside the union: there is no missing-id guard to keep in step
+ * with anybody else's, no fail-closed `default:` to write, and no falsy answer
+ * to return. A FOURTH `OrganizationInvitationType` is a compile error twice —
+ * where the resolver narrows it, and in the switch below.
+ *
+ * WHICH IS WHERE THE 2026-08-13 SWEEP (#411) ENDED UP AFTER THREE ROUNDS, and
+ * the history is worth keeping because the two holes it closed were one hole.
+ * Round 1 gave the switch a `default:` that throws: with three cases and no
+ * default, TypeScript treats a switch on `OrganizationInvitationType` as
+ * exhaustive and lets the function end, so a row whose `type` is outside the
+ * union returned `undefined`. Round 2 removed the other falsy answer — the
+ * `: null` each arm returned when its type-implied ids were missing. Both
+ * reached the caller's truthiness branch as a batch of THREE statements instead
+ * of four: an association committed with no `association_events` row behind it,
+ * which is the one thing OV-008 forbids. Round 3 deleted the arms' own guards,
+ * which had become a fourth hand-written copy of "which two ids does this type
+ * imply"; taking the resolved pair is what is left of them, and the caller's
+ * branch is gone with them.
+ *
+ * The premise stays real rather than theoretical: `organization_invitations.type`
+ * is a bare `varchar(40)` with a TypeScript-only `$type<>` cast, every FK column
+ * is nullable, and nothing validates a row on the way in. What refuses such a
+ * row is the resolver, in the caller, before this function is reached at all.
+ */
+export function auditableAssociationOrg(pair: AssociationPair): {
+  subject: AssociationSubject;
+  orgType: AssociationOrgType;
+  orgId: string;
+} {
+  switch (pair.type) {
+    case "church_to_sending_church": {
+      return {
+        subject: churchSubject(pair.targetChurchId),
+        orgType: "sending_church",
+        orgId: pair.sendingChurchId,
+      };
+    }
+
+    case "church_to_network": {
+      return {
+        subject: churchSubject(pair.targetChurchId),
+        orgType: "network",
+        orgId: pair.sendingNetworkId,
+      };
+    }
+
+    case "sending_church_to_network": {
+      return {
+        subject: sendingChurchSubject(pair.targetSendingChurchId),
+        orgType: "network",
+        orgId: pair.sendingNetworkId,
+      };
+    }
+  }
 }

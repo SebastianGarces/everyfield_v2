@@ -44,7 +44,7 @@ import { churchMeetings } from "@/db/schema/meetings";
 import { eq, and } from "drizzle-orm";
 // Dates render through the pinned-zone formatter, never date-fns —
 // memory/invariants.md → Date & Time Rendering.
-import { formatDateTime } from "@/lib/datetime";
+import { DEFAULT_CHURCH_TIME_ZONE, formatDateTime } from "@/lib/datetime";
 import { meetingTypeLabel } from "@/lib/meetings/labels";
 
 export const dynamic = "force-dynamic";
@@ -130,6 +130,7 @@ export default async function MessageDetailPage({
   // page turned `Bob & Sue` into `Bob &amp;amp; Sue`.
 
   const tiles = summarizeMessageDelivery(comm.stats);
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   // The gate is decided on the server so the button and the action agree, and
   // so a 24-hour boundary can never differ between render and hydration.
@@ -166,7 +167,10 @@ export default async function MessageDetailPage({
           </h1>
           <div className="mt-1 flex items-center gap-4">
             <p className="text-muted-foreground">
-              Sent {comm.sentAt ? formatDateTime(comm.sentAt, "long") : "—"}
+              Sent{" "}
+              {comm.sentAt
+                ? formatDateTime(comm.sentAt, "long", timeZone)
+                : "—"}
             </p>
             {meeting && (
               <Link
@@ -263,9 +267,9 @@ export default async function MessageDetailPage({
                           </td>
                           <td className="text-muted-foreground px-4 py-3 text-xs">
                             {r.deliveredAt &&
-                              `Delivered: ${formatDateTime(r.deliveredAt, "short")}`}
+                              `Delivered: ${formatDateTime(r.deliveredAt, "short", timeZone)}`}
                             {r.openedAt &&
-                              ` · Opened: ${formatDateTime(r.openedAt, "short")}`}
+                              ` · Opened: ${formatDateTime(r.openedAt, "short", timeZone)}`}
                           </td>
                         </tr>
                       );

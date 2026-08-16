@@ -22,8 +22,8 @@ export const churchPrivacySettings = pgTable(
      * oversight recipient (`sending_church_admin`, `network_admin`) is told
      * about this plant.
      *
-     * It replaced `share_phase` and `share_digest` (added by migration 0026).
-     * Those were per-category notification toggles, and the ruling
+     * It replaced the two per-category notification toggles 0026 added.
+     * Those gated `phase` and `digest` eligibility, and the ruling
      * removed the category model for oversight altogether: oversight receives a
      * daily activity SUMMARY plus three milestones, never granular per-event
      * notifications, so there is nothing left for a per-category toggle to say.
@@ -40,9 +40,9 @@ export const churchPrivacySettings = pgTable(
      * untouched: they gate what an oversight user may PULL on the oversight
      * dashboard. This one gates what is PUSHED to them.
      *
-     * `share_phase` and `share_digest` (0026) were superseded here and dropped
-     * by the 0043 contract migration after #224 closed. They are not in this
-     * schema and not in the database.
+     * The 0026 per-category toggles were superseded here and dropped by the
+     * #255 contract migration after #224 closed. They are not in this schema
+     * and not in the database.
      */
     shareActivityWithOversight: boolean("share_activity_with_oversight")
       .default(false)
