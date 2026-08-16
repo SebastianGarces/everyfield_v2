@@ -483,7 +483,7 @@ test("the intent stamp is a real column, closed by a CHECK and backfilled", () =
   const sql = readFileSync(
     path.join(
       process.cwd(),
-      "src/db/migrations/0045_preference_intent_stamp.sql"
+      "src/db/migrations/0046_preference_intent_stamp.sql"
     ),
     "utf8"
   );

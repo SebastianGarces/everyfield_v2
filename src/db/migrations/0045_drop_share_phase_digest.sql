@@ -1,0 +1,95 @@
+-- #255 — CONTRACT half of 0029: drop the dead `share_phase` / `share_digest`
+-- columns from `church_privacy_settings`.
+--
+-- WHY NOW. #224 closed 2026-08-02. The shipped schema has not named these
+-- columns since 0029. A grep of `src/` for share_phase / share_digest /
+-- sharePhase / shareDigest hits only this family of comments and historical
+-- migration files — nothing still SELECTs them. The expand window is over.
+--
+-- NOTHING ELSE CHANGES. Two DROP COLUMN statements. No CHECK, no index, no
+-- other table. Consent state lives on `share_activity_with_oversight`, which
+-- is untouched.
+--
+-- SIBLING RECONCILE. This file landed first as `0043_drop_share_phase_digest`
+-- (`when` 1786859100000). origin/main then took 0043 for wiki feedback
+-- (`0043_true_cammi`, `when` 1786859463138) and 0044 for church time zone
+-- (`when` 1786859500000). Keeping the old stamp would make a PR against
+-- current main DELETE those two files, and `drizzle-kit migrate` would skip
+-- whichever sibling held the lower `when`. It is now
+-- `0045_drop_share_phase_digest` at 1786865200000, strictly above 0044.
+-- A later sibling with a `when` above this one owes it a forward reconcile
+-- (memory/invariants.md → Migrations).
+--
+-- GENERATE. The TS schema already omitted these columns (that was the 0029
+-- expand). `pnpm db:generate` is therefore clean after this file is journaled
+-- — drizzle-kit has nothing further to propose. The SQL is written by hand
+-- because generate will not emit a DROP for columns the snapshot already
+-- forgot.
+--
+-- ROLLBACK (scratch-DB dry-run required). Re-add the columns, then delete
+-- the ledger row, in ONE psql session:
+--
+--   ALTER TABLE "church_privacy_settings"
+--     ADD COLUMN IF NOT EXISTS "share_phase" boolean DEFAULT false NOT NULL;
+--   ALTER TABLE "church_privacy_settings"
+--     ADD COLUMN IF NOT EXISTS "share_digest" boolean DEFAULT false NOT NULL;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865200000;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Re-adding restores the pre-contract shape (both false). It does not restore
+-- any opt-in that 0029 refused to migrate forward — there was none.
+--
+-- OPERATOR RECONCILE — a database that applied the OLD 0043 needs a hand
+-- before `pnpm db:migrate`. The renumber above fixes the repository and
+-- leaves every database that already ran this migration under its old stamp,
+-- 1786859100000, in a state the CLI cannot see: the two columns ARE GONE,
+-- and the ledger either still holds that old `created_at` or no longer does
+-- (an earlier rollback ran the DELETE and removed the row without re-adding
+-- the columns — the two halves of the rollback block are separable). Because
+-- the CLI compares this file's `when` against the ledger's MAXIMUM
+-- `created_at` and not against its own row, 1786865200000 wins and the DDL
+-- below is re-run. `DROP COLUMN IF EXISTS` is idempotent so the apply would
+-- not abort — but a RENUMBERED migration still owes an operator reconcile
+-- (memory/invariants.md → Migrations), and a shared database that already
+-- dropped the columns should not depend on that luck. Record the apply that
+-- already happened so the CLI skips a migration whose effect is present.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select column_name
+--     from information_schema.columns
+--    where table_name = 'church_privacy_settings'
+--      and column_name in ('share_phase', 'share_digest');
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- Zero rows back and a max BELOW 1786865200000 means this migration's effect
+-- is already present and unrecorded at the new stamp — take EXIT A. Two rows
+-- back means a normal apply; run `pnpm db:migrate` and nothing here concerns
+-- you.
+--
+-- EXIT A — the database already dropped the columns (the shared development
+-- branch, or any environment that applied the old 0043 stamp). Record the
+-- apply so the CLI skips:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_drop_share_phase_digest.sql>', 1786865200000);
+--
+-- The `created_at` literal is what matters and it is this migration's journal
+-- `when`; the hash column is bookkeeping for the next human, so write the real
+-- digest rather than a placeholder. THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it: both
+-- `share_phase` and `share_digest` absent from `church_privacy_settings` in
+-- `information_schema.columns`. If either column is still present, EXIT A is
+-- a lie; take the normal apply instead (the two `DROP COLUMN IF EXISTS`
+-- statements below). Prove it from `information_schema.columns`, never from
+-- the CLI's exit status.
+--
+-- EXIT B — a scratch, local or throwaway database whose columns are still
+-- present. Run `pnpm db:migrate` normally. If the columns are gone and you
+-- would rather re-apply than stamp the ledger, re-add them with the ROLLBACK
+-- block's two ADD COLUMNs (leave the ledger DELETE off if the old stamp is
+-- not in the ledger), then migrate.
+
+ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_digest";--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_phase";
