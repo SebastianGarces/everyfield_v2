@@ -24,6 +24,7 @@ import process from "node:process";
 // Resolved from this file, not the cwd — the test must not depend on where it is run from.
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SCRIPT = path.join(ROOT, "scripts/worktree-env.sh");
+const ADD_SCRIPT = path.join(ROOT, "scripts/worktree-add.sh");
 
 // Hermetic git: no global/system config, no identity, no prompts.
 const GIT_ENV = {
@@ -49,6 +50,14 @@ function run(...args) {
     encoding: "utf8",
     env: GIT_ENV,
     cwd: opts.cwd,
+  });
+}
+
+function runAdd(cwd, ...args) {
+  return spawnSync(ADD_SCRIPT, args, {
+    encoding: "utf8",
+    env: GIT_ENV,
+    cwd,
   });
 }
 
@@ -292,29 +301,67 @@ const REFERENCES = [
   ".claude/workflows/frd-implement.js",
 ];
 
-test("the script is executable, so prompts can just call it", () => {
+test("the scripts are executable, so prompts can just call them", () => {
   assert.ok(
     fs.statSync(SCRIPT).mode & 0o111,
     "scripts/worktree-env.sh must be +x"
   );
+  assert.ok(
+    fs.statSync(ADD_SCRIPT).mode & 0o111,
+    "scripts/worktree-add.sh must be +x"
+  );
 });
 
-test("the loop's worktree-creation step points at the script", () => {
+test("worktree-add.sh adds the tree and links .env.local", (t) => {
+  const { main, dir } = makeRepo(t);
+  const wt = path.join(dir, "wt");
+  const r = runAdd(main, "-b", "feature/wt", wt);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.ok(fs.existsSync(path.join(wt, "README.md")), "tree materialised");
+  const dst = path.join(wt, ".env.local");
+  assert.ok(fs.lstatSync(dst).isSymbolicLink(), "env linked, not copied");
+  assert.equal(fs.readFileSync(dst, "utf8"), "DATABASE_URL=main\n");
+});
+
+test("worktree-add.sh resume path (no -b) still links env", (t) => {
+  const { main, dir } = makeRepo(t);
+  git(main, "branch", "feature/resume");
+  const wt = path.join(dir, "resume");
+  const r = runAdd(main, wt, "feature/resume");
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.ok(fs.lstatSync(path.join(wt, ".env.local")).isSymbolicLink());
+});
+
+test("worktree-add.sh does not run env when git worktree add fails", (t) => {
+  const { main, dir } = makeRepo(t);
+  const wt = path.join(dir, "wt");
+  const r = runAdd(main, "-b", "feature/wt", wt, "no-such-ref");
+  assert.notEqual(r.status, 0, "a missing start-point must fail the add");
+  assert.equal(
+    fs.existsSync(path.join(wt, ".env.local")),
+    false,
+    "env must not run after a failed add"
+  );
+});
+
+test("the loop's worktree-creation step points at the wrapper", () => {
   const loop = fs.readFileSync(
     path.join(ROOT, ".claude/workflows/build-until-done.js"),
     "utf8"
   );
-  // From the creation line to the end of that prompt, rather than a fixed
-  // character window: the step legitimately grew a second (resume) path, which
-  // pushed the env line past 600 chars without weakening anything.
   const creation = loop.slice(
-    loop.indexOf("git worktree add -b"),
+    loop.indexOf("scripts/worktree-add.sh"),
     loop.indexOf("label: `setup:")
   );
   assert.match(
     creation,
-    /scripts\/worktree-env\.sh/,
-    "worktree creation must set up the env"
+    /scripts\/worktree-add\.sh/,
+    "worktree creation must go through the wrapper"
+  );
+  assert.doesNotMatch(
+    creation,
+    /git worktree add/,
+    "the setup prompt must not call git worktree add raw"
   );
 });
 

@@ -241,6 +241,8 @@ const results = await pipeline(
   tracks,
   (track) => {
     const branch = `feature/${track.id}`;
+    const wt = `.claude/worktrees/bud-${track.id}`;
+    const startPoint = base || "origin/main";
     const blocks = track.units
       .map(
         (u, i) => `### Unit ${i + 1}: ${u.title} (${u.lane}) — issue #${u.issue}
@@ -253,11 +255,14 @@ ${(u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")}`
     return agent(
       `You are a ${track.lane} engineer. ${CONVENTIONS} ${CHANNEL}
 
-This spawn uses isolation:"worktree" — the harness materialised the tree. Before writing any code, the harness provisions it (these are numbered harness steps, not optional):
-1. \`scripts/worktree-env.sh .\` — cwd is the worktree. A tree with no env fails every DB suite.
-2. \`pnpm install\` if \`node_modules\` is missing — a fresh worktree has no deps; env alone does not make tests run.
+First materialise this track's tree with the one in-repo command (never raw \`git worktree add\`), then install deps. These are numbered steps, not optional:
+1. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
+   - **no such branch → FRESH**: \`scripts/worktree-add.sh -b ${branch} ${wt} ${startPoint}\`
+   - **it exists → RESUME**: \`scripts/worktree-add.sh ${wt} ${branch}\` (no \`-b\`). A changes-requested re-entry ALWAYS resumes; never open a second branch.
+2. If \`.env.local\` is missing, \`scripts/worktree-env.sh ${wt}\` (idempotent). A tree with no env fails every DB suite.
+3. \`pnpm install\` in ${wt} — a fresh worktree has no \`node_modules\`; env alone does not make tests run.
 
-Create a NEW branch "${branch}"${base ? ` from ${base}` : ""} and implement the following ${track.units.length} unit(s)${track.units.length > 1 ? " IN ORDER (they share files, so build sequentially in one tree)" : ""}. If an open PR already exists for this branch (changes-requested re-entry), resume it and update that PR — never open a second.
+Then work in ${wt} and implement the following ${track.units.length} unit(s)${track.units.length > 1 ? " IN ORDER (they share files, so build sequentially in one tree)" : ""}. If an open PR already exists for this branch (changes-requested re-entry), resume it and update that PR — never open a second.
 
 These issues are on the frontier, so everything they were blocked by is closed and merged. Build on what exists. If something you depend on is genuinely missing from the base branch, stop and say so — that means the board is wrong, and guessing would hide it.
 
@@ -270,7 +275,6 @@ Return strictly the schema.`,
         phase: "Implement",
         agentType: track.lane === "backend" ? "backend" : "frontend",
         schema: IMPL_SCHEMA,
-        isolation: "worktree",
       }
     ).then((impl) => ({ track, impl }));
   },

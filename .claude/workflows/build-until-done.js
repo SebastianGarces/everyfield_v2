@@ -350,9 +350,21 @@ const undeclaredMigrations = (changed, declared) =>
 const schemaFenceReason = (migrations) =>
   `G5: undeclared migration(s) ${migrations.join(", ")} — db/ is not in this track's declared files. Halt and re-declare src/db/migrations/ (and the schema it applies) on the workstream; do NOT delete the migration.`;
 
-/** Harness-owned env step. Always runs after `git worktree add`; not an implementer hint. */
-const worktreeEnvStep = (wt) =>
-  `Harness: \`scripts/worktree-env.sh ${wt}\` — this is a numbered harness step, not optional. A tree with no env fails every DB suite.`;
+/** Threads from reviewFeedback that have no threadReplies row with a non-empty body. */
+const unansweredReviewThreads = (feedback, replies) => {
+  const threads = [
+    ...new Set(
+      (feedback || [])
+        .map((f) => String(f.threadId || f.id || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const rows = replies || [];
+  return threads.filter((id) => {
+    const row = rows.find((r) => String(r.threadId || "").trim() === id);
+    return !row || !String(row.body || "").trim();
+  });
+};
 
 const summarise = (us, extra = {}) => {
   const files = [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))];
@@ -593,12 +605,24 @@ const EXIT = {
   blocked: ["agent:blocked", "blocked", "The work did not reach the Definition of Done. The human needs the failing gate and its evidence, then a decision: tighten the spec, raise the budget, or take it manually."], // prettier-ignore
   "delivery-failed": ["agent:delivery-failed", "pr-failed", "Every gate PASSED and only the delivery step failed: say plainly that the human should retry the delivery (push the branch, open the PR) and must NOT re-review or rebuild code that already passed."], // prettier-ignore
   errored: ["agent:in-review", "errored", "The PR is open and its check is green — only the board write did not stick. Name the PR, say that nothing needs rebuilding or re-reviewing, and set the label the ship pass could not confirm."], // prettier-ignore
-  refused: ["agent:queued", "refused", "This invocation must not run: another loop already holds a claim. Revert THIS track's issues to agent:queued (never agent:blocked — nothing failed the DoD) and name the holder. Do not build, and do not clear a claim you did not set."], // prettier-ignore
+  refused: ["agent:queued", "refused", "This invocation must not run: another loop already holds a claim. Revert ONLY issues this invocation actually claimed (the claimed list it wrote to agent:in-progress) to agent:queued — never agent:blocked, and never an issue it did not claim. If claimed is empty, do not retouch labels. Name the holder. Do not build."], // prettier-ignore
 };
 
-async function exitTrack(track, kind, { reason, report = null, trees = [] }) {
+async function exitTrack(
+  track,
+  kind,
+  { reason, report = null, trees = [], claimed = null }
+) {
   const [label, status, brief] = EXIT[kind];
   log(`⛔ ${track.id} ${kind}: ${reason}`);
+  const claimedIssues = (claimed || []).map(Number).filter(Boolean);
+  // On refused, only rewrite labels this invocation actually wrote. An empty
+  // claimed list means serialize refused before any edit — leave the board.
+  const labelTargets = kind === "refused" ? claimedIssues : track.issues;
+  const labelInstructions =
+    kind === "refused" && labelTargets.length === 0
+      ? `Do NOT run \`gh issue edit\`. This invocation claimed nothing, so it must not retouch labels — an issue still on \`agent:changes-requested\` or \`agent:queued\` stays there. Do not rewrite it to queued. Comment to name the holder. Report \`observed: []\`.`
+      : `Then label ${kind === "refused" ? `ONLY the issue(s) this invocation actually claimed (${hashes(labelTargets)}) — never a number it did not write to agent:in-progress` : "it"} and prove it: \`gh issue edit n --add-label ${label} --remove-label agent:in-progress\`, dropping any other \`agent:*\` it carries. Read back with \`gh issue view n --json labels --jq '[.labels[].name]'\` and report EXACTLY what that printed — an issue still reading agent:in-progress is the board lying about this track.`;
   const done = await agent(
     `A build loop for issue(s) ${hashes(track.issues)} stopped. Reason: ${reason}.
 
@@ -612,7 +636,7 @@ ${evidenceBlock(report)}
 For EACH issue, \`gh issue comment <n>\` with that reason, that evidence, what to do next, and a **Surviving worktrees** section listing these — they hold the only copy of this work, they are the reader's now (\`git worktree remove <path>\` when done), and you remove none of them:
 ${treeLines(trees)}
 
-Then label it and prove it: \`gh issue edit n --add-label ${label} --remove-label agent:in-progress\`, dropping any other \`agent:*\` it carries. Read back with \`gh issue view n --json labels --jq '[.labels[].name]'\` and report EXACTLY what that printed — an issue still reading agent:in-progress is the board lying about this track. Do NOT open a PR. Return strictly the schema.`,
+${labelInstructions} Do NOT open a PR. Return strictly the schema.`,
     {
       label: `exit:${track.id}`,
       phase: "Ship",
@@ -622,7 +646,9 @@ Then label it and prove it: \`gh issue edit n --add-label ${label} --remove-labe
     }
   );
 
-  const missing = labelViolations(track.issues, done?.observed, label);
+  const missing = labelTargets.length
+    ? labelViolations(labelTargets, done?.observed, label)
+    : [];
   if (missing.length)
     log(
       `🚨 ${track.id}: issue(s) ${missing.join(", ")} do not read ${label} — fix by hand.`
@@ -650,9 +676,9 @@ async function setupTrack(track, branch, wt, passIssues) {
    For each number n: \`gh issue edit n --remove-label agent:queued --remove-label agent:changes-requested --add-label agent:in-progress\`. Drop whichever status label it currently carries. Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label to decide what to edit — the list above is the complete and only input. The number of issues you edit must be exactly ${track.issues.length}. Report them in \`claimed\`. If the issue carried \`agent:changes-requested\`, set \`changesRequested: true\`.
 3. \`git fetch origin --prune\` — an unfetched \`${BASE}\` is whatever this checkout last saw.
 4. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
-   - **no such branch → FRESH**: \`git worktree add -b ${branch} ${wt} ${BASE}\`, never from a local branch of the same name. Report \`resumed: false\`.
-   - **it exists → RESUME**: a held, blocked, or changes-requested track kept this branch on purpose — do not re-cut, reset or delete anything. Re-attach the tree if it is gone (\`git worktree add ${wt} ${branch}\`, no \`-b\`), then \`git -C ${wt} merge --no-edit ${BASE}\`. If that conflicts, do NOT resolve it: capture \`git -C ${wt} diff --name-only --diff-filter=U\`, \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and those paths. Report \`resumed: true\`. A changes-requested re-entry ALWAYS resumes; never open a second branch.
-5. \`scripts/worktree-env.sh ${wt}\` — harness-owned, not optional. A tree with no env fails every DB suite.
+   - **no such branch → FRESH**: \`scripts/worktree-add.sh -b ${branch} ${wt} ${BASE}\`, never from a local branch of the same name. Report \`resumed: false\`.
+   - **it exists → RESUME**: a held, blocked, or changes-requested track kept this branch on purpose — do not re-cut, reset or delete anything. Re-attach the tree if it is gone (\`scripts/worktree-add.sh ${wt} ${branch}\`, no \`-b\`), then \`git -C ${wt} merge --no-edit ${BASE}\`. If that conflicts, do NOT resolve it: capture \`git -C ${wt} diff --name-only --diff-filter=U\`, \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and those paths. Report \`resumed: true\`. A changes-requested re-entry ALWAYS resumes; never open a second branch.
+5. If \`.env.local\` is missing, \`scripts/worktree-env.sh ${wt}\` (idempotent). A tree with no env fails every DB suite.
 6. **INBOX.** For each claimed issue, \`gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<n>/comments --jq '.[] | {id, issue: <n>, author: .user.login, body}'\`. Return orchestrator instructions (not this loop's own comments) in \`comments\` and their ids in \`consumedCommentIds\`. This is the defined point the loop reads the channel.
 7. **REVIEW THREADS.** \`gh pr list --head ${branch} --state open --json number --jq '.[0].number'\`. If a PR exists, set \`openPr\` to that number and fetch unresolved review threads plus inline comments (\`gh api\` pulls comments and GraphQL \`reviewThreads\`). Return them in \`reviewFeedback\`. A changes-requested re-entry has no input without this. If none, \`openPr: 0\` and \`reviewFeedback: []\`.
 
@@ -672,6 +698,7 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
     return {
       ok: false,
       refused: true,
+      claimed,
       reason: `refused: another loop holds ${holders.map((h) => `#${h.issue}${h.title ? ` (${h.title})` : ""}`).join(", ")}. Never launch a build-until-done while another holds a claim.`,
     };
 
@@ -737,10 +764,10 @@ async function implementWorkstream(ws, trackBranch, declaredFiles, inbox = {}) {
 
 ${
   ws.solo
-    ? `Work in the existing worktree ${wt}, already on ${branch}. Env is already provisioned by the harness (do not re-run \`scripts/worktree-env.sh\`). A fresh worktree still has no \`node_modules\`: run \`pnpm install\` in ${wt} before typecheck or tests.`
-    : `First cut your tree, then the harness provisions it — these are numbered harness steps, not optional:
-1. \`git worktree add -b ${branch} ${wt} ${trackBranch}\` — from the TRACK branch, never from ${BASE}, because it already carries every earlier stage's commits. If the branch survives an earlier run, re-attach instead (no \`-b\`) without resetting it.
-2. ${worktreeEnvStep(wt)}
+    ? `Work in the existing worktree ${wt}, already on ${branch}. If \`.env.local\` is missing, run \`scripts/worktree-env.sh ${wt}\` (idempotent). A fresh worktree still has no \`node_modules\`: run \`pnpm install\` in ${wt} before typecheck or tests.`
+    : `First cut your tree — one command, which adds the worktree AND links its env — then install deps. These are numbered steps, not optional:
+1. \`scripts/worktree-add.sh -b ${branch} ${wt} ${trackBranch}\` — from the TRACK branch, never from ${BASE}, because it already carries every earlier stage's commits. If the branch survives an earlier run, re-attach instead (no \`-b\`) without resetting it.
+2. If \`.env.local\` is missing, \`scripts/worktree-env.sh ${wt}\` (idempotent).
 3. \`pnpm install\` in ${wt} — a fresh worktree has no \`node_modules\`; env alone does not make \`pnpm test\` run.
 Then work there.`
 }
@@ -783,6 +810,14 @@ Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt}. Commit 
       ws,
       branch,
       reason: `${ws.id}: ${schemaFenceReason(migrations)}`,
+    };
+  const unanswered = unansweredReviewThreads(feedback, impl.threadReplies);
+  if (unanswered.length)
+    return {
+      ok: false,
+      ws,
+      branch,
+      reason: `${ws.id}: review thread(s) ${unanswered.join(", ")} have no threadReplies row with a non-empty body — silence is not a reply.`,
     };
   return {
     ok: true,
@@ -1038,6 +1073,7 @@ async function buildTrack(track) {
         ? setup.reason
         : `could not prepare ${wt} on ${branch}: ${setup.reason}`,
       trees: trees(),
+      claimed: setup.claimed,
     });
 
   const inbox = {

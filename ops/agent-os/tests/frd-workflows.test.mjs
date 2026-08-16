@@ -638,11 +638,20 @@ const DEFAULTS = {
     headSha: BASE_SHA,
     baseSha: BASE_SHA,
   }),
-  "impl:": () => ({
+  "impl:": (p) => ({
     committed: true,
     filesChanged: [],
     summary: "built it",
     commits: [COMMIT],
+    threadReplies: [...p.matchAll(/^--- (\S+)/gm)]
+      .map((m) => m[1])
+      .filter((id) => id !== "comment")
+      .map((threadId) => ({
+        threadId,
+        replied: true,
+        actioned: true,
+        body: "addressed",
+      })),
   }),
   "integrate:": (p) => ({ merged: branchesIn(p), conflicts: [] }),
   "review:": () => review(),
@@ -738,7 +747,7 @@ test("dependsOn splits one track into a prerequisite stage and a parallel fan-ou
   for (const c of agents(calls, "impl:").slice(1)) {
     assert.match(
       c.prompt,
-      /git worktree add -b feature\/schema-s1w\d \.claude\/worktrees\/bud-schema-s1w\d feature\/schema\b/,
+      /scripts\/worktree-add\.sh -b feature\/schema-s1w\d \.claude\/worktrees\/bud-schema-s1w\d feature\/schema\b/,
       "a fan-out workstream branches from the TRACK branch, so it carries the prerequisite's commits"
     );
     assert.match(c.prompt, /from the TRACK branch, never from origin\/main/);
@@ -925,10 +934,10 @@ test("the track branch is fetched and cut from origin/main, not the local ref", 
     /git fetch origin/,
     "an unfetched remote-tracking ref is a stale local ref with a longer name"
   );
-  assert.match(prompt, /git worktree add -b \S+ \S+ origin\/main\b/);
+  assert.match(prompt, /scripts\/worktree-add\.sh -b \S+ \S+ origin\/main\b/);
   assert.doesNotMatch(
     prompt,
-    /git worktree add -b \S+ \S+ main\b/,
+    /scripts\/worktree-add\.sh -b \S+ \S+ main\b/,
     "a local `main` is whatever this checkout last fetched"
   );
 });
@@ -940,7 +949,7 @@ test("a bare base is normalised onto the remote; an explicit sha is not", async 
   });
   assert.match(
     one(pinned.calls, "setup:").prompt,
-    new RegExp(`git worktree add -b \\S+ \\S+ ${sha}`),
+    new RegExp(`scripts/worktree-add\\.sh -b \\S+ \\S+ ${sha}`),
     "a deliberate pin must survive normalisation"
   );
 });
@@ -2016,7 +2025,11 @@ test("launching while another loop holds a claim is refused, naming the holder",
   assert.match(result.refused[0].reason, /#132/);
   assert.match(result.refused[0].reason, /other loop/);
   const exit = one(calls, "exit:");
-  assert.match(exit.prompt, /--add-label agent:queued --remove-label agent:in-progress/); // prettier-ignore
+  assert.doesNotMatch(
+    exit.prompt,
+    /--add-label agent:queued/,
+    "claimed is empty — this invocation wrote no in-progress labels to revert"
+  );
   assert.match(exit.prompt, /another loop/);
 });
 
@@ -2045,6 +2058,29 @@ test("a serialize abort after a claim reverts the aborting loop's issue to queue
     true,
     "the stubbed exit reads back agent:queued from the prompt it was given"
   );
+});
+
+test("a refused exit with empty claimed does not rewrite a changes-requested issue to queued", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        ready: false,
+        claimed: [],
+        holders: [{ issue: 132, title: "other loop" }],
+      }),
+    })
+  );
+  assert.equal(result.refused.length, 1);
+  const exit = one(calls, "exit:").prompt;
+  assert.doesNotMatch(
+    exit,
+    /--add-label agent:queued/,
+    "claimed is empty — the issue may still be agent:changes-requested; do not retouch it"
+  );
+  assert.match(exit, /changes-requested/);
+  assert.match(exit, /claimed nothing/);
 });
 
 test("a stale claim is recoverable without hand-editing labels", () => {
@@ -2145,14 +2181,15 @@ test("a fan-out workstream's harness-created tree is provisioned by the harness"
     stub()
   );
   for (const c of agents(calls, "impl:").slice(1)) {
+    assert.match(c.prompt, /scripts\/worktree-add\.sh/);
     assert.match(c.prompt, /scripts\/worktree-env\.sh/);
-    assert.match(c.prompt, /numbered harness steps/);
+    assert.match(c.prompt, /numbered steps/);
   }
   const setup = one(calls, "setup:").prompt;
   assert.match(setup, /scripts\/worktree-env\.sh/);
 });
 
-test("frd-implement isolation:worktree carries a harness-owned env step", async () => {
+test("frd-implement tells the agent to cut the tree with worktree-add.sh, not isolation:worktree", async () => {
   const { calls } = await runImplement({
     frontier: [frontierUnit("solo")],
     blocked: [],
@@ -2161,36 +2198,37 @@ test("frd-implement isolation:worktree carries a harness-owned env step", async 
   const implCall = calls.find(
     (c) => c.kind === "agent" && c.phase === "Implement"
   );
-  assert.equal(implCall.isolation, "worktree");
+  assert.notEqual(implCall.isolation, "worktree");
+  assert.match(implCall.prompt, /scripts\/worktree-add\.sh/);
   assert.match(implCall.prompt, /scripts\/worktree-env\.sh/);
-  assert.match(implCall.prompt, /isolation:"worktree"/);
+  assert.match(implCall.prompt, /pnpm install/);
+  assert.doesNotMatch(implCall.prompt, /isolation:"worktree"/);
 });
 
-test("the wiring test catches a worktree with no env at all", () => {
-  // Hand-rolled env recipes (a symlink or copy of the secrets file) are a
-  // different failure, covered in worktree-env.test.mjs.
-  // This one fails when a materialisation site simply never calls the script.
-  const loop = read(".claude/workflows/build-until-done.js");
-  assert.match(
-    loop,
-    /const worktreeEnvStep[\s\S]{0,300}scripts\/worktree-env\.sh/,
-    "the harness helper must actually invoke the script"
-  );
+test("every worktree materialisation goes through scripts/worktree-add.sh", () => {
+  // Fail if a loop site still says `git worktree add` without the wrapper, or
+  // still uses isolation:"worktree" (Claude's hidden tree is a second path).
   for (const file of [
     ".claude/workflows/build-until-done.js",
     ".claude/workflows/frd-implement.js",
   ]) {
     const src = read(file);
-    const sites = [
-      ...src.matchAll(/isolation:\s*"worktree"|git worktree add/g),
-    ];
-    assert.ok(sites.length > 0, `${file} materialises worktrees`);
-    for (const m of sites) {
-      const window = src.slice(Math.max(0, m.index - 2500), m.index + 2500);
+    assert.match(
+      src,
+      /scripts\/worktree-add\.sh/,
+      `${file} must invoke the wrapper`
+    );
+    assert.doesNotMatch(
+      src,
+      /isolation:\s*["']worktree["']/,
+      `${file} must not use isolation:worktree`
+    );
+    for (const m of src.matchAll(/git worktree add/g)) {
+      const window = src.slice(Math.max(0, m.index - 400), m.index + 400);
       assert.match(
         window,
-        /scripts\/worktree-env\.sh|worktreeEnvStep\(/,
-        `${file} materialises a worktree at ${m.index} with no env`
+        /scripts\/worktree-add\.sh/,
+        `${file} has raw git worktree add at ${m.index} whose window does not go through the wrapper`
       );
     }
   }
@@ -2198,7 +2236,7 @@ test("the wiring test catches a worktree with no env at all", () => {
 
 // ---------------------------------------------------------------------------
 // #329 WS2 — agent:changes-requested re-enters the loop
-// #327 WS3 — fresh-worktree wording names deps (env is harness-owned)
+// #327 WS3 — fresh-worktree wording names deps; env is the wrapper + idempotent fallback
 // ---------------------------------------------------------------------------
 
 test("agent:changes-requested is documented as mutually exclusive and takeable", () => {
@@ -2267,11 +2305,50 @@ test("a changes-requested re-entry reads review threads, replies, and updates th
   assert.match(ship, /never open a second/);
 });
 
-test("a solo implementer is told to pnpm install because deps are missing, not to re-run env", async () => {
+test("a re-entry with review threads and empty threadReplies is blocked, no ship", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        changesRequested: true,
+        openPr: 42,
+        reviewFeedback: [
+          {
+            id: "PRRT_1",
+            threadId: "PRRT_1",
+            path: "src/foo.ts",
+            line: 10,
+            author: "reviewer",
+            body: "rename this helper",
+          },
+        ],
+      }),
+      "impl:": () => ({
+        committed: true,
+        filesChanged: [],
+        summary: "built it",
+        commits: [COMMIT],
+        threadReplies: [],
+      }),
+    })
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("ship:")),
+    "unanswered review threads must not ship"
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.blocked.length, 1);
+  assert.match(result.blocked[0].reason, /PRRT_1/);
+  assert.match(result.blocked[0].reason, /threadReplies/);
+});
+
+test("a solo implementer is told to run worktree-env.sh if missing, and pnpm install", async () => {
   const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
   const impl = one(calls, "impl:").prompt;
   assert.match(impl, /pnpm install/);
-  assert.match(impl, /do not re-run/);
+  assert.match(impl, /scripts\/worktree-env\.sh/);
+  assert.doesNotMatch(impl, /do not re-run/);
   assert.match(impl, /node_modules/);
 });
 
@@ -2286,6 +2363,6 @@ test("a fan-out implementer is told to pnpm install after the harness env step",
   );
   for (const c of agents(calls, "impl:").slice(1)) {
     assert.match(c.prompt, /pnpm install/);
-    assert.match(c.prompt, /numbered harness steps/);
+    assert.match(c.prompt, /numbered steps/);
   }
 });

@@ -25,6 +25,10 @@
 #   scripts/worktree-env.sh <worktree-dir>     # link into that worktree
 #   scripts/worktree-env.sh --check [<dir>]    # report only; exit 1 if env is missing
 #
+# To CREATE a worktree and link env in one step, use `scripts/worktree-add.sh`
+# (the same argv as `git worktree add`). This script does not create trees.
+# It is idempotent: a missing or dangling link is repaired; a present file is left.
+#
 # Deps are a separate problem: a fresh worktree also has no `node_modules`, so run
 # `pnpm install` there too.
 #
@@ -42,7 +46,7 @@ target=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=true ;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "worktree-env: unknown flag: $1" >&2; exit 2 ;;
     *) target="$1" ;;
   esac

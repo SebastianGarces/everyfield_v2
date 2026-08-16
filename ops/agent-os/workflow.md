@@ -52,9 +52,12 @@ loop then:
 4. Re-runs the **full DoD** (review, WORKS, CI). A human asking for a change does not lower the bar.
 5. Replies on every thread: what changed, or not actioned and why. Silence is not a reply.
 
-## Worktree env is a harness step
+## Worktree materialisation
 
-Whenever the harness materialises a worktree (`git worktree add`, or `isolation: "worktree"`), it
-runs `scripts/worktree-env.sh` as a numbered step on that path. The implementer is not the owner
-of that step. A fresh worktree still has no `node_modules` — `pnpm install` is a separate step;
-the harness does not tell the agent to re-run env after it already did.
+One in-repo command creates a track worktree: `scripts/worktree-add.sh`, which is
+`git worktree add` then `scripts/worktree-env.sh`. Loop sites go through that
+command only — never raw `git worktree add`, never `isolation: "worktree"`.
+
+The workflow runtime cannot exec the script itself yet, so implementers still run
+`scripts/worktree-env.sh` if `.env.local` is missing (idempotent). `pnpm install`
+is a separate agent step; a fresh worktree has no `node_modules`.
