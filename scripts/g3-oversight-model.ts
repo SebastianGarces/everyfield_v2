@@ -7,9 +7,7 @@
  * has had every migration applied by `pnpm db:migrate`. Nothing is faked. The
  * unit tests cover the logic; this covers what the database actually does with
  * it, including the migration's own effect — the new column exists at false for
- * every church, and the two columns it SUPERSEDES are still present and still
- * readable, because 0029 is expand-only (see §1; the contract migration that
- * drops them is #255).
+ * every church, and 0043 has dropped the two columns 0029 superseded.
  *
  *   pnpm g3:oversight
  *
@@ -295,13 +293,8 @@ async function run(created: Created) {
   // 1. MIGRATION — the single toggle exists and defaults to false for everyone,
   //    and the two per-category columns it replaces are no longer READ.
   //
-  //    0029 is expand-only: it adds without dropping. The columns it supersedes
-  //    are still in the database on purpose, because this Neon branch is shared
-  //    by local dev, every preview and production, and pre-0029 builds still
-  //    name `share_phase`/`share_digest` in their SELECT list. So the assertion
-  //    that matters is NOT "the columns are gone" — it is "the shipped schema
-  //    has stopped reading them, and old code can still read them". A contract
-  //    migration drops them after #224 merges.
+  //    0029 was expand-only. 0043 is the contract half: the superseded
+  //    columns are gone from the database, not only from the schema.
   // --------------------------------------------------------------------------
   const columns = await db.execute<{ column_name: string }>(sql`
     select column_name from information_schema.columns
@@ -326,17 +319,12 @@ async function run(created: Created) {
   );
   ok("the shipped schema no longer reads share_phase / share_digest");
 
-  // ...and old code still can. This is the whole point of expand/contract: a
-  // pre-0029 instance's exact projection must keep resolving while #224 sits in
-  // review. If this fails, deploying 0029 takes production's oversight surfaces
-  // down with it.
-  await db.execute(sql`
-    select "id", "church_id", "share_people", "share_meetings", "share_tasks",
-           "share_financials", "share_ministry_teams", "share_facilities",
-           "share_phase", "share_digest", "updated_at", "updated_by"
-    from "church_privacy_settings" limit 1
-  `);
-  ok("a PRE-0029 build's column projection still resolves (no deploy window)");
+  assert.ok(
+    !columnNames.includes("share_phase") &&
+      !columnNames.includes("share_digest"),
+    "0043 did not drop share_phase / share_digest"
+  );
+  ok("0043 dropped the dead share_phase / share_digest columns");
 
   // Read back through the shipped reader — every church starts at OFF, which is
   // the substance of the ruling, not a detail of the DDL.

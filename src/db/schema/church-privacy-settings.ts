@@ -40,15 +40,9 @@ export const churchPrivacySettings = pgTable(
      * untouched: they gate what an oversight user may PULL on the oversight
      * dashboard. This one gates what is PUSHED to them.
      *
-     * NOTE — `share_phase` and `share_digest` are absent from this schema but
-     * STILL PRESENT IN THE DATABASE. 0029 is deliberately expand-only: it adds
-     * the column below without dropping the two it supersedes, because this
-     * Neon branch is shared by local dev, every preview AND production, and
-     * dropping a column that pre-0029 builds still name in their SELECT list
-     * would break `canAccessFeatureData` everywhere for as long as #224 sat in
-     * review. A follow-up contract migration drops them after #224 merges.
-     * Leaving them out of this file is what makes the new code stop reading
-     * them; see the 0029 header for the full reasoning.
+     * `share_phase` and `share_digest` (0026) were superseded here and dropped
+     * by the 0043 contract migration after #224 closed. They are not in this
+     * schema and not in the database.
      */
     shareActivityWithOversight: boolean("share_activity_with_oversight")
       .default(false)

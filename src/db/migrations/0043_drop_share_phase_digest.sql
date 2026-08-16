@@ -1,0 +1,37 @@
+-- #255 — CONTRACT half of 0029: drop the dead `share_phase` / `share_digest`
+-- columns from `church_privacy_settings`.
+--
+-- WHY NOW. #224 closed 2026-08-02. The shipped schema has not named these
+-- columns since 0029. A grep of `src/` for share_phase / share_digest /
+-- sharePhase / shareDigest hits only this family of comments and historical
+-- migration files — nothing still SELECTs them. The expand window is over.
+--
+-- NOTHING ELSE CHANGES. Two DROP COLUMN statements. No CHECK, no index, no
+-- other table. Consent state lives on `share_activity_with_oversight`, which
+-- is untouched.
+--
+-- SIBLING RECONCILE. `when` is 1786859100000, above 0042's 1786769854360.
+-- A sibling that lands as 0043 with a lower `when` is silently skipped and
+-- owes this file a forward reconcile (memory/invariants.md → Migrations).
+--
+-- GENERATE. The TS schema already omitted these columns (that was the 0029
+-- expand). `pnpm db:generate` is therefore clean after this file is journaled
+-- — drizzle-kit has nothing further to propose. The SQL is written by hand
+-- because generate will not emit a DROP for columns the snapshot already
+-- forgot.
+--
+-- ROLLBACK (scratch-DB dry-run required). Re-add the columns, then delete
+-- the ledger row, in ONE psql session:
+--
+--   ALTER TABLE "church_privacy_settings"
+--     ADD COLUMN IF NOT EXISTS "share_phase" boolean DEFAULT false NOT NULL;
+--   ALTER TABLE "church_privacy_settings"
+--     ADD COLUMN IF NOT EXISTS "share_digest" boolean DEFAULT false NOT NULL;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786859100000;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Re-adding restores the pre-contract shape (both false). It does not restore
+-- any opt-in that 0029 refused to migrate forward — there was none.
+ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_digest";--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_phase";
