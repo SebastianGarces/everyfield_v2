@@ -92,9 +92,9 @@
 --     TS schema.
 --
 -- So: EXPAND now (add the column, widen the CHECKs — old code unaffected),
--- CONTRACT later (drop the two dead columns in a follow-up migration, once
--- #224 has merged and no running instance selects them). A follow-up issue
--- tracks that cleanup; it must not be folded back into this file.
+-- CONTRACT later. The contract half is `0045_drop_share_phase_digest.sql`
+-- (#255), applied after #224 closed and nothing in `src/` still selected the
+-- dead columns.
 --
 -- The generated SQL for this migration DID contain the two `DROP COLUMN`
 -- statements — drizzle-kit emits them because the TS schema no longer declares
