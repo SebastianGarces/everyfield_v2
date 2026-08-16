@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
 import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
-import { sourceReader } from "@/lib/testing/source-span";
+import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
@@ -91,6 +91,130 @@ test("§2 the pairing table is a value-import-free leaf", () => {
   assert.doesNotMatch(code, /from\s+"@\/lib\/auth\/access"/);
 });
 
+const NOTIFICATIONS_DIR = path.join(process.cwd(), "src/lib/notifications");
+
+/**
+ * The readers §3 does NOT sweep, each with the reason it cannot be swept.
+ *
+ * AN ALLOW-LIST, NOT A SILENCE. The swept set is the directory minus these, so
+ * every file that is not checked is a claim somebody made out loud and a
+ * reviewer can disagree with — the four-file hand-list this replaced exempted
+ * eighteen modules by saying nothing about them.
+ *
+ * `sweptReaders()` fails when an entry names a file that is not in the directory
+ * any more: a renamed exemption goes on exempting nothing, while the file it was
+ * written for either slips into the sweep unannounced or slips out of it.
+ */
+const SWEEP_EXEMPTIONS = new Map<string, string>([
+  [
+    "oversight-admin.ts",
+    "the pairing table itself — it is the ONE file that spells both role literals and both FK column names, and §3 exists to say so",
+  ],
+]);
+
+/** A shipped module of this directory: a `.ts` that is not a suite. */
+function isReader(name: string): boolean {
+  return /\.ts$/.test(name) && !/\.test\.ts$/.test(name);
+}
+
+/**
+ * Every reader in `src/lib/notifications/` bar the named exemptions, comments
+ * stripped, keyed by file name.
+ *
+ * DERIVED FROM THE DIRECTORY, which is the whole point: a module that lands
+ * tomorrow is swept tomorrow, rather than on the day somebody notices the list
+ * is short. The idiom is the one `src/lib/tasks/notifications.test.ts` uses for
+ * "every module that inserts into `tasks` asks for its notifications" —
+ * `readdirSync`, drop the suites, read what is left.
+ */
+function sweptReaders(): Map<string, string> {
+  const present = readdirSync(NOTIFICATIONS_DIR).filter(isReader);
+
+  for (const [name, why] of SWEEP_EXEMPTIONS) {
+    assert.ok(
+      present.includes(name),
+      `the §3 exemption list names ${name}, which is no longer in src/lib/notifications/ — point the entry at the file's new name or delete it (its stated reason: ${why})`
+    );
+  }
+
+  return new Map(
+    present
+      .filter((name) => !SWEEP_EXEMPTIONS.has(name))
+      .sort()
+      .map((name) => [
+        name,
+        stripComments(readFileSync(path.join(NOTIFICATIONS_DIR, name), "utf8")),
+      ])
+  );
+}
+
+/**
+ * One swept reader by name, for the assertions that are about a PARTICULAR file.
+ *
+ * Throws when the name is not in the derived set, so a renamed or newly exempted
+ * reader takes its own per-file assertions down with it instead of leaving them
+ * asserting nothing — the rule `sourceReader` applies to a moved anchor, applied
+ * to a moved file.
+ */
+function sweptReader(swept: Map<string, string>, name: string): string {
+  const code = swept.get(name);
+
+  assert.ok(
+    code !== undefined,
+    `§3 asserts something about ${name} in particular, and the derived sweep has no such file`
+  );
+
+  return code;
+}
+
+/**
+ * An oversight FK reached BY NAME off a row — the half-pairing §3 forbids.
+ *
+ * RECEIVERS, not bare column names, and that is deliberate: selecting
+ * `churches.sendingChurchId` is reading a PLANT's own hierarchy, which every
+ * digest and audience query legitimately does. What is banned is deciding WHICH
+ * column a role or an org kind implies, which is what a `table`/`recipient`/`org`
+ * receiver means here.
+ */
+const FK_BY_NAME = /(?:table|recipient|org)\.sending(?:Church|Network)Id/;
+
+/** An oversight role spelled out instead of read off the pairing row. */
+const ROLE_LITERAL = /"sending_church_admin"|"network_admin"/;
+
+/**
+ * The same half-pairing wearing a constructor: `{ sendingChurchId: null,
+ * sendingNetworkId: id }` names one FK, nulls the other by hand, and a third org
+ * kind leaves it quietly returning an audience missing a key.
+ * `oversightOrgOfKind` takes the KIND and lets the table pick the column.
+ */
+const HAND_NULLED_FK = /sendingChurchId: null|sendingNetworkId: null/;
+
+test("§3a the sweep's exemptions are a named allow-list with reasons", () => {
+  // The allow-list is load-bearing, so it is asserted rather than assumed: an
+  // EMPTY one would mean §3 had quietly become unexemptable (and the pairing
+  // table's own source cannot pass the general ban), and an entry with no reason
+  // is the four-file hand-list back in a new spelling.
+  assert.ok(
+    SWEEP_EXEMPTIONS.size > 0,
+    "the pairing table itself must be exempt, so an empty allow-list means the sweep is mis-wired"
+  );
+
+  for (const [name, why] of SWEEP_EXEMPTIONS) {
+    assert.match(name, /\.ts$/, `${name} is not a reader of this directory`);
+    assert.ok(
+      why.trim().length > 20,
+      `the §3 exemption for ${name} states no reason for itself`
+    );
+  }
+
+  // And an exemption genuinely leaves the swept set — plus, inside
+  // `sweptReaders`, every name still resolves to a file on disk.
+  const swept = sweptReaders();
+  for (const name of SWEEP_EXEMPTIONS.keys()) {
+    assert.ok(!swept.has(name), `${name} is exempt and must not be swept`);
+  }
+});
+
 test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   // FIX 2's structural half. The role was hoisted into `OVERSIGHT_ADMIN` while
   // the FK stayed spelled per site — three hand-written `kind === "…" ? fkA :
@@ -110,78 +234,83 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   // `networkAudience` — beside a `memory/` paragraph claiming every site read
   // the table. A sweep that names two of the three files is how that happens.
   //
-  // SO EVERY READER IN THE DIRECTORY IS LISTED, and the list grows with the
-  // directory: `oversight-audience.ts` now owns both encodings of the pairing
-  // (the SQL audience and the per-row classifier), so it is swept here from the
-  // day it exists rather than on the day somebody notices it is missing.
+  // SO THE SWEPT SET IS THE DIRECTORY, and the list grows with it because
+  // nothing here writes it out: `sweptReaders()` reads `src/lib/notifications/`
+  // and drops only the named exemptions above. That sentence was prose for one
+  // round — four files were read by hand under a comment claiming otherwise, so
+  // `oversight-audience.ts` was swept because somebody remembered to add it, and
+  // the nineteenth module would not have been. It is now true of the code.
   //
-  // AND THE LIST STOPS AT THIS DIRECTORY, deliberately. The one hand-built
-  // `OversightOrgIds` left in the repo is outside it —
+  // AND THE SWEEP STOPS AT THIS DIRECTORY, deliberately, in two ways. The one
+  // hand-built `OversightOrgIds` left in the repo is outside it —
   // `announceAssociationEndedFor` in `src/lib/invitations/core.ts` — and this
   // sweep neither reaches it nor may edit it: that file belongs to another
-  // workstream. So do not read a green §3 as "no half-pairing exists"; it says
-  // "none exists in `src/lib/notifications/`". The residual is recorded on
+  // workstream. The walk is also FLAT, so `channels/` (the delivery layer, which
+  // renders already-resolved facts and resolves no org) is outside it too; widen
+  // the walk on the day a pairing reader lands in a subdirectory. So do not read
+  // a green §3 as "no half-pairing exists"; it says "none exists in the modules
+  // directly under `src/lib/notifications/`". The residual is recorded on
   // `OversightOrgIds` itself (`./oversight-admin.ts`), where the by-construction
-  // claim is now scoped to this directory, and it is compile-guarded rather than
+  // claim is scoped to this directory, and it is compile-guarded rather than
   // fail-open: a third `OVERSIGHT_ADMIN` row widens the type's keys and that
   // literal stops compiling.
-  const noComments = (code: string) =>
-    code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const swept = sweptReaders();
 
-  const read = (relative: string) =>
-    noComments(readFileSync(path.join(process.cwd(), relative), "utf8"));
+  assert.ok(
+    swept.size >= 10,
+    "the directory scan found almost nothing to sweep — the filter is wrong"
+  );
 
-  const emitters = read("src/lib/notifications/oversight.ts");
-  const audience = read("src/lib/notifications/oversight-audience.ts");
-  const gate = read("src/lib/notifications/enqueue.ts");
-  const probe = read("src/lib/notifications/oversight-relationship.ts");
-
-  // No reader names an oversight FK column or an oversight role literal.
-  for (const [label, code] of [
-    ["oversight.ts", emitters],
-    ["oversight-audience.ts", audience],
-    ["enqueue.ts", gate],
-    ["oversight-relationship.ts", probe],
-  ] as const) {
+  // TIER ONE — the general ban, over EVERY reader the directory holds. No reader
+  // names an oversight FK column, spells an oversight role literal, or builds an
+  // org audience by nulling another kind's FK by hand.
+  for (const [label, code] of swept) {
     assert.doesNotMatch(
       code,
-      /table\.sendingChurchId|table\.sendingNetworkId|recipient\.sendingChurchId|recipient\.sendingNetworkId|org\.sendingChurchId|org\.sendingNetworkId/,
+      FK_BY_NAME,
       `${label} reaches an oversight FK through the pairing table, not by name`
     );
     assert.doesNotMatch(
       code,
-      /"sending_church_admin"|"network_admin"/,
+      ROLE_LITERAL,
       `${label} names no oversight role literal`
+    );
+    assert.doesNotMatch(
+      code,
+      HAND_NULLED_FK,
+      `${label} builds an org audience from the pairing table, not from a hand-nulled literal`
     );
   }
 
-  // The recorded-relationship probe is the strictest of the three: it holds no
-  // `users` FK name and no org-kind literal ANYWHERE, because its audit arm
-  // reads the kind off the pairing row's key for `association_events.org_type`.
+  // `oversight-digest.ts` is IN that set and passes it unchanged, which is the
+  // `churches.sending_*_id` allowance holding: the digest sweep selects both
+  // columns off `churches` to find a plant's oversight orgs, and reading a
+  // plant's hierarchy is not deciding which column a role implies.
+  assert.ok(
+    swept.has("oversight-digest.ts"),
+    "the digest sweep must be swept too — its churches.sending_*_id reads are the allowance this ban is shaped around"
+  );
+
+  const emitters = sweptReader(swept, "oversight.ts");
+  const audience = sweptReader(swept, "oversight-audience.ts");
+  const gate = sweptReader(swept, "enqueue.ts");
+  const probe = sweptReader(swept, "oversight-relationship.ts");
+
+  // TIER TWO — the recorded-relationship probe is stricter than the general ban:
+  // it holds no `users` FK name and no org-kind literal ANYWHERE, because its
+  // audit arm reads the kind off the pairing row's key for
+  // `association_events.org_type`.
   assert.doesNotMatch(
     probe,
     /sendingChurchId|sendingNetworkId|"sending_church"|"network"/,
     "oversight-relationship.ts writes no oversight FK name and no org-kind literal"
   );
 
-  // The audience CONSTRUCTORS are table-built too. `{ sendingChurchId: null,
-  // sendingNetworkId: id }` written by hand is the same half-pairing wearing a
-  // constructor: it names one FK, nulls the other by hand, and a third org kind
-  // leaves it silently returning an audience missing a key. `oversightOrgOfKind`
-  // takes the KIND and lets the table pick the column, so no `: null` for
-  // another kind's FK is written anywhere in the module.
-  for (const [label, code] of [
-    ["oversight.ts", emitters],
-    ["oversight-audience.ts", audience],
-  ] as const) {
-    assert.doesNotMatch(
-      code,
-      /sendingChurchId: null|sendingNetworkId: null/,
-      `${label} builds an org audience from the pairing table, not from a hand-nulled literal`
-    );
-  }
+  // The positives: each reader is table-BUILT, not merely free of the bans. A
+  // file deleted or renamed out from under these fails in `sweptReader` above.
   assert.match(emitters, /oversightOrgOfKind\(/);
   assert.match(emitters, /noOversightOrg\(\)/);
+  assert.match(audience, /OVERSIGHT_ADMIN_ROWS/);
 
   // And the gate has no ORG-KIND ternary left — that else-branch WAS the silent
   // absorber. Spanned through the reader rather than grepped module-wide: the
