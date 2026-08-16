@@ -2,6 +2,7 @@ import type {
   PersonTeamAssignment,
   PersonTrainingItem,
 } from "@/lib/ministry-teams/service";
+import { APP_TIME_ZONE, formatDateWithoutWeekday } from "@/lib/datetime";
 
 /**
  * Presentation helpers for the person profile's Teams & Training tab.
@@ -109,30 +110,23 @@ const MONTHS = [
  *
  * - A `date` column arrives as `YYYY-MM-DD` and is read straight off the
  *   string. Handing it to `Date` would parse it as UTC midnight and shift the
- *   day backwards for anyone west of Greenwich.
- * - A `timestamp` column arrives as a `Date` and is read through the local-time
- *   getters. Going via `toISOString()` would pin the day to UTC, so a
- *   completion recorded at 23:30 local would display as the following day.
- *
- * "Local" is the timezone of whatever runtime renders the card. Both callers
- * are server components today, so that is the server's zone (UTC on Vercel),
- * not the viewer's. Showing a viewer's — or a church's — own calendar day
- * needs a timezone decision this helper cannot make on its own.
+ *   day backwards for anyone west of Greenwich. A calendar day has no zone.
+ * - A `timestamp` column arrives as a `Date` and is read in `timeZone` — the
+ *   church's IANA zone, plumbed down. The runtime's getters follow the
+ *   process TZ (UTC on Vercel), so a completion at 23:30 in Chicago would
+ *   otherwise display as the following day.
  *
  * Returns null for a missing or unparseable value so the caller can omit it.
  */
 export function formatCalendarDate(
-  value: Date | string | null | undefined
+  value: Date | string | null | undefined,
+  timeZone: string = APP_TIME_ZONE
 ): string | null {
   if (!value) return null;
 
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
-
-    const monthName = MONTHS[value.getMonth()];
-    if (!monthName) return null;
-
-    return `${monthName} ${value.getDate()}, ${value.getFullYear()}`;
+    return formatDateWithoutWeekday(value, "short", timeZone);
   }
 
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);

@@ -225,26 +225,36 @@ test("formatCalendarDate returns null for missing or unparseable values", () => 
   assert.equal(formatCalendarDate(new Date("not-a-date")), null);
 });
 
-test("formatCalendarDate renders a completion's local day west of Greenwich", () => {
-  inTimezone("America/Chicago", () => {
-    // 23:30 on Mar 1 in Chicago is already Mar 2 in UTC. The old
-    // `completedAt.toISOString().slice(0, 10)` rendered "Mar 2, 2026".
-    const completedAt = new Date("2026-03-02T05:30:00Z");
+test("formatCalendarDate renders a completion's church day west of Greenwich", () => {
+  // 23:30 on Mar 1 in Chicago is already Mar 2 in UTC. The old
+  // `completedAt.toISOString().slice(0, 10)` rendered "Mar 2, 2026".
+  const completedAt = new Date("2026-03-02T05:30:00Z");
 
-    assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-02");
-    assert.equal(completedAt.getHours(), 23);
-    assert.equal(formatCalendarDate(completedAt), "Mar 1, 2026");
-  });
+  assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-02");
+  assert.equal(
+    formatCalendarDate(completedAt, "America/Chicago"),
+    "Mar 1, 2026"
+  );
+  assert.equal(formatCalendarDate(completedAt), "Mar 2, 2026");
 });
 
-test("formatCalendarDate renders a completion's local day east of Greenwich", () => {
-  inTimezone("Asia/Tokyo", () => {
-    // The mirror image: 00:30 on Mar 2 in Tokyo is still Mar 1 in UTC, so
-    // pinning to UTC showed the day *early*.
-    const completedAt = new Date("2026-03-01T15:30:00Z");
+test("formatCalendarDate renders a completion's church day east of Greenwich", () => {
+  // The mirror image: 00:30 on Mar 2 in Tokyo is still Mar 1 in UTC, so
+  // pinning to UTC showed the day *early*.
+  const completedAt = new Date("2026-03-01T15:30:00Z");
 
-    assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-01");
-    assert.equal(formatCalendarDate(completedAt), "Mar 2, 2026");
+  assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-01");
+  assert.equal(formatCalendarDate(completedAt, "Asia/Tokyo"), "Mar 2, 2026");
+  assert.equal(formatCalendarDate(completedAt), "Mar 1, 2026");
+});
+
+test("a hostile process TZ does not move a church-zoned completion date", () => {
+  inTimezone("Pacific/Kiritimati", () => {
+    const completedAt = new Date("2026-03-02T05:30:00Z");
+    assert.equal(
+      formatCalendarDate(completedAt, "America/Chicago"),
+      "Mar 1, 2026"
+    );
   });
 });
 

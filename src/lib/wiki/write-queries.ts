@@ -1,7 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { wikiBookmarks, wikiProgress } from "@/db/schema";
+import {
+  wikiArticleFeedback,
+  wikiBookmarks,
+  wikiProgress,
+  type WikiArticleFeedbackRating,
+} from "@/db/schema";
 
 import type { ProgressPatch } from "./write-input";
 
@@ -174,4 +179,44 @@ export function bookmarkDeleteQuery(userId: string, slug: string) {
       and(eq(wikiBookmarks.userId, userId), eq(wikiBookmarks.articleSlug, slug))
     )
     .returning({ id: wikiBookmarks.id });
+}
+
+/**
+ * Recording a vote: one upsert keyed on (church_id, user_id, article_slug).
+ *
+ * That triple is the unique index, so the conflict target is the index and a
+ * second press updates the rating in place. The SET names `rating` and
+ * `updated_at` only — church, user and slug are the row's identity, and a
+ * forged body must not be able to rewrite them.
+ *
+ * church_id is an argument the ACTION minted from the session, never a field
+ * the POST may name.
+ */
+export function articleFeedbackUpsertQuery(
+  churchId: string,
+  userId: string,
+  slug: string,
+  rating: WikiArticleFeedbackRating,
+  now: Date
+) {
+  return db
+    .insert(wikiArticleFeedback)
+    .values({
+      churchId,
+      userId,
+      articleSlug: slug,
+      rating,
+    })
+    .onConflictDoUpdate({
+      target: [
+        wikiArticleFeedback.churchId,
+        wikiArticleFeedback.userId,
+        wikiArticleFeedback.articleSlug,
+      ],
+      set: {
+        rating,
+        updatedAt: now,
+      },
+    })
+    .returning();
 }

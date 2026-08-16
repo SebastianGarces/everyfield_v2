@@ -5,12 +5,15 @@ import { test } from "node:test";
 
 import {
   APP_TIME_ZONE,
+  DEFAULT_CHURCH_TIME_ZONE,
   addCalendarDays,
   formatDate,
   formatDateTime,
   formatRelativeDay,
   formatRelativeTimestamp,
   formatTime,
+  groupedTimeZones,
+  isValidTimeZone,
   parseDateTimeLocalValue,
   relativeDayOffset,
   toCalendarDate,
@@ -73,6 +76,7 @@ function renderUnder(timeZone: string): Record<string, string> {
 
 test("the app renders every timestamp in one fixed zone", () => {
   assert.equal(APP_TIME_ZONE, "UTC");
+  assert.equal(DEFAULT_CHURCH_TIME_ZONE, "America/Chicago");
 });
 
 test("a browser far from UTC renders exactly what the server rendered", () => {
@@ -338,5 +342,82 @@ test("a not-yet-elapsed instant reads as future, never as 0m ago", () => {
   assert.equal(
     formatRelativeTimestamp(new Date("2026-07-31T14:00:00Z"), now),
     "In 1d"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Church zone, plumbed down. The same instant must render two strings in two
+// zones, and a relative-day badge that straddles UTC midnight must follow the
+// church's calendar, not UTC's.
+// ----------------------------------------------------------------------------
+
+test("an invalid IANA id is rejected, a real one is not", () => {
+  assert.equal(isValidTimeZone("America/Chicago"), true);
+  assert.equal(isValidTimeZone("UTC"), true);
+  assert.equal(isValidTimeZone("Pacific/Kiritimati"), true);
+  assert.equal(isValidTimeZone(""), false);
+  assert.equal(isValidTimeZone("Not/AZone"), false);
+  assert.equal(isValidTimeZone("America/Chicago/Extra"), false);
+});
+
+test("groupedTimeZones lists America first and includes the default", () => {
+  const groups = groupedTimeZones();
+  assert.equal(groups[0]?.region, "America");
+  const ids = groups.flatMap((group) => group.zones.map((zone) => zone.id));
+  assert.ok(ids.includes(DEFAULT_CHURCH_TIME_ZONE));
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("two churches in two zones render the same instant differently", () => {
+  // 19:00 UTC is 2:00 PM in Chicago (CDT) and 4:00 AM the next day in Tokyo.
+  assert.equal(formatTime(EVENING, "America/Chicago"), "2:00 PM");
+  assert.equal(formatTime(EVENING, "Asia/Tokyo"), "4:00 AM");
+  assert.equal(
+    formatDateTime(EVENING, "short", "America/Chicago"),
+    "Jul 30, 2026 at 2:00 PM"
+  );
+  assert.equal(
+    formatDateTime(EVENING, "short", "Asia/Tokyo"),
+    "Jul 31, 2026 at 4:00 AM"
+  );
+});
+
+test("the relative-day badge follows the church calendar across UTC midnight", () => {
+  // 00:20 UTC on July 31 is still 19:20 on July 30 in Chicago. A meeting 40
+  // minutes earlier is "Yesterday" in UTC and "Today" for the plant.
+  const now = new Date("2026-07-31T00:20:00Z");
+  const justNow = new Date("2026-07-30T23:40:00Z");
+
+  assert.equal(formatRelativeDay(justNow, now, APP_TIME_ZONE), "Yesterday");
+  assert.equal(formatRelativeDay(justNow, now, "America/Chicago"), "Today");
+  assert.equal(formatRelativeDay(justNow, now, "Asia/Tokyo"), "Today");
+});
+
+test("toCalendarDate in a church zone is not the UTC day", () => {
+  const lateUtc = new Date("2026-03-02T05:30:00.000Z");
+  assert.equal(toCalendarDate(lateUtc), "2026-03-02");
+  assert.equal(toCalendarDate(lateUtc, "America/Chicago"), "2026-03-01");
+  assert.equal(toCalendarDate(lateUtc, "Asia/Tokyo"), "2026-03-02");
+});
+
+test("a hostile process TZ does not move a church-zoned format", () => {
+  const chicago = renderUnder("Pacific/Kiritimati");
+  assert.equal(chicago.ambientTimeZone, "Pacific/Kiritimati");
+  // Default (APP_TIME_ZONE) strings are still UTC even in +14.
+  assert.equal(chicago.time, "7:00 PM");
+  assert.equal(chicago.date, "Thursday, July 30, 2026");
+});
+
+test("the week-old feed fallback is church-zoned, not UTC", () => {
+  const now = new Date("2026-07-30T12:00:00Z");
+  const older = new Date("2026-07-20T22:00:00Z");
+  // 22:00 UTC July 20 is already July 21 in Tokyo.
+  assert.equal(
+    formatRelativeTimestamp(older, now, APP_TIME_ZONE),
+    "Mon, Jul 20, 2026"
+  );
+  assert.equal(
+    formatRelativeTimestamp(older, now, "Asia/Tokyo"),
+    "Tue, Jul 21, 2026"
   );
 });

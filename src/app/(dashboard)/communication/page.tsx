@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DeliveryOverview } from "@/components/communication/delivery-overview";
-import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import {
   countCommunications,
   countSentSince,
@@ -22,7 +22,10 @@ import {
 import { getTemplates } from "@/lib/communication/templates";
 // Dates render through the pinned-zone formatter, never date-fns —
 // memory/invariants.md → Date & Time Rendering (ruled 2026-08-12, 407-3-1).
-import { formatRelativeTimestamp } from "@/lib/datetime";
+import {
+  DEFAULT_CHURCH_TIME_ZONE,
+  formatRelativeTimestamp,
+} from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +45,14 @@ export default async function CommunicationPage() {
   // question, and a logged contact must never land in a number labelled "Sent"
   // (COM-020 ruling — the split is shown, not hidden).
   const [
+    church,
     { communications: recentMessages, total },
     templates,
     deliveryTotals,
     sentThisWeek,
     loggedCount,
   ] = await Promise.all([
+    getCurrentUserChurch(),
     getCommunications(user.churchId, { limit: 10 }),
     getTemplates(user.churchId),
     getChurchDeliveryTotals(user.churchId),
@@ -60,6 +65,8 @@ export default async function CommunicationPage() {
     user.churchId,
     recentMessages
   );
+
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   // Quick action templates (show first 4 system/popular templates)
   const quickActions = templates.filter((t) => t.isSystem).slice(0, 4);
@@ -221,7 +228,7 @@ export default async function CommunicationPage() {
                             {msg.recipientCount ?? 0} recipient
                             {(msg.recipientCount ?? 0) !== 1 ? "s" : ""}
                             {msg.sentAt &&
-                              ` · ${formatRelativeTimestamp(msg.sentAt, now)}`}
+                              ` · ${formatRelativeTimestamp(msg.sentAt, now, timeZone)}`}
                           </p>
                         </div>
                         <Badge
