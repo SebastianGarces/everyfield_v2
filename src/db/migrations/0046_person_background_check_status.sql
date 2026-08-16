@@ -1,24 +1,27 @@
--- RE-STAMPED 0043 -> 0045 (2026-08-16). This migration was first minted as
--- `0043_person_background_check_status` with `when` 1786858232298. #75 then
--- landed as 0043_true_cammi (`when` 1786859463138) and #166 as
--- 0044_church_time_zone (`when` 1786859500000). drizzle applies a migration
--- only when the ledger's MAX `created_at` is strictly below the migration's
--- `when`, so under the old stamp this file would have been SILENTLY SKIPPED
--- on any database that had applied 0044. The fix (memory/invariants.md →
--- Migrations: reserving an idx does not reserve an ORDER — `when` decides)
--- is this re-stamp: idx 45 / `when` 1786865300000, strictly above 0044.
+-- RE-STAMPED 0045 -> 0046 (2026-08-16). This migration was first minted as
+-- `0043_person_background_check_status` with `when` 1786858232298, then
+-- restamped as `0045_person_background_check_status` with `when`
+-- 1786865300000 after #75 and #166 took 0043/0044. #458 then landed as
+-- `0045_drop_share_phase_digest` (`when` 1786865200000). drizzle applies a
+-- migration only when the ledger's MAX `created_at` is strictly below the
+-- migration's `when`, so a journal that kept this file at idx 45 would
+-- collide with 0045_drop, and a leftover ledger row at 1786865300000 would
+-- sit ABOVE 0045_drop's `when` (silently skipping it). The fix
+-- (memory/invariants.md → Migrations: reserving an idx does not reserve an
+-- ORDER — `when` decides) is this re-stamp: idx 46 / `when` 1786866200000,
+-- strictly above 0045's 1786865200000.
 --
--- OPERATOR RECONCILE — a database that applied the OLD 0043 needs a hand
--- before `pnpm db:migrate`. The renumber above fixes the repository and
--- leaves every database that already ran this migration under its old stamp,
--- 1786858232298, in a state the CLI cannot see: column
--- `persons.background_check_status` EXISTS, and the ledger either still
--- holds that old row or no longer does (a rollback DELETE without the DROP).
--- Because the CLI compares this file's `when` against the ledger's MAXIMUM
--- `created_at` and not against its own row, 1786865300000 wins, the DDL
--- below is re-run, and the apply dies on `ALTER TABLE "persons" ADD COLUMN
--- "background_check_status"` — column already exists — with the migration
--- aborted and the ledger unchanged.
+-- OPERATOR RECONCILE — a database that applied the OLD 0045 (or the older
+-- 0043) needs a hand before `pnpm db:migrate`. The renumber above fixes the
+-- repository and leaves every database that already ran this migration under
+-- its old stamp — 1786865300000 (0045) or 1786858232298 (0043) — in a state
+-- the CLI cannot see: column `persons.background_check_status` EXISTS, and
+-- the ledger either still holds that old row or no longer does (a rollback
+-- DELETE without the DROP). Because the CLI compares this file's `when`
+-- against the ledger's MAXIMUM `created_at` and not against its own row,
+-- 1786866200000 wins, the DDL below is re-run, and the apply dies on
+-- `ALTER TABLE "persons" ADD COLUMN "background_check_status"` — column
+-- already exists — with the migration aborted and the ledger unchanged.
 --
 -- DETECT IT. Two reads, neither of which writes anything:
 --
@@ -28,7 +31,7 @@
 --      and column_name = 'background_check_status';
 --   select max(created_at) from drizzle.__drizzle_migrations;
 --
--- One row back and a max BELOW 1786865300000 means this migration's effect
+-- One row back and a max BELOW 1786866200000 means this migration's effect
 -- is already present and unrecorded at the new stamp — take an exit below.
 -- Zero rows back means a normal apply; run `pnpm db:migrate` and nothing
 -- here concerns you.
@@ -38,7 +41,7 @@
 -- happened, so the CLI skips a migration whose effect is present:
 --
 --   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
---   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_person_background_check_status.sql>', 1786865300000);
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0046_person_background_check_status.sql>', 1786866200000);
 --
 -- The `created_at` literal is what matters and it is this migration's journal
 -- `when`; the hash column is bookkeeping for the next human, so write the real
@@ -55,7 +58,11 @@
 -- first. The header's own rule applies to the result too — prove it from
 -- `information_schema.columns`, never from the CLI's exit status, which is
 -- 0 for "skipped" and 0 for "applied" alike. A leftover ledger row at the
--- old stamp 1786858232298 is bookkeeping; drizzle keys off MAX, so leave it.
+-- old stamp 1786865300000 (or 1786858232298) is bookkeeping; drizzle keys
+-- off MAX, so leave it. That leftover 1786865300000 sits ABOVE 0045_drop's
+-- `when` 1786865200000, so that sibling will not apply via the CLI: if
+-- `share_phase` / `share_digest` still exist on `church_privacy_settings`,
+-- run 0045_drop's DDL by hand.
 --
 -- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
 -- below in full (it drops the column and the CHECK with it), then
@@ -102,17 +109,18 @@
 -- `pnpm db:migrate`.
 --
 -- SIBLING RECONCILE. Originally minted as 0043_person_background_check_status
--- with `when` 1786858232298. #75 landed first as 0043_true_cammi (`when`
--- 1786859463138) and #166 as 0044_church_time_zone (`when` 1786859500000),
--- so this file is now 0045_person_background_check_status at 1786865300000,
--- strictly above 0044, and a `db:migrate` run reaches it. A later sibling
--- with a `when` BELOW that is SILENTLY SKIPPED and owes this one a forward
--- reconcile in its own header (memory/invariants.md → Migrations).
+-- with `when` 1786858232298, then 0045_person_background_check_status at
+-- 1786865300000. #458 landed as 0045_drop_share_phase_digest (`when`
+-- 1786865200000), so this file is now 0046_person_background_check_status at
+-- 1786866200000, strictly above 0045, and a `db:migrate` run reaches it. A
+-- later sibling with a `when` BELOW that is SILENTLY SKIPPED and owes this
+-- one a forward reconcile in its own header (memory/invariants.md →
+-- Migrations).
 --
 -- ROLLBACK (HR2). Two statements, in ONE psql session:
 --
 --   ALTER TABLE "persons" DROP COLUMN IF EXISTS "background_check_status";
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865300000;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866200000;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
@@ -129,6 +137,6 @@
 -- The ledger row can also be identified by the sha256 of THIS FILE, byte for
 -- byte, from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0045_person_background_check_status.sql
+--   shasum -a 256 src/db/migrations/0046_person_background_check_status.sql
 ALTER TABLE "persons" ADD COLUMN "background_check_status" varchar(20) DEFAULT 'not_started' NOT NULL;--> statement-breakpoint
 ALTER TABLE "persons" ADD CONSTRAINT "persons_background_check_status_check" CHECK ("persons"."background_check_status" in ('not_started', 'in_progress', 'cleared', 'flagged'));

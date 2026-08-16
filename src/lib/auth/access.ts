@@ -128,12 +128,9 @@ export async function canAccessChurch(
  * 2026-07-27 ruling oversight has no per-category notification eligibility left
  * to gate.
  *
- * Those two columns are still IN the database. Migration 0029 is expand-only —
- * it adds `share_activity_with_oversight` and drops nothing, because the Neon
- * branch is shared by local dev, every preview and production, and a pre-0029
- * build still names `share_phase`/`share_digest` in its SELECT list. The
- * contract migration that drops them is a follow-up (#255). What changed here
- * is what the shipped code READS, which is the thing this type governs.
+ * The two per-category toggles 0026 added were dropped by the #255 contract
+ * migration after 0029's expand window closed. What this type governs is
+ * what the shipped code READS.
  */
 export type PrivacyFeatureKey =
   | "people"

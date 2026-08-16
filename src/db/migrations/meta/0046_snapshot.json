@@ -1,6 +1,6 @@
 {
-  "id": "e18e434f-214e-4281-96d2-2d44e5fa6c37",
-  "prevId": "c6f0f17a-b04d-46c8-9e50-64d7ef50da8c",
+  "id": "2b47e6f3-3734-4c04-8399-c55ce2d69b7b",
+  "prevId": "e18e434f-214e-4281-96d2-2d44e5fa6c37",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1090,6 +1090,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "background_check_status": {
+          "name": "background_check_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_started'"
+        },
         "source_details": {
           "name": "source_details",
           "type": "text",
@@ -1263,7 +1270,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "persons_background_check_status_check": {
+          "name": "persons_background_check_status_check",
+          "value": "\"persons\".\"background_check_status\" in ('not_started', 'in_progress', 'cleared', 'flagged')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.skills_inventory": {
