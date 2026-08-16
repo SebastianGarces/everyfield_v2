@@ -178,9 +178,20 @@ export function isPermanentlyFailed(delivery: NotificationDelivery): boolean {
  * Registered per notification `type` by the feature that owns that type —
  * F5 registers `task.overdue`, F3 registers `meeting.reminder`. Dispatch calls
  * it immediately before delivering and never interprets the subject itself.
+ *
+ * `now` IS THE RUN'S ONE CLOCK, and a predicate that asks "has this happened
+ * yet?" answers against it — never `new Date()` of its own. A run already
+ * decides its instant once (`runDispatch`'s `now`), and every claim, delivery
+ * and release below is stamped with it; a predicate reading the wall clock is a
+ * SECOND clock inside the same run, disagreeing with the one that picked the
+ * rows. The meeting predicate had that default, so its suite pinned a fixed
+ * `now` the predicate never saw and went red the day the wall clock passed the
+ * fixture. Same shape as the tasks rule in `memory/invariants.md`: the instant
+ * is plumbed as an argument, never defaulted.
  */
 export type StillLivePredicate = (
-  notification: Notification
+  notification: Notification,
+  now: Date
 ) => boolean | Promise<boolean>;
 
 const stillLivePredicates = new Map<string, StillLivePredicate>();
@@ -247,13 +258,14 @@ export type LivenessOutcome = "live" | "resolved" | "unknown";
  * delivery failure notice), which is worse than the stale send it prevents.
  */
 export async function resolveLiveness(
-  notification: Notification
+  notification: Notification,
+  now: Date
 ): Promise<LivenessOutcome> {
   const predicate = stillLivePredicates.get(notification.type);
   if (!predicate) return "live";
 
   try {
-    return (await predicate(notification)) ? "live" : "resolved";
+    return (await predicate(notification, now)) ? "live" : "resolved";
   } catch (error) {
     console.error(
       `[notifications/dispatch] still-live predicate for "${notification.type}" threw; deferring notification ${notification.id}:`,
@@ -846,7 +858,7 @@ async function processGroup(
   const live: Notification[] = [];
 
   for (const notification of group.notifications) {
-    const liveness = await resolveLiveness(notification);
+    const liveness = await resolveLiveness(notification, now);
 
     if (liveness === "live") {
       live.push(notification);

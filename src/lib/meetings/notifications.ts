@@ -552,12 +552,20 @@ export function cancelMeetingNotifications(
  * RESOLVED. The read is church-scoped, so a row whose anchor does not own the
  * meeting announces nothing. A read that THROWS is left to throw —
  * `resolveLiveness` defers the notification rather than guessing (N-014).
+ *
+ * "ALREADY UNDER WAY" IS MEASURED AGAINST THE RUN'S OWN `now`, handed in by
+ * `resolveLiveness`. It used to be a `clock` parameter defaulting to
+ * `new Date()`, and nothing ever passed one: `registerMeetingStillLivePredicates`
+ * takes only `deps`, so the registered predicate read the wall clock while the
+ * run around it was stamping everything with its own instant. Two clocks in one
+ * run — harmless in production, where the run's instant IS `new Date()`, and a
+ * time bomb in the suite, which pinned `now` in the past and watched the real
+ * date walk past its fixture meeting.
  */
 export function meetingStillLivePredicate(
-  deps: MeetingNotificationDeps = dbMeetingNotificationDeps,
-  clock: () => Date = () => new Date()
+  deps: MeetingNotificationDeps = dbMeetingNotificationDeps
 ): StillLivePredicate {
-  return async (notification) => {
+  return async (notification, now) => {
     if (!notification.churchId || !notification.entityId) return false;
 
     const meeting = await deps.loadMeeting(
@@ -569,7 +577,7 @@ export function meetingStillLivePredicate(
       return false;
     }
 
-    return meeting.datetime.getTime() > clock().getTime();
+    return meeting.datetime.getTime() > now.getTime();
   };
 }
 
