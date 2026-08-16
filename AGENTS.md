@@ -5,7 +5,8 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 ## Hard conventions
 
 - **NEVER start a dev server.** One already runs on `localhost:3000` and it serves the **main checkout**, so it never contains your branch. Use the branch's Vercel preview: `.claude/skills/browser-validation/SKILL.md`.
-- **Do not run `pnpm format`.** A `PostToolUse` hook formats every file you write, and CI runs `format:check`. `.prettierignore` excludes `*.md`, so unformatted markdown is deliberate.
+- **Do not run `pnpm format`.** A Claude `PostToolUse` hook and a Cursor `afterFileEdit` hook format every file you write, and CI runs `format:check`. `.prettierignore` excludes `*.md`, so unformatted markdown is deliberate.
+- **Cursor's factory mirror is `.cursor/`.** Skills, agents, commands, and workflows are symlinks to `.claude/`; the Prettier hook is native (Claude's `settings.json` hooks do not run here).
 - **New UI components come from the shadcn CLI**, never hand-written: `pnpm dlx shadcn@latest add <component>` (new-york style).
 - **Migrations run with `pnpm db:migrate`, never `pnpm db:push`** — versioned SQL in `src/db/migrations/` keeps them auditable.
 - **Every clickable element gets `cursor-pointer`** — shadcn components and custom clickables must add it; native `<button>`/`<a>` inherit it from `globals.css`.

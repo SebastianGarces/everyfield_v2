@@ -1546,12 +1546,13 @@ test("a factory-path unit holds itself, whether or not the caller declared it", 
     [
       { ...buildUnit("factory", 101), files: [".claude/workflows/x.js"] },
       { ...buildUnit("doctrine", 102), files: ["ops/agent-os/dod.md"] },
+      { ...buildUnit("cursor", 104), files: [".cursor/hooks.json"] },
       buildUnit("clean", 103),
     ],
     stub(),
     { autoMerge: true }
   );
-  for (const id of ["factory", "doctrine"]) {
+  for (const id of ["factory", "doctrine", "cursor"]) {
     const held = agents(calls, "ship:").find((c) => c.label.includes(id));
     assert.ok(!/gh pr merge/.test(held.prompt), `${id} must never auto-merge`);
     assert.match(held.prompt, /hold — a factory change/);
@@ -1892,5 +1893,19 @@ test("the format hook escapes the worktree ignore, and the walk still skips it",
     hook.command,
     /while \[/,
     "nearest-ancestor resolution, so a main-checkout edit behaves exactly as before"
+  );
+
+  const cursorHooks = JSON.parse(read(".cursor/hooks.json"));
+  const afterEdit = cursorHooks.hooks.afterFileEdit.find((h) =>
+    /format\.sh/.test(h.command)
+  );
+  assert.ok(afterEdit, "the Cursor afterFileEdit format hook must exist");
+  const formatSh = read(".cursor/hooks/format.sh");
+  assert.match(formatSh, /--ignore-path/);
+  assert.match(formatSh, /\.prettierignore/);
+  assert.match(
+    formatSh,
+    /while \[/,
+    "Cursor hook uses the same nearest-ancestor .prettierignore walk"
   );
 });

@@ -272,7 +272,7 @@ function clusterByFile(us) {
 
 // The machine that decides what merges keeps a human: a diff touching it never
 // auto-merges, whether or not the caller remembered to declare it.
-const FACTORY_PATH = /^(\.claude\/(workflows|skills)|ops\/agent-os)\//;
+const FACTORY_PATH = /^(\.claude\/(workflows|skills)|\.cursor|ops\/agent-os)\//;
 
 const summarise = (us, extra = {}) => {
   const files = [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))];

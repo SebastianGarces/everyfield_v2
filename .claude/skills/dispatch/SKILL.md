@@ -83,8 +83,8 @@ human decides. The loop cannot infer it — set the per-unit flag in two cases:
 
 1. The issue body declares it (never-auto-merge, hold for review, or names a human as the decision).
 2. **Always when the unit's files touch the factory** — `.claude/workflows/`, the delivery-OS skills
-   under `.claude/skills/`, or `ops/agent-os/`. A change to the machine that decides what merges
-   keeps a human, because the thing being changed is the thing that would otherwise catch the
+   under `.claude/skills/`, `.cursor/`, or `ops/agent-os/`. A change to the machine that decides what
+   merges keeps a human, because the thing being changed is the thing that would otherwise catch the
    mistake. Use the flag, not `autoMerge: false`, which would stall every clean track beside it.
 
 ## After the pass

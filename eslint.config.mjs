@@ -21,6 +21,7 @@ export default tseslint.config(
     ignores: [
       "node_modules/**",
       ".claude/**",
+      ".cursor/**",
       ".next/**",
       "out/**",
       "dist/**",

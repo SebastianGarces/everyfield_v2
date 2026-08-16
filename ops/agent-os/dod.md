@@ -98,7 +98,7 @@ beta serves real client data from its own production DB, schema and migrations r
 - **`risk:high` only:** the reviewer holds the security lens (gate 3) and reads every matching
   `memory/invariants/*.md`; the PR is labelled `risk:high` and **never auto-merges** — the human PR
   review is the checkpoint, and this is the one class of change a revert cannot undo. Factory-path
-  changes (`.claude/workflows/`, delivery-OS skills, `ops/agent-os/`) hold the same way: the machine
+  changes (`.claude/workflows/`, delivery-OS skills, `.cursor/`, `ops/agent-os/`) hold the same way: the machine
   that decides what merges keeps a human.
 
 ---
