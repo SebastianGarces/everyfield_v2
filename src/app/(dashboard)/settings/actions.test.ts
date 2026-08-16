@@ -390,3 +390,44 @@ test("the control is a real control — it calls the action and it is clickable"
   // data of its own (memory/contracts/data-patterns.md).
   assert.doesNotMatch(NOTICE_SOURCE, /useState|useEffect/);
 });
+
+test("the timezone action takes an IANA id and mints the church from the session", () => {
+  assert.match(
+    ACTIONS_CODE,
+    /export async function setChurchTimeZoneAction\(\s*timeZone: string\s*\)/
+  );
+  assert.match(ACTIONS_CODE, /refine\(isValidTimeZone\)/);
+  assert.match(ACTIONS_CODE, /session\.user\.role !== "planter"/);
+  assert.match(
+    ACTIONS_CODE,
+    /setChurchTimeZone\(\s*session\.user\.churchId,\s*parsed\.data\s*\)/
+  );
+  assert.doesNotMatch(ACTIONS_CODE, /setChurchTimeZoneAction\([^)]*churchId/);
+});
+
+const TIMEZONE_SELECT_SOURCE = readFileSync(
+  path.join(
+    process.cwd(),
+    "src/components/settings/church-time-zone-select.tsx"
+  ),
+  "utf8"
+);
+
+test("the timezone control is optimistic, calls the action, and is clickable", () => {
+  assert.match(TIMEZONE_SELECT_SOURCE, /setChurchTimeZoneAction\(/);
+  assert.match(TIMEZONE_SELECT_SOURCE, /useOptimistic/);
+  assert.doesNotMatch(TIMEZONE_SELECT_SOURCE, /useState|useEffect/);
+  assert.match(
+    TIMEZONE_SELECT_SOURCE,
+    /htmlFor="church-time-zone"[^>]*className="cursor-pointer"/
+  );
+  assert.match(TIMEZONE_SELECT_SOURCE, /data-testid="church-time-zone-select"/);
+  assert.match(
+    TIMEZONE_SELECT_SOURCE,
+    /className="w-full max-w-md cursor-pointer"/
+  );
+  assert.match(
+    TIMEZONE_SELECT_SOURCE,
+    /SelectItem[\s\S]*className="cursor-pointer"/
+  );
+});

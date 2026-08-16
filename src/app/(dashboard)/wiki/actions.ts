@@ -1,7 +1,16 @@
 "use server";
 
+import { refresh } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
+
 import { verifySession } from "@/lib/auth";
+import {
+  submitArticleFeedbackSchema,
+  upsertArticleFeedback,
+  type SubmitArticleFeedbackInput,
+} from "@/lib/wiki/feedback";
 import { searchArticles, type SearchResult } from "@/lib/wiki";
+import type { WikiArticleFeedbackRating } from "@/db/schema";
 
 /**
  * Server action to search wiki articles
@@ -70,5 +79,59 @@ export async function searchWikiArticles(
     // Never `return []` here: see the docblock. An empty list is the answer to
     // "nothing matches those words", not to "the read failed".
     throw error;
+  }
+}
+
+type ActionResult<T = void> =
+  | { success: true; data: T }
+  | { success: false; error: string; fieldErrors?: Record<string, string[]> };
+
+/**
+ * Upsert the current user's helpful / unhelpful vote on an article.
+ *
+ * The actor and the church are minted from the session, never taken as
+ * arguments. Unique per (church, user, article) — a second press updates the
+ * existing rating. `refresh()` reconciles the optimistic control on this page
+ * rather than `revalidatePath`, which would need `wikiRevalidationPath` and
+ * would miss the layout around the article.
+ */
+export async function submitArticleFeedbackAction(
+  input: SubmitArticleFeedbackInput
+): Promise<ActionResult<{ rating: WikiArticleFeedbackRating }>> {
+  const { user } = await verifySession();
+
+  const parsed = submitArticleFeedbackSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Invalid feedback",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  if (!user.churchId) {
+    return {
+      success: false,
+      error: "You must be associated with a church to rate articles",
+    };
+  }
+
+  try {
+    const feedback = await upsertArticleFeedback(user.churchId, user.id, {
+      articleSlug: parsed.data.articleSlug,
+      rating: parsed.data.rating,
+    });
+
+    refresh();
+
+    return { success: true, data: { rating: feedback.rating } };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("submitArticleFeedbackAction error:", error);
+
+    return {
+      success: false,
+      error: "An unexpected error occurred while saving your feedback",
+    };
   }
 }

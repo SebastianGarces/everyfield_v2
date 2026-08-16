@@ -17,9 +17,12 @@ import {
 
 interface MeetingHeaderProps {
   meeting: MeetingWithCounts;
+  /** Church IANA zone for the relative-day badge. Meeting wall-clock date and
+   *  time stay on `APP_TIME_ZONE`. */
+  timeZone?: string;
 }
 
-export function MeetingHeader({ meeting }: MeetingHeaderProps) {
+export function MeetingHeader({ meeting, timeZone }: MeetingHeaderProps) {
   const status = meeting.status;
   const locationDisplay =
     meeting.locationName || meeting.location?.name || "No location set";
@@ -65,7 +68,7 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-muted-foreground text-sm font-medium">
-            {formatRelativeDay(meeting.datetime)}
+            {formatRelativeDay(meeting.datetime, new Date(), timeZone)}
           </span>
           <Badge
             className={MEETING_STATUS_BADGE_CLASSES[status]}

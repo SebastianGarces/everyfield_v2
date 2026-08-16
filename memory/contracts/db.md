@@ -9,6 +9,7 @@ tenant scope; `created_at`/`updated_at` default now.
 
 ## Non-obvious column semantics
 
+- **`churches.time_zone`** (`church.ts`): non-null IANA id, default and backfill `America/Chicago`. Invalid ids are rejected on write (`isValidTimeZone` in `datetime.ts`); there is no CHECK, because IANA is `Intl`'s list. Church-scoped instants render in this zone; meeting `datetime` stays a UTC wall clock. Changed in church settings, not onboarding. There is no per-user timezone.
 - **`churches.leadership_status`** (`church.ts`): `planter_confirmed` | `no_planter` | **null =
   never asked** — null is NOT "no planter", which is why it is not a boolean. Read it only
   through `src/lib/onboarding/leadership.ts`; the planter _assignment_ is `users.church_id` +
@@ -134,3 +135,78 @@ Rules: `../invariants.md` → Dev Seeds. What the source does not tell you:
   still owns that planter's dashboard (`shouldShowOnboarding`, `src/lib/onboarding/steps.ts`).
   The value is `now()` inside the same INSERT as `created_at`'s `DEFAULT now()`, so the two are
   the same instant.
+
+## Migration ledger vs journal (HR2)
+
+The shared Neon branch is also the de-facto prod DB. **Diagnosis is read-only.** Any write to
+`drizzle.__drizzle_migrations` is attended-only — never a side effect of another track.
+
+### Finding (2026-08-16, #340)
+
+Re-ran the journal-vs-applied check against the live ledger and
+`src/db/migrations/meta/_journal.json` at `97db346` (42 journal entries, tags `0000`–`0042`).
+
+| Applied `id` | `created_at` (UTC) | Journal `when` | What it is |
+|---|---|---|---|
+| 19 | 2026-04-07T23:59:06.754Z (`1775606346754`) | **none** | Orphan. Sits between journal `0017_inactivity_thresholds` (`1771112665213`) and `0018_confused_lady_ursula` (`1781130119804`). Hash `31f441c8…` matches no committed migration blob. Live catalog OIDs place `assistant_threads` / `assistant_messages` / `assistant_artifacts` in that gap — three tables with **no repo owner** and no git history for `assistant_threads`. |
+| 40 | 2026-08-09T21:56:31.041Z (`1786312591041`) | **none** | Orphan. Same-day sibling between two journal-matched rows (`1786254063022` and `1786321828264`). Hash `dbacaf84…` matches no committed blob. No uniquely attributable leftover objects. |
+
+Every current journal `when` has a matching applied row. **0 pending.**
+
+**Id gaps** (`31`, `34`, `36`, `38`, `42`) are **deleted serial rows**, not missing journal
+entries. `__drizzle_migrations.id` is a sequence; a rollback that `DELETE`s a ledger row leaves
+a hole. Filename gaps in the repo (`0035` never existed; `0034` then `0036`) are a different
+axis and do not explain the serial holes.
+
+`share_phase` / `share_digest` still present on the live `church_privacy_settings` row are
+**not** ledger drift: 0029 is expand-only; #255 is the contract drop.
+
+### Proposed ruling
+
+**Document the drift as accepted history. Do not repair the ledger unattended.**
+
+Deleting an orphan row whose hash matches no committed file hides applied DDL we cannot name.
+The April orphan almost certainly created the `assistant_*` tables; dropping those objects is
+a separate attended decision (they hold no product code path). The August orphan stays as a
+tombstone until an operator can prove its DDL is subsumed.
+
+If a repair is later approved: identify objects, drop or keep them on purpose, then
+`DELETE FROM drizzle.__drizzle_migrations WHERE id IN (19, 40)` in the same attended session.
+Never edit `_journal.json` to invent tags for hashes we do not have.
+
+### Reusable snippet
+
+Match journal `when` to `drizzle.__drizzle_migrations.created_at`. A row on only one side is
+drift. Run read-only:
+
+```sql
+-- applied rows whose created_at is not a journal `when`
+-- (paste journal whens, or join from a values list built off _journal.json)
+SELECT id, created_at, encode(hash, 'hex')
+FROM drizzle.__drizzle_migrations
+ORDER BY id;
+```
+
+```js
+// node — worktree or checkout that has src/db/migrations/meta/_journal.json
+const journal = require("./src/db/migrations/meta/_journal.json");
+const applied = /* rows from the SELECT above, created_at as string */;
+const jWhen = new Set(journal.entries.map((e) => String(e.when)));
+const aWhen = new Set(applied.map((r) => String(r.created_at)));
+const orphans = applied.filter((r) => !jWhen.has(String(r.created_at)));
+const pending = journal.entries.filter((e) => !aWhen.has(String(e.when)));
+const ids = applied.map((r) => r.id).sort((a, b) => a - b);
+const gaps = [];
+for (let i = ids[0]; i <= ids[ids.length - 1]; i++)
+  if (!ids.includes(i)) gaps.push(i);
+console.log({
+  journal: journal.entries.length,
+  applied: applied.length,
+  orphans,
+  pending: pending.map((e) => e.tag),
+  gaps,
+});
+```
+
+HR2 evidence is this section plus a fresh run of the snippet. A green "0 pending" is not "0
+orphans".

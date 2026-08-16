@@ -39,6 +39,7 @@ interface MeetingCommunicationStatusProps {
   meetingId: string;
   communications: CommunicationSummary[];
   church: { name: string };
+  timeZone: string;
   meeting: {
     title: string | null;
     type: string;
@@ -52,6 +53,7 @@ export function MeetingCommunicationStatus({
   meetingId,
   communications,
   church,
+  timeZone,
   meeting,
 }: MeetingCommunicationStatusProps) {
   const mergeData = {
@@ -125,7 +127,7 @@ export function MeetingCommunicationStatus({
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {comm.sentAt
-                    ? formatDateTime(new Date(comm.sentAt), "short")
+                    ? formatDateTime(new Date(comm.sentAt), "short", timeZone)
                     : "Draft"}
                 </p>
               </div>

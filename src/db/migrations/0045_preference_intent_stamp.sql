@@ -69,28 +69,86 @@
 -- on `column "intent" does not exist`. Run `pnpm db:migrate` first anyway —
 -- nothing in this repo applies migrations on deploy.
 --
--- SIBLING RECONCILE. `when` is 1786857962312, above 0042's 1786769854360, so a
--- `db:migrate` run applies 0042 then this one and neither is skipped. Nothing
--- here owes a forward reconcile; a migration from another branch merging with a
--- `when` above 1786857962312 owes it (memory/invariants.md → Migrations).
+-- SIBLING RECONCILE. #75 landed as 0043_true_cammi (`when` 1786859463138) and
+-- #166 as 0044_church_time_zone (`when` 1786859500000). This unit's original
+-- 0043_preference_intent_stamp held a lower `when` (1786857962312) and would
+-- have been silently skipped — `drizzle-kit migrate` applies a migration only
+-- while the ledger's MAXIMUM `created_at` is below its `when`
+-- (memory/invariants.md → Migrations). It is now 0045_preference_intent_stamp
+-- at 1786865100000, strictly greater than 0044. A later sibling with a `when`
+-- above this one owes it a forward reconcile.
+--
+-- OPERATOR RECONCILE — a database that applied the OLD
+-- 0043_preference_intent_stamp needs a hand before `pnpm db:migrate`
+-- (memory/invariants.md → Migrations ⚖). The renumber above fixes the
+-- repository and leaves every database that already ran this migration under
+-- its old stamp, 1786857962312, in a state the CLI cannot see: the `intent`
+-- column EXISTS, and the ledger either still holds that old row or no longer
+-- does. Because the CLI compares this file's `when` against the ledger's
+-- MAXIMUM `created_at` and not against its own row, 1786865100000 wins, the
+-- DDL below is re-run, and the apply dies on
+-- `ALTER TABLE "notification_preferences" ADD COLUMN "intent"` — column
+-- already exists — with the migration aborted and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select column_name
+--     from information_schema.columns
+--    where table_name = 'notification_preferences'
+--      and column_name = 'intent';
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- A row back and a max BELOW 1786865100000 means this migration's effect is
+-- already present and unrecorded at the new stamp — take an exit below. Zero
+-- rows back means a normal apply; run `pnpm db:migrate` and nothing here
+-- concerns you.
+--
+-- BEFORE EXIT A: 0043_true_cammi (`when` 1786859463138) and
+-- 0044_church_time_zone (`when` 1786859500000) must already be in the ledger.
+-- Inserting this file's `when` first would make the CLI SILENTLY SKIP those
+-- two siblings. If they are missing, apply their SQL (or `pnpm db:migrate`
+-- until they are recorded) FIRST, then come back.
+--
+-- EXIT A — the database carries rows worth keeping (the shared `development`
+-- branch, or any environment with real data). Record the apply that already
+-- happened, so the CLI skips a migration whose effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_preference_intent_stamp.sql>', 1786865100000);
+--
+-- The `created_at` literal is what matters and it is this migration's journal
+-- `when`; the hash column is bookkeeping for the next human, so write the real
+-- digest rather than a placeholder. THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it: the
+-- `intent` column from the probe above, and
+-- `notification_preferences_intent_check` in `pg_constraint`. If either is
+-- missing, EXIT A is a lie the ledger will keep telling; take EXIT B or add
+-- the missing piece by hand first. Prove it from `information_schema.columns`,
+-- never from the CLI's exit status, which is 0 for "skipped" and 0 for
+-- "applied" alike.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
+-- below in full (it drops the CHECK and the column, and deletes the ledger
+-- row), then `pnpm db:migrate` normally and the migration applies from a
+-- clean shape.
 --
 -- ROLLBACK. Three statements, then the ledger delete, in ONE psql session:
 --
 --   ALTER TABLE "notification_preferences"
 --     DROP CONSTRAINT IF EXISTS "notification_preferences_intent_check";
 --   ALTER TABLE "notification_preferences" DROP COLUMN IF EXISTS "intent";
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786857962312;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865100000;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
--- Same reasoning as 0023/0024/0031/0032/0033/0040/0042: the journal is the
--- repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0042/0044: the journal is
+-- the repository's list of migrations, `drizzle.__drizzle_migrations` is the
 -- database's record of what ran, and only the ledger row is deleted.
 --
 -- The row can also be identified by the sha256 of THIS FILE, byte for byte,
 -- from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0043_preference_intent_stamp.sql
+--   shasum -a 256 src/db/migrations/0045_preference_intent_stamp.sql
 --
 -- ROLLING BACK REQUIRES REVERTING THE CODE TOO. `preferenceValueIsInheritable`
 -- reads `intent` on every resolution and both write paths supply it, so dropping
