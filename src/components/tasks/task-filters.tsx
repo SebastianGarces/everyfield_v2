@@ -136,7 +136,10 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
         value={currentStatus || "all"}
         onValueChange={(v) => updateParam("status", v === "all" ? null : v)}
       >
-        <SelectTrigger className="h-8 w-[130px] cursor-pointer text-xs">
+        <SelectTrigger
+          aria-label="Filter by status"
+          className="h-8 w-[130px] cursor-pointer text-xs"
+        >
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
@@ -158,7 +161,10 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
         value={currentPriority || "all"}
         onValueChange={(v) => updateParam("priority", v === "all" ? null : v)}
       >
-        <SelectTrigger className="h-8 w-[120px] cursor-pointer text-xs">
+        <SelectTrigger
+          aria-label="Filter by priority"
+          className="h-8 w-[120px] cursor-pointer text-xs"
+        >
           <SelectValue placeholder="Priority" />
         </SelectTrigger>
         <SelectContent>
@@ -178,7 +184,10 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
         value={currentCategory || "all"}
         onValueChange={(v) => updateParam("category", v === "all" ? null : v)}
       >
-        <SelectTrigger className="h-8 w-[140px] cursor-pointer text-xs">
+        <SelectTrigger
+          aria-label="Filter by category"
+          className="h-8 w-[140px] cursor-pointer text-xs"
+        >
           <SelectValue placeholder="Category" />
         </SelectTrigger>
         <SelectContent>
