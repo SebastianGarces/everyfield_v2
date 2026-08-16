@@ -41,6 +41,15 @@ export const churches = pgTable("churches", {
   sendingNetworkId: uuid("sending_network_id").references(
     () => sendingNetworks.id
   ),
+  // Display zone for church-scoped instants (relative-day badges, training
+  // dates, a message's sentAt). Meeting `datetime` is still a wall clock in
+  // UTC — this column does not reinterpret those. Default is the backfill too:
+  // every existing row is America/Chicago until a planter changes it in
+  // settings. Invalid ids are rejected on write, not by a CHECK — IANA is
+  // `Intl`'s list, and a CHECK would freeze it.
+  timeZone: varchar("time_zone", { length: 64 })
+    .default("America/Chicago")
+    .notNull(),
   // Inactivity thresholds (days since last activity)
   inactivityWarningDays: integer("inactivity_warning_days")
     .default(7)

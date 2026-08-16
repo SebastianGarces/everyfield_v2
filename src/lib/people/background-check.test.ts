@@ -57,7 +57,7 @@ test("the database closes the vocabulary, not just TypeScript", () => {
 });
 
 test("the shipped migration adds the column with its backfilling default", () => {
-  const sql = read("src/db/migrations/0043_person_background_check_status.sql");
+  const sql = read("src/db/migrations/0045_person_background_check_status.sql");
 
   // The default IS the backfill: NOT NULL with a default fills every existing
   // row in the same statement, so no separate UPDATE may creep in later.

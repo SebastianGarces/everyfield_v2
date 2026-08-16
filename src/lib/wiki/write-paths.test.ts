@@ -14,6 +14,7 @@ import * as writeQueries from "./write-queries";
 import {
   bookmarkDeleteQuery,
   bookmarkInsertQuery,
+  articleFeedbackUpsertQuery,
   progressUpsertQuery,
   recordViewUpsertQuery,
 } from "./write-queries";
@@ -49,6 +50,7 @@ import {
 // ----------------------------------------------------------------------------
 
 const USER = "11111111-1111-4111-8111-111111111111";
+const CHURCH = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SLUG = "discovery/values";
 const NOW = new Date("2026-08-13T12:00:00.000Z");
 
@@ -66,6 +68,8 @@ const WRITE_PATHS = {
   recordViewUpsertQuery: () => recordViewUpsertQuery(USER, SLUG, NOW),
   bookmarkInsertQuery: () => bookmarkInsertQuery(USER, SLUG),
   bookmarkDeleteQuery: () => bookmarkDeleteQuery(USER, SLUG),
+  articleFeedbackUpsertQuery: () =>
+    articleFeedbackUpsertQuery(CHURCH, USER, SLUG, "helpful", NOW),
 } satisfies Record<
   keyof typeof writeQueries,
   () => { toSQL(): { sql: string } }
@@ -124,7 +128,11 @@ test("every wiki write is ONE statement, and every INSERT is conflict-safe", () 
  * `server-action-surface.ts`) so a module that NAMES the shape it forbids does
  * not trip the check that forbids it.
  */
-const WRITE_MODULES = ["src/lib/wiki/progress.ts", "src/lib/wiki/bookmarks.ts"];
+const WRITE_MODULES = [
+  "src/lib/wiki/progress.ts",
+  "src/lib/wiki/bookmarks.ts",
+  "src/app/(dashboard)/wiki/actions.ts",
+];
 
 /** A statement built inline: `db.insert(`, `db.update(`, `db.delete(`. */
 const INLINE_WRITE = /db\s*\.\s*(insert|update|delete)\s*\(/;
@@ -576,4 +584,72 @@ test("removing a bookmark is keyed on the pair and reports what it removed", () 
     "without RETURNING, the toggle has to read before it writes to know which way it went"
   );
   assert.deepEqual(params, [USER, SLUG]);
+});
+
+test("an article vote conflicts on (church_id, user_id, article_slug)", () => {
+  const { sql: text, params } =
+    WRITE_PATHS.articleFeedbackUpsertQuery().toSQL();
+
+  assert.match(text, /insert into "wiki_article_feedback"/i);
+  assert.match(
+    text,
+    /on conflict \("church_id","user_id","article_slug"\) do update/i,
+    "the unique index is the triple, so that triple is the conflict target: any other target leaves a second vote possible"
+  );
+
+  const updateClause = text.slice(text.search(/do update/i));
+  assert.match(updateClause, /"rating" =/);
+  assert.match(updateClause, /"updated_at" =/);
+  assert.doesNotMatch(
+    updateClause,
+    /"church_id" =|"user_id" =|"article_slug" =/,
+    "a second vote must not rewrite the row's identity — church, user and slug are the key, not the payload"
+  );
+
+  assert.ok(params.includes(CHURCH), "the church is not bound to the write");
+  assert.ok(params.includes(USER), "the user is not bound to the write");
+  assert.ok(params.includes(SLUG), "the article is not bound to the write");
+  assert.ok(params.includes("helpful"), "the rating is not bound to the write");
+});
+
+test("the feedback action mints, then parses, then stamps the session church", () => {
+  const body = functionBodies(
+    codeOf(path.join(process.cwd(), "src/app/(dashboard)/wiki/actions.ts"))
+  ).find((fn) => fn.name === "submitArticleFeedbackAction");
+
+  assert.ok(body, "submitArticleFeedbackAction is gone from wiki/actions.ts");
+
+  const mint = body.body.indexOf("verifySession()");
+  const parseIndex = body.body.indexOf(
+    "submitArticleFeedbackSchema.safeParse("
+  );
+
+  assert.notEqual(mint, -1, "the feedback action no longer mints a session");
+  assert.notEqual(
+    parseIndex,
+    -1,
+    "the feedback action no longer parses its body"
+  );
+  assert.ok(mint < parseIndex, "the session mint must precede the parse");
+
+  assert.match(
+    body.body,
+    /upsertArticleFeedback\(\s*user\.churchId/,
+    "the church a vote is scoped to must be read off the session, not taken as an argument"
+  );
+  assert.match(
+    body.body,
+    /upsertArticleFeedback\([\s\S]*parsed\.data/,
+    "the action must hand the service the parsed body, never the raw POST"
+  );
+  assert.match(
+    body.body,
+    /refresh\(\)/,
+    "the action must call refresh() so the optimistic control reconciles without a navigation"
+  );
+  assert.doesNotMatch(
+    body.body,
+    /revalidatePath\(/,
+    "revalidatePath on a wiki slug needs wikiRevalidationPath; this mutation is the current page, so refresh() is the house pattern"
+  );
 });

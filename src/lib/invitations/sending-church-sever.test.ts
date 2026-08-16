@@ -3,13 +3,18 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { churchSubject, sendingChurchSubject, toSubjectColumns } from "./audit";
+import {
+  auditableAssociationOrg,
+  churchSubject,
+  sendingChurchSubject,
+  toSubjectColumns,
+} from "./audit";
 import {
   NOT_IN_A_NETWORK_MESSAGE,
   SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE,
-  auditableAssociationOrg,
   invitationActorFromSession,
   leaveNetworkAsSendingChurchAdmin,
+  requireAssociationPair,
   type InvitationActor,
 } from "./core";
 import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
@@ -207,13 +212,15 @@ test("the accept side audits the same subject, from the invitation's type", () =
   // halves. Both derive it from a closed union rather than from whichever FK
   // happens to be set.
   assert.deepEqual(
-    auditableAssociationOrg({
-      type: "sending_church_to_network",
-      targetChurchId: null,
-      targetSendingChurchId: SENDING_CHURCH,
-      sendingChurchId: null,
-      sendingNetworkId: NETWORK,
-    }),
+    auditableAssociationOrg(
+      requireAssociationPair({
+        type: "sending_church_to_network",
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      })
+    ),
     {
       subject: sendingChurchSubject(SENDING_CHURCH),
       orgType: "network",
