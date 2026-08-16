@@ -9,6 +9,8 @@ import { FORMAT_OUTPUT, type DocumentFormat } from "@/lib/documents/types";
 import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 import {
+  GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN,
+  generatedDocumentFilename,
   generatedDocumentForChurchQuery,
   generatedDocumentRow,
   generatedDocumentsForChurchQuery,
@@ -23,6 +25,10 @@ const USER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ARTIFACT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const SRC = path.join(process.cwd(), "src");
+const migrationSource = readFileSync(
+  path.join(SRC, "db", "migrations", "0043_generated_documents.sql"),
+  "utf8"
+);
 const serviceSource = readFileSync(
   path.join(SRC, "lib", "documents", "service.ts"),
   "utf8"
@@ -111,6 +117,16 @@ test("the format CHECK tuple matches the catalog's DocumentFormat keys", () => {
   );
 });
 
+test("the migration creates generated_documents once, with church_id NOT NULL", () => {
+  const creates = migrationSource.match(/CREATE TABLE "generated_documents"/g);
+  assert.equal(creates?.length, 1);
+  assert.match(migrationSource, /"church_id" uuid NOT NULL/);
+  assert.match(
+    migrationSource,
+    /CONSTRAINT "generated_documents_format_check"/
+  );
+});
+
 // ============================================================================
 // List tenancy — newest first, this church only
 // ============================================================================
@@ -150,8 +166,24 @@ test("list items expose no storage key — the client never sees one", () => {
   assert.equal(item.templateId, "commitment-card");
   assert.equal(item.templateName, "Core Group Commitment Card");
   assert.equal(item.format, "pdf");
+  assert.equal(item.filename, "commitment-card.pdf");
   assert.equal("storageKey" in item, false);
   assert.equal("churchId" in item, false);
+});
+
+test("the download filename is the template id plus extension, never a storage key", () => {
+  assert.equal(
+    generatedDocumentFilename("commitment-card", "pdf"),
+    "commitment-card.pdf"
+  );
+  assert.equal(
+    generatedDocumentFilename("first-year-budget", "xlsx"),
+    "first-year-budget.xlsx"
+  );
+  assert.doesNotMatch(
+    generatedDocumentFilename("commitment-card", "pdf"),
+    /documents\//
+  );
 });
 
 // ============================================================================
@@ -171,6 +203,16 @@ test("the signed-URL lookup requires id AND church_id", () => {
   assert.ok(
     !params.includes(CHURCH_B),
     "another church's id reached the signed-URL lookup"
+  );
+  assert.doesNotMatch(
+    text,
+    /where[\s\S]*storage_key/i,
+    "lookup is by id and church, never by a guessed object key"
+  );
+  assert.equal(
+    params.some((value) => String(value).startsWith("documents/")),
+    false,
+    "a storage key must not be a bind parameter of the signed-URL lookup"
   );
 });
 
@@ -199,9 +241,12 @@ test("the download URL signs the row's storage key after the church-scoped looku
       "if (!row) return null;",
       "return getSignedDownloadUrl(",
       "row.storageKey,",
+      "generatedDocumentFilename(row.templateId, row.format)",
+      "GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN",
     ],
     "a missing or foreign row must not be signed; the key comes from the row, never the client"
   );
+  assert.equal(GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN, 3600);
 });
 
 test("the action never accepts a storage key — only an artifact id", () => {
@@ -304,6 +349,8 @@ test("the generation route records after render, and a preview does not record",
 test("the history page lists the session church's documents, newest first", () => {
   assert.match(pageSource, /listGeneratedDocuments\(user\.churchId\)/);
   assert.doesNotMatch(pageSource, /storageKey/);
+  assert.match(pageSource, /document\.filename/);
+  assert.match(pageSource, /artifactId=\{document\.id\}/);
   assert.match(pageSource, /HeaderBreadcrumbs/);
   assert.match(pageSource, /formatDateWithoutWeekday/);
   assert.match(pageSource, /className="cursor-pointer"/);

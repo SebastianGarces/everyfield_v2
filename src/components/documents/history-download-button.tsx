@@ -43,11 +43,11 @@ export function HistoryDownloadButton({
       aria-label={`Download ${label}`}
     >
       {isDownloading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
       ) : (
-        <Download className="h-4 w-4" />
+        <Download className="h-4 w-4" aria-hidden="true" />
       )}
-      <span className="ml-2">Download</span>
+      Download
     </Button>
   );
 }

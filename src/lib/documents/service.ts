@@ -33,6 +33,7 @@ export type GeneratedDocumentListItem = {
   templateId: string;
   templateName: string;
   format: DocumentFormat;
+  filename: string;
   createdAt: Date;
 };
 
@@ -42,6 +43,14 @@ export function generatedDocumentStorageKey(
   ext: string
 ): string {
   return `documents/${churchId}/${id}.${ext}`;
+}
+
+/** Download filename for a stored artifact — template id plus format extension. */
+export function generatedDocumentFilename(
+  templateId: string,
+  format: DocumentFormat
+): string {
+  return `${templateId}.${FORMAT_OUTPUT[format].ext}`;
 }
 
 export function generatedDocumentRow(input: {
@@ -71,6 +80,7 @@ export function toGeneratedDocumentListItem(
     templateId: row.templateId,
     templateName: template?.name ?? row.templateId,
     format: row.format,
+    filename: generatedDocumentFilename(row.templateId, row.format),
     createdAt: row.createdAt,
   };
 }
@@ -131,11 +141,9 @@ export async function getGeneratedDocumentDownloadUrl(
   const row = await getGeneratedDocument(churchId, id);
   if (!row) return null;
 
-  const ext = FORMAT_OUTPUT[row.format].ext;
-  const filename = `${row.templateId}.${ext}`;
   return getSignedDownloadUrl(
     row.storageKey,
-    filename,
+    generatedDocumentFilename(row.templateId, row.format),
     GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN
   );
 }

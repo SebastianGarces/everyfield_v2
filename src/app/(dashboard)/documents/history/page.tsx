@@ -56,7 +56,10 @@ export default async function GeneratedDocumentsHistoryPage() {
         <div className="flex-1 overflow-auto p-6">
           {documents.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-              <FileText className="text-muted-foreground h-10 w-10" />
+              <FileText
+                className="text-muted-foreground h-10 w-10"
+                aria-hidden="true"
+              />
               <div className="space-y-1">
                 <p className="font-medium">No documents generated yet</p>
                 <p className="text-muted-foreground text-sm">
@@ -79,29 +82,28 @@ export default async function GeneratedDocumentsHistoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {documents.map((document) => {
-                  const filename = `${document.templateName}`;
-                  return (
-                    <TableRow key={document.id}>
-                      <TableCell className="font-medium">{filename}</TableCell>
-                      <TableCell>{document.templateName}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {FORMAT_LABELS[document.format]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {formatDateWithoutWeekday(document.createdAt, "short")}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <HistoryDownloadButton
-                          artifactId={document.id}
-                          label={filename}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {documents.map((document) => (
+                  <TableRow key={document.id}>
+                    <TableCell className="font-medium">
+                      {document.filename}
+                    </TableCell>
+                    <TableCell>{document.templateName}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {FORMAT_LABELS[document.format]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {formatDateWithoutWeekday(document.createdAt, "short")}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <HistoryDownloadButton
+                        artifactId={document.id}
+                        label={document.filename}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}

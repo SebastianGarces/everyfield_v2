@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import { History } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
