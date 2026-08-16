@@ -27,9 +27,17 @@ interface MeetingCardProps {
    *  embeds (the marketing page), where nothing may be clickable, focusable or
    *  prefetchable. Absent, as in the app, this card is unchanged. */
   linkStatic?: boolean;
+  /** Church IANA zone for the relative-day badge. Meeting wall-clock date and
+   *  time stay on `APP_TIME_ZONE`. Absent on marketing embeds, which keep UTC. */
+  timeZone?: string;
 }
 
-export function MeetingCard({ meeting, isPast, linkStatic }: MeetingCardProps) {
+export function MeetingCard({
+  meeting,
+  isPast,
+  linkStatic,
+  timeZone,
+}: MeetingCardProps) {
   const locationDisplay =
     meeting.locationName || meeting.location?.name || "No location set";
   const status = meeting.status;
@@ -95,7 +103,9 @@ export function MeetingCard({ meeting, isPast, linkStatic }: MeetingCardProps) {
         {!isPast && (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <CalendarDays className="h-4 w-4 shrink-0" />
-            <span>{formatRelativeDay(meeting.datetime)}</span>
+            <span>
+              {formatRelativeDay(meeting.datetime, new Date(), timeZone)}
+            </span>
           </div>
         )}
       </CardContent>

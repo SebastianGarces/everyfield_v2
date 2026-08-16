@@ -180,6 +180,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
             meetingId={meeting.id}
             communications={serializedComms}
             church={{ name: church.name }}
+            timeZone={church.timeZone}
             meeting={{
               title: meeting.title,
               type: meeting.type,

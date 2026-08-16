@@ -17,12 +17,14 @@ interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
   pastMeetings: MeetingWithCounts[];
   initialView: "upcoming" | "past" | "all";
+  timeZone: string;
 }
 
 export function MeetingList({
   upcomingMeetings,
   pastMeetings,
   initialView,
+  timeZone,
 }: MeetingListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -128,7 +130,11 @@ export function MeetingList({
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {upcomingMeetings.map((meeting) => (
-                    <MeetingCard key={meeting.id} meeting={meeting} />
+                    <MeetingCard
+                      key={meeting.id}
+                      meeting={meeting}
+                      timeZone={timeZone}
+                    />
                   ))}
                 </div>
               )}
@@ -146,7 +152,12 @@ export function MeetingList({
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {pastMeetings.map((meeting) => (
-                    <MeetingCard key={meeting.id} meeting={meeting} isPast />
+                    <MeetingCard
+                      key={meeting.id}
+                      meeting={meeting}
+                      isPast
+                      timeZone={timeZone}
+                    />
                   ))}
                 </div>
               )}

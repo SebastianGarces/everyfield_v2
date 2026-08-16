@@ -386,10 +386,10 @@ Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies
 
 → [dates-times](invariants/dates-times.md) — anything rendering or parsing a date.
 
-- Never format a `Date` without a pinned `timeZone` — format through `src/lib/datetime.ts` (`APP_TIME_ZONE`, UTC). `Intl`/`toLocale*`/date-fns follow the runtime's zone, so SSR and hydrated markup differ (React #418).
-- The CALENDAR-DAY primitives live in `datetime.ts` and nowhere else: `MS_PER_DAY`, `toCalendarDate(date)`, `addCalendarDays(from, days)` — every `date` column written by tasks, ministry-teams and launch goes through them, so the day a write NAMES is measured in the zone it is READ in. Not yet absolute: a 13-site debt list lives in [dates-times](invariants/dates-times.md) — route a call site whenever you touch its module; a NEW local day constant or a re-export is the mistake this line stops.
+- Never format a `Date` without a pinned `timeZone` — format through `src/lib/datetime.ts`. Church-scoped surfaces take the church's IANA zone as an argument (plumbed down, never a global); `APP_TIME_ZONE` (UTC) remains the pin for meeting wall-clocks and surfaces with no church. `Intl`/`toLocale*`/date-fns follow the runtime's zone, so SSR and hydrated markup differ (React #418).
+- The CALENDAR-DAY primitives live in `datetime.ts` and nowhere else: `MS_PER_DAY`, `toCalendarDate(date, timeZone?)`, `addCalendarDays(from, days)` — every `date` column written by tasks, ministry-teams and launch goes through them, so the day a write NAMES is measured in the zone it is READ in. Not yet absolute: a 13-site debt list lives in [dates-times](invariants/dates-times.md) — route a call site whenever you touch its module; a NEW local day constant or a re-export is the mistake this line stops.
 - A meeting's `datetime` is a wall clock, not a zoned instant: `meetingDatetimeSchema` with `parseDateTimeLocalValue()`/`toDateTimeLocalValue()`, never `z.coerce.date()`.
-- There is no per-user or per-church timezone column. Adding one means changing `APP_TIME_ZONE` and back-filling, never runtime-local formatting.
+- ⚖ Every church has a non-null IANA `time_zone` defaulting to `America/Chicago` (existing rows backfilled). Invalid ids are rejected on write. Church-scoped instants render in that zone; there is no per-user timezone, and onboarding does not ask.
 
 ## Client/Server Data Synchronization
 

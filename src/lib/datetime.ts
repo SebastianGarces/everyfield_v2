@@ -12,89 +12,186 @@
  * server's string, so two parts of the same page disagree about when the same
  * event is.
  *
- * Pinning the zone here makes formatting a pure function of the `Date`, so
- * server markup and client markup are identical by construction.
+ * Pinning the zone here makes formatting a pure function of the `Date` and the
+ * zone argument, so server markup and client markup are identical by
+ * construction. The zone is an argument, never a process global and never
+ * read out of a module-level church pointer.
  *
- * ## Why UTC
+ * ## Two pins, not one
  *
- * There is no per-user or per-church timezone column, and scheduling forms use
- * `<input type="datetime-local">`, which yields a *naive* wall clock — the
- * literal "2026-07-30T19:00" the planter typed, with no zone attached. We store
- * that wall clock as UTC (see `parseDateTimeLocalValue`) and render it back as
- * UTC, so what is displayed is exactly what was entered, on every machine.
- * Introducing real per-user zones later means changing `APP_TIME_ZONE` (and
- * back-filling), not hunting down formatters again.
+ * Church-scoped surfaces (a relative-day badge, a training completion, a
+ * message's `sentAt`) take the church's IANA zone, plumbed down from the row.
+ * Meeting `datetime` is still a naive wall clock: scheduling forms use
+ * `<input type="datetime-local">`, we store that literal as UTC (see
+ * `parseDateTimeLocalValue`) and render it back as UTC, so what is displayed
+ * is exactly what was entered. `APP_TIME_ZONE` is that wall-clock pin, and
+ * the default for any caller that has not been handed a church.
  */
 
 /**
- * The single zone every rendered timestamp is expressed in.
- *
- * `relativeDayOffset()` assumes this is UTC — revisit it if that changes.
+ * The pin for meeting wall clocks and for any surface that has not been
+ * handed a church zone. Church-scoped instants take the church's IANA zone
+ * as an argument instead — they do not read this constant.
  */
 export const APP_TIME_ZONE = "UTC";
+
+/**
+ * The IANA zone a new church is born with, and the backfill for every church
+ * that predates the column. Changed in church settings; never inferred from
+ * the address.
+ */
+export const DEFAULT_CHURCH_TIME_ZONE = "America/Chicago";
 
 const LOCALE = "en-US";
 
 /** `"long"` for detail views, `"short"` for dense lists and cards. */
 export type DateVariant = "long" | "short";
 
-const dateFormatters: Record<DateVariant, Intl.DateTimeFormat> = {
-  long: new Intl.DateTimeFormat(LOCALE, {
-    timeZone: APP_TIME_ZONE,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }),
-  short: new Intl.DateTimeFormat(LOCALE, {
-    timeZone: APP_TIME_ZONE,
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function formatter(
+  key: string,
+  options: Intl.DateTimeFormatOptions
+): Intl.DateTimeFormat {
+  const cached = formatterCache.get(key);
+  if (cached) return cached;
+  const created = new Intl.DateTimeFormat(LOCALE, options);
+  formatterCache.set(key, created);
+  return created;
+}
+
+/**
+ * Whether `id` is an IANA time zone `Intl` will accept.
+ *
+ * The write path is the only caller that must reject: a stored invalid id
+ * would throw from every formatter on the next render. `Intl` is the
+ * authority — a hand-maintained list would drift from the runtime.
+ */
+export function isValidTimeZone(id: string): boolean {
+  if (id === "") return false;
+  try {
+    formatter(`valid:${id}`, { timeZone: id });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * IANA zones grouped by region, America first, for the church-settings
+ * control. Labels keep the id (underscores as spaces) so the stored value
+ * and the shown value are the same name.
+ */
+export function groupedTimeZones(): {
+  region: string;
+  zones: { id: string; label: string }[];
+}[] {
+  const groups = new Map<string, { id: string; label: string }[]>();
+  for (const id of Intl.supportedValuesOf("timeZone")) {
+    const region = id.split("/")[0] ?? id;
+    const list = groups.get(region) ?? [];
+    list.push({ id, label: id.replaceAll("_", " ") });
+    groups.set(region, list);
+  }
+
+  const preferred = [
+    "America",
+    "Pacific",
+    "Europe",
+    "Africa",
+    "Asia",
+    "Australia",
+    "Atlantic",
+    "Indian",
+    "Etc",
+  ];
+  const regions = [
+    ...preferred.filter((region) => groups.has(region)),
+    ...[...groups.keys()]
+      .filter((region) => !preferred.includes(region))
+      .sort((a, b) => a.localeCompare(b, "en")),
+  ];
+
+  return regions.map((region) => ({
+    region,
+    zones: groups.get(region) ?? [],
+  }));
+}
+
+function dateFormatter(variant: DateVariant, timeZone: string) {
+  if (variant === "long") {
+    return formatter(`date:long:${timeZone}`, {
+      timeZone,
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+  return formatter(`date:short:${timeZone}`, {
+    timeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",
-  }),
-};
+  });
+}
 
-// The long date without its weekday, for prose and merged documents
-// ("September 14, 2026") — a place a weekday would read as clutter.
-const dayLongFormatter = new Intl.DateTimeFormat(LOCALE, {
-  timeZone: APP_TIME_ZONE,
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
+function dayLongFormatter(timeZone: string) {
+  return formatter(`dayLong:${timeZone}`, {
+    timeZone,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
-const timeFormatter = new Intl.DateTimeFormat(LOCALE, {
-  timeZone: APP_TIME_ZONE,
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-});
+function timeFormatter(timeZone: string) {
+  return formatter(`time:${timeZone}`, {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
-// Composed rather than a single formatter: `Intl` joins a weekday-less short
-// date to a time with a comma ("Jul 30, 2026, 7:00 PM"), and " at " reads
-// better next to the long variant, which `Intl` already joins with "at".
-const shortDateWithoutWeekday = new Intl.DateTimeFormat(LOCALE, {
-  timeZone: APP_TIME_ZONE,
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
+function shortDateWithoutWeekday(timeZone: string) {
+  return formatter(`shortDate:${timeZone}`, {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
-const longDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
-  timeZone: APP_TIME_ZONE,
-  weekday: "long",
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-});
+function longDateTimeFormatter(timeZone: string) {
+  return formatter(`dateTime:long:${timeZone}`, {
+    timeZone,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function tileFormatter(timeZone: string) {
+  return formatter(`tile:${timeZone}`, {
+    timeZone,
+    month: "short",
+    day: "numeric",
+  });
+}
 
 /** `"Thursday, July 30, 2026"` (long) / `"Thu, Jul 30, 2026"` (short). */
-export function formatDate(date: Date, variant: DateVariant = "long"): string {
-  return dateFormatters[variant].format(date);
+export function formatDate(
+  date: Date,
+  variant: DateVariant = "long",
+  timeZone: string = APP_TIME_ZONE
+): string {
+  return dateFormatter(variant, timeZone).format(date);
 }
 
 /**
@@ -103,20 +200,27 @@ export function formatDate(date: Date, variant: DateVariant = "long"): string {
  */
 export function formatDateWithoutWeekday(
   date: Date,
-  variant: DateVariant = "long"
+  variant: DateVariant = "long",
+  timeZone: string = APP_TIME_ZONE
 ): string {
-  if (variant === "long") return dayLongFormatter.format(date);
-  return shortDateWithoutWeekday.format(date);
+  if (variant === "long") return dayLongFormatter(timeZone).format(date);
+  return shortDateWithoutWeekday(timeZone).format(date);
 }
 
 /** `"September 14, 2026"` — the long date without its weekday. */
-export function formatDayLong(date: Date): string {
-  return formatDateWithoutWeekday(date, "long");
+export function formatDayLong(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): string {
+  return formatDateWithoutWeekday(date, "long", timeZone);
 }
 
 /** `"7:00 PM"`. */
-export function formatTime(date: Date): string {
-  return timeFormatter.format(date);
+export function formatTime(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): string {
+  return timeFormatter(timeZone).format(date);
 }
 
 /**
@@ -125,21 +229,12 @@ export function formatTime(date: Date): string {
  */
 export function formatDateTime(
   date: Date,
-  variant: DateVariant = "long"
+  variant: DateVariant = "long",
+  timeZone: string = APP_TIME_ZONE
 ): string {
-  if (variant === "long") return longDateTimeFormatter.format(date);
-  return `${shortDateWithoutWeekday.format(date)} at ${formatTime(date)}`;
+  if (variant === "long") return longDateTimeFormatter(timeZone).format(date);
+  return `${shortDateWithoutWeekday(timeZone).format(date)} at ${formatTime(date, timeZone)}`;
 }
-
-// Month and day on their own, for the two-line calendar tile below. A separate
-// formatter rather than a substring of `formatDate(date, "short")`: pulling
-// "Jul 30" back out of "Thu, Jul 30, 2026" means splitting on the punctuation
-// `Intl` chose, which is a locale detail, not a contract.
-const tileFormatter = new Intl.DateTimeFormat(LOCALE, {
-  timeZone: APP_TIME_ZONE,
-  month: "short",
-  day: "numeric",
-});
 
 /**
  * The two lines of a calendar tile — `["Jul", "30"]`.
@@ -152,8 +247,11 @@ const tileFormatter = new Intl.DateTimeFormat(LOCALE, {
  * the component that renders the tile pulls in server actions that open a
  * database connection at import time, and cannot be imported from a unit test.
  */
-export function calendarTileParts(date: Date): [month: string, day: string] {
-  const parts = tileFormatter.formatToParts(date);
+export function calendarTileParts(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): [month: string, day: string] {
+  const parts = tileFormatter(timeZone).formatToParts(date);
   const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
   return [valueOf("month"), valueOf("day")];
@@ -163,7 +261,8 @@ export function calendarTileParts(date: Date): [month: string, day: string] {
  * The value for an `<input type="datetime-local">`: `"2026-07-30T19:00"`.
  *
  * The inverse of `parseDateTimeLocalValue`, so opening the edit form shows the
- * same wall clock the detail page shows.
+ * same wall clock the detail page shows. Meeting datetimes are wall clocks
+ * stored as UTC, so this stays on `APP_TIME_ZONE`.
  */
 export function toDateTimeLocalValue(date: Date): string {
   return date.toISOString().slice(0, 16);
@@ -197,33 +296,44 @@ export function parseDateTimeLocalValue(value: string): Date | null {
  * One whole day, in milliseconds.
  *
  * Every "N days from here" in the app is this constant, and it lives beside
- * `APP_TIME_ZONE` because it is only correct while that zone is UTC — whose
- * days are exactly 24h and aligned to the epoch. A zone with DST would make day
- * arithmetic calendar-aware and this constant wrong, so the assumption and the
- * number belong in one file. Before #411 it was spelled five ways across the
- * tasks domain (`24 * 60 * 60 * 1000` four times, `86_400_000` once), which is
- * five places for a fix to miss.
+ * `APP_TIME_ZONE` because UTC days are exactly 24h and aligned to the epoch.
+ * Church-zoned *labels* (`relativeDayOffset` with a zone argument) compare
+ * calendar dates in that zone rather than adding this number. A NEW local
+ * copy of this constant is the mistake the calendar-day rule stops.
  */
 export const MS_PER_DAY = 86_400_000;
 
+function calendarDateFormatter(timeZone: string) {
+  return formatter(`calendar:${timeZone}`, {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
 /**
- * The `APP_TIME_ZONE` calendar day of an instant, as `"YYYY-MM-DD"`.
+ * The calendar day of an instant in `timeZone`, as `"YYYY-MM-DD"`.
  *
  * The app's one answer to "which day is this?" — `tasks.due_date` and
  * `launches.target_date` are `date` columns, calendar days rather than
- * instants, and every surface that renders one says which day it is in
- * `APP_TIME_ZONE`. So the day a write NAMES has to be measured in the same
- * zone the day is later read in (`memory/invariants.md` → Date & Time
- * Rendering); `getFullYear()/getMonth()/getDate()` is the runtime's calendar
- * and is how a planter far enough east pressed "Today" and got tomorrow.
+ * instants. Write paths that have not been handed a church still name the
+ * `APP_TIME_ZONE` day; church-scoped reads pass the church's zone so a
+ * completion at 23:30 in Chicago is Chicago's day, not UTC's.
  *
- * It lived in `lib/tasks/recurrence.ts` until #411 — a module about recurring
- * task chains — while client components and three other domains imported it.
- * It is a datetime primitive, so it lives with the datetime primitives, and
- * this module imports nothing, so a `"use client"` component may reach it.
+ * `getFullYear()/getMonth()/getDate()` is the runtime's calendar and is how a
+ * planter far enough east pressed "Today" and got tomorrow.
  */
-export function toCalendarDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+export function toCalendarDate(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): string {
+  if (timeZone === APP_TIME_ZONE) return date.toISOString().slice(0, 10);
+
+  const parts = calendarDateFormatter(timeZone).formatToParts(date);
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${valueOf("year")}-${valueOf("month")}-${valueOf("day")}`;
 }
 
 /**
@@ -232,32 +342,43 @@ export function toCalendarDate(date: Date): string {
  * `toCalendarDate(new Date(base.getTime() + n * MS_PER_DAY))` was written out
  * at six call sites; this is that shape, once. Whole days in, whole days out —
  * the hour of `from` never moves the answer by a day, because both ends are
- * measured on the same UTC-aligned grid.
+ * measured on the same UTC-aligned grid. Write paths stay on that grid;
+ * church-zoned *display* goes through `toCalendarDate(date, churchZone)`.
  */
 export function addCalendarDays(from: Date, days: number): string {
   return toCalendarDate(new Date(from.getTime() + days * MS_PER_DAY));
 }
 
 /**
- * Whole calendar days from `now` to `date`, counted in `APP_TIME_ZONE`.
+ * Whole calendar days from `now` to `date`, counted in `timeZone`.
  *
  * Calendar days, not 24-hour blocks: a meeting at 11:30 PM tonight is `0`
  * ("Today"), never `1` ("Tomorrow"), which is what a difference-in-milliseconds
- * calculation would say.
+ * calculation would say. Two churches in two zones can disagree about the
+ * same pair of instants when they straddle that zone's midnight.
  *
  * Only safe to call where a re-render on the client is impossible (server
- * components), since it reads the clock.
+ * components), since it reads the clock when `now` is omitted.
  */
-export function relativeDayOffset(date: Date, now: Date = new Date()): number {
-  // Valid because APP_TIME_ZONE is UTC, whose days are exactly 24h and aligned
-  // to the epoch. A zone with DST would need a calendar-aware difference.
-  const dayOf = (d: Date) => Math.floor(d.getTime() / MS_PER_DAY);
+export function relativeDayOffset(
+  date: Date,
+  now: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE
+): number {
+  const dayOf = (d: Date) => {
+    const iso = toCalendarDate(d, timeZone);
+    return Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_PER_DAY);
+  };
   return dayOf(date) - dayOf(now);
 }
 
 /** `"Today"` / `"Tomorrow"` / `"In 3 days"` / `"Yesterday"` / `"3 days ago"`. */
-export function formatRelativeDay(date: Date, now: Date = new Date()): string {
-  const days = relativeDayOffset(date, now);
+export function formatRelativeDay(
+  date: Date,
+  now: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE
+): string {
+  const days = relativeDayOffset(date, now, timeZone);
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   if (days === -1) return "Yesterday";
@@ -279,15 +400,16 @@ const MS_PER_MINUTE = 60_000;
  * memory/invariants.md → Date & Time Rendering. A client component that
  * recomputed this at hydration would render a different string than the server
  * did and trip React #418, so the caller passes ONE instant for the whole
- * render — and the fallback goes through `formatDate`, which is pinned to
- * `APP_TIME_ZONE`, rather than through a runtime-local formatter.
+ * render — and the fallback goes through `formatDate`, which is pinned to the
+ * given zone (church zone when plumbed, otherwise `APP_TIME_ZONE`).
  *
  * Future instants are labelled too (`"In 5m"`), so a caller that hands this a
  * scheduled-ahead row gets something honest rather than "0m ago".
  */
 export function formatRelativeTimestamp(
   date: Date,
-  now: Date = new Date()
+  now: Date = new Date(),
+  timeZone: string = APP_TIME_ZONE
 ): string {
   const elapsedMs = now.getTime() - date.getTime();
   const isFuture = elapsedMs < 0;
@@ -302,5 +424,5 @@ export function formatRelativeTimestamp(
   const days = Math.floor(hours / 24);
   if (days < 7) return isFuture ? `In ${days}d` : `${days}d ago`;
 
-  return formatDate(date, "short");
+  return formatDate(date, "short", timeZone);
 }
