@@ -297,6 +297,7 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces.
 - A task's `related_id` is a value the CLIENT chose, so every read through it carries the caller's church: `getLatestPersonNote(churchId, personId)` inner-joins `persons` — `person_activities` has no `church_id`, so the join IS the boundary.
 - Relative due dates are measured against ONE instant passed down from `/tasks` in `APP_TIME_ZONE`: `now` is REQUIRED on `getDueDateInfo`, `groupTasksByDueDate` and `TaskCardViewProps` — no clock default — or a hydrated card computes a different "Due today" (React #418).
 - A task dependency edge is church-scoped: both ends share `church_id`, enforced by composite FKs onto `tasks(id, church_id)` and by the `insert … select` that joins both task rows on that id. A task cannot wait on another church's task.
+- Replacing a task's prerequisites is ONE `db.batch`: the insert…select inner-joins every requested id as a live top-level same-church task and emits rows only when that count equals the requested set; dropStale is gated on the same predicate, so a short set writes nothing. Empty means a single delete-all in that same batch.
 - A dependency cycle is refused at write time. Self-loops are a CHECK; longer chains (including A→B→A) are `wouldCreateCycle`. Blocked-ness is DERIVED from incomplete live prerequisites, never stored as `status`.
 
 ## Notifications — the shared F11 queue, from a consumer's side

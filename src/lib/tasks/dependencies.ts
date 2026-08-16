@@ -97,10 +97,40 @@ export function hasCycle(edges: readonly DependencyEdge[]): boolean {
 const dependentTask = alias(tasks, "dependent");
 const prerequisiteTask = alias(tasks, "prerequisite");
 
+function requestedIdValues(uniqueIds: readonly string[]) {
+  return sql.join(
+    uniqueIds.map((id) => sql`(${id}::uuid)`),
+    sql`, `
+  );
+}
+
 /**
- * The INSERT that writes one edge. Exported so tests can pin the rendered
- * SQL: it is an `insert … select` joining both task rows on church_id, so a
- * missing, deleted, or cross-church prerequisite inserts zero rows.
+ * True when every requested id is a live top-level task in `churchId`.
+ *
+ * Inner-joins the requested ids onto live top-level same-church tasks, so a
+ * missing, deleted, subtask, or cross-church id shortens the count. Shared by
+ * the insert…select and dropStale: a short set must write NOTHING.
+ */
+function allRequestedAreLiveTopLevel(
+  churchId: string,
+  uniqueIds: readonly string[]
+) {
+  return sql`(
+    select count(*)::int
+    from (values ${requestedIdValues(uniqueIds)}) as requested(id)
+    inner join ${tasks}
+      on ${tasks.id} = requested.id
+     and ${eq(tasks.churchId, churchId)}
+     and ${isNull(tasks.deletedAt)}
+     and ${isNull(tasks.parentTaskId)}
+  ) = ${uniqueIds.length}`;
+}
+
+/**
+ * The INSERT that writes the desired edges. Exported so tests can pin the
+ * rendered SQL: it is an `insert … select` joining both task rows on
+ * church_id, inner-joining every requested id as a live top-level same-church
+ * task, and emitting rows only when that count equals the requested set.
  *
  * drizzle's insert-from-select emits every insertable column in table order,
  * so the select names them all.
@@ -108,7 +138,7 @@ const prerequisiteTask = alias(tasks, "prerequisite");
 export function buildAddDependencyStatement(
   churchId: string,
   taskId: string,
-  prerequisiteTaskId: string
+  prerequisiteTaskIds: readonly string[]
 ) {
   return db
     .insert(taskDependencies)
@@ -123,16 +153,24 @@ export function buildAddDependencyStatement(
         })
         .from(dependentTask)
         .innerJoin(
+          sql`(values ${requestedIdValues(prerequisiteTaskIds)}) as requested(id)`,
+          sql`true`
+        )
+        .innerJoin(
           prerequisiteTask,
-          eq(prerequisiteTask.churchId, dependentTask.churchId)
+          and(
+            eq(prerequisiteTask.churchId, dependentTask.churchId),
+            sql`${prerequisiteTask.id} = requested.id`
+          )
         )
         .where(
           and(
             eq(dependentTask.id, taskId),
-            eq(prerequisiteTask.id, prerequisiteTaskId),
             eq(dependentTask.churchId, churchId),
             isNull(dependentTask.deletedAt),
-            isNull(prerequisiteTask.deletedAt)
+            isNull(prerequisiteTask.deletedAt),
+            isNull(prerequisiteTask.parentTaskId),
+            allRequestedAreLiveTopLevel(churchId, prerequisiteTaskIds)
           )
         )
         .getSQL()
@@ -215,25 +253,6 @@ export async function setTaskPrerequisites(
     throw new Error(DEPENDENCY_SELF_ERROR);
   }
 
-  if (uniqueIds.length > 0) {
-    const found = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(
-        and(
-          eq(tasks.churchId, churchId),
-          inArray(tasks.id, uniqueIds),
-          isNull(tasks.deletedAt),
-          // T-016: a subtask is a checklist item. Same predicate as
-          // `topLevelTasksOnly` — this module cannot import service.ts.
-          isNull(tasks.parentTaskId)
-        )
-      );
-    if (found.length !== uniqueIds.length) {
-      throw new Error(DEPENDENCY_CROSS_CHURCH_ERROR);
-    }
-  }
-
   const existing = await loadChurchEdges(churchId);
   const nextGraph = [
     ...existing.filter((edge) => edge.taskId !== taskId),
@@ -246,31 +265,11 @@ export async function setTaskPrerequisites(
     throw new Error(DEPENDENCY_CYCLE_ERROR);
   }
 
-  // Insert the desired set FIRST and inspect what landed. A 0-row
-  // insert…select is the church-scope refusal; deleting first would wipe
-  // the old edges and then treat that empty insert as success.
-  if (uniqueIds.length > 0) {
-    const inserts = uniqueIds.map((prerequisiteTaskId) =>
-      buildAddDependencyStatement(churchId, taskId, prerequisiteTaskId)
-    );
-    const [first, ...rest] = inserts;
-    await db.batch([first, ...rest]);
-
-    const landed = await db
-      .select({ prerequisiteTaskId: taskDependencies.prerequisiteTaskId })
-      .from(taskDependencies)
-      .where(
-        and(
-          eq(taskDependencies.churchId, churchId),
-          eq(taskDependencies.taskId, taskId),
-          inArray(taskDependencies.prerequisiteTaskId, uniqueIds)
-        )
-      );
-    if (landed.length !== uniqueIds.length) {
-      throw new Error(DEPENDENCY_CROSS_CHURCH_ERROR);
-    }
-  }
-
+  // Insert the desired set FIRST and drop stale edges in the SAME batch.
+  // The insert…select emits rows only when every requested id is a live
+  // top-level same-church task; dropStale is gated on that same predicate,
+  // so a short set writes NOTHING. Deleting first would wipe the old edges
+  // and then treat a 0-row insert as success.
   const dropStale = db
     .delete(taskDependencies)
     .where(
@@ -279,10 +278,49 @@ export async function setTaskPrerequisites(
         eq(taskDependencies.taskId, taskId),
         uniqueIds.length > 0
           ? notInArray(taskDependencies.prerequisiteTaskId, uniqueIds)
+          : undefined,
+        uniqueIds.length > 0
+          ? allRequestedAreLiveTopLevel(churchId, uniqueIds)
           : undefined
       )
     );
-  await db.batch([dropStale]);
+  await db.batch([
+    ...(uniqueIds.length > 0
+      ? [buildAddDependencyStatement(churchId, taskId, uniqueIds)]
+      : []),
+    dropStale,
+  ] as unknown as [typeof dropStale, ...(typeof dropStale)[]]);
+
+  // A refused replace leaves the stored set unchanged. Throw only after
+  // reading it — never from a mid-write rowcount, which would mean the
+  // inserts had already committed.
+  if (uniqueIds.length === 0) return;
+
+  const stored = await db
+    .select({ id: prerequisiteTask.id })
+    .from(taskDependencies)
+    .innerJoin(
+      prerequisiteTask,
+      and(
+        eq(prerequisiteTask.id, taskDependencies.prerequisiteTaskId),
+        eq(prerequisiteTask.churchId, taskDependencies.churchId)
+      )
+    )
+    .where(
+      and(
+        eq(taskDependencies.churchId, churchId),
+        eq(taskDependencies.taskId, taskId),
+        isNull(prerequisiteTask.deletedAt),
+        isNull(prerequisiteTask.parentTaskId)
+      )
+    );
+  const storedIds = new Set(stored.map((row) => row.id));
+  if (
+    storedIds.size !== uniqueIds.length ||
+    uniqueIds.some((id) => !storedIds.has(id))
+  ) {
+    throw new Error(DEPENDENCY_CROSS_CHURCH_ERROR);
+  }
 }
 
 export async function listTaskPrerequisites(

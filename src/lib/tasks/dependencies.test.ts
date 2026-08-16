@@ -115,7 +115,7 @@ test("the cycle refusal sentence is the one the action echoes", () => {
 // ----------------------------------------------------------------------------
 
 test("the edge INSERT selects FROM both task rows joined on church_id", () => {
-  const sql = render(buildAddDependencyStatement(CHURCH_ID, TASK_A, TASK_B));
+  const sql = render(buildAddDependencyStatement(CHURCH_ID, TASK_A, [TASK_B]));
 
   assert.match(sql, /insert into "task_dependencies"/i);
   assert.match(sql, /select [\s\S]* from "tasks"/i);
@@ -128,11 +128,14 @@ test("the edge INSERT selects FROM both task rows joined on church_id", () => {
   assert.match(sql, /"dependent"\."church_id"\s*=\s*\$\d+/i);
   assert.match(sql, /"dependent"\."deleted_at" is null/i);
   assert.match(sql, /"prerequisite"\."deleted_at" is null/i);
+  assert.match(sql, /"prerequisite"\."parent_task_id" is null/i);
+  assert.match(sql, /requested\.id/i);
+  assert.match(sql, /count\(\*\)/i);
   assert.match(sql, /returning/i);
 });
 
 test("ON CONFLICT DO NOTHING targets the edge unique index", () => {
-  const sql = render(buildAddDependencyStatement(CHURCH_ID, TASK_A, TASK_B));
+  const sql = render(buildAddDependencyStatement(CHURCH_ID, TASK_A, [TASK_B]));
 
   assert.match(
     sql,
@@ -275,20 +278,29 @@ test("setTaskPrerequisites writes in db.batch and never calls db.transaction", (
   );
 
   assertBatchedWrites(body, "setTaskPrerequisites");
+  assert.equal(
+    (body.match(/await db\.batch\(/g) ?? []).length,
+    1,
+    "setTaskPrerequisites: exactly one batched write — a second batch can throw after inserts have committed"
+  );
   assert.match(
     body,
     /buildAddDependencyStatement\(/,
     "the replace path uses the church-scoped insert…select, not a values() insert"
   );
-  assertInOrder(
+  assert.match(
     body,
-    "setTaskPrerequisites",
-    ["buildAddDependencyStatement(", "await db.batch([dropStale])"],
+    /buildAddDependencyStatement\([\s\S]*dropStale/,
     "insert the desired edges first; deleting first would wipe them on a 0-row insert"
   );
   assert.match(
     body,
-    /isNull\(tasks\.parentTaskId\)/,
+    /allRequestedAreLiveTopLevel\(/,
+    "dropStale is gated on the same all-requested-ids-exist predicate as the insert"
+  );
+  assert.match(
+    body,
+    /isNull\(prerequisiteTask\.parentTaskId\)/,
     "a subtask id the picker will not offer is refused on the write"
   );
 });
