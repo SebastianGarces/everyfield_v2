@@ -8,7 +8,6 @@ import {
   NOT_ASSOCIATED_MESSAGE,
   PLANTER_ONLY_SEVER_MESSAGE,
   associationStatement,
-  auditableAssociationOrg,
   isAssociationOrgType,
   leaveOversightOrgAs,
   lockTargetRow,
@@ -19,7 +18,7 @@ import {
   type AssociationFacts,
   type InvitationActor,
 } from "./core";
-import { associationOrg } from "./audit";
+import { associationOrg, auditableAssociationOrg } from "./audit";
 import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
 import {
   assertInOrder,
@@ -108,6 +107,21 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
   } catch (error) {
     return (error as Error).message;
   }
+}
+
+/**
+ * The accept's own composition of the two halves, as one call: `./core` resolves
+ * which two ids the `type` implies, `./audit` turns that pair into the subject
+ * and org an event names.
+ *
+ * The tests below are about a ROW — the shape that actually reaches an accept —
+ * and the derivation no longer takes one, on purpose: `auditableAssociationOrg`
+ * receives the narrowed pair, so a nullable id is not in scope for it to guess
+ * at. Composing here keeps every case a row again, refusals included, since the
+ * throw a defective row earns comes from the resolver either way.
+ */
+function auditedOrgFor(facts: AssociationFacts) {
+  return auditableAssociationOrg(requireAssociationPair(facts));
 }
 
 // ----------------------------------------------------------------------------
@@ -542,10 +556,6 @@ test("every pair consumer asks the resolver and keeps no copy of the decision", 
       "export function revokeInvitationQuery",
     ],
     [
-      "export function auditableAssociationOrg",
-      "export const oversightOrgTypes",
-    ],
-    [
       "export function associationStatement",
       "export function verifyInvitationAuthority",
     ],
@@ -591,6 +601,50 @@ test("every pair consumer asks the resolver and keeps no copy of the decision", 
       `"${message}" is spelled more than once in core.ts`
     );
   }
+});
+
+test("the third consumer is the audit, in ./audit, and it takes the PAIR", () => {
+  // The audit derivation moved to `./audit`, beside the statement it feeds, and
+  // its PARAMETER is what replaces the delegation assertion above: handed an
+  // `AssociationPair`, it has no nullable id in scope to guard and no `type`
+  // outside the union to answer for, so a copy of the decision is not merely
+  // absent — it is unwritable. That is why it is not in the loop above.
+  const derivation = stripComments(
+    AUDIT.after("export function auditableAssociationOrg")
+  );
+
+  assert.match(
+    derivation,
+    /^export function auditableAssociationOrg\(\s*pair: AssociationPair\s*\)/
+  );
+  assert.doesNotMatch(
+    derivation,
+    /requireAssociationPair/,
+    "the derivation resolves nothing itself — the caller hands it the pair"
+  );
+  assert.doesNotMatch(
+    derivation,
+    /if \(!pair\./,
+    "an id guard here would be a second copy of the resolver's decision"
+  );
+  assert.doesNotMatch(
+    derivation,
+    /:\s*never/,
+    "the pair is already narrowed, so there is no unknown type for a fail-closed arm to see"
+  );
+
+  // …and `core.ts` does not declare it any more. The derivation and
+  // `acceptedAssociationEventStatement` are halves of one OV-008 invariant that
+  // used to sit 730 lines apart; a re-declaration here would put them back.
+  const core = stripComments(CORE_CODE);
+
+  assert.doesNotMatch(core, /function auditableAssociationOrg/);
+  // The accept IMPORTS it, and `core.ts` opens no second door onto the audit
+  // module: a re-export would publish the derivation under two specifiers, which
+  // is the one-door rule this domain's leaves are held to.
+  assert.match(core, /^\s+auditableAssociationOrg,$/m);
+  assert.doesNotMatch(core, /export\s*\{[^}]*\}\s*from\s*"\.\/audit"/);
+  assert.doesNotMatch(core, /export\s+\*[^\n]*from\s*"\.\/audit"/);
 });
 
 test("a defective row is refused by every consumer, and by the lock where it applies", () => {
@@ -643,11 +697,7 @@ test("a defective row is refused by every consumer, and by the lock where it app
         InvitationError,
         shape
       );
-      assert.throws(
-        () => auditableAssociationOrg(facts),
-        InvitationError,
-        shape
-      );
+      assert.throws(() => auditedOrgFor(facts), InvitationError, shape);
 
       assert.equal(
         (() => {
@@ -678,7 +728,7 @@ test("a defective row is refused by every consumer, and by the lock where it app
   unboundTargetSlot(whole);
   associationStatement(whole, INVITATION_ID);
   lockTargetRow(whole);
-  assert.equal(auditableAssociationOrg(whole).orgId, SENDING_CHURCH);
+  assert.equal(auditedOrgFor(whole).orgId, SENDING_CHURCH);
 });
 
 test("the sever announces AFTER the write, and the decline announces at all", () => {
@@ -751,7 +801,7 @@ test("the audited org comes from the invitation's type", () => {
   // to an org that associated nobody — the same fault
   // `invitingOrgForInvitation` exists to prevent on the notification side.
   assert.deepEqual(
-    auditableAssociationOrg({
+    auditedOrgFor({
       type: "church_to_sending_church",
       targetChurchId: PLANT,
       targetSendingChurchId: null,
@@ -766,7 +816,7 @@ test("the audited org comes from the invitation's type", () => {
   );
 
   assert.deepEqual(
-    auditableAssociationOrg({
+    auditedOrgFor({
       type: "church_to_network",
       targetChurchId: PLANT,
       targetSendingChurchId: null,
@@ -788,7 +838,7 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
   // subject discriminator, so the arm returns the real subject and the accept
   // batch audits all three types.
   assert.deepEqual(
-    auditableAssociationOrg({
+    auditedOrgFor({
       type: "sending_church_to_network",
       targetChurchId: null,
       targetSendingChurchId: SENDING_CHURCH,
@@ -818,7 +868,7 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
   // assert the same thing.
   assert.throws(
     () =>
-      auditableAssociationOrg({
+      auditedOrgFor({
         type: "sending_church_to_network",
         targetChurchId: null,
         targetSendingChurchId: SENDING_CHURCH,
@@ -831,7 +881,7 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
 
   assert.throws(
     () =>
-      auditableAssociationOrg({
+      auditedOrgFor({
         type: "church_to_network",
         targetChurchId: PLANT,
         targetSendingChurchId: null,
@@ -875,7 +925,7 @@ test("a type outside the union REFUSES rather than auditing nothing", () => {
   };
 
   assert.throws(
-    () => auditableAssociationOrg(rogue),
+    () => auditedOrgFor(rogue),
     InvitationError,
     "a rogue type must refuse — returning null is the same three-statement batch as falling off the end of the switch"
   );
