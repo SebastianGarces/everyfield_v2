@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   jsonb,
   pgTable,
@@ -171,6 +172,10 @@ export const tasks = pgTable(
       .where(
         sql`${table.completionEvent} = 'meeting.evaluation.completed' and ${table.deletedAt} is null`
       ),
+    // Composite FKs on task_dependencies reference (id, church_id), so both
+    // ends of an edge are the same church as the row that names them. `id` is
+    // already unique; this pair exists so Postgres can spell the FK.
+    uniqueIndex("tasks_id_church_id_unique_idx").on(table.id, table.churchId),
   ]
 );
 
@@ -245,3 +250,58 @@ export const phasePromptAnswers = pgTable(
 
 export type PhasePromptAnswerRecord = typeof phasePromptAnswers.$inferSelect;
 export type NewPhasePromptAnswer = typeof phasePromptAnswers.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// TaskDependency — "this task waits on that one" (T-015).
+//
+// The edge carries church_id, and BOTH FKs are composite onto
+// tasks(id, church_id), so a row that names two churches is unrepresentable.
+// The write path still inserts via `insert … select` joining both tasks on
+// church_id: a forged id that names no live row in this church inserts nothing.
+//
+// UNIQUE (task_id, prerequisite_task_id) is the duplicate-edge arbiter.
+// CHECK task_id <> prerequisite_task_id refuses a self-loop; longer cycles are
+// an application rule (`wouldCreateCycle` in `src/lib/tasks/dependencies.ts`).
+//
+// CASCADE on both task FKs: a HARD delete of either end takes the edge with
+// it. The product soft-deletes, so this fires for wipe/repair the same way
+// `tasks.parent_task_id` does. Soft-deleted prerequisites stop blocking
+// because the blocked-state query filters `deleted_at`.
+// ----------------------------------------------------------------------------
+export const taskDependencies = pgTable(
+  "task_dependencies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    taskId: uuid("task_id").notNull(),
+    prerequisiteTaskId: uuid("prerequisite_task_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("task_dependencies_edge_unique_idx").on(
+      table.taskId,
+      table.prerequisiteTaskId
+    ),
+    index("task_dependencies_church_id_idx").on(table.churchId),
+    index("task_dependencies_prerequisite_idx").on(table.prerequisiteTaskId),
+    check(
+      "task_dependencies_no_self_check",
+      sql`${table.taskId} <> ${table.prerequisiteTaskId}`
+    ),
+    foreignKey({
+      name: "task_dependencies_task_church_fk",
+      columns: [table.taskId, table.churchId],
+      foreignColumns: [tasks.id, tasks.churchId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "task_dependencies_prereq_church_fk",
+      columns: [table.prerequisiteTaskId, table.churchId],
+      foreignColumns: [tasks.id, tasks.churchId],
+    }).onDelete("cascade"),
+  ]
+);
+
+export type TaskDependency = typeof taskDependencies.$inferSelect;
+export type NewTaskDependency = typeof taskDependencies.$inferInsert;

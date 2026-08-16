@@ -5,6 +5,7 @@ import { TaskForm } from "@/components/tasks";
 import { users } from "@/db/schema";
 import { db } from "@/db";
 import { verifySession } from "@/lib/auth/session";
+import { listPrerequisiteCandidates } from "@/lib/tasks/dependencies";
 import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -17,14 +18,17 @@ export default async function NewTaskPage() {
   }
 
   // Fetch church users for the assignee selector
-  const churchUsers = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-    })
-    .from(users)
-    .where(eq(users.churchId, user.churchId));
+  const [churchUsers, prerequisiteCandidates] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(eq(users.churchId, user.churchId)),
+    listPrerequisiteCandidates(user.churchId),
+  ]);
 
   return (
     <>
@@ -35,7 +39,10 @@ export default async function NewTaskPage() {
         <h1 className="mb-6 text-2xl font-bold tracking-tight">
           Create New Task
         </h1>
-        <TaskForm users={churchUsers} />
+        <TaskForm
+          users={churchUsers}
+          prerequisiteCandidates={prerequisiteCandidates}
+        />
       </div>
     </>
   );

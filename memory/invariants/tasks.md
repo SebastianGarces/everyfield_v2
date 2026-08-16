@@ -2,7 +2,7 @@
 
 Why and how, for the Tasks rules in [`../invariants.md`](../invariants.md). Two features that look separate and are not: **subtasks** (T-016) give a task a checklist, **recurrence** (T-017) mints the next instance on completion — and the interesting rules are where they meet.
 
-**Source:** `src/lib/tasks/` (`service.ts`, `recurrence.ts`, `descriptions.ts`, `templates.ts`, `import.ts`, `phase-prompt.ts`), `src/components/tasks/`, `src/app/(dashboard)/tasks/`, `src/lib/launch/milestones.ts`, `src/lib/events/subscriptions.ts`
+**Source:** `src/lib/tasks/` (`service.ts`, `recurrence.ts`, `descriptions.ts`, `templates.ts`, `import.ts`, `phase-prompt.ts`, `dependencies.ts`), `src/components/tasks/`, `src/app/(dashboard)/tasks/`, `src/lib/launch/milestones.ts`, `src/lib/events/subscriptions.ts`
 
 ## Subtasks
 
@@ -71,3 +71,11 @@ Three defects of one family — a value taken on trust — and none is visible f
 **The due-date arithmetic read the runtime's clock, twice.** `getDueDateInfo` and `groupTasksByDueDate` each floored their own `new Date()` through the runtime's midnight, so a server-rendered card hydrated to a different "Due today" (React #418) and, on a server east of UTC, every task grouped wrong. `now` is ONE instant minted by `/tasks` in `APP_TIME_ZONE`, and it is REQUIRED — on both functions and on `TaskCardViewProps` — with no clock default even for a surface that never hydrates, because that exemption went stale inside the very pass that wrote it.
 
 **One `as` was left, in the module written to abolish casts.** `parseEnumParam` took a hand-rolled structural stand-in for the zod interface, which discards the parsed type and forces the cast back — letting `parseEnumParam<TaskPriority>(params.status, taskStatusSchema)` compile. It takes `schema: z.ZodType<T>` now and threads `safeParse`'s own `data` through; the three callers INFER `T` rather than naming it.
+
+## Prerequisites (T-015)
+
+**Source:** `src/lib/tasks/dependencies.ts`, `src/db/schema/tasks.ts` (`task_dependencies`)
+
+- **Blocked is derived.** An incomplete live prerequisite is the blocked state; nothing writes `tasks.status = 'blocked'` on the planter's behalf. Completing the last one clears the badge on the next render (`refresh()` after `completeTask`), which is why the list re-asks the edge table rather than trusting a stored flag that would need its own write.
+- **Church scope is the row.** Composite FKs onto `tasks(id, church_id)` make a cross-church edge unrepresentable. The write is still `insert … select` joining both ends on `church_id`, so a forged id that names no live row in this church inserts nothing — the same shape as `createHouseholdWithHead`.
+- **Cycles are refused before the write.** The CHECK only sees a self-loop; A→B→A and longer chains are `wouldCreateCycle` over the church's existing edges plus the proposed set. A SELECT-then-INSERT, so two concurrent opposite edges can still land — the unique index only stops a duplicate of the same pair.

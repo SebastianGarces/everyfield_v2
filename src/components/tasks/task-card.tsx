@@ -44,6 +44,7 @@ export function TaskCard({ task, personNote, now }: TaskCardProps) {
   const [isPending, startTransition] = useTransition();
 
   const isComplete = task.status === "complete";
+  const isBlocked = task.isBlocked;
 
   function handleToggleComplete() {
     startTransition(async () => {
@@ -69,9 +70,15 @@ export function TaskCard({ task, personNote, now }: TaskCardProps) {
         <Checkbox
           checked={isComplete}
           onCheckedChange={handleToggleComplete}
-          disabled={isPending}
+          disabled={isPending || (isBlocked && !isComplete)}
           className="cursor-pointer"
-          aria-label={isComplete ? "Reopen task" : "Complete task"}
+          aria-label={
+            isComplete
+              ? "Reopen task"
+              : isBlocked
+                ? "Complete task (waiting on prerequisites)"
+                : "Complete task"
+          }
         />
       }
     />
