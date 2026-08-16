@@ -14,6 +14,10 @@ import {
   formatDateWithoutWeekday,
 } from "@/lib/datetime";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
+import {
+  listPrerequisiteCandidates,
+  listTaskPrerequisites,
+} from "@/lib/tasks/dependencies";
 import { eq } from "drizzle-orm";
 import {
   Calendar,
@@ -117,22 +121,34 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   }
 
   // Fetch church users for editing, plus this task's checklist (T-016).
-  const [churchUsers, subtasks] = await Promise.all([
-    db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-      })
-      .from(users)
-      .where(eq(users.churchId, user.churchId)),
-    listSubtasks(user.churchId, id),
-  ]);
+  const [churchUsers, subtasks, prerequisites, prerequisiteCandidates] =
+    await Promise.all([
+      db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        })
+        .from(users)
+        .where(eq(users.churchId, user.churchId)),
+      listSubtasks(user.churchId, id),
+      listTaskPrerequisites(user.churchId, id),
+      listPrerequisiteCandidates(user.churchId, id),
+    ]);
 
   const statusConfig = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
   const priorityConfig =
     PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const relatedUrl = getRelatedUrl(task.relatedType, task.relatedId);
+  const isBlocked = prerequisites.some(
+    (prerequisite) => prerequisite.status !== "complete"
+  );
+  const candidateById = new Map(
+    prerequisiteCandidates.map((candidate) => [candidate.id, candidate])
+  );
+  for (const prerequisite of prerequisites) {
+    candidateById.set(prerequisite.id, prerequisite);
+  }
 
   // Dates, pinned to APP_TIME_ZONE (`memory/invariants.md` → Date & Time
   // Rendering). All three were `toLocaleDateString` with no `timeZone`, which
@@ -188,6 +204,9 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               <CircleDot className="mr-1 h-3 w-3" />
               {CATEGORY_LABELS[task.category] ?? task.category}
             </Badge>
+          )}
+          {isBlocked && (
+            <Badge className="bg-red-100 text-xs text-red-700">Blocked</Badge>
           )}
         </div>
 
@@ -306,7 +325,14 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             <CardTitle className="text-sm font-medium">Edit Task</CardTitle>
           </CardHeader>
           <CardContent>
-            <TaskForm task={task} users={churchUsers} />
+            <TaskForm
+              task={task}
+              users={churchUsers}
+              prerequisiteCandidates={[...candidateById.values()]}
+              prerequisiteIds={prerequisites.map(
+                (prerequisite) => prerequisite.id
+              )}
+            />
           </CardContent>
         </Card>
       </div>

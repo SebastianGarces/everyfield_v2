@@ -49,6 +49,7 @@ import {
   taskNotificationsDiffer,
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
+import { blockedTaskIdsAmong } from "./dependencies";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -96,7 +97,14 @@ export interface ListTasksOptions {
  * so. `description` is the stored markup on every row now; `descriptionPreview`
  * is the summary, and it is the field the card renders.
  */
-export type TaskListRow = WithDescriptionPreview<TaskWithAssignee>;
+export type TaskListRow = WithDescriptionPreview<TaskWithAssignee> & {
+  /**
+   * True while any live prerequisite is not complete (T-015). Derived from
+   * the edge table, never stored as `status`. Completing the last
+   * prerequisite clears this on the next render.
+   */
+  isBlocked: boolean;
+};
 
 /** `ListTasksResult` over the row type above. */
 export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
@@ -348,10 +356,18 @@ export async function listTasks(
     ? (resultTasks[resultTasks.length - 1]?.id ?? null)
     : null;
 
+  const blockedIds = await blockedTaskIdsAmong(
+    churchId,
+    resultTasks.map((task) => task.id)
+  );
+
   return {
     // Readable text, never markup (T-021): the card renders every field it is
     // given as text, so an un-flattened description would print its own tags.
-    tasks: withDescriptionPreviews(resultTasks),
+    tasks: withDescriptionPreviews(resultTasks).map((task) => ({
+      ...task,
+      isBlocked: blockedIds.has(task.id),
+    })),
     total,
     nextCursor,
   };
@@ -596,7 +612,14 @@ export async function listSubtasks(
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
 
   // A checklist is a list surface too — same rule as `listTasks`.
-  return withDescriptionPreviews(result);
+  const blockedIds = await blockedTaskIdsAmong(
+    churchId,
+    result.map((task) => task.id)
+  );
+  return withDescriptionPreviews(result).map((task) => ({
+    ...task,
+    isBlocked: blockedIds.has(task.id),
+  }));
 }
 
 // ============================================================================

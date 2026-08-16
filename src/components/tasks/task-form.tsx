@@ -17,7 +17,8 @@ import {
   taskStatuses,
   type Task,
 } from "@/db/schema";
-import { Loader2 } from "lucide-react";
+import type { PrerequisiteCandidate } from "@/lib/tasks/dependencies";
+import { Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
@@ -119,15 +120,129 @@ export function TaskDescriptionField({
 }
 
 // ============================================================================
+// Prerequisites field (T-015)
+// ============================================================================
+
+export interface TaskPrerequisitesFieldProps {
+  candidates: PrerequisiteCandidate[];
+  selectedIds?: string[];
+  disabled?: boolean;
+}
+
+/**
+ * The prerequisite picker. Exported so its markup can be asserted without a
+ * router: `TaskForm` calls `useRouter`, and everything worth pinning here —
+ * `cursor-pointer` on every control, the ids reaching the request — lives in
+ * this subtree.
+ *
+ * Selected ids travel in one hidden input (comma-separated) because the
+ * form helper that builds the action payload overwrites repeated names.
+ */
+export function TaskPrerequisitesField({
+  candidates,
+  selectedIds = [],
+  disabled = false,
+}: TaskPrerequisitesFieldProps) {
+  const [selected, setSelected] = useState<string[]>(selectedIds);
+  const selectedSet = new Set(selected);
+  const available = candidates.filter(
+    (candidate) => !selectedSet.has(candidate.id)
+  );
+  const selectedRows = selected.flatMap((id) => {
+    const row = candidates.find((candidate) => candidate.id === id);
+    return row ? [row] : [];
+  });
+
+  function add(id: string) {
+    if (!id || selectedSet.has(id)) return;
+    setSelected((current) => [...current, id]);
+  }
+
+  function remove(id: string) {
+    setSelected((current) => current.filter((value) => value !== id));
+  }
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="hidden"
+        name="prerequisiteTaskIds"
+        value={selected.join(",")}
+      />
+
+      {selectedRows.length > 0 && (
+        <ul className="space-y-1.5">
+          {selectedRows.map((row) => (
+            <li
+              key={row.id}
+              className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm"
+            >
+              <span className="min-w-0 truncate">{row.title}</span>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-0.5"
+                aria-label={`Remove prerequisite ${row.title}`}
+                onClick={() => remove(row.id)}
+                disabled={disabled}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {available.length > 0 ? (
+        <Select
+          key={selected.join(",")}
+          onValueChange={add}
+          disabled={disabled}
+        >
+          <SelectTrigger className="cursor-pointer">
+            <SelectValue placeholder="Add a prerequisite…" />
+          </SelectTrigger>
+          <SelectContent>
+            {available.map((candidate) => (
+              <SelectItem
+                key={candidate.id}
+                value={candidate.id}
+                className="cursor-pointer"
+              >
+                {candidate.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : candidates.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          Create another task first to set a prerequisite.
+        </p>
+      ) : null}
+
+      <p className="text-muted-foreground text-sm">
+        This task stays blocked until every prerequisite is complete.
+      </p>
+    </div>
+  );
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
 interface TaskFormProps {
   task?: Task; // If provided, we're editing
   users?: { id: string; name: string | null; email: string }[];
+  prerequisiteCandidates?: PrerequisiteCandidate[];
+  prerequisiteIds?: string[];
 }
 
-export function TaskForm({ task, users = [] }: TaskFormProps) {
+export function TaskForm({
+  task,
+  users = [],
+  prerequisiteCandidates = [],
+  prerequisiteIds = [],
+}: TaskFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -277,6 +392,16 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
           </Select>
         </div>
       )}
+
+      {/* Prerequisites (T-015) */}
+      <div className="space-y-2">
+        <Label>Prerequisites</Label>
+        <TaskPrerequisitesField
+          candidates={prerequisiteCandidates}
+          selectedIds={prerequisiteIds}
+          disabled={isPending}
+        />
+      </div>
 
       {/* Repeat (T-017) */}
       <div className="space-y-4 rounded-md border p-4">

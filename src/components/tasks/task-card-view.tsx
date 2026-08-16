@@ -31,6 +31,7 @@ import type { TaskWithAssignee } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
+  Ban,
   Calendar,
   CircleDot,
   Clock,
@@ -196,7 +197,13 @@ interface TaskCardViewProps {
    * the service (T-021). A plain `TaskWithAssignee` (the marketing fixtures)
    * carries none, and the summary line below simply does not render.
    */
-  task: WithDescriptionPreview<TaskWithAssignee>;
+  task: WithDescriptionPreview<TaskWithAssignee> & {
+    /**
+     * Derived blocked state (T-015). Optional so marketing fixtures, which
+     * are plain `TaskWithAssignee` rows, render unchanged.
+     */
+    isBlocked?: boolean;
+  };
   personNote?: string | null;
   /**
    * The complete/reopen control, rendered into the card's leading gutter.
@@ -256,9 +263,14 @@ export function TaskCardView({
   now,
 }: TaskCardViewProps) {
   const isComplete = task.status === "complete";
+  const isBlocked = task.isBlocked === true;
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const categoryInfo = task.category ? CATEGORY_CONFIG[task.category] : null;
   const dueDateInfo = getDueDateInfo(task.dueDate, now);
+  const showStoredStatus =
+    task.status !== "not_started" &&
+    task.status !== "complete" &&
+    !(isBlocked && task.status === "blocked");
   // A span carrying the identical className, not an href-less anchor: a
   // presentational embed should carry no app URL at all, so there is nothing
   // left to prefetch by construction.
@@ -271,6 +283,7 @@ export function TaskCardView({
     <div
       data-slot="task-card"
       data-status={task.status}
+      data-blocked={isBlocked ? "true" : "false"}
       className={cn(
         "group bg-card flex items-start gap-3 rounded-lg border p-4 transition-all duration-200 hover:shadow-md",
         isComplete && "opacity-60",
@@ -356,8 +369,19 @@ export function TaskCardView({
             </span>
           )}
 
-          {/* Status (if not default) */}
-          {task.status !== "not_started" && task.status !== "complete" && (
+          {isBlocked && (
+            <span
+              data-slot="task-card-blocked"
+              className="flex items-center gap-1 font-medium text-red-600"
+            >
+              <Ban className="h-3 w-3" />
+              Blocked
+            </span>
+          )}
+
+          {/* Status (if not default, and not the same word the derived
+              blocked badge already said) */}
+          {showStoredStatus && (
             <span
               className={cn(
                 "flex items-center gap-1",

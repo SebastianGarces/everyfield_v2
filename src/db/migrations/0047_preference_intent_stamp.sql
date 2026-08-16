@@ -1,0 +1,170 @@
+-- #443 — `notification_preferences.intent`: WHY a preference row exists, so
+-- "is this a consent record?" stops being inferred from the channel.
+--
+-- WHAT THE STAMP REPLACES. A row can exist without its `enabled` being anyone's
+-- decision: `enabled` is NOT NULL and the grain is (user, category, channel), so
+-- a cadence-only save has to invent one for the row it creates. #237 answered
+-- that by reading the VALUE — a stored `enabled` equal to the coded default was
+-- treated as saying nothing, so a later change to that default still reached the
+-- user. #411/#427 then found the case the value cannot answer: the logged-out
+-- unsubscribe undo writes `true`, which EQUALS every category's coded email
+-- default, and that write IS the reader's decision about their own consent. With
+-- nothing stored saying who wrote a row, the fix available then was a CHANNEL
+-- exemption plus a carve-out for the one cell the cadence selector writes to —
+-- both carried as accepted residuals, both retired by this column.
+--
+-- TWO VALUES, AND NEITHER IS REQUEST INPUT. `chosen` = a human decided this
+-- value (a settings toggle, the emailed unsubscribe, its undo) and it is
+-- honoured as written forever. `incidental` = a save wrote it to carry something
+-- else, so it keeps #237's value-equality rule. Each write path states its own
+-- stamp in code (`setPreferenceQuery` / `setDigestCadenceQuery`), so a caller
+-- cannot claim `chosen` for a by-product.
+--
+-- ----------------------------------------------------------------------------
+-- WHAT EXISTING ROWS WERE ASSUMED TO BE
+-- ----------------------------------------------------------------------------
+--
+-- Nothing stored before this migration says who wrote a row, so no backfill can
+-- recover the truth. The one it CAN preserve is the answer the running system
+-- already gives, and that is what this one is chosen to do: every existing row
+-- is stamped with the intent that makes the new resolver return exactly what the
+-- channel-inferred rule returns today, so no reader's resolved preference moves
+-- on the day this deploys.
+--
+--   channel = 'email' AND category <> 'digest'  ->  'chosen'
+--       The cells the channel exemption already honoured as written. The
+--       assumption: an email row on one of these categories was a human's
+--       decision. It is the same inference the exemption made, kept for history
+--       alone, and it errs in the consenting direction — its cost is a row that
+--       keeps following the reader instead of the default, never a preference
+--       the reader set being dropped.
+--
+--   everything else                             ->  'incidental'
+--       Every `in_app` row, which #237's value-equality rule already governed,
+--       plus ('digest', 'email') — the cell the cadence selector has to write to
+--       and the one the carve-out already excluded from the exemption.
+--
+-- THE RESIDUAL THAT SURVIVES, FOR OLD ROWS ONLY: an undo pressed on the `digest`
+-- category BEFORE this migration is indistinguishable from a cadence-only save
+-- and is stamped `incidental`, so that one historical row still follows the
+-- coded default. Every undo written after this migration is stamped `chosen` by
+-- the write path and survives a default flip, which is the residual's own
+-- scenario and the reason this column exists.
+--
+-- WHY THE COLUMN DEFAULT IS 'chosen' WHEN THE BACKFILL IS NOT. The default
+-- governs a row written by something that does not state a stamp — a script, a
+-- psql session, a future writer that forgets. That direction has to be the
+-- fail-safe one, and it is the same asymmetry as above: honouring a value nobody
+-- chose is recoverable, dropping a value somebody did choose is not. The
+-- backfill overrides it for existing rows because for THOSE rows the answer is
+-- known: it is whatever the code answers today.
+--
+-- ADDITIVE, AND SAFE IN EITHER DEPLOY ORDER. One column with a default, one
+-- CHECK, one UPDATE over a table with no volume in front of it. No index, no
+-- `ON CONFLICT` arbiter and no rewrite of another table, so the 0038/0042 trap
+-- (`ON CONFLICT (…) WHERE …` against a database lacking the index, SQLSTATE
+-- 42P10) does not apply here. Code-first is survivable: the running code before
+-- this deploy never names `intent`, and the code after it selects `*`, so the
+-- only window is between the deploy and the migration, where a SELECT would fail
+-- on `column "intent" does not exist`. Run `pnpm db:migrate` first anyway —
+-- nothing in this repo applies migrations on deploy.
+--
+-- SIBLING RECONCILE. #75 landed as 0043_true_cammi (`when` 1786859463138) and
+-- #166 as 0044_church_time_zone (`when` 1786859500000). This unit's original
+-- 0043_preference_intent_stamp held a lower `when` (1786857962312) and would
+-- have been silently skipped — `drizzle-kit migrate` applies a migration only
+-- while the ledger's MAXIMUM `created_at` is below its `when`
+-- (memory/invariants.md → Migrations). It was restamped to
+-- 0045_preference_intent_stamp at 1786865100000, then to
+-- 0046_preference_intent_stamp at 1786866100000 after #442 took 0045
+-- (`0045_drop_share_phase_digest`, `when` 1786865200000). Then #380 landed
+-- as 0046_person_background_check_status (`when` 1786866200000), which is
+-- ABOVE that stamp. It is now 0047_preference_intent_stamp at 1786866500000,
+-- strictly greater than 0046. A later sibling with a `when` above this one
+-- owes it a forward reconcile.
+--
+-- OPERATOR RECONCILE — a database that applied an OLD stamp of this file
+-- (0046 at 1786866100000, 0045 at 1786865100000, or 0043 at 1786857962312)
+-- needs a hand before `pnpm db:migrate` (memory/invariants.md → Migrations ⚖).
+-- The `intent` column EXISTS, and the ledger either still holds that old row
+-- or no longer does. Because the CLI compares this file's `when` against the
+-- ledger's MAXIMUM `created_at` and not against its own row, 1786866500000
+-- wins, the DDL below is re-run, and the apply dies on
+-- `ALTER TABLE "notification_preferences" ADD COLUMN "intent"` — column
+-- already exists — with the migration aborted and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select column_name
+--     from information_schema.columns
+--    where table_name = 'notification_preferences'
+--      and column_name = 'intent';
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- A row back and a max BELOW 1786866500000 means this migration's effect is
+-- already present and unrecorded at the new stamp — take an exit below. Zero
+-- rows back means a normal apply; run `pnpm db:migrate` and nothing here
+-- concerns you.
+--
+-- BEFORE EXIT A: 0046_person_background_check_status (`when` 1786866200000)
+-- must already be in the ledger, and so must 0045_drop_share_phase_digest
+-- (1786865200000), 0043_true_cammi (1786859463138) and 0044_church_time_zone
+-- (1786859500000). Inserting this file's `when` first would make the CLI
+-- SILENTLY SKIP any sibling whose `when` is lower. If they are missing, apply
+-- their SQL (or `pnpm db:migrate` until they are recorded) FIRST, then come
+-- back. A database whose ledger still holds the old 0046 stamp 1786866100000
+-- is BELOW 0046_person_background_check_status — apply that sibling first,
+-- then EXIT A.
+--
+-- EXIT A — the database carries rows worth keeping (the shared `development`
+-- branch, or any environment with real data). Record the apply that already
+-- happened, so the CLI skips a migration whose effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0047_preference_intent_stamp.sql>', 1786866500000);
+--
+-- The `created_at` literal is what matters and it is this migration's journal
+-- `when`; the hash column is bookkeeping for the next human, so write the real
+-- digest rather than a placeholder. THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it: the
+-- `intent` column from the probe above, and
+-- `notification_preferences_intent_check` in `pg_constraint`. If either is
+-- missing, EXIT A is a lie the ledger will keep telling; take EXIT B or add
+-- the missing piece by hand first. Prove it from `information_schema.columns`,
+-- never from the CLI's exit status, which is 0 for "skipped" and 0 for
+-- "applied" alike.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
+-- below in full (it drops the CHECK and the column, and deletes the ledger
+-- row), then `pnpm db:migrate` normally and the migration applies from a
+-- clean shape.
+--
+-- ROLLBACK. Three statements, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "notification_preferences"
+--     DROP CONSTRAINT IF EXISTS "notification_preferences_intent_check";
+--   ALTER TABLE "notification_preferences" DROP COLUMN IF EXISTS "intent";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866500000;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0042/0044: the journal is
+-- the repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- database's record of what ran, and only the ledger row is deleted.
+--
+-- The row can also be identified by the sha256 of THIS FILE, byte for byte,
+-- from the deployed commit:
+--
+--   shasum -a 256 src/db/migrations/0047_preference_intent_stamp.sql
+--
+-- ROLLING BACK REQUIRES REVERTING THE CODE TOO. `preferenceValueIsInheritable`
+-- reads `intent` on every resolution and both write paths supply it, so dropping
+-- the column under a live build breaks the settings screen, the dispatcher's
+-- preference read and the unsubscribe link at once. Revert the application half
+-- first, then drop. Dropping also FORGETS every stamp: the reverted code infers
+-- consent from the channel again, which is the behaviour this replaces rather
+-- than a loss of data, but an undo written on the `digest` category in between
+-- goes back to following the coded default.
+ALTER TABLE "notification_preferences" ADD COLUMN "intent" varchar(16) DEFAULT 'chosen' NOT NULL;--> statement-breakpoint
+UPDATE "notification_preferences" SET "intent" = 'incidental' WHERE "channel" <> 'email' OR "category" = 'digest';--> statement-breakpoint
+ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_intent_check" CHECK ("notification_preferences"."intent" in ('chosen', 'incidental'));

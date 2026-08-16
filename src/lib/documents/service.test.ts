@@ -26,7 +26,7 @@ const ARTIFACT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const SRC = path.join(process.cwd(), "src");
 const migrationSource = readFileSync(
-  path.join(SRC, "db", "migrations", "0046_generated_documents.sql"),
+  path.join(SRC, "db", "migrations", "0049_generated_documents.sql"),
   "utf8"
 );
 const serviceSource = readFileSync(

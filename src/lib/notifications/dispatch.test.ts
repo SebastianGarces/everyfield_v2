@@ -166,6 +166,8 @@ class FakeDispatchStore implements DispatchDeps {
       category,
       channel,
       enabled,
+      // The shape the settings toggle leaves behind — see `setPreferenceQuery`.
+      intent: "chosen",
       digestCadence: null,
       createdAt: PAST,
       updatedAt: PAST,

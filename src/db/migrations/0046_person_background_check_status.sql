@@ -1,0 +1,142 @@
+-- RE-STAMPED 0045 -> 0046 (2026-08-16). This migration was first minted as
+-- `0043_person_background_check_status` with `when` 1786858232298, then
+-- restamped as `0045_person_background_check_status` with `when`
+-- 1786865300000 after #75 and #166 took 0043/0044. #458 then landed as
+-- `0045_drop_share_phase_digest` (`when` 1786865200000). drizzle applies a
+-- migration only when the ledger's MAX `created_at` is strictly below the
+-- migration's `when`, so a journal that kept this file at idx 45 would
+-- collide with 0045_drop, and a leftover ledger row at 1786865300000 would
+-- sit ABOVE 0045_drop's `when` (silently skipping it). The fix
+-- (memory/invariants.md → Migrations: reserving an idx does not reserve an
+-- ORDER — `when` decides) is this re-stamp: idx 46 / `when` 1786866200000,
+-- strictly above 0045's 1786865200000.
+--
+-- OPERATOR RECONCILE — a database that applied the OLD 0045 (or the older
+-- 0043) needs a hand before `pnpm db:migrate`. The renumber above fixes the
+-- repository and leaves every database that already ran this migration under
+-- its old stamp — 1786865300000 (0045) or 1786858232298 (0043) — in a state
+-- the CLI cannot see: column `persons.background_check_status` EXISTS, and
+-- the ledger either still holds that old row or no longer does (a rollback
+-- DELETE without the DROP). Because the CLI compares this file's `when`
+-- against the ledger's MAXIMUM `created_at` and not against its own row,
+-- 1786866200000 wins, the DDL below is re-run, and the apply dies on
+-- `ALTER TABLE "persons" ADD COLUMN "background_check_status"` — column
+-- already exists — with the migration aborted and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select table_name, column_name
+--     from information_schema.columns
+--    where table_name = 'persons'
+--      and column_name = 'background_check_status';
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- One row back and a max BELOW 1786866200000 means this migration's effect
+-- is already present and unrecorded at the new stamp — take an exit below.
+-- Zero rows back means a normal apply; run `pnpm db:migrate` and nothing
+-- here concerns you.
+--
+-- EXIT A — the database carries rows worth keeping (the shared `development`
+-- branch, or any environment with real data). Record the apply that already
+-- happened, so the CLI skips a migration whose effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0046_person_background_check_status.sql>', 1786866200000);
+--
+-- The `created_at` literal is what matters and it is this migration's journal
+-- `when`; the hash column is bookkeeping for the next human, so write the real
+-- digest rather than a placeholder. (It is the sha256 of this file's bytes at
+-- the moment of the apply — which is exactly why the rollback DELETE below
+-- cannot key on it: any header edit changes the file while the ledger keeps
+-- the old value. `created_at` is stable.) THIS INSERT ASSERTS THAT THE DDL
+-- BELOW MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it:
+-- the column from the probe above, `is_nullable = 'NO'`, `column_default`
+-- containing `'not_started'`, and `persons_background_check_status_check` in
+-- `pg_constraint` with the four values (`not_started`, `in_progress`,
+-- `cleared`, `flagged`). If any one of them is missing, EXIT A is a lie the
+-- ledger will keep telling; take EXIT B or add the missing piece by hand
+-- first. The header's own rule applies to the result too — prove it from
+-- `information_schema.columns`, never from the CLI's exit status, which is
+-- 0 for "skipped" and 0 for "applied" alike. A leftover ledger row at the
+-- old stamp 1786865300000 (or 1786858232298) is bookkeeping; drizzle keys
+-- off MAX, so leave it. That leftover 1786865300000 sits ABOVE 0045_drop's
+-- `when` 1786865200000, so that sibling will not apply via the CLI: if
+-- `share_phase` / `share_digest` still exist on `church_privacy_settings`,
+-- run 0045_drop's DDL by hand.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
+-- below in full (it drops the column and the CHECK with it), then
+-- `pnpm db:migrate` normally and the migration applies from a clean shape.
+-- Dropping the column FORGETS every recorded status; that is why this exit
+-- is for databases whose rows nobody will miss.
+--
+-- P-0xx — `persons.background_check_status`: where a volunteer stands in the
+-- church's OWN background-check process, recorded by hand.
+--
+-- WHY A COLUMN ON `persons` AND NOT A TABLE. There is one answer per person at
+-- a time and no provider to reconcile with: nothing in this repo talks to a
+-- screening service, and the requirement this serves — the Children's Ministry
+-- roster showing whether the person in a seat is cleared — reads exactly one
+-- current value. A `background_checks` table would buy a history nobody writes
+-- and a "which row is current" question every reader would have to answer.
+-- When a provider integration lands it will own its own rows and this column
+-- becomes the projection they update.
+--
+-- THE DEFAULT IS `not_started`, AND THAT IS THE BACKFILL. The column is NOT
+-- NULL with a default, so Postgres fills EVERY EXISTING ROW with 'not_started'
+-- in this statement; there is no separate UPDATE and no window in which a
+-- person has no value. Two spellings of "nobody has said" (NULL and
+-- 'not_started') would make every reader coalesce them, and a roster is the
+-- wrong place to learn the difference between an unanswered question and an
+-- unstarted one. Since PostgreSQL 11 a defaulted NOT NULL column is added
+-- without rewriting the heap, so this is a catalogue change on a table of any
+-- size.
+--
+-- THE CHECK IS THE VOCABULARY. `.$type<BackgroundCheckStatus>()` on a varchar
+-- is a compile-time brand and nothing more — the same reasoning as 0024, 0031,
+-- 0032, 0033 and 0040 — so the four legal values are closed in the database
+-- too. This column decides whether a roster claims somebody is cleared to work
+-- with children, which makes "whatever the last writer happened to spell" a
+-- worse answer here than anywhere else it has been refused.
+--
+-- ADDITIVE, AND EITHER DEPLOY ORDER IS SAFE. One column and one CHECK; nothing
+-- is dropped, renamed or rewritten, and no other table is read or written.
+-- Code-first is survivable in both directions: the old code never names the
+-- column, and the new code reading a database without it fails loudly on
+-- `column persons.background_check_status does not exist` rather than
+-- half-working. Nothing in this repo applies migrations on deploy
+-- (`package.json` has only `"build": "next build"`), so an operator runs
+-- `pnpm db:migrate`.
+--
+-- SIBLING RECONCILE. Originally minted as 0043_person_background_check_status
+-- with `when` 1786858232298, then 0045_person_background_check_status at
+-- 1786865300000. #458 landed as 0045_drop_share_phase_digest (`when`
+-- 1786865200000), so this file is now 0046_person_background_check_status at
+-- 1786866200000, strictly above 0045, and a `db:migrate` run reaches it. A
+-- later sibling with a `when` BELOW that is SILENTLY SKIPPED and owes this
+-- one a forward reconcile in its own header (memory/invariants.md →
+-- Migrations).
+--
+-- ROLLBACK (HR2). Two statements, in ONE psql session:
+--
+--   ALTER TABLE "persons" DROP COLUMN IF EXISTS "background_check_status";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866200000;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0042: the journal is the
+-- repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- database's record of what ran, and only the ledger row is deleted. Dropping
+-- the column also drops the CHECK with it, and FORGETS every recorded status —
+-- there is no other copy of it — so revert the application half first and read
+-- the non-default rows before running it:
+--
+--   SELECT background_check_status, count(*) FROM persons
+--    WHERE background_check_status <> 'not_started' GROUP BY 1;
+--
+-- The ledger row can also be identified by the sha256 of THIS FILE, byte for
+-- byte, from the deployed commit:
+--
+--   shasum -a 256 src/db/migrations/0046_person_background_check_status.sql
+ALTER TABLE "persons" ADD COLUMN "background_check_status" varchar(20) DEFAULT 'not_started' NOT NULL;--> statement-breakpoint
+ALTER TABLE "persons" ADD CONSTRAINT "persons_background_check_status_check" CHECK ("persons"."background_check_status" in ('not_started', 'in_progress', 'cleared', 'flagged'));

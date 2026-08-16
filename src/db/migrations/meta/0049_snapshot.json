@@ -1,6 +1,6 @@
 {
-  "id": "2b47e6f3-3734-4c04-8399-c55ce2d69b7b",
-  "prevId": "e18e434f-214e-4281-96d2-2d44e5fa6c37",
+  "id": "96caa2b7-92e5-474d-85ec-3522ee6c7b1d",
+  "prevId": "044963df-6dbf-49db-8a70-2143ef9a5a31",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -6152,6 +6152,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "tasks_id_church_id_unique_idx": {
+          "name": "tasks_id_church_id_unique_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7251,6 +7272,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "intent": {
+          "name": "intent",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'chosen'"
         }
       },
       "indexes": {
@@ -7323,6 +7351,10 @@
         "notification_preferences_digest_cadence_check": {
           "name": "notification_preferences_digest_cadence_check",
           "value": "\"notification_preferences\".\"digest_cadence\" is null or \"notification_preferences\".\"digest_cadence\" in ('daily', 'weekly')"
+        },
+        "notification_preferences_intent_check": {
+          "name": "notification_preferences_intent_check",
+          "value": "\"notification_preferences\".\"intent\" in ('chosen', 'incidental')"
         }
       },
       "isRLSEnabled": false
@@ -8701,6 +8733,254 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.task_dependencies": {
+      "name": "task_dependencies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "church_id": {
+          "name": "church_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prerequisite_task_id": {
+          "name": "prerequisite_task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "task_dependencies_edge_unique_idx": {
+          "name": "task_dependencies_edge_unique_idx",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "prerequisite_task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_dependencies_church_id_idx": {
+          "name": "task_dependencies_church_id_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_dependencies_prerequisite_idx": {
+          "name": "task_dependencies_prerequisite_idx",
+          "columns": [
+            {
+              "expression": "prerequisite_task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "task_dependencies_church_id_churches_id_fk": {
+          "name": "task_dependencies_church_id_churches_id_fk",
+          "tableFrom": "task_dependencies",
+          "tableTo": "churches",
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "task_dependencies_task_church_fk": {
+          "name": "task_dependencies_task_church_fk",
+          "tableFrom": "task_dependencies",
+          "tableTo": "tasks",
+          "columnsFrom": ["task_id", "church_id"],
+          "columnsTo": ["id", "church_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "task_dependencies_prereq_church_fk": {
+          "name": "task_dependencies_prereq_church_fk",
+          "tableFrom": "task_dependencies",
+          "tableTo": "tasks",
+          "columnsFrom": ["prerequisite_task_id", "church_id"],
+          "columnsTo": ["id", "church_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "task_dependencies_no_self_check": {
+          "name": "task_dependencies_no_self_check",
+          "value": "\"task_dependencies\".\"task_id\" <> \"task_dependencies\".\"prerequisite_task_id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.generated_documents": {
+      "name": "generated_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "church_id": {
+          "name": "church_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "format": {
+          "name": "format",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "generated_documents_church_created_at_idx": {
+          "name": "generated_documents_church_created_at_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "generated_documents_storage_key_idx": {
+          "name": "generated_documents_storage_key_idx",
+          "columns": [
+            {
+              "expression": "storage_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "generated_documents_church_id_churches_id_fk": {
+          "name": "generated_documents_church_id_churches_id_fk",
+          "tableFrom": "generated_documents",
+          "tableTo": "churches",
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "generated_documents_user_id_users_id_fk": {
+          "name": "generated_documents_user_id_users_id_fk",
+          "tableFrom": "generated_documents",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "generated_documents_format_check": {
+          "name": "generated_documents_format_check",
+          "value": "\"generated_documents\".\"format\" in ('pdf', 'docx', 'xlsx')"
+        }
+      },
       "isRLSEnabled": false
     }
   },

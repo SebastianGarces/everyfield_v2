@@ -47,35 +47,38 @@
 -- `"build": "next build"`), so code-first is the DEFAULT unless an operator
 -- runs `pnpm db:migrate`.
 --
--- SIBLING RECONCILE. This file was 0045_generated_documents at
--- 1786865500000, itself a forward-reconcile of 0043_generated_documents
--- at 1786859369921. origin/main then took 0045 for
--- 0045_drop_share_phase_digest (`when` 1786865200000). Keeping the 0045
--- tag would DELETE that file on merge; keeping 1786865500000 as the only
--- stamp above 0044 would leave 0045_drop (lower `when`) SILENTLY SKIPPED
--- on any database that already applied this table. It is now
--- 0046_generated_documents at 1786866400000, above 0045. A later sibling
+-- SIBLING RECONCILE. This file was 0043_generated_documents at
+-- 1786859369921, then 0045_generated_documents at 1786865500000, then
+-- 0046_generated_documents at 1786866400000. origin/main then took 0046
+-- for 0046_person_background_check_status (`when` 1786866200000), 0047
+-- for 0047_preference_intent_stamp (`when` 1786866500000), and 0048 for
+-- 0048_task_dependencies (`when` 1786866700000). Keeping the 0046 tag
+-- would DELETE that file on merge; keeping 1786866400000 as the stamp
+-- above 0045 would leave 0046_person_background_check_status (lower
+-- `when` 1786866200000) SILENTLY SKIPPED on any database that already
+-- applied this table at 1786866400000. It is now
+-- 0049_generated_documents at 1786866900000, above 0048. A later sibling
 -- with a `when` above this one owes it a forward reconcile
 -- (memory/invariants.md → Migrations).
 --
 -- ROLLBACK (HR2). Two statements, then the ledger delete, in ONE psql session:
 --
 --   DROP TABLE IF EXISTS "generated_documents";
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866400000;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866900000;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
--- Same reasoning as 0023/0024/0031/0032/0033/0040/0041/0042/0043/0044/0045: the
--- journal is the repository's list of migrations, `drizzle.__drizzle_migrations`
--- is the database's record of what ran, and only the ledger row is deleted.
--- Removing the journal entry instead makes drizzle-kit forget the migration
--- while the ledger still claims it applied, which is unrecoverable by
--- restoring the entry.
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0041/0042/0043/0044/0045/0046:
+-- the journal is the repository's list of migrations,
+-- `drizzle.__drizzle_migrations` is the database's record of what ran, and
+-- only the ledger row is deleted. Removing the journal entry instead makes
+-- drizzle-kit forget the migration while the ledger still claims it applied,
+-- which is unrecoverable by restoring the entry.
 --
 -- The row can also be identified by the sha256 of THIS FILE, byte for byte,
 -- from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0046_generated_documents.sql
+--   shasum -a 256 src/db/migrations/0049_generated_documents.sql
 --
 -- DROPPING THE TABLE DESTROYS DATA — every stored generation log row. The
 -- objects in the private bucket are NOT deleted by this rollback. That is
@@ -92,23 +95,24 @@
 -- rollback above is only one of the two answers to it — read OPERATOR
 -- RECONCILE below BEFORE running `pnpm db:migrate` against it.
 --
--- OPERATOR RECONCILE — a database that applied the OLD 0045_generated_documents
--- (or the 0043 before that) needs a hand before `pnpm db:migrate`. The
--- renumber above fixes the repository and leaves every database that already
--- ran this migration under its old stamp, 1786865500000 (or 1786859369921),
--- in a state the CLI cannot see: the table EXISTS, and the ledger either
--- still holds that lower `created_at` or no longer does (an earlier rollback
--- ran the DELETE and removed the row without dropping the table — the two
--- halves of the rollback block are separable and one of them was run alone).
--- Because the CLI compares this file's `when` against the ledger's MAXIMUM
--- `created_at` and not against its own row, 1786866400000 wins, the DDL
--- below is re-run, and the apply dies on creating the `"generated_documents"`
--- relation — already exists — with the migration aborted and the ledger
--- unchanged.
+-- OPERATOR RECONCILE — a database that applied the OLD 0043, 0045 or 0046
+-- generated_documents needs a hand before `pnpm db:migrate`. The renumber
+-- above fixes the repository and leaves every database that already ran
+-- this migration under its old stamp — 1786859369921 (0043), 1786865500000
+-- (0045) or 1786866400000 (0046) — in a state the CLI cannot see: the table
+-- EXISTS, and the ledger either still holds that lower `created_at` or no
+-- longer does (an earlier rollback ran the DELETE and removed the row
+-- without dropping the table — the two halves of the rollback block are
+-- separable and one of them was run alone). Because the CLI compares this
+-- file's `when` against the ledger's MAXIMUM `created_at` and not against
+-- its own row, 1786866900000 wins, the DDL below is re-run, and the apply
+-- dies on creating the `"generated_documents"` relation — already exists —
+-- with the migration aborted and the ledger unchanged.
 --
 -- THE SHARED `development` BRANCH IS THIS SHAPE: the table exists and the
--- ledger already holds 1786865500000. Do not CREATE TABLE. Detect, then
--- INSERT the new `when` if that row is missing.
+-- ledger already holds 1786865500000, and may also hold 1786866400000 from
+-- the previous restamp. Do not CREATE TABLE. Detect, then INSERT the new
+-- `when` if that row is missing.
 --
 -- DETECT IT. Two reads, neither of which writes anything:
 --
@@ -124,13 +128,17 @@
 --            1786859500000,  -- 0044_church_time_zone
 --            1786865200000,  -- 0045_drop_share_phase_digest
 --            1786865500000,  -- old 0045_generated_documents
---            1786866400000   -- this file
+--            1786866200000,  -- 0046_person_background_check_status
+--            1786866400000,  -- old 0046_generated_documents
+--            1786866500000,  -- 0047_preference_intent_stamp
+--            1786866700000,  -- 0048_task_dependencies
+--            1786866900000   -- this file
 --          )
 --    order by created_at;
 --   select max(created_at) from drizzle.__drizzle_migrations;
 --
 -- One row back from `information_schema.tables` and no ledger row at
--- 1786866400000 means this migration's effect is already present and
+-- 1786866900000 means this migration's effect is already present and
 -- unrecorded at the new stamp — take an exit below. Zero rows back means a
 -- normal apply; run `pnpm db:migrate` and nothing here concerns you.
 --
@@ -139,29 +147,43 @@
 -- 0045: exit 0, `share_phase` / `share_digest` stay if they were never
 -- dropped. Probe those columns on `church_privacy_settings` BEFORE inserting
 -- this file's row. If they still exist, run 0045's DROP COLUMN by hand and
--- INSERT 1786865200000, then take EXIT A here. If they are already gone,
--- INSERT 1786865200000 if that stamp is missing, then EXIT A. Inserting
--- 1786866400000 first raises the max further above 0045 and the skip is
--- permanent.
+-- INSERT 1786865200000, then continue. If they are already gone, INSERT
+-- 1786865200000 if that stamp is missing, then continue.
 --
--- DO NOT INSERT THIS FILE'S LEDGER ROW WHILE 0043, 0044 OR 0045 ARE UNAPPLIED.
--- Inserting `created_at = 1786866400000` first raises the ledger maximum
+-- 0046_person_background_check_status (`when` 1786866200000) sits BELOW the
+-- old stamp 1786866400000. A database holding 1786866400000 will SILENTLY
+-- SKIP 0046: exit 0, `persons.background_check_status` never appears. Probe
+-- that column BEFORE inserting this file's row. If it is missing, run 0046's
+-- ADD COLUMN by hand and INSERT 1786866200000, then continue. If it is
+-- already present, INSERT 1786866200000 if that stamp is missing, then
+-- continue. A database holding only 1786865500000 (and not 1786866400000)
+-- can let migrate apply 0046/0047/0048 normally — do that BEFORE EXIT A.
+-- Inserting 1786866900000 first raises the max above 0046, 0047 and 0048
+-- and those skips are permanent.
+--
+-- DO NOT INSERT THIS FILE'S LEDGER ROW WHILE 0043–0048 ARE UNAPPLIED.
+-- Inserting `created_at = 1786866900000` first raises the ledger maximum
 -- above 0043_true_cammi (1786859463138), 0044_church_time_zone
--- (1786859500000) and 0045_drop_share_phase_digest (1786865200000), and
--- `drizzle-kit migrate` SILENTLY SKIPS all three: exit 0,
--- `wiki_article_feedback` never exists, `churches.time_zone` never exists,
--- `share_phase` / `share_digest` stay. If those three `created_at` values
--- are missing from the second probe, handle 0045 as the paragraph above
--- says, then take EXIT A. If 0043, 0044 and 0045 are already in the ledger
--- (or 0045's effect is recorded by hand) and the table exists, skip migrate
--- and take EXIT A directly.
+-- (1786859500000), 0045_drop_share_phase_digest (1786865200000),
+-- 0046_person_background_check_status (1786866200000),
+-- 0047_preference_intent_stamp (1786866500000) and
+-- 0048_task_dependencies (1786866700000), and `drizzle-kit migrate`
+-- SILENTLY SKIPS all six: exit 0, `wiki_article_feedback` never exists,
+-- `churches.time_zone` never exists, `share_phase` / `share_digest` stay,
+-- `persons.background_check_status` never appears, preference intent is
+-- unstamped, `task_dependencies` never exists. If those `created_at`
+-- values are missing from the second probe, handle 0045 and 0046 as the
+-- paragraphs above say, let migrate apply 0047/0048 (or record them by
+-- hand once their effects are present), then take EXIT A. If 0043–0048
+-- are already in the ledger (or their effects are recorded by hand) and
+-- the table exists, skip migrate and take EXIT A directly.
 --
 -- EXIT A — the database carries rows worth keeping (the shared `development`
 -- branch, or any environment with real data). Record the apply that already
 -- happened, so the CLI skips a migration whose effect is present:
 --
 --   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
---   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0046_generated_documents.sql>', 1786866400000);
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0049_generated_documents.sql>', 1786866900000);
 --
 -- The `created_at` literal is what matters and it is this migration's journal
 -- `when`; the hash column is bookkeeping for the next human, so write the real
@@ -182,9 +204,10 @@
 -- EXIT B or add the missing piece by hand first. The header's own rule
 -- applies to the result too — prove it from `information_schema.tables`,
 -- never from the CLI's exit status, which is 0 for "skipped" and 0 for
--- "applied" alike. The old stamps 1786859369921 and 1786865500000 may still
--- sit in the ledger; leave them. `when` is what decides, and the INSERT
--- above is what makes this file's `when` visible. Do not CREATE TABLE.
+-- "applied" alike. The old stamps 1786859369921, 1786865500000 and
+-- 1786866400000 may still sit in the ledger; leave them. `when` is what
+-- decides, and the INSERT above is what makes this file's `when` visible.
+-- Do not CREATE TABLE.
 --
 -- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
 -- above in full (it drops the table), then `pnpm db:migrate` normally and the

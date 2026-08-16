@@ -141,3 +141,25 @@ export const bulkRescheduleSchema = z.object({
 });
 
 export type BulkRescheduleInput = z.infer<typeof bulkRescheduleSchema>;
+
+/**
+ * Comma-separated prerequisite ids from the task form's hidden input.
+ *
+ * The form posts one field so `formDataToObject` cannot collapse a repeated
+ * name. Empty or absent means "wait on nothing".
+ */
+export const prerequisiteTaskIdsSchema = z
+  .string()
+  .optional()
+  .transform((value) => {
+    if (!value) return [];
+    return [
+      ...new Set(
+        value
+          .split(",")
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0)
+      ),
+    ];
+  })
+  .pipe(z.array(z.string().uuid()));
