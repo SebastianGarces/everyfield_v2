@@ -19,3 +19,4 @@ export * from "./notifications";
 export * from "./auth-attempts";
 export * from "./phase-engine";
 export * from "./methodology-embeddings";
+export * from "./documents";

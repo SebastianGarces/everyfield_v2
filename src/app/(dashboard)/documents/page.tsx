@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { History } from "lucide-react";
+import Link from "next/link";
 
 import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
+import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
 import { buildAutoFillDefaults, DOCUMENT_TEMPLATES } from "@/lib/documents";
 import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
@@ -38,10 +41,25 @@ export default async function DocumentsPage() {
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="bg-card space-y-1 p-6 pb-4 shadow-sm">
-          <h1 className="text-3xl font-bold tracking-tight">Documents</h1>
-          <p className="text-muted-foreground">
-            Generate print-ready documents with your church details filled in.
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <h1 className="text-3xl font-bold tracking-tight">Documents</h1>
+              <p className="text-muted-foreground">
+                Generate print-ready documents with your church details filled
+                in.
+              </p>
+            </div>
+            <Button
+              asChild
+              variant="outline"
+              className="cursor-pointer sm:shrink-0"
+            >
+              <Link href="/documents/history">
+                <History className="mr-2 h-4 w-4" />
+                History
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Library */}

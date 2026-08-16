@@ -11,6 +11,7 @@ import {
 } from "@/lib/documents";
 import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
 import { canRenderDocument, renderDocument } from "@/lib/documents/render";
+import { recordGeneratedDocument } from "@/lib/documents/service";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -21,7 +22,9 @@ export const runtime = "nodejs";
  * Renders a code-defined document template and streams it as a download.
  * Format defaults to the template's first supported format. Merge values come
  * from query params; missing fields fall back to church/user auto-fill
- * defaults. Generate-on-demand (no persistence).
+ * defaults. The bytes are stored and a history row is written so the planter
+ * can re-download without regenerating. A preview (`?preview=1`) does not
+ * record.
  */
 export async function GET(
   request: NextRequest,
@@ -90,6 +93,34 @@ export async function GET(
   const { mime, ext } = FORMAT_OUTPUT[format];
   const inline =
     format === "pdf" && request.nextUrl.searchParams.get("preview") === "1";
+
+  if (!inline) {
+    if (!user.churchId) {
+      return NextResponse.json(
+        { error: "No church associated with this account" },
+        { status: 400 }
+      );
+    }
+    try {
+      await recordGeneratedDocument({
+        churchId: user.churchId,
+        userId: user.id,
+        templateId: template.id,
+        format,
+        bytes: file,
+      });
+    } catch (error) {
+      console.error(
+        `[documents] failed to persist ${templateId} (${format}):`,
+        error
+      );
+      return NextResponse.json(
+        { error: "Failed to generate document" },
+        { status: 500 }
+      );
+    }
+  }
+
   const disposition = inline ? "inline" : "attachment";
   return new NextResponse(new Uint8Array(file), {
     status: 200,

@@ -2,10 +2,11 @@
 // Document Templates — Types (F6)
 // ============================================================================
 //
-// Phase-1 MVP: templates are code-defined (no DB table). Each template carries
-// metadata for the library UI plus a list of merge fields. Documents are
-// generated on-demand and streamed to the browser; generated-document history
-// (the `documents` table) is a deferred follow-up.
+// Templates are code-defined (no DB table — audit decision #15). Each template
+// carries metadata for the library UI plus a list of merge fields. Generation
+// still streams the file to the browser; the bytes are also stored and a row
+// is written to `generated_documents` so history can re-download without
+// re-rendering.
 // ============================================================================
 
 export type DocumentCategory =

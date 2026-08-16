@@ -241,6 +241,13 @@ Applies to every `@react-pdf/renderer` path: the F6 templates under `src/lib/doc
 
 - Every PDF face is a ROLE from `PDF_FONT` (`documents/pdf/fonts.ts`), never a standard-14 name (`Helvetica`, `Courier`, `Times-Roman`, Bold/Oblique included) and never a `fontWeight`/`fontStyle` axis: standard-14 faces write a WRONG GLYPH outside WinAnsi instead of failing, and `@react-pdf/font` filters on `fontStyle` first, so an axis on a single-source family throws. A standard-14 name resolves with no asset, so the corruption is silent; `pdf/fonts.test.ts` scans the directory and `article-pdf/render.test.ts` pins every emphasis combination.
 
+## Generated Documents
+
+Applies to `generated_documents`, `src/lib/documents/service.ts`, and `/documents/history`.
+
+- A generated artifact is stored at `documents/{churchId}/{uuid}.{ext}` in the private bucket; the history row is inserted AFTER the upload, and an insert failure deletes the object. Never insert a key that was not uploaded.
+- History list and signed-URL lookup both `eq(church_id, session.churchId)`. The client names an artifact id, never a storage key; a foreign id is missing, not signed.
+
 ## Communication — Resend & Delivery Figures
 
 Applies to `src/lib/communication/**` and the `/communication` surfaces.
