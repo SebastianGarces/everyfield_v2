@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { MeetingList } from "@/components/meetings/meeting-list";
 import { Button } from "@/components/ui/button";
-import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
+import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
 import { listMeetings } from "@/lib/meetings/service";
 import {
   analyticsMeetingTypeArg,
@@ -39,7 +40,14 @@ export default async function MeetingsPage({
     parseListMeetingTypeFilter(params.type)
   );
 
-  const [upcomingResult, pastResult] = await Promise.all([
+  // One `now` per render: MeetingList is a client component, so the
+  // relative-day badge cannot read the clock itself — that would stamp
+  // different instants on SSR and hydration (React #418).
+  // memory/invariants.md → Date & Time Rendering.
+  const now = new Date();
+
+  const [church, upcomingResult, pastResult] = await Promise.all([
+    getCurrentUserChurch(),
     view !== "past"
       ? listMeetings(user.churchId, {
           status: "upcoming",
@@ -81,6 +89,8 @@ export default async function MeetingsPage({
             upcomingMeetings={upcomingResult.meetings}
             pastMeetings={pastResult.meetings}
             initialView={view}
+            timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
+            now={now}
           />
         </div>
       </div>

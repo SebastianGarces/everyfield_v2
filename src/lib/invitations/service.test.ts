@@ -957,6 +957,11 @@ const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
         wellFormed: [],
         malformed: [],
       },
+      {
+        name: "setChurchTimeZoneAction",
+        wellFormed: ["America/Chicago"],
+        malformed: ["Not/AZone"],
+      },
     ],
   },
   {

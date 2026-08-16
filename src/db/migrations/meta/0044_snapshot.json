@@ -1,6 +1,6 @@
 {
-  "id": "75f5add8-dd50-4fd4-bfe4-97f9a0442cb2",
-  "prevId": "81be53d5-2faf-44e1-8360-219a1e9848b4",
+  "id": "c6f0f17a-b04d-46c8-9e50-64d7ef50da8c",
+  "prevId": "75f5add8-dd50-4fd4-bfe4-97f9a0442cb2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -199,6 +199,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'America/Chicago'"
         }
       },
       "indexes": {},

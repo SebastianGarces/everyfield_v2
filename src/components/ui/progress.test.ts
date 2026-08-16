@@ -179,6 +179,7 @@ function trainingItem(
 test("Training Progress still renders, now with a bar that fills", () => {
   const html = renderToStaticMarkup(
     createElement(PersonTrainingProgress, {
+      timeZone: "America/Chicago",
       items: [
         trainingItem({
           programId: "safety",
@@ -208,7 +209,10 @@ test("Training Progress still renders, now with a bar that fills", () => {
 
 test("Training Progress with nothing assigned renders its empty state", () => {
   const html = renderToStaticMarkup(
-    createElement(PersonTrainingProgress, { items: [] })
+    createElement(PersonTrainingProgress, {
+      timeZone: "America/Chicago",
+      items: [],
+    })
   );
 
   assert.ok(html.includes("No training assigned"));

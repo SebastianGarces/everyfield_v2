@@ -1,0 +1,188 @@
+-- DOC-008 — `generated_documents`: one row per file a planter generated,
+-- pointing at the bytes in the private Tigris bucket so history can
+-- re-download without re-rendering.
+--
+-- WHY THIS EXISTS. Generation was on-demand and stateless: the file streamed
+-- to the browser and nothing was recorded, so `/documents/history` had no
+-- data source. A log-only design would silently return a *different* document
+-- after a template edit. Storing the artifact is the only option that
+-- satisfies "re-download without regenerating" as written.
+--
+-- THIS IS NOT A TEMPLATE TABLE. Audit decision #15 rules out DB-backed
+-- *template* tables; the catalog stays code-defined. A generation log records
+-- what was produced, not what can be produced, and does not reopen that
+-- decision.
+--
+-- ADDITIVE AND NON-REWRITING. One new table, two foreign keys, two indexes
+-- and one CHECK. Nothing existing is altered, nothing is backfilled, and no
+-- row of any other table is read or written. `churches` and `users` do not
+-- cascade, which `planWipe()` derives from `pg_constraint` at seed time —
+-- never write that order down as a list (memory/invariants.md → Dev Seeds).
+--
+-- WHY THE CHECK. `format` is `varchar(8)` and `GeneratedDocumentFormat` is a
+-- `.$type<>()` brand, which is a compile-time fact and nothing else (0040's
+-- lesson). Without the constraint a typo'd format is as writable as a real
+-- one and sits in the table forever, invisible to a re-download that looks
+-- up MIME type from the three words the code knows. Widening the vocabulary
+-- means widening this CHECK in a new migration — never editing this file.
+--
+-- `storage_key` is UNIQUE: two rows must not point at the same object. The
+-- list reads `(church_id, created_at)` together — tenancy is
+-- application-enforced here (no RLS) — so that is the index the history
+-- page actually uses.
+--
+-- DEPLOY IN EITHER ORDER, and the claim is checked rather than inherited (the
+-- 0038 correction of 2026-08-13). Nothing in this repo INFERS anything against
+-- this table's constraints:
+--   - migration first — the old build never names `generated_documents`, so
+--     the table sits empty and unread.
+--   - code first — every read and write of `generated_documents` is new in
+--     the same change, so a build that has the code and not the table raises
+--     `relation "generated_documents" does not exist` on generate (after
+--     render) and on `/documents/history`, and nowhere else. No existing
+--     surface changes behaviour until persist runs.
+-- There is no `ON CONFLICT (…) WHERE …` here, so the 42P10 trap that forced
+-- 0038's arbiter-index-first ordering does not apply.
+-- Nothing in this repo applies migrations on deploy (`package.json` has only
+-- `"build": "next build"`), so code-first is the DEFAULT unless an operator
+-- runs `pnpm db:migrate`.
+--
+-- SIBLING RECONCILE. Main's head is now 0044_church_time_zone (`when`
+-- 1786859500000), itself a forward-reconcile of a 0043 that lost to
+-- 0043_true_cammi (#75, `when` 1786859463138). This file was
+-- 0043_generated_documents at 1786859369921 — BELOW both — so a database
+-- that had applied either sibling would SILENTLY SKIP it. It is now
+-- 0045_generated_documents at 1786865500000, above both. A later sibling
+-- with a `when` above this one owes it a forward reconcile
+-- (memory/invariants.md → Migrations).
+--
+-- ROLLBACK (HR2). Two statements, then the ledger delete, in ONE psql session:
+--
+--   DROP TABLE IF EXISTS "generated_documents";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865500000;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0041/0042/0043/0044: the
+-- journal is the repository's list of migrations, `drizzle.__drizzle_migrations`
+-- is the database's record of what ran, and only the ledger row is deleted.
+-- Removing the journal entry instead makes drizzle-kit forget the migration
+-- while the ledger still claims it applied, which is unrecoverable by
+-- restoring the entry.
+--
+-- The row can also be identified by the sha256 of THIS FILE, byte for byte,
+-- from the deployed commit:
+--
+--   shasum -a 256 src/db/migrations/0045_generated_documents.sql
+--
+-- DROPPING THE TABLE DESTROYS DATA — every stored generation log row. The
+-- objects in the private bucket are NOT deleted by this rollback. That is
+-- what makes this migration safe to roll back only BEFORE planters have
+-- generated documents they expect to re-download, and it is the one thing
+-- to check before running it.
+--
+-- ROLLING BACK REQUIRES REVERTING THE CODE TOO. The generation route writes
+-- this table after every non-preview render and `/documents/history` reads
+-- it, so dropping it under a live build 500s those two surfaces.
+--
+-- If a database already CARRIES `generated_documents` while its ledger holds
+-- no row for this migration, that is the renumber's own residue and the
+-- rollback above is only one of the two answers to it — read OPERATOR
+-- RECONCILE below BEFORE running `pnpm db:migrate` against it.
+--
+-- OPERATOR RECONCILE — a database that applied the OLD 0043_generated_documents
+-- needs a hand before `pnpm db:migrate`. The renumber above fixes the
+-- repository and leaves every database that already ran this migration under
+-- its old stamp, 1786859369921, in a state the CLI cannot see: the table
+-- EXISTS, and the ledger either still holds that lower `created_at` or no
+-- longer does (an earlier rollback ran the DELETE and removed the row without
+-- dropping the table — the two halves of the rollback block are separable and
+-- one of them was run alone). Because the CLI compares this file's `when`
+-- against the ledger's MAXIMUM `created_at` and not against its own row,
+-- 1786865500000 wins, the DDL below is re-run, and the apply dies on
+-- creating the `"generated_documents"` relation — already exists — with the
+-- migration aborted and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select table_name
+--     from information_schema.tables
+--    where table_schema = 'public'
+--      and table_name = 'generated_documents';
+--   select created_at
+--     from drizzle.__drizzle_migrations
+--    where created_at in (
+--            1786859369921,  -- old 0043_generated_documents
+--            1786859463138,  -- 0043_true_cammi (wiki)
+--            1786859500000,  -- 0044_church_time_zone
+--            1786865500000   -- this file
+--          )
+--    order by created_at;
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- One row back from `information_schema.tables` and no ledger row at
+-- 1786865500000 means this migration's effect is already present and
+-- unrecorded — take an exit below. Zero rows back means a normal apply; run
+-- `pnpm db:migrate` and nothing here concerns you.
+--
+-- DO NOT INSERT THIS FILE'S LEDGER ROW WHILE 0043 OR 0044 ARE UNAPPLIED.
+-- Inserting `created_at = 1786865500000` first raises the ledger maximum
+-- above 0043_true_cammi (1786859463138) and 0044_church_time_zone
+-- (1786859500000), and `drizzle-kit migrate` SILENTLY SKIPS both: exit 0,
+-- `wiki_article_feedback` never exists, `churches.time_zone` never exists.
+-- If those two `created_at` values are missing from the second probe, run
+-- `pnpm db:migrate` FIRST — it applies 0043 then 0044, then dies on CREATE
+-- TABLE already exists. That failure is the expected stop. THEN take EXIT A.
+-- If 0043 and 0044 are already in the ledger (max at least 1786859500000)
+-- and the table exists, skip migrate and take EXIT A directly.
+--
+-- EXIT A — the database carries rows worth keeping (the shared `development`
+-- branch, or any environment with real data). Record the apply that already
+-- happened, so the CLI skips a migration whose effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_generated_documents.sql>', 1786865500000);
+--
+-- The `created_at` literal is what matters and it is this migration's journal
+-- `when`; the hash column is bookkeeping for the next human, so write the real
+-- digest rather than a placeholder. (It is the sha256 of this file's bytes at
+-- the moment of the apply — which is exactly why the rollback DELETE above
+-- cannot key on it: any header edit changes the file while the ledger keeps the
+-- old value. `created_at` is stable.) THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it: the
+-- table from the probe above; the seven columns `id`, `church_id`, `user_id`,
+-- `template_id`, `format`, `storage_key`, `created_at` from
+-- `information_schema.columns`; `is_nullable = 'NO'` on `church_id` and
+-- `user_id`; `generated_documents_format_check` from `pg_constraint`; the two
+-- FKs `generated_documents_church_id_churches_id_fk` and
+-- `generated_documents_user_id_users_id_fk`; and the two indexes
+-- `generated_documents_church_created_at_idx` and
+-- `generated_documents_storage_key_idx` (UNIQUE) from `pg_indexes`. If any
+-- one of them is missing, EXIT A is a lie the ledger will keep telling; take
+-- EXIT B or add the missing piece by hand first. The header's own rule
+-- applies to the result too — prove it from `information_schema.tables`,
+-- never from the CLI's exit status, which is 0 for "skipped" and 0 for
+-- "applied" alike. The old stamp 1786859369921 may still sit in the ledger;
+-- leave it. `when` is what decides, and the INSERT above is what makes this
+-- file's `when` visible.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK block
+-- above in full (it drops the table), then `pnpm db:migrate` normally and the
+-- migration applies from a clean shape. It DELETES every generation-log row,
+-- which is what that block already says it does; that is why this exit is for
+-- databases whose rows nobody will miss.
+CREATE TABLE "generated_documents" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"church_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"template_id" varchar(64) NOT NULL,
+	"format" varchar(8) NOT NULL,
+	"storage_key" varchar(500) NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "generated_documents_format_check" CHECK ("generated_documents"."format" in ('pdf', 'docx', 'xlsx'))
+);
+--> statement-breakpoint
+ALTER TABLE "generated_documents" ADD CONSTRAINT "generated_documents_church_id_churches_id_fk" FOREIGN KEY ("church_id") REFERENCES "public"."churches"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "generated_documents" ADD CONSTRAINT "generated_documents_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "generated_documents_church_created_at_idx" ON "generated_documents" USING btree ("church_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "generated_documents_storage_key_idx" ON "generated_documents" USING btree ("storage_key");

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Mail, SearchX } from "lucide-react";
-import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import {
   getCommunications,
   resolveSubjects,
@@ -19,7 +19,10 @@ import {
 import { parseCommunicationFilters } from "@/lib/validations/communication";
 // Dates render through the pinned-zone formatter, never date-fns —
 // memory/invariants.md → Date & Time Rendering (ruled 2026-08-12, 407-3-1).
-import { formatRelativeTimestamp } from "@/lib/datetime";
+import {
+  DEFAULT_CHURCH_TIME_ZONE,
+  formatRelativeTimestamp,
+} from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -47,16 +50,18 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const filters = parseCommunicationFilters(params);
   const { page, limit } = filters;
 
-  const { communications, total } = await getCommunications(
-    user.churchId,
-    filters
-  );
+  const [church, { communications, total }] = await Promise.all([
+    getCurrentUserChurch(),
+    getCommunications(user.churchId, filters),
+  ]);
 
   // Resolve merge field variables in subjects for display
   const resolvedSubjectMap = await resolveSubjects(
     user.churchId,
     communications
   );
+
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   const totalPages = Math.ceil(total / limit);
   const hasFilters = Boolean(
@@ -165,7 +170,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                       >
                         <td className="px-4 py-3 text-sm">
                           {msg.sentAt
-                            ? formatRelativeTimestamp(msg.sentAt, now)
+                            ? formatRelativeTimestamp(msg.sentAt, now, timeZone)
                             : "—"}
                         </td>
                         <td className="px-4 py-3">

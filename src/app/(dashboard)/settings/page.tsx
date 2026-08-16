@@ -4,7 +4,8 @@ import Link from "next/link";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { EmailSuppressionNotice } from "@/components/notifications/email-suppression-notice";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
-import { verifySession } from "@/lib/auth/session";
+import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
 import { isAddressSuppressed } from "@/lib/notifications/channels/suppression";
 import {
@@ -41,6 +42,10 @@ export const metadata: Metadata = {
 export default async function SettingsPage() {
   const session = await verifySession();
   const owner = preferenceOwnerFromSession(session);
+  const church =
+    session.user.role === "planter" && session.user.churchId
+      ? await getCurrentUserChurch()
+      : null;
   // The matrix must be resolved against the SAME audience the feed, the badge
   // and the dispatcher resolve against, or an absent row renders as one value
   // here and behaves as another there (N-027).
@@ -110,6 +115,23 @@ export default async function SettingsPage() {
 
           <PreferenceMatrix view={view} />
         </section>
+
+        {church && (
+          <section aria-labelledby="church-timezone" className="space-y-4">
+            <div className="space-y-1">
+              <h2
+                id="church-timezone"
+                className="text-lg font-semibold tracking-tight"
+              >
+                Church
+              </h2>
+              <p className="text-muted-foreground text-sm">
+                How this plant&apos;s dates and times are shown.
+              </p>
+            </div>
+            <ChurchTimeZoneSelect timeZone={church.timeZone} />
+          </section>
+        )}
 
         {/* The one setting on the neighbouring screen, linked rather than
             inlined. It is a different KIND of decision — church-wide, about
