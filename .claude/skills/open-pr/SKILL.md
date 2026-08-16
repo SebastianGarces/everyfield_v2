@@ -33,7 +33,10 @@ or with required evidence missing, do not open a PR — return control to the lo
    done
    ```
 4. Anchor on CI: `gh pr checks <number> --watch --fail-fast`.
-5. Return the PR URL.
+5. **Back-fill the body from the anchor**, then read it back: `gh pr edit <number> --body-file <path>`
+   replaces the CI row with the conclusion GitHub reported and the sha it ran at, and
+   `gh pr view <number> --json headRefOid` proves the body still describes the head.
+6. Return the PR URL.
 
 ## The CI anchor, and the labels
 
@@ -49,6 +52,11 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
   make sure `agent:in-progress` is *gone*, not merely joined by `agent:in-review`.
 - **A label that cannot be confirmed is an ERROR**, reported as such. A green PR whose issue still
   reads `agent:in-progress` is worse than a failed one, because it will be believed.
+- **The body is evidence, so it is checked like evidence: every sha it cites must be the head sha.**
+  A table still reading `⏳ anchoring`, or `CI ❌ at <ancestor sha>`, or a preview validated one
+  commit back, describes a different commit than the one about to merge — and it will be believed
+  too. **This refuses the merge**, it is not a note for later: back-fill the CI cell from the landed
+  anchor, correct any cell the fix round moved, and only then merge or enable auto-merge.
 
 ## PR body template
 
@@ -91,10 +99,24 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 ```sql
 <DDL delta>
 ```
+
+**Applies** (`pnpm db:migrate` on a scratch DB):
+```
+<transcript, verbatim>
+```
+
+**Rolls back** (the down path, on that same scratch DB):
+```
+<transcript, verbatim>
+```
 </details>
 
 🤖 Built and validated by the Agent Delivery OS.
 ```
+
+**The schema-diff section is owed whole or not at all**: the DDL delta alone is a FAIL, because a
+delta nobody applied is a claim. Both transcripts, both directions, from a scratch DB — and if either
+direction will not run, that is a failed WORKS gate rather than a section written anyway.
 
 **Never omit `Closes #<issue>`** — one line per issue the track closes, or the board silently keeps an
 issue open. **Never let Manual QA restate the acceptance criteria**: the gates proved those, and human
