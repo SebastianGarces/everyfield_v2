@@ -11,6 +11,7 @@ import {
   isBookmarked,
   getBookmarkedSlugs,
   wikiHref,
+  getArticleFeedbackForUser,
 } from "@/lib/wiki";
 import { extractHeadings } from "@/lib/wiki/toc";
 import { getCurrentSession } from "@/lib/auth";
@@ -24,6 +25,7 @@ import { RelatedArticles } from "@/components/wiki/related-articles";
 import { RelatedTemplates } from "@/components/wiki/related-templates";
 import { ArticlePager } from "@/components/wiki/article-pager";
 import { ArticleActions } from "@/components/wiki/article-actions";
+import { ArticleFeedback } from "@/components/wiki/article-feedback";
 import type { ArticleWithRelated } from "@/lib/wiki/get-article";
 import type { ArticleMeta } from "@/lib/wiki/types";
 import type { WikiProgressStatus } from "@/db/schema";
@@ -149,10 +151,14 @@ async function ArticleView({
   // The navigation read is scoped to the same church as the article itself, so
   // the footer can never advertise a title this reader is not allowed to open
   // (`memory/invariants.md` → Multi-Tenancy).
-  const [content, bookmarked, navigation] = await Promise.all([
+  const { user } = await getCurrentSession();
+  const [content, bookmarked, navigation, existingVote] = await Promise.all([
     compileArticle(article),
     isBookmarked(article.slug),
     getArticleNavigation(article.slug, article.relatedArticleSlugs, churchId),
+    user?.churchId
+      ? getArticleFeedbackForUser(user.churchId, user.id, article.slug)
+      : Promise.resolve(null),
   ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
@@ -244,6 +250,13 @@ async function ArticleView({
               previous={navigation.previous}
               next={navigation.next}
             />
+
+            {user?.churchId ? (
+              <ArticleFeedback
+                articleSlug={article.slug}
+                initialRating={existingVote?.rating ?? null}
+              />
+            ) : null}
           </div>
         </article>
 
