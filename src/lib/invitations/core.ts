@@ -83,10 +83,10 @@ import { announceRemovedFromOversightOrg } from "@/lib/notifications/plant-assoc
 
 import {
   acceptedAssociationEventStatement,
+  auditableAssociationOrg,
   churchSubject,
   sendingChurchSubject,
   severAssociationWithAuditStatement,
-  type AssociationSubject,
 } from "./audit";
 
 import {
@@ -1536,14 +1536,15 @@ export async function acceptInvitationAs(
   // contradict its `type` throws instead of half-applying.
   //
   // THE ORDER OF THESE LINES IS LOAD-BEARING, and it is ASSERTED rather than
-  // argued (ruled 2026-08-13 on PR #423, #411). `auditableAssociationOrg` below
-  // is TOTAL — it throws on a row whose type-implied ids are missing and on a
-  // `type` outside the union — and the only reason a planter never meets that
-  // throw is that `lockTargetRow` and `associationStatement` are built FIRST and
-  // refuse exactly the same rows a few lines earlier. That is an argument about
-  // reading order, so the sweep that made the function total left it one refactor
-  // from being false: hoist the audit above these two and a defective row reaches
-  // it with nothing having refused it, changing which refusal the planter reads.
+  // argued (ruled 2026-08-13 on PR #423, #411). The audit line REFUSES a row
+  // whose type-implied ids are missing, and one whose `type` is outside the union
+  // — `requireAssociationPair` throws before `auditableAssociationOrg` (`./audit`)
+  // is handed anything — and the only reason a planter never meets that throw is
+  // that `lockTargetRow` and `associationStatement` are built FIRST and refuse
+  // exactly the same rows a few lines earlier. That is an argument about reading
+  // order, so the sweep that made the audit total left it one refactor from being
+  // false: hoist the audit above these two and a defective row reaches it with
+  // nothing having refused it, changing which refusal the planter reads.
   // `association.test.ts` §2 pins the ORDER, read off this function's own source.
   // Reorder these lines and that suite goes red.
   //
@@ -1563,15 +1564,20 @@ export async function acceptInvitationAs(
   // outcome rather than trusting the batch (see
   // `acceptedAssociationEventStatement`).
   //
+  // BOTH HALVES OF THAT INVARIANT LIVE IN `./audit` — what an accept audits and
+  // the statement that writes it, next to each other — so this line is the whole
+  // of the accept's part in it: resolve the pair the way the two builders above
+  // already did, and hand it over.
+  //
   // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
-  // sending-church subject included, and `auditableAssociationOrg` is TOTAL:
-  // it returns a subject or it throws. So there is exactly ONE batch shape here
-  // — four statements, always audited. The shorter batch is not conditional, it
-  // does not exist: an unaudited association is the state OV-008 forbids, so the
-  // spelling of it is absent from this file rather than guarded by a ternary a
-  // later edit could make reachable.
+  // sending-church subject included, and the two functions are TOTAL between
+  // them: a subject comes back, or one of them throws. So there is exactly ONE
+  // batch shape here — four statements, always audited. The shorter batch is not
+  // conditional, it does not exist: an unaudited association is the state OV-008
+  // forbids, so the spelling of it is absent from this file rather than guarded
+  // by a ternary a later edit could make reachable.
   const audit = acceptedAssociationEventStatement(actor, {
-    ...auditableAssociationOrg(invitation),
+    ...auditableAssociationOrg(requireAssociationPair(invitation)),
     invitationId,
   });
 
@@ -1968,7 +1974,7 @@ export type AssociationPair =
  * is a real decision that somebody has to make, and the same decision every time.
  *
  * IT WAS MADE THREE TIMES (swept 2026-08-13, #411 review round 1).
- * `unboundTargetSlot`, `auditableAssociationOrg` and `associationStatement` each
+ * `unboundTargetSlot`, `associationStatement` and the audit derivation each
  * carried their own switch over `type`, their own pair of `if (!invitation.<fk>)`
  * guards per arm, their own literal copy of the three "Invalid invitation:
  * missing …" messages and their own fail-closed `default:` — character-identical
@@ -1978,6 +1984,11 @@ export type AssociationPair =
  * establish by enumeration that one function's guards were a superset of
  * another's. That relation is now true BY CONSTRUCTION — there is one set of
  * guards — so the property needs no cross-product to hold it up.
+ *
+ * THE THIRD CONSUMER IS NOW IN ANOTHER MODULE, and `AssociationPair` is what
+ * carries the decision to it: `auditableAssociationOrg` (`./audit`) takes the
+ * narrowed pair, so it cannot re-derive one, and it cannot ask for one either —
+ * that module reaches this one for TYPES ONLY, deliberately.
  *
  * IT IS TOTAL: it returns a narrowed pair or it THROWS, and there is no third
  * answer. The `never` makes a FOURTH `OrganizationInvitationType` a compile error
@@ -2121,8 +2132,9 @@ export function lockTargetRow(invitation: AssociationFacts) {
  *
  * A row whose FK columns contradict its `type`, and a `type` no arm knows, are
  * both refused by `requireAssociationPair` before this function chooses a table
- * — the same one decision `associationStatement` and `auditableAssociationOrg`
- * ask, so the three cannot disagree about which pair a type implies.
+ * — the same one decision `associationStatement` asks and the accept's audit
+ * (`./audit` → `auditableAssociationOrg`) is handed, so the three cannot
+ * disagree about which pair a type implies.
  */
 export function unboundTargetSlot(invitation: AssociationFacts): SQL {
   const pair = requireAssociationPair(invitation);
@@ -2322,103 +2334,18 @@ export async function disassociateSendingChurchFromNetwork(
     .where(eq(sendingChurches.id, sendingChurchId));
 }
 
+// WHAT AN ACCEPT AUDITS IS NOT IN THIS FILE. `auditableAssociationOrg` — which
+// subject and which org an invitation's association names — lives in `./audit`,
+// next to `acceptedAssociationEventStatement`, the statement it is derived for.
+// The two are halves of one OV-008 invariant, and holding them 730 lines apart
+// here is what let a `default:` arm fall off the end of a switch and read as
+// correct at both ends. It takes the pair `requireAssociationPair` narrows, so
+// the decision about which two ids a `type` implies stays here, made once, for
+// the three consumers that share it.
+
 // ----------------------------------------------------------------------------
 // The planter's sever (#304 / OV-007a, OV-010)
 // ----------------------------------------------------------------------------
-
-/**
- * WHICH oversight org an invitation's association is with, in the audit's own
- * vocabulary — derived from `type`, never from whichever of the row's two FK
- * columns happens to be populated.
- *
- * Same rule, and the same reason, as `invitingOrgForInvitation` in
- * `@/lib/notifications/oversight`: nothing constrains an
- * `organization_invitations` row to one FK and `insertInvitation` validates
- * none, so a `church_to_sending_church` row carrying a stray network id would
- * otherwise get an audit row naming a network that associated nobody.
- *
- * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0036).
- * The `sending_church_to_network` arm used to return `null` — not because that
- * association was unworthy of an audit, but because `association_events` made a
- * CHURCH its mandatory subject, and a sending church joining a network names no
- * church. 0036 gave the table the subject discriminator its own header had asked
- * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
- * the network as org.
- *
- * IT IS TOTAL: it returns a subject or it THROWS, and there is no third answer.
- * It fails closed the way every other read of an invitation's `type` in this
- * file does — `InvitationError`, the same arm `insertInvitation`'s slot rule,
- * `lockTargetRow`, `associationStatement`, the accept path and
- * `verifyInvitationAuthority` all take — and it gets there by asking
- * `requireAssociationPair` first, so it can see neither a null id nor an unknown
- * type at all.
- *
- * THREE ROUNDS OF THE 2026-08-13 SWEEP (#411) GOT IT THERE, and the later two
- * are the ones worth remembering. Round 1 gave the switch a `default:` that
- * throws: with three cases and no default TypeScript treats the switch as
- * exhaustive and lets the function end, so a row carrying a `type` outside the
- * union returned `undefined`. Round 2 removed the OTHER falsy answer — the
- * `: null` each of the three arms returned when its type-implied ids were
- * missing. Both were the same hole, because the caller branched on truthiness: a
- * falsy result meant a batch of three statements instead of four, an association
- * committed with no `association_events` row behind it, which is the one thing
- * #274 / OV-008 forbids. Documenting the nullable arm as "unreachable, because
- * `associationStatement` throws on exactly these id pairs fifteen lines earlier"
- * is the reasoning this function's own header rejects one paragraph down; the
- * fix is to delete the branch, not to explain it. `acceptInvitationAs` now has
- * ONE batch shape, four statements, always audited.
- *
- * Round 3 fixed what rounds 1 and 2 had made WORSE: this function had become a
- * fourth hand-written copy of "which two ids does this type imply", and the
- * subset relation the accept's safety rests on — every row this refuses is
- * refused a statement earlier — held only because four switches happened to be
- * spelled alike. The guards, the messages and the `never` now live once, in
- * `requireAssociationPair`, and the relation is true by construction.
- *
- * The premise is real rather than theoretical: `organization_invitations.type`
- * is a bare `varchar(40)` with a TypeScript-only `$type<>` cast, the FK columns
- * are all nullable, and `insertInvitation` validates neither (see
- * `verifyInvitationAuthority`). Nothing reaches the refusal today —
- * `lockTargetRow`, `associationStatement` and `verifyInvitationAuthority` all
- * refuse such a row first — but "unreachable because three other functions
- * happen to run earlier" is not the guarantee this function should rest on, and
- * a FOURTH `OrganizationInvitationType` would reach it with all three of those
- * extended and this one silently unaudited. The `never` makes that a compile
- * error, and the throw makes the runtime refuse rather than half-apply.
- */
-export function auditableAssociationOrg(invitation: AssociationFacts): {
-  subject: AssociationSubject;
-  orgType: AssociationOrgType;
-  orgId: string;
-} {
-  const pair = requireAssociationPair(invitation);
-
-  switch (pair.type) {
-    case "church_to_sending_church": {
-      return {
-        subject: churchSubject(pair.targetChurchId),
-        orgType: "sending_church",
-        orgId: pair.sendingChurchId,
-      };
-    }
-
-    case "church_to_network": {
-      return {
-        subject: churchSubject(pair.targetChurchId),
-        orgType: "network",
-        orgId: pair.sendingNetworkId,
-      };
-    }
-
-    case "sending_church_to_network": {
-      return {
-        subject: sendingChurchSubject(pair.targetSendingChurchId),
-        orgType: "network",
-        orgId: pair.sendingNetworkId,
-      };
-    }
-  }
-}
 
 /** The two orgs a plant can leave, as the planter's surface names them. */
 export const oversightOrgTypes = ["sending_church", "network"] as const;

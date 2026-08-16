@@ -226,10 +226,27 @@ test("the audit writer is not a 'use server' module", () => {
   assert.doesNotMatch(AUDIT_CODE, /"use server"/);
   assert.doesNotMatch(AUDIT_CODE, /'use server'/);
 
-  // And the module reaches `./core` for the ACTOR TYPE only — a value import
-  // would widen every future caller's module graph without saying so.
-  assert.match(AUDIT_CODE, /import type \{ InvitationActor \} from "\.\/core"/);
-  assert.doesNotMatch(AUDIT_CODE, /^import \{[^}]*\} from "\.\/core"/m);
+  // And every reach into `./core` is a TYPE — the branded actor, and the
+  // narrowed pair `auditableAssociationOrg` takes. A value import would widen
+  // every future caller's module graph without saying so, and it would close a
+  // cycle: `./core` imports the statement builders here.
+  const coreImports =
+    AUDIT_CODE.match(
+      /^import\s+(?:type\s+)?\{[^}]*\}\s*from\s*"\.\/core";/gm
+    ) ?? [];
+
+  assert.ok(coreImports.length > 0, "the actor type comes from ./core");
+  for (const line of coreImports) {
+    assert.match(line, /^import type \{/, line);
+  }
+  assert.ok(
+    coreImports.some((line) => /\bInvitationActor\b/.test(line)),
+    coreImports.join("\n")
+  );
+  assert.ok(
+    coreImports.some((line) => /\bAssociationPair\b/.test(line)),
+    coreImports.join("\n")
+  );
 });
 
 test("no 'use server' module republishes the audit writer", () => {
