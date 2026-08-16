@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { getDueDateInfo } from "./task-card-view";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import type { TaskWithAssignee } from "@/lib/tasks/types";
+
+import { getDueDateInfo, TaskCardView } from "./task-card-view";
 
 // ----------------------------------------------------------------------------
 // THE DUE-DATE LINE — the card's only clock read, and it was reading the wrong
@@ -106,4 +111,75 @@ test("the hour of the instant never moves the answer", () => {
   );
 
   assert.deepEqual([...answers], ["Due in 3 days"]);
+});
+
+// ----------------------------------------------------------------------------
+// Blocked state (T-015). A task with an incomplete prerequisite is visibly
+// blocked in the list. Completing the last prerequisite clears `isBlocked`
+// on the next render (the list query re-derives it); this pins the markup
+// the list actually shows.
+// ----------------------------------------------------------------------------
+
+function listRow(
+  overrides: Partial<TaskWithAssignee> & {
+    isBlocked?: boolean;
+    descriptionPreview?: string | null;
+  } = {}
+): TaskWithAssignee & {
+  isBlocked?: boolean;
+  descriptionPreview: string | null;
+} {
+  return {
+    id: "task-1",
+    churchId: "church-1",
+    title: "Print the flyers",
+    description: null,
+    descriptionPreview: null,
+    status: "not_started",
+    priority: "medium",
+    dueDate: null,
+    dueTime: null,
+    assignedToId: null,
+    category: null,
+    relatedType: null,
+    relatedId: null,
+    parentTaskId: null,
+    isRecurring: false,
+    recurrenceRule: null,
+    completionEvent: null,
+    completedAt: null,
+    completedById: null,
+    createdById: "user-1",
+    createdAt: MIDDAY,
+    updatedAt: MIDDAY,
+    deletedAt: null,
+    assigneeName: null,
+    assigneeEmail: null,
+    ...overrides,
+  };
+}
+
+test("a task waiting on an incomplete prerequisite renders as blocked", () => {
+  const html = renderToStaticMarkup(
+    createElement(TaskCardView, {
+      task: listRow({ isBlocked: true }),
+      now: MIDDAY,
+    })
+  );
+
+  assert.match(html, /data-blocked="true"/);
+  assert.match(html, /data-slot="task-card-blocked"/);
+  assert.match(html, />Blocked</);
+});
+
+test("a task with no incomplete prerequisite is not blocked", () => {
+  const html = renderToStaticMarkup(
+    createElement(TaskCardView, {
+      task: listRow({ isBlocked: false }),
+      now: MIDDAY,
+    })
+  );
+
+  assert.match(html, /data-blocked="false"/);
+  assert.doesNotMatch(html, /data-slot="task-card-blocked"/);
 });

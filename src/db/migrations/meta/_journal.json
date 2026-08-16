@@ -330,6 +330,13 @@
       "when": 1786866500000,
       "tag": "0047_preference_intent_stamp",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786866700000,
+      "tag": "0048_task_dependencies",
+      "breakpoints": true
     }
   ]
 }

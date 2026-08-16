@@ -1,0 +1,185 @@
+-- T-015 — `task_dependencies`: a task may wait on one or more prerequisites
+-- in the SAME church, and a cycle is unrepresentable at write time.
+--
+-- WHY THIS EXISTS. The FRD's TaskDependency join is how a planter makes the
+-- order of work visible rather than remembered. Blocked-ness is DERIVED from
+-- these edges (any live prerequisite whose status is not `complete`), so this
+-- table is the only new fact; nothing writes `tasks.status = 'blocked'` on
+-- the planter's behalf.
+--
+-- CHURCH SCOPE IS THE ROW SHAPE, NOT A SERVICE CHECK. Both foreign keys are
+-- composite onto `tasks(id, church_id)`, so an edge that names two churches
+-- is unrepresentable. That pair needs `tasks_id_church_id_unique_idx` —
+-- `id` is already unique, the pair exists so Postgres can spell the FK.
+-- The write path still inserts via `insert … select` joining both task rows
+-- on church_id: a forged id that names no live row in this church inserts
+-- nothing. The CHECK refuses a self-loop; longer cycles are an application
+-- rule (`wouldCreateCycle` in `src/lib/tasks/dependencies.ts`).
+--
+-- UNIQUE (task_id, prerequisite_task_id) is the duplicate-edge arbiter, and
+-- the insert speaks for it with `ON CONFLICT DO NOTHING`.
+--
+-- CASCADE ON BOTH TASK FKs. A HARD delete of either end takes the edge with
+-- it. The product soft-deletes, so this fires for wipe/repair the same way
+-- `tasks.parent_task_id` does (0038). Soft-deleted prerequisites stop
+-- blocking because the blocked-state query filters `deleted_at`.
+--
+-- ADDITIVE AND NON-REWRITING. One new table, three foreign keys, three
+-- indexes (one of them on `tasks`, the composite-FK target) and one CHECK.
+-- Nothing existing is altered, nothing is backfilled. `planWipe()` derives
+-- delete order from `pg_constraint` — never write it down as a list
+-- (memory/invariants.md → Dev Seeds).
+--
+-- ORDER MATTERS ONCE. `tasks_id_church_id_unique_idx` MUST exist before the
+-- composite FKs that reference `(id, church_id)`. A database lacking it
+-- refuses those ALTERs. The generated statement order put the index last;
+-- this file puts it first.
+--
+-- DEPLOY MIGRATION FIRST. The write path inserts into this table, so a
+-- code-first deploy is `relation "task_dependencies" does not exist` on
+-- every save that names a prerequisite. Nothing in this repo applies
+-- migrations on deploy (`package.json` has only `"build": "next build"`),
+-- so an operator must run `pnpm db:migrate` BEFORE the deploy that carries
+-- the code. The unique index on `tasks` is unused by the old build, so
+-- migration-first is fine the other way too.
+--
+-- SIBLING RECONCILE. This migration was first minted as
+-- `0043_task_dependencies` (`when` 1786859124814), then `0045` at
+-- 1786865400000, then `0046` at 1786866300000 after main took 0045.
+-- Main then landed `0046_person_background_check_status`
+-- (`when` 1786866200000) and `0047_preference_intent_stamp`
+-- (`when` 1786866500000). A journal entry whose `when` is at or below
+-- the ledger's MAXIMUM `created_at` is silently skipped, so this file
+-- is now `0048_task_dependencies` at 1786866700000 — strictly above
+-- 0047. A later sibling with a `when` above this one owes it a forward
+-- reconcile (memory/invariants.md → Migrations).
+--
+-- ROLLBACK (HR2). The composite FKs drop with the table; the unique index
+-- on `tasks` does not. Two statements, then the ledger delete, in ONE
+-- psql session:
+--
+--   DROP TABLE IF EXISTS "task_dependencies";
+--   DROP INDEX IF EXISTS "tasks_id_church_id_unique_idx";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866700000;
+--
+-- A database that applied an earlier stamp of this migration also holds
+-- one of `1786866300000` (old 0046), `1786865400000` (old 0045) or
+-- `1786859124814` (old 0043). Delete those rows in the same session:
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866300000;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865400000;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786859124814;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0042: the journal is the
+-- repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- database's record of what ran, and only the ledger row is deleted.
+-- Removing the journal entry instead makes drizzle-kit forget the migration
+-- while the ledger still claims it applied, which is unrecoverable by
+-- restoring the entry.
+--
+-- The row can also be identified by the sha256 of THIS FILE, byte for byte,
+-- from the deployed commit:
+--
+--   shasum -a 256 src/db/migrations/0048_task_dependencies.sql
+--
+-- ROLLING BACK REQUIRES REVERTING THE CODE TOO. The task form and the list
+-- blocked-state query read this table, so dropping it under a live build
+-- breaks those paths. Revert the application half first, then drop.
+--
+-- OPERATOR RECONCILE — a database that applied an earlier stamp of this
+-- migration (0043 / 0045 / 0046) needs a hand before `pnpm db:migrate`.
+-- The table MAY exist. Because the CLI compares this file's `when` against
+-- the ledger's MAXIMUM `created_at` and not against its own row,
+-- 1786866700000 wins, the DDL below is re-run, and the apply dies on
+-- `CREATE TABLE "task_dependencies"` — already exists — with the migration
+-- aborted and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select table_name
+--     from information_schema.tables
+--    where table_schema = 'public'
+--      and table_name = 'task_dependencies';
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- One row back and a max BELOW 1786866700000 means this migration's
+-- effect is already present and unrecorded under the new stamp — take
+-- an exit below. Zero rows back means a normal apply; run
+-- `pnpm db:migrate` and nothing here concerns you.
+--
+-- 0046 AND 0047 MUST ALREADY BE PRESENT BEFORE EXIT A. Inserting
+-- 1786866700000 first would silently skip `0047_preference_intent_stamp`
+-- on a database whose max is still below 1786866500000. The OLD 0046
+-- stamp (1786866300000) sits ABOVE `0046_person_background_check_status`
+-- (`when` 1786866200000), so a ledger that already holds 1786866300000
+-- will skip that sibling. Probe:
+--
+--   select column_name from information_schema.columns
+--    where table_name = 'persons' and column_name = 'background_check_status';
+--   select column_name from information_schema.columns
+--    where table_name = 'notification_preferences' and column_name = 'intent';
+--
+-- If `background_check_status` is missing, run that file's DDL by hand
+-- (or take its own operator-reconcile EXIT A) before EXIT A here. If
+-- `intent` is missing, run `pnpm db:migrate` once so 0047 applies, then
+-- 0048 aborts on CREATE TABLE; then take EXIT A. If both columns are
+-- present, skip that pass and take EXIT A now.
+--
+-- EXIT A — the database carries rows worth keeping (the shared
+-- `development` branch, or any environment with real data). Record
+-- the apply that already happened, so the CLI skips a migration whose
+-- effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0048_task_dependencies.sql>', 1786866700000);
+--
+-- The `created_at` literal is what matters and it is this migration's
+-- journal `when`; the hash column is bookkeeping for the next human,
+-- so write the real digest rather than a placeholder. (It is the
+-- sha256 of this file's bytes at the moment of the apply — which is
+-- exactly why the rollback DELETE above cannot key on it: any header
+-- edit changes the file while the ledger keeps the old value.
+-- `created_at` is stable.) THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it:
+-- the `task_dependencies` table from the probe above, the unique
+-- index `tasks_id_church_id_unique_idx` on `tasks`, the four
+-- constraints from `pg_constraint` (`task_dependencies_no_self_check`,
+-- `task_dependencies_church_id_churches_id_fk`,
+-- `task_dependencies_task_church_fk`,
+-- `task_dependencies_prereq_church_fk`), and the three indexes from
+-- `pg_indexes` (`task_dependencies_edge_unique_idx`,
+-- `task_dependencies_church_id_idx`,
+-- `task_dependencies_prerequisite_idx`). If any one of them is
+-- missing, EXIT A is a lie the ledger will keep telling; take EXIT B
+-- or add the missing piece by hand first. The header's own rule
+-- applies to the result too — prove it from `information_schema.tables`,
+-- never from the CLI's exit status, which is 0 for "skipped" and 0 for
+-- "applied" alike.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK
+-- block above in full (it drops the table and the unique index on
+-- `tasks`), then `pnpm db:migrate` normally and the migration applies
+-- from a clean shape. It DELETES every dependency edge, which is what
+-- that block already says it does; that is why this exit is for
+-- databases whose rows nobody will miss.
+CREATE UNIQUE INDEX "tasks_id_church_id_unique_idx" ON "tasks" USING btree ("id","church_id");
+--> statement-breakpoint
+CREATE TABLE "task_dependencies" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"church_id" uuid NOT NULL,
+	"task_id" uuid NOT NULL,
+	"prerequisite_task_id" uuid NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "task_dependencies_no_self_check" CHECK ("task_dependencies"."task_id" <> "task_dependencies"."prerequisite_task_id")
+);
+--> statement-breakpoint
+ALTER TABLE "task_dependencies" ADD CONSTRAINT "task_dependencies_church_id_churches_id_fk" FOREIGN KEY ("church_id") REFERENCES "public"."churches"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_dependencies" ADD CONSTRAINT "task_dependencies_task_church_fk" FOREIGN KEY ("task_id","church_id") REFERENCES "public"."tasks"("id","church_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_dependencies" ADD CONSTRAINT "task_dependencies_prereq_church_fk" FOREIGN KEY ("prerequisite_task_id","church_id") REFERENCES "public"."tasks"("id","church_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "task_dependencies_edge_unique_idx" ON "task_dependencies" USING btree ("task_id","prerequisite_task_id");
+--> statement-breakpoint
+CREATE INDEX "task_dependencies_church_id_idx" ON "task_dependencies" USING btree ("church_id");
+--> statement-breakpoint
+CREATE INDEX "task_dependencies_prerequisite_idx" ON "task_dependencies" USING btree ("prerequisite_task_id");
