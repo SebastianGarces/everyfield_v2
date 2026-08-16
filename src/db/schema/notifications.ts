@@ -121,6 +121,36 @@ export const digestCadences = ["daily", "weekly"] as const;
 export type DigestCadence = (typeof digestCadences)[number];
 
 /**
+ * WHY A PREFERENCE ROW EXISTS — the stamp that decides whether its `enabled`
+ * is a consent record or a by-product.
+ *
+ * A row can exist without anybody having decided anything. `enabled` is NOT
+ * NULL and the table's grain is (user, category, channel), so a save that only
+ * meant to store a cadence still has to invent an `enabled` for the row it
+ * creates. Without a stamp the only thing left to read is the VALUE, and a
+ * value that happens to equal the coded default cannot be told from a value
+ * nobody chose.
+ *
+ *   `chosen`      a human decided this value — a settings toggle, or the
+ *                 emailed unsubscribe and its undo. Honoured as written,
+ *                 forever, however it agrees with today's coded default.
+ *   `incidental`  a save wrote it to carry something else. It says nothing on
+ *                 its own, so it stays subject to the value-equality rule: as
+ *                 long as it agrees with the coded default it is inheritable
+ *                 and a later change to that default still reaches the user.
+ *
+ * IT IS NEVER REQUEST INPUT. Each write path states its own stamp, so a caller
+ * cannot claim `chosen` for a by-product — see `setPreferenceQuery` and
+ * `setDigestCadenceQuery` in `src/lib/notifications/preferences.ts`.
+ *
+ * `chosen` is the column DEFAULT because that is the fail-safe direction: its
+ * cost is a row that keeps following the user instead of the default, while
+ * `incidental`'s cost is a preference the user set being dropped.
+ */
+export const preferenceIntents = ["chosen", "incidental"] as const;
+export type PreferenceIntent = (typeof preferenceIntents)[number];
+
+/**
  * What a notification can be ABOUT — the cancel-by-entity discriminator and the
  * feed's link target.
  *
@@ -410,6 +440,15 @@ export const notificationPreferences = pgTable(
       .$type<NotificationChannel>()
       .notNull(),
     enabled: boolean("enabled").notNull().default(true),
+    /**
+     * WHY this row exists — see `preferenceIntents`. It is what
+     * `preferenceValueIsInheritable` decides on, so a row whose `enabled` was
+     * invented to carry a cadence cannot be read back as a consent record.
+     */
+    intent: varchar("intent", { length: 16 })
+      .$type<PreferenceIntent>()
+      .notNull()
+      .default("chosen"),
     /** Only meaningful on the `digest` category; null elsewhere. */
     digestCadence: varchar("digest_cadence", {
       length: 16,
@@ -441,6 +480,13 @@ export const notificationPreferences = pgTable(
     check(
       "notification_preferences_digest_cadence_check",
       sql`${table.digestCadence} is null or ${table.digestCadence} in (${inList(digestCadences)})`
+    ),
+    // The stamp decides whether a row is honoured as written or may still be
+    // overtaken by a change to the coded default, so a value the code cannot
+    // name would put a consent record in a state no resolver has a rule for.
+    check(
+      "notification_preferences_intent_check",
+      sql`${table.intent} in (${inList(preferenceIntents)})`
     ),
   ]
 );

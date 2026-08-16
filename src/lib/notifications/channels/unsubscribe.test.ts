@@ -12,12 +12,12 @@ import {
   preferenceOwnerFromUnsubscribeToken,
   preferenceValueIsInheritable,
   resolvePreference,
-  UNSUBSCRIBE_CHANNEL,
 } from "../preferences";
 import {
   applyEmailOptIn,
   applyEmailOptOut,
   describeUnsubscribeSubject,
+  UNSUBSCRIBE_CHANNEL,
   unsubscribeWriteQuery,
   type UnsubscribeStore,
 } from "./unsubscribe";
@@ -221,10 +221,19 @@ function recordingStore(
   };
 }
 
-/** An explicit stored row, the way the settings screen or an opt-out writes it. */
+/**
+ * The row this module's write leaves behind.
+ *
+ * `intent: "chosen"` is not decoration here — it is the whole subject of the
+ * tests below, and it is what `unsubscribeWriteQuery` actually stamps (asserted
+ * off its own SQL in "the write records a CHOICE"). The optional `digestCadence`
+ * is how a row that ALSO carries a cadence is built, which is the shape the old
+ * carve-out could not tell apart from an undo.
+ */
 function preferenceRow(
   category: NotificationCategory,
-  enabled: boolean
+  enabled: boolean,
+  overrides: Partial<NotificationPreference> = {}
 ): NotificationPreference {
   return {
     id: "44444444-4444-4444-8444-444444444444",
@@ -232,9 +241,11 @@ function preferenceRow(
     category,
     channel: "email",
     enabled,
+    intent: "chosen",
     digestCadence: null,
     createdAt: NOW,
     updatedAt: NOW,
+    ...overrides,
   } as NotificationPreference;
 }
 
@@ -594,12 +605,11 @@ test("an unconfigured environment refuses the token instead of throwing at the p
 });
 
 test("the undo records a CHOICE, not a value that agrees with today's default", () => {
-  // Ruled 2026-08-13 (#411 → #427), reversing what this test used to pin. The
-  // undo writes `enabled: true`, which EQUALS the coded default for every
-  // category's email channel, and #237's value-equality rule therefore read it
-  // as `source: "default"` — a row that says nothing. For a reader who pressed
+  // The undo writes `enabled: true`, which EQUALS the coded default for every
+  // category's email channel, so a resolver reading the value alone calls it
+  // `source: "default"` — a row that says nothing. For a reader who pressed
   // "keep sending these" that reading is wrong: they made a decision about
-  // their own consent, and `UNSUBSCRIBE_CHANNEL` is now exempt from the rule.
+  // their own consent, and the row's `chosen` stamp is what records it.
   const resolved = resolvePreference(
     [preferenceRow("tasks", true)],
     "tasks",
@@ -614,7 +624,7 @@ test("the undo records a CHOICE, not a value that agrees with today's default", 
   );
 
   // The opt-OUT was always explicit — it disagrees with the default — and the
-  // exemption must not have disturbed it.
+  // stamp must not have disturbed it.
   const optedOut = resolvePreference(
     [preferenceRow("tasks", false)],
     "tasks",
@@ -625,7 +635,7 @@ test("the undo records a CHOICE, not a value that agrees with today's default", 
 });
 
 test("the undo survives a later flip of the coded default", () => {
-  // The scenario the ruling exists for, run rather than described: the reader
+  // The scenario the stamp exists for, run rather than described: the reader
   // unsubscribed, changed their mind, and LATER the product reconsiders whether
   // this category's email is on by default.
   //
@@ -648,7 +658,7 @@ test("the undo survives a later flip of the coded default", () => {
   try {
     assert.equal(defaultChannelEnabled("tasks", "email"), false);
 
-    // Absence follows the new default — that is #237's rule, untouched.
+    // Absence follows the new default — the value-equality rule, untouched.
     assert.equal(resolvePreference([], "tasks", "email").enabled, false);
 
     // The reader who pressed "keep sending these" still receives them.
@@ -664,11 +674,62 @@ test("the undo survives a later flip of the coded default", () => {
   }
 });
 
-test("the exempt channel IS the channel this module writes to", () => {
-  // The ruling names a channel, and two modules have to agree on which one:
-  // the resolver exempts `UNSUBSCRIBE_CHANNEL`, and every write here is pinned
-  // to it. They are one constant, and this asserts it from both ends — the SQL
-  // the link actually issues, and the rule the resolver actually applies.
+test("the undo on the DIGEST category survives the same flip", () => {
+  // The case the channel-inferred rule could not reach, and the reason this
+  // column exists. `digest` shares its email row with the cadence selector, so
+  // an exemption keyed on the channel had to carve this cell back out — and the
+  // undo pressed on it went on following the coded default. The stamp tells the
+  // two writes apart, so the carve-out is gone and this cell behaves like every
+  // other one.
+  const undone = preferenceRow("digest", true);
+  const cadenceOnly = preferenceRow("digest", true, {
+    intent: "incidental",
+    digestCadence: "daily",
+  });
+
+  assert.equal(
+    defaultChannelEnabled("digest", "email"),
+    true,
+    "the premise: today's coded default is what both rows happen to carry"
+  );
+
+  // The two rows are indistinguishable by cell and by value — same category,
+  // same channel, same `enabled` — so the stamp is the only thing left to tell
+  // them apart, and it does. The carve-out's protection survives without the
+  // exception: the row a cadence-only save left behind still says nothing.
+  const carrier = resolvePreference([cadenceOnly], "digest", "email");
+  assert.equal(carrier.source, "default");
+  assert.equal(carrier.digestCadence, "daily");
+  assert.equal(
+    resolvePreference([undone], "digest", "email").source,
+    "explicit"
+  );
+
+  const restore = flipCodedDefault("digest", "email", false);
+  try {
+    // Absence follows the new default, on this category as on any other.
+    assert.equal(resolvePreference([], "digest", "email").enabled, false);
+
+    // And the reader who pressed "keep sending these" still receives the
+    // digest. This is the assertion that fails without the stamp.
+    const afterFlip = resolvePreference([undone], "digest", "email");
+    assert.equal(
+      afterFlip.enabled,
+      true,
+      "the digest undo followed the coded default instead of the reader"
+    );
+    assert.equal(afterFlip.source, "explicit");
+  } finally {
+    restore();
+  }
+});
+
+test("the write records a CHOICE, on the channel this module is pinned to", () => {
+  // Both halves of what the emailed link writes, off the SQL it actually
+  // issues: the channel it can ever touch, and the stamp that makes the row a
+  // consent record. The resolver's rule is asserted beside it on the same
+  // stamp, so "what the link writes" and "what the resolver honours" cannot
+  // drift into two different answers — and neither of them names a channel.
   const resolved = ownerFor("tasks");
   const { params } = unsubscribeWriteQuery(
     resolved.owner,
@@ -677,11 +738,15 @@ test("the exempt channel IS the channel this module writes to", () => {
   ).toSQL();
 
   assert.ok(params.includes(UNSUBSCRIBE_CHANNEL));
+  assert.ok(params.includes("chosen"), String(params));
+  assert.ok(!params.includes("incidental"), String(params));
+
   assert.equal(
     preferenceValueIsInheritable(
       "tasks",
       UNSUBSCRIBE_CHANNEL,
-      defaultChannelEnabled("tasks", UNSUBSCRIBE_CHANNEL)
+      defaultChannelEnabled("tasks", UNSUBSCRIBE_CHANNEL),
+      "chosen"
     ),
     false
   );
