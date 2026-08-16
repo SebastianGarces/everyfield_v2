@@ -1,7 +1,8 @@
 import { PersonProfileWrapper } from "@/components/people/person-profile-wrapper";
 import { PersonTeamAssignments } from "@/components/people/person-team-assignments";
 import { PersonTrainingProgress } from "@/components/people/person-training-progress";
-import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
+import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
 import {
   getPersonTeams,
   getPersonTraining,
@@ -23,16 +24,19 @@ export default async function TeamsPage({ params }: TeamsPageProps) {
 
   // Both reads are scoped to the session's church and neither depends on the
   // other, so fetch them together rather than in a waterfall.
-  const [assignments, training] = await Promise.all([
+  const [assignments, training, church] = await Promise.all([
     getPersonTeams(user.churchId, id),
     getPersonTraining(user.churchId, id),
+    getCurrentUserChurch(),
   ]);
+
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   return (
     <PersonProfileWrapper personId={id} activeTab="teams">
       <div className="grid gap-6 md:grid-cols-2">
-        <PersonTeamAssignments assignments={assignments} />
-        <PersonTrainingProgress items={training} />
+        <PersonTeamAssignments assignments={assignments} timeZone={timeZone} />
+        <PersonTrainingProgress items={training} timeZone={timeZone} />
       </div>
     </PersonProfileWrapper>
   );

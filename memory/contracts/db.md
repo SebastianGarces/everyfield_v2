@@ -9,6 +9,7 @@ tenant scope; `created_at`/`updated_at` default now.
 
 ## Non-obvious column semantics
 
+- **`churches.time_zone`** (`church.ts`): non-null IANA id, default and backfill `America/Chicago`. Invalid ids are rejected on write (`isValidTimeZone` in `datetime.ts`); there is no CHECK, because IANA is `Intl`'s list. Church-scoped instants render in this zone; meeting `datetime` stays a UTC wall clock. Changed in church settings, not onboarding. There is no per-user timezone.
 - **`churches.leadership_status`** (`church.ts`): `planter_confirmed` | `no_planter` | **null =
   never asked** — null is NOT "no planter", which is why it is not a boolean. Read it only
   through `src/lib/onboarding/leadership.ts`; the planter _assignment_ is `users.church_id` +

@@ -302,6 +302,13 @@
       "when": 1786859463138,
       "tag": "0043_true_cammi",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786859500000,
+      "tag": "0044_church_time_zone",
+      "breakpoints": true
     }
   ]
 }
