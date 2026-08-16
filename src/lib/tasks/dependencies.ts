@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { taskDependencies, tasks, type TaskStatus } from "@/db/schema";
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 // ============================================================================
@@ -154,7 +154,27 @@ async function loadChurchEdges(churchId: string): Promise<DependencyEdge[]> {
       prerequisiteTaskId: taskDependencies.prerequisiteTaskId,
     })
     .from(taskDependencies)
-    .where(eq(taskDependencies.churchId, churchId));
+    .innerJoin(
+      dependentTask,
+      and(
+        eq(dependentTask.id, taskDependencies.taskId),
+        eq(dependentTask.churchId, taskDependencies.churchId)
+      )
+    )
+    .innerJoin(
+      prerequisiteTask,
+      and(
+        eq(prerequisiteTask.id, taskDependencies.prerequisiteTaskId),
+        eq(prerequisiteTask.churchId, taskDependencies.churchId)
+      )
+    )
+    .where(
+      and(
+        eq(taskDependencies.churchId, churchId),
+        isNull(dependentTask.deletedAt),
+        isNull(prerequisiteTask.deletedAt)
+      )
+    );
 }
 
 async function assertTaskInChurch(
@@ -203,7 +223,10 @@ export async function setTaskPrerequisites(
         and(
           eq(tasks.churchId, churchId),
           inArray(tasks.id, uniqueIds),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          // T-016: a subtask is a checklist item. Same predicate as
+          // `topLevelTasksOnly` — this module cannot import service.ts.
+          isNull(tasks.parentTaskId)
         )
       );
     if (found.length !== uniqueIds.length) {
@@ -223,24 +246,43 @@ export async function setTaskPrerequisites(
     throw new Error(DEPENDENCY_CYCLE_ERROR);
   }
 
-  const deleteExisting = db
+  // Insert the desired set FIRST and inspect what landed. A 0-row
+  // insert…select is the church-scope refusal; deleting first would wipe
+  // the old edges and then treat that empty insert as success.
+  if (uniqueIds.length > 0) {
+    const inserts = uniqueIds.map((prerequisiteTaskId) =>
+      buildAddDependencyStatement(churchId, taskId, prerequisiteTaskId)
+    );
+    const [first, ...rest] = inserts;
+    await db.batch([first, ...rest]);
+
+    const landed = await db
+      .select({ prerequisiteTaskId: taskDependencies.prerequisiteTaskId })
+      .from(taskDependencies)
+      .where(
+        and(
+          eq(taskDependencies.churchId, churchId),
+          eq(taskDependencies.taskId, taskId),
+          inArray(taskDependencies.prerequisiteTaskId, uniqueIds)
+        )
+      );
+    if (landed.length !== uniqueIds.length) {
+      throw new Error(DEPENDENCY_CROSS_CHURCH_ERROR);
+    }
+  }
+
+  const dropStale = db
     .delete(taskDependencies)
     .where(
       and(
         eq(taskDependencies.churchId, churchId),
-        eq(taskDependencies.taskId, taskId)
+        eq(taskDependencies.taskId, taskId),
+        uniqueIds.length > 0
+          ? notInArray(taskDependencies.prerequisiteTaskId, uniqueIds)
+          : undefined
       )
     );
-
-  const inserts = uniqueIds.map((prerequisiteTaskId) =>
-    buildAddDependencyStatement(churchId, taskId, prerequisiteTaskId)
-  );
-
-  // Delete then insert, one batch: neon-http has no interactive transaction,
-  // and `db.batch` is all-or-nothing for errors. An empty insert list is just
-  // the delete. A 0-row insert is not an error — the church-scoped SELECT
-  // above is what makes that case a refusal before we get here.
-  await db.batch([deleteExisting, ...inserts]);
+  await db.batch([dropStale]);
 }
 
 export async function listTaskPrerequisites(

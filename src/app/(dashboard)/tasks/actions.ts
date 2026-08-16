@@ -183,7 +183,12 @@ export async function createTaskAction(
     );
 
     if (prerequisites?.ok && prerequisites.ids.length > 0) {
-      await setTaskPrerequisites(user.churchId, task.id, prerequisites.ids);
+      try {
+        await setTaskPrerequisites(user.churchId, task.id, prerequisites.ids);
+      } catch (error) {
+        await deleteTask(user.churchId, task.id);
+        throw error;
+      }
     }
 
     refresh();

@@ -267,7 +267,7 @@ test("the migration builds the unique index on tasks BEFORE the composite FKs", 
 // The write path — batch, no db.transaction, unique index as the guard
 // ----------------------------------------------------------------------------
 
-test("setTaskPrerequisites writes in one db.batch and never calls db.transaction", () => {
+test("setTaskPrerequisites writes in db.batch and never calls db.transaction", () => {
   const source = stripComments(read("src/lib/tasks/dependencies.ts"));
   const body = sourceReader(source, "dependencies.ts").span(
     "export async function setTaskPrerequisites",
@@ -279,6 +279,49 @@ test("setTaskPrerequisites writes in one db.batch and never calls db.transaction
     body,
     /buildAddDependencyStatement\(/,
     "the replace path uses the church-scoped insert…select, not a values() insert"
+  );
+  assertInOrder(
+    body,
+    "setTaskPrerequisites",
+    ["buildAddDependencyStatement(", "await db.batch([dropStale])"],
+    "insert the desired edges first; deleting first would wipe them on a 0-row insert"
+  );
+  assert.match(
+    body,
+    /isNull\(tasks\.parentTaskId\)/,
+    "a subtask id the picker will not offer is refused on the write"
+  );
+});
+
+test("the cycle walk drops edges whose ends are soft-deleted", () => {
+  const source = stripComments(read("src/lib/tasks/dependencies.ts"));
+  const body = sourceReader(source, "dependencies.ts").span(
+    "async function loadChurchEdges",
+    "async function assertTaskInChurch"
+  );
+
+  assert.match(body, /innerJoin\(\s*dependentTask/);
+  assert.match(body, /innerJoin\(\s*prerequisiteTask/);
+  assert.match(body, /isNull\(dependentTask\.deletedAt\)/);
+  assert.match(body, /isNull\(prerequisiteTask\.deletedAt\)/);
+});
+
+test("createTaskAction deletes the new task if the dependency write is refused", () => {
+  const source = read("src/app/(dashboard)/tasks/actions.ts");
+  const body = sourceReader(source, "actions.ts").span(
+    "export async function createTaskAction",
+    "export async function quickAddTaskAction"
+  );
+
+  assertInOrder(
+    body,
+    "createTaskAction",
+    [
+      "await createTask(",
+      "await setTaskPrerequisites(",
+      "await deleteTask(user.churchId, task.id)",
+    ],
+    "a refused dependency write must not leave a task the planter was told was not created"
   );
 });
 
