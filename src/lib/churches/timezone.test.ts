@@ -47,7 +47,7 @@ test("an invalid zone id is rejected on write rather than stored", () => {
 
 test("the migration adds a non-null IANA column defaulting to Chicago", () => {
   const sql = readFileSync(
-    path.join(process.cwd(), "src/db/migrations/0043_church_time_zone.sql"),
+    path.join(process.cwd(), "src/db/migrations/0044_church_time_zone.sql"),
     "utf8"
   );
 
