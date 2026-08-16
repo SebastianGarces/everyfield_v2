@@ -247,9 +247,50 @@ test("rejects an unknown flag and a non-directory target", (t) => {
   assert.equal(run(path.join(wt, "does-not-exist")).status, 2);
 });
 
+test("a dangling .env.local symlink is treated as absent, not healthy", (t) => {
+  const { addWorktree } = makeRepo(t);
+  const wt = addWorktree();
+  const dst = path.join(wt, ".env.local");
+  fs.symlinkSync(path.join(wt, "does-not-exist.env"), dst);
+  assert.equal(fs.existsSync(dst), false, "precondition: the link is dangling");
+  assert.ok(fs.lstatSync(dst).isSymbolicLink());
+
+  const check = run("--check", wt);
+  assert.equal(
+    check.status,
+    1,
+    "--check must not treat a dangling link as present"
+  );
+  assert.match(check.stdout, /missing/);
+
+  const r = run(wt);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /linked \.env\.local/);
+  assert.ok(fs.lstatSync(dst).isSymbolicLink());
+  assert.equal(fs.readFileSync(dst, "utf8"), "DATABASE_URL=main\n");
+});
+
+test("the gitignore guard runs against a present .env.local, not only ones the script creates", (t) => {
+  const { addWorktree } = makeRepo(t, { ignoreEnv: false });
+  const wt = addWorktree();
+  fs.writeFileSync(path.join(wt, ".env.local"), "DATABASE_URL=leaky\n");
+
+  const r = run(wt);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /NOT gitignored/);
+  assert.equal(
+    fs.readFileSync(path.join(wt, ".env.local"), "utf8"),
+    "DATABASE_URL=leaky\n",
+    "a present unignored file is refused, not clobbered"
+  );
+});
+
 // --- Wiring: one mechanism, referenced — not copy-pasted per prompt. ---
 
-const REFERENCES = [".claude/workflows/build-until-done.js"];
+const REFERENCES = [
+  ".claude/workflows/build-until-done.js",
+  ".claude/workflows/frd-implement.js",
+];
 
 test("the script is executable, so prompts can just call it", () => {
   assert.ok(
@@ -303,7 +344,7 @@ test("no prompt or skill re-implements the mechanism", () => {
   );
 
   for (const file of files) {
-    if (file.endsWith("worktree-env.test.mjs")) continue;
+    if (/\.test\.mjs$/.test(file)) continue;
     const text = fs.readFileSync(file, "utf8");
     const rel = path.relative(ROOT, file);
     assert.doesNotMatch(

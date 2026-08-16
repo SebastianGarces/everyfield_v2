@@ -13,8 +13,11 @@
 # What it does: symlinks the main checkout's `.env.local` into the worktree.
 #   - A symlink, not a copy: no second copy of the secrets on disk, and the
 #     worktree can never drift from the checkout the human maintains.
-#   - `.env.local` is gitignored (the script refuses to link it if it is not), so
-#     `git status` in the worktree stays clean and the file cannot be committed.
+#   - `.env.local` must be gitignored. The guard runs against any present
+#     `.env.local`, not only ones this script just created — a file already in
+#     the tree that is not ignored is a refusal, same as a create would be.
+#   - A dangling symlink is absent, not healthy: `--check` fails, and a real
+#     run replaces it with a working link.
 #   - The link dies with `git worktree remove`; the main checkout's file is untouched.
 #
 # Usage:
@@ -39,7 +42,7 @@ target=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=true ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "worktree-env: unknown flag: $1" >&2; exit 2 ;;
     *) target="$1" ;;
   esac
@@ -75,7 +78,23 @@ for f in "${ENV_FILES[@]}"; do
   src="$main_root/$f"
   dst="$wt_root/$f"
 
+  # A dangling symlink is -L but not -e: treat it as absent, not healthy.
+  if [ -L "$dst" ] && [ ! -e "$dst" ]; then
+    if $check_only; then
+      echo "worktree-env: $f missing in $wt_root (dangling symlink; would link → $src)"
+      status=1
+      continue
+    fi
+    rm -f "$dst"
+  fi
+
   if [ -e "$dst" ] || [ -L "$dst" ]; then
+    # Guard any present file, not only ones this script is about to create.
+    if ! git -C "$wt_root" check-ignore -q "$f"; then
+      echo "worktree-env: refusing to link $f — it is NOT gitignored in $wt_root." >&2
+      status=1
+      continue
+    fi
     echo "worktree-env: $f already present in $wt_root — left as is."
     continue
   fi
@@ -84,7 +103,7 @@ for f in "${ENV_FILES[@]}"; do
     {
       echo "worktree-env: no $f in the main checkout ($main_root)."
       echo "  Without it, DB-touching suites fail on a missing DATABASE_URL."
-      echo "  Create it there first (cp .env.example .env.local and fill DATABASE_URL,"
+      echo "  Create it there first (copy .env.example to .env.local and fill DATABASE_URL,"
       echo "  or vercel env pull .env.local), then re-run: scripts/worktree-env.sh $wt_root"
     } >&2
     status=1
