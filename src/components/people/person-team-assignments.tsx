@@ -18,6 +18,7 @@ import {
 
 interface PersonTeamAssignmentsProps {
   assignments: PersonTeamAssignment[];
+  timeZone: string;
 }
 
 /**
@@ -26,6 +27,7 @@ interface PersonTeamAssignmentsProps {
  */
 export function PersonTeamAssignments({
   assignments,
+  timeZone,
 }: PersonTeamAssignmentsProps) {
   const sorted = sortTeamAssignments(assignments);
 
@@ -61,7 +63,10 @@ export function PersonTeamAssignments({
         ) : (
           <ul className="divide-border divide-y">
             {sorted.map((assignment) => {
-              const startedOn = formatCalendarDate(assignment.startDate);
+              const startedOn = formatCalendarDate(
+                assignment.startDate,
+                timeZone
+              );
 
               return (
                 <li

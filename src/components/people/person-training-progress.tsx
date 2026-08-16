@@ -19,13 +19,17 @@ import {
 
 interface PersonTrainingProgressProps {
   items: PersonTrainingItem[];
+  timeZone: string;
 }
 
 /**
  * The person profile's Training Progress card: the training programs that apply
  * to this person and which of them they have a completion recorded for.
  */
-export function PersonTrainingProgress({ items }: PersonTrainingProgressProps) {
+export function PersonTrainingProgress({
+  items,
+  timeZone,
+}: PersonTrainingProgressProps) {
   const summary = summarizeTraining(items);
   const sorted = sortTrainingItems(items);
 
@@ -80,7 +84,10 @@ export function PersonTrainingProgress({ items }: PersonTrainingProgressProps) {
 
             <ul className="divide-border divide-y">
               {sorted.map((item) => {
-                const completedOn = formatCalendarDate(item.completedAt);
+                const completedOn = formatCalendarDate(
+                  item.completedAt,
+                  timeZone
+                );
 
                 return (
                   <li

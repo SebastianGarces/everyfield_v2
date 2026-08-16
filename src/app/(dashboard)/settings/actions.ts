@@ -5,6 +5,8 @@ import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
+import { setChurchTimeZone } from "@/lib/churches/timezone";
+import { isValidTimeZone } from "@/lib/datetime";
 import {
   audienceMayReceiveCategory,
   digestCadences,
@@ -312,5 +314,61 @@ export async function clearMyEmailSuppressionAction(): Promise<SuppressionAction
     unstable_rethrow(error);
     console.error("[SETTINGS] clearing an email suppression failed:", error);
     return { success: false, error: SUPPRESSION_CLEAR_FAILED_MESSAGE };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Church timezone
+// ----------------------------------------------------------------------------
+//
+// Whose plant this is is NOT an argument. The action takes an IANA id and
+// nothing else; the church comes from the session. A planter can only ever
+// change their own plant's zone, and that is a property of the signature
+// rather than a check someone could delete.
+//
+// Planter-only, like the sharing toggle: a team member lives in the zone but
+// does not choose it, and an oversight admin choosing a plant's display zone
+// would be the setting authorising itself.
+//
+// Invalid ids are rejected by the parser, and again by the write helper, so
+// a value `Intl` will not format cannot land.
+
+export type TimeZoneActionResult =
+  | { success: true; timeZone: string }
+  | { success: false; error: string };
+
+const churchTimeZoneSchema = z.string().min(1).max(64).refine(isValidTimeZone);
+
+export async function setChurchTimeZoneAction(
+  timeZone: string
+): Promise<TimeZoneActionResult> {
+  const session = await verifySession();
+
+  const parsed = churchTimeZoneSchema.safeParse(timeZone);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a timezone we can save" };
+  }
+
+  try {
+    if (session.user.role !== "planter") {
+      return {
+        success: false,
+        error: "Only the church planter can change this plant's timezone",
+      };
+    }
+
+    if (!session.user.churchId) {
+      return { success: false, error: "Create your church plant first" };
+    }
+
+    const stored = await setChurchTimeZone(session.user.churchId, parsed.data);
+
+    refresh();
+
+    return { success: true, timeZone: stored };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving the church timezone failed:", error);
+    return { success: false, error: "We could not save that timezone" };
   }
 }

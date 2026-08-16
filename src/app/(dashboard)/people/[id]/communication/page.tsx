@@ -6,9 +6,9 @@ import { PersonProfileWrapper } from "@/components/people/person-profile-wrapper
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { getPersonCommunications } from "@/lib/communication/service";
-import { formatDateTime } from "@/lib/datetime";
+import { DEFAULT_CHURCH_TIME_ZONE, formatDateTime } from "@/lib/datetime";
 import {
   COMMUNICATION_STATUS_BADGE_CLASSES,
   COMMUNICATION_STATUS_LABELS,
@@ -47,7 +47,11 @@ export default async function PersonCommunicationPage({
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const history = await getPersonCommunications(user.churchId, id);
+  const [history, church] = await Promise.all([
+    getPersonCommunications(user.churchId, id),
+    getCurrentUserChurch(),
+  ]);
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   return (
     <PersonProfileWrapper personId={id} activeTab="communication">
@@ -93,7 +97,11 @@ export default async function PersonCommunicationPage({
                         </p>
                         <p className="text-muted-foreground mt-1 text-sm">
                           {communication.sentAt
-                            ? formatDateTime(communication.sentAt, "short")
+                            ? formatDateTime(
+                                communication.sentAt,
+                                "short",
+                                timeZone
+                              )
                             : "—"}
                         </p>
                         {isLoggedContact && (

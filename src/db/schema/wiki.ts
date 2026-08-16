@@ -8,9 +8,12 @@ import {
   timestamp,
   index,
   uniqueIndex,
+  varchar,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { users } from "./user";
 
 /**
@@ -184,3 +187,63 @@ export const wikiBookmarks = pgTable(
 
 export type WikiBookmark = typeof wikiBookmarks.$inferSelect;
 export type NewWikiBookmark = typeof wikiBookmarks.$inferInsert;
+
+/**
+ * Article feedback ratings — thumbs up / thumbs down.
+ *
+ * `.$type<>()` on a varchar is a compile-time brand and nothing else. The CHECK
+ * on the table is what stops a forged rating sitting in the row forever.
+ */
+export const wikiArticleFeedbackRatings = ["helpful", "unhelpful"] as const;
+
+export type WikiArticleFeedbackRating =
+  (typeof wikiArticleFeedbackRatings)[number];
+
+/**
+ * Wiki article feedback — one vote per (church, user, article).
+ *
+ * church_id is NOT NULL: a vote belongs to a plant, never to a churchless
+ * account, and never to the global corpus. The unique index on
+ * (church_id, user_id, article_slug) is the guard — a second vote from the
+ * same reader updates the rating rather than inserting a duplicate.
+ *
+ * article_slug is unbounded text with no FK, matching wiki_progress and
+ * wiki_bookmarks: articles are addressed by slug, and a church's copy of a
+ * global slug is still that slug.
+ */
+export const wikiArticleFeedback = pgTable(
+  "wiki_article_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    articleSlug: text("article_slug").notNull(),
+    rating: varchar("rating", { length: 20 })
+      .$type<WikiArticleFeedbackRating>()
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wiki_article_feedback_church_user_article_idx").on(
+      table.churchId,
+      table.userId,
+      table.articleSlug
+    ),
+    index("wiki_article_feedback_church_article_idx").on(
+      table.churchId,
+      table.articleSlug
+    ),
+    check(
+      "wiki_article_feedback_rating_check",
+      sql`${table.rating} in (${inList(wikiArticleFeedbackRatings)})`
+    ),
+  ]
+);
+
+export type WikiArticleFeedback = typeof wikiArticleFeedback.$inferSelect;
+export type NewWikiArticleFeedback = typeof wikiArticleFeedback.$inferInsert;

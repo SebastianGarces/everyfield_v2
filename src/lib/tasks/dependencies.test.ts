@@ -164,7 +164,7 @@ test("blocked-ness is a query over incomplete live prerequisites, not a stored s
 // ----------------------------------------------------------------------------
 
 const snapshot = JSON.parse(
-  read("src/db/migrations/meta/0043_snapshot.json")
+  read("src/db/migrations/meta/0045_snapshot.json")
 ) as {
   tables: Record<
     string,
@@ -189,7 +189,7 @@ test("task_dependencies unique-indexes the edge pair", () => {
     ];
   assert.ok(
     edge,
-    "task_dependencies_edge_unique_idx missing from the 0043 snapshot"
+    "task_dependencies_edge_unique_idx missing from the 0045 snapshot"
   );
   assert.equal(edge.isUnique, true);
   assert.deepEqual(
@@ -200,14 +200,14 @@ test("task_dependencies unique-indexes the edge pair", () => {
 
 test("both task FKs are composite onto (id, church_id) and CASCADE", () => {
   const table = snapshot.tables["public.task_dependencies"];
-  assert.ok(table, "public.task_dependencies missing from the 0043 snapshot");
+  assert.ok(table, "public.task_dependencies missing from the 0045 snapshot");
 
   for (const name of [
     "task_dependencies_task_church_fk",
     "task_dependencies_prereq_church_fk",
   ] as const) {
     const fk = table.foreignKeys[name];
-    assert.ok(fk, `${name} missing from the 0043 snapshot`);
+    assert.ok(fk, `${name} missing from the 0045 snapshot`);
     assert.deepEqual(fk.columnsFrom.slice(1), ["church_id"]);
     assert.deepEqual(fk.columnsTo, ["id", "church_id"]);
     assert.equal(fk.onDelete, "cascade");
@@ -228,7 +228,7 @@ test("tasks carries the (id, church_id) unique index the composite FKs need", ()
     snapshot.tables["public.tasks"]?.indexes["tasks_id_church_id_unique_idx"];
   assert.ok(
     index,
-    "tasks_id_church_id_unique_idx missing from the 0043 snapshot"
+    "tasks_id_church_id_unique_idx missing from the 0045 snapshot"
   );
   assert.equal(index.isUnique, true);
   assert.deepEqual(
@@ -244,16 +244,16 @@ test("a self-loop is a CHECK", () => {
     ];
   assert.ok(
     check,
-    "task_dependencies_no_self_check missing from the 0043 snapshot"
+    "task_dependencies_no_self_check missing from the 0045 snapshot"
   );
   assert.match(check.value, /task_id.+<>.+prerequisite_task_id/i);
 });
 
 test("the migration builds the unique index on tasks BEFORE the composite FKs", () => {
-  const migration = read("src/db/migrations/0043_task_dependencies.sql");
+  const migration = read("src/db/migrations/0045_task_dependencies.sql");
   assertInOrder(
     migration,
-    "0043_task_dependencies.sql",
+    "0045_task_dependencies.sql",
     [
       'CREATE UNIQUE INDEX "tasks_id_church_id_unique_idx"',
       'ADD CONSTRAINT "task_dependencies_task_church_fk"',

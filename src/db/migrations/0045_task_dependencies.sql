@@ -43,11 +43,14 @@
 -- the code. The unique index on `tasks` is unused by the old build, so
 -- migration-first is fine the other way too.
 --
--- SIBLING RECONCILE. This migration's `when` (1786859124814) is above
--- 0042's (1786769854360), so a `db:migrate` run that sees both applies
--- 0042 then 0043 and neither is skipped. Nothing here owes a forward
--- reconcile. A migration from ANOTHER branch merging with a `when` above
--- 1786769854360 and at or below 1786859124814 owes it
+-- SIBLING RECONCILE. This migration was first minted as
+-- `0043_task_dependencies` with `when` 1786859124814. Main then landed
+-- `0043_true_cammi` (wiki article feedback, `when` 1786859463138) and
+-- `0044_church_time_zone` (`when` 1786859500000). A journal entry whose
+-- `when` is at or below the ledger's MAXIMUM `created_at` is silently
+-- skipped, so this file is now `0045_task_dependencies` at
+-- 1786865400000 — strictly above both siblings. A later sibling with a
+-- `when` above this one owes it a forward reconcile
 -- (memory/invariants.md → Migrations).
 --
 -- ROLLBACK (HR2). The composite FKs drop with the table; the unique index
@@ -56,6 +59,11 @@
 --
 --   DROP TABLE IF EXISTS "task_dependencies";
 --   DROP INDEX IF EXISTS "tasks_id_church_id_unique_idx";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865400000;
+--
+-- A database that applied the OLD 0043 also holds
+-- `created_at = 1786859124814`. Delete that row in the same session:
+--
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786859124814;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
@@ -70,11 +78,90 @@
 -- The row can also be identified by the sha256 of THIS FILE, byte for byte,
 -- from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0043_task_dependencies.sql
+--   shasum -a 256 src/db/migrations/0045_task_dependencies.sql
 --
 -- ROLLING BACK REQUIRES REVERTING THE CODE TOO. The task form and the list
 -- blocked-state query read this table, so dropping it under a live build
 -- breaks those paths. Revert the application half first, then drop.
+--
+-- OPERATOR RECONCILE — a database that applied the OLD 0043 needs a
+-- hand before `pnpm db:migrate`. The renumber above fixes the
+-- repository and leaves every database that already ran this migration
+-- under its old stamp, 1786859124814, in a state the CLI cannot see:
+-- `task_dependencies` EXISTS, and the ledger either still holds that
+-- row or no longer does (an earlier rollback ran the DELETE and
+-- removed the row without dropping the table — the two halves of the
+-- rollback block are separable and one of them was run alone). Because
+-- the CLI compares this file's `when` against the ledger's MAXIMUM
+-- `created_at` and not against its own row, 1786865400000 wins, the
+-- DDL below is re-run, and the apply dies on `CREATE TABLE
+-- "task_dependencies"` — already exists — with the migration aborted
+-- and the ledger unchanged.
+--
+-- DETECT IT. Two reads, neither of which writes anything:
+--
+--   select table_name
+--     from information_schema.tables
+--    where table_schema = 'public'
+--      and table_name = 'task_dependencies';
+--   select max(created_at) from drizzle.__drizzle_migrations;
+--
+-- One row back and a max BELOW 1786865400000 means this migration's
+-- effect is already present and unrecorded under the new stamp — take
+-- an exit below. Zero rows back means a normal apply; run
+-- `pnpm db:migrate` and nothing here concerns you.
+--
+-- 0043 AND 0044 MUST ALREADY BE PRESENT BEFORE EXIT A. Inserting
+-- 1786865400000 first would silently skip `0043_true_cammi` and
+-- `0044_church_time_zone` (the same `when`-vs-max rule). Probe:
+--
+--   select table_name from information_schema.tables
+--    where table_name = 'wiki_article_feedback';
+--   select column_name from information_schema.columns
+--    where table_name = 'churches' and column_name = 'time_zone';
+--
+-- If either is missing, run `pnpm db:migrate` once: 0043 and 0044
+-- apply, then 0045 aborts on CREATE TABLE. Then take EXIT A and run
+-- `pnpm db:migrate` again. If both are present, skip that pass and
+-- take EXIT A now.
+--
+-- EXIT A — the database carries rows worth keeping (the shared
+-- `development` branch, or any environment with real data). Record
+-- the apply that already happened, so the CLI skips a migration whose
+-- effect is present:
+--
+--   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_task_dependencies.sql>', 1786865400000);
+--
+-- The `created_at` literal is what matters and it is this migration's
+-- journal `when`; the hash column is bookkeeping for the next human,
+-- so write the real digest rather than a placeholder. (It is the
+-- sha256 of this file's bytes at the moment of the apply — which is
+-- exactly why the rollback DELETE above cannot key on it: any header
+-- edit changes the file while the ledger keeps the old value.
+-- `created_at` is stable.) THIS INSERT ASSERTS THAT THE DDL BELOW
+-- MATCHES WHAT THE DATABASE ALREADY HAS. Assert it, do not assume it:
+-- the `task_dependencies` table from the probe above, the unique
+-- index `tasks_id_church_id_unique_idx` on `tasks`, the four
+-- constraints from `pg_constraint` (`task_dependencies_no_self_check`,
+-- `task_dependencies_church_id_churches_id_fk`,
+-- `task_dependencies_task_church_fk`,
+-- `task_dependencies_prereq_church_fk`), and the three indexes from
+-- `pg_indexes` (`task_dependencies_edge_unique_idx`,
+-- `task_dependencies_church_id_idx`,
+-- `task_dependencies_prerequisite_idx`). If any one of them is
+-- missing, EXIT A is a lie the ledger will keep telling; take EXIT B
+-- or add the missing piece by hand first. The header's own rule
+-- applies to the result too — prove it from `information_schema.tables`,
+-- never from the CLI's exit status, which is 0 for "skipped" and 0 for
+-- "applied" alike.
+--
+-- EXIT B — a scratch, local or throwaway database. Run the ROLLBACK
+-- block above in full (it drops the table and the unique index on
+-- `tasks`), then `pnpm db:migrate` normally and the migration applies
+-- from a clean shape. It DELETES every dependency edge, which is what
+-- that block already says it does; that is why this exit is for
+-- databases whose rows nobody will miss.
 CREATE UNIQUE INDEX "tasks_id_church_id_unique_idx" ON "tasks" USING btree ("id","church_id");
 --> statement-breakpoint
 CREATE TABLE "task_dependencies" (
