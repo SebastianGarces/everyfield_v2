@@ -427,6 +427,7 @@ export async function createPerson(
     postalCode: data.postalCode,
     country: data.country,
     status: data.status,
+    backgroundCheckStatus: data.backgroundCheckStatus,
     source: data.source,
     sourceDetails: data.sourceDetails,
     notes: data.notes,
@@ -486,6 +487,8 @@ export async function updatePerson(
   if (data.postalCode !== undefined) updateData.postalCode = data.postalCode;
   if (data.country !== undefined) updateData.country = data.country;
   if (data.status !== undefined) updateData.status = data.status;
+  if (data.backgroundCheckStatus !== undefined)
+    updateData.backgroundCheckStatus = data.backgroundCheckStatus;
   if (data.source !== undefined) updateData.source = data.source;
   if (data.sourceDetails !== undefined)
     updateData.sourceDetails = data.sourceDetails;

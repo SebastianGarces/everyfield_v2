@@ -4,6 +4,7 @@ import {
   teamRoles,
   teamMemberships,
   persons,
+  type BackgroundCheckStatus,
   type MinistryTeam,
   type NewMinistryTeam,
   type TeamRole,
@@ -37,6 +38,12 @@ export interface TeamDetail extends MinistryTeam {
       lastName: string;
       email: string | null;
       phone: string | null;
+      /**
+       * Read for the rosters that require a check (`teamRequiresBackgroundCheck`).
+       * Selected for every team rather than conditionally, so one projection
+       * answers for all of them; the ROSTER decides whether to render it.
+       */
+      backgroundCheckStatus: BackgroundCheckStatus;
     } | null;
   })[];
 }
@@ -154,6 +161,7 @@ export async function getTeam(
       lastName: string;
       email: string | null;
       phone: string | null;
+      backgroundCheckStatus: BackgroundCheckStatus;
     }
   >();
   if (assignedPersonIds.length > 0) {
@@ -164,6 +172,7 @@ export async function getTeam(
         lastName: persons.lastName,
         email: persons.email,
         phone: persons.phone,
+        backgroundCheckStatus: persons.backgroundCheckStatus,
       })
       .from(persons)
       .where(
