@@ -1,6 +1,6 @@
 /**
  * G3 harness for the oversight notification model (issue #224, FRD N-025 +
- * N-026) — real database, scratch database only.
+ * N-026) — real database.
  *
  * Runs the SHIPPED functions — `enqueue`, the three milestone emitters, the
  * daily digest and the sharing toggle's reader/writer — against a Postgres that
@@ -11,14 +11,43 @@
  * readable, because 0029 is expand-only (see §1; the contract migration that
  * drops them is #255).
  *
- * NEVER point it at a real database: it seeds churches and users and leaves
- * them behind. Create a scratch one first.
+ *   pnpm g3:oversight
  *
- *   psql "$DATABASE_URL" -c 'create database scratch_oversight'
- *   export DATABASE_URL="<same url, /scratch_oversight>"
- *   pnpm db:migrate
- *   pnpm exec tsx scripts/g3-oversight-model.ts
- *   psql "<original url>" -c 'drop database scratch_oversight'
+ * ----------------------------------------------------------------------------
+ * Why it cleans up after itself, and why it counts the rows to prove it
+ * ----------------------------------------------------------------------------
+ *
+ * This harness was DEAD. It documented `pnpm exec tsx scripts/…`, which loads
+ * no env file, so `src/db/index.ts` reached `neon()` with an undefined
+ * `DATABASE_URL` and the script died at import time — the same broken
+ * invocation `scripts/g3-association-lifecycle.ts` records having had. Given a
+ * `DATABASE_URL` it then aborted mid-sequence anyway: §3d's reset deleted
+ * `organization_invitations` rows whose `association_events` children still
+ * referenced them, and the FK refused (SQLSTATE 23503 on
+ * `association_events_source_invitation_id_organization_invitation` — the
+ * truncated name, see `db/schema/association-event.ts`). Every fixture from the
+ * seed onwards was left behind on the way out, because the cleanup sat at the
+ * BOTTOM of a function with no `finally`. Three aborted runs had salted the
+ * shared development branch with 159 invitations, 60 audit rows and six
+ * churches before this was fixed.
+ *
+ * So it is now shaped like the association harness:
+ *
+ *   * EVERY entity is REGISTERED as it is created, and the cleanup runs from a
+ *     `finally` over that registry — an abort leaves nothing behind either;
+ *   * the cleanup deletes ONLY registered rows, and it deletes children before
+ *     parents: `association_events` carries plain FKs to both
+ *     `organization_invitations` and `churches`, with no cascade on either;
+ *   * and it PROVES that instead of claiming it. A row-count census over every
+ *     table the harness writes is taken before the first insert and again after
+ *     the cleanup, and a run whose counts do not balance fails.
+ *
+ * The census is also the tripwire for §6c/§6d, whose digest sweep is fleet-wide
+ * BY DESIGN: it selects every church holding an oversight FK, so on a database
+ * where some other plant shares activity with one of the historical days those
+ * sections name, the sweep writes that plant's digest too — a row this harness
+ * must not delete. That is a loud failure now rather than a silent side effect,
+ * but it is still a reason to prefer a scratch branch over a shared one.
  */
 import assert from "node:assert/strict";
 
@@ -26,6 +55,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  associationEvents,
   churches,
   churchMeetings,
   churchPrivacySettings,
@@ -138,7 +168,76 @@ async function rowsFor(churchId: string) {
     .where(eq(notifications.churchId, churchId));
 }
 
-async function main() {
+/**
+ * The entities this run has created, registered as they are created.
+ *
+ * A list rather than a set of consts because the cleanup has to work from
+ * whatever exists at the moment of an ABORT: half the fixtures below are minted
+ * a thousand lines into the sequence (§3b's sending church, §3d's race plant and
+ * its rival, §5's foreign church, §6d's five starvation plants), so a cleanup
+ * that closed over named bindings could only ever run at the end.
+ */
+interface Created {
+  churches: string[];
+  users: string[];
+  sendingChurches: string[];
+  networks: string[];
+}
+
+/**
+ * Every table this harness writes, directly or through a shipped function.
+ *
+ * `launch_events` and the two milestone tables are here because they cascade
+ * from `launches` — the census is what says the cascade really reached them.
+ */
+const CENSUS_TABLES = [
+  "churches",
+  "users",
+  "sending_churches",
+  "sending_networks",
+  "church_privacy_settings",
+  "notifications",
+  "association_events",
+  "organization_invitations",
+  "persons",
+  "tasks",
+  "church_meetings",
+  "phase_transitions",
+  "launches",
+  "launch_events",
+  "launch_milestones",
+  "launch_milestone_tasks",
+] as const;
+
+type Census = Record<(typeof CENSUS_TABLES)[number], number>;
+
+/** One round trip: a scalar subquery per table. */
+async function census(): Promise<Census> {
+  const projection = CENSUS_TABLES.map(
+    (table) => `(select count(*) from "${table}") as "${table}"`
+  ).join(",\n           ");
+  const result = await db.execute<Record<string, string>>(
+    sql.raw(`select ${projection}`)
+  );
+  const [counts] = result.rows;
+  return Object.fromEntries(
+    CENSUS_TABLES.map((table) => [table, Number(counts[table])])
+  ) as Census;
+}
+
+/**
+ * Deletes rows only when there are ids to scope the delete BY.
+ *
+ * An `inArray(column, [])` is a predicate whose rendering is drizzle's business,
+ * and a cleanup statement is the last place to find out it renders as something
+ * that matches everything.
+ */
+async function purge(ids: string[], deleteRows: (ids: string[]) => unknown) {
+  if (ids.length === 0) return;
+  await deleteRows(ids);
+}
+
+async function run(created: Created) {
   const stamp = Date.now();
 
   // --------------------------------------------------------------------------
@@ -148,11 +247,13 @@ async function main() {
     .insert(sendingNetworks)
     .values({ name: "Scratch Network" })
     .returning();
+  created.networks.push(network.id);
 
   const [plant] = await db
     .insert(churches)
     .values({ name: "Scratch Plant", sendingNetworkId: network.id })
     .returning();
+  created.churches.push(plant.id);
 
   const [planter] = await db
     .insert(users)
@@ -163,6 +264,7 @@ async function main() {
       churchId: plant.id,
     })
     .returning();
+  created.users.push(planter.id);
 
   const [adminA, adminB] = await db
     .insert(users)
@@ -181,6 +283,7 @@ async function main() {
       },
     ])
     .returning();
+  created.users.push(adminA.id, adminB.id);
 
   // The plant's settings row, exactly as church creation writes it.
   await db.insert(churchPrivacySettings).values({
@@ -411,6 +514,7 @@ async function main() {
     .insert(sendingChurches)
     .values({ name: "Scratch Sending Church" })
     .returning();
+  created.sendingChurches.push(otherSendingChurch.id);
 
   const [sendingChurchAdmin] = await db
     .insert(users)
@@ -421,6 +525,7 @@ async function main() {
       sendingChurchId: otherSendingChurch.id,
     })
     .returning();
+  created.users.push(sendingChurchAdmin.id);
 
   // The plant now holds BOTH FKs — the reachable state the finding turned on.
   await db
@@ -606,6 +711,7 @@ async function main() {
     .insert(sendingChurches)
     .values({ name: "Scratch Race Sending Church" })
     .returning();
+  created.sendingChurches.push(raceSendingChurch.id);
 
   const [raceInviter] = await db
     .insert(users)
@@ -616,11 +722,13 @@ async function main() {
       sendingChurchId: raceSendingChurch.id,
     })
     .returning();
+  created.users.push(raceInviter.id);
 
   const [racePlant] = await db
     .insert(churches)
     .values({ name: "Scratch Race Plant" })
     .returning();
+  created.churches.push(racePlant.id);
 
   const [racePlanter] = await db
     .insert(users)
@@ -631,6 +739,7 @@ async function main() {
       churchId: racePlant.id,
     })
     .returning();
+  created.users.push(racePlanter.id);
 
   await db.insert(churchPrivacySettings).values({ churchId: racePlant.id });
 
@@ -918,6 +1027,7 @@ async function main() {
     .insert(sendingChurches)
     .values({ name: "Scratch Rival Sending Church" })
     .returning();
+  created.sendingChurches.push(rivalSendingChurch.id);
 
   const [rivalInviter] = await db
     .insert(users)
@@ -928,6 +1038,7 @@ async function main() {
       sendingChurchId: rivalSendingChurch.id,
     })
     .returning();
+  created.users.push(rivalInviter.id);
 
   const incumbent = await freshRaceInvitation();
   await acceptInvitationAs(actorFor(racePlanter), incumbent.id);
@@ -1138,6 +1249,15 @@ async function main() {
     .update(churches)
     .set({ sendingChurchId: null })
     .where(eq(churches.id, racePlant.id));
+  // THE AUDIT ROWS FIRST. Every accept above wrote an `association_events` row
+  // naming the invitation it answered, and `source_invitation_id` is a plain FK
+  // with no cascade — so deleting these invitations while their audit rows still
+  // referenced them was SQLSTATE 23503, and it killed the run here for as long
+  // as the harness went unrun. The invariant is the one the FK states: no audit
+  // row outlives the invitation it names.
+  await db
+    .delete(associationEvents)
+    .where(eq(associationEvents.churchId, racePlant.id));
   await db
     .delete(organizationInvitations)
     .where(eq(organizationInvitations.targetChurchId, racePlant.id));
@@ -1267,6 +1387,7 @@ async function main() {
     .insert(churches)
     .values({ name: "Scratch Foreign Plant" })
     .returning();
+  created.churches.push(foreignChurch.id);
   await assert.rejects(
     () => setLaunchDate(planter, foreignChurch.id, "2026-11-01"),
     /Forbidden/,
@@ -1700,6 +1821,7 @@ async function main() {
     .insert(sendingNetworks)
     .values({ name: "Scratch Empty Network" })
     .returning();
+  created.networks.push(emptyNetwork.id);
 
   await db.insert(churches).values([
     { id: quietPlant, name: "Starve Quiet", sendingNetworkId: network.id },
@@ -1716,6 +1838,16 @@ async function main() {
     { id: eligibleA, name: "Starve Eligible A", sendingNetworkId: network.id },
     { id: eligibleB, name: "Starve Eligible B", sendingNetworkId: network.id },
   ]);
+  // Registered AFTER the insert, never before: these five ids are FIXED, so a
+  // pre-registered id that turned out to belong to somebody else's row would put
+  // that row on the cleanup's delete list.
+  created.churches.push(
+    quietPlant,
+    notSharingPlant,
+    noAdminPlant,
+    eligibleA,
+    eligibleB
+  );
 
   await db.insert(churchPrivacySettings).values([
     { churchId: quietPlant, shareActivityWithOversight: true },
@@ -1970,6 +2102,7 @@ async function main() {
     .insert(churches)
     .values({ name: "Scratch Orphan", sendingNetworkId: network.id })
     .returning();
+  created.churches.push(orphan.id);
   assert.equal(await isSharingActivityWithOversight(orphan.id), false);
   await setSharingActivityWithOversight({
     churchId: orphan.id,
@@ -1991,6 +2124,7 @@ async function main() {
     .insert(churches)
     .values({ name: "Scratch Plant Two", sendingNetworkId: network.id })
     .returning();
+  created.churches.push(otherPlant.id);
   await db.insert(churchPrivacySettings).values({ churchId: otherPlant.id });
 
   const acrossPlants = await enqueue({
@@ -2005,76 +2139,139 @@ async function main() {
   assert.equal(acrossPlants.reason, "oversight_privacy");
   ok("an admin over two plants gets what each plant granted, not the union");
 
-  // --------------------------------------------------------------------------
-  // Cleanup of the rows this run created, so a re-run on the same scratch DB
-  // starts from the same place.
-  // --------------------------------------------------------------------------
-  const seededChurches = [
-    plant.id,
-    orphan.id,
-    otherPlant.id,
-    foreignChurch.id,
-    racePlant.id,
-    quietPlant,
-    notSharingPlant,
-    noAdminPlant,
-    eligibleA,
-    eligibleB,
-  ];
-  await db
-    .delete(notifications)
-    .where(inArray(notifications.churchId, seededChurches));
-  await db.delete(persons).where(inArray(persons.churchId, seededChurches));
-  await db.delete(tasks).where(inArray(tasks.churchId, seededChurches));
-  await db
-    .delete(churchMeetings)
-    .where(inArray(churchMeetings.churchId, seededChurches));
-  await db
-    .delete(phaseTransitions)
-    .where(inArray(phaseTransitions.churchId, seededChurches));
-  await db
-    .delete(organizationInvitations)
-    .where(inArray(organizationInvitations.targetChurchId, seededChurches));
-  // The launch entity (#305/LS-001). Deleting the launch cascades its journal,
-  // milestones and milestone/task links — but it must happen BEFORE `users`
-  // below, because `launch_events.actor_user_id` points at the planter and that
-  // FK does not cascade.
-  await db.delete(launches).where(inArray(launches.churchId, seededChurches));
-
-  // ...and then the ENTITIES themselves, innermost FK first. Deleting only the
-  // child rows left every seeded church, user, network and sending church
-  // behind, which made a second run on the same scratch database fail on the
-  // starvation fixture's FIXED uuids — and, when this was ever pointed at a
-  // shared database, salted it permanently.
-  await db
-    .delete(churchPrivacySettings)
-    .where(inArray(churchPrivacySettings.churchId, seededChurches));
-  await db.delete(users).where(
-    inArray(
-      users.id,
-      [
-        planter,
-        adminA,
-        adminB,
-        sendingChurchAdmin,
-        raceInviter,
-        racePlanter,
-      ].map((row) => row.id)
-    )
-  );
-  await db.delete(churches).where(inArray(churches.id, seededChurches));
-  await db
-    .delete(sendingChurches)
-    .where(
-      inArray(sendingChurches.id, [otherSendingChurch.id, raceSendingChurch.id])
-    );
-  await db
-    .delete(sendingNetworks)
-    .where(inArray(sendingNetworks.id, [network.id, emptyNetwork.id]));
-
   console.log(
-    "\nALL PASS — the oversight model behaves against real Postgres."
+    "\nALL ASSERTIONS PASSED — the oversight model behaves against real" +
+      "\nPostgres: 0029's expand-only window, the consent exemption and the" +
+      "\naudience it reaches, the lost-accept invariant under four races, the" +
+      "\nthree milestones, the digest's counts, its once-a-day sweep, the" +
+      "\nstarvation and partial-delivery fixes, and the per-plant toggle."
   );
+}
+
+/**
+ * Deletes exactly the rows `run` registered, children before parents.
+ *
+ * The ORDER is the whole of it. `association_events` FKs both
+ * `organization_invitations` (`source_invitation_id`) and `churches`, `launches`
+ * cascades to `launch_events` whose `actor_user_id` FKs `users`, and none of
+ * those cascade on delete — so audit rows go before invitations, launches before
+ * users, and every child before its church.
+ */
+async function cleanUp(created: Created) {
+  console.log("\n--- cleanup (deletes ONLY the rows this run created) ---");
+
+  const churchIds = created.churches;
+  const userIds = created.users;
+  const sendingChurchIds = created.sendingChurches;
+  const orgIds = [...created.sendingChurches, ...created.networks];
+
+  await purge(churchIds, (ids) =>
+    db.delete(notifications).where(inArray(notifications.churchId, ids))
+  );
+  // An ORG-ANCHORED notification carries no `church_id`, so the delete above
+  // cannot reach it. The anchor is an org this run created, which is what makes
+  // the row ours to delete.
+  await purge(orgIds, (ids) =>
+    db.delete(notifications).where(inArray(notifications.anchorOrgId, ids))
+  );
+
+  await purge(churchIds, (ids) =>
+    db.delete(associationEvents).where(inArray(associationEvents.churchId, ids))
+  );
+  await purge(sendingChurchIds, (ids) =>
+    db
+      .delete(associationEvents)
+      .where(inArray(associationEvents.subjectSendingChurchId, ids))
+  );
+
+  // Two deletes rather than one `or(…)`: drizzle drops an undefined arm, and an
+  // `or()` left with none matches every row in the table.
+  await purge(churchIds, (ids) =>
+    db
+      .delete(organizationInvitations)
+      .where(inArray(organizationInvitations.targetChurchId, ids))
+  );
+  await purge(userIds, (ids) =>
+    db
+      .delete(organizationInvitations)
+      .where(inArray(organizationInvitations.inviterUserId, ids))
+  );
+
+  await purge(churchIds, (ids) =>
+    db.delete(persons).where(inArray(persons.churchId, ids))
+  );
+  await purge(churchIds, (ids) =>
+    db.delete(tasks).where(inArray(tasks.churchId, ids))
+  );
+  await purge(churchIds, (ids) =>
+    db.delete(churchMeetings).where(inArray(churchMeetings.churchId, ids))
+  );
+  await purge(churchIds, (ids) =>
+    db.delete(phaseTransitions).where(inArray(phaseTransitions.churchId, ids))
+  );
+  // The launch entity (#305/LS-001), which cascades its journal, milestones and
+  // milestone/task links.
+  await purge(churchIds, (ids) =>
+    db.delete(launches).where(inArray(launches.churchId, ids))
+  );
+  await purge(churchIds, (ids) =>
+    db
+      .delete(churchPrivacySettings)
+      .where(inArray(churchPrivacySettings.churchId, ids))
+  );
+
+  await purge(userIds, (ids) => db.delete(users).where(inArray(users.id, ids)));
+  await purge(churchIds, (ids) =>
+    db.delete(churches).where(inArray(churches.id, ids))
+  );
+  await purge(sendingChurchIds, (ids) =>
+    db.delete(sendingChurches).where(inArray(sendingChurches.id, ids))
+  );
+  await purge(created.networks, (ids) =>
+    db.delete(sendingNetworks).where(inArray(sendingNetworks.id, ids))
+  );
+}
+
+async function main() {
+  const created: Created = {
+    churches: [],
+    users: [],
+    sendingChurches: [],
+    networks: [],
+  };
+
+  const before = await census();
+  let assertionsPassed = false;
+
+  try {
+    await run(created);
+    assertionsPassed = true;
+  } finally {
+    await cleanUp(created);
+
+    // THE PROOF of "it cleans up only its own rows", and the only form of it
+    // that cannot be talked around: the tables are as populous as they were.
+    const after = await census();
+    const drift = CENSUS_TABLES.filter(
+      (table) => after[table] !== before[table]
+    ).map((table) => `${table}: ${before[table]} → ${after[table]}`);
+
+    if (drift.length === 0) {
+      console.log("cleanup done — the database is as it was found");
+    } else {
+      console.error(
+        "CENSUS MISMATCH — the run did not leave these tables as it found" +
+          "\nthem. Each line is either a fixture the cleanup missed or a row" +
+          "\nthe fleet-wide digest sweep wrote for somebody else's plant:"
+      );
+      for (const line of drift) console.error(`  ${line}`);
+      // Only when the sequence itself finished: an abort has its own error to
+      // report, and replacing it from a `finally` hides why the run stopped.
+      if (assertionsPassed) {
+        assert.fail("the harness did not leave the database as it found it");
+      }
+    }
+  }
 }
 
 main().then(
