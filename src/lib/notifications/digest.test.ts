@@ -127,6 +127,9 @@ class FakeDigestDeps implements PlanterDigestDeps {
           category: "digest" as const,
           channel: "email" as NotificationChannel,
           enabled: true,
+          // A cadence-carrying row: its `enabled` is the coded default the
+          // INSERT had to invent, not a choice — see `setDigestCadenceQuery`.
+          intent: "incidental" as const,
           digestCadence: cadence,
           createdAt: NOW,
           updatedAt: NOW,
@@ -531,6 +534,8 @@ class TinyDispatchStore implements DispatchDeps {
       category: "digest",
       channel,
       enabled: false,
+      // A deliberate opt-out, the way the settings toggle writes one.
+      intent: "chosen",
       digestCadence: null,
       createdAt: NOW,
       updatedAt: NOW,

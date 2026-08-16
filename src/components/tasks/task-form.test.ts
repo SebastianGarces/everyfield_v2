@@ -11,7 +11,7 @@ import {
   type RenderedElement,
 } from "@/lib/testing/rendered-markup";
 
-import { TaskDescriptionField } from "./task-form";
+import { TaskDescriptionField, TaskPrerequisitesField } from "./task-form";
 
 // ----------------------------------------------------------------------------
 // The task description field (T-021), asserted against the markup the browser
@@ -114,4 +114,60 @@ test("the placeholder shows only while there is nothing to read", () => {
   // `<p><br></p>` is an emptied editor, not content.
   assert.ok(render("<p><br></p>").includes("Add details about this task..."));
   assert.ok(!render("<p>Book the room</p>").includes("Add details about this"));
+});
+
+// ----------------------------------------------------------------------------
+// Prerequisites (T-015). Same reason the description field is exported: the
+// form around it cannot be rendered here, and the contract is attributes.
+// ----------------------------------------------------------------------------
+
+const PREREQ_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const PREREQ_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+function renderPrereqs(selectedIds: string[] = [PREREQ_A]) {
+  return renderToStaticMarkup(
+    createElement(TaskPrerequisitesField, {
+      candidates: [
+        { id: PREREQ_A, title: "Book the room", status: "not_started" },
+        { id: PREREQ_B, title: "Confirm the speaker", status: "complete" },
+      ],
+      selectedIds,
+    })
+  );
+}
+
+test("prerequisite ids travel in the form under the name the server reads", () => {
+  const input = parseElements(renderPrereqs()).find(
+    (el) => el.tag === "input" && el.attrs["name"] === "prerequisiteTaskIds"
+  );
+
+  assert.ok(input, "no hidden input carrying the prerequisite ids");
+  assert.equal(input.attrs["type"], "hidden");
+  assert.equal(input.attrs["value"], PREREQ_A);
+});
+
+test("every prerequisite control is a clickable that carries cursor-pointer", () => {
+  const html = renderPrereqs();
+  const buttons = namedButtons(html);
+  assert.ok(
+    buttons.length >= 1,
+    "the selected prerequisite has no named remove control"
+  );
+  for (const button of buttons) {
+    assert.match(
+      button.attrs["class"] ?? "",
+      /\bcursor-pointer\b/,
+      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
+    );
+  }
+
+  const trigger = parseElements(html).find(
+    (el) => el.attrs["data-slot"] === "select-trigger"
+  );
+  assert.ok(trigger, "no select trigger to add a prerequisite");
+  assert.match(
+    trigger.attrs["class"] ?? "",
+    /\bcursor-pointer\b/,
+    "the add-prerequisite trigger is clickable without cursor-pointer"
+  );
 });

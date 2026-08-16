@@ -10,6 +10,7 @@ import {
   type NotificationCategory,
   type NotificationChannel,
   type NotificationPreference,
+  type PreferenceIntent,
   type User,
   type UserRole,
 } from "@/db/schema";
@@ -39,57 +40,50 @@ import {
 // has never opened the settings screen has no rows at all.
 //
 // ----------------------------------------------------------------------------
-// Absence is not the only way to have chosen nothing (#237)
+// Absence is not the only way to have chosen nothing
 // ----------------------------------------------------------------------------
 //
 // A row can exist without its `enabled` being a CHOICE. The cadence selector is
 // the case that forced this: cadence has nowhere to live but a (digest, email)
-// row (see `DIGEST_CADENCE_CHANNEL`), so changing only the cadence had to
-// INSERT one, and that row's `enabled` was a copy of today's coded default. The
-// resolver then read it back as `explicit`, and the user was pinned to a value
-// they never chose — precisely what `preferenceWriteIsNoop` exists to prevent
-// on the toggle path, arriving through the other door.
+// row (see `DIGEST_CADENCE_CHANNEL`), so changing only the cadence has to
+// INSERT one, and that row's `enabled` is a copy of today's coded default that
+// nobody picked. Read back as a choice, it pins the user to a value they never
+// made — precisely what `preferenceWriteIsNoop` exists to prevent on the toggle
+// path, arriving through the other door.
 //
-// The fix, of the two the issue named, is the RESOLVER one: a stored `enabled`
-// equal to the coded default is INHERITABLE — resolved as `source: "default"`,
-// carrying the coded default's value, so a later change to that default (N-019,
-// role-aware defaults) still reaches the user. The other option, a
-// category-level store so cadence persists without a channel row, needs a
-// migration; this track ships none.
+// SO THE ROW RECORDS WHY IT EXISTS. `notification_preferences.intent` is
+// stamped by the write path, and `preferenceValueIsInheritable` decides from
+// that stamp:
 //
-// A stored value that DIFFERS from the coded default is still explicit, whoever
-// wrote it and whichever direction it points — an opt-out is never re-defaulted
-// back on, and an opt-IN against a default that is off is never dropped.
+//   `incidental`  a save wrote this value to carry something else, so it says
+//                 nothing on its own. While it equals the coded default it is
+//                 INHERITABLE — resolved as `source: "default"`, carrying the
+//                 coded default's value, so a later change to that default
+//                 (N-019, role-aware defaults) still reaches the user.
+//   `chosen`      a human decided this value, so it is honoured as written
+//                 however it agrees with today's default. The logged-out
+//                 unsubscribe undo (`./channels/unsubscribe.ts`) is the case
+//                 that makes this load-bearing: "keep sending these" writes
+//                 `true`, which EQUALS every category's coded email default,
+//                 and a rule that read the value alone would reverse that
+//                 reader's own decision about their consent the day the default
+//                 flipped.
 //
-// ----------------------------------------------------------------------------
-// …EXCEPT ON THE UNSUBSCRIBE CHANNEL (ruled 2026-08-13, #411 / #427)
-// ----------------------------------------------------------------------------
+// A stored value that DIFFERS from the coded default is explicit under either
+// stamp, whoever wrote it and whichever direction it points — an opt-out is
+// never re-defaulted back on, and an opt-IN against a default that is off is
+// never dropped.
 //
-// The rule above is right wherever a row can be a by-product. It is wrong on
-// `UNSUBSCRIBE_CHANNEL`, because that channel has a writer whose every row IS a
-// choice: the logged-out unsubscribe undo (`./channels/unsubscribe.ts`). A
-// stranger who followed an emailed link, read a page that said the category was
-// now off, and pressed "keep sending these" made a decision about their own
-// consent — and under the value-equality rule that decision resolved as
-// `source: "default"` and would be reversed the day the coded default flipped.
+// THE STAMP IS NEVER REQUEST INPUT, which is what makes it trustworthy: it is
+// absent from `setPreferenceSchema`, and each write path states its own (see
+// `setPreferenceQuery` and `setDigestCadenceQuery`), so no caller can claim a
+// by-product was a decision.
 //
-// So the exemption is BY CHANNEL, and it is a consent decision rather than a
-// resolution one: on the unsubscribe channel a stored row is honoured as
-// written, however it agrees with today's default. Every other channel keeps
-// #237's behaviour unchanged, because no unauthenticated writer reaches them.
-//
-// It is coarse — it cannot tell the undo's row from any other `email` row,
-// because nothing stored says who wrote one. The precise fix is an intent stamp
-// on the row, which needs a migration; that option was considered and rejected
-// for now (#411 DECISION, 2026-08-13), and coarse-in-the-consenting-direction
-// is the safe way to be coarse: the cost is a row that keeps following the user
-// instead of the default, never a preference the user set being dropped.
-//
-// ONE CELL IS CARVED BACK OUT, and it is the cadence row this section opened
-// with — `digest` on `DIGEST_CADENCE_CHANNEL`, which is the same channel. That
-// row's `enabled` is invented by an authenticated save rather than chosen by
-// anyone, so #237 keeps it. `preferenceValueIsInheritable` states the carve-out
-// and the residual it leaves.
+// The rule is therefore UNIFORM ACROSS CHANNELS. It was once inferred from the
+// channel instead — every row on the emailed link's channel honoured as a
+// choice, with the cadence cell carved back out again — because nothing stored
+// said who wrote a row. The stamp says, so neither the exemption nor the
+// carve-out is left.
 //
 // Resolution is pure (`resolvePreference`, `buildPreferenceMap`) so the
 // dispatcher can load a user's rows once and answer many questions from them
@@ -284,88 +278,56 @@ export function buildPreferenceMap(
 }
 
 /**
- * The channel the logged-out unsubscribe link — and its undo — can ever write.
+ * Is a stored `enabled` indistinguishable from having chosen nothing?
  *
- * It lives HERE rather than in `./channels/unsubscribe.ts`, which is the module
- * that acts on it, because the resolver now keys a consent rule on it (see
- * `preferenceValueIsInheritable`) and `unsubscribe.ts` already imports this
- * module: the constant cannot sit on the far side of that edge without a cycle.
- * One spelling, imported by the writer, so "which channel the emailed link
- * touches" and "which channel is exempt from the value-equality rule" cannot
- * drift into two different answers.
- */
-export const UNSUBSCRIBE_CHANNEL: NotificationChannel = "email";
-
-/**
- * Is a stored `enabled` indistinguishable from having chosen nothing? (#237)
+ * Decided from the row's own `intent` stamp, never from its channel:
  *
- * True when it equals the coded default for this audience. Such a value tells
- * us nothing the default did not already say, so treating it as a CHOICE only
- * freezes today's default into a user's record — and the user is then the one
- * person a change to that default cannot reach.
+ *   `chosen`      NEVER inheritable. Somebody decided this value, so it is
+ *                 honoured as written however it agrees with today's coded
+ *                 default — which is the whole reason the stamp is stored (see
+ *                 the module header, and `preferenceIntents` in the schema).
+ *   `incidental`  inheritable while it equals the coded default. Such a value
+ *                 tells us nothing the default did not already say, so treating
+ *                 it as a choice only freezes today's default into a user's
+ *                 record — and the user is then the one person a change to that
+ *                 default cannot reach.
  *
- * The comparison is against the CURRENT coded default, deliberately. It is not
- * asking "was this written deliberately?" — nothing stored can answer that —
- * but "does this row still say anything?". A row that stops agreeing with the
- * default starts saying something, and from then on it is honoured as a choice.
+ * For an `incidental` row the comparison is against the CURRENT coded default,
+ * deliberately. It asks "does this row still say anything?", not "was this
+ * written deliberately?" — the stamp answers that one. A row that stops
+ * agreeing with the default starts saying something, and from then on it is
+ * honoured as a choice whatever its stamp.
  *
  * `audience` matters for the same reason it matters everywhere else here: the
  * coded default for `digest`/`in_app` differs between the plant's team and an
  * oversight recipient (N-027), so the same stored `false` is inheritable for
  * one and a deliberate opt-out for the other.
  *
- * THE UNSUBSCRIBE CHANNEL IS EXEMPT (ruled 2026-08-13) — see the module header.
- * A row on it is honoured as written, so the undo's "keep sending these"
- * survives a later flip of the coded default. The exemption is a property of
- * the CHANNEL, not of the row, because nothing stored says who wrote a row.
- *
- * ONE PAIR IS CARVED BACK OUT OF THE EXEMPTION, and it is #237's own case:
- * (`digest`, `DIGEST_CADENCE_CHANNEL`) — the cell the cadence selector has to
- * INSERT a row for, because cadence has nowhere else to live and `enabled` is
- * NOT NULL. That row's `enabled` is a copy of the coded default that the user
- * never chose, it is written by an authenticated screen rather than by the
- * emailed link, and treating it as explicit is exactly the defect #237 fixed.
- * The two channels are the same channel today, so without this carve-out the
- * exemption would silently revert #237 for the one cell it was written for.
- *
- * Accepted residual, and stated so it is not discovered later: an undo on the
- * `digest` category lands on that carved-out cell, so THAT one undo still
- * follows the coded default. Closing it needs the intent stamp the ruling
- * deferred (a migration), because a cadence row and an undo row are otherwise
- * the same row.
+ * `intent` is REQUIRED and sits ahead of the optional `audience`, so a caller
+ * that has a row but does not say what kind of row it is does not compile.
+ * There is no channel branch and no per-cell exception left: every (category,
+ * channel) pair is decided the same way.
  */
 export function preferenceValueIsInheritable(
   category: NotificationCategory,
   channel: NotificationChannel,
   enabled: boolean,
+  intent: PreferenceIntent,
   audience: NotificationAudience = "church"
 ): boolean {
-  if (channel === UNSUBSCRIBE_CHANNEL && !isCadenceCarrier(category, channel)) {
-    return false;
-  }
+  if (intent === "chosen") return false;
   return enabled === defaultChannelEnabled(category, channel, audience);
-}
-
-/**
- * Is this the one cell whose row the cadence selector has to invent an `enabled`
- * for? See `DIGEST_CADENCE_CHANNEL` and `setDigestCadenceQuery`.
- */
-function isCadenceCarrier(
-  category: NotificationCategory,
-  channel: NotificationChannel
-): boolean {
-  return category === "digest" && channel === DIGEST_CADENCE_CHANNEL;
 }
 
 /**
  * Resolve one (category, channel) against a user's stored rows.
  *
  * - row absent       → the category's coded default, marked `default`.
- * - row inheritable  → the coded default, marked `default`. The stored value
- *                      agrees with it and so adds nothing; see
- *                      `preferenceValueIsInheritable` and the module header.
- *                      A row on `UNSUBSCRIBE_CHANNEL` is never inheritable
- *                      (with the one carve-out that function names), so an
+ * - row inheritable  → the coded default, marked `default`. The row is stamped
+ *                      `incidental` and its stored value agrees with the
+ *                      default, so it adds nothing; see
+ *                      `preferenceValueIsInheritable` and the module header. A
+ *                      row stamped `chosen` is never inheritable, so an
  *                      agreeing row there is a CHOICE and takes the branch
  *                      below.
  * - row differs      → its `enabled`, marked `explicit` (true AND false alike;
@@ -406,7 +368,13 @@ export function resolvePreference(
 
   if (
     !row ||
-    preferenceValueIsInheritable(category, channel, row.enabled, audience)
+    preferenceValueIsInheritable(
+      category,
+      channel,
+      row.enabled,
+      row.intent,
+      audience
+    )
   ) {
     return {
       category,
@@ -460,11 +428,12 @@ export function isChannelEnabled(
  *
  * Writing it to BOTH digest rows was the alternative and is worse: it would
  * materialise a second row the user never asked for, doubling the surface the
- * inheritable rule has to keep harmless for no gain. One row is enough, and
- * `preferenceValueIsInheritable` is what stops that row reading as a choice
- * (#237) — which is why this pair is the one cell carved back out of the
- * unsubscribe-channel exemption, the two channels being the same channel. See
- * `resolveDigestCadence` for the read side.
+ * inheritable rule has to keep harmless for no gain. One row is enough, and the
+ * `incidental` stamp `setDigestCadenceQuery` writes is what stops that row
+ * reading as a choice. It shares its channel with the emailed unsubscribe link
+ * and that no longer matters: the two writes are told apart by what they say
+ * about themselves, not by where they land. See `resolveDigestCadence` for the
+ * read side.
  */
 export const DIGEST_CADENCE_CHANNEL: NotificationChannel = "email";
 
@@ -1007,7 +976,17 @@ export async function getInAppCategories(
  * `digestCadence` is only stored on the `digest` category; passing it elsewhere
  * is ignored rather than rejected, so a settings form can send the whole row.
  *
- * Three things this function is careful about:
+ * THIS IS THE DELIBERATE-WRITE DOOR, so every row it writes is stamped
+ * `chosen` — on the INSERT and on the UPDATE alike, because a human re-deciding
+ * a value promotes a row a cadence save left behind. Both its callers are a
+ * person acting: the settings toggle, and the emailed unsubscribe with its undo
+ * (`unsubscribeWriteQuery`). The stamp is a property of the PATH and never of
+ * the input — it is absent from `setPreferenceSchema`, so a caller forwarding a
+ * form body cannot claim a by-product was a decision. A write that is NOT
+ * somebody deciding belongs in a function that says so, the way
+ * `setDigestCadenceQuery` does.
+ *
+ * Three more things this function is careful about:
  *
  * 1. It writes for a `PreferenceOwner`, never a bare id. See the module header:
  *    a preference is a consent record, so whose it is has to be a type.
@@ -1034,10 +1013,12 @@ export function setPreferenceQuery(
 
   const set: {
     enabled: boolean;
+    intent: PreferenceIntent;
     updatedAt: Date;
     digestCadence?: DigestCadence;
   } = {
     enabled: parsed.enabled,
+    intent: "chosen",
     updatedAt: new Date(),
   };
 
@@ -1054,6 +1035,7 @@ export function setPreferenceQuery(
       category: parsed.category,
       channel: parsed.channel,
       enabled: parsed.enabled,
+      intent: "chosen",
       digestCadence: suppliedCadence,
     })
     .onConflictDoUpdate({
@@ -1090,12 +1072,15 @@ export async function setPreference(
  * so the row this creates is behaviourally identical to the absence it
  * replaces — the user changed their cadence and nothing else changed with it.
  *
- * "Behaviourally identical" is the resolver's doing, not this INSERT's (#237).
- * The value written here agrees with the coded default, so
- * `preferenceValueIsInheritable` marks it `default` and it keeps following the
- * default rather than pinning the user to today's copy of it. Before that rule
- * existed, this INSERT was how a cadence-only change silently turned into an
- * explicit (digest, email) preference.
+ * AND IT SAYS SO, which is what makes that true rather than lucky: the row is
+ * stamped `incidental`, so `preferenceValueIsInheritable` keeps it following
+ * the coded default instead of pinning the user to today's copy of one nobody
+ * picked. This is the write the stamp exists to describe.
+ *
+ * The stamp is NOT in the update clause, for the same reason `enabled` is not:
+ * changing a cadence over a row somebody deliberately chose must not demote
+ * that choice to a by-product. An `incidental` row stays incidental, a `chosen`
+ * row stays chosen, and only the cadence moves.
  */
 export function setDigestCadenceQuery(
   owner: PreferenceOwner,
@@ -1111,6 +1096,7 @@ export function setDigestCadenceQuery(
       category: "digest",
       channel: DIGEST_CADENCE_CHANNEL,
       enabled: defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL),
+      intent: "incidental",
       digestCadence: parsed,
     })
     .onConflictDoUpdate({

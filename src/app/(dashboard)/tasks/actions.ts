@@ -17,6 +17,13 @@ import {
   SUBTASK_SELF_ERROR,
   type BulkTaskResult,
 } from "@/lib/tasks/service";
+import {
+  DEPENDENCY_CROSS_CHURCH_ERROR,
+  DEPENDENCY_CYCLE_ERROR,
+  DEPENDENCY_SELF_ERROR,
+  DEPENDENCY_TASK_MISSING_ERROR,
+  setTaskPrerequisites,
+} from "@/lib/tasks/dependencies";
 import { parseRecurrenceForm } from "@/lib/tasks/recurrence";
 import { UNKNOWN_TEMPLATE_ERROR, importTaskTemplate } from "@/lib/tasks/import";
 import { findTaskTemplate } from "@/lib/tasks/templates";
@@ -24,6 +31,7 @@ import type { ActionResult } from "@/lib/tasks/types";
 import {
   bulkRescheduleSchema,
   bulkTaskIdsSchema,
+  prerequisiteTaskIdsSchema,
   taskCreateSchema,
   taskQuickAddSchema,
   taskStatusSchema,
@@ -70,6 +78,10 @@ const USER_FACING_SERVICE_ERRORS = new Set<string>([
   SUBTASK_DEPTH_ERROR,
   SUBTASK_HAS_CHILDREN_ERROR,
   UNKNOWN_TEMPLATE_ERROR,
+  DEPENDENCY_CYCLE_ERROR,
+  DEPENDENCY_CROSS_CHURCH_ERROR,
+  DEPENDENCY_SELF_ERROR,
+  DEPENDENCY_TASK_MISSING_ERROR,
 ]);
 
 function userFacingError(error: unknown): string | null {
@@ -89,6 +101,33 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
   });
 
   return obj;
+}
+
+/**
+ * Prerequisite ids from the task form's hidden input. `null` means the
+ * field was not posted (quick-add, bulk, anything that does not own the
+ * dependency editor) and the existing edges must be left alone.
+ */
+function parsePostedPrerequisiteIds(
+  rawData: Record<string, unknown>
+):
+  | { ok: true; ids: string[] }
+  | { ok: false; fieldErrors: Record<string, string[]> }
+  | null {
+  if (!Object.hasOwn(rawData, "prerequisiteTaskIds")) return null;
+
+  const parsed = prerequisiteTaskIdsSchema.safeParse(
+    rawData.prerequisiteTaskIds ?? ""
+  );
+  if (!parsed.success) {
+    return {
+      ok: false,
+      fieldErrors: {
+        prerequisiteTaskIds: ["Choose valid tasks"],
+      },
+    };
+  }
+  return { ok: true, ids: parsed.data };
 }
 
 // ============================================================================
@@ -125,6 +164,15 @@ export async function createTaskAction(
       };
     }
 
+    const prerequisites = parsePostedPrerequisiteIds(rawData);
+    if (prerequisites && !prerequisites.ok) {
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: prerequisites.fieldErrors,
+      };
+    }
+
     const task = await createTask(
       user.churchId,
       user.id,
@@ -134,6 +182,16 @@ export async function createTaskAction(
       parseRecurrenceForm(rawData) ?? undefined
     );
 
+    if (prerequisites?.ok && prerequisites.ids.length > 0) {
+      try {
+        await setTaskPrerequisites(user.churchId, task.id, prerequisites.ids);
+      } catch (error) {
+        await deleteTask(user.churchId, task.id);
+        throw error;
+      }
+    }
+
+    refresh();
     revalidatePath("/tasks");
 
     return { success: true, data: task };
@@ -231,6 +289,15 @@ export async function updateTaskAction(
       };
     }
 
+    const prerequisites = parsePostedPrerequisiteIds(rawData);
+    if (prerequisites && !prerequisites.ok) {
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: prerequisites.fieldErrors,
+      };
+    }
+
     const task = await updateTask(
       user.churchId,
       taskId,
@@ -238,6 +305,11 @@ export async function updateTaskAction(
       parseRecurrenceForm(rawData) ?? undefined
     );
 
+    if (prerequisites?.ok) {
+      await setTaskPrerequisites(user.churchId, taskId, prerequisites.ids);
+    }
+
+    refresh();
     revalidatePath("/tasks");
     revalidatePath(`/tasks/${taskId}`);
 
@@ -274,6 +346,10 @@ export async function completeTaskAction(
 
     const { task } = await completeTask(user.churchId, taskId, user.id);
 
+    // `refresh()` updates the page the planter is standing on — completing
+    // the last prerequisite must clear the dependent's blocked badge without
+    // a full navigation. `revalidatePath` covers the other task surfaces.
+    refresh();
     revalidatePath("/tasks");
     revalidatePath(`/tasks/${taskId}`);
 
@@ -314,6 +390,7 @@ export async function reopenTaskAction(
 
     const task = await reopenTask(user.churchId, taskId);
 
+    refresh();
     revalidatePath("/tasks");
     revalidatePath(`/tasks/${taskId}`);
 

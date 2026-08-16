@@ -611,3 +611,49 @@ export function getAllTeamTemplates(): TeamTemplate[] {
 export function getTotalRoleTemplateCount(): number {
   return TEAM_TEMPLATES.reduce((acc, team) => acc + team.roles.length, 0);
 }
+
+// ============================================================================
+// Background checks — which rosters show a member's status
+// ============================================================================
+
+/**
+ * The predefined teams whose roster shows each member's background-check
+ * status.
+ *
+ * THE REQUIREMENT IS STATED PER TEAM, NOT PER ROLE, AND THAT IS DELIBERATE.
+ * The ministry-teams FRD asks for exactly one thing here — "reads each person's
+ * background-check status so it is visible on the Children's Ministry roster" —
+ * and its TeamRole contract carries no "requires a background check" flag to
+ * hang the question on. Roles carry no training requirement of their own for
+ * the same stated reason: per-role granularity is premature for teams this
+ * size. So a role flag is NOT invented here; the team is the unit the
+ * requirement was written about, and the FRD's Children's Ministry section is
+ * what this list spells.
+ *
+ * A role-level flag landing later does not contradict this: the roster asks
+ * `teamRequiresBackgroundCheck` once, so widening it to consult a role reaches
+ * every surface at once.
+ */
+export const BACKGROUND_CHECK_TEAM_KEYS: readonly PredefinedTeamKey[] = [
+  "childrens_ministry",
+];
+
+/**
+ * Whether a team's roster shows its members' background-check status.
+ *
+ * Matched on NAME, because a `ministry_teams` row stores no template key — the
+ * same handle the role-template import already uses to find a team's templates.
+ * A custom team, or a predefined one a planter renamed, answers false: the
+ * status is still on every person's profile, so nothing is hidden, it is only
+ * not claimed to be required.
+ */
+export function teamRequiresBackgroundCheck(teamName: string): boolean {
+  const normalized = teamName.trim().toLowerCase();
+
+  return TEAM_TEMPLATES.some(
+    (template) =>
+      BACKGROUND_CHECK_TEAM_KEYS.includes(
+        template.teamKey as PredefinedTeamKey
+      ) && template.teamName.toLowerCase() === normalized
+  );
+}

@@ -96,6 +96,7 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
       postalCode: persons.postalCode,
       country: persons.country,
       status: persons.status,
+      backgroundCheckStatus: persons.backgroundCheckStatus,
       source: persons.source,
       sourceDetails: persons.sourceDetails,
       notes: persons.notes,
