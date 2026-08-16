@@ -776,10 +776,41 @@ test("a still-live subject is delivered normally", async () => {
   }
 });
 
+test("a predicate is handed the run's own clock, never a clock of its own", async () => {
+  // THE TIME BOMB THIS CLOSES. A predicate that asks "has this happened yet?"
+  // — the meeting one does — used to default its clock to `new Date()`, and no
+  // registrar ever passed one. Production never noticed (the run's instant IS
+  // `new Date()`), but a suite pinning `now` in the past was pinning an instant
+  // the predicate never read, so it went red on the day the wall clock walked
+  // past its fixture. The instant is an argument now, so there is one clock per
+  // run and no default to drift from.
+  const store = storeWithPlanter();
+  store.addNotification({ type: "task.overdue" });
+
+  const seen: Date[] = [];
+  registerStillLivePredicate("task.overdue", (_row, now) => {
+    seen.push(now);
+    return true;
+  });
+
+  try {
+    await runDispatch(store, { now: NOW });
+
+    assert.equal(seen.length, 1, "the predicate ran");
+    assert.equal(
+      seen[0].getTime(),
+      NOW.getTime(),
+      "the predicate was handed the run's instant, not the wall clock"
+    );
+  } finally {
+    unregisterStillLivePredicate("task.overdue");
+  }
+});
+
 test("an unregistered type is live — F11 does not invent a caller's rules", async () => {
   clearStillLivePredicates();
   const notification = { type: "phase.assessment.ready" } as Notification;
-  assert.equal(await resolveLiveness(notification), "live");
+  assert.equal(await resolveLiveness(notification, NOW), "live");
 });
 
 test("a predicate that throws defers the notification rather than guessing", async () => {
