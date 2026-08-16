@@ -1,0 +1,105 @@
+-- #443 — `notification_preferences.intent`: WHY a preference row exists, so
+-- "is this a consent record?" stops being inferred from the channel.
+--
+-- WHAT THE STAMP REPLACES. A row can exist without its `enabled` being anyone's
+-- decision: `enabled` is NOT NULL and the grain is (user, category, channel), so
+-- a cadence-only save has to invent one for the row it creates. #237 answered
+-- that by reading the VALUE — a stored `enabled` equal to the coded default was
+-- treated as saying nothing, so a later change to that default still reached the
+-- user. #411/#427 then found the case the value cannot answer: the logged-out
+-- unsubscribe undo writes `true`, which EQUALS every category's coded email
+-- default, and that write IS the reader's decision about their own consent. With
+-- nothing stored saying who wrote a row, the fix available then was a CHANNEL
+-- exemption plus a carve-out for the one cell the cadence selector writes to —
+-- both carried as accepted residuals, both retired by this column.
+--
+-- TWO VALUES, AND NEITHER IS REQUEST INPUT. `chosen` = a human decided this
+-- value (a settings toggle, the emailed unsubscribe, its undo) and it is
+-- honoured as written forever. `incidental` = a save wrote it to carry something
+-- else, so it keeps #237's value-equality rule. Each write path states its own
+-- stamp in code (`setPreferenceQuery` / `setDigestCadenceQuery`), so a caller
+-- cannot claim `chosen` for a by-product.
+--
+-- ----------------------------------------------------------------------------
+-- WHAT EXISTING ROWS WERE ASSUMED TO BE
+-- ----------------------------------------------------------------------------
+--
+-- Nothing stored before this migration says who wrote a row, so no backfill can
+-- recover the truth. The one it CAN preserve is the answer the running system
+-- already gives, and that is what this one is chosen to do: every existing row
+-- is stamped with the intent that makes the new resolver return exactly what the
+-- channel-inferred rule returns today, so no reader's resolved preference moves
+-- on the day this deploys.
+--
+--   channel = 'email' AND category <> 'digest'  ->  'chosen'
+--       The cells the channel exemption already honoured as written. The
+--       assumption: an email row on one of these categories was a human's
+--       decision. It is the same inference the exemption made, kept for history
+--       alone, and it errs in the consenting direction — its cost is a row that
+--       keeps following the reader instead of the default, never a preference
+--       the reader set being dropped.
+--
+--   everything else                             ->  'incidental'
+--       Every `in_app` row, which #237's value-equality rule already governed,
+--       plus ('digest', 'email') — the cell the cadence selector has to write to
+--       and the one the carve-out already excluded from the exemption.
+--
+-- THE RESIDUAL THAT SURVIVES, FOR OLD ROWS ONLY: an undo pressed on the `digest`
+-- category BEFORE this migration is indistinguishable from a cadence-only save
+-- and is stamped `incidental`, so that one historical row still follows the
+-- coded default. Every undo written after this migration is stamped `chosen` by
+-- the write path and survives a default flip, which is the residual's own
+-- scenario and the reason this column exists.
+--
+-- WHY THE COLUMN DEFAULT IS 'chosen' WHEN THE BACKFILL IS NOT. The default
+-- governs a row written by something that does not state a stamp — a script, a
+-- psql session, a future writer that forgets. That direction has to be the
+-- fail-safe one, and it is the same asymmetry as above: honouring a value nobody
+-- chose is recoverable, dropping a value somebody did choose is not. The
+-- backfill overrides it for existing rows because for THOSE rows the answer is
+-- known: it is whatever the code answers today.
+--
+-- ADDITIVE, AND SAFE IN EITHER DEPLOY ORDER. One column with a default, one
+-- CHECK, one UPDATE over a table with no volume in front of it. No index, no
+-- `ON CONFLICT` arbiter and no rewrite of another table, so the 0038/0042 trap
+-- (`ON CONFLICT (…) WHERE …` against a database lacking the index, SQLSTATE
+-- 42P10) does not apply here. Code-first is survivable: the running code before
+-- this deploy never names `intent`, and the code after it selects `*`, so the
+-- only window is between the deploy and the migration, where a SELECT would fail
+-- on `column "intent" does not exist`. Run `pnpm db:migrate` first anyway —
+-- nothing in this repo applies migrations on deploy.
+--
+-- SIBLING RECONCILE. `when` is 1786857962312, above 0042's 1786769854360, so a
+-- `db:migrate` run applies 0042 then this one and neither is skipped. Nothing
+-- here owes a forward reconcile; a migration from another branch merging with a
+-- `when` above 1786857962312 owes it (memory/invariants.md → Migrations).
+--
+-- ROLLBACK. Three statements, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "notification_preferences"
+--     DROP CONSTRAINT IF EXISTS "notification_preferences_intent_check";
+--   ALTER TABLE "notification_preferences" DROP COLUMN IF EXISTS "intent";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786857962312;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0040/0042: the journal is the
+-- repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- database's record of what ran, and only the ledger row is deleted.
+--
+-- The row can also be identified by the sha256 of THIS FILE, byte for byte,
+-- from the deployed commit:
+--
+--   shasum -a 256 src/db/migrations/0043_preference_intent_stamp.sql
+--
+-- ROLLING BACK REQUIRES REVERTING THE CODE TOO. `preferenceValueIsInheritable`
+-- reads `intent` on every resolution and both write paths supply it, so dropping
+-- the column under a live build breaks the settings screen, the dispatcher's
+-- preference read and the unsubscribe link at once. Revert the application half
+-- first, then drop. Dropping also FORGETS every stamp: the reverted code infers
+-- consent from the channel again, which is the behaviour this replaces rather
+-- than a loss of data, but an undo written on the `digest` category in between
+-- goes back to following the coded default.
+ALTER TABLE "notification_preferences" ADD COLUMN "intent" varchar(16) DEFAULT 'chosen' NOT NULL;--> statement-breakpoint
+UPDATE "notification_preferences" SET "intent" = 'incidental' WHERE "channel" <> 'email' OR "category" = 'digest';--> statement-breakpoint
+ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_intent_check" CHECK ("notification_preferences"."intent" in ('chosen', 'incidental'));

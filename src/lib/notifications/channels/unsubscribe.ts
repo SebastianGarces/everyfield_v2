@@ -5,13 +5,13 @@ import { users, type NotificationPreference } from "@/db/schema";
 import {
   NOTIFICATION_CATEGORIES,
   type NotificationCategory,
+  type NotificationChannel,
 } from "../categories";
 import {
   loadUserPreferences,
   preferenceOwnerFromUnsubscribeToken,
   resolvePreference,
   setPreferenceQuery,
-  UNSUBSCRIBE_CHANNEL,
   type PreferenceOwner,
 } from "../preferences";
 import {
@@ -54,22 +54,15 @@ import {
 // delete would race the resolver's absence rule for no gain and there is no
 // delete path here at all.
 //
-// AND THAT WRITE IS NOW A RECORDED CHOICE (ruled 2026-08-13, #411 → #427).
-// It was not, for a while, and the comment that used to sit here said so: #237
-// made a stored value EQUAL to the coded default resolve as `source: "default"`,
-// and every category's `email` default is `true`, so the undo's `true` resolved
-// exactly as an absent row did. Nothing misbehaved today — both readings say
-// "on" — but the day that coded default is reconsidered, the user who pressed
-// "keep sending these" would silently stop receiving them.
-//
-// The ruling settled it in the consenting direction: `preferenceValueIsInheritable`
-// (`../preferences.ts`) EXEMPTS `UNSUBSCRIBE_CHANNEL` from the value-equality
-// rule, so a row this module wrote resolves `source: "explicit"` and follows the
-// user rather than the default. The exemption is by CHANNEL because nothing
-// stored says who wrote a row — an intent stamp would need a migration and was
-// deferred — and it carves ONE cell back out, the (digest, cadence) row an
-// authenticated cadence save has to invent. Both the carve-out and the residual
-// it leaves are stated at that function.
+// AND THAT WRITE IS A RECORDED CHOICE. `true` EQUALS every category's coded
+// email default, so a resolver reading the value alone would treat the undo
+// exactly as an absent row: nothing misbehaves today — both readings say "on" —
+// but the day that default is reconsidered, the reader who pressed "keep
+// sending these" silently stops receiving them. What stops that is the row's own
+// `intent` stamp: every write here goes through `setPreferenceQuery`, which
+// stamps `chosen`, so the row is honoured as written on EVERY category
+// including `digest`. The rule is the resolver's and applies to no channel in
+// particular — see `preferenceValueIsInheritable` (`../preferences.ts`).
 //
 // ----------------------------------------------------------------------------
 // Why storage is injected
@@ -83,9 +76,17 @@ import {
 // — no route or page passes one.
 // ============================================================================
 
-// The channel this token family can ever touch is fixed and never a parameter —
-// `UNSUBSCRIBE_CHANNEL`, imported from `../preferences` rather than declared
-// here since the resolver keys its consent exemption on the same constant.
+/**
+ * The one channel this token family can ever touch — fixed here, never a
+ * parameter, so "the emailed link reaches email and nothing else" is a property
+ * of the module rather than of each call.
+ *
+ * It lives with the writer because nothing else keys on it. The resolver used to
+ * — a row's channel was once how consent was inferred — and the constant sat in
+ * `../preferences` for that reason; the stamp on the row answers that question
+ * now, so the constant has come back to the only module that uses it.
+ */
+export const UNSUBSCRIBE_CHANNEL: NotificationChannel = "email";
 
 /**
  * The write, as a builder — exported so a test can `.toSQL()` it and assert the

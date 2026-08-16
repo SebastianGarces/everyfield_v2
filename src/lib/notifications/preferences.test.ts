@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import type { NotificationPreference, UserRole } from "@/db/schema";
+import {
+  preferenceIntents,
+  type NotificationPreference,
+  type UserRole,
+} from "@/db/schema";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import {
@@ -41,7 +45,6 @@ import {
   setDigestCadenceQuery,
   setPreferenceQuery,
   setPreferenceSchema,
-  UNSUBSCRIBE_CHANNEL,
   UnauthenticatedPreferenceAccessError,
   type DigestCadenceChoiceView,
   type PreferenceMatrixView,
@@ -60,6 +63,13 @@ import {
 
 const USER_ID = "user-1";
 
+/**
+ * A stored row, defaulting to the BY-PRODUCT stamp.
+ *
+ * `incidental` is the default because it is the only stamp the value-equality
+ * rule has anything to say about: a test that means "somebody decided this"
+ * has to say `intent: "chosen"`, so a decision is never asserted by accident.
+ */
 function makeRow(
   overrides: Partial<NotificationPreference> &
     Pick<NotificationPreference, "category" | "channel" | "enabled">
@@ -67,6 +77,7 @@ function makeRow(
   return {
     id: `pref-${overrides.category}-${overrides.channel}`,
     userId: USER_ID,
+    intent: "incidental",
     digestCadence: null,
     createdAt: new Date("2026-07-01T00:00:00.000Z"),
     updatedAt: new Date("2026-07-01T00:00:00.000Z"),
@@ -78,15 +89,11 @@ function makeRow(
 // present-enabled / present-disabled / absent
 // ----------------------------------------------------------------------------
 
-test("a present row that AGREES with the coded default stays inheritable", () => {
-  // #237. `tasks`/`in_app` defaults to on, so a stored `true` says nothing the
-  // default did not — and reading it as a CHOICE is what pinned users to
-  // today's defaults, keeping N-019's role-aware defaults from ever reaching
-  // them. The value is the same either way; the attribution is the fix.
-  //
-  // Stated on `in_app` rather than on `email`, because `email` is
-  // `UNSUBSCRIBE_CHANNEL` and is exempt from this rule as of 2026-08-13 — see
-  // the exemption's own tests below.
+test("a present INCIDENTAL row that AGREES with the coded default is inheritable", () => {
+  // `tasks`/`in_app` defaults to on, so a stored `true` nobody chose says
+  // nothing the default did not — and reading it as a CHOICE is what pinned
+  // users to today's defaults, keeping N-019's role-aware defaults from ever
+  // reaching them. The value is the same either way; the attribution is the fix.
   const rows = [
     makeRow({ category: "tasks", channel: "in_app", enabled: true }),
   ];
@@ -465,6 +472,38 @@ test("the enum sets are CHECK constraints in the database, not just a TS brand",
   ]) {
     assert.ok(sql.includes(constraint), constraint);
   }
+});
+
+test("the intent stamp is a real column, closed by a CHECK and backfilled", () => {
+  // The stamp is what `preferenceValueIsInheritable` decides on, so a deploy
+  // whose database lacks the column answers no preference at all. The CHECK
+  // matters for the same reason the other three do: `.$type<>()` vanishes at
+  // runtime, and a stamp the code cannot name puts a consent record in a state
+  // no resolver has a rule for.
+  const sql = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/db/migrations/0043_preference_intent_stamp.sql"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    sql,
+    /ADD COLUMN "intent" varchar\(16\) DEFAULT 'chosen' NOT NULL/
+  );
+  assert.ok(sql.includes("notification_preferences_intent_check"));
+  for (const intent of preferenceIntents) {
+    assert.ok(sql.includes(`'${intent}'`), intent);
+  }
+
+  // Existing rows are stamped to REPRODUCE the answer the channel-inferred rule
+  // gave them, so nobody's resolved preference moves on the day this applies.
+  // The migration header states the assumption; this pins the statement.
+  assert.match(
+    sql,
+    /UPDATE "notification_preferences" SET "intent" = 'incidental' WHERE "channel" <> 'email' OR "category" = 'digest'/
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -908,6 +947,7 @@ test("an EXPLICIT preference beats the audience default, both ways", () => {
     category: "digest",
     channel: "in_app",
     enabled: false,
+    intent: "chosen",
     digestCadence: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -988,13 +1028,15 @@ test("an oversight admin switching their in-app digest OFF is not a no-op", () =
  *
  * Built from `setDigestCadenceQuery`'s own inputs rather than hand-written, so
  * it cannot drift from what the write path inserts: the channel it writes to,
- * and the coded default it has to supply for the NOT NULL `enabled` column.
+ * the coded default it has to supply for the NOT NULL `enabled` column, and the
+ * `incidental` stamp that says nobody picked it.
  */
 function cadenceOnlyRow(cadence: (typeof digestCadences)[number]) {
   return makeRow({
     category: "digest",
     channel: DIGEST_CADENCE_CHANNEL,
     enabled: defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL),
+    intent: "incidental",
     digestCadence: cadence,
   });
 }
@@ -1103,11 +1145,23 @@ test("inheritable is decided against the CURRENT default, per audience", () => {
   // stored `true` says nothing to an oversight reader and is a deliberate
   // opt-in for the plant's team.
   assert.equal(
-    preferenceValueIsInheritable("digest", "in_app", true, "oversight"),
+    preferenceValueIsInheritable(
+      "digest",
+      "in_app",
+      true,
+      "incidental",
+      "oversight"
+    ),
     true
   );
   assert.equal(
-    preferenceValueIsInheritable("digest", "in_app", true, "church"),
+    preferenceValueIsInheritable(
+      "digest",
+      "in_app",
+      true,
+      "incidental",
+      "church"
+    ),
     false
   );
 
@@ -1123,117 +1177,165 @@ test("inheritable is decided against the CURRENT default, per audience", () => {
 });
 
 // ----------------------------------------------------------------------------
-// …except on the unsubscribe channel (ruled 2026-08-13, #411 → #427)
+// Inheritable vs explicit is decided from the row's own stamp
 // ----------------------------------------------------------------------------
 
-/**
- * Every category whose unsubscribe-channel cell the exemption covers — that is,
- * all of them except the one cell the cadence selector has to write to. The
- * carve-out is expressed as the condition that creates it (the two channel
- * constants coinciding), so a future move of the cadence to another channel
- * widens this list on its own rather than leaving a stale exclusion here.
- */
-const exemptCategories = notificationCategories.filter(
-  (category) =>
-    !(category === "digest" && UNSUBSCRIBE_CHANNEL === DIGEST_CADENCE_CHANNEL)
-);
+test("a CHOSEN row is a choice even when it agrees with the default", () => {
+  // The case the stamp exists for: the unsubscribe undo writes a value that
+  // happens to equal the coded default, and that write is still the reader's
+  // own decision about their consent. Asserted over EVERY pair, both audiences,
+  // so a seventh category is covered on the day it is added — and so the rule
+  // cannot quietly acquire a channel or a category it does not apply to.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+      const coded = defaultChannelEnabled(category, channel, audience);
+      const rows = [
+        makeRow({ category, channel, enabled: coded, intent: "chosen" }),
+      ];
+      const resolved = resolvePreference(rows, category, channel, audience);
+      const label = `${audience} ${preferenceKey(category, channel)}`;
 
-test("a row on the unsubscribe channel is a choice even when it agrees", () => {
-  // The ruling: the unsubscribe undo writes a value that happens to equal the
-  // coded default, and that write is still the reader's own decision about
-  // their consent. Asserted over every category the exemption covers, not a
-  // sample, so a seventh category is covered on the day it is added.
-  for (const category of exemptCategories) {
-    const coded = defaultChannelEnabled(category, UNSUBSCRIBE_CHANNEL);
-    const rows = [
-      makeRow({ category, channel: UNSUBSCRIBE_CHANNEL, enabled: coded }),
-    ];
-    const resolved = resolvePreference(rows, category, UNSUBSCRIBE_CHANNEL);
-
-    assert.equal(
-      preferenceValueIsInheritable(category, UNSUBSCRIBE_CHANNEL, coded),
-      false,
-      category
-    );
-    assert.equal(resolved.source, "explicit", category);
-    // The VALUE is unchanged — only the attribution, and with it what a later
-    // change to the default can do to this reader.
-    assert.equal(resolved.enabled, coded, category);
+      assert.equal(
+        preferenceValueIsInheritable(
+          category,
+          channel,
+          coded,
+          "chosen",
+          audience
+        ),
+        false,
+        label
+      );
+      assert.equal(resolved.source, "explicit", label);
+      // The VALUE is unchanged — only the attribution, and with it what a later
+      // change to the default can do to this reader.
+      assert.equal(resolved.enabled, coded, label);
+    }
   }
 });
 
-test("#237's rule is untouched on every OTHER channel", () => {
-  // The other half of the ruling, and the one that keeps this narrow: nothing
-  // but the unsubscribe channel changed. Derived from the channel tuple, so a
-  // third channel is held to #237 by default rather than by an edit here.
-  const others = notificationChannels.filter(
-    (channel) => channel !== UNSUBSCRIBE_CHANNEL
-  );
-  assert.ok(others.length > 0);
-
+test("an INCIDENTAL row that agrees stays inheritable, on every pair", () => {
+  // The other half, and the one that keeps the value-equality rule alive: a row
+  // whose value was written to carry something else says nothing, so the coded
+  // default still reaches its owner. Derived from the matrix, so a third
+  // channel is held to the same rule by default rather than by an edit here.
   for (const audience of ["church", "oversight"] as const) {
-    for (const category of notificationCategories) {
-      for (const channel of others) {
+    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+      const coded = defaultChannelEnabled(category, channel, audience);
+      const rows = [
+        makeRow({ category, channel, enabled: coded, intent: "incidental" }),
+      ];
+      const label = `${audience} ${preferenceKey(category, channel)}`;
+
+      assert.equal(
+        preferenceValueIsInheritable(
+          category,
+          channel,
+          coded,
+          "incidental",
+          audience
+        ),
+        true,
+        label
+      );
+      assert.equal(
+        resolvePreference(rows, category, channel, audience).source,
+        "default",
+        label
+      );
+    }
+  }
+});
+
+test("the stamp, not the channel, is what the two answers differ on", () => {
+  // The property this unit is for, stated as the one comparison that proves it:
+  // two rows on the SAME (category, channel) cell, both carrying the coded
+  // default, resolve differently — and the only thing that differs is why each
+  // row exists. Asserted on every pair, so no cell keeps a channel rule of its
+  // own; the pair the old carve-out named is in here with the rest.
+  for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+    const coded = defaultChannelEnabled(category, channel);
+    const label = preferenceKey(category, channel);
+
+    const chosen = resolvePreference(
+      [makeRow({ category, channel, enabled: coded, intent: "chosen" })],
+      category,
+      channel
+    );
+    const incidental = resolvePreference(
+      [makeRow({ category, channel, enabled: coded, intent: "incidental" })],
+      category,
+      channel
+    );
+
+    assert.equal(chosen.source, "explicit", label);
+    assert.equal(incidental.source, "default", label);
+    assert.equal(chosen.enabled, incidental.enabled, label);
+  }
+});
+
+test("the stamp changes no VALUE, so no write becomes a non-no-op", () => {
+  // `preferenceWriteIsNoop` asks about the resolved value, never about its
+  // attribution. If the stamp had moved a value, a screen that saves what it
+  // rendered would start materialising rows again — the defect the
+  // value-equality rule closed.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const intent of preferenceIntents) {
+      for (const { category, channel } of notificationPreferenceMatrixKeys()) {
         const coded = defaultChannelEnabled(category, channel, audience);
-        const rows = [makeRow({ category, channel, enabled: coded })];
+        const rows = [makeRow({ category, channel, enabled: coded, intent })];
+        const label = `${audience} ${intent} ${preferenceKey(category, channel)}`;
 
         assert.equal(
-          preferenceValueIsInheritable(category, channel, coded, audience),
-          true,
-          `${audience} ${preferenceKey(category, channel)}`
+          resolvePreference(rows, category, channel, audience).enabled,
+          coded,
+          label
         );
         assert.equal(
-          resolvePreference(rows, category, channel, audience).source,
-          "default",
-          `${audience} ${preferenceKey(category, channel)}`
+          preferenceWriteIsNoop(rows, category, channel, coded, audience),
+          true,
+          label
         );
       }
     }
   }
 });
 
-test("the cadence carrier is carved back out, so #237's own case still holds", () => {
-  // The exemption is by channel, and the cadence selector writes to that same
-  // channel with an `enabled` the user never chose (the column is NOT NULL, so
-  // the INSERT has to invent one). Exempting it wholesale would have silently
-  // reverted #237 for the one cell it was written for, so that cell keeps the
-  // value-equality rule.
-  const coded = defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL);
+test("the settings toggle stamps a choice and the cadence save does not", () => {
+  // The two write paths, read off the SQL they actually issue. The stamp is
+  // never request input, so this is the only place it is decided — and the
+  // cadence save must leave an existing stamp alone on the update, exactly as
+  // it leaves `enabled` alone, or changing a cadence would demote a deliberate
+  // choice to a by-product.
+  const toggle = setPreferenceQuery(OWNER, {
+    category: "digest",
+    channel: DIGEST_CADENCE_CHANNEL,
+    enabled: true,
+  }).toSQL();
 
-  assert.equal(
-    preferenceValueIsInheritable("digest", DIGEST_CADENCE_CHANNEL, coded),
-    true
-  );
+  assert.ok(toggle.params.includes("chosen"), String(toggle.params));
+  assert.ok(updateClause(toggle.sql).includes("intent"), toggle.sql);
 
-  // And the carve-out is exactly one cell wide: the same category on the other
-  // channel, and every other category on this one, are unaffected by it.
-  assert.equal(
-    preferenceValueIsInheritable("tasks", DIGEST_CADENCE_CHANNEL, true),
-    false
-  );
+  const cadence = setDigestCadenceQuery(OWNER, "daily").toSQL();
+
+  assert.ok(cadence.params.includes("incidental"), String(cadence.params));
+  assert.ok(!cadence.params.includes("chosen"), String(cadence.params));
+  assert.ok(!updateClause(cadence.sql).includes("intent"), cadence.sql);
 });
 
-test("the exemption changes no VALUE, so no write becomes a non-no-op", () => {
-  // `preferenceWriteIsNoop` asks about the resolved value, never about its
-  // attribution. If the exemption had moved a value, a screen that saves what
-  // it rendered would start materialising rows again — the defect #237 closed.
-  for (const audience of ["church", "oversight"] as const) {
-    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
-      const coded = defaultChannelEnabled(category, channel, audience);
-      const rows = [makeRow({ category, channel, enabled: coded })];
+test("a stamp is never something a caller can send", () => {
+  // A preference write is reachable as a POST with no UI, so a stamp the
+  // request could name would let a by-product claim to be a decision — the
+  // whole point of storing it. The schema is the boundary and it has no such
+  // key; `z.object` strips it rather than storing it.
+  const parsed = setPreferenceSchema.parse({
+    category: "tasks",
+    channel: "email",
+    enabled: true,
+    intent: "chosen",
+  });
 
-      assert.equal(
-        resolvePreference(rows, category, channel, audience).enabled,
-        coded,
-        `${audience} ${preferenceKey(category, channel)}`
-      );
-      assert.equal(
-        preferenceWriteIsNoop(rows, category, channel, coded, audience),
-        true,
-        `${audience} ${preferenceKey(category, channel)}`
-      );
-    }
-  }
+  assert.ok(!("intent" in parsed));
 });
 
 test("a stored value that DIFFERS from the default is still a choice", () => {
