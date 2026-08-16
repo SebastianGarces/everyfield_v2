@@ -74,25 +74,22 @@
 -- 0043_preference_intent_stamp held a lower `when` (1786857962312) and would
 -- have been silently skipped — `drizzle-kit migrate` applies a migration only
 -- while the ledger's MAXIMUM `created_at` is below its `when`
--- (memory/invariants.md → Migrations). It was restamped once to
--- 0045_preference_intent_stamp at 1786865100000, strictly greater than 0044.
--- Then #442 landed as 0045_drop_share_phase_digest (`when` 1786865200000),
--- which is ABOVE that stamp, so 0045_preference_intent_stamp would be
--- silently skipped on any database that had applied 0045_drop. It is now
--- 0046_preference_intent_stamp at 1786866100000, strictly greater than
--- 0045_drop. A later sibling with a `when` above this one owes it a forward
--- reconcile.
+-- (memory/invariants.md → Migrations). It was restamped to
+-- 0045_preference_intent_stamp at 1786865100000, then to
+-- 0046_preference_intent_stamp at 1786866100000 after #442 took 0045
+-- (`0045_drop_share_phase_digest`, `when` 1786865200000). Then #380 landed
+-- as 0046_person_background_check_status (`when` 1786866200000), which is
+-- ABOVE that stamp. It is now 0047_preference_intent_stamp at 1786866500000,
+-- strictly greater than 0046. A later sibling with a `when` above this one
+-- owes it a forward reconcile.
 --
--- OPERATOR RECONCILE — a database that applied the OLD
--- 0045_preference_intent_stamp (`when` 1786865100000) or the still-older
--- 0043_preference_intent_stamp (`when` 1786857962312) needs a hand before
--- `pnpm db:migrate` (memory/invariants.md → Migrations ⚖). The renumber
--- above fixes the repository and leaves every database that already ran this
--- migration under an old stamp in a state the CLI cannot see: the `intent`
--- column EXISTS, and the ledger either still holds that old row or no longer
--- does. Because the CLI compares this file's `when` against the ledger's
--- MAXIMUM `created_at` and not against its own row, 1786866100000 wins, the
--- DDL below is re-run, and the apply dies on
+-- OPERATOR RECONCILE — a database that applied an OLD stamp of this file
+-- (0046 at 1786866100000, 0045 at 1786865100000, or 0043 at 1786857962312)
+-- needs a hand before `pnpm db:migrate` (memory/invariants.md → Migrations ⚖).
+-- The `intent` column EXISTS, and the ledger either still holds that old row
+-- or no longer does. Because the CLI compares this file's `when` against the
+-- ledger's MAXIMUM `created_at` and not against its own row, 1786866500000
+-- wins, the DDL below is re-run, and the apply dies on
 -- `ALTER TABLE "notification_preferences" ADD COLUMN "intent"` — column
 -- already exists — with the migration aborted and the ledger unchanged.
 --
@@ -104,24 +101,27 @@
 --      and column_name = 'intent';
 --   select max(created_at) from drizzle.__drizzle_migrations;
 --
--- A row back and a max BELOW 1786866100000 means this migration's effect is
+-- A row back and a max BELOW 1786866500000 means this migration's effect is
 -- already present and unrecorded at the new stamp — take an exit below. Zero
 -- rows back means a normal apply; run `pnpm db:migrate` and nothing here
 -- concerns you.
 --
--- BEFORE EXIT A: 0045_drop_share_phase_digest (`when` 1786865200000) must
--- already be in the ledger, and so must 0043_true_cammi (1786859463138) and
--- 0044_church_time_zone (1786859500000). Inserting this file's `when` first
--- would make the CLI SILENTLY SKIP any sibling whose `when` is lower. If
--- they are missing, apply their SQL (or `pnpm db:migrate` until they are
--- recorded) FIRST, then come back.
+-- BEFORE EXIT A: 0046_person_background_check_status (`when` 1786866200000)
+-- must already be in the ledger, and so must 0045_drop_share_phase_digest
+-- (1786865200000), 0043_true_cammi (1786859463138) and 0044_church_time_zone
+-- (1786859500000). Inserting this file's `when` first would make the CLI
+-- SILENTLY SKIP any sibling whose `when` is lower. If they are missing, apply
+-- their SQL (or `pnpm db:migrate` until they are recorded) FIRST, then come
+-- back. A database whose ledger still holds the old 0046 stamp 1786866100000
+-- is BELOW 0046_person_background_check_status — apply that sibling first,
+-- then EXIT A.
 --
 -- EXIT A — the database carries rows worth keeping (the shared `development`
 -- branch, or any environment with real data). Record the apply that already
 -- happened, so the CLI skips a migration whose effect is present:
 --
 --   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
---   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0046_preference_intent_stamp.sql>', 1786866100000);
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0047_preference_intent_stamp.sql>', 1786866500000);
 --
 -- The `created_at` literal is what matters and it is this migration's journal
 -- `when`; the hash column is bookkeeping for the next human, so write the real
@@ -144,7 +144,7 @@
 --   ALTER TABLE "notification_preferences"
 --     DROP CONSTRAINT IF EXISTS "notification_preferences_intent_check";
 --   ALTER TABLE "notification_preferences" DROP COLUMN IF EXISTS "intent";
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866100000;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866500000;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
@@ -155,7 +155,7 @@
 -- The row can also be identified by the sha256 of THIS FILE, byte for byte,
 -- from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0046_preference_intent_stamp.sql
+--   shasum -a 256 src/db/migrations/0047_preference_intent_stamp.sql
 --
 -- ROLLING BACK REQUIRES REVERTING THE CODE TOO. `preferenceValueIsInheritable`
 -- reads `intent` on every resolution and both write paths supply it, so dropping

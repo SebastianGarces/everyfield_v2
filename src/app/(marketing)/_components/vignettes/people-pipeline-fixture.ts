@@ -49,6 +49,7 @@ const BLANK = {
   postalCode: null,
   country: "US",
   sourceDetails: null,
+  backgroundCheckStatus: "not_started",
   photoUrl: null,
   householdId: null,
   householdRole: null,

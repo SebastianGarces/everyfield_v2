@@ -15,10 +15,12 @@ import {
   Pencil,
   Phone,
   Plus,
+  ShieldCheck,
   Tag as TagIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BackgroundCheckBadge } from "./background-check-badge";
 import { HouseholdMembers } from "./household-members";
 import { SkillsList } from "./skills-list";
 import { TagPicker } from "./tag-picker";
@@ -170,6 +172,19 @@ export function PersonOverview({
                     No address provided
                   </p>
                 )}
+              </div>
+            </div>
+
+            {/* Background check */}
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Background Check
+                </p>
+                <div>
+                  <BackgroundCheckBadge status={person.backgroundCheckStatus} />
+                </div>
               </div>
             </div>
 
