@@ -16,7 +16,7 @@ decisions and reviewing PRs.
    (localhost serves the main checkout, so it never contains the branch's work), at the final sha.
 4. **Agents rule for themselves**, and record every ruling. See *Rulings* below.
 
-`risk:high` and factory-path changes (`.claude/workflows/`, the delivery-OS skills, `ops/agent-os/`)
+`risk:high` and factory-path changes (`.claude/workflows/`, the delivery-OS skills, `.cursor/`, `ops/agent-os/`)
 never auto-merge — the machine that decides what merges keeps a human. Exhaustion is never a silent
 stop: it produces `agent:blocked` plus an evidence comment. Labels are canonical and the Project board
 is a one-way mirror of them; exactly one `agent:*` label per active issue.
@@ -115,6 +115,7 @@ guards live inside the skill (a review-queue cap, a refusal while anything is `a
 | Status labels, the board, the frontier query | `ops/agent-os/labels.md` |
 | The build loop | `.claude/workflows/build-until-done.js` |
 | Planning an FRD into tracks / building the frontier | `.claude/workflows/frd-plan.js`, `.claude/workflows/frd-implement.js` |
+| Cursor mirror of the factory | `.cursor/` (skills / agents / commands / workflows symlink here; hooks are native) |
 | The reviewer brief | `.claude/agents/code-reviewer.md` |
 | Board mirror (labels → columns) | `.github/workflows/board-sync.yml` |
 | Intake · dispatch · PR · validation | `.claude/skills/{spec-intake,dispatch,open-pr,validate,browser-validation,definition-of-done}/` |

@@ -289,7 +289,12 @@ test("every prompt and skill that needs the env references the one script", () =
 });
 
 test("no prompt or skill re-implements the mechanism", () => {
-  const dirs = [".claude/workflows", ".claude/skills", "ops/agent-os"];
+  const dirs = [
+    ".claude/workflows",
+    ".claude/skills",
+    ".cursor",
+    "ops/agent-os",
+  ];
   const files = dirs.flatMap((d) =>
     fs
       .readdirSync(path.join(ROOT, d), { recursive: true, withFileTypes: true })
