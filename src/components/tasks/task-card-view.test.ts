@@ -121,13 +121,20 @@ test("the hour of the instant never moves the answer", () => {
 // ----------------------------------------------------------------------------
 
 function listRow(
-  overrides: Partial<TaskWithAssignee> & { isBlocked?: boolean } = {}
-): TaskWithAssignee & { isBlocked?: boolean } {
+  overrides: Partial<TaskWithAssignee> & {
+    isBlocked?: boolean;
+    descriptionPreview?: string | null;
+  } = {}
+): TaskWithAssignee & {
+  isBlocked?: boolean;
+  descriptionPreview: string | null;
+} {
   return {
     id: "task-1",
     churchId: "church-1",
     title: "Print the flyers",
     description: null,
+    descriptionPreview: null,
     status: "not_started",
     priority: "medium",
     dueDate: null,

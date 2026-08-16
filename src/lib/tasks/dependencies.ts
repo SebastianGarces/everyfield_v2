@@ -232,19 +232,14 @@ export async function setTaskPrerequisites(
       )
     );
 
-  if (uniqueIds.length === 0) {
-    await deleteExisting;
-    return;
-  }
-
   const inserts = uniqueIds.map((prerequisiteTaskId) =>
     buildAddDependencyStatement(churchId, taskId, prerequisiteTaskId)
   );
 
   // Delete then insert, one batch: neon-http has no interactive transaction,
-  // and `db.batch` is all-or-nothing for errors. A 0-row insert is not an
-  // error — the church-scoped SELECT above is what makes that case a refusal
-  // before we get here. The insert…select is still the tenancy guard.
+  // and `db.batch` is all-or-nothing for errors. An empty insert list is just
+  // the delete. A 0-row insert is not an error — the church-scoped SELECT
+  // above is what makes that case a refusal before we get here.
   await db.batch([deleteExisting, ...inserts]);
 }
 
@@ -259,12 +254,17 @@ export async function listTaskPrerequisites(
       status: tasks.status,
     })
     .from(taskDependencies)
-    .innerJoin(tasks, eq(tasks.id, taskDependencies.prerequisiteTaskId))
+    .innerJoin(
+      tasks,
+      and(
+        eq(tasks.id, taskDependencies.prerequisiteTaskId),
+        eq(tasks.churchId, taskDependencies.churchId)
+      )
+    )
     .where(
       and(
         eq(taskDependencies.churchId, churchId),
         eq(taskDependencies.taskId, taskId),
-        eq(tasks.churchId, churchId),
         isNull(tasks.deletedAt)
       )
     )
@@ -275,7 +275,13 @@ export async function listPrerequisiteCandidates(
   churchId: string,
   excludeTaskId?: string
 ): Promise<PrerequisiteCandidate[]> {
-  const conditions = [eq(tasks.churchId, churchId), isNull(tasks.deletedAt)];
+  const conditions = [
+    eq(tasks.churchId, churchId),
+    isNull(tasks.deletedAt),
+    // A subtask is a checklist item, not a task (T-016). It does not belong
+    // in a prerequisite picker.
+    isNull(tasks.parentTaskId),
+  ];
   if (excludeTaskId) {
     conditions.push(ne(tasks.id, excludeTaskId));
   }
@@ -293,26 +299,40 @@ export async function listPrerequisiteCandidates(
 
 /**
  * Which of `taskIds` currently wait on an incomplete, live prerequisite.
+ *
+ * Exported as a builder so tests can pin the rendered SQL: church_id is in
+ * the JOIN, incomplete is `status <> 'complete'`, and a soft-deleted
+ * prerequisite does not block.
  */
+export function blockedTaskIdsQuery(
+  churchId: string,
+  taskIds: readonly string[]
+) {
+  return db
+    .selectDistinct({ taskId: taskDependencies.taskId })
+    .from(taskDependencies)
+    .innerJoin(
+      tasks,
+      and(
+        eq(tasks.id, taskDependencies.prerequisiteTaskId),
+        eq(tasks.churchId, taskDependencies.churchId)
+      )
+    )
+    .where(
+      and(
+        eq(taskDependencies.churchId, churchId),
+        inArray(taskDependencies.taskId, [...taskIds]),
+        isNull(tasks.deletedAt),
+        ne(tasks.status, "complete")
+      )
+    );
+}
+
 export async function blockedTaskIdsAmong(
   churchId: string,
   taskIds: readonly string[]
 ): Promise<Set<string>> {
   if (taskIds.length === 0) return new Set();
-
-  const rows = await db
-    .selectDistinct({ taskId: taskDependencies.taskId })
-    .from(taskDependencies)
-    .innerJoin(tasks, eq(tasks.id, taskDependencies.prerequisiteTaskId))
-    .where(
-      and(
-        eq(taskDependencies.churchId, churchId),
-        inArray(taskDependencies.taskId, [...taskIds]),
-        eq(tasks.churchId, churchId),
-        isNull(tasks.deletedAt),
-        ne(tasks.status, "complete")
-      )
-    );
-
+  const rows = await blockedTaskIdsQuery(churchId, taskIds);
   return new Set(rows.map((row) => row.taskId));
 }
