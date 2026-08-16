@@ -44,13 +44,13 @@
 -- migration-first is fine the other way too.
 --
 -- SIBLING RECONCILE. This migration was first minted as
--- `0043_task_dependencies` with `when` 1786859124814. Main then landed
--- `0043_true_cammi` (wiki article feedback, `when` 1786859463138) and
--- `0044_church_time_zone` (`when` 1786859500000). A journal entry whose
--- `when` is at or below the ledger's MAXIMUM `created_at` is silently
--- skipped, so this file is now `0045_task_dependencies` at
--- 1786865400000 — strictly above both siblings. A later sibling with a
--- `when` above this one owes it a forward reconcile
+-- `0043_task_dependencies` with `when` 1786859124814, then reconciled to
+-- `0045_task_dependencies` at 1786865400000 after main took 0043 and 0044.
+-- Main then landed `0045_drop_share_phase_digest` (`when` 1786865200000).
+-- A journal entry whose `when` is at or below the ledger's MAXIMUM
+-- `created_at` is silently skipped, so this file is now
+-- `0046_task_dependencies` at 1786866300000 — strictly above 0045. A later
+-- sibling with a `when` above this one owes it a forward reconcile
 -- (memory/invariants.md → Migrations).
 --
 -- ROLLBACK (HR2). The composite FKs drop with the table; the unique index
@@ -59,11 +59,13 @@
 --
 --   DROP TABLE IF EXISTS "task_dependencies";
 --   DROP INDEX IF EXISTS "tasks_id_church_id_unique_idx";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786866300000;
+--
+-- A database that applied the OLD 0045 also holds
+-- `created_at = 1786865400000`. A database that applied the OLD 0043 also
+-- holds `created_at = 1786859124814`. Delete those rows in the same session:
+--
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786865400000;
---
--- A database that applied the OLD 0043 also holds
--- `created_at = 1786859124814`. Delete that row in the same session:
---
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786859124814;
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
@@ -78,25 +80,24 @@
 -- The row can also be identified by the sha256 of THIS FILE, byte for byte,
 -- from the deployed commit:
 --
---   shasum -a 256 src/db/migrations/0045_task_dependencies.sql
+--   shasum -a 256 src/db/migrations/0046_task_dependencies.sql
 --
 -- ROLLING BACK REQUIRES REVERTING THE CODE TOO. The task form and the list
 -- blocked-state query read this table, so dropping it under a live build
 -- breaks those paths. Revert the application half first, then drop.
 --
--- OPERATOR RECONCILE — a database that applied the OLD 0043 needs a
--- hand before `pnpm db:migrate`. The renumber above fixes the
--- repository and leaves every database that already ran this migration
--- under its old stamp, 1786859124814, in a state the CLI cannot see:
--- `task_dependencies` EXISTS, and the ledger either still holds that
--- row or no longer does (an earlier rollback ran the DELETE and
--- removed the row without dropping the table — the two halves of the
--- rollback block are separable and one of them was run alone). Because
--- the CLI compares this file's `when` against the ledger's MAXIMUM
--- `created_at` and not against its own row, 1786865400000 wins, the
--- DDL below is re-run, and the apply dies on `CREATE TABLE
--- "task_dependencies"` — already exists — with the migration aborted
--- and the ledger unchanged.
+-- OPERATOR RECONCILE — a database that applied the OLD 0043 or the OLD 0045
+-- needs a hand before `pnpm db:migrate`. The table MAY exist. The renumber
+-- above fixes the repository and leaves every database that already ran this
+-- migration under an old stamp, 1786859124814 or 1786865400000, in a state
+-- the CLI cannot see: `task_dependencies` EXISTS, and the ledger either still
+-- holds that row or no longer does (an earlier rollback ran the DELETE and
+-- removed the row without dropping the table — the two halves of the rollback
+-- block are separable and one of them was run alone). Because the CLI
+-- compares this file's `when` against the ledger's MAXIMUM `created_at` and
+-- not against its own row, 1786866300000 wins, the DDL below is re-run, and
+-- the apply dies on `CREATE TABLE "task_dependencies"` — already exists —
+-- with the migration aborted and the ledger unchanged.
 --
 -- DETECT IT. Two reads, neither of which writes anything:
 --
@@ -106,24 +107,36 @@
 --      and table_name = 'task_dependencies';
 --   select max(created_at) from drizzle.__drizzle_migrations;
 --
--- One row back and a max BELOW 1786865400000 means this migration's
+-- One row back and a max BELOW 1786866300000 means this migration's
 -- effect is already present and unrecorded under the new stamp — take
 -- an exit below. Zero rows back means a normal apply; run
 -- `pnpm db:migrate` and nothing here concerns you.
 --
--- 0043 AND 0044 MUST ALREADY BE PRESENT BEFORE EXIT A. Inserting
--- 1786865400000 first would silently skip `0043_true_cammi` and
--- `0044_church_time_zone` (the same `when`-vs-max rule). Probe:
+-- 0043, 0044, AND 0045 MUST ALREADY BE PRESENT BEFORE EXIT A. Inserting
+-- 1786866300000 first would silently skip `0045_drop_share_phase_digest`
+-- (the same `when`-vs-max rule) on a database whose max is still below
+-- 1786865200000. Probe:
 --
 --   select table_name from information_schema.tables
 --    where table_name = 'wiki_article_feedback';
 --   select column_name from information_schema.columns
 --    where table_name = 'churches' and column_name = 'time_zone';
+--   select column_name from information_schema.columns
+--    where table_name = 'church_privacy_settings'
+--      and column_name in ('share_phase', 'share_digest');
 --
--- If either is missing, run `pnpm db:migrate` once: 0043 and 0044
--- apply, then 0045 aborts on CREATE TABLE. Then take EXIT A and run
--- `pnpm db:migrate` again. If both are present, skip that pass and
--- take EXIT A now.
+-- If wiki_article_feedback or churches.time_zone is missing, run
+-- `pnpm db:migrate` once: 0043 and 0044 apply, then 0046 aborts on
+-- CREATE TABLE (0045_drop applies first if max is still below
+-- 1786865200000). Then take EXIT A and run `pnpm db:migrate` again.
+--
+-- THE OLD 0045 STAMP SITS ABOVE 0045_DROP. If the ledger already holds
+-- 1786865400000, the CLI will skip `0045_drop_share_phase_digest`
+-- (`when` 1786865200000). If either share_phase or share_digest remains,
+-- run that file's two `DROP COLUMN IF EXISTS` statements by hand before
+-- taking EXIT A here. If both are already gone, 0045_drop's effect is
+-- present. If all three probes are already satisfied, skip the migrate
+-- pass and take EXIT A now.
 --
 -- EXIT A — the database carries rows worth keeping (the shared
 -- `development` branch, or any environment with real data). Record
@@ -131,7 +144,7 @@
 -- effect is present:
 --
 --   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
---   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0045_task_dependencies.sql>', 1786865400000);
+--   VALUES ('<sha256 of this file: shasum -a 256 src/db/migrations/0046_task_dependencies.sql>', 1786866300000);
 --
 -- The `created_at` literal is what matters and it is this migration's
 -- journal `when`; the hash column is bookkeeping for the next human,
