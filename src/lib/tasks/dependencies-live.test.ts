@@ -22,7 +22,7 @@ import {
 //
 // ⚠ THIS FILE SKIPS WHEN DATABASE_URL POINTS NOWHERE, AND IT DOES ON CI.
 // A green PR check means the pure half held. The DB evidence comes from
-// running this where a real database is configured (and 0046 has been
+// running this where a real database is configured (and 0048 has been
 // applied):
 //
 //     pnpm exec tsx --env-file-if-exists=.env.local --test "src/lib/tasks/dependencies*.test.ts"
@@ -38,7 +38,7 @@ async function databaseReachable(): Promise<boolean> {
 }
 
 const SKIP_NOTE =
-  "SKIPPED — the live T-015 assertions did NOT run. No reachable DATABASE_URL, or migration 0046 has not been applied. Run `pnpm db:migrate` in a worktree with .env.local linked.";
+  "SKIPPED — the live T-015 assertions did NOT run. No reachable DATABASE_URL, or migration 0048 has not been applied. Run `pnpm db:migrate` in a worktree with .env.local linked.";
 
 interface Fixture {
   churchId: string;

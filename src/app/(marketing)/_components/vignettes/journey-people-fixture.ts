@@ -57,6 +57,7 @@ const PERSON_BASE = {
   postalCode: null,
   country: "US",
   sourceDetails: null,
+  backgroundCheckStatus: "not_started",
   notes: null,
   photoUrl: null,
   householdId: null,

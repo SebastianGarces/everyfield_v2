@@ -16,12 +16,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { BACKGROUND_CHECK_BADGE_CONFIG } from "@/lib/people/background-check";
 import type {
   ActionResult,
   PersonSource,
   PersonStatus,
 } from "@/lib/people/types";
-import { personSources, personStatuses, type Person } from "@/lib/people/types";
+import {
+  backgroundCheckStatuses,
+  personSources,
+  personStatuses,
+  type Person,
+} from "@/lib/people/types";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef, useState } from "react";
@@ -219,6 +225,29 @@ export function PersonForm({
               ))}
             </SelectContent>
           </Select>
+        </div>
+
+        {/* Background check — manually tracked, and the only place it is set */}
+        <div className="space-y-2">
+          <Label htmlFor="backgroundCheckStatus">Background Check</Label>
+          <Select
+            name="backgroundCheckStatus"
+            defaultValue={person?.backgroundCheckStatus ?? "not_started"}
+          >
+            <SelectTrigger id="backgroundCheckStatus">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {backgroundCheckStatuses.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {BACKGROUND_CHECK_BADGE_CONFIG[s].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">
+            Recorded by hand — teams that require a check read it from here.
+          </p>
         </div>
       </div>
 

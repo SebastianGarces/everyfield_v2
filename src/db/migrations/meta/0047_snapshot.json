@@ -1,6 +1,6 @@
 {
-  "id": "2b47e6f3-3734-4c04-8399-c55ce2d69b7b",
-  "prevId": "e18e434f-214e-4281-96d2-2d44e5fa6c37",
+  "id": "8ab40768-67b2-4b93-a1d8-ab53f568e78b",
+  "prevId": "2b47e6f3-3734-4c04-8399-c55ce2d69b7b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7251,6 +7251,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "intent": {
+          "name": "intent",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'chosen'"
         }
       },
       "indexes": {
@@ -7323,6 +7330,10 @@
         "notification_preferences_digest_cadence_check": {
           "name": "notification_preferences_digest_cadence_check",
           "value": "\"notification_preferences\".\"digest_cadence\" is null or \"notification_preferences\".\"digest_cadence\" in ('daily', 'weekly')"
+        },
+        "notification_preferences_intent_check": {
+          "name": "notification_preferences_intent_check",
+          "value": "\"notification_preferences\".\"intent\" in ('chosen', 'incidental')"
         }
       },
       "isRLSEnabled": false

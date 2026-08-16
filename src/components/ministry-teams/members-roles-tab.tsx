@@ -2,10 +2,12 @@
 
 import { Mail, Phone, Shield, User } from "lucide-react";
 
+import { BackgroundCheckBadge } from "@/components/people/background-check-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
 import type { TeamDetail } from "@/lib/ministry-teams/service";
 import type { Person } from "@/db/schema";
 import { RoleFormDialog } from "./role-form-dialog";
@@ -25,6 +27,8 @@ export function MembersRolesTab({
   people,
   teamCounts,
 }: MembersRolesTabProps) {
+  const showsBackgroundChecks = teamRequiresBackgroundCheck(team.name);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -36,6 +40,13 @@ export function MembersRolesTab({
           <RoleFormDialog teamId={team.id} />
         </div>
       </div>
+
+      {showsBackgroundChecks && (
+        <p className="text-muted-foreground text-sm">
+          This team serves children, so every member's background check is shown
+          below. The status is recorded by hand on the person's profile.
+        </p>
+      )}
 
       {team.roles.length === 0 ? (
         <Card>
@@ -115,6 +126,14 @@ export function MembersRolesTab({
                           </span>
                         )}
                       </div>
+                      {showsBackgroundChecks && (
+                        <div className="mt-1.5">
+                          <BackgroundCheckBadge
+                            status={role.assignedPerson.backgroundCheckStatus}
+                            labelled
+                          />
+                        </div>
+                      )}
                     </div>
                     <Badge
                       variant="secondary"
