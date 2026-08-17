@@ -42,7 +42,7 @@ at once is a bug, not a state; board-sync fails on it.
 | `feature`    | A feature parent. Links its FRD, holds scope decisions, owns the progress bar. |
 | `decision`   | An open ruling that gates work. **No PR closes it** — it closes by a ruling recorded in the decision ledger. |
 | `deferred`   | Off the active roadmap: cut, or kept-but-post-beta. Combines with `feature`. Carries no `agent:*` label. |
-| `risk:high`  | **Auth/tenancy/payments** → the rider in `ops/agent-os/dod.md`: security lens, never auto-merges. Pre-release, schema and migrations are *not* high-risk on their own (ruled 2026-08-13 — no separate prod DB holds client data; they return here when alpha or beta serves one). The migration proofs — applies and rolls back, DDL delta in the PR body — fire on any diff carrying a migration, at any tier. |
+| `risk:high`  | **Auth/tenancy/payments** → the rider in `ops/agent-os/dod.md`: security lens, never auto-merges. Pre-release, schema and migrations are *not* high-risk on their own (ruled 2026-08-13 — no separate prod DB holds client data; they return here when alpha or beta serves one). The migration proofs — the DDL delta **and** both scratch-DB transcripts in the PR body, apply and rollback — fire on any diff carrying a migration, at any tier, and the delta alone does not satisfy them. |
 | `needs-spec` | **Not build-ready**, and a last resort — an agent rules for itself wherever `product-docs/product-values.md`, `CONTEXT.md` and `memory/invariants.md` can answer. Reserved for a feature with no spec, or a question that is irreversible or the owner's taste. Carries no `agent:*` label. |
 
 Milestones hold **dates**, not features — one milestone and one parent per issue; `Beta` is the only
