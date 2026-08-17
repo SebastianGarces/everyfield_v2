@@ -257,6 +257,25 @@ const SHIP_SCHEMA = obj(
       description: "from `gh pr checks` — GitHub's word, not your opinion",
     },
     checkSummary: str("if not success: the failing step and the error excerpt"),
+    // The body is evidence too, so it is checked like evidence: a table still
+    // reading "anchoring", or citing an ancestor sha, is a green PR describing
+    // a commit nobody reviewed.
+    bodySha: str(
+      "the sha the body's CI row cites AFTER the back-fill, " + VERBATIM
+    ),
+    prHeadSha: str("`gh pr view <n> --json headRefOid`, " + VERBATIM),
+    // The migration rider, reported rather than remembered. `touched` comes
+    // from the diff, never from the declared file list.
+    migration: obj(["touched"], {
+      touched: bool,
+      ddl: str("the DDL delta you pasted into the body"),
+      applyTranscript: str(
+        "what the scratch DB printed applying it, " + VERBATIM
+      ),
+      rollbackTranscript: str(
+        "what the scratch DB printed rolling it back, " + VERBATIM
+      ),
+    }),
     labels: LABEL_ROWS,
     mergeState: {
       ...oneOf(
@@ -1018,23 +1037,26 @@ async function shipPass(
 2. **WORKS — one look, at that sha, and only one.** Use \`.claude/skills/validate/SKILL.md\`.
 ${
   track.lane === "backend"
-    ? `   Make ONE real request against the route or server action this track changed — the real handler, not a mock — and assert the status AND the response shape against the contract. A tsx harness in the worktree is fine. For a migration, prove it applies and rolls back on a scratch DB, and put the DDL delta in the PR body.`
+    ? `   Make ONE real request against the route or server action this track changed — the real handler, not a mock — and assert the status AND the response shape against the contract. A tsx harness in the worktree is fine.`
     : `   Drive the branch's VERCEL PREVIEW (\`scripts/preview-url.sh ${branch} --wait --bypass\` — name the branch, or it resolves whatever HEAD your shell is on), never localhost:3000 — localhost serves main and would pass code this track never wrote. Confirm the deployment was built from \`remoteSha\`; if it was built from anything else, report works FAIL and name that sha. Assert EACH criterion and screenshot it, require a clean console (the toolbar's 403 is the one allowed entry), and run a lighthouse a11y audit — below 90 is a FAIL. Judge what no gate can while you are there: layout, hierarchy, copy. Tear the browser down when you finish.`
 }
+   **MIGRATION RIDER — compute it, never recall it**, whatever this track's lane is: \`git -C ${wt} diff --name-only ${BASE}...HEAD -- src/db/migrations/\`. Nothing printed → report \`migration: { "touched": false }\` and move on. Anything printed → the rider is owed at any risk tier (\`ops/agent-os/dod.md\` § Migrations): apply it on a scratch DB **and roll it back**, then report what the scratch DB printed in each direction VERBATIM as \`migration.applyTranscript\` and \`migration.rollbackTranscript\`, with the DDL delta as \`migration.ddl\`. **The DDL delta alone is a FAIL** — a delta nobody applied is a claim, and the loop refuses the merge on a half-met rider. If either direction will not run, that is works FAIL carrying what the scratch DB printed, never a body written anyway.
    Criteria to prove:
 ${allCriteria(track)}
 
    **If WORKS is FAIL, STOP HERE.** Report \`works.status: "FAIL"\` with its evidence, \`opened: false\`, \`checkConclusion: "none"\`, \`mergeState: "not-attempted"\`, and do NOT open a PR, edit labels or merge. A branch that does not work must not reach main while someone decides; the loop reads that and decides the retry.
 
 3. **PR.** Follow \`.claude/skills/open-pr/SKILL.md\` for the body template and the label discipline — every write there is idempotent, so retry one that did not stick. Update the existing PR for this branch if there is one — never open a second. Otherwise \`gh pr create\` against main with \`--label agent:in-review\`${track.risk === "high" ? " --label risk:high" : ""}. The body carries the evidence bundle (review verdict, the criteria checklist with evidence, the works evidence and screenshots), ${ruled.length ? `a **Rulings** section quoting each of these verbatim — ${ruled.map((w) => `${w.summary} (${w.detail || "no source named"})`).join(" | ")} — ` : ""}\`Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}\`, and a **## 👀 Manual QA** section naming WHAT THE AUTOMATION COULD NOT JUDGE: the judgement calls and any edge case no criterion asserted. Do NOT restate the acceptance criteria there — step 2 proved them, and human attention is the scarcest thing here. "Nothing to eyeball" in one line is a valid answer.${menu}
+   **Every sha the body cites is \`remoteSha\`** — the head you just published and the one step 5 anchors. No evidence copied from an earlier attempt, no "CI ❌ at <older sha>", and no preview validated at anything but that sha. Where the CI row cannot be filled yet, write it as \`anchoring at <remoteSha>\` and back-fill it in step 5; a body still saying "anchoring" after the check reports is a green PR describing a commit nobody read. When \`migration.touched\` is true the **Schema diff** section carries the DDL delta AND both scratch-DB transcripts — apply and rollback, verbatim. The DDL alone does not satisfy it.
 
 4. **LABELS, once.** For each issue n: \`gh issue edit n --add-label agent:in-review --remove-label agent:in-progress\`, dropping any other \`agent:*\` it carries, and \`gh pr edit <number> --add-label agent:in-review\`. Then READ THEM BACK with \`gh issue view n --json labels --jq '[.labels[].name]'\` and report in \`labels\` EXACTLY what that printed, even when it is not what you expected — the loop compares it and errors this track if the board disagrees with you.
 
 5. **CI is the merge contract.** \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check into \`checkConclusion\` verbatim. If it is not success, pull the failing step with \`gh run view <run-id> --log-failed\` into \`checkSummary\`. Do not report success you did not observe, and do not call a red check probably unrelated.
+   **Then BACK-FILL the body**, in the same pass: rewrite the CI row to the conclusion you just read and the sha it ran at (\`gh pr edit <number> --body-file <path>\`), and correct any other cell whose sha the fix round moved. Then read the PR back — \`gh pr view <number> --json headRefOid\` into \`prHeadSha\`, and the sha the body's CI row now cites into \`bodySha\` — and report both VERBATIM, even when they disagree. The loop compares them rather than trusting you.
 
 6. ${
       AUTO_MERGE && !holds.length
-        ? `**MERGE**, once the check is green: \`gh pr merge <number> --squash --delete-branch --auto\`. \`--auto\` is deliberate — the main ruleset requires up-to-date branches, so GitHub re-runs the checks and merges only on green; if it refuses because the branch is behind, \`gh pr update-branch\` and retry. Re-read with \`gh pr view <number> --json state,mergedAt\` and report what GitHub did in \`mergeState\`. ONLY when that reads \`merged\`, clean up: for each path below, \`git worktree remove <path> --force\` and \`git branch -D <branch>\`, then \`git worktree prune\`. Touch nothing outside this list — other tracks are building in sibling worktrees.
+        ? `**MERGE**, once the check is green AND the body describes this head. Two refusals come before the merge command, and each is a stop rather than a note: \`bodySha\` must equal \`prHeadSha\` — a body citing an ancestor sha merges evidence for another commit — and a diff carrying a migration must show BOTH scratch-DB transcripts, not the DDL alone. Correct the body and re-anchor first; if you still cannot make it true, report \`mergeState: "refused"\` with the two shas or the missing transcript and merge nothing. Otherwise: \`gh pr merge <number> --squash --delete-branch --auto\`. \`--auto\` is deliberate — the main ruleset requires up-to-date branches, so GitHub re-runs the checks and merges only on green; if it refuses because the branch is behind, \`gh pr update-branch\` and retry. Re-read with \`gh pr view <number> --json state,mergedAt\` and report what GitHub did in \`mergeState\`. ONLY when that reads \`merged\`, clean up: for each path below, \`git worktree remove <path> --force\` and \`git branch -D <branch>\`, then \`git worktree prune\`. Touch nothing outside this list — other tracks are building in sibling worktrees.
 ${treeLines(trees)}`
         : `**HOLD** — this PR does not auto-merge. \`gh pr comment\` with why, report \`mergeState: "${holds.length ? "refused" : "not-attempted"}"\`, and do not touch labels again.
 ${holds.length ? `Reason(s):\n${holds.map((h) => `- ${h}`).join("\n")}` : "This run does not auto-merge; a human reviews the PR directly."}
@@ -1208,6 +1230,52 @@ async function buildTrack(track) {
       if (attempt < MAX_ATTEMPTS)
         await fixPass(track, branch, wt, { report: lastReport, attempt });
       continue;
+    }
+
+    // The two refusals the ship agent must not be able to mark its own homework
+    // on. Both are about the EVIDENCE, not the code — a body citing a sha the
+    // head moved past, and a migration whose rollback nobody ran — so the
+    // remedy is another ship pass that corrects and re-anchors the body, never
+    // a fix round that rewrites code which already passed. A rider that is
+    // half-met because the rollback genuinely fails comes back as works FAIL,
+    // and that path does route to a fixer.
+    const bodySha = String(ship.bodySha || "").trim();
+    const prHead = String(ship.prHeadSha || ship.remoteSha || "").trim();
+    const mig = ship.migration || {};
+    const proved = (k) => Boolean(String(mig[k] || "").trim());
+    const refusals = [];
+    if (bodySha && prHead && bodySha !== prHead)
+      refusals.push(
+        `the PR body's evidence cites ${bodySha} but the head is ${prHead} — the body describes a commit nobody reviewed`
+      );
+    const riderMissing =
+      mig.touched === true &&
+      !(proved("applyTranscript") && proved("rollbackTranscript"));
+    if (riderMissing)
+      refusals.push(
+        `the diff touches src/db/migrations/ and the body carries ${
+          proved("applyTranscript")
+            ? "no rollback transcript"
+            : proved("rollbackTranscript")
+              ? "no apply transcript"
+              : "neither scratch-DB transcript"
+        } — the DDL delta alone is a claim, not a proof`
+      );
+    if (refusals.length) {
+      if (ship.mergeState === "merged")
+        log(
+          `🚨 ${track.id}: ${ship.url || "the PR"} merged anyway — ${refusals.join("; ")}. The evidence on main is stale; fix the body by hand.`
+        );
+      else {
+        lastReport = {
+          ...review,
+          verdict: "FAIL",
+          failingGate: riderMissing ? "WORKS" : "publish",
+          summary: refusals.join("; "),
+        };
+        log(`🔁 ${track.id} attempt ${attempt}: merge refused — ${refusals.join("; ")}`); // prettier-ignore
+        continue;
+      }
     }
 
     if (!ship.opened)

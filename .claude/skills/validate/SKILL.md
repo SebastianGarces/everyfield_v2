@@ -34,6 +34,8 @@ for the expected shape first.
 - Assert **status code and response shape** per AC, always including **one auth/permission case**
   and **one invalid-input case**.
 - Where the unit touches tenancy, prove a cross-tenant or unauthorized request is rejected.
-- If the change alters schema, prove the migration applies and that you can get back (versioned
-  files via `pnpm db:migrate`, never `db:push` — `AGENTS.md`).
-- Prefer a scratch DB or a transaction you can roll back; the development database is shared.
+- If the diff touches `src/db/migrations/` — read that off the diff, not off the plan — prove the
+  migration applies **and rolls back** (versioned files via `pnpm db:migrate`, never `db:push` —
+  `AGENTS.md`), and **keep both transcripts verbatim**: the PR body owes both directions, and the
+  DDL delta alone is a FAIL of this gate.
+- Use a scratch DB, never the shared development database, and never one you cannot throw away.

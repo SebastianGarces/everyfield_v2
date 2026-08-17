@@ -674,6 +674,10 @@ const DEFAULTS = {
     opened: true,
     url: PR_URL,
     checkConclusion: "success",
+    // The body was back-filled from the anchor, so it cites the head it ran at.
+    bodySha: HEAD_SHA,
+    prHeadSha: HEAD_SHA,
+    migration: { touched: false },
     labels: issuesIn(p).map((issue) => ({
       issue,
       labels: ["agent:in-review"],
@@ -1305,7 +1309,11 @@ test("the ship pass proves a backend change with one real request", async () => 
     "ship:"
   ).prompt;
   assert.match(prompt, /Make ONE real request/);
-  assert.match(prompt, /rolls back on a scratch DB/, "the high-risk rider");
+  assert.match(
+    prompt,
+    /apply it on a scratch DB \*\*and roll it back\*\*/,
+    "the migration rider, and it has one home now — the lane no longer decides whether it is asked for"
+  );
 });
 
 test("the PR body carries the evidence, the Manual QA and the Closes edges", async () => {
@@ -1482,6 +1490,139 @@ test("a track whose issue does not read agent:in-review is errored, not shipped"
   assert.ok(exit, "an unconfirmed label still owes the issue a comment");
   assert.match(exit.prompt, /--add-label agent:in-review --remove-label agent:in-progress/); // prettier-ignore
   assert.match(exit.prompt, /nothing needs rebuilding or re-reviewing/);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: the evidence refusals — the body's sha, and the rider
+//
+// Two gaps an audit of 11 merged PRs found: bodies that merged still reading
+// "⏳ anchoring" or citing an ancestor sha, and 5 of 7 migration PRs pasting the
+// DDL with no scratch-DB proof. Both are evidence failures a ship agent can
+// report its way past, so the loop checks them rather than trusting the report.
+// ---------------------------------------------------------------------------
+
+test("the ship pass back-fills the CI cell and reads the body's sha back", async () => {
+  const prompt = one(
+    (await runBuild([buildUnit("alpha", 101)], stub())).calls,
+    "ship:"
+  ).prompt;
+  assert.match(prompt, /Then BACK-FILL the body/);
+  assert.match(prompt, /gh pr view <number> --json headRefOid/);
+  assert.match(
+    prompt,
+    /Every sha the body cites is `remoteSha`/,
+    "the body describes the head, not whatever the earlier attempt validated"
+  );
+  assert.ok(
+    prompt.indexOf("BACK-FILL the body") >
+      prompt.indexOf("--watch --fail-fast"),
+    "the cell can only be filled from an anchor that already reported"
+  );
+});
+
+test("a PR body citing an ancestor sha refuses the merge and re-ships", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      // Green check, green gates — and a body describing the parent commit.
+      "ship:": (p) => ({
+        ...DEFAULTS["ship:"](p),
+        bodySha: BASE_SHA,
+        prHeadSha: HEAD_SHA,
+        mergeState: "refused",
+      }),
+    }),
+    { autoMerge: true }
+  );
+  assert.equal(
+    agents(calls, "fix:").length,
+    0,
+    "a stale body is a ref operation, not a defect — nothing about the code changed"
+  );
+  assert.deepEqual(
+    agents(calls, "ship:").map((c) => c.label),
+    ["ship:alpha#1", "ship:alpha#2"],
+    "the remedy is another ship pass that corrects and re-anchors the body"
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.blocked[0].failingGate, "publish");
+  assert.ok(
+    one(calls, "exit:").prompt.includes(BASE_SHA),
+    "the human is told which sha the body was describing"
+  );
+});
+
+test("the ship pass reads the migration rider off the diff, in either lane", async () => {
+  for (const lane of ["backend", "frontend"]) {
+    const prompt = one(
+      (await runBuild([buildUnit("alpha", 101, { lane })], stub())).calls,
+      "ship:"
+    ).prompt;
+    assert.match(prompt, /MIGRATION RIDER — compute it, never recall it/, lane);
+    assert.match(prompt, /diff --name-only .* -- src\/db\/migrations\//, lane);
+    assert.match(prompt, /roll it back/, lane);
+    assert.match(
+      prompt,
+      /\*\*The DDL delta alone is a FAIL\*\*/,
+      `${lane}: the half-met rider is the one this catches`
+    );
+  }
+});
+
+test("a migration with the DDL but no rollback transcript refuses the merge", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101, { files: ["src/db/migrations/0042_x.sql"] })],
+    stub({
+      "ship:": (p) => ({
+        ...DEFAULTS["ship:"](p),
+        migration: {
+          touched: true,
+          ddl: "ALTER TABLE plants ADD COLUMN phase text;",
+          applyTranscript: "applied 0042_x.sql",
+          rollbackTranscript: "",
+        },
+        // The ship agent obeyed the refusal; the loop still checks the proof
+        // itself, because the agent grading its own evidence is the gap.
+        mergeState: "refused",
+      }),
+    }),
+    { autoMerge: true }
+  );
+  assert.equal(result.shipped.length, 0, "a half-met rider never merges");
+  assert.equal(result.blocked[0].failingGate, "WORKS");
+  assert.ok(
+    one(calls, "exit:").prompt.includes("no rollback transcript"),
+    "the exit names which direction was never proven"
+  );
+});
+
+test("a migration proven in both directions ships like any other track", async () => {
+  const { result } = await runBuild(
+    [buildUnit("alpha", 101, { files: ["src/db/migrations/0042_x.sql"] })],
+    stub({
+      "ship:": (p) => ({
+        ...DEFAULTS["ship:"](p),
+        migration: {
+          touched: true,
+          ddl: "ALTER TABLE plants ADD COLUMN phase text;",
+          applyTranscript: "applied 0042_x.sql",
+          rollbackTranscript: "rolled back 0042_x.sql",
+        },
+      }),
+    })
+  );
+  assert.equal(result.shipped.length, 1, "the rider gates the proof, not the migration"); // prettier-ignore
+});
+
+test("the PR template owes both scratch-DB transcripts, not the DDL alone", () => {
+  const skill = read(".claude/skills/open-pr/SKILL.md");
+  assert.match(skill, /\*\*Applies\*\*/);
+  assert.match(skill, /\*\*Rolls back\*\*/);
+  assert.match(
+    skill,
+    /the DDL delta alone is a FAIL/,
+    "5 of 7 migration PRs pasted the delta and stopped there"
+  );
 });
 
 // ---------------------------------------------------------------------------

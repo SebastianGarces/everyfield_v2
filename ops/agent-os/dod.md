@@ -94,7 +94,11 @@ production database holds client data (ruled 2026-08-13). **Revert condition:** 
 beta serves real client data from its own production DB, schema and migrations return to `risk:high`.
 
 - **Whenever the diff carries a migration, at any risk tier:** prove it **applies and rolls back** on
-  a scratch DB, and paste the exact **DDL delta** into the PR body.
+  a scratch DB, and paste into the PR body the exact **DDL delta** *and both transcripts*, verbatim,
+  one per direction. **The DDL delta alone is a FAIL** — a delta nobody applied is a claim, and the
+  rider is the one gate whose evidence cannot be inferred from the diff. Read the rider off the diff
+  (`git diff --name-only <base>...HEAD -- src/db/migrations/`), never off the declared file list, and
+  if either direction will not run, fail gate 2 with what the scratch DB printed.
 - **`risk:high` only:** the reviewer holds the security lens (gate 3) and reads every matching
   `memory/invariants/*.md`; the PR is labelled `risk:high` and **never auto-merges** — the human PR
   review is the checkpoint, and this is the one class of change a revert cannot undo. Factory-path
@@ -134,6 +138,11 @@ with a DECISION comment only when the ruling would change product shape.
   on a side branch moves the tree but not the ref, and then nothing anchors.
 - Never satisfy gate 1 with a run at an ancestor sha. A green run at the parent is exactly the
   staleness this rule catches.
+- **Before merging: every sha the PR body cites must equal that head, and this refuses the merge.**
+  The body is the evidence a human reads, so a table still reading `⏳ anchoring`, a `CI ❌ at
+  <ancestor sha>` the fix round already answered, or a preview validated one commit back is a green
+  PR describing a commit nobody reviewed. Back-fill the CI cell from the landed anchor, correct
+  whatever else the fix round moved, then merge or enable auto-merge — never the other order.
 
 ## Memory (part of gate 3)
 
