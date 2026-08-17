@@ -678,6 +678,21 @@ const DEFAULTS = {
     bodySha: HEAD_SHA,
     prHeadSha: HEAD_SHA,
     migration: { touched: false },
+    // Track-level review threads are answered here or nowhere, so the stub
+    // transcribes exactly the ones its own prompt handed it.
+    threadReplies: (
+      p.match(
+        /\*\*TRACK-LEVEL REVIEW THREADS\.\*\*[\s\S]*?(?=\n\d\. \*\*)/
+      )?.[0] || ""
+    )
+      .split("\n")
+      .flatMap((line) => line.match(/^--- (\S+)/)?.slice(1) || [])
+      .map((threadId) => ({
+        threadId,
+        replied: true,
+        actioned: true,
+        body: "answered at the track level",
+      })),
     labels: issuesIn(p).map((issue) => ({
       issue,
       labels: ["agent:in-review"],
@@ -2224,12 +2239,63 @@ test("a refused exit with empty claimed does not rewrite a changes-requested iss
   assert.match(exit, /claimed nothing/);
 });
 
+test("the serialize scan paginates instead of taking a bare limit", async () => {
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
+  const setup = one(calls, "setup:").prompt;
+  assert.doesNotMatch(
+    setup,
+    /gh issue list --limit/,
+    "gh issue list caps at 30 and answers from a window over the newest issues — a holder outside it reads as an empty board"
+  );
+  assert.match(setup, /gh api --paginate/);
+  assert.match(setup, /labels=agent:in-progress/);
+  assert.match(setup, /per_page=100/);
+  assert.match(
+    setup,
+    /select\(\.pull_request == null\)/,
+    "that REST endpoint returns pull requests alongside issues"
+  );
+});
+
+test("the claim is re-checked AFTER it is written, and a racing claimant releases it", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        // Step 1 saw an empty board — the other loop had not written yet.
+        holders: [],
+        claimed: [101],
+        holdersAfterClaim: [{ issue: 132, title: "claimed alongside" }],
+      }),
+    })
+  );
+  const setup = one(calls, "setup:").prompt;
+  assert.match(setup, /RE-CHECK THE CLAIM/);
+  assert.match(setup, /holdersAfterClaim/);
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "a raced claim must not build"
+  );
+  assert.equal(result.blocked.length, 0, "a race is not a DoD failure");
+  assert.equal(result.refused.length, 1);
+  assert.match(result.refused[0].reason, /raced/);
+  assert.match(result.refused[0].reason, /#132/);
+  const exit = one(calls, "exit:").prompt;
+  assert.match(
+    exit,
+    /--add-label agent:queued/,
+    "this invocation wrote a claim, so it gives back exactly that claim"
+  );
+  assert.doesNotMatch(exit, /--add-label agent:blocked/);
+});
+
 test("a stale claim is recoverable without hand-editing labels", () => {
   const invocation = read("ops/agent-os/invocation.md");
   assert.match(
     invocation,
-    /gh issue list[^\n]*agent:in-progress/,
-    "detectable"
+    /gh api --paginate[^\n]*labels=agent:in-progress/,
+    "detectable — and paginated, never a bare limit"
   );
   assert.match(
     invocation,
@@ -2482,6 +2548,110 @@ test("a re-entry with review threads and empty threadReplies is blocked, no ship
   assert.equal(result.blocked.length, 1);
   assert.match(result.blocked[0].reason, /PRRT_1/);
   assert.match(result.blocked[0].reason, /threadReplies/);
+});
+
+// A track whose stage 1 fans out: ui and api own disjoint files, so a review
+// thread on one of them belongs to exactly one of them.
+const REENTRY_TRACK = [
+  { ...buildUnit("schema", 101), files: ["src/db/schema/churches.ts"] },
+  { ...buildUnit("ui", 102), dependsOn: ["schema"], files: ["src/ui.ts"] },
+  { ...buildUnit("api", 103), dependsOn: ["schema"], files: ["src/api.ts"] },
+];
+const thread = (id, path, body) => ({
+  id,
+  threadId: id,
+  path,
+  line: 10,
+  author: "reviewer",
+  body,
+});
+const reentryStub = (feedback, over = {}) =>
+  stub({
+    "setup:": (p) => ({
+      ...DEFAULTS["setup:"](p),
+      changesRequested: true,
+      openPr: 42,
+      reviewFeedback: feedback,
+    }),
+    ...over,
+  });
+/** The prompt of the impl step whose workstream declared `file`. */
+const implFor = (calls, file) =>
+  agents(calls, "impl:").find((c) => c.prompt.includes(`  - ${file}`))?.prompt;
+
+test("each workstream is given only the review threads its declared files own", async () => {
+  const { result, calls } = await runBuild(
+    REENTRY_TRACK,
+    reentryStub([
+      thread("T_UI", "src/ui.ts", "rename the ui helper"),
+      thread("T_API", "src/api.ts", "widen the api response"),
+      thread("T_ORPHAN", "README.md", "explain the whole approach"),
+    ])
+  );
+  const ui = implFor(calls, "src/ui.ts");
+  const api = implFor(calls, "src/api.ts");
+  assert.ok(ui && api, "both fan-out workstreams ran");
+
+  assert.match(ui, /rename the ui helper/);
+  assert.doesNotMatch(
+    ui,
+    /widen the api response/,
+    "a thread about another workstream's file is a duplicate reply, or a decline that false-blocks this one"
+  );
+  assert.doesNotMatch(ui, /explain the whole approach/);
+  assert.match(api, /widen the api response/);
+  assert.doesNotMatch(api, /rename the ui helper/);
+
+  // Exactly one place answers each thread, and the loop still ships.
+  const ship = one(calls, "ship:").prompt;
+  assert.match(ship, /TRACK-LEVEL REVIEW THREADS/);
+  assert.match(ship, /explain the whole approach/);
+  assert.doesNotMatch(ship, /rename the ui helper/);
+  assert.equal(result.shipped.length, 1);
+  assert.equal(result.blocked.length, 0);
+});
+
+test("a thread no workstream owns is refused at ship when it goes unanswered", async () => {
+  const { result, calls } = await runBuild(
+    REENTRY_TRACK,
+    reentryStub(
+      [thread("T_ORPHAN", "README.md", "explain the whole approach")],
+      {
+        "ship:": (p) => ({ ...DEFAULTS["ship:"](p), threadReplies: [] }),
+      }
+    )
+  );
+  assert.equal(result.shipped.length, 0, "silence is not a reply");
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("fix:")),
+    "an unanswered thread is an evidence defect — another ship pass, never a fix round"
+  );
+  assert.equal(
+    agents(calls, "ship:").length,
+    2,
+    "the remedy is re-shipping (MAX_ATTEMPTS), so it re-ships until attempts run out"
+  );
+  assert.equal(result.blocked[0].failingGate, "publish");
+  const exit = one(calls, "exit:").prompt;
+  assert.match(exit, /T_ORPHAN/);
+  assert.match(exit, /silence is not a reply/);
+});
+
+test("the one-review rule bounds a PASS, so a changes-requested re-entry is reviewed again", () => {
+  // The re-entry doctrine re-runs the full DoD. A doc still reading "one review
+  // per PR" with no re-review agent describes a loop that does not exist.
+  for (const doc of ["ops/agent-os/README.md", "ops/agent-os/dod.md"]) {
+    const src = read(doc);
+    assert.doesNotMatch(
+      src,
+      /(ONE|one|Exactly one) code review per PR/,
+      `${doc}: the bound is the pass, not the PR's lifetime`
+    );
+    assert.match(src, /code review per (PASS|pass)/, doc);
+    assert.match(src, /changes-requested/, `${doc}: names the re-entry`);
+    assert.match(src, /new pass|NEW pass/, doc);
+    assert.match(src, /re-review/, `${doc}: still forbidden WITHIN a pass`);
+  }
 });
 
 test("a solo implementer is told to run worktree-env.sh if missing, and pnpm install", async () => {

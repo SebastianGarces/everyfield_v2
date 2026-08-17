@@ -98,6 +98,10 @@ const SETUP_SCHEMA = obj(["claimed", "ready", "branch", "headSha", "baseSha"], {
     obj(["issue"], { issue: { type: "integer" }, title: str() }),
     "open agent:in-progress issues NOT owned by this invocation — a non-empty list means refuse and do not claim"
   ),
+  holdersAfterClaim: arr(
+    obj(["issue"], { issue: { type: "integer" }, title: str() }),
+    "the SAME scan re-run AFTER the claim was written — a non-empty list means another loop claimed alongside this one, and the loop releases this claim"
+  ),
   comments: arr(
     obj(["id", "issue", "body"], {
       id: { type: "integer" },
@@ -129,6 +133,21 @@ const SETUP_SCHEMA = obj(["claimed", "ready", "branch", "headSha", "baseSha"], {
   ),
 });
 
+// One row per review thread the step was ROUTED (not per thread on the PR):
+// each thread is answered in exactly one place, and every place answers all of
+// the threads it was given.
+const THREAD_REPLIES = arr(
+  obj(["threadId", "replied", "body"], {
+    threadId: str(),
+    replied: bool,
+    actioned: bool,
+    body: str(
+      "what changed, or not actioned and why — never silently drop a thread"
+    ),
+  }),
+  "one row per review thread you were given; silence is not a reply"
+);
+
 const IMPL_SCHEMA = obj(["committed", "filesChanged", "summary", "commits"], {
   committed: bool,
   filesChanged: arr(str()),
@@ -141,17 +160,7 @@ const IMPL_SCHEMA = obj(["committed", "filesChanged", "summary", "commits"], {
     { type: "integer" },
     "inbox comment ids you acted on (or explicitly declined) this pass"
   ),
-  threadReplies: arr(
-    obj(["threadId", "replied", "body"], {
-      threadId: str(),
-      replied: bool,
-      actioned: bool,
-      body: str(
-        "what changed, or not actioned and why — never silently drop a thread"
-      ),
-    }),
-    "one row per review thread you were given; silence is not a reply"
-  ),
+  threadReplies: THREAD_REPLIES,
 });
 
 const INTEGRATE_SCHEMA = obj(["merged", "conflicts"], {
@@ -264,6 +273,10 @@ const SHIP_SCHEMA = obj(
       "the sha the body's CI row cites AFTER the back-fill, " + VERBATIM
     ),
     prHeadSha: str("`gh pr view <n> --json headRefOid`, " + VERBATIM),
+    // Track-level review threads — the ones no workstream's declared files
+    // own. Ship is the only step that holds the whole diff, so it is the one
+    // place they can be answered.
+    threadReplies: THREAD_REPLIES,
     // The migration rider, reported rather than remembered. `touched` comes
     // from the diff, never from the declared file list.
     migration: obj(["touched"], {
@@ -383,6 +396,49 @@ const unansweredReviewThreads = (feedback, replies) => {
     const row = rows.find((r) => String(r.threadId || "").trim() === id);
     return !row || !String(row.body || "").trim();
   });
+};
+
+/** True when `p` is a declared file, or sits under a declared directory. */
+const pathUnderDeclared = (p, files) => {
+  const target = normFile(p);
+  if (!target) return false;
+  return (files || []).some((f) => {
+    const declared = normFile(f).replace(/\/+$/, "");
+    return (
+      declared && (target === declared || target.startsWith(`${declared}/`))
+    );
+  });
+};
+
+/**
+ * Route each review thread to exactly ONE place that answers it. A thread on a
+ * path a workstream declared is that workstream's; a thread with no path, or a
+ * path no workstream owns, is the track's and ship answers it once.
+ *
+ * The alternative — handing every thread to every workstream — is wrong in both
+ * directions at once: each workstream either posts a duplicate reply on a thread
+ * about someone else's files, or correctly declines it and is then false-blocked
+ * by `unansweredReviewThreads` for not covering it. Routing keeps "silence is
+ * not a reply" while making exactly one place accountable for each thread.
+ */
+const routeReviewThreads = (feedback, workstreams) => {
+  const rows = feedback || [];
+  const wss = workstreams || [];
+  const byWorkstream = new Map(wss.map((ws) => [ws.id, []]));
+  // One workstream IS the track: there is no second place a thread could go, so
+  // routing would only invent a seam. It owns every thread, as it always did.
+  if (wss.length < 2) {
+    if (wss.length) byWorkstream.set(wss[0].id, [...rows]);
+    return { byWorkstream, trackLevel: wss.length ? [] : [...rows] };
+  }
+  const trackLevel = [];
+  for (const f of rows) {
+    const owner = f?.path
+      ? wss.find((ws) => pathUnderDeclared(f.path, ws.files))
+      : null;
+    (owner ? byWorkstream.get(owner.id) : trackLevel).push(f);
+  }
+  return { byWorkstream, trackLevel };
 };
 
 const summarise = (us, extra = {}) => {
@@ -685,21 +741,30 @@ ${labelInstructions} Do NOT open a PR. Return strictly the schema.`,
 // ---------------------------------------------------------------------------
 // setup — serialize, claim, cut, provision env, read inbox. One cheap agent.
 // ---------------------------------------------------------------------------
+// The holder scan, in the ONE form `ops/agent-os/labels.md` declares
+// load-bearing: `--paginate` and never a bare limit (`gh issue list` caps at 30
+// and answers silently from a window over the newest issues, so a holder
+// outside the window reads as an empty board and two loops run at once), plus
+// `select(.pull_request == null)`, because that REST endpoint returns pull
+// requests alongside issues.
+const HOLDER_SCAN = `gh api --paginate "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues?labels=agent:in-progress&state=open&per_page=100" --jq '.[] | select(.pull_request == null) | {issue: .number, title: .title}'`;
+
 async function setupTrack(track, branch, wt, passIssues) {
   const owned = (passIssues || track.issues).join(", ") || "(none)";
   const ready = await agent(
     `Claim this track's issues and prepare its build tree. ${CHANNEL} Run exactly this, in order, and write no code.
 
-1. **SERIALIZE.** \`gh issue list --limit 200 --state open --label agent:in-progress --json number,title\`. Holders are issues in that list whose number is NOT one of this invocation's issues (${owned}). If any holders exist: do NOT edit any labels, return \`ready: false\`, \`claimed: []\`, and the holders. Launching a second loop while another holds a claim is forbidden.
+1. **SERIALIZE.** \`${HOLDER_SCAN}\`. Run it in exactly that form — \`--paginate\`, never a bare-limit issue listing, which caps at 30 and answers silently from a window over the newest issues, so a holder outside the window reads as an empty board (\`ops/agent-os/labels.md\`). Holders are rows whose \`issue\` is NOT one of this invocation's issues (${owned}). If any holders exist: do NOT edit any labels, return \`ready: false\`, \`claimed: []\`, and the holders. Launching a second loop while another holds a claim is forbidden.
 2. Label EXACTLY these issues and no others: ${track.issues.join(", ") || "(none)"}
    For each number n: \`gh issue edit n --remove-label agent:queued --remove-label agent:changes-requested --add-label agent:in-progress\`. Drop whichever status label it currently carries. Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label to decide what to edit — the list above is the complete and only input. The number of issues you edit must be exactly ${track.issues.length}. Report them in \`claimed\`. If the issue carried \`agent:changes-requested\`, set \`changesRequested: true\`.
-3. \`git fetch origin --prune\` — an unfetched \`${BASE}\` is whatever this checkout last saw.
-4. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
+3. **RE-CHECK THE CLAIM.** Step 1 read the board BEFORE step 2 wrote your claim, so two loops launched together both saw it empty and both claimed. Run \`${HOLDER_SCAN}\` AGAIN, apply the same filter (rows whose \`issue\` is not one of ${owned}), and report the result in \`holdersAfterClaim\` — an empty list when you are the only claimant. If it is non-empty, STOP: run no further step, cut no worktree, and let the loop release the claim you just wrote. Do not release it yourself.
+4. \`git fetch origin --prune\` — an unfetched \`${BASE}\` is whatever this checkout last saw.
+5. \`git rev-parse --verify --quiet refs/heads/${branch}\` picks the path:
    - **no such branch → FRESH**: \`scripts/worktree-add.sh -b ${branch} ${wt} ${BASE}\`, never from a local branch of the same name. Report \`resumed: false\`.
    - **it exists → RESUME**: a held, blocked, or changes-requested track kept this branch on purpose — do not re-cut, reset or delete anything. Re-attach the tree if it is gone (\`scripts/worktree-add.sh ${wt} ${branch}\`, no \`-b\`), then \`git -C ${wt} merge --no-edit ${BASE}\`. If that conflicts, do NOT resolve it: capture \`git -C ${wt} diff --name-only --diff-filter=U\`, \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and those paths. Report \`resumed: true\`. A changes-requested re-entry ALWAYS resumes; never open a second branch.
-5. If \`.env.local\` is missing, \`scripts/worktree-env.sh ${wt}\` (idempotent). A tree with no env fails every DB suite.
-6. **INBOX.** For each claimed issue, \`gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<n>/comments --jq '.[] | {id, issue: <n>, author: .user.login, body}'\`. Return orchestrator instructions (not this loop's own comments) in \`comments\` and their ids in \`consumedCommentIds\`. This is the defined point the loop reads the channel.
-7. **REVIEW THREADS.** \`gh pr list --head ${branch} --state open --json number --jq '.[0].number'\`. If a PR exists, set \`openPr\` to that number and fetch unresolved review threads plus inline comments (\`gh api\` pulls comments and GraphQL \`reviewThreads\`). Return them in \`reviewFeedback\`. A changes-requested re-entry has no input without this. If none, \`openPr: 0\` and \`reviewFeedback: []\`.
+6. If \`.env.local\` is missing, \`scripts/worktree-env.sh ${wt}\` (idempotent). A tree with no env fails every DB suite.
+7. **INBOX.** For each claimed issue, \`gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<n>/comments --jq '.[] | {id, issue: <n>, author: .user.login, body}'\`. Return orchestrator instructions (not this loop's own comments) in \`comments\` and their ids in \`consumedCommentIds\`. This is the defined point the loop reads the channel.
+8. **REVIEW THREADS.** \`gh pr list --head ${branch} --state open --json number --jq '.[0].number'\`. If a PR exists, set \`openPr\` to that number and fetch unresolved review threads plus inline comments (\`gh api\` pulls comments and GraphQL \`reviewThreads\`). Return them in \`reviewFeedback\`. A changes-requested re-entry has no input without this. If none, \`openPr: 0\` and \`reviewFeedback: []\`.
 
 Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HEAD\` → \`branch\`; \`git -C ${wt} rev-parse HEAD\` → \`headSha\`; \`git rev-parse ${BASE}\` → \`baseSha\`; \`git -C ${wt} merge-base --is-ancestor ${BASE} HEAD && echo yes || echo no\` → \`baseIsAncestor\`. The loop checks these rather than trusting you: a FRESH cut has headSha == baseSha, a RESUME has baseIsAncestor true, and nothing is built on a base behind ${BASE}. Return strictly the schema.`,
     {
@@ -719,6 +784,26 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
       refused: true,
       claimed,
       reason: `refused: another loop holds ${holders.map((h) => `#${h.issue}${h.title ? ` (${h.title})` : ""}`).join(", ")}. Never launch a build-until-done while another holds a claim.`,
+    };
+
+  // Step 1 reads and step 2 writes, so the serialize gate is check-then-claim:
+  // two loops launched together both read an empty board and both claim. Step 3
+  // re-reads AFTER the write, which is the first moment a second claimant is
+  // visible, and this loop then gives back exactly what it took — `claimed`
+  // goes to the refused exit, which reverts only those issues to agent:queued.
+  //
+  // Residual, accepted: in a dead heat BOTH loops see each other and BOTH back
+  // off, so the pass builds nothing. That is fail-safe rather than
+  // fail-dangerous — a pass nobody ran is one re-dispatch, while two loops on
+  // one branch and one claim is corrupted work — and it is recorded in
+  // `ops/agent-os/workflow.md` § Serialized invocation.
+  const raceHolders = ready?.holdersAfterClaim || [];
+  if (raceHolders.length)
+    return {
+      ok: false,
+      refused: true,
+      claimed,
+      reason: `refused: the claim raced — after this invocation wrote its claim, ${raceHolders.map((h) => `#${h.issue}${h.title ? ` (${h.title})` : ""}`).join(", ")} also held agent:in-progress. Releasing only the claim this invocation wrote (${claimed.join(", ") || "none"}); nothing was built. Both loops backing off is the accepted outcome — re-dispatch this track.`,
     };
 
   const strays = claimed.filter((n) => !track.issues.includes(n));
@@ -773,7 +858,10 @@ Then report VERBATIM what each printed: \`git -C ${wt} rev-parse --abbrev-ref HE
 async function implementWorkstream(ws, trackBranch, declaredFiles, inbox = {}) {
   const { branch, wt } = ws;
   const comments = inbox.comments || [];
-  const feedback = inbox.reviewFeedback || [];
+  // Only THIS workstream's threads: the ones whose path its declared files own.
+  // Everything else is another workstream's or the track's, and answering it
+  // here is either a duplicate reply or a decline that false-blocks the ship.
+  const feedback = inbox.routedFeedback?.get(ws.id) || [];
   const reentry =
     inbox.changesRequested === true || Number(inbox.openPr) > 0
       ? `This is a re-entry on existing PR #${inbox.openPr || "?"}. Push to ${branch} and update that PR; never open a second. The full DoD still runs — a human asking for a change does not lower the bar.`
@@ -803,7 +891,7 @@ A new file under \`src/db/migrations/\` when \`db/\` is not in that list is a bl
 
 ${inboxBlock(comments)}
 ${reviewFeedbackBlock(feedback)}
-Fill \`threadReplies\` for every review thread you were given. Reply on the GitHub thread itself. Feedback you choose not to action still gets a reply naming the reason — never drop it silently.
+Fill \`threadReplies\` for every review thread you were given — those below and no others. Threads on files you do not own were routed to the workstream that owns them, or to the ship pass; do not reply to a thread you were not given. Reply on the GitHub thread itself. Feedback you choose not to action still gets a reply naming the reason — never drop it silently.
 
 Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt}. Commit to ${branch} (conventional commits) and report every commit sha. Do NOT push, open a PR, edit labels or issues, or merge — the loop integrates, reviews and ships. Return strictly the schema.`,
     {
@@ -1019,7 +1107,7 @@ async function shipPass(
   track,
   branch,
   wt,
-  { review, unresolved, holds, trees, attempt }
+  { review, unresolved, holds, trees, attempt, trackThreads = [] }
 ) {
   const ruled = (review?.warnings || []).filter((w) => w.kind === "ruling");
   const specQuestions = (review?.warnings || []).filter(
@@ -1027,6 +1115,17 @@ async function shipPass(
   );
   const menu = unresolved.length
     ? `\nUnresolved review findings — present EACH as a DECISION with this menu, never as a defect dump: (a) merge as-is, ruling the finding accepted; (b) direct a named fix, which is why the branch and worktree survive; (c) take it manually. Quote each verbatim:\n${findingsBlock(unresolved)}\n`
+    : "";
+  // Threads no workstream's declared files own. They were routed here because
+  // ship is the only step that holds the whole track's diff — and because a
+  // thread nobody was made accountable for is a thread that goes unanswered.
+  const trackThreadBlock = trackThreads.length
+    ? `\n**TRACK-LEVEL REVIEW THREADS.** These threads on the existing PR touch no single workstream's declared files, so they are yours and yours only — no implementer was given them. Reply to EACH on the GitHub thread itself (what changed, or not actioned and why) and report one \`threadReplies\` row per thread. Silence is not a reply, and the loop refuses the merge on a thread you left blank:\n${trackThreads
+        .map(
+          (f) =>
+            `--- ${f.threadId || f.id} ${f.path ? `${f.path}:${f.line || ""}` : "(no file)"} (${f.author || "reviewer"}) ---\n${f.body}`
+        )
+        .join("\n\n")}\n`
     : "";
 
   return agent(
@@ -1048,7 +1147,7 @@ ${allCriteria(track)}
 
 3. **PR.** Follow \`.claude/skills/open-pr/SKILL.md\` for the body template and the label discipline — every write there is idempotent, so retry one that did not stick. Update the existing PR for this branch if there is one — never open a second. Otherwise \`gh pr create\` against main with \`--label agent:in-review\`${track.risk === "high" ? " --label risk:high" : ""}. The body carries the evidence bundle (review verdict, the criteria checklist with evidence, the works evidence and screenshots), ${ruled.length ? `a **Rulings** section quoting each of these verbatim — ${ruled.map((w) => `${w.summary} (${w.detail || "no source named"})`).join(" | ")} — ` : ""}\`Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}\`, and a **## 👀 Manual QA** section naming WHAT THE AUTOMATION COULD NOT JUDGE: the judgement calls and any edge case no criterion asserted. Do NOT restate the acceptance criteria there — step 2 proved them, and human attention is the scarcest thing here. "Nothing to eyeball" in one line is a valid answer.${menu}
    **Every sha the body cites is \`remoteSha\`** — the head you just published and the one step 5 anchors. No evidence copied from an earlier attempt, no "CI ❌ at <older sha>", and no preview validated at anything but that sha. Where the CI row cannot be filled yet, write it as \`anchoring at <remoteSha>\` and back-fill it in step 5; a body still saying "anchoring" after the check reports is a green PR describing a commit nobody read. When \`migration.touched\` is true the **Schema diff** section carries the DDL delta AND both scratch-DB transcripts — apply and rollback, verbatim. The DDL alone does not satisfy it.
-
+${trackThreadBlock}
 4. **LABELS, once.** For each issue n: \`gh issue edit n --add-label agent:in-review --remove-label agent:in-progress\`, dropping any other \`agent:*\` it carries, and \`gh pr edit <number> --add-label agent:in-review\`. Then READ THEM BACK with \`gh issue view n --json labels --jq '[.labels[].name]'\` and report in \`labels\` EXACTLY what that printed, even when it is not what you expected — the loop compares it and errors this track if the board disagrees with you.
 
 5. **CI is the merge contract.** \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check into \`checkConclusion\` verbatim. If it is not success, pull the failing step with \`gh run view <run-id> --log-failed\` into \`checkSummary\`. Do not report success you did not observe, and do not call a red check probably unrelated.
@@ -1056,7 +1155,7 @@ ${allCriteria(track)}
 
 6. ${
       AUTO_MERGE && !holds.length
-        ? `**MERGE**, once the check is green AND the body describes this head. Two refusals come before the merge command, and each is a stop rather than a note: \`bodySha\` must equal \`prHeadSha\` — a body citing an ancestor sha merges evidence for another commit — and a diff carrying a migration must show BOTH scratch-DB transcripts, not the DDL alone. Correct the body and re-anchor first; if you still cannot make it true, report \`mergeState: "refused"\` with the two shas or the missing transcript and merge nothing. Otherwise: \`gh pr merge <number> --squash --delete-branch --auto\`. \`--auto\` is deliberate — the main ruleset requires up-to-date branches, so GitHub re-runs the checks and merges only on green; if it refuses because the branch is behind, \`gh pr update-branch\` and retry. Re-read with \`gh pr view <number> --json state,mergedAt\` and report what GitHub did in \`mergeState\`. ONLY when that reads \`merged\`, clean up: for each path below, \`git worktree remove <path> --force\` and \`git branch -D <branch>\`, then \`git worktree prune\`. Touch nothing outside this list — other tracks are building in sibling worktrees.
+        ? `**MERGE**, once the check is green AND the body describes this head. Three refusals come before the merge command, and each is a stop rather than a note: \`bodySha\` must equal \`prHeadSha\` — a body citing an ancestor sha merges evidence for another commit; a diff carrying a migration must show BOTH scratch-DB transcripts, not the DDL alone; and every track-level review thread above must carry a \`threadReplies\` row with a real body. Correct the body and re-anchor first; if you still cannot make it true, report \`mergeState: "refused"\` with the two shas or the missing transcript and merge nothing. Otherwise: \`gh pr merge <number> --squash --delete-branch --auto\`. \`--auto\` is deliberate — the main ruleset requires up-to-date branches, so GitHub re-runs the checks and merges only on green; if it refuses because the branch is behind, \`gh pr update-branch\` and retry. Re-read with \`gh pr view <number> --json state,mergedAt\` and report what GitHub did in \`mergeState\`. ONLY when that reads \`merged\`, clean up: for each path below, \`git worktree remove <path> --force\` and \`git branch -D <branch>\`, then \`git worktree prune\`. Touch nothing outside this list — other tracks are building in sibling worktrees.
 ${treeLines(trees)}`
         : `**HOLD** — this PR does not auto-merge. \`gh pr comment\` with why, report \`mergeState: "${holds.length ? "refused" : "not-attempted"}"\`, and do not touch labels again.
 ${holds.length ? `Reason(s):\n${holds.map((h) => `- ${h}`).join("\n")}` : "This run does not auto-merge; a human reviews the PR directly."}
@@ -1098,10 +1197,19 @@ async function buildTrack(track) {
       claimed: setup.claimed,
     });
 
+  // Each review thread gets exactly one answering place, decided here once:
+  // the workstream whose declared files the thread touches, or — when no
+  // workstream owns the path — the ship pass, the only step holding the whole
+  // track's diff.
+  const routed = routeReviewThreads(
+    setup.reviewFeedback || [],
+    track.stages.flat()
+  );
   const inbox = {
     comments: setup.comments || [],
     consumedCommentIds: setup.consumedCommentIds || [],
     reviewFeedback: setup.reviewFeedback || [],
+    routedFeedback: routed.byWorkstream,
     openPr: setup.openPr || 0,
     changesRequested: setup.changesRequested === true,
   };
@@ -1205,6 +1313,7 @@ async function buildTrack(track) {
       holds,
       trees: trees(),
       attempt,
+      trackThreads: routed.trackLevel,
     });
     if (!ship) {
       log(`💥 ${track.id} attempt ${attempt}: the ship agent died`);
@@ -1232,13 +1341,13 @@ async function buildTrack(track) {
       continue;
     }
 
-    // The two refusals the ship agent must not be able to mark its own homework
-    // on. Both are about the EVIDENCE, not the code — a body citing a sha the
-    // head moved past, and a migration whose rollback nobody ran — so the
-    // remedy is another ship pass that corrects and re-anchors the body, never
-    // a fix round that rewrites code which already passed. A rider that is
-    // half-met because the rollback genuinely fails comes back as works FAIL,
-    // and that path does route to a fixer.
+    // The refusals the ship agent must not be able to mark its own homework on.
+    // Every one is about the EVIDENCE, not the code — a body citing a sha the
+    // head moved past, a migration whose rollback nobody ran, a review thread
+    // nobody replied to — so the remedy is another ship pass that corrects and
+    // re-anchors the body, never a fix round that rewrites code which already
+    // passed. A rider that is half-met because the rollback genuinely fails
+    // comes back as works FAIL, and that path does route to a fixer.
     const bodySha = String(ship.bodySha || "").trim();
     const prHead = String(ship.prHeadSha || ship.remoteSha || "").trim();
     const mig = ship.migration || {};
@@ -1251,6 +1360,18 @@ async function buildTrack(track) {
     const riderMissing =
       mig.touched === true &&
       !(proved("applyTranscript") && proved("rollbackTranscript"));
+    // The third refusal, same class as the other two: it is about the evidence
+    // on the PR, not the code, so the remedy is another ship pass that posts
+    // the replies — never a fix round. A track-level thread is answered here or
+    // nowhere, because no implementer was given it.
+    const unansweredTrackThreads = unansweredReviewThreads(
+      routed.trackLevel,
+      ship.threadReplies
+    );
+    if (unansweredTrackThreads.length)
+      refusals.push(
+        `review thread(s) ${unansweredTrackThreads.join(", ")} were routed to the ship pass and have no threadReplies row with a non-empty body — silence is not a reply`
+      );
     if (riderMissing)
       refusals.push(
         `the diff touches src/db/migrations/ and the body carries ${

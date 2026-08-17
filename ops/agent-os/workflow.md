@@ -29,6 +29,21 @@ owns. Any other holder → refuse, name them, do not build. Issues this loop alr
 reverted to `agent:queued` (not `agent:blocked` — nothing failed the DoD). Recovery for a claim
 whose agent is gone is in `ops/agent-os/invocation.md`.
 
+The scan is `gh api --paginate "repos/$R/issues?labels=agent:in-progress&state=open&per_page=100"`,
+never `gh issue list --limit N` — see `ops/agent-os/labels.md`. A bare limit caps at 30 and answers
+from a window over the newest issues, so a holder outside the window reads as an empty board and two
+loops run at once.
+
+**The claim is re-checked after it is written.** Reading holders and writing the claim are two steps,
+so two loops launched together both read an empty board and both claim. Setup therefore re-runs the
+same scan *after* its label writes; a claimant that appears there makes this loop release exactly the
+issues it claimed and refuse.
+
+> **Accepted residual.** In a dead heat both loops see each other and both back off, so the pass
+> builds nothing. That is fail-safe rather than fail-dangerous — a pass nobody ran costs one
+> re-dispatch, while two loops on one branch and one claim is corrupted work. Do not "fix" it with a
+> tie-break that lets one side proceed on its own reading of the board.
+
 ## G5 — undeclared migrations are blocking
 
 File-ownership fencing is the workstream's declared files. A new path under `src/db/migrations/`
@@ -49,8 +64,24 @@ loop then:
 1. Claims by dropping `agent:changes-requested` (or `agent:queued`) for `agent:in-progress`.
 2. Resumes the existing branch — never recuts, never opens a second PR.
 3. Reads the PR's review threads and inline comments as implementer input.
-4. Re-runs the **full DoD** (review, WORKS, CI). A human asking for a change does not lower the bar.
+4. Re-runs the **full DoD** — a **new pass**, with its own single code review, its own WORKS look and
+   its own CI anchor. A human asking for a change does not lower the bar.
 5. Replies on every thread: what changed, or not actioned and why. Silence is not a reply.
+
+### Thread routing — one thread, one answering place
+
+Every review thread is routed to **exactly one** place before any implementer runs:
+
+- A thread whose path a workstream's **declared files** own goes to that workstream, and that
+  workstream is gated on **its** threads only.
+- A thread with no path, or a path no workstream declared, is **track-level** and the **ship** pass
+  answers it — the only step holding the whole track's diff. An unanswered one is a merge refusal in
+  the same class as a stale body sha: the remedy is another ship pass, never a fix round.
+- A track with a single workstream *is* the track, so that workstream owns every thread.
+
+Handing every thread to every workstream is wrong in both directions at once: each workstream either
+posts a duplicate reply on a thread about someone else's files, or correctly declines it and is then
+blocked for not covering it.
 
 ## Worktree materialisation
 

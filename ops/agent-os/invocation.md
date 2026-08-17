@@ -45,8 +45,14 @@ A claim is stale when an issue still reads `agent:in-progress` and no loop is ru
 agent died). Detect without opening the GitHub UI:
 
 ```bash
-gh issue list --limit 200 --state open --label agent:in-progress --json number,title,updatedAt
+R=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+gh api --paginate "repos/$R/issues?labels=agent:in-progress&state=open&per_page=100" \
+  --jq '.[] | select(.pull_request == null) | {number, title, updatedAt: .updated_at}'
 ```
+
+`--paginate`, never `gh issue list --limit N`: that command caps at 30 and answers silently from a
+window over the newest issues, so a holder outside the window reads as an empty board
+(`ops/agent-os/labels.md`). The loop's own serialize scan uses this exact form.
 
 If that list is non-empty and no `build-until-done` is in flight, revert the named issues — still
 without hand-editing labels:

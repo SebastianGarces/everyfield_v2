@@ -10,8 +10,10 @@ decisions and reviewing PRs.
 1. **CI green is the merge contract.** The `Format, Lint, Typecheck, Build` check — format:check,
    lint, typecheck, test, build — is the verdict. A green anchor at the PR head sha IS the gate;
    never re-derive beside it. Everything an agent reports is a claim.
-2. **Exactly ONE code review per PR.** One review site, one reviewer, one fix round. No scoped
-   per-workstream reviews, no re-review agent.
+2. **Exactly ONE code review per PASS.** One review site, one reviewer, one fix round. No scoped
+   per-workstream reviews, and no re-review agent after the fix round — CI re-anchors instead. An
+   `agent:changes-requested` re-entry is a NEW pass, so it gets its own single review; a PR a human
+   sent back is not a PR nobody reviews again.
 3. **Exactly ONE browser look**, at the branch's **Vercel preview** and never `localhost:3000`
    (localhost serves the main checkout, so it never contains the branch's work), at the final sha.
 4. **Agents rule for themselves**, and record every ruling. See *Rulings* below.
