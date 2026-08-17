@@ -51,8 +51,11 @@ The change is demonstrated against a running deployment of **this sha**, once, a
 
 ### 3 — REVIEWED
 
-**Exactly one code review per PR**, by an agent that did not implement the change
-(`.claude/agents/code-reviewer.md`). It reads the assembled diff and covers, in one pass:
+**Exactly one code review per pass**, by an agent that did not implement the change
+(`.claude/agents/code-reviewer.md`). One review, then at most one fix round, and no re-review after
+it — CI re-anchors at the new sha. A PR a human sends back with `agent:changes-requested` re-enters
+as a **new pass** and gets its own single review; the rule bounds a pass, not the PR's lifetime. It
+reads the assembled diff and covers, in one pass:
 
 - **Spec mapping** — every AC on every issue the track closes has a verification method and a result.
   Each issue has a `feature` parent: `gh issue view <n> --json parent --jq .parent`. **Use that

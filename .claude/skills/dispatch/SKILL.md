@@ -8,7 +8,9 @@ description: One autonomous pass over the board's frontier — take the unblocke
 One guarded pass over the frontier, to reviewed PRs, with no human in the loop for its duration. The
 board holds the order (`ops/agent-os/labels.md`); `build-until-done` implements, validates against
 the DoD (`ops/agent-os/dod.md`), and opens the PR. This skill decides only **whether to run, and on
-what**. The human reviews; you never merge by hand.
+what**. The human reviews; you never merge by hand. Read `ops/agent-os/invocation.md` before this
+pass — that is the orchestrator↔track contract (issue comments, never `SendMessage`; serialize
+loops; schema-capable tracks).
 
 ## Preconditions — check in order, stop at the first failure
 
@@ -35,14 +37,30 @@ git fetch -q origin
 ```
 
 Any claim, a dirty tree, or `STALE` → stop, and say which sha each side is on. Never clear a claim
-automatically — that is how two loops end up on one branch.
+automatically — that is how two loops end up on one branch. A claim whose owning agent is gone is
+reverted with the command in `ops/agent-os/invocation.md`, not by editing labels in the UI, and not
+by this pass.
 
 **3. The frontier is not empty.** Use the canonical frontier query in `ops/agent-os/labels.md`; do
-not re-derive one. Expand each track along `dependsOn` to pull in the dependents it will build in
-later stages — a blocker *inside* the track lands on the track branch first, one outside it is a
-hard stop. **Skip `risk:high` unless the caller opted in** (`dispatch high-risk`): unattended and
-recurring is a different axis from autonomous, so auth and tenancy changes start when
-someone is around. Say how many you skipped. Empty frontier → stop with what the board waits on.
+not re-derive one. It unions `agent:queued` and `agent:changes-requested`. Expand each track along
+`dependsOn` to pull in the dependents it will build in later stages — a blocker *inside* the track
+lands on the track branch first, one outside it is a hard stop. **Skip `risk:high` unless the
+caller opted in** (`dispatch high-risk`): unattended and recurring is a different axis from
+autonomous, so auth and tenancy changes start when someone is around. Say how many you skipped.
+Empty frontier → stop with what the board waits on.
+
+A unit labelled `agent:changes-requested` keeps its existing branch and PR: set
+`changesRequested: true` on it so the loop resumes rather than recutting, reads the PR's review
+threads, and re-runs the full DoD. Applying that label is the only human action required.
+
+**3b. At most one schema-capable track per pass.** A track is schema-capable when its `files`
+include `db/` / `src/db/` **or** when its spec might need schema even though the file list does
+not — a new persisted field, a status column, a unique index, anything that will mint a migration.
+Worked example: #202 declared onboarding components and lib, no `db/`, then added
+`churches.leadership_status` and minted migration 0028 while another in-flight track minted a
+different 0028. Two schema-capable tracks in one pass recreate that journal collision; G5 only
+sees one track's declaration. Prefer the track that already declares `db/`; park the rest for the
+next pass and say so.
 
 **4. The budget can finish what it starts.** Do not start a stage you cannot finish. No arithmetic
 here — the per-attempt reserve before each integration attempt and before each stage, plus
@@ -70,11 +88,15 @@ Workflow({ name: "build-until-done", args: {
   `U313-fix`) — the track branch is `feature/<unitId>`, so any other id builds validated commits on
   a branch no PR head carries.
 
-Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold}`.
-`files` comes from the issue's `## Likely files`, the per-workstream lists from `## Workstreams`. The
-loop cuts units into tracks (shared files ∪ `dependsOn`), then stages, then workstreams, and owns
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold, changesRequested?}`.
+`files` comes from the issue's `## Likely files`, the per-workstream lists from `## Workstreams`.
+`changesRequested` is true when the issue currently carries `agent:changes-requested`. The loop
+cuts units into tracks (shared files ∪ `dependsOn`), then stages, then workstreams, and owns
 everything after: claiming, gates, retries, the PR, or `agent:blocked` on exhaustion. Do not
 re-implement any of it here, and do not second-guess its verdict.
+
+Talk to a running track only through **issue comments** on the issues it claimed. `SendMessage` to
+a loop agent resumes a duplicate continuation (`ops/agent-os/invocation.md`).
 
 ### When to set `hold: true`
 

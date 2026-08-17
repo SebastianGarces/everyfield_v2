@@ -10,8 +10,10 @@ decisions and reviewing PRs.
 1. **CI green is the merge contract.** The `Format, Lint, Typecheck, Build` check — format:check,
    lint, typecheck, test, build — is the verdict. A green anchor at the PR head sha IS the gate;
    never re-derive beside it. Everything an agent reports is a claim.
-2. **Exactly ONE code review per PR.** One review site, one reviewer, one fix round. No scoped
-   per-workstream reviews, no re-review agent.
+2. **Exactly ONE code review per PASS.** One review site, one reviewer, one fix round. No scoped
+   per-workstream reviews, and no re-review agent after the fix round — CI re-anchors instead. An
+   `agent:changes-requested` re-entry is a NEW pass, so it gets its own single review; a PR a human
+   sent back is not a PR nobody reviews again.
 3. **Exactly ONE browser look**, at the branch's **Vercel preview** and never `localhost:3000`
    (localhost serves the main checkout, so it never contains the branch's work), at the final sha.
 4. **Agents rule for themselves**, and record every ruling. See *Rulings* below.
@@ -96,16 +98,16 @@ so "the rule seems wrong" has somewhere to go other than being ignored or obeyed
 
 ## Invocation
 
-**User-invoked = entry points only. Everything the loop calls stays model-invocable.** A skill with
-`disable-model-invocation: true` is unreachable by subagents *and* from a slash-command body, because
-both are executed by the model. `handoff` is the only skill carrying the flag; `/deliver` is a slash
-command, so it is user-invoked by construction and needs none. `dispatch` is schedule-invoked, so its
-guards live inside the skill (a review-queue cap, a refusal while anything is `agent:in-progress`,
-`risk:high` excluded, a per-pass track cap).
+**User-invoked = entry points only. Everything the loop calls stays model-invocable.** The full
+contract — issue comments as the orchestrator↔track channel (never `SendMessage`), serialized loop
+invocations, stale-claim recovery, and the schema-capable-track heuristic — lives in
+`ops/agent-os/invocation.md`. Read that **before dispatching**. The cycle, G5 undeclared-migration
+fence, and `agent:changes-requested` re-entry live in `ops/agent-os/workflow.md`.
 
-> **Hazard.** Flagging anything the loop calls breaks it *silently* — the subagent simply cannot see
-> the skill, and the failure surfaces as an unrelated gate failure minutes later. Same class of trap as
-> renaming the CI job without updating the ruleset: a contract living in two places.
+> **Hazard.** Flagging anything the loop calls with `disable-model-invocation: true` breaks it
+> *silently* — the subagent simply cannot see the skill, and the failure surfaces as an unrelated
+> gate failure minutes later. Same class of trap as renaming the CI job without updating the
+> ruleset: a contract living in two places.
 
 ## Where each piece lives
 
@@ -113,6 +115,8 @@ guards live inside the skill (a review-queue cap, a refusal while anything is `a
 |---|---|
 | The gate contract | `ops/agent-os/dod.md` |
 | Status labels, the board, the frontier query | `ops/agent-os/labels.md` |
+| How work enters the loop (channel, serialize, recovery) | `ops/agent-os/invocation.md` |
+| The loop cycle, G5 fence, review re-entry | `ops/agent-os/workflow.md` |
 | The build loop | `.claude/workflows/build-until-done.js` |
 | Planning an FRD into tracks / building the frontier | `.claude/workflows/frd-plan.js`, `.claude/workflows/frd-implement.js` |
 | Cursor mirror of the factory | `.cursor/` (skills / agents / commands / workflows symlink here; hooks are native) |

@@ -6,6 +6,7 @@ set -euo pipefail
 gh label create "agent:queued"      --color FBCA04 --description "Spec accepted, awaiting build" --force
 gh label create "agent:in-progress" --color 0E8A16 --description "build-until-done loop running"  --force
 gh label create "agent:in-review"   --color 1D76DB --description "DoD passed, PR in review queue" --force
+gh label create "agent:changes-requested" --color E36209 --description "Human review asked for changes — loop re-takes the existing PR" --force
 gh label create "agent:blocked"     --color B60205 --description "Loop exhausted, needs a human"  --force
 gh label create "agent:delivery-failed" --color E99695 --description "DoD passed but the PR/delivery step failed — retry delivery; the code is fine" --force
 gh label create "risk:high"         --color D93F0B --description "Auth/tenancy/payments"          --force

@@ -38,6 +38,7 @@ async function runWorkflow(source, { args: argv, agentImpl, pipelineImpl }) {
         phase: opts.phase,
         label: opts.label,
         prompt,
+        isolation: opts.isolation,
       });
       return agentImpl(prompt, opts);
     },
@@ -637,11 +638,20 @@ const DEFAULTS = {
     headSha: BASE_SHA,
     baseSha: BASE_SHA,
   }),
-  "impl:": () => ({
+  "impl:": (p) => ({
     committed: true,
     filesChanged: [],
     summary: "built it",
     commits: [COMMIT],
+    threadReplies: [...p.matchAll(/^--- (\S+)/gm)]
+      .map((m) => m[1])
+      .filter((id) => id !== "comment")
+      .map((threadId) => ({
+        threadId,
+        replied: true,
+        actioned: true,
+        body: "addressed",
+      })),
   }),
   "integrate:": (p) => ({ merged: branchesIn(p), conflicts: [] }),
   "review:": () => review(),
@@ -668,6 +678,21 @@ const DEFAULTS = {
     bodySha: HEAD_SHA,
     prHeadSha: HEAD_SHA,
     migration: { touched: false },
+    // Track-level review threads are answered here or nowhere, so the stub
+    // transcribes exactly the ones its own prompt handed it.
+    threadReplies: (
+      p.match(
+        /\*\*TRACK-LEVEL REVIEW THREADS\.\*\*[\s\S]*?(?=\n\d\. \*\*)/
+      )?.[0] || ""
+    )
+      .split("\n")
+      .flatMap((line) => line.match(/^--- (\S+)/)?.slice(1) || [])
+      .map((threadId) => ({
+        threadId,
+        replied: true,
+        actioned: true,
+        body: "answered at the track level",
+      })),
     labels: issuesIn(p).map((issue) => ({
       issue,
       labels: ["agent:in-review"],
@@ -741,7 +766,7 @@ test("dependsOn splits one track into a prerequisite stage and a parallel fan-ou
   for (const c of agents(calls, "impl:").slice(1)) {
     assert.match(
       c.prompt,
-      /git worktree add -b feature\/schema-s1w\d \.claude\/worktrees\/bud-schema-s1w\d feature\/schema\b/,
+      /scripts\/worktree-add\.sh -b feature\/schema-s1w\d \.claude\/worktrees\/bud-schema-s1w\d feature\/schema\b/,
       "a fan-out workstream branches from the TRACK branch, so it carries the prerequisite's commits"
     );
     assert.match(c.prompt, /from the TRACK branch, never from origin\/main/);
@@ -928,10 +953,10 @@ test("the track branch is fetched and cut from origin/main, not the local ref", 
     /git fetch origin/,
     "an unfetched remote-tracking ref is a stale local ref with a longer name"
   );
-  assert.match(prompt, /git worktree add -b \S+ \S+ origin\/main\b/);
+  assert.match(prompt, /scripts\/worktree-add\.sh -b \S+ \S+ origin\/main\b/);
   assert.doesNotMatch(
     prompt,
-    /git worktree add -b \S+ \S+ main\b/,
+    /scripts\/worktree-add\.sh -b \S+ \S+ main\b/,
     "a local `main` is whatever this checkout last fetched"
   );
 });
@@ -943,7 +968,7 @@ test("a bare base is normalised onto the remote; an explicit sha is not", async 
   });
   assert.match(
     one(pinned.calls, "setup:").prompt,
-    new RegExp(`git worktree add -b \\S+ \\S+ ${sha}`),
+    new RegExp(`scripts/worktree-add\\.sh -b \\S+ \\S+ ${sha}`),
     "a deliberate pin must survive normalisation"
   );
 });
@@ -2049,4 +2074,606 @@ test("the format hook escapes the worktree ignore, and the walk still skips it",
     /while \[/,
     "Cursor hook uses the same nearest-ancestor .prettierignore walk"
   );
+});
+
+// ---------------------------------------------------------------------------
+// #329 WS1 — issue-comment channel, serialized invocation, G5
+// #327 WS1 — harness-provisioned worktree env
+// ---------------------------------------------------------------------------
+
+test("ops/agent-os documents the issue-comment channel where an orchestrator reads before dispatching", () => {
+  const invocation = read("ops/agent-os/invocation.md");
+  const dispatch = read(".claude/skills/dispatch/SKILL.md");
+  const readme = read("ops/agent-os/README.md");
+  for (const [name, text] of [
+    ["invocation.md", invocation],
+    ["dispatch/SKILL.md", dispatch],
+    ["README.md", readme],
+  ]) {
+    assert.match(text, /issue comments/i, `${name} must name the channel`);
+    assert.match(text, /SendMessage/, `${name} must name the misfire`);
+  }
+  assert.match(
+    invocation,
+    /duplicate continuation/i,
+    "the reason lives on the invocation page, not only in the issue"
+  );
+  assert.match(
+    invocation,
+    /do \*\*not\*\* act/i,
+    "a stubbed direct message is answered by pointing at the channel"
+  );
+  assert.match(
+    invocation,
+    /ops\/agent-os\/invocation\.md/,
+    "the reply points at the contract"
+  );
+});
+
+test("a stubbed direct message is answered by pointing at the channel, not acting", async () => {
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
+  for (const prefix of ["setup:", "impl:", "review:", "ship:"]) {
+    assert.match(
+      one(calls, prefix).prompt,
+      /never SendMessage/,
+      `${prefix} must refuse a direct message rather than act on it`
+    );
+  }
+  const impl = one(calls, "impl:").prompt;
+  assert.match(impl, /This agent is mid-loop/);
+  assert.match(impl, /duplicate continuation/);
+});
+
+test("the loop injects orchestrator comments into the implementer and records consumed ids", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        comments: [
+          {
+            id: 99,
+            issue: 101,
+            author: "orchestrator",
+            body: "prefer the org timezone",
+          },
+        ],
+        consumedCommentIds: [99],
+      }),
+    })
+  );
+  const setup = one(calls, "setup:").prompt;
+  assert.match(setup, /INBOX/);
+  assert.match(setup, /consumedCommentIds/);
+  const impl = one(calls, "impl:").prompt;
+  assert.match(impl, /prefer the org timezone/);
+  assert.match(impl, /comment 99/);
+  assert.match(impl, /consumedCommentIds/);
+  assert.deepEqual(
+    result.shipped[0].consumedCommentIds,
+    [99],
+    "consumed ids are the record, not only a prompt instruction"
+  );
+});
+
+test("launching while another loop holds a claim is refused, naming the holder", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        ready: false,
+        claimed: [],
+        holders: [{ issue: 132, title: "other loop" }],
+      }),
+    })
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "a second launch must not build"
+  );
+  assert.equal(
+    result.blocked.length,
+    0,
+    "a serialize refusal is not a DoD failure"
+  );
+  assert.equal(result.refused.length, 1);
+  assert.match(result.refused[0].reason, /#132/);
+  assert.match(result.refused[0].reason, /other loop/);
+  const exit = one(calls, "exit:");
+  assert.doesNotMatch(
+    exit.prompt,
+    /--add-label agent:queued/,
+    "claimed is empty — this invocation wrote no in-progress labels to revert"
+  );
+  assert.match(exit.prompt, /another loop/);
+});
+
+test("a serialize abort after a claim reverts the aborting loop's issue to queued", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        ready: false,
+        claimed: [101],
+        holders: [{ issue: 132, title: "still in flight" }],
+      }),
+    })
+  );
+  assert.equal(result.refused.length, 1);
+  const exit = one(calls, "exit:").prompt;
+  assert.match(exit, /--add-label agent:queued/);
+  assert.doesNotMatch(
+    exit,
+    /--add-label agent:blocked/,
+    "nothing failed the DoD — a stranded in-progress claim is the failure this prevents"
+  );
+  assert.equal(
+    result.refused[0].labelSettled,
+    true,
+    "the stubbed exit reads back agent:queued from the prompt it was given"
+  );
+});
+
+test("a refused exit with empty claimed does not rewrite a changes-requested issue to queued", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        ready: false,
+        claimed: [],
+        holders: [{ issue: 132, title: "other loop" }],
+      }),
+    })
+  );
+  assert.equal(result.refused.length, 1);
+  const exit = one(calls, "exit:").prompt;
+  assert.doesNotMatch(
+    exit,
+    /--add-label agent:queued/,
+    "claimed is empty — the issue may still be agent:changes-requested; do not retouch it"
+  );
+  assert.match(exit, /changes-requested/);
+  assert.match(exit, /claimed nothing/);
+});
+
+test("the serialize scan paginates instead of taking a bare limit", async () => {
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
+  const setup = one(calls, "setup:").prompt;
+  assert.doesNotMatch(
+    setup,
+    /gh issue list --limit/,
+    "gh issue list caps at 30 and answers from a window over the newest issues — a holder outside it reads as an empty board"
+  );
+  assert.match(setup, /gh api --paginate/);
+  assert.match(setup, /labels=agent:in-progress/);
+  assert.match(setup, /per_page=100/);
+  assert.match(
+    setup,
+    /select\(\.pull_request == null\)/,
+    "that REST endpoint returns pull requests alongside issues"
+  );
+});
+
+test("the claim is re-checked AFTER it is written, and a racing claimant releases it", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        // Step 1 saw an empty board — the other loop had not written yet.
+        holders: [],
+        claimed: [101],
+        holdersAfterClaim: [{ issue: 132, title: "claimed alongside" }],
+      }),
+    })
+  );
+  const setup = one(calls, "setup:").prompt;
+  assert.match(setup, /RE-CHECK THE CLAIM/);
+  assert.match(setup, /holdersAfterClaim/);
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "a raced claim must not build"
+  );
+  assert.equal(result.blocked.length, 0, "a race is not a DoD failure");
+  assert.equal(result.refused.length, 1);
+  assert.match(result.refused[0].reason, /raced/);
+  assert.match(result.refused[0].reason, /#132/);
+  const exit = one(calls, "exit:").prompt;
+  assert.match(
+    exit,
+    /--add-label agent:queued/,
+    "this invocation wrote a claim, so it gives back exactly that claim"
+  );
+  assert.doesNotMatch(exit, /--add-label agent:blocked/);
+});
+
+test("a stale claim is recoverable without hand-editing labels", () => {
+  const invocation = read("ops/agent-os/invocation.md");
+  assert.match(
+    invocation,
+    /gh api --paginate[^\n]*labels=agent:in-progress/,
+    "detectable — and paginated, never a bare limit"
+  );
+  assert.match(
+    invocation,
+    /gh issue edit <n> --add-label agent:queued --remove-label agent:in-progress/,
+    "revertible without the GitHub UI"
+  );
+});
+
+test("G5 classifies an undeclared migration as blocking and tells the agent to re-declare", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "impl:": () => ({
+        committed: true,
+        filesChanged: ["src/db/migrations/0050_leadership.sql"],
+        summary: "added a column",
+        commits: [COMMIT],
+      }),
+    })
+  );
+  assert.ok(!calls.some((c) => c.label?.startsWith("review:")));
+  assert.ok(!calls.some((c) => c.label?.startsWith("ship:")));
+  assert.equal(result.blocked.length, 1);
+  const reason = result.blocked[0].reason;
+  assert.match(reason, /G5/);
+  assert.match(reason, /src\/db\/migrations\/0050_leadership\.sql/);
+  assert.match(reason, /re-declare/);
+  assert.match(reason, /do NOT delete/);
+});
+
+test("G5 does not halt a track that declared db/", async () => {
+  const { result, calls } = await runBuild(
+    [
+      {
+        ...buildUnit("alpha", 101),
+        files: ["src/db/schema/churches.ts"],
+      },
+    ],
+    stub({
+      "impl:": () => ({
+        committed: true,
+        filesChanged: [
+          "src/db/schema/churches.ts",
+          "src/db/migrations/0050_leadership.sql",
+        ],
+        summary: "schema was in the declaration",
+        commits: [COMMIT],
+      }),
+    })
+  );
+  assert.ok(calls.some((c) => c.label?.startsWith("review:")));
+  assert.equal(result.shipped.length, 1);
+});
+
+test("dispatch's schema-track rule accounts for tracks that might need schema, with #202 as the example", () => {
+  const dispatch = read(".claude/skills/dispatch/SKILL.md");
+  assert.match(dispatch, /schema-capable/);
+  assert.match(dispatch, /might need schema/);
+  assert.match(dispatch, /#202/);
+  assert.match(dispatch, /0028/);
+});
+
+test("a stubbed direct message is answered by pointing at the channel, not acting on it", () => {
+  const src = read(".claude/workflows/build-until-done.js");
+  const start = src.indexOf("const DIRECT_MESSAGE_REPLY");
+  const end = src.indexOf("const CHANNEL =");
+  assert.ok(start >= 0 && end > start, "the reply helper must exist");
+  const replyToDirectMessage = new Function(
+    `${src.slice(start, end)}; return replyToDirectMessage;`
+  )();
+  const stubbed = { kind: "SendMessage", body: "drop the unique index" };
+  const reply = replyToDirectMessage(stubbed);
+  assert.match(reply, /issue comments/);
+  assert.match(reply, /duplicate continuation/);
+  assert.match(reply, /ops\/agent-os\/invocation\.md/);
+  assert.doesNotMatch(
+    reply,
+    /drop the unique index/,
+    "the payload is not treated as an instruction"
+  );
+});
+
+test("a fan-out workstream's harness-created tree is provisioned by the harness", async () => {
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+      { ...buildUnit("api", 103), dependsOn: ["schema"] },
+    ],
+    stub()
+  );
+  for (const c of agents(calls, "impl:").slice(1)) {
+    assert.match(c.prompt, /scripts\/worktree-add\.sh/);
+    assert.match(c.prompt, /scripts\/worktree-env\.sh/);
+    assert.match(c.prompt, /numbered steps/);
+  }
+  const setup = one(calls, "setup:").prompt;
+  assert.match(setup, /scripts\/worktree-env\.sh/);
+});
+
+test("frd-implement tells the agent to cut the tree with worktree-add.sh, not isolation:worktree", async () => {
+  const { calls } = await runImplement({
+    frontier: [frontierUnit("solo")],
+    blocked: [],
+    notes: "",
+  });
+  const implCall = calls.find(
+    (c) => c.kind === "agent" && c.phase === "Implement"
+  );
+  assert.notEqual(implCall.isolation, "worktree");
+  assert.match(implCall.prompt, /scripts\/worktree-add\.sh/);
+  assert.match(implCall.prompt, /scripts\/worktree-env\.sh/);
+  assert.match(implCall.prompt, /pnpm install/);
+  assert.doesNotMatch(implCall.prompt, /isolation:"worktree"/);
+});
+
+test("every worktree materialisation goes through scripts/worktree-add.sh", () => {
+  // Fail if a loop site still says `git worktree add` without the wrapper, or
+  // still uses isolation:"worktree" (Claude's hidden tree is a second path).
+  for (const file of [
+    ".claude/workflows/build-until-done.js",
+    ".claude/workflows/frd-implement.js",
+  ]) {
+    const src = read(file);
+    assert.match(
+      src,
+      /scripts\/worktree-add\.sh/,
+      `${file} must invoke the wrapper`
+    );
+    assert.doesNotMatch(
+      src,
+      /isolation:\s*["']worktree["']/,
+      `${file} must not use isolation:worktree`
+    );
+    for (const m of src.matchAll(/git worktree add/g)) {
+      const window = src.slice(Math.max(0, m.index - 400), m.index + 400);
+      assert.match(
+        window,
+        /scripts\/worktree-add\.sh/,
+        `${file} has raw git worktree add at ${m.index} whose window does not go through the wrapper`
+      );
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #329 WS2 — agent:changes-requested re-enters the loop
+// #327 WS3 — fresh-worktree wording names deps; env is the wrapper + idempotent fallback
+// ---------------------------------------------------------------------------
+
+test("agent:changes-requested is documented as mutually exclusive and takeable", () => {
+  const labels = read("ops/agent-os/labels.md");
+  const setup = read("ops/agent-os/setup-labels.sh");
+  const workflow = read("ops/agent-os/workflow.md");
+  assert.match(labels, /Status labels \(mutually exclusive/);
+  assert.match(labels, /agent:changes-requested/);
+  assert.match(
+    labels,
+    /agent:queued agent:changes-requested/,
+    "the frontier unions both takeable labels"
+  );
+  assert.match(setup, /agent:changes-requested/);
+  assert.match(workflow, /Changes-requested re-entry/);
+  assert.match(workflow, /full DoD/);
+});
+
+test("the frontier prompt unions queued and changes-requested", async () => {
+  const { calls } = await runImplement({
+    frontier: [frontierUnit("solo")],
+    blocked: [],
+    notes: "",
+  });
+  const prompt = promptOf(calls, "Frontier");
+  assert.match(prompt, /agent:queued agent:changes-requested/);
+  assert.match(prompt, /--remove-label agent:changes-requested/);
+  assert.match(
+    prompt,
+    /Applying `agent:changes-requested` to an issue whose PR is open is enough/
+  );
+});
+
+test("a changes-requested re-entry reads review threads, replies, and updates the existing PR", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        changesRequested: true,
+        openPr: 42,
+        reviewFeedback: [
+          {
+            id: "PRRT_1",
+            threadId: "PRRT_1",
+            path: "src/foo.ts",
+            line: 10,
+            author: "reviewer",
+            body: "rename this helper",
+          },
+        ],
+      }),
+    })
+  );
+  const setup = one(calls, "setup:").prompt;
+  assert.match(setup, /REVIEW THREADS/);
+  assert.match(setup, /--remove-label agent:changes-requested/);
+  const impl = one(calls, "impl:").prompt;
+  assert.match(impl, /rename this helper/);
+  assert.match(impl, /never open a second/);
+  assert.match(impl, /full DoD/);
+  assert.match(impl, /threadReplies/);
+  assert.match(impl, /not actioned/);
+  const ship = one(calls, "ship:").prompt;
+  assert.match(ship, /Update the existing PR/);
+  assert.match(ship, /never open a second/);
+});
+
+test("a re-entry with review threads and empty threadReplies is blocked, no ship", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    stub({
+      "setup:": (p) => ({
+        ...DEFAULTS["setup:"](p),
+        changesRequested: true,
+        openPr: 42,
+        reviewFeedback: [
+          {
+            id: "PRRT_1",
+            threadId: "PRRT_1",
+            path: "src/foo.ts",
+            line: 10,
+            author: "reviewer",
+            body: "rename this helper",
+          },
+        ],
+      }),
+      "impl:": () => ({
+        committed: true,
+        filesChanged: [],
+        summary: "built it",
+        commits: [COMMIT],
+        threadReplies: [],
+      }),
+    })
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("ship:")),
+    "unanswered review threads must not ship"
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.blocked.length, 1);
+  assert.match(result.blocked[0].reason, /PRRT_1/);
+  assert.match(result.blocked[0].reason, /threadReplies/);
+});
+
+// A track whose stage 1 fans out: ui and api own disjoint files, so a review
+// thread on one of them belongs to exactly one of them.
+const REENTRY_TRACK = [
+  { ...buildUnit("schema", 101), files: ["src/db/schema/churches.ts"] },
+  { ...buildUnit("ui", 102), dependsOn: ["schema"], files: ["src/ui.ts"] },
+  { ...buildUnit("api", 103), dependsOn: ["schema"], files: ["src/api.ts"] },
+];
+const thread = (id, path, body) => ({
+  id,
+  threadId: id,
+  path,
+  line: 10,
+  author: "reviewer",
+  body,
+});
+const reentryStub = (feedback, over = {}) =>
+  stub({
+    "setup:": (p) => ({
+      ...DEFAULTS["setup:"](p),
+      changesRequested: true,
+      openPr: 42,
+      reviewFeedback: feedback,
+    }),
+    ...over,
+  });
+/** The prompt of the impl step whose workstream declared `file`. */
+const implFor = (calls, file) =>
+  agents(calls, "impl:").find((c) => c.prompt.includes(`  - ${file}`))?.prompt;
+
+test("each workstream is given only the review threads its declared files own", async () => {
+  const { result, calls } = await runBuild(
+    REENTRY_TRACK,
+    reentryStub([
+      thread("T_UI", "src/ui.ts", "rename the ui helper"),
+      thread("T_API", "src/api.ts", "widen the api response"),
+      thread("T_ORPHAN", "README.md", "explain the whole approach"),
+    ])
+  );
+  const ui = implFor(calls, "src/ui.ts");
+  const api = implFor(calls, "src/api.ts");
+  assert.ok(ui && api, "both fan-out workstreams ran");
+
+  assert.match(ui, /rename the ui helper/);
+  assert.doesNotMatch(
+    ui,
+    /widen the api response/,
+    "a thread about another workstream's file is a duplicate reply, or a decline that false-blocks this one"
+  );
+  assert.doesNotMatch(ui, /explain the whole approach/);
+  assert.match(api, /widen the api response/);
+  assert.doesNotMatch(api, /rename the ui helper/);
+
+  // Exactly one place answers each thread, and the loop still ships.
+  const ship = one(calls, "ship:").prompt;
+  assert.match(ship, /TRACK-LEVEL REVIEW THREADS/);
+  assert.match(ship, /explain the whole approach/);
+  assert.doesNotMatch(ship, /rename the ui helper/);
+  assert.equal(result.shipped.length, 1);
+  assert.equal(result.blocked.length, 0);
+});
+
+test("a thread no workstream owns is refused at ship when it goes unanswered", async () => {
+  const { result, calls } = await runBuild(
+    REENTRY_TRACK,
+    reentryStub(
+      [thread("T_ORPHAN", "README.md", "explain the whole approach")],
+      {
+        "ship:": (p) => ({ ...DEFAULTS["ship:"](p), threadReplies: [] }),
+      }
+    )
+  );
+  assert.equal(result.shipped.length, 0, "silence is not a reply");
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("fix:")),
+    "an unanswered thread is an evidence defect — another ship pass, never a fix round"
+  );
+  assert.equal(
+    agents(calls, "ship:").length,
+    2,
+    "the remedy is re-shipping (MAX_ATTEMPTS), so it re-ships until attempts run out"
+  );
+  assert.equal(result.blocked[0].failingGate, "publish");
+  const exit = one(calls, "exit:").prompt;
+  assert.match(exit, /T_ORPHAN/);
+  assert.match(exit, /silence is not a reply/);
+});
+
+test("the one-review rule bounds a PASS, so a changes-requested re-entry is reviewed again", () => {
+  // The re-entry doctrine re-runs the full DoD. A doc still reading "one review
+  // per PR" with no re-review agent describes a loop that does not exist.
+  for (const doc of ["ops/agent-os/README.md", "ops/agent-os/dod.md"]) {
+    const src = read(doc);
+    assert.doesNotMatch(
+      src,
+      /(ONE|one|Exactly one) code review per PR/,
+      `${doc}: the bound is the pass, not the PR's lifetime`
+    );
+    assert.match(src, /code review per (PASS|pass)/, doc);
+    assert.match(src, /changes-requested/, `${doc}: names the re-entry`);
+    assert.match(src, /new pass|NEW pass/, doc);
+    assert.match(src, /re-review/, `${doc}: still forbidden WITHIN a pass`);
+  }
+});
+
+test("a solo implementer is told to run worktree-env.sh if missing, and pnpm install", async () => {
+  const { calls } = await runBuild([buildUnit("alpha", 101)], stub());
+  const impl = one(calls, "impl:").prompt;
+  assert.match(impl, /pnpm install/);
+  assert.match(impl, /scripts\/worktree-env\.sh/);
+  assert.doesNotMatch(impl, /do not re-run/);
+  assert.match(impl, /node_modules/);
+});
+
+test("a fan-out implementer is told to pnpm install after the harness env step", async () => {
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+      { ...buildUnit("api", 103), dependsOn: ["schema"] },
+    ],
+    stub()
+  );
+  for (const c of agents(calls, "impl:").slice(1)) {
+    assert.match(c.prompt, /pnpm install/);
+    assert.match(c.prompt, /numbered steps/);
+  }
 });

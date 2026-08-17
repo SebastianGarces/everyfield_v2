@@ -26,11 +26,12 @@ silently — never use it.
 
 | Label                   | Meaning                                                              |
 |-------------------------|----------------------------------------------------------------------|
-| `agent:queued`          | Spec accepted, not yet started. Waiting for a build slot / budget.   |
-| `agent:in-progress`     | A `build-until-done` loop is actively iterating on it.               |
-| `agent:in-review`       | DoD passed, PR opened — **in the human review queue**.               |
-| `agent:blocked`         | Loop exhausted attempts/budget; needs a human. See the issue comment. |
-| `agent:delivery-failed` | DoD passed, but pushing/opening the PR failed. The code is fine — retry the delivery. See the issue comment. |
+| `agent:queued`              | Spec accepted, not yet started. Waiting for a build slot / budget.   |
+| `agent:in-progress`         | A `build-until-done` loop is actively iterating on it.               |
+| `agent:in-review`           | DoD passed, PR opened — **in the human review queue**.               |
+| `agent:changes-requested`   | Human review asked for changes. Applying this to an issue whose PR is open is enough to make the work takeable again. The loop resumes the existing branch and PR, reads the review threads, and re-runs the full DoD. |
+| `agent:blocked`             | Loop exhausted attempts/budget; needs a human. See the issue comment. |
+| `agent:delivery-failed`     | DoD passed, but pushing/opening the PR failed. The code is fine — retry the delivery. See the issue comment. |
 
 When the PR merges the issue closes via `Closes #`, so there is no "done" label. Two `agent:*` labels
 at once is a bug, not a state; board-sync fails on it.
@@ -62,15 +63,19 @@ gh api --method POST repos/{owner}/{repo}/issues/<n>/dependencies/blocked_by -F 
 ```
 
 `issue_dependencies_summary.blocked_by` counts **open blockers only**, so it is a live gate. The
-**frontier** is every issue whose blockers are all closed and which nobody has claimed — one request:
+**frontier** is every issue whose blockers are all closed and which nobody has claimed, labelled
+`agent:queued` **or** `agent:changes-requested`. GitHub's `labels=` query is AND, so those two
+cannot share one request — two paginated lists, unioned:
 
 ```bash
 R={owner}/{repo}
-gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" \
-  --jq '.[]
-        | select(.pull_request == null)
-        | select(.issue_dependencies_summary.blocked_by == 0 and (.assignees | length) == 0)
-        | .number'
+for label in agent:queued agent:changes-requested; do
+  gh api --paginate "repos/$R/issues?labels=$label&state=open&per_page=100" \
+    --jq '.[]
+          | select(.pull_request == null)
+          | select(.issue_dependencies_summary.blocked_by == 0 and (.assignees | length) == 0)
+          | .number'
+done
 ```
 
 Three parts are load-bearing: **`--paginate`, never a bare limit** (`gh issue list` caps at 30 and
@@ -78,7 +83,8 @@ silently answers from a window over the newest issues); **`select(.pull_request 
 issues endpoint returns pull requests too, and `gh api` does not filter them, so a PR can otherwise
 enter the frontier as buildable work); and **reuse this payload rather than re-fetching per issue** —
 `body`, `labels` and `assignees` are already in it, so `## Likely files` and the ACs need no second
-call.
+call. `agent:changes-requested` sits on the issue, not the PR, so the pull_request filter still
+holds. Applying that label is enough to make an open-PR issue takeable again.
 
 **A dependency is semantic; file overlap is not.** Two units touching `src/db/schema/index.ts` do not
 block each other — they merely cannot run in the same parallel batch. Blocking edges decide a track's
