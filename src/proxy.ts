@@ -4,15 +4,31 @@ import { NextResponse } from "next/server";
 import {
   CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
   isCrawlerPreviewRequest,
-  ROUTED_URL_HEADER,
 } from "@/lib/crawler";
+import { ROUTED_URL_HEADER } from "@/lib/routed-url";
 import { loginPathFor, safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
-// Routes that authenticated users should be redirected away from
-const AUTH_ROUTES = ["/login", "/register"];
+// Routes an authenticated user is redirected away from, decided HERE on the
+// presence of the session cookie alone.
+//
+// `/login` IS NOT ONE OF THEM, and its absence is the fix for an infinite
+// redirect loop (#503). A cookie that exists but no longer VERIFIES — expired,
+// revoked, a session row deleted — is the case this proxy cannot tell from a
+// good one. With `/login` on this list, such a reader asked for a dashboard
+// route, the layout bounced them to `/login` because the session did not
+// verify, and this branch threw them straight back at the route because the
+// cookie was still in the jar. ERR_TOO_MANY_REDIRECTS, and the reader could not
+// reach the form that would have fixed it.
+//
+// The bounce is not lost, it MOVED to where the answer is real: the login page
+// asks `getCurrentSession()` and redirects a genuinely signed-in reader itself.
+// A page can tell a live session from a dead one; a cookie cannot. `/` and
+// `/register` stay because neither is where a failed session lands, so neither
+// closes a loop.
+const AUTH_ROUTES = ["/register"];
 
 // Routes that require authentication.
 //
@@ -87,7 +103,8 @@ export function proxy(request: NextRequest): NextResponse {
 
   // 1. Auth routing for GET requests
   if (request.method === "GET") {
-    // Authenticated user on auth routes → redirect to dashboard (or redirect param).
+    // Cookie-bearing reader on `/` or `/register` → dashboard (or the redirect
+    // param). NOT on `/login`: see `AUTH_ROUTES` for the loop that cost.
     // The param is sanitised by `safeRedirectPath` — the ONE open-redirect
     // predicate, shared with `login`/`devLoginAs` — because a bare
     // `startsWith("/")` admits `//evil.com` and its control-character

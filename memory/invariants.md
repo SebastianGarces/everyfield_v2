@@ -87,8 +87,9 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - A row naming TWO tenancies is refused EVERY capability including the reads — the check sits above the tenancy switch, because a `tenancy: "any"` verb would otherwise wave the defect through.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals`, which hash both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. The trusted headers are `x-routed-url` (absence fails closed) and the platform-written `x-real-ip`.
-- `x-routed-url` carries the RELATIVE URL the proxy routed — path AND query — because a Server Component gets neither otherwise, and a layout is never handed `searchParams`. A route-scoping reader takes the pathname off the front; it does not get a second header.
-- A signed-out bounce to `/login` goes through `loginPathFor` and comes back through `safeRedirectPath` (`@/lib/auth/safe-redirect`) — ONE param name (`redirect`), sanitised at BOTH ends. The proxy and the `(dashboard)` layout each bounce a different population and neither may hand-roll the URL.
+- `x-routed-url` (`@/lib/routed-url`) carries the RELATIVE URL the proxy routed — path AND query — because a Server Component gets neither otherwise, and a layout is never handed `searchParams`. A route-scoping reader calls `routedPathname` for the route half; it does not get a second header.
+- A signed-out bounce to `/login` goes through `loginPathFor` and comes back through `safeRedirectPath` (`@/lib/auth/safe-redirect`) — ONE param name (`redirect`), sanitised at BOTH ends. There are exactly TWO writers, `src/proxy.ts` and the `(dashboard)` layout; a page or a shared guard inside that group NEVER spells its own, because it can only race the two that carry a return path.
+- `/login` IS NOT AN AUTH ROUTE in the proxy (`AUTH_ROUTES` is `/` and `/register`). The already-signed-in bounce is the login PAGE's, because it asks the session and the proxy can only ask the cookie — and a cookie that no longer verifies is precisely the reader the layout sends there, so bouncing on it closed an inescapable redirect loop.
 
 ## Seats & Tenancy
 

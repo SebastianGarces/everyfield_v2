@@ -22,6 +22,8 @@
  * belongs behind `getCurrentSession()` in the page, not behind this check.
  */
 
+import { routedPathname } from "@/lib/routed-url";
+
 /**
  * Social-media and search-engine crawlers that need pages for metadata/OG
  * scraping. A plain string is a substring test against the lowercased UA; a
@@ -114,43 +116,11 @@ export function isCrawlerUserAgent(
  */
 export const CRAWLER_PREVIEWABLE_ROUTE_PREFIXES = ["/wiki"] as const;
 
-/**
- * The header the proxy stamps on the REQUEST with the RELATIVE URL it routed —
- * pathname AND query — so a Server Component can scope a decision by route, or
- * name the request it is refusing.
- *
- * A Server Component has no other way to learn either half: `headers()` is all
- * it gets, a layout is never handed `searchParams`, and so this is the one
- * documented channel from proxy to app:
- * `NextResponse.next({ request: { headers } })`. This is not the trap #240
- * removed. The distinction is who writes it: the proxy sets this on EVERY
- * continuation, so a client-supplied value is always overwritten with the real
- * URL before the app sees it, and its absence means the proxy did not run —
- * which every reader must treat as "not previewable" rather than guessing. It
- * also carries a fact (which URL), never a verdict (whether to trust this
- * request); the verdict is re-derived on both sides from the same inputs by
- * `isCrawlerPreviewRequest` below.
- *
- * It carries the query because ONE header for "the URL the proxy routed" beats
- * two half-facts a reader has to reassemble (#503): the `(dashboard)` layout
- * bounces a signed-out reader to `/login` and has to say where to come back to,
- * and `/settings?tab=billing` without its query is a different destination. The
- * route-scoping readers below take the pathname off the front themselves.
- */
-export const ROUTED_URL_HEADER = "x-routed-url";
-
-/**
- * True when `routedUrl` names a route the proxy admits session-less crawlers to.
- *
- * Accepts a bare pathname (what the proxy holds) or a relative URL with a query
- * (what `ROUTED_URL_HEADER` carries), because the prefix match is about the
- * route and `/wiki/x?utm=1` is the same route as `/wiki/x`.
- */
+/** True when `pathname` is one the proxy admits session-less crawlers to. */
 export function isCrawlerPreviewableRoute(
-  routedUrl: string | null | undefined
+  pathname: string | null | undefined
 ): boolean {
-  if (!routedUrl) return false;
-  const pathname = routedUrl.split(/[?#]/, 1)[0];
+  if (!pathname) return false;
   return CRAWLER_PREVIEWABLE_ROUTE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
@@ -160,14 +130,19 @@ export function isCrawlerPreviewableRoute(
  * The whole crawler allowance, in one predicate both sides call: a known
  * crawler, on a route we admit session-less crawlers to.
  *
- * The proxy calls it with `request.nextUrl.pathname`; the layout calls it with
- * the `ROUTED_URL_HEADER` the proxy stamped. Both are the same fact from the
- * same authority, so the two cannot drift — and both fail CLOSED, because an
- * unknown UA or an unknown path is simply not a preview.
+ * Both sides hand it the URL the proxy routed — the proxy its own
+ * `request.nextUrl`, the layout the `ROUTED_URL_HEADER` it stamped — and
+ * `routedPathname` takes the route off the front, so neither caller has to know
+ * that the value carries a query. Same fact from the same authority, so the two
+ * cannot drift, and both fail CLOSED: an unknown UA, an absent header or an
+ * unknown path is simply not a preview.
  */
 export function isCrawlerPreviewRequest(
   userAgent: string | null | undefined,
   routedUrl: string | null | undefined
 ): boolean {
-  return isCrawlerUserAgent(userAgent) && isCrawlerPreviewableRoute(routedUrl);
+  return (
+    isCrawlerUserAgent(userAgent) &&
+    isCrawlerPreviewableRoute(routedPathname(routedUrl))
+  );
 }

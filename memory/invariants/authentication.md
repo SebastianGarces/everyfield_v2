@@ -79,23 +79,45 @@ reviewer reconstructs by opening thirty action modules.
 
 ## The signed-out bounce, and why it is one function (#503)
 
-Two places send a signed-out reader to `/login`, and they cover different
-populations. `src/proxy.ts` bounces `PROTECTED_ROUTE_PREFIXES` at the edge on
-the presence of the session COOKIE. The `(dashboard)` layout bounces everything
-else in its group — `/settings`, `/people`, `/tasks`, `/teams`, `/meetings`,
-`/notifications` are in no proxy list — and it is the only bounce at all for a
-cookie that exists but does not VERIFY, which the proxy cannot see.
+EXACTLY TWO places send a signed-out reader to `/login`, and they cover
+different populations. `src/proxy.ts` bounces `PROTECTED_ROUTE_PREFIXES` at the
+edge on the presence of the session COOKIE. The `(dashboard)` layout bounces
+everything else in its group — `/settings`, `/people`, `/tasks`, `/teams`,
+`/meetings`, `/notifications` are in no proxy list — and it is the only bounce
+at all for a cookie that exists but does not VERIFY, which the proxy cannot see.
 
-So both must name the destination, under one param, and both call
-`loginPathFor`. The layout used to `redirect("/login")` bare, which is why a
-reader following a deep link into `/settings` signed in and landed on the
-dashboard. The param is sanitised on the way out as well as on the way back:
-`safeRedirectPath` is the read half, so an attacker's URL never reaches the
-address bar of the login page either.
+Both name the destination, under one param, through `loginPathFor`. The layout
+used to `redirect("/login")` bare, which is why a reader following a deep link
+into `/settings` signed in and landed on the dashboard. The param is sanitised
+on the way out as well as on the way back: `safeRedirectPath` is the read half,
+so an attacker's URL never reaches the address bar of the login page either.
 
-The layout learns the destination from `ROUTED_URL_HEADER`, which is why that
-header carries the query as well as the path. A layout is never handed
-`searchParams` — `headers()` is the whole channel — so `/settings?tab=billing`
-would otherwise come back as `/settings`. Fragments never make the trip at all:
-a browser does not send one, so preserving `#notification-preferences` is a
-client-side job and is out of scope by ruling on #503.
+**Two is the whole list, and a third copy is a defect.** Three pages and the
+oversight guard used to spell their own `redirect("/login")` beneath the
+layout's. None carried a return path, and each could only race a bounce that
+did. They are gone; those call sites take `verifySession()`, which asks for the
+session the layout has already established. `session.test.ts` asserts the
+oversight guard has no `/login` redirect, positively, so the copy cannot grow
+back.
+
+**The stale-cookie bounce is only terminal because `/login` is not an auth
+route.** This is the loop the fix had to close, and it was live before #503:
+`hasSessionCookie` is presence, not validity, so an expired session looked
+signed-in to the proxy and signed-out to the layout. The layout sent that reader
+to `/login`; with `/login` on `AUTH_ROUTES` the proxy sent them straight back on
+the strength of the dead cookie; ERR_TOO_MANY_REDIRECTS, with the form that
+would have fixed it unreachable. `AUTH_ROUTES` is now `/` and `/register` only,
+and the already-signed-in bounce moved to the login PAGE, which asks
+`getCurrentSession()` — a page can tell a live session from a dead one, a cookie
+cannot. Putting `/login` back on that list restores the loop.
+
+The layout learns the destination from `ROUTED_URL_HEADER` (`@/lib/routed-url`,
+which owns the header and `routedPathname`, because the crawler scope and the
+bounce both read it and neither is about the other). That is why the header
+carries the query as well as the path: a layout is never handed `searchParams` —
+`headers()` is the whole channel — so `/settings?tab=billing` would otherwise
+come back as `/settings`. Fragments never make the trip at all: a browser does
+not send one, so preserving `#notification-preferences` is a client-side job and
+is out of scope by ruling on #503. The one place a fragment could survive is the
+client: `(dashboard)/error.tsx` builds its sign-in link from `usePathname()`
+through the same `loginPathFor`.

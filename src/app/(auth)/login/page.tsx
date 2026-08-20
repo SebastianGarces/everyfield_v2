@@ -1,5 +1,8 @@
+import { redirect } from "next/navigation";
+
 import { LoginForm } from "./login-form";
 import { isDevLoginEnabled, listDevAccounts } from "./dev-accounts";
+import { getCurrentSession } from "@/lib/auth";
 import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 /**
@@ -32,8 +35,19 @@ export default async function LoginPage({
   // both forms below. The Suspense boundary that used to wrap the form went
   // with the `useSearchParams` inside it: this page already awaits
   // `searchParams`, so nothing below it suspends and the skeleton never showed.
-  const { redirect } = await searchParams;
-  const redirectTo = safeRedirectPath(redirect);
+  const { redirect: redirectParam } = await searchParams;
+  const redirectTo = safeRedirectPath(redirectParam);
+
+  // The already-signed-in bounce, which the proxy used to do off `/login` and
+  // can no longer do correctly (#503). It branches on the session COOKIE, and a
+  // cookie that no longer verifies is exactly the reader the layout sends here
+  // — so the proxy sent them back, forever. This asks the SESSION instead, so a
+  // dead cookie falls through to the form that fixes it and only a live session
+  // is bounced. `redirectTo` is already through `safeRedirectPath`.
+  const { user } = await getCurrentSession();
+  if (user) {
+    redirect(redirectTo);
+  }
 
   // The auth layout is a flex row; stack so the dev switcher sits BELOW the
   // form rather than beside it.

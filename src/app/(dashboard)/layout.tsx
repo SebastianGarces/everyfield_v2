@@ -11,7 +11,8 @@ import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
-import { isCrawlerPreviewRequest, ROUTED_URL_HEADER } from "@/lib/crawler";
+import { isCrawlerPreviewRequest } from "@/lib/crawler";
+import { ROUTED_URL_HEADER } from "@/lib/routed-url";
 import {
   notificationViewer,
   type NotificationViewer,
@@ -86,14 +87,23 @@ export default async function DashboardLayout({
   }
 
   if (!user) {
-    // Carrying where to come back to, from the same header and through the same
-    // builder the proxy uses (#503). This branch is not the proxy's leftovers:
-    // it is the ONLY bounce for the routes in this group the proxy does not
-    // protect — /settings, /people, /tasks, /teams, /meetings, /notifications —
-    // and the only one at all for a session cookie that exists but fails to
-    // verify, which the proxy cannot detect because it only reads the cookie.
-    // A bare `/login` here is what sent a reader following a deep link to the
-    // dashboard instead of the page they asked for.
+    // THE bounce for this group, carrying where to come back to — same header,
+    // same builder the proxy uses (#503). A bare `/login` here is what sent a
+    // reader following a deep link to the dashboard instead of the page they
+    // asked for.
+    //
+    // It is not the proxy's leftovers. It is the only bounce for the routes the
+    // proxy does not protect (/settings, /people, /tasks, /teams, /meetings,
+    // /notifications), and the only one for a session cookie that EXISTS but no
+    // longer verifies — the proxy reads presence, not validity, so that reader
+    // looks signed-in to it and signed-out here.
+    //
+    // That second case only terminates because `/login` is not on the proxy's
+    // `AUTH_ROUTES`. While it was, this redirect and that one chased each other
+    // — dead cookie in the jar, so the proxy sent the reader back to the route
+    // that had just refused them — and the loop ended at ERR_TOO_MANY_REDIRECTS
+    // rather than at the form that would have fixed it. Putting `/login` back
+    // on that list restores the loop; `proxy.test.ts` fails first if anyone does.
     redirect(loginPathFor(routedUrl));
   }
 

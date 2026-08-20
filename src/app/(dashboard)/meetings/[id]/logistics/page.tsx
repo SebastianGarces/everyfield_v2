@@ -16,7 +16,11 @@ interface LogisticsPageProps {
 
 export default async function LogisticsPage({ params }: LogisticsPageProps) {
   const { user } = await verifySession();
-  if (!user.churchId) redirect("/login");
+  // Signed in already — `verifySession` throws otherwise — just without a plant.
+  // /login was the wrong answer to that: it is not what is missing, and a live
+  // session is bounced straight back off the login page (#503). /dashboard is
+  // where an account with no plant belongs, and it says so.
+  if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
   const [meeting, checklist, checklistSummary] = await Promise.all([

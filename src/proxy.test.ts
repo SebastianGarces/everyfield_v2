@@ -6,8 +6,8 @@ import { NextRequest } from "next/server";
 import {
   CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
   isCrawlerPreviewRequest,
-  ROUTED_URL_HEADER,
 } from "./lib/crawler";
+import { ROUTED_URL_HEADER } from "./lib/routed-url";
 import { proxy } from "./proxy";
 
 // ============================================================================
@@ -133,13 +133,16 @@ test("an unauthenticated browser is still sent to /login", () => {
 });
 
 // ============================================================================
-// The authenticated bounce off /login, and its `?redirect=` param.
+// The cookie-bearing bounce off an auth route, and its `?redirect=` param.
 //
 // The param is followed through `safeRedirectPath` — the ONE open-redirect
 // predicate, shared with `login` and `devLoginAs` (ruling 408-1A). The proxy
 // used to hand-roll `startsWith("/")`, which `//evil.com` satisfies: resolved
 // against the request URL it is a PROTOCOL-RELATIVE URL, so a signed-in user
-// clicking `https://<app>/login?redirect=//evil.com` was sent off-site.
+// clicking `https://<app>/register?redirect=//evil.com` was sent off-site.
+//
+// These assert on `/register` because `/login` LEFT this branch (#503): see the
+// loop test below for why a cookie is the wrong thing to ask there.
 // ============================================================================
 
 function authedGet(path: string): NextRequest {
@@ -154,7 +157,7 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   // A legitimate path is followed unchanged…
   assert.equal(
     loginRedirect(
-      proxy(authedGet("/login?redirect=%2Fwiki%2Fgetting-started"))
+      proxy(authedGet("/register?redirect=%2Fwiki%2Fgetting-started"))
     ),
     `${BASE}/wiki/getting-started`
   );
@@ -169,7 +172,7 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   ]) {
     assert.equal(
       loginRedirect(
-        proxy(authedGet(`/login?redirect=${encodeURIComponent(attack)}`))
+        proxy(authedGet(`/register?redirect=${encodeURIComponent(attack)}`))
       ),
       `${BASE}/dashboard`,
       `${attack} escaped safeRedirectPath`
@@ -177,7 +180,46 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   }
 
   // No param at all still lands on the dashboard.
-  assert.equal(loginRedirect(proxy(authedGet("/login"))), `${BASE}/dashboard`);
+  assert.equal(
+    loginRedirect(proxy(authedGet("/register"))),
+    `${BASE}/dashboard`
+  );
+
+  // And `/` is still an auth route, so the same branch covers it.
+  assert.equal(loginRedirect(proxy(authedGet("/"))), `${BASE}/dashboard`);
+});
+
+test("a cookie that no longer verifies reaches the login form (#503)", () => {
+  // THE LOOP, pinned. `hasSessionCookie` is presence, not validity, so an
+  // expired or revoked session looks signed-in to this proxy and signed-out to
+  // everything that checks properly. The layout bounced such a reader to
+  // `/login?redirect=<where they were>`; with `/login` on `AUTH_ROUTES` this
+  // proxy sent them back to that same route on the strength of the dead cookie,
+  // which bounced them again — ERR_TOO_MANY_REDIRECTS, and no way to reach the
+  // form that would have fixed it.
+  //
+  // What must hold is that `/login` is a DEAD END for the redirect chain: the
+  // request continues into the app, where the page asks the session rather than
+  // the cookie. Asserting `loginRedirect === null` is the whole property — one
+  // more hop and the loop is back.
+  for (const path of [
+    "/login",
+    "/login?redirect=%2Fsettings",
+    "/login?redirect=%2Fsettings%3Ftab%3Dbilling",
+  ]) {
+    const response = proxy(authedGet(path));
+    assert.equal(
+      loginRedirect(response),
+      null,
+      `${path} bounced a stale-cookie reader away from the login form`
+    );
+    // It continues into the app rather than being answered at the edge.
+    assert.equal(
+      response.headers.get(`x-middleware-request-${ROUTED_URL_HEADER}`),
+      path,
+      `${path} did not continue into the app`
+    );
+  }
 });
 
 test("/dashboard bounces a crawler exactly like a browser (#297)", () => {
