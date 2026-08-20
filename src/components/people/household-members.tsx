@@ -3,16 +3,17 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Household, HouseholdRole, Person } from "@/db/schema";
+import type { Household, HouseholdRole } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { Settings, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { HouseholdManager } from "./household-manager";
 
 interface HouseholdMembersProps {
-  person: Person;
+  person: PersonForClient;
   household: Household | null;
-  members: Person[];
+  members: PersonForClient[];
   /**
    * All households of the church, for the "join existing" list.
    * Required — an empty default would silently remove that path.
@@ -27,7 +28,7 @@ const ROLE_LABELS: Record<HouseholdRole, string> = {
   other: "Member",
 };
 
-function getInitials(person: Person): string {
+function getInitials(person: PersonForClient): string {
   return `${person.firstName[0] || ""}${person.lastName[0] || ""}`.toUpperCase();
 }
 

@@ -25,7 +25,7 @@
 //
 // `tags` is deliberately absent. `PersonCard` can render them, but the only
 // caller in the product (`components/people/people-list.tsx`, fed by
-// `listPeople`, which returns `PersonForList[]`) never passes any — so a
+// `listPeople`, which returns `PersonForClient[]`) never passes any — so a
 // landing page that showed tag chips would be showing a card the product does
 // not currently render.
 //
@@ -33,7 +33,7 @@
 // value import would pull Drizzle into the marketing bundle.
 // ============================================================================
 
-import type { PersonForList } from "@/lib/people/types";
+import type { PersonForClient } from "@/lib/people/types";
 
 const CHURCH_ID = "fixture-church";
 const CREATED_BY = "fixture-user";
@@ -176,8 +176,8 @@ export const PEOPLE_FIXTURE = [
     createdAt: new Date("2026-03-31T06:27:14.774Z"),
     updatedAt: new Date("2026-07-26T06:27:14.774Z"),
   },
-] satisfies PersonForList[];
-// `PersonForList`, matching what `listPeople` hands `PeopleList` — the account
+] satisfies PersonForClient[];
+// `PersonForClient`, matching what `listPeople` hands `PeopleList` — the account
 // link is not among the columns that reach a browser (#378), so a fixture
 // carrying one would be modelling a payload the product does not send.
 

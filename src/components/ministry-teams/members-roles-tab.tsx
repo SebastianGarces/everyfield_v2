@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
 import type { TeamDetail } from "@/lib/ministry-teams/service";
-import type { PersonForList } from "@/lib/people/types";
+import type { PersonForClient } from "@/lib/people/types";
 import { RoleFormDialog } from "./role-form-dialog";
 import { MemberAssignDialog } from "./member-assign-dialog";
 import { MemberRemoveButton } from "./member-remove-button";
@@ -17,9 +17,9 @@ import { RoleTemplateImport } from "./role-template-import";
 
 interface MembersRolesTabProps {
   team: TeamDetail;
-  /** `PersonForList` — the assign dialog needs a name and an id, never the
+  /** `PersonForClient` — the assign dialog needs a name and an id, never the
    *  account link, which does not cross to this client component (#378). */
-  people: PersonForList[];
+  people: PersonForClient[];
   /** Active team count per person id, for the assign dialog's warning. */
   teamCounts: Record<string, number>;
 }

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Commitment, Household, SkillInventory } from "@/db/schema";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
-import type { Person, Tag } from "@/lib/people/types";
+import type { PersonForClient, Tag } from "@/lib/people/types";
 import {
   Calendar,
   FileSignature,
@@ -26,13 +26,13 @@ import { SkillsList } from "./skills-list";
 import { TagPicker } from "./tag-picker";
 
 interface PersonOverviewProps {
-  person: Person;
+  person: PersonForClient;
   tags?: Tag[];
   availableTags?: Tag[];
   latestCommitment?: Commitment | null;
   skills?: SkillInventory[];
   household?: Household | null;
-  householdMembers?: Person[];
+  householdMembers?: PersonForClient[];
   /**
    * All households of the church, fetched server-side for HouseholdManager.
    * Required — an empty default would silently remove the Join Existing

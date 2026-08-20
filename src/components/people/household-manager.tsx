@@ -24,7 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Household, HouseholdRole, Person } from "@/db/schema";
+import type { Household, HouseholdRole } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { householdRoles } from "@/db/schema";
 import { cn } from "@/lib/utils";
 import { Home, Loader2, MapPin, Plus, UserMinus, Users } from "lucide-react";
@@ -33,7 +34,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 interface HouseholdManagerProps {
-  person: Person;
+  person: PersonForClient;
   currentHousehold: Household | null;
   /** All households of the church, fetched server-side and passed down */
   households: Household[];

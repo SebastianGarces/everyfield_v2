@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { CommitmentType, Person } from "@/db/schema";
+import type { CommitmentType } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -21,7 +22,7 @@ import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 interface CommitmentFormProps {
-  person: Person;
+  person: PersonForClient;
   onSuccess?: () => void;
 }
 

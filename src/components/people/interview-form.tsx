@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { InterviewResult, InterviewStatus, Person } from "@/db/schema";
+import type { InterviewResult, InterviewStatus } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Check, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -21,7 +22,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 interface InterviewFormProps {
-  person: Person;
+  person: PersonForClient;
   onSuccess?: () => void;
 }
 

@@ -106,7 +106,7 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
       // NO `userId`. This projection is drawn by `PipelineView`, a client
       // component, so every column named here crosses to the browser — and an
       // account identifier has no business in a drag-and-drop card (#378).
-      // `PersonForList` is the type that says so.
+      // `PersonForClient` is the type that says so.
       createdBy: persons.createdBy,
       createdAt: persons.createdAt,
       updatedAt: persons.updatedAt,

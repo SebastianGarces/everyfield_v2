@@ -6,14 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
-import { PersonForList, PersonStatus, Tag } from "@/lib/people/types";
+import { PersonForClient, PersonStatus, Tag } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import { TagList } from "./tag-list";
 
 interface PersonCardProps {
-  /** `PersonForList` — every caller is a list surface, and the account
+  /** `PersonForClient` — every caller is a list surface, and the account
    *  link is not among the columns that reach the browser (#378). */
-  person: PersonForList & { tags?: Tag[] };
+  person: PersonForClient & { tags?: Tag[] };
   /** Render the card as inert markup instead of a link — for presentational
    *  embeds (the marketing page), where nothing may be clickable, focusable or
    *  prefetchable. Absent, as in the app, this card is unchanged. */
