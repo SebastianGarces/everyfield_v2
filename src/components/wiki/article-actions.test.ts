@@ -412,6 +412,12 @@ describe("the print contract, across every file that holds a piece of it", () =>
 });
 
 describe("the download control", () => {
+  test("the surface offers exactly two controls", () => {
+    // Print and download, and nothing that crept in beside them. The count
+    // outlived the cursor scan it was written to make meaningful (#502).
+    assert.equal((ARTICLE_ACTIONS.match(/<Button/g) ?? []).length, 2);
+  });
+
   test("the renderer is loaded on click, not on every wiki page view", () => {
     // Every file on the download path, not just this one: `render.tsx` is
     // imported statically FROM here, so a static import of the renderer over

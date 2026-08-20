@@ -12,8 +12,9 @@ import { sourceReader, stripComments } from "@/lib/testing/source-span";
 // The rule stands on two rungs, and each one is asserted here once:
 //
 //   1. `globals.css` gives the cursor to every NATIVE clickable — a `<button>`,
-//      an `a[href]`, anything carrying `role="button"` or `tabindex="0"`. No
-//      class is involved, so no call site can drop it.
+//      a checkbox or radio `<input>`, an `a[href]`, anything carrying
+//      `role="button"` or `tabindex="0"`. No class is involved, so no call site
+//      can drop it.
 //   2. The shadcn bases below render an element rung 1 cannot reach — a Radix
 //      `div[role="option"]`, a `div[role="menuitem"]` — or are the primitive a
 //      whole surface leans on. For those the class string in `src/components/ui/`
@@ -185,7 +186,7 @@ test("every interactive shadcn base carries cursor-pointer in its own class", ()
   }
 });
 
-test("globals.css keeps the native rung: button, role=button, a[href], tabindex=0", () => {
+test("globals.css keeps the native rung: button, role=button, inputs, a[href], tabindex=0", () => {
   // The rung the inventory above deliberately does NOT duplicate. Deleting a
   // selector from this list silently un-guards every plain `<Button>` and
   // `<Link>` in the product, which is why no call site scans for it any more.
@@ -199,6 +200,11 @@ test("globals.css keeps the native rung: button, role=button, a[href], tabindex=
 
   for (const selector of [
     '[role="button"]:not(:disabled)',
+    // Added in #502. A native checkbox and radio are clickable and nothing
+    // else reaches them, which is why one surface was scanning its own call
+    // sites for the class instead.
+    'input[type="checkbox"]:not(:disabled)',
+    'input[type="radio"]:not(:disabled)',
     "a[href]",
     '[tabindex="0"]',
   ]) {
@@ -212,10 +218,19 @@ test("globals.css keeps the native rung: button, role=button, a[href], tabindex=
 /**
  * The suites still allowed to scan a CALL SITE for the class, and why.
  *
- * Every entry names a clickable neither rung reaches: rung 1 is four selectors
- * wide and rung 2 only covers what `src/components/ui/` writes. The list is a
- * tripwire in both directions — an entry that stops scanning is dead weight and
- * fails here, so the list shrinks as coverage grows.
+ * Every entry names a clickable NEITHER RUNG REACHES — and that is a literal
+ * claim, checked entry by entry, not a general excuse. Rung 1 is six selectors
+ * and rung 2 covers only what `src/components/ui/` writes; anything a call site
+ * scans that falls inside either is a second weak rung, and #502 deleted twenty
+ * of those. The list is a tripwire in both directions: an entry that stops
+ * scanning is dead weight and fails here, so it shrinks as coverage grows —
+ * which is exactly what happened when rung 1 took the native inputs.
+ *
+ * Three entries. Two of them are `<label>`, and that is the shape of the gap:
+ * a label is clickable, no selector reaches it, and the class cannot move to
+ * the `Label` base because a label's cursor follows the control it names (#502
+ * W1). A `ToggleLabel` primitive would close it; that is the next increment,
+ * not this one (W2).
  */
 const CALL_SITE_SCANS: readonly {
   readonly file: string;
@@ -228,17 +243,13 @@ const CALL_SITE_SCANS: readonly {
   },
   {
     file: "src/components/tasks/phase-template-prompt.test.ts",
-    clickable: 'a native <input type="checkbox"> and its <label>',
+    clickable:
+      "the <label> beside each checklist — the checkbox itself is rung 1 now",
   },
   {
     file: "src/components/phase-engine/exit-criteria.test.ts",
     clickable:
       '<summary> — focusable without a tabindex="0" attribute to match',
-  },
-  {
-    file: "src/components/shared/rich-text-editor-controls.test.ts",
-    clickable:
-      "richTextControlClass — a shared constant, guarded where it is written",
   },
 ];
 
@@ -248,7 +259,9 @@ function testFilesUnder(dir: string): string[] {
 
     if (entry.isDirectory()) return testFilesUnder(full);
 
-    return entry.name.endsWith(".test.ts") ? [full] : [];
+    // `.tsx` as well as `.ts`: none exist today, and a ratchet with a blind
+    // extension is a ratchet the next suite slips past.
+    return /\.test\.tsx?$/.test(entry.name) ? [full] : [];
   });
 }
 

@@ -8,23 +8,17 @@ import {
 } from "./rich-text-editor-controls";
 
 // ----------------------------------------------------------------------------
-// `cursor-pointer` on every clickable is a project hard rule (AGENTS.md), and
-// these toolbar buttons are the easiest place in the app to break it — they are
-// bare <button>s in a custom widget, not shadcn components someone else already
-// styled. The rule is a claim about the class string, so it is asserted on the
-// class string, in BOTH states: an active Bold is still a clickable.
+// The toolbar's class string, in both states. What is pinned is that the active
+// state DECORATES the base rather than replacing it — the failure that would
+// otherwise show up as a Bold button losing its padding the moment it is
+// pressed.
+//
+// The cursor scan that used to lead this file is gone (#502). These controls
+// are bare <button>s, and a native button takes its pointer from globals.css,
+// so the class carrying `cursor-pointer` is belt-and-braces and asserting it
+// here was the second weak rung the issue exists to delete — the same call this
+// PR made for the <Button> in article-feedback and eighteen others.
 // ----------------------------------------------------------------------------
-
-test("every toolbar control carries cursor-pointer, active or not", () => {
-  for (const isActive of [true, false]) {
-    assert.match(
-      richTextControlClass(isActive),
-      /\bcursor-pointer\b/,
-      `active=${isActive}`
-    );
-  }
-  assert.match(RICH_TEXT_CONTROL_CLASS, /\bcursor-pointer\b/);
-});
 
 test("the active state changes appearance without dropping the base class", () => {
   const active = richTextControlClass(true);

@@ -44,9 +44,8 @@ function hiddenDescriptionInput(html: string): RenderedElement | undefined {
 }
 
 test("the toolbar renders one named control per editor command", () => {
-  // The cursor loop that used to sit here is gone (#502): these buttons take
-  // their class from `richTextControlClass`, which is asserted where it is
-  // written — `src/components/shared/rich-text-editor-controls.test.ts`.
+  // The cursor loop that used to sit here is gone (#502): these controls are
+  // native <button>s, so globals.css gives them the pointer.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);

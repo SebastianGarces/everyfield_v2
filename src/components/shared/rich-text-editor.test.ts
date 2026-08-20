@@ -31,8 +31,8 @@ function render(props: Partial<Parameters<typeof RichTextEditor>[0]> = {}) {
 }
 
 test("the toolbar renders one named control per editor command", () => {
-  // The cursor loop that used to sit here is gone (#502): the class comes from
-  // `richTextControlClass` and is asserted where that constant is written.
+  // The cursor loop that used to sit here is gone (#502): these are native
+  // <button>s, so globals.css gives them the pointer.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);

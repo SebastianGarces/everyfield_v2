@@ -254,8 +254,15 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  /* The native rung of the cursor-pointer rule (AGENTS.md). The two input
+     types joined it in #502: a native checkbox and radio are clickable, no
+     selector here reached them, and the only surface rendering them was
+     pinning the class per call site instead. Guarded by
+     src/components/ui/cursor-pointer.test.ts. */
   button:not(:disabled),
   [role="button"]:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
   a[href],
   [tabindex="0"] {
     cursor: pointer;

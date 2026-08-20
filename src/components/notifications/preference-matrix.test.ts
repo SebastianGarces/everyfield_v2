@@ -81,6 +81,15 @@ test("the cadence area renders the variant it was given, not an assumed one", ()
   assert.doesNotMatch(CODE, /once a day/i);
 });
 
+test("the matrix is built from the shared primitives, not hand-rolled ones", () => {
+  // A per-channel Switch and a cadence Select, both from src/components/ui/.
+  // Reaching for a raw <input type="checkbox"> or a <select> here would leave
+  // the surface styled and guarded by nothing the rest of the app shares.
+  for (const primitive of [/<Switch\b/, /<SelectTrigger\b/, /<SelectItem\b/]) {
+    assert.match(CODE, primitive, String(primitive));
+  }
+});
+
 test("the header comment claims only what the file does", () => {
   // The other half of #236: the comment already promised a toast on failure
   // while the actions were still throwing, so the file documented behaviour it
