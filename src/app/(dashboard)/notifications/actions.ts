@@ -3,7 +3,8 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { requireSeat, type Capability } from "@/lib/auth/seats";
+import { requireSeat } from "@/lib/auth/seats";
+import { type Capability } from "@/lib/auth/seat-rules";
 import {
   loadOlderNotifications,
   markAllVisibleNotificationsRead,

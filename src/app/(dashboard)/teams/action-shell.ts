@@ -13,11 +13,8 @@
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
-import {
-  requireSeat,
-  SeatRefusalError,
-  type Capability,
-} from "@/lib/auth/seats";
+import { requireSeat } from "@/lib/auth/seats";
+import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
@@ -54,8 +51,15 @@ export async function withChurch<T>(
     }
     return await run({ churchId: user.churchId, userId: user.id });
   } catch (error) {
+    // A SESSIONLESS CALL THROWS, and it leaves through here rather than
+    // becoming a handled result — the same rule `withChurchSession` follows.
+    // Converting `Unauthorized` into `{ success: false, error: "You must be
+    // logged in" }` hands an anonymous caller a well-formed answer from an
+    // endpoint that should only ever have said no
+    // (`memory/invariants.md` → Authentication). It lands on
+    // `src/app/(dashboard)/error.tsx`, which offers a way back.
     if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in" };
+      throw error;
     }
     // An `instanceof` and not a message prefix: `requireChurchAccess` throws
     // `Forbidden: …` too, so a prefix test quietly widens to every refusal that

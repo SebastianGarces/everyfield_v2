@@ -3,7 +3,12 @@ import { test } from "node:test";
 
 import type { SeatFields } from "./tenancy";
 import { CAPABILITY_BY_EXPORT } from "./capability-map";
-import { ADMIN_PLUS, OWNER_ONLY, holdsSeatFor, type Capability } from "./seats";
+import {
+  ADMIN_PLUS,
+  OWNER_ONLY,
+  holdsSeatFor,
+  type Capability,
+} from "./seat-rules";
 
 // ============================================================================
 // WHO MAY DO WHAT — the ruling 185 (1) / AS-003..AS-008 matrix, asserted.

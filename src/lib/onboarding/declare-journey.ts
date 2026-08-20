@@ -8,6 +8,12 @@
  * test through `DeclareJourneyDeps` without a request or a database. Same shape
  * as `./create-church` (#198) and `dashboard/confirm-leadership.ts`.
  *
+ * "WITHOUT A DATABASE" IS A CLAIM ABOUT THIS FILE'S IMPORTS, and it is one line
+ * from being false: the seat rule below comes from `@/lib/auth/seat-rules`, the
+ * import-free leaf, and NOT from `@/lib/auth/seats`, which opens a connection at
+ * module scope to mint an actor. `seat-leaf.test.ts` walks the graph and fails
+ * on that edge.
+ *
  * THE COMPOSITION ROOT LIVES IN THE ACTION, NOT HERE (ruling on 408's item 5).
  * `src/lib` is the shared layer every route, script and the phase engine may
  * import, so nothing in it may import from `src/app` — binding the concrete
@@ -17,7 +23,7 @@
  * including the test whose whole point is running without a request.
  */
 
-import { assertSeatFor } from "@/lib/auth/seats";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import { launchTargetDateSchema } from "@/lib/launch/validation";

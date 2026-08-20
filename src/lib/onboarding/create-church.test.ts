@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { SeatRefusalError } from "@/lib/auth/seats";
+import { SeatRefusalError } from "@/lib/auth/seat-rules";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { mock, test } from "node:test";

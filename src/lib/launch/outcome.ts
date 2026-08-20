@@ -16,7 +16,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import type { User } from "@/db/schema";
 import { requireChurchAccess } from "@/lib/auth/access";
-import { assertSeatFor } from "@/lib/auth/seats";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { markPlantDirty } from "@/lib/phase-engine/dirty-handler";
 import { daysUntilTarget } from "./countdown";
 import { getLaunchForChurch } from "./queries";

@@ -72,13 +72,9 @@ import {
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
   type AgendaSection,
+  type AgendaSaveResult,
   type AgendaSectionTemplate,
 } from "@/lib/meetings/agenda";
-
-/** What the save action reports back. Never throws at the component. */
-export type AgendaSaveResult =
-  | { success: true }
-  | { success: false; error: string };
 
 export interface AgendaBuilderProps {
   meetingId: string;

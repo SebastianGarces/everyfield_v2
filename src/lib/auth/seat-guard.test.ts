@@ -3,7 +3,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { CAPABILITY_BY_EXPORT } from "./capability-map";
-import { ADMIN_PLUS, OWNER_ONLY, UNSEATED_EXPORTS } from "./seats";
+import { ADMIN_PLUS, OWNER_ONLY, UNSEATED_EXPORTS } from "./seat-rules";
 import {
   SEAT_GUARD,
   SRC,
@@ -224,7 +224,7 @@ test("the two seat sets have one declaration site, and nothing else compares a s
   // or an admin" is one refactor away from disagreeing, and the disagreement is
   // silent — both files compile, both look right, and one of them is now the
   // permission rule nobody reads.
-  const SETS = path.join(SRC, "lib", "auth", "seats.ts");
+  const SETS = path.join(SRC, "lib", "auth", "seat-rules.ts");
 
   // `tenancy.ts` is the leaf that owns the (tenancy, seat) predicates
   // `holdsSeatFor` is written against; it declares neither set.
@@ -273,7 +273,7 @@ test("the two seat sets have one declaration site, and nothing else compares a s
   assert.deepEqual(
     declarations,
     [],
-    "OWNER_ONLY and ADMIN_PLUS are declared in src/lib/auth/seats.ts and imported everywhere else — a second declaration is the per-module matrix ruling 185 (8) rejected"
+    "OWNER_ONLY and ADMIN_PLUS are declared in src/lib/auth/seat-rules.ts and imported everywhere else — a second declaration is the per-module matrix ruling 185 (8) rejected"
   );
 
   assert.deepEqual(

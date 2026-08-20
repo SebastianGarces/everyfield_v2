@@ -50,7 +50,7 @@ import {
 } from "@/lib/validations/onboarding";
 import { and, eq, notExists, type SQL } from "drizzle-orm";
 
-import { assertSeatFor } from "@/lib/auth/seats";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import type { SeatFields } from "@/lib/auth/tenancy";
 
 /**

@@ -1,6 +1,7 @@
 "use server";
 
-import { requireSeat, SeatRefusalError } from "@/lib/auth/seats";
+import { requireSeat } from "@/lib/auth/seats";
+import { SeatRefusalError } from "@/lib/auth/seat-rules";
 import type { Task } from "@/db/schema";
 import {
   bulkCompleteTasks,

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
+import { codeOf, functionBodies } from "@/lib/auth/server-action-surface";
+
 import type { Task, User, UserSeat } from "@/db/schema";
-import { SeatRefusalError } from "@/lib/auth/seats";
+import { SeatRefusalError } from "@/lib/auth/seat-rules";
 
 import {
   NOT_YOUR_TASK_REASON,
@@ -104,6 +107,49 @@ test("a coach and an oversight account fail the rule too", () => {
 
   assert.equal(mayActOnTask(coach, task(null)), false);
   assert.equal(mayActOnTask(orgOwner, task(null)), false);
+});
+
+// ----------------------------------------------------------------------------
+// The two paths that ask the question in the ACTION, not in the service
+// ----------------------------------------------------------------------------
+
+test("the two actions that write past the service ask the rule themselves", () => {
+  // FOUR OF THE SIX `tasks.own` PATHS ARE COVERED BY THE SERVICE, because
+  // `completeTask` and `reopenTask` assert after their own load — which is also
+  // what covers `/launch`'s milestone ticks. The other two write through doors
+  // that have no subject of their own:
+  //
+  //   * `updateTaskStatusAction`'s non-complete branch goes to `updateTask`,
+  //     a `tasks.write` function;
+  //   * `addSubtaskAction` goes to `createTask`, and its subject is the PARENT,
+  //     which no service on that path ever reads.
+  //
+  // So both load the row and assert in the action body, and nothing downstream
+  // would notice if that line were deleted. This is the assertion that would —
+  // source-shaped for the reason `launch/service.test.ts`'s pair is: the
+  // property is "this call is present on this path", and a unit test that
+  // stubbed the service would pass with the line gone.
+  const code = codeOf(
+    path.join(process.cwd(), "src/app/(dashboard)/tasks/actions.ts")
+  );
+
+  for (const name of ["updateTaskStatusAction", "addSubtaskAction"]) {
+    const body = functionBodies(code).find((fn) => fn.name === name);
+
+    assert.ok(body, `${name} is gone from tasks/actions.ts`);
+    assert.match(
+      body.body,
+      /assertMayActOnTask\(user, (?:existing|parent)\)/,
+      `${name} writes without asking whose task it is — the seat guard admits every Member, and this path has no service-side check behind it (AS-006)`
+    );
+
+    // …and it asks about a row it LOADED, not about the id it was handed.
+    assert.match(
+      body.body,
+      /await getTask\(user\.churchId, \w+\)/,
+      `${name} must read the row it is judging`
+    );
+  }
 });
 
 // ----------------------------------------------------------------------------

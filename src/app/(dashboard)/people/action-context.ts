@@ -7,11 +7,8 @@
  */
 
 import type { User } from "@/db/schema";
-import {
-  requireSeat,
-  SeatRefusalError,
-  type Capability,
-} from "@/lib/auth/seats";
+import { requireSeat } from "@/lib/auth/seats";
+import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
 import type { ActionResult } from "@/lib/people/types";
 import { unstable_rethrow } from "next/navigation";
 import type { ZodError } from "zod";
@@ -103,6 +100,13 @@ export async function withChurchSession<T>(
     // and converting its `Unauthorized` into `{ success: false, … }` is what
     // gives an anonymous caller a well-formed answer from an endpoint that
     // should only ever have said no (`memory/invariants.md` → Authentication).
+    //
+    // WHERE IT LANDS FOR A REAL PERSON: `src/app/(dashboard)/error.tsx`, which
+    // says the sign-in probably expired and offers Try again / Sign in. Before
+    // that boundary existed the only one in the tree was `global-error.tsx`,
+    // which swaps in a bare document — so this rethrow was a blank page on a
+    // filled-in form. A seat refusal does NOT go that way; it is answered
+    // inline below, because "you may not do this" is an answer, not a fault.
     if (error instanceof Error && error.message === "Unauthorized") {
       throw error;
     }

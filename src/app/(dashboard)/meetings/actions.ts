@@ -21,8 +21,7 @@ import {
   updateRsvpStatus,
 } from "@/lib/meetings/guest-list";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
-import type { AgendaSection } from "@/lib/meetings/agenda";
-import type { AgendaSaveResult } from "@/components/meetings/agenda-builder";
+import type { AgendaSaveResult, AgendaSection } from "@/lib/meetings/agenda";
 import type {
   ChurchMeeting,
   Location,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { SeatRefusalError } from "@/lib/auth/seats";
+import { SeatRefusalError } from "@/lib/auth/seat-rules";
 import { mock, test } from "node:test";
 
 import { runDeclareJourney, type DeclareJourneyDeps } from "./declare-journey";

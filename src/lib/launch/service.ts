@@ -23,7 +23,7 @@ import { db } from "@/db";
 import type { User } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 import { requireChurchAccess } from "@/lib/auth/access";
-import { assertSeatFor } from "@/lib/auth/seats";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
 import { launchNoteSchema, launchTargetDateSchema } from "./validation";
 

@@ -26,7 +26,8 @@
 // The UI hides what a seat may not do; these are the checks that make it true.
 // ============================================================================
 
-import { requireSeat, type Capability } from "@/lib/auth/seats";
+import { requireSeat } from "@/lib/auth/seats";
+import { type Capability } from "@/lib/auth/seat-rules";
 import { refresh, revalidatePath } from "next/cache";
 import { z } from "zod";
 

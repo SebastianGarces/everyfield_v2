@@ -44,7 +44,7 @@ import {
 import type { LaunchMilestoneArea } from "@/db/schema/launch";
 import type { TaskStatus } from "@/db/schema/tasks";
 import { requireChurchAccess } from "@/lib/auth/access";
-import { assertSeatFor } from "@/lib/auth/seats";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
 
 // ----------------------------------------------------------------------------
