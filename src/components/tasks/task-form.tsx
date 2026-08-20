@@ -20,7 +20,7 @@ import {
 import type { PrerequisiteCandidate } from "@/lib/tasks/dependencies";
 import { Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import {
   createTaskAction,
   updateTaskAction,
@@ -244,7 +244,11 @@ export function TaskForm({
   prerequisiteIds = [],
 }: TaskFormProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+
+  // NOT `useTransition`, and the form is wired through `onSubmit` rather than
+  // `action` — see `handleSubmit` for why. This is the same "in flight" flag a
+  // transition gave, owned here so the submit is not React's to schedule.
+  const [isPending, setIsPending] = useState(false);
 
   const isEditing = !!task;
 
@@ -265,23 +269,59 @@ export function TaskForm({
     toRichTextHtml(task?.description)
   );
 
-  function handleSubmit(formData: FormData) {
-    startTransition(async () => {
-      const result = isEditing
-        ? await updateTaskAction(task!.id, formData)
-        : await createTaskAction(formData);
+  // --------------------------------------------------------------------------
+  // A SUBMIT THAT LEAVES OWNS NO TRANSITION AND NO REFRESH (#228, #526, #529)
+  // --------------------------------------------------------------------------
+  //
+  // memory/invariants.md → Client/Server Data Synchronization: a click that
+  // navigates must not own a transition or a refresh on the route being LEFT,
+  // because either turns the click into work React is still doing on the route
+  // the push is trying to replace. This form was the full banned shape —
+  // `startTransition` around actions that each called `refresh()`, with
+  // `router.push("/tasks")` inside the same transition.
+  //
+  // Three things had to move, and the third is why this is `onSubmit` rather
+  // than `action`:
+  //
+  //   1. `refresh()` left `createTaskAction`/`updateTaskAction`. Both have
+  //      exactly ONE caller — this form — and it always navigates away, so the
+  //      refresh only ever re-rendered a route nobody was going to be on. The
+  //      `revalidatePath` calls stay: they freshen /tasks, which is where the
+  //      planter lands.
+  //   2. The transition is gone. `isPending` is plain state now.
+  //   3. `<form action={fn}>` runs `fn` inside a transition REACT owns, so
+  //      dropping `useTransition` while keeping `action` would have changed
+  //      nothing. `onSubmit` is the wiring that actually leaves the push
+  //      outside one.
+  //
+  // `isPending` is deliberately NOT cleared on success: the form is leaving, and
+  // re-enabling the button while the push is in flight invites a second submit
+  // that creates a second task.
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
 
-      if (result.success) {
-        toast.success(isEditing ? "Task updated" : "Task created");
-        router.push("/tasks");
-      } else {
-        toast.error(result.error);
-      }
-    });
+    const formData = new FormData(event.currentTarget);
+    setIsPending(true);
+
+    // Narrowed on the row itself rather than on `isEditing`, so the id needs no
+    // non-null assertion to reach the action.
+    const result = task
+      ? await updateTaskAction(task.id, formData)
+      : await createTaskAction(formData);
+
+    if (!result.success) {
+      setIsPending(false);
+      toast.error(result.error);
+      return;
+    }
+
+    toast.success(isEditing ? "Task updated" : "Task created");
+    router.push("/tasks");
   }
 
   return (
-    <form action={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       {/* Title */}
       <div className="space-y-2">
         <Label htmlFor="title">

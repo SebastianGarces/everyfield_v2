@@ -32,6 +32,25 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   const isForked = !!template.sourceTemplateId;
   const isSystem = template.isSystem;
 
+  // --------------------------------------------------------------------------
+  // BOTH BUTTONS LEAVE, SO NEITHER REFRESHES (#228, #526, #529)
+  // --------------------------------------------------------------------------
+  //
+  // memory/invariants.md → Client/Server Data Synchronization: a click that
+  // navigates owns no refresh on the route being LEFT. Both handlers below used
+  // to `router.push(...)` and then `router.refresh()` on the very next line —
+  // the refresh re-renders the editor the push is replacing, which is the
+  // arrangement measured to strand the navigation while the write still lands.
+  //
+  // Nothing is lost by dropping it. Both actions call
+  // `revalidatePath("/communication/templates")`, so the list the reader arrives
+  // at is already re-rendered from the database — and the destination is a page,
+  // not a shared layout, so unlike the notifications bell (#527) there is no
+  // segment the push reuses and no reconcile owed after it.
+  //
+  // `saving` is cleared on the FAILURE path only, for the same reason: on the
+  // way out, re-enabling Save while the push is in flight invites a second write
+  // of a template the reader has stopped looking at.
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -43,10 +62,8 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
         body,
       });
       router.push("/communication/templates");
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
       setSaving(false);
     }
   };
@@ -64,7 +81,6 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
     try {
       await deleteTemplateAction(template.id);
       router.push("/communication/templates");
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reset");
     }
