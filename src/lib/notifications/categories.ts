@@ -61,9 +61,9 @@ export interface NotificationCategoryDefinition {
  * decides what an ABSENT preference row means, and an explicit row from either
  * audience still wins outright.
  *
- * Deliberately an audience rather than a role, so exactly one place
- * (`audienceForRole` in `./preferences.ts`) maps the five roles onto the two
- * behaviours and the rest of the module never branches on a role string.
+ * Deliberately an audience rather than a tenancy, so exactly one place
+ * (`audienceForTenancy` in `./preferences.ts`) maps the three tenancies onto the two
+ * behaviours and the rest of the module never branches on a tenancy column.
  */
 export type NotificationAudience = "church" | "oversight";
 
@@ -437,8 +437,9 @@ export function oversightGateFor(
  * defaults to false, so a plant that has decided nothing shares nothing —
  * enqueue writes no row for an oversight recipient at all.
  *
- * Church-level roles (planter, coach, team_member) never reach this:
- * `canAccessFeatureData` returns true for them without consulting a toggle.
+ * A church-level account — any seat in a plant, or a coach with no tenancy —
+ * never reaches this: `canAccessFeatureData` returns true for them without
+ * consulting a toggle.
  */
 export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
   "oversight_activity";

@@ -119,12 +119,21 @@ class FakeDispatchStore implements DispatchDeps {
 
   // -- seeding --------------------------------------------------------------
 
+  /**
+   * A recipient in the given tenancy — the plant by default, which is what
+   * every recipient in this file is. All three FKs are named because
+   * `DispatchRecipient` requires them: they are read together to pick the coded
+   * preference defaults (`audienceForTenancy`, N-027).
+   */
   addRecipient(
     id: string,
     email: string,
-    role: DispatchRecipient["role"] = "planter"
+    tenancy: Pick<
+      DispatchRecipient,
+      "churchId" | "sendingChurchId" | "sendingNetworkId"
+    > = { churchId: CHURCH, sendingChurchId: null, sendingNetworkId: null }
   ): DispatchRecipient {
-    const recipient: DispatchRecipient = { id, email, name: null, role };
+    const recipient: DispatchRecipient = { id, email, name: null, ...tenancy };
     this.recipients.push(recipient);
     return recipient;
   }
@@ -1003,7 +1012,9 @@ test("a recipient with no email address fails permanently, never retries", async
     id: PLANTER,
     email: "",
     name: null,
-    role: "planter" as const,
+    churchId: CHURCH,
+    sendingChurchId: null,
+    sendingNetworkId: null,
   });
   const notification = store.addNotification();
 

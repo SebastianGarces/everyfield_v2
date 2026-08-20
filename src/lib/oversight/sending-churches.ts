@@ -30,6 +30,7 @@
 //     caller's OWN invitations and this one reads a member org's.
 // ============================================================================
 
+import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 
 import {
@@ -61,10 +62,13 @@ export async function listNetworkSendingChurches(
 ): Promise<NetworkSendingChurchSummary[]> {
   const { db } = await import("@/db");
 
-  // Rule 1. Not a role check plus an id check — one check, because a network id
-  // on a non-network account is not a licence to read a network.
-  if (user.role !== "network_admin" || !user.sendingNetworkId) return [];
-  const networkId = user.sendingNetworkId;
+  // Rule 1. Not a tenancy check plus an id check — ONE check, because a network
+  // id on an account whose tenancy is something else is not a licence to read a
+  // network. `oversightOrgOf` is that one check: it answers only when the row
+  // names exactly one tenancy and that tenancy is this network.
+  const org = oversightOrgOf(user);
+  if (org?.type !== "network") return [];
+  const networkId = org.id;
 
   const members = await db
     .select({ id: sendingChurches.id, name: sendingChurches.name })

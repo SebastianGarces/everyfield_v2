@@ -101,7 +101,7 @@ async function main() {
     .values({
       email: `a-${Date.now()}@example.test`,
       passwordHash: "x",
-      role: "planter",
+      seat: "owner",
       churchId: churchA.id,
     })
     .returning();
@@ -110,7 +110,7 @@ async function main() {
     .values({
       email: `b-${Date.now()}@example.test`,
       passwordHash: "x",
-      role: "team_member",
+      seat: "member",
       churchId: churchA.id,
     })
     .returning();
@@ -119,7 +119,7 @@ async function main() {
     .values({
       email: `c-${Date.now()}@example.test`,
       passwordHash: "x",
-      role: "planter",
+      seat: "owner",
       churchId: churchB.id,
     })
     .returning();
@@ -429,7 +429,7 @@ async function main() {
     .values({
       email: `oversight-${Date.now()}@example.test`,
       passwordHash: "x",
-      role: "network_admin",
+      seat: "owner",
       sendingNetworkId: network.id,
     })
     .returning();
@@ -526,7 +526,7 @@ async function main() {
     .values({
       email: `shut-${Date.now()}@example.test`,
       passwordHash: "x",
-      role: "planter",
+      seat: "owner",
       churchId: shutChurch.id,
     })
     .returning();

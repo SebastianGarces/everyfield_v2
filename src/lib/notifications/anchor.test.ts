@@ -1,3 +1,4 @@
+import { armFor, oversightSqlArms } from "@/lib/testing/oversight-sql-arms";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { db } from "@/db";
 import { users, type User } from "@/db/schema";
 import { sourceReader } from "@/lib/testing/source-span";
 
-import { OVERSIGHT_ADMIN } from "./oversight-admin";
+import { OVERSIGHT_ADMIN, oversightOrgOfKind } from "./oversight-admin";
 
 import {
   anchorId,
@@ -77,7 +78,7 @@ const QUERIES_CODE = readFileSync(
 function user(overrides: Partial<User>): User {
   return {
     id: USER,
-    role: "network_admin",
+    seat: "owner",
     churchId: null,
     sendingChurchId: null,
     sendingNetworkId: null,
@@ -359,12 +360,14 @@ test("the two anchors' reads differ in the BOUNDARY and in nothing else", () => 
 
 test("only an oversight admin OF the anchored org may be notified", () => {
   const networkAdmin = user({
-    role: "network_admin",
+    seat: "owner",
     sendingNetworkId: NETWORK,
+    sendingChurchId: null,
   });
   const sendingChurchAdmin = user({
-    role: "sending_church_admin",
+    seat: "owner",
     sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
   });
 
   assert.equal(
@@ -383,7 +386,11 @@ test("only an oversight admin OF the anchored org may be notified", () => {
   // this one's" rule, at the notification layer.
   assert.equal(
     recipientAdministersOrg(
-      user({ role: "network_admin", sendingNetworkId: SENDING_CHURCH }),
+      user({
+        seat: "owner",
+        sendingNetworkId: SENDING_CHURCH,
+        sendingChurchId: null,
+      }),
       orgAnchor("network", NETWORK)
     ),
     false
@@ -401,41 +408,52 @@ test("only an oversight admin OF the anchored org may be notified", () => {
     false
   );
 
-  // A church-level role carrying a stray org FK is not an oversight user, and
-  // the role half of the check is what says so.
-  assert.equal(
-    recipientAdministersOrg(
-      user({ role: "team_member", sendingNetworkId: NETWORK }),
-      orgAnchor("network", NETWORK)
-    ),
-    false
-  );
-  assert.equal(
-    recipientAdministersOrg(
-      user({ role: "planter", churchId: CHURCH, sendingNetworkId: NETWORK }),
-      orgAnchor("network", NETWORK)
-    ),
-    false
-  );
+  // A CHURCH-LEVEL ACCOUNT CARRYING A STRAY ORG FK is not an oversight user,
+  // and the PLANT FK is what says so — the seat cannot, since `owner` is the
+  // same word in a plant and in a network. Both rows below name two tenancies,
+  // so `oversightOrgOf` names no org for either and neither reaches anything.
+  for (const seat of ["member", "owner"] as const) {
+    assert.equal(
+      recipientAdministersOrg(
+        user({
+          seat,
+          churchId: CHURCH,
+          sendingNetworkId: NETWORK,
+          sendingChurchId: null,
+        }),
+        orgAnchor("network", NETWORK)
+      ),
+      false,
+      `a plant ${seat} carrying a stray sending_network_id`
+    );
+  }
 });
 
-test("each anchor kind admits exactly the role that administers it", () => {
-  // #304 ruling 4, item 6. "An oversight role" was too coarse. Both org FKs
-  // live on the SAME `users` row, so a `network_admin` who also carries a
+test("each anchor kind admits exactly the tenancy that administers it", () => {
+  // #304 ruling 4, item 6, restated for the seat model. Both org FKs live on
+  // the SAME `users` row, so an account carrying a `sending_network_id` AND a
   // `sending_church_id` — a founder who administers both, or a row where the
-  // second FK was set once and never cleared — passed the sending-church arm
-  // and received that sending church's own notifications. That is the
-  // hierarchy walk the invariant forbids, arriving through the role rather
-  // than through the FK.
+  // second FK was set once and never cleared — used to be told apart by its
+  // role: `network_admin` passed the network arm and failed the sending-church
+  // one.
+  //
+  // WITH THE ROLE GONE NOTHING BREAKS THAT TIE. `seat = "owner"` says the same
+  // word for both orgs, so `oversightOrgOf` answers only when EXACTLY ONE
+  // tenancy is named and this row administers NEITHER — where the old rule let
+  // it administer one. That is stricter, not looser, and it is the fail-closed
+  // side of the same hierarchy-walk invariant: whichever FK a precedence order
+  // picked, the other org's reach would go to an account with a competing claim
+  // on it. The row is a data defect and the audience is built to SEE it rather
+  // than swallow it (`classifyOversightCandidate` counts it misprovisioned).
   const dualFk = user({
-    role: "network_admin",
+    seat: "owner",
     sendingNetworkId: NETWORK,
     sendingChurchId: SENDING_CHURCH,
   });
 
   assert.equal(
     recipientAdministersOrg(dualFk, orgAnchor("network", NETWORK)),
-    true
+    false
   );
   assert.equal(
     recipientAdministersOrg(
@@ -445,56 +463,51 @@ test("each anchor kind admits exactly the role that administers it", () => {
     false
   );
 
-  // The mirror image: a sending-church admin carrying a network FK.
-  const dualFkOther = user({
-    role: "sending_church_admin",
-    sendingChurchId: SENDING_CHURCH,
-    sendingNetworkId: NETWORK,
-  });
+  // The whole tenancy × anchor domain, enumerated: for each anchor kind exactly
+  // ONE tenancy qualifies, and holding the Owner seat is never what qualifies
+  // it. A tenancy added to the product later fails this rather than defaulting
+  // into an audience.
+  const CARRIERS: [
+    string,
+    Partial<User>,
+    "sending_church" | "network" | null,
+  ][] = [
+    ["the plant's Owner", { seat: "owner", churchId: CHURCH }, null],
+    ["a coach, who names no tenancy at all", { seat: null }, null],
+    [
+      "the sending church's account",
+      { seat: "owner", sendingChurchId: SENDING_CHURCH },
+      "sending_church",
+    ],
+    [
+      "the network's account",
+      { seat: "owner", sendingNetworkId: NETWORK },
+      "network",
+    ],
+    [
+      "a row naming all three tenancies",
+      {
+        seat: "owner",
+        churchId: CHURCH,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      },
+      null,
+    ],
+  ];
 
-  assert.equal(
-    recipientAdministersOrg(
-      dualFkOther,
-      orgAnchor("sending_church", SENDING_CHURCH)
-    ),
-    true
-  );
-  assert.equal(
-    recipientAdministersOrg(dualFkOther, orgAnchor("network", NETWORK)),
-    false
-  );
-
-  // The whole role × anchor domain, enumerated: for each anchor kind exactly
-  // ONE role qualifies, whatever FKs the row carries. A role added to the
-  // product later fails this rather than defaulting into an audience.
-  const everyRole = [
-    "planter",
-    "team_member",
-    "coach",
-    "sending_church_admin",
-    "network_admin",
-  ] as const;
-
-  for (const role of everyRole) {
-    const carriesBoth = user({
-      role,
-      churchId: CHURCH,
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: NETWORK,
-    });
+  for (const [who, fields, administers] of CARRIERS) {
+    const row = user(fields);
 
     assert.equal(
-      recipientAdministersOrg(
-        carriesBoth,
-        orgAnchor("sending_church", SENDING_CHURCH)
-      ),
-      role === "sending_church_admin",
-      `sending_church anchor / ${role}`
+      recipientAdministersOrg(row, orgAnchor("sending_church", SENDING_CHURCH)),
+      administers === "sending_church",
+      `sending_church anchor / ${who}`
     );
     assert.equal(
-      recipientAdministersOrg(carriesBoth, orgAnchor("network", NETWORK)),
-      role === "network_admin",
-      `network anchor / ${role}`
+      recipientAdministersOrg(row, orgAnchor("network", NETWORK)),
+      administers === "network",
+      `network anchor / ${who}`
     );
   }
 });
@@ -527,56 +540,83 @@ test("the fan-out asks the same question the per-recipient gate does", () => {
 
   const normalised = sql.replace(/"/g, "");
 
-  // Each arm pairs the role with ITS OWN FK. Both org FKs live on one `users`
-  // row and neither implies the other, so an unpaired `or(fk, fk) and role in
-  // (...)` admits a network admin carrying a stray `sending_church_id` into
-  // that sending church's audience — the hierarchy walk memory/invariants.md
-  // forbids, arriving through the role instead of through the FK.
-  assert.match(
-    normalised,
-    /users\.role = \$\d+ and users\.sending_church_id = \$\d+/
+  // Each arm pairs the org's FK with THE REST OF THE EXACTLY-ONE-TENANCY RULE:
+  // `church_id` null, and every other oversight FK null. That conjunction is
+  // what the role used to be — `sending_church_admin` said "this row speaks for
+  // its sending church and nothing else", and with the role gone the only thing
+  // that can say it is the ABSENCE of the other two tenancies. Both org FKs
+  // live on one `users` row and neither implies the other, so an unpaired
+  // `or(fk, fk)` admits a network account carrying a stray `sending_church_id`
+  // into that sending church's audience — the hierarchy walk
+  // memory/invariants.md forbids, arriving through a column nobody paired with
+  // anything.
+  //
+  // ARM-SCOPED, AND ORDER-FREE. Both properties are needed and they pull in
+  // opposite directions. Matching the whole string is order-free but
+  // CROSS-SATISFIABLE — `church_id is null` appears in both arms, so deleting
+  // it from one leaves the assertion green while that arm admits a row with a
+  // competing tenancy. Pinning a per-arm regex to clause order is arm-scoped
+  // but brittle, because the conjunction is built by FILTERING a column list
+  // and its order follows the pairing table. So the arms are split FIRST, and
+  // each arm is then matched on its own text.
+  const arms = oversightSqlArms(normalised, "users");
+  assert.equal(
+    arms.length,
+    2,
+    `expected two audience arms, got ${arms.length}`
   );
-  assert.match(
-    normalised,
-    /users\.role = \$\d+ and users\.sending_network_id = \$\d+/
-  );
 
-  // The bound values say which role went with which FK — and they are the whole
-  // parameter list, so an arm cannot carry a role predicate the pairing above
-  // did not pair.
-  assert.deepEqual(params, [
-    "sending_church_admin",
-    SENDING_CHURCH,
-    "network_admin",
-    NETWORK,
-  ]);
+  for (const [named, alsoNull] of [
+    ["sending_church_id", ["church_id", "sending_network_id"]],
+    ["sending_network_id", ["church_id", "sending_church_id"]],
+  ] as const) {
+    const arm = armFor(arms, named);
 
-  // …and BOTH encodings read that pairing off one table. The SQL arms bind
-  // whatever `OVERSIGHT_ADMIN` says, and `recipientAdministersOrg` accepts
-  // exactly the role for the anchor's kind and no other — so the audience and
-  // the gate cannot drift, which is the drift that starved a plant.
-  assert.deepEqual(params, [
-    OVERSIGHT_ADMIN.sending_church.role,
-    SENDING_CHURCH,
-    OVERSIGHT_ADMIN.network.role,
-    NETWORK,
-  ]);
+    assert.match(
+      arm.sql,
+      new RegExp(`users\\.${named} = \\$\\d+`),
+      `the arm names ${named}`
+    );
+    for (const column of alsoNull) {
+      assert.match(
+        arm.sql,
+        new RegExp(`users\\.${column} is null`),
+        `${named}'s OWN arm requires ${column} to be null`
+      );
+    }
+  }
 
+  // The bound values are the org ids alone, and they are the WHOLE parameter
+  // list — the rest of each arm is `is null`, so there is nothing an arm could
+  // bind that the pairing above did not pair.
+  assert.deepEqual(params, [SENDING_CHURCH, NETWORK]);
+
+  // …and BOTH encodings read that pairing off one table. The SQL arms name
+  // whatever column `OVERSIGHT_ADMIN` says, and `recipientAdministersOrg`
+  // accepts exactly the tenancy for the anchor's kind and no other — so the
+  // audience and the gate cannot drift, which is the drift that starved a
+  // plant.
   for (const [orgType, orgId] of [
     ["sending_church", SENDING_CHURCH],
     ["network", NETWORK],
   ] as const) {
+    assert.match(
+      normalised,
+      new RegExp(
+        `users\\.${users[OVERSIGHT_ADMIN[orgType].fk].name} = \\$\\d+`
+      ),
+      `${orgType}: the audience binds its own FK column`
+    );
+
     const admin = user({
-      role: OVERSIGHT_ADMIN[orgType].role,
       churchId: null,
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: NETWORK,
+      ...oversightOrgOfKind(orgType, orgId),
     });
 
     assert.equal(
       recipientAdministersOrg(admin, orgAnchor(orgType, orgId)),
       true,
-      `${orgType}: the gate admits the role the audience binds`
+      `${orgType}: the gate admits the tenancy the audience binds`
     );
   }
 });

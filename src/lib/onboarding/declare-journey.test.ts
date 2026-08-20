@@ -61,8 +61,20 @@ function harness(
   return { deps, calls, kinds: () => calls.map((call) => call.kind) };
 }
 
+/**
+ * The plant's Owner. All three tenancy FKs are named because `OnboardingActor`
+ * is `SeatFields`: a fixture that omitted one would be asserting about a shape
+ * `isChurchLevelOwner` never sees.
+ */
 function planter(overrides: Partial<OnboardingActor> = {}): OnboardingActor {
-  return { id: USER_ID, role: "planter", churchId: CHURCH_ID, ...overrides };
+  return {
+    id: USER_ID,
+    seat: "owner",
+    churchId: CHURCH_ID,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...overrides,
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -72,7 +84,7 @@ function planter(overrides: Partial<OnboardingActor> = {}): OnboardingActor {
 test("a non-planter is refused before anything is written", async () => {
   const { deps, calls } = harness();
 
-  const result = await runDeclareJourney(deps, planter({ role: "coach" }), {
+  const result = await runDeclareJourney(deps, planter({ seat: null }), {
     stage: "3",
   });
 

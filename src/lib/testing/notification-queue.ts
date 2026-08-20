@@ -1,3 +1,4 @@
+import type { TenancyFields } from "@/lib/auth/tenancy";
 import type {
   NewNotification,
   Notification,
@@ -84,9 +85,18 @@ export class FakeNotificationQueue
   addRecipient(
     id: string,
     email = `${id}@example.test`,
-    role: DispatchRecipient["role"] = "planter"
+    tenancy: TenancyFields = {
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }
   ): DispatchRecipient {
-    const recipient: DispatchRecipient = { id, email, name: null, role };
+    const recipient: DispatchRecipient = {
+      id,
+      email,
+      name: null,
+      ...tenancy,
+    };
     this.recipients.push(recipient);
     return recipient;
   }

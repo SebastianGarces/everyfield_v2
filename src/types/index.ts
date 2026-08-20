@@ -21,7 +21,7 @@ export type {
   SendingNetwork,
 } from "@/db/schema/sending-network";
 export type { NewSession, Session } from "@/db/schema/session";
-export type { NewUser, User, UserRole } from "@/db/schema/user";
+export type { NewUser, User, UserSeat } from "@/db/schema/user";
 
 // App-wide types
 export interface ActionResult<T = void> {

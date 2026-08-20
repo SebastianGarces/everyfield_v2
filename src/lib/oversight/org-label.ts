@@ -2,9 +2,12 @@
 // The reader's word for each kind of oversight org — ONE table, and the only
 // place either word is spelled.
 //
-// It is reached two ways because the surfaces ask two different questions. A
-// page knows the caller's ROLE (`scopeLabelForRole`); a dialog rendered from
-// association provenance knows the ORG's KIND (`scopeLabelForOrgType`). Before
+// ONE ENTRY POINT, KEYED ON THE ORG'S KIND. It used to have two: a page knew
+// the caller's ROLE and asked `scopeLabelForRole(user.role)`, while a dialog
+// rendered from association provenance knew the org's KIND. With the role
+// column gone (#494) a page has no role to ask about — `requireOversightUser` resolves
+// the caller's org from the tenancy FK and hands it back — so both callers now
+// hold a kind and the role-keyed door is deleted rather than re-pointed. Before
 // this module there were three declarations of a two-word vocabulary: a ternary
 // in `presentation.ts`, the same ternary inline on `/oversight/health` and
 // `/oversight/invitations`, and a private `Record<AssociationOrgType, string>`
@@ -26,7 +29,6 @@
 // label.
 // ============================================================================
 
-import type { UserRole } from "@/db/schema";
 import type { OversightOrgType } from "@/lib/oversight/types";
 
 const ORG_TYPE_LABEL: Record<OversightOrgType, string> = {
@@ -34,18 +36,11 @@ const ORG_TYPE_LABEL: Record<OversightOrgType, string> = {
   sending_church: "sending church",
 };
 
-/** The caller's own org KIND in the reader's words. */
+/**
+ * An org KIND in the reader's words. Used in the explain-why copy, so an
+ * oversight account is told who the plant declined to share with in the same
+ * words the rest of the oversight surface uses.
+ */
 export function scopeLabelForOrgType(orgType: OversightOrgType): string {
   return ORG_TYPE_LABEL[orgType];
-}
-
-/**
- * The caller's own org in the reader's words. Used in the explain-why copy, so
- * an admin is told who the plant declined to share with in the same words the
- * rest of the oversight surface uses.
- */
-export function scopeLabelForRole(role: UserRole): string {
-  return scopeLabelForOrgType(
-    role === "network_admin" ? "network" : "sending_church"
-  );
 }

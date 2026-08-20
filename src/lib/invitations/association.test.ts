@@ -32,10 +32,11 @@ import {
 //
 // Three things are worth a test here and they fail in three different ways:
 //
-//   1. THE AUTHORITY RULE (OV-010, ruled #274). Planter only, refused in the
-//      logic layer so a forged call meets it. Executed — a `team_member` and a
-//      `coach` are real actors here, not a mocked role string, and they are
-//      refused BEFORE any read, so these tests need no database.
+//   1. THE AUTHORITY RULE (OV-010, ruled #274). The plant's Owner only,
+//      refused in the logic layer so a forged call meets it. Executed — a
+//      Member and a coach are real actors here, each a (seat, tenancy) pair
+//      rather than a mocked string, and they are refused BEFORE any read, so
+//      these tests need no database.
 //   2. THE TENANCY ASSERTION on the FK write (#304's high-risk extra). Read off
 //      the generated SQL: the UPDATE's WHERE names the org being left, and the
 //      audit INSERT selects FROM that UPDATE rather than running beside it.
@@ -92,7 +93,7 @@ const INVITATION_ID = "55555555-5555-4555-8555-555555555555";
 function actor(overrides: Partial<InvitationActor> = {}): InvitationActor {
   return {
     id: USER,
-    role: "planter",
+    seat: "owner",
     churchId: PLANT,
     sendingChurchId: null,
     sendingNetworkId: null,
@@ -125,68 +126,76 @@ function auditedOrgFor(facts: AssociationFacts) {
 }
 
 // ----------------------------------------------------------------------------
-// 1. Authority — OV-010, planter only, server-side
+// 1. Authority — OV-010, the plant's Owner only, server-side
 // ----------------------------------------------------------------------------
 
-test("a team member or coach of the plant cannot sever, whatever the UI shows", async () => {
-  // RULED #274 / OV-010: joining an oversight org and leaving one are both the
-  // planter's decision. The refusal is the FIRST statement, so these calls never
-  // read a row — which is also why they are refused identically for a plant that
-  // does not exist.
-  for (const role of ["team_member", "coach"] as const) {
-    assert.equal(
-      await refusal(leaveOversightOrgAs(actor({ role }), "sending_church")),
-      PLANTER_ONLY_SEVER_MESSAGE,
-      role
-    );
-  }
+/** Everyone in the plant who is not its Owner, and everyone outside it. */
+const NOT_THE_PLANT_OWNER: [string, Partial<InvitationActor>][] = [
+  ["a Member of the plant", { seat: "member" }],
+  // A real coach: the plant's `church_id`, and no seat. The seat is what
+  // refuses them, so leaving the FK null would not have probed that.
+  ["a coach of the plant", { seat: null, churchId: PLANT }],
+  [
+    "the sending church's own Owner",
+    { churchId: null, sendingChurchId: SENDING_CHURCH },
+  ],
+  ["the network's own Owner", { churchId: null, sendingNetworkId: NETWORK }],
+];
 
-  // An oversight admin is refused by the same rule: severing from the ORG side
-  // is #278's surface, with its own authority rule, and it is not this function.
-  for (const role of ["sending_church_admin", "network_admin"] as const) {
+test("nobody but the plant's Owner can sever, whatever the UI shows", async () => {
+  // RULED #274 / OV-010: joining an oversight org and leaving one are both the
+  // plant Owner's decision. The refusal is the FIRST statement, so these calls
+  // never read a row — which is also why they are refused identically for a
+  // plant that does not exist.
+  //
+  // The oversight accounts are refused by the same rule: severing from the ORG
+  // side is #278's surface, with its own authority rule, and it is not this
+  // function. Holding the Owner SEAT is not what admits anyone here — the
+  // tenancy half of `isPlantOwner` is what tells those two from the first two.
+  for (const [who, fields] of NOT_THE_PLANT_OWNER) {
     assert.equal(
-      await refusal(
-        leaveOversightOrgAs(
-          actor({ role, churchId: null, sendingChurchId: SENDING_CHURCH }),
-          "sending_church"
-        )
-      ),
+      await refusal(leaveOversightOrgAs(actor(fields), "sending_church")),
       PLANTER_ONLY_SEVER_MESSAGE,
-      role
+      who
     );
   }
 });
 
-test("the same two roles are refused ACCEPT and DECLINE, by the same rule", async () => {
+test("the same accounts are refused ACCEPT and DECLINE, by the same rule", async () => {
   // OV-010 is one rule over three verbs, and the third is checked somewhere
   // else (`verifyInvitationAuthority`, exercised in `service.test.ts`). Stated
   // here as well because the acceptance criterion is about the three TOGETHER:
-  // a team member who cannot leave but can accept has not been refused, they
-  // have been slowed down.
+  // a Member who cannot leave but can accept has not been refused, they have
+  // been slowed down.
   const invitation = {
     type: "church_to_sending_church" as const,
     targetChurchId: PLANT,
     targetSendingChurchId: null,
   };
 
-  for (const role of ["team_member", "coach"] as const) {
+  for (const [who, fields] of NOT_THE_PLANT_OWNER) {
     assert.throws(
-      () => verifyInvitationAuthority(invitation, actor({ role })),
+      () => verifyInvitationAuthority(invitation, actor(fields)),
       /not authorized|permission/i,
-      role
+      who
     );
   }
 
-  // The planter of that same plant passes all three — so the refusals above are
-  // the ROLE being checked, not the fixture being unanswerable.
+  // The Owner of that same plant passes all three — so the refusals above are
+  // the (seat, tenancy) pair being checked, not the fixture being unanswerable.
   verifyInvitationAuthority(invitation, actor());
   assert.equal(
-    await refusal(leaveOversightOrgAs(actor({ role: "coach" }), "network")),
+    await refusal(
+      leaveOversightOrgAs(
+        actor({ seat: null, sendingChurchId: null, sendingNetworkId: null }),
+        "network"
+      )
+    ),
     PLANTER_ONLY_SEVER_MESSAGE
   );
 });
 
-test("a planter with no plant has nothing to sever", async () => {
+test("an Owner with no plant has nothing to sever", async () => {
   assert.match(
     await refusal(
       leaveOversightOrgAs(actor({ churchId: null }), "sending_church")

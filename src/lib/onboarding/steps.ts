@@ -21,6 +21,7 @@
 
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { leadershipAnswered, type ChurchLeadershipStatus } from "./leadership";
+import { isChurchLevelOwner, type SeatFields } from "@/lib/auth/tenancy";
 
 export const ONBOARDING_STEP_IDS = [
   "basics",
@@ -471,9 +472,7 @@ export function previousOnboardingStep(
  * onboarding flow owns the dashboard. Kept structural (not `User`/`Church`) so
  * the rule can be tested without constructing whole rows.
  */
-export type OnboardingViewer = {
-  role: string | null | undefined;
-  churchId: string | null | undefined;
+export type OnboardingViewer = SeatFields & {
   /** `null` while the flow still owns the dashboard; a date once it is done. */
   onboardingCompletedAt: Date | null | undefined;
 };
@@ -486,12 +485,16 @@ export type OnboardingViewer = {
  * abandonment safe: the church is already real, and the planter is returned to
  * the flow instead of to a half-configured dashboard.
  *
- * Only planters. Coaches, team members and oversight roles never onboard a
- * church, and churches that existed before migration 0027 were backfilled to a
- * non-null `onboarding_completed_at`, so nobody is retro-enrolled.
+ * Only a plant Owner. Coaches, plant Members and oversight accounts never
+ * onboard a church, and churches that existed before migration 0027 were
+ * backfilled to a non-null `onboarding_completed_at`, so nobody is
+ * retro-enrolled.
+ *
+ * `isChurchLevelOwner`, not `isPlantOwner`: the first clause below is exactly
+ * the Owner who has no plant yet.
  */
 export function shouldShowOnboarding(viewer: OnboardingViewer): boolean {
-  if (viewer.role !== "planter") return false;
+  if (!isChurchLevelOwner(viewer)) return false;
   if (!viewer.churchId) return true;
   return !viewer.onboardingCompletedAt;
 }

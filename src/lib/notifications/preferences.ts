@@ -12,9 +12,8 @@ import {
   type NotificationPreference,
   type PreferenceIntent,
   type User,
-  type UserRole,
 } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
+import { isOversightUser, type TenancyFields } from "@/lib/auth/tenancy";
 
 import {
   audienceMayReceiveCategory,
@@ -359,7 +358,7 @@ export function resolvePreference(
   // choice a user actually made.
   //
   // It defaults to "church" so every existing caller keeps today's answer and
-  // only a caller that KNOWS the recipient's role can change it — guessing an
+  // only a caller that KNOWS the recipient's tenancy can change it — guessing an
   // audience would be worse than not asking.
   const digestCadence =
     category === "digest"
@@ -395,16 +394,18 @@ export function resolvePreference(
 }
 
 /**
- * Which coded defaults apply to a user in this role (N-027).
+ * Which coded defaults apply to an account in this tenancy (N-027).
  *
- * The ONE place the five roles collapse onto the two audiences, so nothing else
- * in the module branches on a role string. It is a DEFAULTS question, never a
- * permission one — eligibility is `enqueue`'s and is far stricter.
+ * The ONE place the three tenancies collapse onto the two audiences, so nothing
+ * else in the module branches on a tenancy column. It is a DEFAULTS question,
+ * never a permission one — eligibility is `enqueue`'s and is far stricter.
+ *
+ * THE SEAT IS NOT AN INPUT. An org Member reads exactly what its Owner reads
+ * (ruling 185 (3)), so both take the oversight defaults; what the seat decides
+ * is what may be DONE, which is a different question asked elsewhere.
  */
-export function audienceForRole(role: UserRole): NotificationAudience {
-  return (OVERSIGHT_ROLES as readonly UserRole[]).includes(role)
-    ? "oversight"
-    : "church";
+export function audienceForTenancy(user: TenancyFields): NotificationAudience {
+  return isOversightUser(user) ? "oversight" : "church";
 }
 
 /** Convenience for the dispatcher: is this channel on for this category? */
@@ -720,14 +721,14 @@ export const OVERSIGHT_INELIGIBLE_CATEGORY_NOTE =
  * Build the whole screen from a user's stored rows.
  *
  * `audience` is the SAME argument the read and dispatch paths resolve with
- * (`audienceForRole(session.user.role)`). It has to be, or the screen lies: an
+ * (`audienceForTenancy(session.user)`). It has to be, or the screen lies: an
  * oversight recipient's `digest`/`in_app` default is ON (N-027) while the
  * plant's team's is off, so a matrix built with the "church" defaults would
  * show an oversight admin an unchecked box for a notification they are in fact
  * receiving — and their first click would "turn on" something already on.
  *
  * It still defaults to "church" so a caller that does not know the recipient's
- * role gets today's answer rather than a guessed one; the only production
+ * tenancy gets today's answer rather than a guessed one; the only production
  * caller is `/settings`, which knows.
  */
 export function buildPreferenceMatrixView(
@@ -763,8 +764,8 @@ export function buildPreferenceMatrixView(
     })),
     // An oversight recipient is not offered a control that cannot change what
     // they receive (#254) — see `DigestCadenceFixedView`. The audience decides,
-    // not the role, so this stays the one place the five roles collapse onto
-    // the two behaviours (`audienceForRole`).
+    // not the seat, so this stays the one place the three tenancies collapse
+    // onto the two behaviours (`audienceForTenancy`).
     digest: buildDigestCadenceView(map, audience),
     // The note is present only when it has something to explain, so a screen
     // can ask `ineligibleNote` rather than re-deriving the audience.

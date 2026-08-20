@@ -68,8 +68,7 @@ import {
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
-import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
-import type { UserRole } from "@/db/schema";
+import { isChurchLevelUser, isPlantOwner } from "@/lib/auth/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -82,22 +81,16 @@ export const metadata = {
 export default async function LaunchPage() {
   const { user } = await verifySession();
 
-  // Oversight users have their own surfaces; a plant's launch page is the
-  // plant's. Anyone without a church has no launch to show.
-  // The widening cast, not a cast on `user.role`: `CHURCH_LEVEL_ROLES` is
-  // declared `as const` in `@/lib/auth/roles` — the one place it comes from —
-  // so the list narrows to its three members and `includes` needs the wider
-  // element type. The same shape `src/lib/notifications/preferences.ts` uses
-  // for `OVERSIGHT_ROLES`.
-  if (
-    !(CHURCH_LEVEL_ROLES as readonly UserRole[]).includes(user.role) ||
-    !user.churchId
-  ) {
+  // An oversight tenancy has its own surfaces; a plant's launch page is the
+  // plant's. Anyone without a church has no launch to show. `isChurchLevelUser`
+  // is the same predicate `recordMilestone` refuses oversight with, so what
+  // this page renders and what its actions accept cannot disagree.
+  if (!isChurchLevelUser(user) || !user.churchId) {
     redirect("/dashboard");
   }
 
   const churchId = user.churchId;
-  const isPlanter = user.role === "planter";
+  const isPlanter = isPlantOwner(user);
   const launch = await getLaunchForChurch(churchId);
 
   // ONE clock read for the whole render, so every number on the page is about

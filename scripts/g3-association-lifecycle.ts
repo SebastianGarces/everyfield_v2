@@ -187,43 +187,43 @@ async function main() {
       {
         email: address("planter"),
         passwordHash: "x",
-        role: "planter" as const,
+        seat: "owner" as const,
         churchId: plant.id,
       },
       {
         email: address("teammate"),
         passwordHash: "x",
-        role: "team_member" as const,
+        seat: "member" as const,
         churchId: plant.id,
       },
       {
         email: address("sc-admin"),
         passwordHash: "x",
-        role: "sending_church_admin" as const,
+        seat: "owner" as const,
         sendingChurchId: sendingChurch.id,
       },
       {
         email: address("net-admin"),
         passwordHash: "x",
-        role: "network_admin" as const,
+        seat: "owner" as const,
         sendingNetworkId: network.id,
       },
       {
         email: address("other-sc-admin"),
         passwordHash: "x",
-        role: "sending_church_admin" as const,
+        seat: "owner" as const,
         sendingChurchId: otherSendingChurch.id,
       },
       {
         email: address("other-net-admin"),
         passwordHash: "x",
-        role: "network_admin" as const,
+        seat: "owner" as const,
         sendingNetworkId: otherNetwork.id,
       },
       {
         email: address("sc-teammate"),
         passwordHash: "x",
-        role: "team_member" as const,
+        seat: "member" as const,
         sendingChurchId: sendingChurch.id,
       },
       // A SECOND admin of the SAME sending church. §9's bypass needs two
@@ -232,7 +232,7 @@ async function main() {
       {
         email: address("sc-admin-2"),
         passwordHash: "x",
-        role: "sending_church_admin" as const,
+        seat: "owner" as const,
         sendingChurchId: sendingChurch.id,
       },
       // A NETWORK admin carrying a stray `sending_church_id`. Both org FKs live
@@ -242,7 +242,7 @@ async function main() {
       {
         email: address("dual-fk-net-admin"),
         passwordHash: "x",
-        role: "network_admin" as const,
+        seat: "owner" as const,
         sendingNetworkId: otherNetwork.id,
         sendingChurchId: sendingChurch.id,
       },
@@ -801,7 +801,7 @@ async function main() {
       defectOf(dualFkNetAdmin.id),
       {
         id: dualFkNetAdmin.id,
-        role: "network_admin",
+        seat: "owner",
         reachedBy: "sendingChurchId",
       },
       "a network admin with a stray sending_church_id is reported, not hidden"
@@ -812,7 +812,7 @@ async function main() {
       defectOf(scTeammate.id),
       {
         id: scTeammate.id,
-        role: "team_member",
+        seat: "member",
         reachedBy: "sendingChurchId",
       },
       "…and so is a church-level role carrying an oversight FK"

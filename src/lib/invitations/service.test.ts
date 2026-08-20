@@ -571,8 +571,10 @@ test("every action refuses a call with no session, whatever else it is sent", as
   const mod = await actionModule();
   const forged = {
     id: "55555555-5555-4555-8555-555555555555",
-    role: "planter" as const,
+    seat: "owner" as const,
     churchId: "11111111-1111-4111-8111-111111111111",
+    sendingChurchId: null,
+    sendingNetworkId: null,
   };
 
   for (const name of LIFECYCLE_ACTIONS) {
@@ -679,8 +681,10 @@ test("every association action refuses a call with no session, well-formed argum
   // malformed argument produces the SAME throw rather than a parse result.
   const forged = {
     id: "55555555-5555-4555-8555-555555555555",
-    role: "planter" as const,
+    seat: "owner" as const,
     churchId: "11111111-1111-4111-8111-111111111111",
+    sendingChurchId: null,
+    sendingNetworkId: null,
   };
 
   // A syntactically valid uuid (`safeParse` would have accepted it) and a
@@ -1303,7 +1307,7 @@ const INVITEE_EMAIL = "planter@example.com";
 
 function actor(overrides: {
   id?: string;
-  role: InvitationActor["role"];
+  seat: InvitationActor["seat"];
   churchId?: string | null;
   sendingChurchId?: string | null;
   sendingNetworkId?: string | null;
@@ -1311,7 +1315,7 @@ function actor(overrides: {
   return invitationActorFromSession({
     user: {
       id: overrides.id ?? PLANTER_ID,
-      role: overrides.role,
+      seat: overrides.seat,
       churchId: overrides.churchId ?? null,
       sendingChurchId: overrides.sendingChurchId ?? null,
       sendingNetworkId: overrides.sendingNetworkId ?? null,
@@ -1319,21 +1323,19 @@ function actor(overrides: {
   });
 }
 
-const PLANTER = actor({ role: "planter", churchId: PLANT });
+// The five old role names, in the seat model's terms: a seat plus the tenancy
+// it is held in. `PLANTER` is a plant Owner, `TEAM_MEMBER` a plant Member, and
+// the two org actors hold `owner` in their own org — the mapping the migration
+// backfilled (ruling 185).
+const PLANTER = actor({ seat: "owner", churchId: PLANT });
 const FOREIGN_PLANTER = actor({
   id: FOREIGN_ID,
-  role: "planter",
+  seat: "owner",
   churchId: OTHER_PLANT,
 });
-const TEAM_MEMBER = actor({ role: "team_member", churchId: PLANT });
-const SC_ADMIN = actor({
-  role: "sending_church_admin",
-  sendingChurchId: SENDING_CHURCH,
-});
-const NETWORK_ADMIN = actor({
-  role: "network_admin",
-  sendingNetworkId: NETWORK,
-});
+const TEAM_MEMBER = actor({ seat: "member", churchId: PLANT });
+const SC_ADMIN = actor({ seat: "owner", sendingChurchId: SENDING_CHURCH });
+const NETWORK_ADMIN = actor({ seat: "owner", sendingNetworkId: NETWORK });
 
 test("an actor carries the session's identity and nothing else", () => {
   // Derived, not passed through: a whole user row goes in and only the five
@@ -1342,7 +1344,7 @@ test("an actor carries the session's identity and nothing else", () => {
   const minted = invitationActorFromSession({
     user: {
       id: PLANTER_ID,
-      role: "planter",
+      seat: "owner",
       churchId: PLANT,
       sendingChurchId: null,
       sendingNetworkId: null,
@@ -1355,7 +1357,7 @@ test("an actor carries the session's identity and nothing else", () => {
   assert.deepEqual(Object.keys(minted).sort(), [
     "churchId",
     "id",
-    "role",
+    "seat",
     "sendingChurchId",
     "sendingNetworkId",
   ]);
@@ -1369,7 +1371,7 @@ test("a user object off the wire is not an actor", () => {
   // `@ts-expect-error` is itself an error, so this cannot rot.
   const forged = {
     id: FOREIGN_ID,
-    role: "planter" as const,
+    seat: "owner" as const,
     churchId: PLANT,
     sendingChurchId: null,
     sendingNetworkId: null,
@@ -1441,7 +1443,10 @@ test("a team member of the target plant may not bind it to an org", () => {
 test("a churchless actor may not respond for a church", () => {
   assert.throws(
     () =>
-      verifyInvitationAuthority(CHURCH_INVITATION, actor({ role: "planter" })),
+      verifyInvitationAuthority(
+        CHURCH_INVITATION,
+        actor({ seat: "owner", sendingChurchId: null, sendingNetworkId: null })
+      ),
     InvitationError
   );
 });
@@ -1449,18 +1454,44 @@ test("a churchless actor may not respond for a church", () => {
 test("only the target sending church's admin may join a network", () => {
   verifyInvitationAuthority(SENDING_CHURCH_INVITATION, SC_ADMIN);
 
-  for (const wrong of [
-    PLANTER,
-    NETWORK_ADMIN,
-    actor({
-      role: "sending_church_admin",
-      sendingChurchId: OTHER_SENDING_CHURCH,
-    }),
-    actor({ role: "planter", sendingChurchId: SENDING_CHURCH }),
-  ]) {
+  // THE ORG ARM ASKS BOTH HALVES — `sending_church_admin` meant the Owner seat
+  // IN a sending church, so no role ever mapped to an org Member or to a
+  // seatless org row, and this list refuses them exactly as the allowlist did.
+  // #498 decides only whether `admin` joins `owner`.
+  const wrongTenancy: [string, InvitationActor][] = [
+    ["a plant's Owner", PLANTER],
+    ["a network's Owner", NETWORK_ADMIN],
+    [
+      "another sending church",
+      actor({ seat: "owner", sendingChurchId: OTHER_SENDING_CHURCH }),
+    ],
+    // The two-tenancy defect: it NAMES the target sending church and is still
+    // refused, because a row naming two tenancies resolves to neither.
+    [
+      "the target sending church AND a network",
+      actor({
+        seat: "owner",
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      }),
+    ],
+    // The seat half: both of these NAME the target sending church and are
+    // refused on the seat alone.
+    [
+      "a MEMBER of the target sending church",
+      actor({ seat: "member", sendingChurchId: SENDING_CHURCH }),
+    ],
+    [
+      "an ADMIN of the target sending church",
+      actor({ seat: "admin", sendingChurchId: SENDING_CHURCH }),
+    ],
+  ];
+
+  for (const [what, wrong] of wrongTenancy) {
     assert.throws(
       () => verifyInvitationAuthority(SENDING_CHURCH_INVITATION, wrong),
-      InvitationError
+      InvitationError,
+      what
     );
   }
 });
@@ -1487,7 +1518,12 @@ test("an unrecognised invitation type grants nobody authority", () => {
   // returning normally is how this function says "authorized". A team member of
   // an unrelated church was granted authority over a foreign church's
   // invitation for every one of these.
-  const stranger = actor({ role: "team_member", churchId: OTHER_PLANT });
+  const stranger = actor({
+    seat: "member",
+    churchId: OTHER_PLANT,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  });
 
   for (const type of UNKNOWN_TYPES) {
     assert.throws(
@@ -1656,25 +1692,34 @@ test("a sending church cannot invite another sending church", () => {
   );
 });
 
-test("nobody without an oversight role may invite", () => {
-  for (const role of ["planter", "coach", "team_member"] as const) {
-    const resolved = resolveInvitationRequest(
-      actor({ role, churchId: PLANT }),
-      { inviteeEmail: INVITEE_EMAIL, targetChurchId: OTHER_PLANT }
-    );
-    assert.ok(!resolved.ok, role);
+test("nobody outside an oversight tenancy may invite", () => {
+  // The three the old role list named, in the seat model's terms: the plant's
+  // Owner, a plant Member, and a coach — who carries the plant's `church_id`
+  // and no seat, which is what the seed writes and what makes the seat the
+  // thing doing the refusing.
+  const insideAPlant: [string, InvitationActor][] = [
+    ["the plant's Owner", actor({ seat: "owner", churchId: PLANT })],
+    ["a plant Member", actor({ seat: "member", churchId: PLANT })],
+    ["a coach", actor({ seat: null, churchId: PLANT })],
+  ];
+
+  for (const [what, caller] of insideAPlant) {
+    const resolved = resolveInvitationRequest(caller, {
+      inviteeEmail: INVITEE_EMAIL,
+      targetChurchId: OTHER_PLANT,
+    });
+    assert.ok(!resolved.ok, what);
   }
 });
 
-test("an oversight admin with no org of their own may not invite", () => {
+test("an account with no org of its own may not invite", () => {
+  // One case, once. This was the SAME assertion written twice, character for
+  // character — the second copy asserted nothing the first had not.
+  //
+  // Holding `owner` while naming no tenancy is not an oversight account:
+  // `isOrgOwner` wants both halves, so the Owner seat alone buys nothing here.
   assert.ok(
-    !resolveInvitationRequest(actor({ role: "sending_church_admin" }), {
-      inviteeEmail: INVITEE_EMAIL,
-      targetChurchId: PLANT,
-    }).ok
-  );
-  assert.ok(
-    !resolveInvitationRequest(actor({ role: "network_admin" }), {
+    !resolveInvitationRequest(actor({ seat: "owner" }), {
       inviteeEmail: INVITEE_EMAIL,
       targetChurchId: PLANT,
     }).ok
@@ -1805,7 +1850,7 @@ test("the revoke statement is scoped to the session's own ORG", () => {
   const invitationId = "66666666-6666-4666-8666-666666666666";
 
   const network = revokeInvitationQuery(
-    actor({ role: "network_admin", sendingNetworkId: NETWORK }),
+    actor({ seat: "owner", sendingNetworkId: NETWORK, sendingChurchId: null }),
     invitationId
   ).toSQL();
 
@@ -1837,20 +1882,21 @@ test("nobody outside an inviting org can revoke anything", () => {
   // drop, which would turn this statement into "revoke by id" for anyone.
   const invitationId = "66666666-6666-4666-8666-666666666666";
 
-  for (const caller of [
-    PLANTER,
-    TEAM_MEMBER,
-    actor({ role: "coach" }),
-    actor({ role: "sending_church_admin", sendingChurchId: null }),
-    actor({ role: "network_admin", sendingNetworkId: null }),
-  ]) {
+  const noOrgOfTheirOwn: [string, InvitationActor][] = [
+    ["the plant's Owner", PLANTER],
+    ["a plant Member", TEAM_MEMBER],
+    ["a coach", actor({ seat: null, churchId: PLANT })],
+    ["an Owner with no tenancy at all", actor({ seat: "owner" })],
+  ];
+
+  for (const [what, caller] of noOrgOfTheirOwn) {
     const { sql, params } = revokeInvitationQuery(caller, invitationId).toSQL();
 
-    assert.match(sql, /false/, caller.role);
-    assert.doesNotMatch(sql, /"sending_church_id" = \$\d+/, caller.role);
-    assert.doesNotMatch(sql, /"sending_network_id" = \$\d+/, caller.role);
-    assert.ok(!params.includes(SENDING_CHURCH), caller.role);
-    assert.ok(!params.includes(NETWORK), caller.role);
+    assert.match(sql, /false/, what);
+    assert.doesNotMatch(sql, /"sending_church_id" = \$\d+/, what);
+    assert.doesNotMatch(sql, /"sending_network_id" = \$\d+/, what);
+    assert.ok(!params.includes(SENDING_CHURCH), what);
+    assert.ok(!params.includes(NETWORK), what);
   }
 });
 
@@ -1859,7 +1905,10 @@ test("the list and the revoke agree on what 'our invitations' means", () => {
   // predicate the pending list is read with is the SAME predicate the revoke
   // writes with. Two definitions of "ours" is exactly how a screen ends up
   // showing an admin a row whose button refuses them.
-  for (const admin of [SC_ADMIN, NETWORK_ADMIN]) {
+  for (const [what, admin] of [
+    ["a sending church's Owner", SC_ADMIN],
+    ["a network's Owner", NETWORK_ADMIN],
+  ] as [string, InvitationActor][]) {
     const listed = invitationsForOrgQuery(admin).toSQL();
     const revoked = revokeInvitationQuery(
       admin,
@@ -1873,14 +1922,14 @@ test("the list and the revoke agree on what 'our invitations' means", () => {
     const fromList = whereOf(listed.sql).match(orgPredicate);
     const fromRevoke = whereOf(revoked.sql).match(orgPredicate);
 
-    assert.ok(fromList, admin.role);
-    assert.ok(fromRevoke, admin.role);
-    assert.equal(fromRevoke[1], fromList[1], admin.role);
+    assert.ok(fromList, what);
+    assert.ok(fromRevoke, what);
+    assert.equal(fromRevoke[1], fromList[1], what);
 
     const orgId = admin.sendingChurchId ?? admin.sendingNetworkId;
-    assert.ok(orgId, admin.role);
-    assert.ok(listed.params.includes(orgId), admin.role);
-    assert.ok(revoked.params.includes(orgId), admin.role);
+    assert.ok(orgId, what);
+    assert.ok(listed.params.includes(orgId), what);
+    assert.ok(revoked.params.includes(orgId), what);
   }
 });
 

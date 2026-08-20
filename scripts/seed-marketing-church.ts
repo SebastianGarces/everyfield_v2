@@ -890,7 +890,7 @@ async function seedRedemptionHill(
     .values({
       email: RH_PLANTER_EMAIL,
       name: "Daniel Reyes",
-      role: "planter",
+      seat: "owner",
       passwordHash,
       churchId,
       sendingNetworkId: networkId,
@@ -2350,7 +2350,7 @@ async function seedTrinityGrove(
     .values({
       email: TG_PLANTER_EMAIL,
       name: "Marcus Bell",
-      role: "planter",
+      seat: "owner",
       passwordHash,
       churchId,
       sendingNetworkId: networkId,
@@ -2817,7 +2817,7 @@ async function main(): Promise<void> {
     await db.insert(users).values({
       email: NETWORK_ADMIN_EMAIL,
       name: NETWORK_ADMIN_NAME,
-      role: "network_admin",
+      seat: "owner",
       passwordHash,
       sendingNetworkId: network.id,
     });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { SeatFields } from "@/lib/auth/tenancy";
+
 import {
   CHURCH_LEADERSHIP_STATUSES,
   DEFAULT_LEADERSHIP_ANSWER,
@@ -28,6 +30,19 @@ import {
 // treating "never asked" as "no planter" would light the nudge on every church
 // that predates this step and strip the assignee off their follow-up tasks.
 // ----------------------------------------------------------------------------
+
+/**
+ * A viewer with the given seat in `CHURCH_ID`. The two oversight FKs are null
+ * on every one of them, because `LeadershipViewer` is `SeatFields` and all
+ * three tenancy columns are required — a fixture that omitted one would be
+ * asserting about a shape `oversightOrgOf` never sees.
+ */
+function viewer(
+  seat: SeatFields["seat"],
+  churchId: string | null = CHURCH_ID
+): SeatFields {
+  return { seat, churchId, sendingChurchId: null, sendingNetworkId: null };
+}
 
 test("the flow's default answer is Yes (#157: assume, but ask)", () => {
   assert.equal(DEFAULT_LEADERSHIP_ANSWER, "yes");
@@ -146,13 +161,7 @@ test("a plant with a planter and no recorded answer is treated as confirmed", ()
   const church = churchState({ hasPlanterUser: true });
 
   assert.equal(resolvedLeadershipStatus(church), "planter_confirmed");
-  assert.equal(
-    shouldPromptPastorConfirmation(
-      { role: "team_member", churchId: CHURCH_ID },
-      church
-    ),
-    false
-  );
+  assert.equal(shouldPromptPastorConfirmation(viewer("member"), church), false);
 });
 
 test("the resolved status never overwrites a recorded one", () => {
@@ -167,14 +176,14 @@ test("the resolved status never overwrites a recorded one", () => {
 });
 
 test("the prompt fires only for an empty seat with no answer", () => {
-  const viewer = { role: "team_member", churchId: CHURCH_ID };
+  const who = viewer("member");
 
-  assert.equal(shouldPromptPastorConfirmation(viewer, churchState()), true);
+  assert.equal(shouldPromptPastorConfirmation(who, churchState()), true);
 
   for (const status of CHURCH_LEADERSHIP_STATUSES) {
     assert.equal(
       shouldPromptPastorConfirmation(
-        viewer,
+        who,
         churchState({ leadershipStatus: status })
       ),
       false,
@@ -183,42 +192,57 @@ test("the prompt fires only for an empty seat with no answer", () => {
   }
 });
 
-test("the prompt never reaches somebody else's plant, or a role that leads none", () => {
+test("the prompt never reaches somebody else's plant, or a tenancy that leads none", () => {
   const church = churchState();
 
   assert.equal(
     shouldPromptPastorConfirmation(
-      { role: "team_member", churchId: "44444444-4444-4444-8444-444444444444" },
+      viewer("member", "44444444-4444-4444-8444-444444444444"),
       church
     ),
     false
   );
 
-  for (const role of ["coach", "sending_church_admin", "network_admin", null]) {
+  // The three shapes the old role list refused, in the seat model's terms: a
+  // coach holds no seat, and an oversight account's tenancy is not this plant
+  // however its `church_id` reads.
+  const leadsNobody: [string, SeatFields][] = [
+    ["a coach", { ...viewer(null), churchId: CHURCH_ID }],
+    [
+      "a sending church's Owner",
+      { ...viewer("owner", null), sendingChurchId: "sc-1" },
+    ],
+    [
+      "a network's Owner",
+      { ...viewer("owner", null), sendingNetworkId: "n-1" },
+    ],
+  ];
+
+  for (const [what, who] of leadsNobody) {
     assert.equal(
-      shouldPromptPastorConfirmation({ role, churchId: CHURCH_ID }, church),
+      shouldPromptPastorConfirmation(who, church),
       false,
-      `${role} does not lead this plant`
+      `${what} does not lead this plant`
     );
   }
 });
 
 test("answering Yes is only permitted while the seat is empty", () => {
-  const viewer = { role: "team_member", churchId: CHURCH_ID };
+  const who = viewer("member");
 
-  assert.equal(canAnswerLeadershipQuestion(viewer, churchState()), true);
+  assert.equal(canAnswerLeadershipQuestion(who, churchState()), true);
   assert.equal(
-    canAnswerLeadershipQuestion(viewer, churchState({ hasPlanterUser: true })),
+    canAnswerLeadershipQuestion(who, churchState({ hasPlanterUser: true })),
     false
   );
 });
 
 test("the plant's planter may always answer — that is OB-004's re-entry", () => {
-  const viewer = { role: "planter", churchId: CHURCH_ID };
+  const who = viewer("owner");
 
   assert.equal(
     canAnswerLeadershipQuestion(
-      viewer,
+      who,
       churchState({ leadershipStatus: "no_planter", hasPlanterUser: true })
     ),
     true
@@ -226,17 +250,17 @@ test("the plant's planter may always answer — that is OB-004's re-entry", () =
 });
 
 test("the nudge follows an answered No, never a church that was merely never asked", () => {
-  const viewer = { role: "planter", churchId: CHURCH_ID };
+  const who = viewer("owner");
 
   assert.equal(
     shouldShowNoPlanterNudge(
-      viewer,
+      who,
       churchState({ leadershipStatus: "no_planter", hasPlanterUser: true })
     ),
     true
   );
   assert.equal(
-    shouldShowNoPlanterNudge(viewer, churchState({ hasPlanterUser: true })),
+    shouldShowNoPlanterNudge(who, churchState({ hasPlanterUser: true })),
     false
   );
 });
@@ -246,7 +270,7 @@ test("the team member who answered No under OB-010 still gets the nudge", () => 
   // still empty, so the person who answered can reach the question again.
   assert.equal(
     shouldShowNoPlanterNudge(
-      { role: "team_member", churchId: CHURCH_ID },
+      viewer("member"),
       churchState({ leadershipStatus: "no_planter" })
     ),
     true
@@ -256,28 +280,14 @@ test("the team member who answered No under OB-010 still gets the nudge", () => 
 test("Yes assigns only when the answerer is not already the planter", () => {
   const empty = churchState();
 
+  assert.equal(leadershipWritePlan(viewer("member"), empty, "yes"), "claim");
   assert.equal(
     leadershipWritePlan(
-      { role: "team_member", churchId: CHURCH_ID },
-      empty,
-      "yes"
-    ),
-    "claim"
-  );
-  assert.equal(
-    leadershipWritePlan(
-      { role: "planter", churchId: CHURCH_ID },
+      viewer("owner"),
       churchState({ hasPlanterUser: true }),
       "yes"
     ),
     "confirm"
   );
-  assert.equal(
-    leadershipWritePlan(
-      { role: "team_member", churchId: CHURCH_ID },
-      empty,
-      "no"
-    ),
-    "decline"
-  );
+  assert.equal(leadershipWritePlan(viewer("member"), empty, "no"), "decline");
 });

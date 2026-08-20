@@ -19,9 +19,8 @@ import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantDetail } from "@/components/oversight/plant-detail";
-import { oversightOrgOfUser } from "@/lib/invitations/core";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
-import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { getOversightPlantDetail } from "@/lib/oversight/read";
 import { requireOversightUser } from "@/lib/oversight/session";
 
@@ -40,7 +39,7 @@ export default async function OversightPlantPage({
   params,
 }: OversightPlantPageProps) {
   // Oversight-only surface — one guard, shared by every /oversight route.
-  const user = await requireOversightUser();
+  const { user, org: callerOrg } = await requireOversightUser();
 
   const { id } = await params;
   const detail = await getOversightPlantDetail(user, id);
@@ -55,12 +54,14 @@ export default async function OversightPlantPage({
   // never from the URL, and it is the same derivation the sever is guarded by, so
   // what this page shows and what its Remove action can touch cannot disagree.
   //
-  // `oversightOrgOfUser` cannot be null here — the role guard above admits only
-  // the two oversight roles, and `getOversightPlantDetail` already answered null
-  // for an admin with no org (they reach no plants at all). The empty history is
-  // the fail-closed answer rather than an unscoped read.
-  const org = oversightOrgOfUser(user);
-  const history = org ? await getAssociationHistoryForOrg(org, id) : [];
+  // The org comes from the guard, which resolved it from the session's tenancy
+  // FK — so it is non-null by construction and there is no second derivation to
+  // disagree with the first. `getAssociationHistoryForOrg` takes the
+  // invitations domain's `{ orgType, orgId }` spelling of the same fact.
+  const history = await getAssociationHistoryForOrg(
+    { orgType: callerOrg.type, orgId: callerOrg.id },
+    id
+  );
 
   return (
     <>
@@ -72,7 +73,7 @@ export default async function OversightPlantPage({
       />
       <PlantDetail
         detail={detail}
-        scopeLabel={scopeLabelForRole(user.role)}
+        scopeLabel={scopeLabelForOrgType(callerOrg.type)}
         history={history}
       />
     </>

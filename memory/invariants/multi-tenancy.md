@@ -11,14 +11,15 @@ The two oversight FKs are **independent associations held side by side**; neithe
 - **An accept never replaces an association (⚖).** The guard is on the **claim**, so a refused accept writes nothing rather than committing an acceptance with no association behind it; re-binding the same org stays an idempotent no-op for the replay path. Being a subquery it holds only against a *sequential* second accept — [transactions-atomicity.md](transactions-atomicity.md) has the lock.
 - **No invitation that cannot be answered (⚖), per invitation TYPE.** A targetable role with nowhere to answer was closed by BUILDING the surface, not by re-gating the path; a test enumerates the types, so a fourth fails until its answering view and its LEAVE control exist.
 
-## One table decides which role administers which kind of org
+## One table decides which COLUMN carries which kind of org
 
+- **`OVERSIGHT_ADMIN` lost its `role` half with `users.role` (#494).** A row is now `{ fk }` alone, and what the role used to say — "this account speaks for THIS kind of org and nothing else" — is said instead by `oversightOrgOf` (`@/lib/auth/tenancy`), which answers only for a row naming exactly one tenancy FK.
 - **Half of `OVERSIGHT_ADMIN` is still a pairing written per site.** State what the compiler was OBSERVED to do: add a third union member, run `pnpm typecheck`, read the output, restore the file. The one correspondence left written out is the `churches.sending_*_id` column, so a new kind must fail there.
-- **The audience carries no `OVERSIGHT_ROLES` floor, and one must not be added back.** Every arm already names its role from the table, and an arm edited to a non-oversight role would be silently ANDed to zero: a floor that turns a loud error into silence is not a floor.
+- **The audience arm is the FK AND the rest of the tenancy rule, and it must not be narrowed to the FK alone.** The other columns are derived from the table's own rows, so an arm cannot be edited to name one FK and forget another. Widening it back to `or(fk, fk)` re-admits a row carrying a competing tenancy — the hierarchy walk, arriving through a column nobody checked against the rest of the row.
 
 ## Severing
 
-- **Both sides may sever (⚖ OV-007/OV-010)**, each on the surface owning its authority rule, behind a type-to-confirm dialog, notifying the other side and writing an `association_events` row. The planter's action takes an org KIND, the org admin's a CHURCH id, the sending church's **no argument at all**; the endpoints stay SEPARATE, because a role branch inside one puts the authority rule in the client's hands. A sever whose subject the audit table cannot hold does not ship at all.
+- **Both sides may sever (⚖ OV-007/OV-010)**, each on the surface owning its authority rule, behind a type-to-confirm dialog, notifying the other side and writing an `association_events` row. The plant Owner's action takes an org KIND, the org's a CHURCH id, the sending church's **no argument at all**; the endpoints stay SEPARATE, because a tenancy branch inside one puts the authority rule in the client's hands. A sever whose subject the audit table cannot hold does not ship at all.
 
 ## The surface never answers "does this address have an account?"
 

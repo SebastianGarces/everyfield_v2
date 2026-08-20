@@ -3,12 +3,12 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import type { UserRole } from "@/db/schema";
-// The ONE declaration of the oversight role pair, imported rather than parsed
-// out of another module's source. `@/lib/auth/roles` is an import-free leaf, so
-// this costs the suite no database — which is precisely why the pair can live
-// in one place now (`@/lib/auth/access` opens with `@/db`).
-import { OVERSIGHT_ROLES, isOversightRole } from "@/lib/auth/roles";
+// The ONE declaration of "which org does this row's tenancy name", imported
+// rather than parsed out of another module's source. `@/lib/auth/tenancy` is an
+// import-free leaf, so this costs the suite no database — which is precisely
+// why the decision can live in one place now (`@/lib/auth/access` opens with
+// `@/db`).
+import { oversightOrgOf, type TenancyFields } from "@/lib/auth/tenancy";
 // The repo's static reader, imported rather than re-written: `codeOf` is the
 // comment stripper this file used to keep a copy of, and `staticValueSpecifiers`
 // is the import scan the leaf guard below used to spell as a bare
@@ -19,7 +19,7 @@ import {
   staticValueSpecifiers,
 } from "@/lib/auth/server-action-surface";
 
-import { scopeLabelForOrgType, scopeLabelForRole } from "./org-label";
+import { scopeLabelForOrgType } from "./org-label";
 
 // ============================================================================
 // One guard for every /oversight route, and one spelling of the scope label.
@@ -56,45 +56,46 @@ function oversightPages(dir: string = OVERSIGHT_ROUTES): string[] {
 const readCode = codeOf;
 
 // ----------------------------------------------------------------------------
-// The role list is one list
+// The tenancy decision is made in one place
 // ----------------------------------------------------------------------------
 
-test("the guard declares no role of its own", () => {
+test("the guard names no tenancy column of its own", () => {
   // `session.ts` used to hold `OVERSIGHT_ROLE_LIST` — a second `as const` tuple
-  // of the same two roles as `OVERSIGHT_ROLES` (`@/lib/auth/access`),
-  // reconciled by a regex over THAT module's source text. Two implementations
-  // of one authority policy, with a drift guard pointed backwards: declaring
-  // `OVERSIGHT_ROLES` `as const`, the one change that removes the reason for
-  // the copy, was the change that failed the guard.
-  //
-  // The pair is now declared once, in the import-free leaf `@/lib/auth/roles`,
-  // which EVERY site imports — `roles.test.ts` asserts that no other module in
-  // `src/` exports either symbol, so there is one import path and no re-export
-  // to serve a second. What this guard owes is that no third copy grows back
-  // here.
+  // of the two oversight roles — reconciled by a regex over another module's
+  // source text: two implementations of one authority policy, with a drift
+  // guard pointed backwards. The decision is now made once, by `oversightOrgOf`
+  // in the import-free leaf `@/lib/auth/tenancy`, and `tenancy.test.ts` asserts
+  // no other module in `src/` exports it. What this guard owes is that no third
+  // copy grows back here — including the FK-reading form the predicate replaced.
   const guard = readCode(
     path.join(ROOT, "src", "lib", "oversight", "session.ts")
   );
-  for (const role of ["sending_church_admin", "network_admin"]) {
+  for (const column of ["sendingChurchId", "sendingNetworkId"]) {
     assert.ok(
-      !guard.includes(role),
-      `session.ts names "${role}" — the role pair belongs to @/lib/auth/roles`
+      !guard.includes(column),
+      `session.ts reads "${column}" — resolving a tenancy belongs to @/lib/auth/tenancy`
     );
   }
-  assert.match(guard, /from "@\/lib\/auth\/roles"/);
+  assert.match(guard, /from "@\/lib\/auth\/tenancy"/);
 });
 
-test("every non-oversight role is refused, and both oversight roles pass", () => {
-  const roles: UserRole[] = [
-    "planter",
-    "coach",
-    "team_member",
-    "sending_church_admin",
-    "network_admin",
-  ];
-  const admitted = roles.filter(isOversightRole);
-  // Compared against the DECLARATION, not against a third spelling of the pair.
-  assert.deepEqual(admitted, [...OVERSIGHT_ROLES]);
+test("a church-level tenancy is refused and both oversight tenancies pass", () => {
+  const base: TenancyFields = {
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
+  // The same predicate the guard calls, over the shapes the guard sees.
+  assert.equal(oversightOrgOf({ ...base, churchId: "c" }), null, "a plant");
+  assert.equal(oversightOrgOf(base), null, "a coach — no tenancy at all");
+  assert.equal(
+    oversightOrgOf({ ...base, sendingChurchId: "s" })?.type,
+    "sending_church"
+  );
+  assert.equal(
+    oversightOrgOf({ ...base, sendingNetworkId: "n" })?.type,
+    "network"
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -115,15 +116,17 @@ test("every oversight route guards through requireOversightUser", () => {
   }
 });
 
-test("no oversight route keeps its own copy of the role pair", () => {
+test("no oversight route resolves the caller's tenancy itself", () => {
   // Six pages used to open with the identical
   // `user.role !== "sending_church_admin" && user.role !== "network_admin"`.
-  // A rule written six times is a rule that can be weakened in one of them.
+  // A rule written six times is a rule that can be weakened in one of them. The
+  // seat model's version of that copy is a page reading an org FK off the
+  // session row instead of taking the org the guard already resolved.
   for (const page of oversightPages()) {
     const source = readCode(page);
     assert.ok(
-      !/user\.role !== "sending_church_admin"/.test(source),
-      `${path.relative(ROOT, page)} re-spells the oversight role pair`
+      !/user\.sendingChurchId|user\.sendingNetworkId/.test(source),
+      `${path.relative(ROOT, page)} resolves the caller's org itself instead of using the guard's`
     );
     assert.ok(
       !/getCurrentSession\(\)/.test(source),
@@ -133,8 +136,8 @@ test("no oversight route keeps its own copy of the role pair", () => {
 });
 
 test("the two refusals stay different, and neither is a 404", () => {
-  // No session → /login (signing in is what is missing); a church-level role →
-  // /dashboard (they have a home). `notFound()` is reserved for the one page
+  // No session → /login (signing in is what is missing); a church-level tenancy
+  // → /dashboard (they have a home). `notFound()` is reserved for the one page
   // whose EXISTENCE is the disclosure, and it stays at that page.
   const guard = readCode(
     path.join(ROOT, "src", "lib", "oversight", "session.ts")
@@ -151,7 +154,7 @@ test("the two refusals stay different, and neither is a 404", () => {
   );
   assert.match(
     roster,
-    /user\.role !== "network_admin"\s*\)\s*\{\s*notFound\(\);/,
+    /org\.type !== "network"\s*\)\s*\{\s*notFound\(\);/,
     "the network-only refusal is this page's own rule and must stay on it"
   );
 });
@@ -183,7 +186,7 @@ test("no oversight surface re-derives the scope label inline", () => {
     const source = readCode(file);
     assert.ok(
       !/\?\s*"network"\s*:\s*"sending church"/.test(source),
-      `${path.relative(ROOT, file)} re-derives the scope label from the role`
+      `${path.relative(ROOT, file)} re-derives the scope label inline`
     );
     assert.ok(
       !/sending_church:\s*"sending church"/.test(source),
@@ -200,7 +203,7 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
   const presentation = readCode(
     path.join(ROOT, "src", "lib", "oversight", "presentation.ts")
   );
-  for (const symbol of ["scopeLabelForRole", "scopeLabelForOrgType"]) {
+  for (const symbol of ["scopeLabelForOrgType"]) {
     assert.ok(
       !presentation.includes(symbol),
       `presentation.ts serves ${symbol}, which puts @/db/schema one import from a client component`
@@ -222,8 +225,6 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
     "org-label.ts gained a value import — it is no longer safe in a client bundle"
   );
 
-  assert.equal(
-    scopeLabelForRole("network_admin"),
-    scopeLabelForOrgType("network")
-  );
+  assert.equal(scopeLabelForOrgType("network"), "network");
+  assert.equal(scopeLabelForOrgType("sending_church"), "sending church");
 });

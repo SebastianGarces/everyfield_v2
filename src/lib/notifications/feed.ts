@@ -1,8 +1,8 @@
-import type { UserRole } from "@/db/schema";
+import type { TenancyFields } from "@/lib/auth/tenancy";
 
 import type { NotificationAudience, NotificationCategory } from "./categories";
 import {
-  audienceForRole,
+  audienceForTenancy,
   getInAppCategories,
   preferenceOwnerFromSession,
   type PreferenceOwner,
@@ -66,7 +66,7 @@ import {
 // exact bug the override was added to fix, moved one layer down: the dispatcher
 // wrote an oversight admin's in-app digest row and every read path here filtered
 // it straight back out. So the audience travels ON THE VIEWER — resolved once,
-// from the session's role, by `notificationViewer` — and every read and both
+// from the session's tenancy, by `notificationViewer` — and every read and both
 // mark-read writes take it from there rather than defaulting.
 // ============================================================================
 
@@ -78,7 +78,7 @@ import {
  * All three are minted from a verified session and none can be assembled from
  * request input — `NotificationScope` is required-field by construction,
  * `PreferenceOwner` is branded so only `preferenceOwnerFromSession` can produce
- * one, and the audience is derived from the session's role.
+ * one, and the audience is derived from the session's tenancy.
  */
 export interface NotificationViewer {
   scope: NotificationScope;
@@ -93,7 +93,7 @@ export interface NotificationViewer {
 
 /** The session shape a viewer needs. Structural, so any verified session fits. */
 export interface ViewerSession {
-  user: { id: string; churchId: string | null; role: UserRole };
+  user: { id: string } & TenancyFields;
 }
 
 /**
@@ -105,17 +105,17 @@ export interface ViewerSession {
  * church has nothing to read rather than an empty list — the callers turn that
  * into a redirect and a hidden bell.
  *
- * That is still true for an oversight user, and it is now the ONLY thing
- * standing between them and the feed. An oversight admin's rows are scoped to
- * each PLANT they oversee, not to a church of their own (`users.church_id` is
- * null for both oversight roles — see `resolveRoleAssignment` in
+ * That is still true for an oversight account, and it is now the ONLY thing
+ * standing between them and the feed. Their rows are scoped to each PLANT they
+ * oversee, not to a church of their own (`users.church_id` is null for an
+ * oversight tenancy — see `resolveSeatAssignment` in
  * `src/app/(auth)/register/actions.ts`), so serving them means deciding which
  * plants one feed spans. That decision, and the surface it feeds, is #225.
  *
  * What this unit settles is the other half, which #225 must not have to
- * re-litigate: the AUDIENCE is resolved here, from the role, independently of
- * the church. So the moment #225 hands this function a plant to scope to, the
- * defaults it reads with are already the oversight ones.
+ * re-litigate: the AUDIENCE is resolved here, from the tenancy, independently
+ * of the church. So the moment #225 hands this function a plant to scope to,
+ * the defaults it reads with are already the oversight ones.
  */
 export function notificationViewer(
   session: ViewerSession
@@ -128,7 +128,7 @@ export function notificationViewer(
       recipientUserId: session.user.id,
     },
     owner: preferenceOwnerFromSession(session),
-    audience: audienceForRole(session.user.role),
+    audience: audienceForTenancy(session.user),
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireChurchAccess, requireRole } from "@/lib/auth/access";
+import { requireChurchAccess, requirePlantOwner } from "@/lib/auth/access";
 import { verifySession } from "@/lib/auth/session";
 import {
   transitionPhase,
@@ -52,7 +52,7 @@ export interface TransitionPhaseActionInput {
  * (PE-001/002/003). Soft-gated — never blocks. Writes the immutable audit row,
  * updates the current phase, and emits `phase.changed`.
  *
- * Enforces planter role + church_id scope before any write.
+ * Enforces the plant Owner seat + church_id scope before any write.
  */
 export async function transitionPhaseAction(
   input: TransitionPhaseActionInput
@@ -60,10 +60,10 @@ export async function transitionPhaseAction(
   try {
     const { user } = await verifySession();
 
-    // Only the planter controls their plant's phase.
-    requireRole(user, "planter");
+    // Only the plant's Owner controls its phase.
+    requirePlantOwner(user);
 
-    // The plant is the session's, not the caller's. A planter with no church
+    // The plant is the session's, not the caller's. An Owner with no church
     // has nothing to move.
     const churchId = user.churchId;
     if (!churchId) {

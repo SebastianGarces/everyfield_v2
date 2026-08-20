@@ -25,7 +25,7 @@ import {
 // `presentation.ts`, and this import is part of what pins that: a re-export
 // there would make the heavy module reachable from `remove-plant-dialog.tsx`,
 // a `"use client"` component (`org-label.test.ts` asserts the property).
-import { scopeLabelForOrgType, scopeLabelForRole } from "./org-label";
+import { scopeLabelForOrgType } from "./org-label";
 // The countdown oversight renders is the CANON, not a local copy: this module
 // used to carry a byte-for-byte duplicate of it (PR #339), which is how #338
 // shipped twice. These cases stay here because they pin what the oversight
@@ -204,27 +204,13 @@ test("a network admin sees which of THEIR sending churches the plant sits under"
 // ----------------------------------------------------------------------------
 
 test("the scope label matches the caller's kind of org", () => {
-  assert.equal(scopeLabelForRole("network_admin"), "network");
-  assert.equal(scopeLabelForRole("sending_church_admin"), "sending church");
+  assert.equal(scopeLabelForOrgType("network"), "network");
+  assert.equal(scopeLabelForOrgType("sending_church"), "sending church");
 });
 
 test("an out-of-range phase does not blow up the row", () => {
   assert.equal(formatPhase(0), "Phase 0: Discovery");
   assert.equal(formatPhase(99), "Phase 99");
-});
-
-test("the two scope-label spellings are one table, reached two ways", () => {
-  // The page knows a ROLE, the remove dialog knows an ORG KIND, and both must
-  // produce the same word — three private copies of this pair is what the leaf
-  // replaced.
-  assert.equal(
-    scopeLabelForOrgType("network"),
-    scopeLabelForRole("network_admin")
-  );
-  assert.equal(
-    scopeLabelForOrgType("sending_church"),
-    scopeLabelForRole("sending_church_admin")
-  );
 });
 
 // ----------------------------------------------------------------------------

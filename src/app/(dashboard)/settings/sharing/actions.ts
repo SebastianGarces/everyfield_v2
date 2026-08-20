@@ -1,5 +1,6 @@
 "use server";
 
+import { isPlantOwner } from "@/lib/auth/tenancy";
 import { refresh } from "next/cache";
 import { z } from "zod";
 
@@ -49,7 +50,7 @@ export async function setOversightSharingAction(
     return { success: false, error: "That is not a setting we can save" };
   }
 
-  if (user.role !== "planter") {
+  if (!isPlantOwner(user)) {
     return {
       success: false,
       error: "Only the church planter can change what this plant shares",

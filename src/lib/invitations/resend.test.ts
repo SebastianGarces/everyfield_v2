@@ -93,6 +93,7 @@ const INVITATION_ID = "77777777-7777-4777-8777-777777777777";
 const REPLACEMENT_ID = "88888888-8888-4888-8888-888888888888";
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
+const PLANT = "99999999-9999-4999-8999-999999999999";
 const ADMIN_ID = "44444444-4444-4444-8444-444444444444";
 const INVITEE = "new-planter@example.test";
 const ORG = "Redemption Hill";
@@ -103,7 +104,7 @@ const EXPIRES = new Date("2026-09-03T23:30:00.000Z");
 function actor(overrides: Partial<InvitationActor> = {}): InvitationActor {
   return {
     id: ADMIN_ID,
-    role: "sending_church_admin",
+    seat: "owner",
     churchId: null,
     sendingChurchId: SENDING_CHURCH,
     sendingNetworkId: null,
@@ -571,7 +572,11 @@ test("the resend read is scoped by the SAME org predicate as the list and the re
   // built from `invitingOrgOf(actor)`, and the parameters below come from the
   // session — there is no argument a request could put another org's id into.
   const scoped = orgInvitationQuery(
-    actor({ role: "sending_church_admin", sendingChurchId: SENDING_CHURCH }),
+    actor({
+      seat: "owner",
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: null,
+    }),
     INVITATION_ID
   ).toSQL();
 
@@ -584,7 +589,7 @@ test("the resend read is scoped by the SAME org predicate as the list and the re
 
   const network = orgInvitationQuery(
     actor({
-      role: "network_admin",
+      seat: "owner",
       sendingChurchId: null,
       sendingNetworkId: NETWORK,
     }),
@@ -594,18 +599,36 @@ test("the resend read is scoped by the SAME org predicate as the list and the re
   assert.ok(network.params.includes(NETWORK));
 });
 
-test("a role that cannot invite, and an admin with no org, match nothing", () => {
-  // `invitingOrgOf` answers `false` for both, so the predicate matches no row
-  // rather than degrading into "every invitation in the product".
-  for (const nobody of [
-    actor({ role: "planter", sendingChurchId: null }),
-    actor({ role: "team_member", sendingChurchId: null }),
-    actor({ role: "coach", sendingChurchId: null }),
-    actor({ role: "sending_church_admin", sendingChurchId: null }),
-    actor({ role: "network_admin", sendingChurchId: null }),
-  ]) {
+test("a tenancy that cannot invite, and an account with no org, match nothing", () => {
+  // `invitingOrgOf` answers `false` for every one of them, so the predicate
+  // matches no row rather than degrading into "every invitation in the
+  // product". The last row is the one the role used to settle: with two
+  // oversight FKs and no role to break the tie, `oversightOrgOf` names NO org
+  // and the query reaches nothing — fail-closed, not a precedence order.
+  const NOBODY: [string, Partial<InvitationActor>][] = [
+    ["the plant's Owner", { seat: "owner", churchId: PLANT }],
+    ["a plant Member", { seat: "member", churchId: PLANT }],
+    ["a coach, who names no tenancy at all", { seat: null }],
+    ["an Owner whose org is not set", { seat: "owner" }],
+    [
+      "an account naming BOTH oversight orgs",
+      {
+        seat: "owner",
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      },
+    ],
+  ];
+
+  for (const [who, fields] of NOBODY) {
+    const nobody = actor({
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      ...fields,
+    });
     const { sql } = orgInvitationQuery(nobody, INVITATION_ID).toSQL();
-    assert.match(sql, /false/, nobody.role);
+    assert.match(sql, /false/, who);
   }
 });
 

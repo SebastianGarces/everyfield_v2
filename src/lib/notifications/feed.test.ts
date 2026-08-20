@@ -14,7 +14,12 @@ import {
   type NotificationViewer,
   type ViewerSession,
 } from "./feed";
-import { resolveInAppCategories } from "./preferences";
+import {
+  preferenceOwnerFromSession,
+  resolveInAppCategories,
+} from "./preferences";
+
+import type { TenancyFields } from "@/lib/auth/tenancy";
 
 // ----------------------------------------------------------------------------
 // The read path resolves with the viewer's AUDIENCE (N-027, ruled on #259).
@@ -38,22 +43,63 @@ import { resolveInAppCategories } from "./preferences";
 const PLANT = "11111111-1111-4111-8111-111111111111";
 const PLANTER = "22222222-2222-4222-8222-222222222222";
 const OVERSIGHT_ADMIN = "33333333-3333-4333-8333-333333333333";
+const SENDING_CHURCH = "44444444-4444-4444-8444-444444444444";
+const NETWORK = "55555555-5555-4555-8555-555555555555";
 
+/**
+ * A session naming the given tenancy. All three FKs are always present because
+ * `ViewerSession` carries `TenancyFields`, and the audience is read off the
+ * three together — a fixture that omitted one would be asserting about a shape
+ * `audienceForTenancy` never sees. `church_id` defaults to the plant, which is
+ * what every church-level session names.
+ */
 function session(
   id: string,
-  role: ViewerSession["user"]["role"],
-  churchId: string | null = PLANT
+  tenancy: Partial<TenancyFields> = {}
 ): ViewerSession {
-  return { user: { id, churchId, role } };
+  return {
+    user: {
+      id,
+      churchId: PLANT,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      ...tenancy,
+    },
+  };
 }
 
 function viewerFor(
   id: string,
-  role: ViewerSession["user"]["role"]
+  tenancy: Partial<TenancyFields> = {}
 ): NotificationViewer {
-  const viewer = notificationViewer(session(id, role));
+  const viewer = notificationViewer(session(id, tenancy));
   assert.ok(viewer, "the fixture produced no viewer");
   return viewer;
+}
+
+/**
+ * An oversight reader's viewer, built directly rather than minted from a
+ * session — and that is the seat model talking, not a shortcut.
+ *
+ * An oversight tenancy names `sending_church_id` or `sending_network_id` and
+ * leaves `church_id` NULL, so `notificationViewer` returns null for it (that is
+ * the test below, and it is the one thing left between an oversight account and
+ * the feed until #225 decides which plants their feed spans). Naming a church
+ * AND an oversight org on one row does not produce an oversight reader either:
+ * `oversightOrgOf` refuses a row naming two tenancies, so such a fixture would
+ * resolve to the CHURCH audience and quietly assert the opposite of what it
+ * reads like.
+ *
+ * So the audience these paths must carry is stated here, and what the paths do
+ * with it is what the tests below are about. The derivation itself — tenancy to
+ * audience — is pinned at `audienceForTenancy` in `preferences.test.ts`.
+ */
+function oversightViewer(): NotificationViewer {
+  return {
+    scope: { churchId: PLANT, recipientUserId: OVERSIGHT_ADMIN },
+    owner: preferenceOwnerFromSession({ user: { id: OVERSIGHT_ADMIN } }),
+    audience: "oversight",
+  };
 }
 
 /**
@@ -134,29 +180,30 @@ async function allowListsFor(viewer: NotificationViewer) {
 // The audience travels on the viewer
 // ----------------------------------------------------------------------------
 
-test("the viewer's audience is derived from the session role", () => {
-  assert.equal(viewerFor(PLANTER, "planter").audience, "church");
-  assert.equal(viewerFor(PLANTER, "coach").audience, "church");
-  assert.equal(viewerFor(PLANTER, "team_member").audience, "church");
-  assert.equal(
-    viewerFor(OVERSIGHT_ADMIN, "sending_church_admin").audience,
-    "oversight"
-  );
-  assert.equal(
-    viewerFor(OVERSIGHT_ADMIN, "network_admin").audience,
-    "oversight"
-  );
+test("the viewer's audience is derived from the session tenancy", () => {
+  // A plant's tenancy reads with the church defaults no matter which seat holds
+  // it — the three old church role names were one tenancy all along, which is
+  // why there is one assertion here now instead of three.
+  assert.equal(viewerFor(PLANTER).audience, "church");
 });
 
-test("a session naming no church still has no feed, whatever its role", () => {
+test("a session naming no church still has no feed, whatever tenancy it names", () => {
   // Unchanged, and it is the ONLY thing between an oversight user and the feed
   // now that the audience is settled: their rows are scoped to each plant they
   // oversee, and deciding which plants one feed spans is #225's question.
-  assert.equal(notificationViewer(session(PLANTER, "planter", null)), null);
-  assert.equal(
-    notificationViewer(session(OVERSIGHT_ADMIN, "network_admin", null)),
-    null
-  );
+  assert.equal(notificationViewer(session(PLANTER, { churchId: null })), null);
+  for (const [who, tenancy] of [
+    ["a sending church's account", { sendingChurchId: SENDING_CHURCH }],
+    ["a network's account", { sendingNetworkId: NETWORK }],
+  ] as [string, Partial<TenancyFields>][]) {
+    assert.equal(
+      notificationViewer(
+        session(OVERSIGHT_ADMIN, { churchId: null, ...tenancy })
+      ),
+      null,
+      `${who} was given a feed with no plant to scope it to`
+    );
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -164,9 +211,7 @@ test("a session naming no church still has no feed, whatever its role", () => {
 // ----------------------------------------------------------------------------
 
 test("an oversight recipient with NO preference sees the digest everywhere", async () => {
-  const lists = await allowListsFor(
-    viewerFor(OVERSIGHT_ADMIN, "sending_church_admin")
-  );
+  const lists = await allowListsFor(oversightViewer());
 
   for (const [path, categories] of Object.entries(lists)) {
     assert.ok(
@@ -183,7 +228,7 @@ test("an oversight recipient with NO preference sees the digest everywhere", asy
 });
 
 test("a planter's allow-list is unchanged — the digest stays out in-app", async () => {
-  const lists = await allowListsFor(viewerFor(PLANTER, "planter"));
+  const lists = await allowListsFor(viewerFor(PLANTER));
 
   for (const [path, categories] of Object.entries(lists)) {
     assert.equal(
@@ -201,10 +246,8 @@ test("a planter's allow-list is unchanged — the digest stays out in-app", asyn
 });
 
 test("the two audiences differ by exactly one category", async () => {
-  const church = await allowListsFor(viewerFor(PLANTER, "planter"));
-  const oversight = await allowListsFor(
-    viewerFor(OVERSIGHT_ADMIN, "network_admin")
-  );
+  const church = await allowListsFor(viewerFor(PLANTER));
+  const oversight = await allowListsFor(oversightViewer());
 
   assert.deepEqual(
     oversight.feed.filter((category) => !church.feed.includes(category)),

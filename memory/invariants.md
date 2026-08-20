@@ -42,8 +42,9 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - Accepted residual: an OPEN row stays distinguishable at `/register` — the GET renders the redeeming form with a pre-filled `readOnly` address (never `disabled`, which submits nothing), and the matching POST redeems. Retired by invite-at-registration.
 - ⚖ `association_events` names a SUBJECT, not a plant (0036): `subject_type` ∈ {church, sending_church}, one nullable FK per kind, a CHECK that exactly one is set. `acceptInvitationAs` has ONE batch shape, `[lock, claim, association, audit]`; `requireAssociationPair` decides which ids a type implies.
 - ⚖ A notification is anchored to a CHURCH or to an ORG (`anchor_type`, `anchor_org_id`, CHECK exactly-one) — ONE table, never a parallel org table, and neither tenancy coalesces with the other.
-- No `inArray(role, OVERSIGHT_ROLES)` floor beside the oversight notification audience — each arm already names its role from the `OVERSIGHT_ADMIN` pairing table, and the floor would silently AND a mis-edited arm to zero rows.
-- ⚖ A `users` row an oversight FK reached whose ROLE does not administer that kind of org is a DATA DEFECT, never a recipient: the audience PARTITIONS them (`OversightAudience`), so `fanOutTo` loops `recipients` alone and logs the rest. The exclusion is in TypeScript, not the `WHERE`, to be COUNTED; `oversightReachCondition` is that probe, never an audience.
+- An oversight audience arm is its org's FK AND the rest of the exactly-one-tenancy rule (`church_id` null, every other oversight FK null) — the SQL half of `oversightOrgOf`. Never the FK alone: that admits a row with a competing claim on another tenancy. The other columns come off `OVERSIGHT_ADMIN_ROWS`, so a third org kind tightens every arm.
+- ⚖ A `users` row an oversight FK reached whose OWN TENANCY is not that org is a DATA DEFECT, never a recipient: the audience PARTITIONS them (`OversightAudience`), so `fanOutTo` loops `recipients` alone and logs the rest. The exclusion is in TypeScript, not the `WHERE`, to be COUNTED; `oversightReachCondition` is that probe, never an audience.
+- That log names the row's OWN tenancy columns (`names`), never the org it administers: a row only reaches that branch by naming more than one tenancy, and such a row administers nothing — so an "administers" field could only ever print null, which is a count an operator cannot act on.
 - ⚖ A pending invitation carries a "Resend email" action so a failed or missed send is recoverable. NOTHING is persisted about delivery, because provider acceptance is not a delivery receipt.
 - ⚖ After a successful resend the button is DISABLED for the rest of that 60s bucket (`RESEND_DEDUPE_WINDOW_MS`) and counts it down. ONE arithmetic feeds both the provider idempotency-key suffix and the countdown, and only DURATIONS cross to the browser.
 - Accepted residual — ⚖ that cooldown is PER CLIENT SESSION: it lives in `useActionState`, so a reload or a second tab mounts with none. Retired only by reversing the no-persistence ruling.
@@ -80,10 +81,17 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals`, which hash both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. The trusted headers are `x-pathname` (absence fails closed) and the platform-written `x-real-ip`.
 
-## User Roles
+## Seats & Tenancy
 
-- Planter: full CRUD on their own church. Team member: feature-limited within it. Coach: read on assigned planters. Both oversight admins: aggregates for churches matching their org FK, subject to the toggles.
-- Outside registration a role is granted in exactly ONE place — the OB-010 planter claim on a planterless plant, promoting `team_member` → `planter`. The SQL repeats the role check, and it is a raced write.
+→ [seats-and-tenancy](invariants/seats-and-tenancy.md) — anything reading who an account is.
+
+- `users.role` DOES NOT EXIST (dropped by migration 0051). An account is a SEAT — `users.seat` ∈ {owner, admin, member}, NULL for a coach — held in a TENANCY named by `church_id`, `sending_church_id` or `sending_network_id`. Neither half answers alone: `seat = 'owner'` says nothing about whose owner.
+- ⚖ ONE OWNER PER TENANCY, ENFORCED BY THE DATABASE (AS-002, ruling 185 (4)): three partial unique indexes, one per tenancy FK, each `WHERE seat = 'owner'`. This RETIRED the OB-010 claim race — a second Owner is now a write that cannot commit, not a defect to detect. The `notExists` in `claimPlanterStatements` stays only to make the ordinary already-claimed case a no-op instead of an error.
+- The partial predicate and the NULL-distinct rule are BOTH what keep a coach-only account writable — no tenancy, no seat, caught by neither half. An index made total, or a `seat` made NOT NULL, breaks the second coach account with nothing in the app to say why.
+- ONE function answers "which tenancy is this", `oversightOrgOf` (`@/lib/auth/tenancy`, an import-free leaf), and it answers ONLY for a row naming EXACTLY ONE tenancy FK. A row naming two is a data defect that reaches NOTHING in either direction; `isChurchLevelUser` is stated positively for the same reason, so the defect is neither church-level nor oversight.
+- Accepted residual: nothing in the schema holds an account to one tenancy. Migration 0050 §1 cleared the twelve rows that carried two (measured on the shared branch, 2026-08-20), but a CHECK would have refused them, so the state stays REPRESENTABLE and every reader fails closed on it. Retired by a `num_nonnulls(...) <= 1` CHECK once no writer can produce one.
+- Outside registration a seat is granted in exactly ONE place — the OB-010 claim on a plant with no Owner, promoting `{owner, member}` and NOT `admin`. The pair is the ruled `{planter, team_member}` migrated; `admin` is a seat the role model could not express, so admitting it would be a widening, not a rename.
+- An authority arm that names an oversight org asks the SEAT as well as the tenancy (`isOrgOwner`) — `sending_church_admin` and `network_admin` each meant "the Owner seat in this kind of org", so a seatless org row and an org Member were already refused. Dropping the seat half widens the rule while looking like a rename.
 
 ## Phase History — Declarations vs Transitions
 
@@ -169,6 +177,7 @@ Those two server actions write their hop through `changeStatus`, which enforces 
 
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to `scripts/seed-dev-db.ts` and anything that inserts a `churches` row.
 
+- A seeded coach carries a `church_id` and NO seat, deliberately: that reads as "in this plant, holding nothing", which is what a coach is, and `getAccessibleChurchIds` still answers them from `coach_assignments`.
 - `pnpm db:seed` deletes ALL users and ALL churches unscoped — the fixture is the whole database, not the rows the script created. Run it against your own or a throwaway database ONLY.
 - Every script that inserts a `churches` row stamps `onboarding_completed_at` with `now()` in that same INSERT — an unstamped seeded church puts its planter in the wizard.
 - ⚖ A credential removed from the repo needs a ROUTE, or the fixture it opens becomes unreachable: `SEED_ADMIN_PASSWORD` is recorded in `.env.local` — gitignored, machine-local, and read by a verifier BEFORE seeding rather than re-chosen.

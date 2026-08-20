@@ -52,6 +52,7 @@ import { listManualSignals } from "@/lib/phase-engine/signals/attestation-servic
 import { getMilestoneTimeline } from "@/lib/phase-engine/signals/milestones";
 import { getPlantTrends } from "@/lib/phase-engine/signals/trends";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
+import { isPlantOwner } from "@/lib/auth/tenancy";
 
 export const metadata = {
   title: "Plant Intelligence",
@@ -65,8 +66,8 @@ export default async function PhasePage() {
     redirect("/login");
   }
 
-  // Planter-facing surface only. Oversight users have their own aggregate view.
-  if (user.role !== "planter" || !user.churchId) {
+  // Owner-facing surface only. An oversight tenancy has its own aggregate view.
+  if (!isPlantOwner(user) || !user.churchId) {
     redirect("/dashboard");
   }
 

@@ -36,15 +36,15 @@ export const metadata: Metadata = {
 };
 
 export default async function OversightSendingChurchesPage() {
-  // Church-level roles are bounced to their own dashboard by the shared guard,
+  // A church-level tenancy is bounced to its own dashboard by the shared guard,
   // the same as every other oversight route — they have a home to go to. The
   // network-only refusal below is this page's own rule and stays here.
-  const user = await requireOversightUser();
+  const { user, org } = await requireOversightUser();
 
-  // A sending-church admin is an oversight user with no business on this
-  // surface. `listNetworkSendingChurches` refuses them a second time by
-  // resolving no network, so the guard is not carried by this line alone.
-  if (user.role !== "network_admin") {
+  // A sending-church tenancy is an oversight one with no business on this
+  // surface. `listNetworkSendingChurches` refuses it a second time by resolving
+  // no network, so the guard is not carried by this line alone.
+  if (org.type !== "network") {
     notFound();
   }
 

@@ -3,7 +3,7 @@
  *
  * Creates sample data for local development:
  * - Churches at various phases
- * - Users with different roles
+ * - Users holding different seats in different tenancies
  *
  * Usage:
  *   bun run scripts/seed-dev-db.ts
@@ -26,7 +26,7 @@
  * database.
  *
  * IT RE-KEYS, IT DOES NOT SKIP. The writes are upserts on `users.email`: an
- * existing address gets the password you passed, plus its role and org FKs put
+ * existing address gets the password you passed, plus its seat and org FKs put
  * back. `onConflictDoNothing` here meant a second run exited 0 announcing a
  * password it had not set while the old one still opened the account.
  *
@@ -57,6 +57,7 @@ import {
   users,
   type NewChurch,
   type NewUser,
+  type UserSeat,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
 import {
@@ -498,9 +499,9 @@ const DEV_EMAIL_DOMAIN = "everyfield.app";
  * Until now this script created no `sending_churches` row at all, which had a
  * consequence nobody had written down: the whole sending-church-admin half of
  * the product was unreachable by any real login. The dev database held exactly
- * two oversight accounts, both `network_admin`, and `sending_church_admin` —
- * a role with its own settings screen, its own association view and its own
- * leave dialog — had zero rows. A surface no seeded account can open is a
+ * two oversight accounts, both in the NETWORK tenancy, and the sending-church
+ * tenancy — which has its own settings screen, its own association view and its
+ * own leave dialog — had zero rows. A surface no seeded account can open is a
  * surface no browser validation can cover, so #304's WS3 shipped unphotographed
  * and the G3 gate failed on evidence that could not exist.
  *
@@ -527,8 +528,14 @@ const SEED_SENDING_CHURCH = {
   sendingNetworkId: null,
 } as const;
 
-interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
-  churchIndex: number | null; // Index into SEED_CHURCHES, null for network admin
+interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId" | "seat"> {
+  churchIndex: number | null; // Index into SEED_CHURCHES, null for an org account
+  /**
+   * REQUIRED here though the column is nullable: `null` means "coach, no seat"
+   * and is a deliberate fixture value (ruling 185 (2)), so leaving it off a row
+   * must not be spelled the same way as choosing it.
+   */
+  seat: UserSeat | null;
 }
 
 const SEED_USERS: SeedUser[] = [
@@ -536,18 +543,18 @@ const SEED_USERS: SeedUser[] = [
   {
     email: `admin@${DEV_EMAIL_DOMAIN}`,
     name: "Network Admin",
-    role: "network_admin",
+    seat: "owner",
     churchIndex: null,
     sendingNetworkId: SEED_SENDING_NETWORK.id,
   },
-  // Sending church admin (no church of their own — they oversee plants).
+  // Sending church Owner (no church of their own — they oversee plants).
   // Their `sending_church_id` is what `getAccessibleChurchIds` reads, and it is
-  // also what makes `/settings/association` render the admin's view rather than
-  // the planter's. Without this row that branch had no way to be opened.
+  // also what makes `/settings/association` render the org's view rather than
+  // the plant's. Without this row that branch had no way to be opened.
   {
     email: `sending-church-admin@${DEV_EMAIL_DOMAIN}`,
     name: "Sarah Sending",
-    role: "sending_church_admin",
+    seat: "owner",
     churchIndex: null,
     sendingChurchId: SEED_SENDING_CHURCH.id,
   },
@@ -555,51 +562,54 @@ const SEED_USERS: SeedUser[] = [
   {
     email: `planter1@${DEV_EMAIL_DOMAIN}`,
     name: "John Planter",
-    role: "planter",
+    seat: "owner",
     churchIndex: 0,
   },
   {
     email: `planter2@${DEV_EMAIL_DOMAIN}`,
     name: "Samuel Planter",
-    role: "planter",
+    seat: "owner",
     churchIndex: 1,
   },
   {
     email: `planter3@${DEV_EMAIL_DOMAIN}`,
     name: "Mike Planter",
-    role: "planter",
+    seat: "owner",
     churchIndex: 2,
   },
-  // Coaches
+  // Coaches — NO SEAT (ruling 185 (2)). Coaching is an assignment, so a coach
+  // holds no seat in the plant they coach; `getAccessibleChurchIds` answers a
+  // seatless account from `coach_assignments`. `churchIndex` still links them to
+  // a plant, which is what gives them an in-app notification feed.
   {
     email: `coach1@${DEV_EMAIL_DOMAIN}`,
     name: "David Coach",
-    role: "coach",
+    seat: null,
     churchIndex: 0,
   },
   {
     email: `coach2@${DEV_EMAIL_DOMAIN}`,
     name: "Emily Coach",
-    role: "coach",
+    seat: null,
     churchIndex: 1,
   },
   // Team members
   {
     email: `team1@${DEV_EMAIL_DOMAIN}`,
     name: "Alex Team",
-    role: "team_member",
+    seat: "member",
     churchIndex: 0,
   },
   {
     email: `team2@${DEV_EMAIL_DOMAIN}`,
     name: "Jordan Team",
-    role: "team_member",
+    seat: "member",
     churchIndex: 0,
   },
   {
     email: `team3@${DEV_EMAIL_DOMAIN}`,
     name: "Casey Team",
-    role: "team_member",
+    seat: "member",
     churchIndex: 1,
   },
 ];
@@ -664,7 +674,7 @@ async function seedOversightOrgs(passwordHash: string): Promise<void> {
 
   for (const admin of oversightAdminSeeds(SEED_USERS)) {
     await oversightAdminUpsert(db, admin, passwordHash, now);
-    console.log(`   [${admin.role}] ${admin.email}`);
+    console.log(`   [${admin.seat ?? "no seat"}] ${admin.email}`);
   }
 }
 
@@ -704,7 +714,7 @@ async function seedDatabase(): Promise<void> {
   const usersToCreate: NewUser[] = SEED_USERS.map((user) => ({
     email: user.email,
     name: user.name,
-    role: user.role,
+    seat: user.seat,
     passwordHash,
     churchId:
       user.churchIndex !== null ? createdChurches[user.churchIndex].id : null,
@@ -717,7 +727,7 @@ async function seedDatabase(): Promise<void> {
   for (const user of createdUsers) {
     const church = createdChurches.find((c) => c.id === user.churchId);
     const churchName = church ? church.name : "No church";
-    console.log(`   [${user.role}] ${user.email} - ${churchName}`);
+    console.log(`   [${user.seat ?? "no seat"}] ${user.email} - ${churchName}`);
   }
   console.log();
 
@@ -731,12 +741,12 @@ async function seedDatabase(): Promise<void> {
       .values({ churchId: church.id, targetDate, status: seed.status })
       .returning({ id: launches.id });
 
-    // The journal is seeded too (LS-002). Its actor is the plant's planter —
+    // The journal is seeded too (LS-002). Its actor is the plant's Owner —
     // there is no such thing as an unattributed date change in the product, so
-    // there should not be one in the seed either. A church with no planter user
-    // simply gets no journal rather than a fabricated actor.
+    // there should not be one in the seed either. A church with no Owner simply
+    // gets no journal rather than a fabricated actor.
     const planter = createdUsers.find(
-      (u) => u.churchId === church.id && u.role === "planter"
+      (u) => u.churchId === church.id && u.seat === "owner"
     );
     if (planter) {
       await db.insert(launchEvents).values({

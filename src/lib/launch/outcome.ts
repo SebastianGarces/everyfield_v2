@@ -15,7 +15,7 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import type { User } from "@/db/schema";
-import { requireChurchAccess, requireRole } from "@/lib/auth/access";
+import { requireChurchAccess, requirePlantOwner } from "@/lib/auth/access";
 import { markPlantDirty } from "@/lib/phase-engine/dirty-handler";
 import { daysUntilTarget } from "./countdown";
 import { getLaunchForChurch } from "./queries";
@@ -296,7 +296,7 @@ export async function recordLaunchOutcome(
   input: LaunchOutcomeInput,
   asOf: Date = new Date()
 ): Promise<RecordLaunchOutcomeResult> {
-  requireRole(user, "planter");
+  requirePlantOwner(user);
   await requireChurchAccess(user, churchId);
 
   const parsed = launchOutcomeSchema.safeParse(input);
@@ -359,7 +359,7 @@ export async function updateLaunchOutcome(
   churchId: string,
   input: LaunchOutcomeInput
 ): Promise<UpdateLaunchOutcomeResult> {
-  requireRole(user, "planter");
+  requirePlantOwner(user);
   await requireChurchAccess(user, churchId);
 
   const parsed = launchOutcomeSchema.safeParse(input);

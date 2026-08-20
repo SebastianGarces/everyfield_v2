@@ -296,7 +296,7 @@ test("the write path never takes its actor as an argument it did not mint", () =
   // and that this function re-derives authority from it rather than trusting a
   // church id alone. Both checks must be present and both must throw.
   const source = readFileSync(path.join(LAUNCH_DIR, "service.ts"), "utf8");
-  assert.match(source, /requireRole\(user, "planter"\)/);
+  assert.match(source, /requirePlantOwner\(user\)/);
   assert.match(source, /await requireChurchAccess\(user, churchId\)/);
 });
 

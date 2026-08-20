@@ -165,15 +165,15 @@ export async function runConfirmLeadership(
 // The statements
 // ============================================================================
 
-/** `EXISTS (SELECT … FROM users WHERE church_id = ? AND role = 'planter')`. */
+/** `EXISTS (SELECT … FROM users WHERE church_id = ? AND seat = 'owner')`. */
 function planterOfChurch(churchId: string) {
   return db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.churchId, churchId), eq(users.role, "planter")));
+    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")));
 }
 
-/** The same question about ONE user: is this actor the plant's planter? */
+/** The same question about ONE user: does this actor hold the plant's Owner seat? */
 function actorIsPlanterOf(churchId: string, actorId: string) {
   return db
     .select({ id: users.id })
@@ -182,14 +182,14 @@ function actorIsPlanterOf(churchId: string, actorId: string) {
       and(
         eq(users.id, actorId),
         eq(users.churchId, churchId),
-        eq(users.role, "planter")
+        eq(users.seat, "owner")
       )
     );
 }
 
 /**
  * OB-004's write: record the answer against a plant whose assignment is already
- * SETTLED — a Yes or No from the planter about their own seat. One idempotent
+ * SETTLED — a Yes or No from the Owner about their own seat. One idempotent
  * UPDATE, and there is genuinely no race to lose here: once anybody holds the
  * seat, `canAnswerLeadershipQuestion` lets only the planter answer, so there is
  * no second writer to interleave with.
@@ -284,17 +284,29 @@ export function claimPlanterStatements(write: LeadershipWrite) {
       .for("update"),
     db
       .update(users)
-      .set({ role: "planter", updatedAt: now })
+      .set({ seat: "owner", updatedAt: now })
       .where(
         and(
           eq(users.id, write.actorId),
           eq(users.churchId, write.churchId),
           // Defense in depth. `canAnswerLeadershipQuestion` already refuses a
-          // coach or an oversight admin in JS, so today this predicate can
+          // coach or an oversight account in JS, so today this predicate can
           // never be the thing that saves us — but this statement PROMOTES
           // somebody, and a promotion should not be one forgotten JS check away
           // from being reachable if these statements ever gain a second caller.
-          inArray(users.role, ["team_member", "planter"]),
+          //
+          // THE RULED PAIR, NOT "ANY SEAT". `{team_member, planter}` maps to
+          // `{member, owner}` and to nothing else: `admin` is a seat the role
+          // model could not express, so admitting it here would let a plant
+          // Admin claim the Owner seat — a product widening nobody ruled. It
+          // belongs to the seat-management issue if it is ever wanted.
+          inArray(users.seat, ["owner", "member"]),
+          // Since migration 0050 this is no longer the only thing standing
+          // between two Yeses: `users_church_owner_unique_idx` refuses the
+          // second write outright, so the loser of the race gets a unique
+          // violation instead of a silently-empty `returning()`. The
+          // `notExists` stays because it is what makes the ordinary
+          // already-claimed case a no-op rather than an error.
           notExists(planterOfChurch(write.churchId))
         )
       )

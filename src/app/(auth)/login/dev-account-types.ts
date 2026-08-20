@@ -18,7 +18,8 @@ export interface DevAccount {
   id: string;
   name: string;
   email: string;
-  role: string;
+  /** What this account is, as one phrase — see `standingLabel`. */
+  standing: string;
   churchName: string | null;
   group: DevAccountGroup;
 }

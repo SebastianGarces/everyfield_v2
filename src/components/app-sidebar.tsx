@@ -22,7 +22,7 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { UserRole } from "@/db/schema/user";
+import type { AssociationOrgType } from "@/db/schema";
 import {
   isPathWithin,
   mainNavItems,
@@ -35,23 +35,31 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
     name: string;
     email: string;
     initials: string;
-    role: UserRole;
   };
+  /**
+   * The KIND of oversight org this account's tenancy is, or null for a plant
+   * seat or a coach — resolved server-side by `oversightOrgOf`.
+   *
+   * The nav has always keyed off the tenancy rather than the seat, and now says
+   * so: an org Member sees the same navigation as its Owner (ruling 185 (3)),
+   * so a seat here would be a distinction the nav does not make.
+   */
+  orgType: AssociationOrgType | null;
   hasChurch: boolean;
   /** Server-decided: whether the current user is a platform admin. */
   isPlatformAdmin?: boolean;
 };
 
-function getNavConfig(role: UserRole) {
-  switch (role) {
-    case "sending_church_admin":
+function getNavConfig(orgType: AssociationOrgType | null) {
+  switch (orgType) {
+    case "sending_church":
       return {
         items: sendingChurchNavItems,
         label: "Management",
         subtitle: "Sending Church",
         homeHref: "/oversight",
       };
-    case "network_admin":
+    case "network":
       return {
         items: networkAdminNavItems,
         label: "Management",
@@ -70,11 +78,12 @@ function getNavConfig(role: UserRole) {
 
 export function AppSidebar({
   user,
+  orgType,
   hasChurch,
   isPlatformAdmin = false,
   ...props
 }: AppSidebarProps) {
-  const navConfig = getNavConfig(user.role);
+  const navConfig = getNavConfig(orgType);
   const pathname = usePathname();
   const adminActive = isPathWithin(pathname, "/admin");
 

@@ -26,7 +26,7 @@ import {
   users,
   type NotificationPreference,
 } from "@/db/schema";
-import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
+import { churchLevelCondition } from "./oversight-audience";
 import { toCalendarDate } from "@/lib/datetime";
 import { topLevelTasksOnly } from "@/lib/tasks/service";
 
@@ -454,12 +454,7 @@ export async function listPlanterDigestRecipients(
   return db
     .select({ id: users.id })
     .from(users)
-    .where(
-      and(
-        eq(users.churchId, churchId),
-        inArray(users.role, [...CHURCH_LEVEL_ROLES])
-      )
-    );
+    .where(and(eq(users.churchId, churchId), churchLevelCondition(users)));
 }
 
 export const dbPlanterDigestDeps: PlanterDigestDeps = {
@@ -566,7 +561,7 @@ export function plantsOwedPlanterDigestQuery(
             .where(
               and(
                 eq(owedDigestMember.churchId, churches.id),
-                inArray(owedDigestMember.role, [...CHURCH_LEVEL_ROLES]),
+                churchLevelCondition(owedDigestMember),
                 // There is something to tell them about...
                 hasOutstandingCondition(
                   churches.id,

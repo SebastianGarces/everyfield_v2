@@ -60,14 +60,14 @@ async function seed(prefix: string): Promise<Fixture> {
         email: `${prefix}-a@example.test`,
         passwordHash: "not-a-real-hash",
         name: `${prefix} planter A`,
-        role: "planter",
+        seat: "owner",
         churchId: church.id,
       },
       {
         email: `${prefix}-b@example.test`,
         passwordHash: "not-a-real-hash",
         name: `${prefix} planter B`,
-        role: "planter",
+        seat: "owner",
         churchId: otherChurch.id,
       },
     ])

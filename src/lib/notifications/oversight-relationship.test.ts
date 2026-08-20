@@ -11,6 +11,7 @@ import {
   isOwnRelationshipType,
 } from "./categories";
 import { recipientAdministersOrg } from "./enqueue";
+import type { OversightOrgIds } from "./oversight-admin";
 import {
   orgHasRecordedRelationshipWithChurch,
   recipientOrgOf,
@@ -80,11 +81,7 @@ test("a recipient with no org of their own matches nothing, and asks the DB noth
   // church-level user never costs a round trip — this runs with no database.
   assert.equal(
     await orgHasRecordedRelationshipWithChurch(
-      {
-        role: "sending_church_admin",
-        sendingChurchId: null,
-        sendingNetworkId: null,
-      },
+      { churchId: null, sendingChurchId: null, sendingNetworkId: null },
       CHURCH
     ),
     false
@@ -92,33 +89,28 @@ test("a recipient with no org of their own matches nothing, and asks the DB noth
 });
 
 // ----------------------------------------------------------------------------
-// The pairing — role × org FK (#304 round 8, ruled 2026-08-10)
+// The pairing — the row's OWN tenancy × the org FK (#304 round 8, ruled
+// 2026-08-10; re-pointed by #494)
 //
-// Both oversight FKs live on ONE `users` row and neither implies the other
-// (memory/invariants.md → Multi-Tenancy). Round 7 found that this probe took the
-// row as it came and OR'd the two arms, so a `network_admin` carrying a
-// `sending_church_id` they do not administer satisfied it through THAT sending
-// church's invitations — the hierarchy walk the invariant forbids, arriving
-// through the role rather than through the FK. `recipientOrgOf` is the fix, and
-// it is asserted over the whole domain rather than on the one case that bit.
+// All three tenancy FKs live on ONE `users` row and nothing in the schema holds
+// an account to one (memory/invariants.md → Multi-Tenancy). Round 7 found that
+// this probe took the row as it came and OR'd the two oversight arms, so an
+// account carrying a `sending_church_id` it does not administer satisfied the
+// probe through THAT sending church's invitations — the hierarchy walk the
+// invariant forbids. `recipientOrgOf` is the fix; with `users.role` dropped it
+// asks `oversightOrgOf`, which answers only for a row naming EXACTLY ONE
+// tenancy. Asserted over the whole domain rather than on the one case that bit.
 // ----------------------------------------------------------------------------
 
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
+const PLANT = "55555555-5555-4555-8555-555555555555";
 
-const ROLES = [
-  "planter",
-  "coach",
-  "team_member",
-  "sending_church_admin",
-  "network_admin",
-] as const;
-
-/** A whole `users` row around the three columns the pairing reads. */
+/** A whole `users` row around the columns the pairing reads. */
 function user(recipient: OversightRecipient): User {
   return {
     id: "44444444-4444-4444-8444-444444444444",
-    churchId: null,
+    seat: "owner",
     name: null,
     email: "admin@example.test",
     passwordHash: "x",
@@ -128,99 +120,91 @@ function user(recipient: OversightRecipient): User {
   } as User;
 }
 
-/** Every combination of the two FKs: neither, one, the other, both. */
-const ORG_FKS = [
-  { sendingChurchId: null, sendingNetworkId: null },
-  { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
-  { sendingChurchId: null, sendingNetworkId: NETWORK },
-  { sendingChurchId: SENDING_CHURCH, sendingNetworkId: NETWORK },
-] as const;
+const NO_ORG: OversightOrgIds = {
+  sendingChurchId: null,
+  sendingNetworkId: null,
+};
 
-test("each role contributes exactly its own kind of org, over the whole domain", () => {
-  // 5 roles × 4 FK shapes, and the expected answer is stated as a rule rather
-  // than a table: the sending-church admin contributes ONLY `sendingChurchId`,
-  // the network admin ONLY `sendingNetworkId`, everybody else nothing.
-  for (const role of ROLES) {
-    for (const fks of ORG_FKS) {
-      const paired = recipientOrgOf({ role, ...fks });
-      const label = `${role} + ${JSON.stringify(fks)}`;
+/**
+ * Every tenancy shape a `users` row can carry, and the org it contributes.
+ *
+ * The rule, not a table of coincidences: a row naming exactly one OVERSIGHT
+ * tenancy contributes that org; a row naming a plant, nothing, or TWO tenancies
+ * contributes nothing at all, which matches nobody rather than everybody.
+ */
+const TENANCIES: [string, OversightRecipient, OversightOrgIds][] = [
+  ["no tenancy", { churchId: null, ...NO_ORG }, NO_ORG],
+  ["a plant", { churchId: PLANT, ...NO_ORG }, NO_ORG],
+  [
+    "a sending church",
+    { churchId: null, sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+    { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+  ],
+  [
+    "a network",
+    { churchId: null, sendingChurchId: null, sendingNetworkId: NETWORK },
+    { sendingChurchId: null, sendingNetworkId: NETWORK },
+  ],
+  [
+    "both oversight orgs",
+    {
+      churchId: null,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    },
+    NO_ORG,
+  ],
+  [
+    "a plant AND a network",
+    { churchId: PLANT, sendingChurchId: null, sendingNetworkId: NETWORK },
+    NO_ORG,
+  ],
+];
 
-      if (role === "sending_church_admin") {
-        assert.deepEqual(
-          paired,
-          { sendingChurchId: fks.sendingChurchId, sendingNetworkId: null },
-          label
-        );
-      } else if (role === "network_admin") {
-        assert.deepEqual(
-          paired,
-          { sendingChurchId: null, sendingNetworkId: fks.sendingNetworkId },
-          label
-        );
-      } else {
-        assert.deepEqual(
-          paired,
-          { sendingChurchId: null, sendingNetworkId: null },
-          label
-        );
-      }
-    }
+test("a row contributes exactly its own tenancy's org, over the whole domain", () => {
+  for (const [what, row, expected] of TENANCIES) {
+    assert.deepEqual(recipientOrgOf(row), expected, what);
   }
 });
 
-test("the inverse lookup gives a role exactly its own org, table-driven", () => {
-  // `recipientOrgOf` is the third reader. It used to spell both column names in
-  // two ternaries; it now scans the pairing rows. The property is unchanged and
-  // is what the recorded-relationship probe rests on: a role contributes ONLY
-  // its own kind of org, so a cross-paired admin cannot reach through the other
-  // FK.
-  const carriesBoth = {
-    sendingChurchId: SENDING_CHURCH,
-    sendingNetworkId: NETWORK,
-  };
-
-  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "planter" }), {
-    sendingChurchId: null,
-    sendingNetworkId: null,
-  });
+test("a row naming TWO tenancies contributes nothing, so it reaches nobody", () => {
+  // The hierarchy walk, closed from the other side. While `users.role` existed
+  // the role broke the tie; with it gone, a row carrying a network's id AND a
+  // sending church's resolves to neither, so neither org's recorded
+  // relationship can be reached through it.
   assert.deepEqual(
-    recipientOrgOf({ ...carriesBoth, role: "sending_church_admin" }),
-    { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null }
+    recipientOrgOf({
+      churchId: null,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }),
+    NO_ORG
   );
-  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "network_admin" }), {
-    sendingChurchId: null,
-    sendingNetworkId: NETWORK,
-  });
 });
 
-test("a network admin carrying a foreign sending_church_id reaches no sending church", async () => {
-  // The exact shape round 7 named. The recipient IS a network admin, they DO
+test("an account carrying a foreign sending_church_id reaches no sending church", async () => {
+  // The exact shape round 7 named. The recipient administers a NETWORK, they DO
   // carry a `sending_church_id`, and the plant's only recorded relationship is
   // an invitation that sending church issued — so the OR'd version returned
-  // true and `enqueue` filed the row. With the pairing there is nothing for the
-  // sending-church arm to be built from, the network arm names an org the
-  // record does not mention, and the probe never asks the database at all,
-  // which is why this runs without one.
+  // true and `enqueue` filed the row. Now the row names two tenancies, resolves
+  // to neither, and the probe never asks the database at all, which is why this
+  // runs without one.
   assert.equal(
     await orgHasRecordedRelationshipWithChurch(
       {
-        role: "network_admin",
+        churchId: null,
         sendingChurchId: SENDING_CHURCH,
-        sendingNetworkId: null,
+        sendingNetworkId: NETWORK,
       },
       CHURCH
     ),
     false
   );
 
-  // The mirror case: a sending-church admin carrying a stray network id.
+  // The mirror case: a plant tenancy carrying a stray network id.
   assert.equal(
     await orgHasRecordedRelationshipWithChurch(
-      {
-        role: "sending_church_admin",
-        sendingChurchId: null,
-        sendingNetworkId: NETWORK,
-      },
+      { churchId: PLANT, sendingChurchId: null, sendingNetworkId: NETWORK },
       CHURCH
     ),
     false
@@ -228,16 +212,12 @@ test("a network admin carrying a foreign sending_church_id reaches no sending ch
 });
 
 test("the pairing agrees with the org-anchored gate, which is the other half of the same rule", () => {
-  // `recipientAdministersOrg` pairs role to anchor KIND for an org-anchored row;
-  // this pairs role to org FK for a church-anchored one. Two questions, one
-  // rule — and they are asserted against each other so a later edit cannot
-  // relax one and leave the other looking like it still holds.
-  for (const role of ROLES) {
-    const recipient = {
-      role,
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: NETWORK,
-    };
+  // `recipientAdministersOrg` resolves the row's tenancy against an anchor
+  // KIND for an org-anchored row; this resolves it against an org FK for a
+  // church-anchored one. Two questions, one rule — and they are asserted
+  // against each other over every tenancy shape, so a later edit cannot relax
+  // one and leave the other looking like it still holds.
+  for (const [what, recipient] of TENANCIES) {
     const paired = recipientOrgOf(recipient);
 
     assert.equal(
@@ -246,7 +226,7 @@ test("the pairing agrees with the org-anchored gate, which is the other half of 
         type: "sending_church",
         orgId: SENDING_CHURCH,
       }),
-      `${role} — sending church`
+      `${what} — sending church`
     );
     assert.equal(
       paired.sendingNetworkId !== null,
@@ -254,7 +234,7 @@ test("the pairing agrees with the org-anchored gate, which is the other half of 
         type: "network",
         orgId: NETWORK,
       }),
-      `${role} — network`
+      `${what} — network`
     );
   }
 });

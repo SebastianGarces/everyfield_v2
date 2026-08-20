@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { SeatFields } from "@/lib/auth/tenancy";
+
 import {
   ACCOUNT_NOT_INVITABLE_MESSAGE,
   bindOpenInvitationTargetQuery,
@@ -98,6 +100,12 @@ const INVITATIONS_LIST = read(
 );
 const LIST_ROW = read("lib", "invitations", "list-row.ts");
 const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
+const REGISTER_ENTITIES = read(
+  "app",
+  "(auth)",
+  "register",
+  "account-entities.ts"
+);
 const REGISTER_FORM = read("app", "(auth)", "register", "register-form.tsx");
 const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
 
@@ -143,7 +151,7 @@ const INVITATION_ID = "77777777-7777-4777-8777-777777777777";
 function actor(overrides: Partial<InvitationActor>): InvitationActor {
   return {
     id: ADMIN_ID,
-    role: "sending_church_admin",
+    seat: "owner",
     churchId: null,
     sendingChurchId: null,
     sendingNetworkId: null,
@@ -152,10 +160,29 @@ function actor(overrides: Partial<InvitationActor>): InvitationActor {
 }
 
 const SC_ADMIN = actor({
-  role: "sending_church_admin",
+  seat: "owner",
   sendingChurchId: SENDING_CHURCH,
+  sendingNetworkId: null,
 });
-const NET_ADMIN = actor({ role: "network_admin", sendingNetworkId: NETWORK });
+const NET_ADMIN = actor({
+  seat: "owner",
+  sendingNetworkId: NETWORK,
+  sendingChurchId: null,
+});
+
+/**
+ * An account row as `inviteeAccountTarget` sees it — a seat plus ALL THREE
+ * tenancy FKs, because the seat alone does not say whose Owner it is.
+ */
+function account(fields: Partial<SeatFields> = {}): SeatFields {
+  return {
+    seat: null,
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...fields,
+  };
+}
 
 /** A sending church that is NOT the one `SC_ADMIN` speaks for. */
 const OTHER_SENDING_CHURCH = "66666666-6666-4666-8666-666666666666";
@@ -207,8 +234,8 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
     "the slot is checked BEFORE the row is written"
   );
 
-  // …and the ROLE is settled before either. `resolveInvitationTarget` reads
-  // `users` and tells "no such account" apart from "a planter with no church",
+  // …and the TENANCY is settled before either. `resolveInvitationTarget` reads
+  // `users` and tells "no such account" apart from "an Owner with no plant",
   // which is an account-enumeration oracle: it must be unreachable to anyone
   // who may not invite at all. The authority call is pure and takes no target,
   // so it can run first without a lookup.
@@ -247,9 +274,10 @@ test("every slot refusal is the SAME sentence — ruled 2026-08-09", () => {
   // collapsing only one of them would have collapsed nothing.
   assert.deepEqual(
     inviteeAccountTarget({
-      role: "coach",
+      seat: null,
       churchId: null,
       sendingChurchId: null,
+      sendingNetworkId: null,
     }),
     { ok: false, error: slotRefusalMessage("other") }
   );
@@ -285,19 +313,33 @@ test("EVERY post-resolution refusal is the one message, for every account", () =
   // So the property is asserted over the whole email→verdict pipeline and over
   // the whole account domain, not over one branch: whatever the address turns
   // out to be, an admin may learn only "this worked" or "not this address".
-  const accounts = [
+  //
+  // All three tenancy FKs on every account, because `SeatFields` requires them:
+  // the seat alone does not say whose Owner this is, and a fixture that omitted
+  // one would be probing a row the resolver never sees.
+  const accounts: [string, SeatFields | undefined][] = [
     ["no account at all", undefined],
-    ["planter with a plant", { role: "planter", churchId: PLANT }],
-    ["planter with no plant yet", { role: "planter" }],
-    ["team member", { role: "team_member", churchId: PLANT }],
-    ["coach", { role: "coach", churchId: PLANT }],
-    ["network admin", { role: "network_admin", sendingNetworkId: NETWORK }],
+    ["a plant Owner with a plant", account({ seat: "owner", churchId: PLANT })],
+    ["a plant Owner with no plant yet", account({ seat: "owner" })],
+    ["a plant Member", account({ seat: "member", churchId: PLANT })],
+    ["a coach", account({ seat: null, churchId: PLANT })],
     [
-      "sending church admin WITH a sending church",
-      { role: "sending_church_admin", sendingChurchId: OTHER_SENDING_CHURCH },
+      "a network's Owner",
+      account({ seat: "owner", sendingNetworkId: NETWORK }),
     ],
-    ["sending church admin with none yet", { role: "sending_church_admin" }],
-  ] as const;
+    [
+      "a sending church's Owner WITH a sending church",
+      account({ seat: "owner", sendingChurchId: OTHER_SENDING_CHURCH }),
+    ],
+    [
+      "an ADMIN of a sending church",
+      account({ seat: "admin", sendingChurchId: OTHER_SENDING_CHURCH }),
+    ],
+    [
+      "a seatless account carrying a sending church",
+      account({ seat: null, sendingChurchId: OTHER_SENDING_CHURCH }),
+    ],
+  ];
 
   for (const [who, actingFor] of [
     ["a sending church admin", SC_ADMIN],
@@ -306,14 +348,7 @@ test("EVERY post-resolution refusal is the one message, for every account", () =
     const outcomes = new Set<string>();
 
     for (const [label, account] of accounts) {
-      const lookup = inviteeAccountTarget(
-        account && {
-          role: account.role,
-          churchId: ("churchId" in account && account.churchId) || null,
-          sendingChurchId:
-            ("sendingChurchId" in account && account.sendingChurchId) || null,
-        }
-      );
+      const lookup = inviteeAccountTarget(account);
 
       const verdict = !lookup.ok
         ? lookup.error
@@ -508,18 +543,19 @@ test("registration binds THEN accepts, never the other way round", () => {
   // invitation mutation follows.
   assert.match(body, /invitationActorFromSession\(\{ user \}\)/);
 
-  // The association itself is never written here: `createAccountEntities` must
-  // not set an oversight FK, or a plant could be bound with no acceptance.
+  // The association itself is never written by the planner: `createAccountEntities`
+  // must not set an oversight FK, or a plant could be bound with no acceptance.
   //
-  // The function is SYNCHRONOUS. Anchored on `async function` this span was -1
-  // to 17862 — the empty string — so the `doesNotMatch` below was a tautology
-  // and stayed green with `sendingChurchId: invitation` written into the body.
-  const entities = REGISTER.span(
-    "function createAccountEntities",
-    "async function redeemRegistrationInvitation"
-  );
+  // THE WHOLE MODULE, NOT A SPAN. #494 moved the planner into its own file —
+  // `account-entities.ts`, which has no `"use server"` directive so that
+  // exporting it does not open an endpoint — and the whole file IS the planner,
+  // so there is no span to mis-anchor. That matters here: anchored on `async
+  // function` this span was once -1 to 17862 — the empty string — so the
+  // `doesNotMatch` below was a tautology and stayed green with
+  // `sendingChurchId: invitation` written into the body.
+  assert.match(REGISTER_ENTITIES, /export function createAccountEntities/);
   assert.doesNotMatch(
-    entities,
+    REGISTER_ENTITIES,
     /sendingChurchId: invitation|sendingNetworkId: invitation/
   );
 });
@@ -539,18 +575,20 @@ test("an existing account maps to the organization it speaks for", () => {
   // Pure, so this is a real behavioural assertion and not a grep.
   assert.deepEqual(
     inviteeAccountTarget({
-      role: "planter",
+      seat: "owner",
       churchId: PLANT,
       sendingChurchId: null,
+      sendingNetworkId: null,
     }),
     { ok: true, target: { targetChurchId: PLANT } }
   );
 
   assert.deepEqual(
     inviteeAccountTarget({
-      role: "sending_church_admin",
+      seat: "owner",
       churchId: null,
       sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: null,
     }),
     { ok: true, target: { targetSendingChurchId: SENDING_CHURCH } }
   );
@@ -562,24 +600,27 @@ test("an existing account maps to the organization it speaks for", () => {
 
 test("an account that speaks for no invitable org is refused, with ONE message", () => {
   // The account-enumeration property the 2026-08-04 ruling introduced survives
-  // the restoration: a team member, a coach, a network admin and a planter with
-  // no plant yet are four different facts about an address, and the inviter is
-  // told none of them — only "not this address".
-  const refusals = [
-    { role: "team_member", churchId: PLANT, sendingChurchId: null },
-    { role: "coach", churchId: PLANT, sendingChurchId: null },
-    { role: "network_admin", churchId: null, sendingChurchId: null },
-    // A planter who has not created their plant yet: there is no row to target.
-    { role: "planter", churchId: null, sendingChurchId: null },
-    // A sending church admin with no sending church yet, likewise.
-    { role: "sending_church_admin", churchId: null, sendingChurchId: null },
-  ] as const;
+  // the restoration: a plant Member, a coach, a network's Owner and a plant
+  // Owner with no plant yet are four different facts about an address, and the
+  // inviter is told none of them — only "not this address".
+  const refusals: [string, SeatFields][] = [
+    ["a plant Member", account({ seat: "member", churchId: PLANT })],
+    ["a coach of the plant", account({ seat: null, churchId: PLANT })],
+    [
+      "a network's Owner",
+      account({ seat: "owner", sendingNetworkId: NETWORK }),
+    ],
+    // An Owner who has not created their plant yet: there is no row to target.
+    ["a plant Owner with no plant yet", account({ seat: "owner" })],
+    // An account with no tenancy of any kind, likewise.
+    ["an account naming no tenancy at all", account({ seat: null })],
+  ];
 
-  for (const account of refusals) {
+  for (const [who, fields] of refusals) {
     assert.deepEqual(
-      inviteeAccountTarget(account),
+      inviteeAccountTarget(fields),
       { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE },
-      account.role
+      who
     );
   }
 });
@@ -626,7 +667,7 @@ test("the account refusal reads as a next action, not as a failure", () => {
 
   // It is now the ONLY thing an admin reads about an address, so it has to be
   // true of all four situations behind it at once — which means naming none of
-  // them. No role, no organization, no relationship: a message that said "that
+  // them. No seat, no organization, no relationship: a message that said "that
   // plant already belongs to somebody" would be the oracle wearing softer
   // words.
   for (const leak of [

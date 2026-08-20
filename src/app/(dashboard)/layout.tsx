@@ -9,6 +9,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
+import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { isCrawlerPreviewRequest, PATHNAME_HEADER } from "@/lib/crawler";
 import {
   notificationViewer,
@@ -103,11 +104,12 @@ export default async function DashboardLayout({
     name: user.name || user.email.split("@")[0],
     email: user.email,
     initials: getInitials(user.name, user.email),
-    role: user.role,
   };
 
-  const isOversightUser =
-    user.role === "sending_church_admin" || user.role === "network_admin";
+  // ONE derivation of the caller's tenancy, read twice below: the nav keys off
+  // the org KIND, and the Wiki guide is hidden for an oversight account because
+  // the wiki is the plant's own library.
+  const org = oversightOrgOf(user);
 
   const userIsPlatformAdmin = isPlatformAdmin(user);
 
@@ -115,6 +117,7 @@ export default async function DashboardLayout({
     <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar
         user={sidebarUser}
+        orgType={org?.type ?? null}
         hasChurch={!!user.churchId}
         isPlatformAdmin={userIsPlatformAdmin}
       />
@@ -135,7 +138,7 @@ export default async function DashboardLayout({
             )}
           </DashboardHeader>
           <main className="flex-1 overflow-auto">{children}</main>
-          {!isOversightUser && <WikiGuide />}
+          {!org && <WikiGuide />}
         </HeaderProvider>
       </SidebarInset>
     </SidebarProvider>

@@ -17,6 +17,7 @@
  * including the test whose whole point is running without a request.
  */
 
+import { isChurchLevelOwner } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import { launchTargetDateSchema } from "@/lib/launch/validation";
@@ -132,7 +133,7 @@ export async function runDeclareJourney(
   actor: OnboardingActor,
   input: DeclareJourneyInput
 ): Promise<DeclareJourneyState> {
-  if (actor.role !== "planter") {
+  if (!isChurchLevelOwner(actor)) {
     return { status: "error", error: "Only church planters can onboard" };
   }
 

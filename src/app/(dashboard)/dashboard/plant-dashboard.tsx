@@ -29,11 +29,11 @@ import { churchHasPlanterUser } from "./confirm-leadership";
 import { incompleteOnboardingItems } from "./incomplete-onboarding";
 import { IncompleteOnboardingIndicator } from "./incomplete-onboarding-indicator";
 import { PastorConfirmationPrompt } from "./pastor-confirmation-prompt";
+import { isPlantOwner, type SeatFields } from "@/lib/auth/tenancy";
 
 /** The signed-in user, as far as the finished dashboard is concerned. */
-export type PlantDashboardViewer = {
+export type PlantDashboardViewer = SeatFields & {
   id: string;
-  role: string | null | undefined;
   /**
    * Non-null BY CONTRACT: the page guards the no-church viewer (a coach, or a
    * team member whose plant link is gone) before this component renders and
@@ -101,11 +101,11 @@ export async function PlantDashboard({
           ? await getLaunchReadiness(row.id, churchId)
           : null,
     })),
-    // OV-005: the persistent reminder's data. Only a PLANTER can answer an
-    // invitation (OV-010), so nobody else is asked — a banner whose buttons
-    // the server refuses is worse than no banner. It rides this same
+    // OV-005: the persistent reminder's data. Only the plant's OWNER can
+    // answer an invitation (OV-010 / AS-003), so nobody else is asked — a
+    // banner whose buttons the server refuses is worse than no banner. It rides this same
     // `Promise.all`, so the reminder costs the dashboard no serial round trip.
-    viewer.role === "planter"
+    isPlantOwner(viewer)
       ? getPendingInvitationsForPlant(churchId)
       : Promise.resolve([]),
     // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and

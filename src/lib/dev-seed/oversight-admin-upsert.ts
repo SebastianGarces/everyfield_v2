@@ -1,6 +1,6 @@
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 
-import { users, type UserRole } from "@/db/schema";
+import { users, type UserSeat } from "@/db/schema";
 
 // ============================================================================
 // THE OVERSIGHT ADMIN CREDENTIAL WRITE (#304).
@@ -20,10 +20,11 @@ import { users, type UserRole } from "@/db/schema";
  * The two addresses `--oversight-orgs-only` re-keys, in the order it writes
  * them, and the same two the browser-validation credentials table names.
  *
- * KEYED BY ADDRESS, NOT BY ROLE. The docs promise a verifier two addresses; a
- * role is not unique by construction, so a lookup by role moves the credential
- * write to a different account the day a second `network_admin` joins the
- * fixture. The address is the key; the role is a value that gets written.
+ * KEYED BY ADDRESS, NOT BY TENANCY. The docs promise a verifier two addresses;
+ * a tenancy is not unique by construction, so a lookup by org FK moves the
+ * credential write to a different account the day a second staffer joins the
+ * fixture. The address is the key; the seat and the org FK are values that get
+ * written.
  *
  * SPELLED OUT rather than built from `DEV_EMAIL_DOMAIN`, which is the one place
  * the seed domain is declared (ruled 2026-07-31). That constant lives in
@@ -43,7 +44,7 @@ export const OVERSIGHT_ADMIN_EMAILS = [
 export type OversightAdminSeed = {
   email: string;
   name: string;
-  role: UserRole;
+  seat: UserSeat | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
 };
@@ -52,7 +53,7 @@ export type OversightAdminSeed = {
 export type SeedAccountRow = {
   email: string;
   name?: string | null;
-  role: UserRole;
+  seat: UserSeat | null;
   sendingChurchId?: string | null;
   sendingNetworkId?: string | null;
 };
@@ -89,7 +90,7 @@ export function oversightAdminSeeds(
     return {
       email: row.email,
       name: row.name,
-      role: row.role,
+      seat: row.seat,
       sendingChurchId: row.sendingChurchId ?? null,
       sendingNetworkId: row.sendingNetworkId ?? null,
     };
@@ -109,9 +110,9 @@ export function oversightAdminSeeds(
  * already refused, with no override, on any database holding a sentinel. On a
  * scratch or preview database the address is this fixture's own.
  *
- * `churchId` and both org FKs are in the SET, so a run also repairs an account
- * whose `sending_network_id` drifted to NULL. `name` is NOT: it identifies a
- * person on screen, and a re-key is not a rename.
+ * `churchId`, the seat and both org FKs are in the SET, so a run also repairs
+ * an account whose `sending_network_id` drifted to NULL. `name` is NOT: it
+ * identifies a person on screen, and a re-key is not a rename.
  */
 export function oversightAdminUpsert<TSchema extends Record<string, unknown>>(
   db: NeonHttpDatabase<TSchema>,
@@ -124,7 +125,7 @@ export function oversightAdminUpsert<TSchema extends Record<string, unknown>>(
     .values({
       email: admin.email,
       name: admin.name,
-      role: admin.role,
+      seat: admin.seat,
       passwordHash,
       churchId: null,
       sendingChurchId: admin.sendingChurchId,
@@ -134,7 +135,7 @@ export function oversightAdminUpsert<TSchema extends Record<string, unknown>>(
       target: users.email,
       set: {
         passwordHash,
-        role: admin.role,
+        seat: admin.seat,
         churchId: null,
         sendingChurchId: admin.sendingChurchId,
         sendingNetworkId: admin.sendingNetworkId,

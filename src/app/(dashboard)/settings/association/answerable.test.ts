@@ -128,28 +128,25 @@ test("the dashboard only asks for invitations somebody may answer", () => {
   // refuses them again — but a reminder they cannot dismiss would be a trap.
   assert.match(
     DASHBOARD,
-    /role === "planter"\s*\?\s*getPendingInvitationsForPlant\(churchId\)/
+    /isPlantOwner\(viewer\)\s*\?\s*getPendingInvitationsForPlant\(churchId\)/
   );
   assert.match(DASHBOARD, /<AssociationReminder/);
 });
 
 test("the settings surface redirects anyone who could not act on it", () => {
-  // TWO roles can act here since #304 WS3, and the guard is positive — each
-  // view is entered by the role that owns it, and the redirect is what is left
-  // over. Stated that way round so a third answering role cannot be admitted by
-  // forgetting to add it to a negation.
-  assert.match(PAGE, /user\.role === "planter" && user\.churchId/);
-  assert.match(
-    PAGE,
-    /user\.role === "sending_church_admin" && user\.sendingChurchId/
-  );
+  // TWO tenancies can act here since #304 WS3, and the guard is positive — each
+  // view is entered by the tenancy that owns it, and the redirect is what is
+  // left over. Stated that way round so a third answering tenancy cannot be
+  // admitted by forgetting to add it to a negation.
+  assert.match(PAGE, /isPlantOwner\(user\) && user\.churchId/);
+  assert.match(PAGE, /org\?\.type === "sending_church"/);
   assert.match(PAGE, /redirect\("\/settings"\)/);
 
-  // The redirect is the LAST thing, so it cannot be reached by a role that has
-  // a view above it.
+  // The redirect is the LAST thing, so it cannot be reached by a tenancy that
+  // has a view above it.
   assert.ok(
     PAGE.indexOf('redirect("/settings")') >
-      PAGE.indexOf('user.role === "sending_church_admin"'),
+      PAGE.indexOf('org?.type === "sending_church"'),
     "the redirect must be the fall-through, not a gate in front of a view"
   );
 });

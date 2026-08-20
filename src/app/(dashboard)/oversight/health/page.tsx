@@ -17,19 +17,19 @@
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantHealthPortfolio } from "@/components/phase-engine/plant-health-portfolio";
-import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { requireOversightUser } from "@/lib/oversight/session";
 import { getOversightPlantHealth } from "@/lib/phase-engine/oversight/read";
 
 export default async function OversightHealthPage() {
-  // Oversight-only surface. Church-level roles never reach the privacy-gated
-  // read — one guard, shared by every /oversight route.
-  const user = await requireOversightUser();
+  // Oversight-only surface. A church-level tenancy never reaches the
+  // privacy-gated read — one guard, shared by every /oversight route.
+  const { user, org } = await requireOversightUser();
 
   const plants = await getOversightPlantHealth(user);
-  // `scopeLabelForRole` is the ONE spelling of these two words; this page used
-  // to re-derive them from the role inline.
-  const scopeLabel = scopeLabelForRole(user.role);
+  // `scopeLabelForOrgType` is the ONE spelling of these two words; this page
+  // used to re-derive them inline.
+  const scopeLabel = scopeLabelForOrgType(org.type);
 
   return (
     <>

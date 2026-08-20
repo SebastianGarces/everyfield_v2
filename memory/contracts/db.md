@@ -10,10 +10,15 @@ tenant scope; `created_at`/`updated_at` default now.
 ## Non-obvious column semantics
 
 - **`churches.time_zone`** (`church.ts`): non-null IANA id, default and backfill `America/Chicago`. Invalid ids are rejected on write (`isValidTimeZone` in `datetime.ts`); there is no CHECK, because IANA is `Intl`'s list. Church-scoped instants render in this zone; meeting `datetime` stays a UTC wall clock. Changed in church settings, not onboarding. There is no per-user timezone.
+- **`users.seat`** (`user.ts`): `owner` | `admin` | `member` | **null = a coach**, and null is a
+  VALUE here rather than a gap — coaching is an assignment, not a seat. Read it ONLY together with
+  the tenancy FK on the same row (`church_id` / `sending_church_id` / `sending_network_id`), through
+  `src/lib/auth/tenancy.ts`: `owner` alone says nothing about whose owner. There is no `users.role`
+  — migration 0051 dropped it.
 - **`churches.leadership_status`** (`church.ts`): `planter_confirmed` | `no_planter` | **null =
   never asked** — null is NOT "no planter", which is why it is not a boolean. Read it only
   through `src/lib/onboarding/leadership.ts`; the planter _assignment_ is `users.church_id` +
-  role.
+  `users.seat = 'owner'`.
 - **`churches` has NO `launch_date` column.** Launch Sunday is the `launches` entity, at most one
   row per church. Read with `getLaunchForChurch` / `getLaunchDatesForChurches`
   (`src/lib/launch/queries.ts`); write ONLY through `setLaunchDate` (`src/lib/launch/service.ts`),

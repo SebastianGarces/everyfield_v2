@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { OversightSharingSwitch } from "@/components/settings/oversight-sharing-switch";
 import { verifySession } from "@/lib/auth/session";
+import { isPlantOwner } from "@/lib/auth/tenancy";
 import { OVERSIGHT_SHARING_TOGGLE } from "@/lib/notifications/categories";
 import { isSharingActivityWithOversight } from "@/lib/notifications/oversight-sharing";
 
@@ -31,9 +32,9 @@ export default async function SharingSettingsPage() {
   const { user } = await verifySession();
 
   // Not an authorisation subtlety: nobody else has a plant whose sharing this
-  // page could be about. A coach or an oversight admin landing here would be
+  // page could be about. A coach or an oversight account landing here would be
   // shown a switch with no subject.
-  if (user.role !== "planter" || !user.churchId) {
+  if (!isPlantOwner(user) || !user.churchId) {
     redirect("/settings");
   }
 

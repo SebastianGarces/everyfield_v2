@@ -14,12 +14,8 @@ import {
   codeOf,
   staticValueSpecifiers,
 } from "@/lib/auth/server-action-surface";
-import {
-  CHURCH_LEVEL_ROLES,
-  OVERSIGHT_ROLES,
-  isOversightRole,
-} from "@/lib/auth/roles";
-import type { User, UserRole } from "@/db/schema";
+import { isOversightUser } from "@/lib/auth/tenancy";
+import type { User } from "@/db/schema";
 
 import { formatAssociationProvenance } from "./presentation";
 import {
@@ -403,53 +399,64 @@ function renderedPortfolio(churchIds: string[] = ["church-a", "church-b"]) {
 // The index read refuses on its own
 // ----------------------------------------------------------------------------
 
-/** A session user of `role`, carrying every id a church-level role can hold. */
-function callerWithRole(role: UserRole): User {
+/** A session user with the given tenancy, plus every seat a plant can hold. */
+function caller(tenancy: Partial<User>): User {
   return {
     id: "user-1",
-    role,
-    // Real ids, deliberately: `getAccessibleChurchIds` turns `churchId` into a
-    // one-element accessible list for `planter` and `team_member`, so a caller
-    // with NO ids would pass this test for the wrong reason.
-    churchId: "church-mine",
-    sendingChurchId: "sending-church-1",
-    sendingNetworkId: "network-1",
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...tenancy,
   } as unknown as User;
 }
 
-test("the index read refuses every church-level role itself", async () => {
+/** Every tenancy shape that is NOT a single oversight org. */
+const CHURCH_LEVEL_CALLERS: [string, User][] = [
+  ["a plant Owner", caller({ churchId: "church-mine" })],
+  ["a plant Member", caller({ churchId: "church-mine", seat: "member" })],
+  // A real coach: the plant's FK, no seat.
+  ["a coach", caller({ seat: null, churchId: "church-mine" })],
+  // The two-tenancy defect: it names an oversight FK, and it still reaches
+  // nothing, because `oversightOrgOf` answers only for exactly one tenancy.
+  [
+    "an account naming two tenancies",
+    caller({ churchId: "church-mine", sendingNetworkId: "network-1" }),
+  ],
+];
+
+test("the index read refuses every church-level caller itself", async () => {
   // The docblock used to say `getAccessibleChurchIds` decided this. It does
-  // not: it returns `[user.churchId]` for a planter and a team member, and the
-  // coach's assignments for a coach — ids that would have reached the `in (...)`
-  // and rendered a portfolio for a caller with no oversight org.
+  // not: it returns `[user.churchId]` for a seat in a plant, and the coach's
+  // assignments for a seatless account — ids that would have reached the
+  // `in (...)` and rendered a portfolio for a caller with no oversight org.
   //
   // This case needs NO DATABASE. If the refusal is removed, the very next line
   // is `await import("@/lib/auth/access")`, which opens `@/db`, so a regression
   // fails here rather than quietly returning rows.
-  for (const role of CHURCH_LEVEL_ROLES) {
+  for (const [what, user] of CHURCH_LEVEL_CALLERS) {
     assert.deepEqual(
-      await getOversightPortfolio(callerWithRole(role)),
+      await getOversightPortfolio(user),
       [],
-      `${role} reached the oversight index read — the route guard is not the only guard`
+      `${what} reached the oversight index read — the route guard is not the only guard`
     );
   }
 });
 
-test("the refusal admits exactly the two oversight roles", () => {
-  // Pinned to the ONE declaration rather than to a copy of the pair, so a
-  // sixth role joins whichever list `@/lib/auth/roles` puts it in and this
-  // assertion follows it.
-  for (const role of CHURCH_LEVEL_ROLES)
-    assert.equal(isOversightRole(role), false);
-  for (const role of OVERSIGHT_ROLES) assert.equal(isOversightRole(role), true);
+test("the refusal admits exactly the two oversight tenancies", () => {
+  // Pinned to the ONE declaration rather than to a copy of the rule.
+  for (const [what, user] of CHURCH_LEVEL_CALLERS)
+    assert.equal(isOversightUser(user), false, what);
+  assert.equal(isOversightUser(caller({ sendingChurchId: "s" })), true);
+  assert.equal(isOversightUser(caller({ sendingNetworkId: "n" })), true);
 
-  // …and the read states its gate in those terms, not in a role literal of its
-  // own: a hand-written `role !== "planter"` is the drift this pins.
+  // …and the read states its gate in those terms, not in an FK test of its own:
+  // a hand-written `if (user.sendingNetworkId)` is the drift this pins.
   const source = readCode(path.join(LIB_DIR, "read.ts"));
   assert.match(
     source,
-    /if \(!isOversightRole\(user\.role\)\) return \[\];/,
-    "getOversightPortfolio no longer refuses non-oversight roles before resolving ids"
+    /if \(!isOversightUser\(user\)\) return \[\];/,
+    "getOversightPortfolio no longer refuses a church-level caller before resolving ids"
   );
 });
 

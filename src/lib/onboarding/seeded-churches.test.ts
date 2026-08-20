@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { SeatFields } from "@/lib/auth/tenancy";
+
 import { shouldShowOnboarding } from "./steps";
 
 // ----------------------------------------------------------------------------
@@ -62,7 +64,14 @@ function churchInsertSites(source: string): string[] {
 test("the rule these seeds have to satisfy", () => {
   // Restating the reason the assertions below matter: an unstamped church is
   // exactly what sends a seeded planter into the wizard.
-  const viewer = { role: "planter", churchId: "church-1" };
+  // All three tenancy FKs, because `OnboardingViewer` is `SeatFields`: the seat
+  // alone does not say whose Owner this is.
+  const viewer: SeatFields = {
+    seat: "owner",
+    churchId: "church-1",
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
   assert.equal(
     shouldShowOnboarding({ ...viewer, onboardingCompletedAt: null }),
     true

@@ -1,0 +1,44 @@
+-- users.role is dropped (#494, ruling 185 of 2026-08-20: "No compatibility
+-- layer, no dual read"). The seat that replaces it, its backfill from this
+-- column and the tenancy repair that backfill depends on are all in 0050, the
+-- file immediately before this one. Applying 0050 without this one leaves the
+-- database correct and the column dead; applying this one without 0050 loses the
+-- five role names with nothing carrying their meaning, so the pair is applied
+-- together and in this order.
+--
+-- WHY A SEPARATE FILE AND NOT THE LAST STATEMENT OF 0050. Both of 0050's UPDATEs
+-- read `role`. A drop in the same file would still work — statements run in
+-- order — but it would put the point of no return in the middle of a file whose
+-- header is about the seat. Split, each file states one thing and the rollback
+-- of each is a single statement.
+--
+-- ORDER AGAINST THE DEPLOY. This one is genuinely breaking and must land BEFORE
+-- the build that stops selecting the column, or with it. Nothing in this
+-- repository applies migrations on deploy (`package.json` has no pre/postbuild,
+-- `vercel.json` is a schema stub), so code-first is the default order unless an
+-- operator runs `pnpm db:migrate` first — and here that is not a preference:
+-- the OLD build against the NEW database fails on every session read, because
+-- `getCurrentSession` selects the whole `users` row.
+--
+-- ROLLBACK — this file, then 0050's block, in ONE psql session:
+--
+--   ALTER TABLE "users" ADD COLUMN "role" varchar(50);
+--   UPDATE "users" SET "role" = CASE
+--     WHEN "seat" IS NULL                                THEN 'coach'
+--     WHEN "sending_network_id" IS NOT NULL              THEN 'network_admin'
+--     WHEN "sending_church_id"  IS NOT NULL              THEN 'sending_church_admin'
+--     WHEN "seat" = 'owner'                              THEN 'planter'
+--     ELSE 'team_member'
+--   END;
+--   ALTER TABLE "users" ALTER COLUMN "role" SET NOT NULL;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1787201066871;
+--
+-- THAT RECONSTRUCTION IS LOSSY AND SAYS SO. The seat model has three words where
+-- the role model had five, so `admin` — a word no role ever spelled — comes back
+-- as `team_member` in a plant, and any seat granted after this migration has no
+-- role it ever held. It is a way to get an old build running again, not a way to
+-- get the old data back.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+
+ALTER TABLE "users" DROP COLUMN "role";

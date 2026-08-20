@@ -50,7 +50,7 @@ import {
 const ADMIN = {
   email: "sending-church-admin@everyfield.app",
   name: "Sarah Sending",
-  role: "sending_church_admin",
+  seat: "owner",
   sendingChurchId: "d2000000-0000-4000-8000-000000000002",
   sendingNetworkId: null,
 } as const;
@@ -86,8 +86,8 @@ test("the upsert sets everything the fixture needs, not only the password", () =
 
   for (const column of [
     '"password_hash"', // the whole point: the operator's chosen credential
-    '"role"', // an account demoted by hand is not an oversight admin any more
-    '"church_id"', // an oversight admin owns no plant of their own
+    '"seat"', // an account demoted by hand is not its org's Owner any more
+    '"church_id"', // an oversight tenancy owns no plant of its own
     '"sending_church_id"', // what `getAccessibleChurchIds` reads
     '"sending_network_id"', // NULL here renders "Set up your network first"
     '"updated_at"',
@@ -119,17 +119,17 @@ test("the upsert sets everything the fixture needs, not only the password", () =
 // ----------------------------------------------------------------------------
 
 const FIXTURE: SeedAccountRow[] = [
-  { email: "planter1@everyfield.app", name: "Pat Planter", role: "planter" },
+  { email: "planter1@everyfield.app", name: "Pat Planter", seat: "owner" },
   {
     email: "sending-church-admin@everyfield.app",
     name: "Sarah Sending",
-    role: "sending_church_admin",
+    seat: "owner",
     sendingChurchId: "d2000000-0000-4000-8000-000000000002",
   },
   {
     email: "admin@everyfield.app",
     name: "Network Admin",
-    role: "network_admin",
+    seat: "owner",
     sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
   },
 ];
@@ -159,33 +159,33 @@ test("both oversight admins are selected by ADDRESS, so one command restores bot
   assert.deepEqual(seeds[0], {
     email: "sending-church-admin@everyfield.app",
     name: "Sarah Sending",
-    role: "sending_church_admin",
+    seat: "owner",
     sendingChurchId: "d2000000-0000-4000-8000-000000000002",
     sendingNetworkId: null,
   });
   assert.deepEqual(seeds[1], {
     email: "admin@everyfield.app",
     name: "Network Admin",
-    role: "network_admin",
+    seat: "owner",
     sendingChurchId: null,
     sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
   });
 });
 
 test("a missing half of the fixture stops the run instead of shortening the loop", () => {
-  // The lookup is by ADDRESS, not by role, because a role is not unique by
-  // construction: a second `network_admin` in the fixture would silently move
-  // the credential write to another account.
-  const roleTwin: SeedAccountRow = {
+  // The lookup is by ADDRESS, not by tenancy, because a tenancy is not unique
+  // by construction: a second account in the network would silently move the
+  // credential write to another row.
+  const tenancyTwin: SeedAccountRow = {
     email: "second-admin@everyfield.app",
     name: "Second Admin",
-    role: "network_admin",
+    seat: "owner",
     sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
   };
   assert.deepEqual(
-    oversightAdminSeeds([...FIXTURE, roleTwin]).map((seed) => seed.email),
+    oversightAdminSeeds([...FIXTURE, tenancyTwin]).map((seed) => seed.email),
     [...OVERSIGHT_ADMIN_EMAILS],
-    "a second account carrying the same role must not attract the credential write"
+    "a second account in the same org must not attract the credential write"
   );
 
   assert.throws(

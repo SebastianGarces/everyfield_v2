@@ -107,7 +107,9 @@ function fakeDeps(
           id: PLANTER,
           email: "planter@example.test",
           name: "Sam",
-          role: "planter" as const,
+          churchId: CHURCH,
+          sendingChurchId: null,
+          sendingNetworkId: null,
         },
       ];
     },

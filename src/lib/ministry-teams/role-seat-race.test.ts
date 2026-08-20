@@ -110,7 +110,7 @@ async function createScratchSeat(): Promise<Seat> {
       email: `${crypto.randomUUID()}@scratch.invalid`,
       passwordHash: "scratch",
       name: SCRATCH_NAME,
-      role: "planter",
+      seat: "owner",
       churchId: church.id,
     })
     .returning({ id: users.id });

@@ -19,12 +19,14 @@
  * and by the task-assignment path without dragging any of them into each other.
  */
 
+import { isChurchLevelUser, type SeatFields } from "@/lib/auth/tenancy";
+
 /**
  * The persisted answer. Stored on `churches.leadership_status`.
  *
  * - `"planter_confirmed"` — the creating account IS the lead planter/pastor.
  *   The assignment itself is the existing mechanism (`users.church_id` + the
- *   `planter` role, written at step 1); this column is what makes it explicit
+ *   Owner seat, written at step 1); this column is what makes it explicit
  *   and queryable rather than inferred.
  * - `"no_planter"` — answered No. The church deliberately has no planter until
  *   the answer changes (assigning somebody else needs user invitations, which
@@ -86,7 +88,7 @@ export function leadershipAnswered(church: ChurchLeadership): boolean {
  *
  * Deliberately narrow: only an explicit No counts. A church that was never
  * asked (`null`) keeps the pre-OB-004 behaviour of inferring the planter from
- * the role, which is what stops this change from retro-orphaning every church
+ * the seat, which is what stops this change from retro-orphaning every church
  * created before it.
  */
 export function churchHasNoPlanter(church: ChurchLeadership): boolean {
@@ -103,17 +105,14 @@ export function churchHasNoPlanter(church: ChurchLeadership): boolean {
  * minted from the session by every caller — never accepted from a request
  * (`memory/invariants.md` → Authentication).
  */
-export type LeadershipViewer = {
-  role: string | null | undefined;
-  churchId: string | null | undefined;
-};
+export type LeadershipViewer = SeatFields;
 
 /**
  * What a church's leadership actually is, both ways it can be known.
  *
  * `leadershipStatus` is the EXPLICIT answer (OB-004's column). `hasPlanterUser`
  * is the IMPLICIT assignment that predates it and is still the real one — a
- * `users` row with the `planter` role pointing at this church. The two are
+ * `users` row holding the OWNER seat and pointing at this church. The two are
  * separate inputs because the whole of OB-010 turns on their disagreement: a
  * church can have a planter and no recorded answer (every church created before
  * the question shipped), and that is the state the prompt must NOT fire on.
@@ -123,9 +122,22 @@ export type ChurchLeadershipState = ChurchLeadership & {
   hasPlanterUser: boolean;
 };
 
-/** In-church roles. Coaches and oversight admins lead nobody's plant. */
-function isInChurchRole(role: string | null | undefined): boolean {
-  return role === "planter" || role === "team_member";
+/**
+ * Holds one of the two seats this question is asked of.
+ *
+ * NOT "any seat". The pair is `{owner, member}` because the roles it replaces
+ * were `{planter, team_member}` — `admin` is a seat the role model could not
+ * express, so it was never in scope here, and admitting it now would let a
+ * plant Admin claim the Owner seat through OB-010. That is a product widening
+ * and belongs to the seat-management issue, not to this migration. A coach
+ * holds no seat and an oversight account's tenancy is not a plant, so neither
+ * reaches this either.
+ */
+function holdsPlantSeat(viewer: LeadershipViewer): boolean {
+  return (
+    (viewer.seat === "owner" || viewer.seat === "member") &&
+    isChurchLevelUser(viewer)
+  );
 }
 
 function viewerBelongsTo(
@@ -173,24 +185,24 @@ export function resolvedLeadershipStatus(
  *
  * Two ways in, and the second is deliberately narrow:
  *
- * - the plant's **planter** — OB-004's path, the person the question is about;
- * - a **team member of a plant with no planter at all** — OB-010's path. The
- *   seat is empty, there is nobody above them to ask, and the FRD sends the
- *   prompt to the church's user(s). Answering Yes therefore *assigns* them,
- *   which is a role change, so the permission exists only while the seat is
- *   empty: the moment anyone holds it, this returns false again for everyone
- *   but the planter.
+ * - the plant's **Owner** — OB-004's path, the person the question is about;
+ * - a **Member of a plant with no Owner at all** — OB-010's path. The seat is
+ *   empty, there is nobody above them to ask, and the FRD sends the prompt to
+ *   the church's user(s). Answering Yes therefore *assigns* them, which is a
+ *   seat change, so the permission exists only while the seat is empty: the
+ *   moment anyone holds it, this returns false again for everyone but the
+ *   Owner.
  *
- * Coaches and oversight admins are never in scope — they do not lead the plant,
- * and `getAccessibleChurchIds` is how they reach it at all.
+ * Coaches and oversight accounts are never in scope — they do not lead the
+ * plant, and `getAccessibleChurchIds` is how they reach it at all.
  */
 export function canAnswerLeadershipQuestion(
   viewer: LeadershipViewer,
   church: ChurchLeadershipState
 ): boolean {
   if (!viewerBelongsTo(viewer, church)) return false;
-  if (!isInChurchRole(viewer.role)) return false;
-  if (viewer.role === "planter") return true;
+  if (!holdsPlantSeat(viewer)) return false;
+  if (viewer.seat === "owner") return true;
   return !church.hasPlanterUser;
 }
 
@@ -233,17 +245,19 @@ export function shouldShowNoPlanterNudge(
 /**
  * What the answer WRITES, decided before any statement is built.
  *
- * - `confirm` — the answerer already holds the planter role; Yes only records
- *   the answer. This is OB-004's Yes and touches no `users` row.
- * - `claim` — Yes from a team member of a planterless plant (OB-010): the
- *   assignment has to be made, not just recorded, so this plan writes the role
- *   too and is the only one that can be lost to a race.
- * - `decline` — No, from either. Records `no_planter`; nobody's role changes.
+ * - `confirm` — the answerer already holds the Owner seat; Yes only records the
+ *   answer. This is OB-004's Yes and touches no `users` row.
+ * - `claim` — Yes from a Member of a planterless plant (OB-010): the assignment
+ *   has to be made, not just recorded, so this plan writes the seat too. It is
+ *   the only one that competes, and since migration 0050 the loser of that race
+ *   is refused by `users_church_owner_unique_idx` rather than by winning a
+ *   compare-and-set.
+ * - `decline` — No, from either. Records `no_planter`; nobody's seat changes.
  */
 export type LeadershipWritePlan = "confirm" | "claim" | "decline";
 
 /**
- * Is the planter seat already this viewer's? — the one question that decides
+ * Is the Owner seat already this viewer's? — the one question that decides
  * whether an answer is settling something or competing for it.
  *
  * Exported because the write path needs the same fact for a DECLINE that
@@ -257,7 +271,7 @@ export function viewerHoldsPlanterSeat(
   viewer: LeadershipViewer,
   church: ChurchLeadershipState
 ): boolean {
-  return viewer.role === "planter" && church.hasPlanterUser;
+  return viewer.seat === "owner" && church.hasPlanterUser;
 }
 
 export function leadershipWritePlan(

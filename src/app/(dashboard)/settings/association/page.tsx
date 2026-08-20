@@ -10,6 +10,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { verifySession } from "@/lib/auth/session";
+import { isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
 
 import { InvitationAnswer } from "./invitation-answer";
@@ -97,12 +98,13 @@ export const metadata: Metadata = {
 export default async function AssociationSettingsPage() {
   const { user } = await verifySession();
 
-  if (user.role === "planter" && user.churchId) {
+  if (isPlantOwner(user) && user.churchId) {
     return <PlantAssociation churchId={user.churchId} />;
   }
 
-  if (user.role === "sending_church_admin" && user.sendingChurchId) {
-    return <SendingChurchAssociation sendingChurchId={user.sendingChurchId} />;
+  const org = oversightOrgOf(user);
+  if (org?.type === "sending_church") {
+    return <SendingChurchAssociation sendingChurchId={org.id} />;
   }
 
   redirect("/settings");

@@ -70,10 +70,12 @@ act. Where a sentence covers org Members too, say **oversight seat holder**.
 **Team leadership is not a seat.** A ministry team's leader is `MinistryTeam.leader_id`, and the
 writes leadership grants derive from that column. There is no `team_leader`.
 
-**The code is mid-migration.** `users.role` still carries the five old names; the seat column, the
-three partial unique indexes and the caller migration ship under
-[#185](https://github.com/SebastianGarces/everyfield_v2/issues/185). This entry governs prose from
-today: new and edited text uses seats and tenancies, whatever the column is called this week.
+**The code carries the seat model.** `users.seat` and the three partial unique indexes landed with
+[#494](https://github.com/SebastianGarces/everyfield_v2/issues/494), and `users.role` was dropped in
+the same wave — the five old names survive only as deprecated synonyms in prose, and in the migration
+header that maps them. What is still open under
+[#185](https://github.com/SebastianGarces/everyfield_v2/issues/185) is the enforcement half: the
+single `requireSeat` guard and the permissions module.
 
 **Two things named "coach" that this entry does not govern.** Both are content, not prose about
 the role, and both keep their names:

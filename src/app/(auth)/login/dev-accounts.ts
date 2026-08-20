@@ -2,8 +2,8 @@
 // LOCAL DEVELOPMENT ONLY — account switcher data source.
 //
 // Backs a combobox on the login form that signs in as any existing user
-// WITHOUT a password, so features can be exercised across roles (planter /
-// oversight / eval corpus) without juggling credentials.
+// WITHOUT a password, so features can be exercised across seats and tenancies
+// (plant / oversight / eval corpus) without juggling credentials.
 //
 // ⚠️  This bypasses authentication entirely. It must never run anywhere but a
 // local dev machine. `isDevLoginEnabled()` is the single gate, and it is
@@ -26,6 +26,7 @@ import { asc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { churches, users } from "@/db/schema";
+import { oversightOrgOf, type SeatFields } from "@/lib/auth/tenancy";
 
 import type { DevAccount, DevAccountGroup } from "./dev-account-types";
 
@@ -53,13 +54,34 @@ export function isDevLoginEnabled(): boolean {
 }
 
 /** Exported for its test — the grouping rule is the only logic in this module. */
-export function groupFor(email: string, role: string): DevAccountGroup {
+export function groupFor(email: string, account: SeatFields): DevAccountGroup {
   if (email.includes(EVAL_EMAIL_MARKER)) return "Phase Engine eval";
-  if (role === "network_admin" || role === "sending_church_admin") {
-    return "Oversight";
-  }
-  if (role === "planter") return "Planters";
+  if (oversightOrgOf(account)) return "Oversight";
+  if (account.seat === "owner" && account.churchId) return "Planters";
   return "Other";
+}
+
+/**
+ * What this account IS, in one phrase — the switcher's right-hand column.
+ *
+ * Built HERE rather than mapped from an enum in the component: the seat alone
+ * is three words that mean nothing without a tenancy ("owner" of what?), so the
+ * label is the pair, and the pair is only knowable server-side.
+ */
+export function standingLabel(account: SeatFields): string {
+  const org = oversightOrgOf(account);
+  const where = org
+    ? org.type === "network"
+      ? "Network"
+      : "Sending church"
+    : account.churchId
+      ? "Plant"
+      : null;
+
+  if (!account.seat) return where ? `${where} · no seat` : "Coach / no seat";
+  if (!where) return `${account.seat} · no tenancy`;
+
+  return `${where} ${account.seat}`;
 }
 
 /**
@@ -75,7 +97,10 @@ export async function listDevAccounts(): Promise<DevAccount[]> {
       id: users.id,
       name: users.name,
       email: users.email,
-      role: users.role,
+      seat: users.seat,
+      churchId: users.churchId,
+      sendingChurchId: users.sendingChurchId,
+      sendingNetworkId: users.sendingNetworkId,
       churchName: churches.name,
     })
     .from(users)
@@ -87,8 +112,8 @@ export async function listDevAccounts(): Promise<DevAccount[]> {
     // `users.name` is nullable; the email is always the reliable identifier.
     name: row.name ?? "(unnamed)",
     email: row.email,
-    role: row.role,
+    standing: standingLabel(row),
     churchName: row.churchName ?? null,
-    group: groupFor(row.email, row.role),
+    group: groupFor(row.email, row),
   }));
 }

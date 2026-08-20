@@ -48,7 +48,7 @@ import {
   invitationActorFromSession,
 } from "@/lib/invitations/core";
 import { toInvitationListRow } from "@/lib/invitations/list-row";
-import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata = {
@@ -57,10 +57,10 @@ export const metadata = {
 
 export default async function OversightInvitationsPage() {
   // Oversight-only, through the guard every /oversight route shares. The action
-  // layer enforces the same rule server-side — a planter or team member who
-  // POSTs to `createInvitation` directly is refused by
+  // layer enforces the same rule server-side — anyone whose tenancy is a plant
+  // who POSTs to `createInvitation` directly is refused by
   // `resolveInvitationRequest`, not merely kept off this page.
-  const user = await requireOversightUser();
+  const { user, org } = await requireOversightUser();
 
   const actor = invitationActorFromSession({ user });
   const invitations = await getInvitationsForOrg(actor);
@@ -73,17 +73,17 @@ export default async function OversightInvitationsPage() {
       <div>
         <h1 className="text-3xl font-bold">Invitations</h1>
         {/*
-          `scopeLabelForRole` is the ONE spelling of these two words across the
-          oversight surface; this sentence used to re-derive them inline.
+          `scopeLabelForOrgType` is the ONE spelling of these two words across
+          the oversight surface; this sentence used to re-derive them inline.
         */}
         <p className="text-muted-foreground mt-1">
           Invite church plants to associate with your{" "}
-          {scopeLabelForRole(user.role)}, and track what you have sent.
+          {scopeLabelForOrgType(org.type)}, and track what you have sent.
         </p>
       </div>
 
       <InvitationCreateForm
-        canInviteSendingChurches={user.role === "network_admin"}
+        canInviteSendingChurches={org.type === "network"}
         expiryDays={INVITATION_EXPIRY_DAYS}
       />
 
