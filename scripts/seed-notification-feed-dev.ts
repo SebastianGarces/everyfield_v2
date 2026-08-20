@@ -59,8 +59,17 @@ const ORG_ADMINS = [
 /** Everything this script writes carries it, and everything it deletes matches it. */
 const FIXTURE_KEY = "dev-308:";
 
-/** Enough rows that the feed pages — the audit is on a paged screen. */
-const SHARING_ROWS = 34;
+/**
+ * Enough rows that the feed pages — the audit is on a paged screen.
+ *
+ * `UNREAD_SHARING_ROWS` is over thirty for the same reason: #308 owes a
+ * Lighthouse audit on `/notifications` AND on `?filter=unread`, and the unread
+ * tab is a DIFFERENT list. Leaving six rows unread audited a short screen on
+ * one of the two URLs the acceptance criterion names. The rest arrive read, so
+ * the All tab still shows both states.
+ */
+const SHARING_ROWS = 40;
+const UNREAD_SHARING_ROWS = 34;
 
 const MINUTE = 60_000;
 
@@ -195,10 +204,11 @@ async function seedFor(email: string): Promise<SeededOrg> {
       // and the pages are stable between runs.
       scheduledFor: new Date(now - (index + 1) * MINUTE),
       createdAt: new Date(now - (index + 1) * MINUTE),
-      // The first six stay UNREAD, so the badge has a number and mark-read has
-      // something to clear; the rest arrive read so the two states are both on
-      // screen.
-      readAt: index < 6 ? null : new Date(now - index * MINUTE),
+      // The first `UNREAD_SHARING_ROWS` stay UNREAD, so the badge has a number,
+      // mark-read has something to clear and the unread tab is long enough to
+      // audit; the rest arrive read so both states are on the All tab.
+      readAt:
+        index < UNREAD_SHARING_ROWS ? null : new Date(now - index * MINUTE),
       dedupeKey: `${FIXTURE_KEY}sharing:${index}`,
       status: "delivered",
     });
