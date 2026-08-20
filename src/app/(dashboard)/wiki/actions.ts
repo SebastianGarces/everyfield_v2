@@ -1,9 +1,9 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 
-import { verifySession } from "@/lib/auth";
 import {
   submitArticleFeedbackSchema,
   upsertArticleFeedback,
@@ -58,7 +58,7 @@ import type { WikiArticleFeedbackRating } from "@/db/schema";
 export async function searchWikiArticles(
   query: string
 ): Promise<SearchResult[]> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
 
   // Basic input validation
   if (!query || typeof query !== "string") {
@@ -98,7 +98,7 @@ type ActionResult<T = void> =
 export async function submitArticleFeedbackAction(
   input: SubmitArticleFeedbackInput
 ): Promise<ActionResult<{ rating: WikiArticleFeedbackRating }>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("self.write");
 
   const parsed = submitArticleFeedbackSchema.safeParse(input);
   if (!parsed.success) {

@@ -247,7 +247,7 @@ test("correcting is planter-only and never moves the phase either", () => {
   );
   assert.match(
     source,
-    /export async function updateLaunchOutcome\([\s\S]*?requirePlantOwner\(user\)/
+    /export async function updateLaunchOutcome\([\s\S]*?assertSeatFor\(user, "launch\.schedule"\)/
   );
   assert.match(
     source,
@@ -375,7 +375,7 @@ test("recording the outcome is planter-only (LS-007), and self-authorising", () 
     path.join(process.cwd(), "src", "lib", "launch", "outcome.ts"),
     "utf8"
   );
-  assert.match(source, /requirePlantOwner\(user\)/);
+  assert.match(source, /assertSeatFor\(user, "launch\.schedule"\)/);
   assert.match(source, /await requireChurchAccess\(user, churchId\)/);
 });
 

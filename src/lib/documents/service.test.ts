@@ -288,7 +288,7 @@ test("the action mints the session before it parses, above the try", () => {
   assertInOrder(
     body,
     "getGeneratedDocumentDownloadUrlAction",
-    ["await verifySession();", "safeParse", "try {"],
+    ["await requireSeat(", "safeParse", "try {"],
     "session first, then parse, mint above the try"
   );
 });
@@ -304,7 +304,7 @@ test("the action re-checks church_id from the session, not a client church id", 
 test("the documents action module is a use-server endpoint", () => {
   const full = path.join(SRC, "app", "(dashboard)", "documents", "actions.ts");
   assert.equal(isUseServerModule(full), true);
-  assert.match(codeOf(full), /verifySession/);
+  assert.match(codeOf(full), /requireSeat\("read"\)/);
 });
 
 // ============================================================================

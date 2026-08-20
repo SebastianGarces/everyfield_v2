@@ -42,10 +42,10 @@
 // the imported module, so `export default` and re-exports are caught too.
 // ============================================================================
 
+import { requireSeat } from "@/lib/auth/seats";
 import { z } from "zod";
 
 import type { OrganizationInvitation } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
 
 import {
   InvitationError,
@@ -219,7 +219,9 @@ const INVALID_REQUEST_ERROR = "Check the form and try again";
 export async function createInvitation(
   request: InvitationRequest
 ): Promise<InvitationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("org.invitation.manage")
+  );
 
   const parsed = invitationRequestSchema.safeParse(request);
   if (!parsed.success) {
@@ -245,7 +247,9 @@ export async function createInvitation(
 export async function resendInvitationEmail(
   invitationId: string
 ): Promise<InvitationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("org.invitation.manage")
+  );
   return run("resendInvitationEmail", () =>
     resendInvitationEmailAs(actor, invitationId)
   );
@@ -263,7 +267,9 @@ export async function resendInvitationEmail(
 export async function acceptInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("association.answer")
+  );
   return run("acceptInvitation", () =>
     answered(acceptInvitationAs(actor, invitationId))
   );
@@ -275,7 +281,9 @@ export async function acceptInvitation(
 export async function declineInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("association.answer")
+  );
   return run("declineInvitation", () =>
     answered(declineInvitationAs(actor, invitationId))
   );
@@ -288,7 +296,9 @@ export async function declineInvitation(
 export async function revokeInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("org.invitation.manage")
+  );
   return run("revokeInvitation", () =>
     answered(revokeInvitationAs(actor, invitationId))
   );

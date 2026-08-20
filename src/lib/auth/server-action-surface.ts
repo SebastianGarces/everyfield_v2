@@ -42,6 +42,29 @@ export const TS_FILES: string[] = (function collect(dir: string): string[] {
 const CODE_CACHE = new Map<string, string>();
 
 /**
+ * Comments and string literals, matched in ONE left-to-right pass so that
+ * whichever opens first wins.
+ *
+ * TWO SEQUENTIAL `replace` CALLS GOT THIS WRONG, and the way it was wrong is
+ * the way a static guard is worst: it deleted code silently. Stripping block
+ * comments first meant a slash-star written INSIDE a line comment opened a
+ * block that ran to the next star-slash anywhere below. `launch/actions.ts` has
+ * one — a header
+ * bullet naming the path `src/lib/launch/*` — and it swallowed the file's
+ * entire import list plus the next docblock. Nothing failed: the mint walk was
+ * looking for a literal `verifySession()` that survived below the wreckage, and
+ * only #498's guard walk, which has to RESOLVE an import to see the guard,
+ * noticed the imports were gone. A module could have hidden an unguarded export
+ * the same way.
+ *
+ * String and template literals are matched too, and kept, so a `//` inside one
+ * is not a comment — the same reason `https://` never was (the `(^|\s)` anchor
+ * the old line pattern used).
+ */
+const COMMENT_OR_LITERAL =
+  /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
+
+/**
  * A module with its comments removed. Every assertion built on this is about
  * CODE: a file that explains a rule by naming the shape it forbids
  * (`respondingUser`, `db.`, `"use server"`) would otherwise trip the test that
@@ -51,9 +74,10 @@ export function codeOf(file: string): string {
   const cached = CODE_CACHE.get(file);
   if (cached !== undefined) return cached;
 
-  const code = readFileSync(file, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
+  const code = readFileSync(file, "utf8").replace(
+    COMMENT_OR_LITERAL,
+    (match, literal: string | undefined) => literal ?? ""
+  );
   CODE_CACHE.set(file, code);
   return code;
 }

@@ -68,7 +68,7 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - ⚖ Inheritable vs explicit is decided from the row's OWN stamp, `notification_preferences.intent`, never from its channel: `preferenceValueIsInheritable` calls a `chosen` row a choice however it agrees with the coded default, and holds an `incidental` one to #237's value-equality rule. Every (category, channel) pair is decided alike — no exemption, no carve-out — so the emailed undo's "keep sending these" survives a flip of the default on `digest` as on any other category.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE`.
 - NO `/oversight` page reads the database.
-- Accepted residual: ministry-team write actions check only session + `church_id`, so any authenticated user in a church can mutate any team. Retired by the `risk:high` team-leader-scoping unit.
+- Accepted residual: an own-duty verb's SUBJECT half is unasked — `teams.own` and `meetings.rsvp` refuse a coach and oversight (the seat half, #498) but not a Member acting on someone else's team or RSVP. `ministry_teams.leader_id` and the guest list name a PERSON and nothing links a person row to an account, so the check is not writable. Retired by AS-013's person link at registration.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target. ONE implementation: `daysUntilTarget` (`launch/countdown.ts`).
 
 ## Authentication
@@ -78,6 +78,9 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - **Every export of a `"use server"` module is a POSTable endpoint reachable with no session and no UI** — the export list IS the auth surface. Keep helpers, reads and unwired writes in a sibling module with no directive.
 - A state-changing action never takes its actor as an argument — it mints one from `verifySession()`. An entity implied by the actor is not an argument either.
 - SESSION FIRST, THEN THE PARSE: the mint is the FIRST statement of the export, ahead of `safeParse`, because parsing first answers a sessionless caller differently for a malformed argument than a well-formed one.
+- ⚖ AND THE MINT *IS* THE SEAT CHECK: every export of every `"use server"` module calls `requireSeat(capability)` first (AS-019, ruling 185 (8)) — it returns what `verifySession()` returned, so there is one statement, not two. The eight sessionless-BY-DESIGN endpoints are named with their reason in `SESSIONLESS_EXPORTS`; `seat-guard.test.ts` asserts that set EXACTLY and walks the rest.
+- ONE permissions module, `@/lib/auth/seats`: `OWNER_ONLY` and `ADMIN_PLUS` are declared there and NOWHERE else, and one capability table pairs each verb with a seat set AND a tenancy requirement. A per-module matrix was rejected by name. `holdsSeatFor` is the non-throwing form for a sibling module holding an actor it cannot mint.
+- A row naming TWO tenancies is refused EVERY capability including the reads — the check sits above the tenancy switch, because a `tenancy: "any"` verb would otherwise wave the defect through.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals`, which hash both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. The trusted headers are `x-pathname` (absence fails closed) and the platform-written `x-real-ip`.
 

@@ -30,6 +30,7 @@ export async function addSkillAction(data: {
   notes?: string;
 }): Promise<ActionResult<SkillInventory>> {
   return withChurchSession(
+    "people.write",
     "addSkillAction",
     {
       fallback: "Failed to add skill",
@@ -81,6 +82,7 @@ export async function updateSkillAction(
   }
 ): Promise<ActionResult<SkillInventory>> {
   return withChurchSession(
+    "people.write",
     "updateSkillAction",
     {
       fallback: "Failed to update skill",
@@ -133,6 +135,7 @@ export async function removeSkillAction(
   skillId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "removeSkillAction",
     {
       fallback: "Failed to remove skill",
@@ -171,6 +174,7 @@ export async function getPersonSkillsAction(
   personId: string
 ): Promise<ActionResult<SkillInventory[]>> {
   return withChurchSession(
+    "read",
     "getPersonSkillsAction",
     { fallback: "Failed to get skills" },
     async ({ churchId }) => {

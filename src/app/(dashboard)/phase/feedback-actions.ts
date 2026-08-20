@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { revalidatePath } from "next/cache";
 import { requireChurchAccess } from "@/lib/auth/access";
-import { verifySession } from "@/lib/auth/session";
 import {
   InsightNotFoundError,
   submitInsightFeedbackSchema,
@@ -35,7 +35,7 @@ export async function submitInsightFeedbackAction(
   input: SubmitInsightFeedbackInput
 ): Promise<ActionResult<{ feedback: InsightFeedback }>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("self.write");
 
     if (!user.churchId) {
       return {

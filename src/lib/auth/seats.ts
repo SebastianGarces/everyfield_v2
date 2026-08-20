@@ -175,6 +175,12 @@ const CAPABILITIES = {
   "teams.write": { seats: ADMIN_PLUS, tenancy: "plant" },
   /** Sending a message and managing the church's templates. */
   "communication.send": { seats: ADMIN_PLUS, tenancy: "plant" },
+  /**
+   * Setting a manual phase signal. The DECLARATION is the planter's
+   * (`phase.declare`); the signals that feed the recommendation are an ordinary
+   * plant-level write, so this is where "everything else an Admin may do" lands.
+   */
+  "phase.signal": { seats: ADMIN_PLUS, tenancy: "plant" },
 
   // ── Own duty: a seat, any seat; the subject is checked in the body ─────────
   /** Completing, reopening or restatusing a task ASSIGNED TO THE CALLER. */
@@ -195,6 +201,18 @@ const CAPABILITIES = {
   // ── A session is the whole rule ────────────────────────────────────────────
   /** A read-only endpoint. Reached by every seat, a coach, and oversight. */
   read: { seats: null, tenancy: "any" },
+  /**
+   * Answering the OB-010 leadership question — the CLAIM on a plant that has no
+   * Owner yet.
+   *
+   * NO SEAT SET, and that is the point: this verb GRANTS the seat rather than
+   * spending one, so its rule is not a capability. The ruled `{owner, member}`
+   * pair that decides who may claim lives in `src/lib/onboarding/leadership.ts`
+   * (`memory/invariants.md` → Seats & Tenancy: `admin` is deliberately not in
+   * it), and putting it in either set here would make a grant look like a
+   * permission and invite the two to be "reconciled".
+   */
+  "church.claim": { seats: null, tenancy: "church-level" },
   /**
    * A write whose row is keyed by the caller's own user id and reaches no other
    * account: notification preferences and read marks, wiki bookmarks and
@@ -251,6 +269,16 @@ export function holdsSeatFor(
   user: SeatFields,
   capability: Capability
 ): boolean {
+  // A ROW NAMING TWO TENANCIES REACHES NOTHING, whatever the capability asks
+  // for. `isChurchLevelUser` and `isOversightUser` are both stated POSITIVELY
+  // and the defect satisfies neither, so "neither" is exactly that row — and
+  // this has to sit ABOVE the switch, because `tenancy: "any"` would otherwise
+  // wave it through on the four verbs that reach both sides of the product.
+  // (`memory/invariants.md` → Seats & Tenancy; migration 0050 §1 repaired
+  // twelve such rows and a CHECK would have refused them, so the state stays
+  // representable and every reader fails closed on it.)
+  if (!isChurchLevelUser(user) && !isOversightUser(user)) return false;
+
   // Widened to `Authority` on purpose: indexing the literal table narrows
   // `seats` to the one tuple this capability names, and the membership test
   // below then only accepts that tuple's own members.
@@ -272,6 +300,23 @@ export function holdsSeatFor(
 
   if (seats === null) return true;
   return user.seat !== null && seats.includes(user.seat);
+}
+
+/**
+ * The throwing form, for a SERVICE that was handed an actor it cannot mint.
+ *
+ * The action layer's guard is the primary refusal; this is the service's own,
+ * so an authority rule holds for a caller that reached the service some other
+ * way. It is the same table, which is the whole point — the two spellings it
+ * replaces (`requirePlantOwner`, `requireChurchLevel` in `@/lib/auth/access`)
+ * had already drifted: `requireChurchLevel` admitted a COACH to the launch
+ * milestone ticks that the seat model refuses them (AS-008), so the action and
+ * the service disagreed about the same write.
+ */
+export function assertSeatFor(user: SeatFields, capability: Capability): void {
+  if (!holdsSeatFor(user, capability)) {
+    throw new Error(`Forbidden: ${capability} is not carried by this account`);
+  }
 }
 
 /**

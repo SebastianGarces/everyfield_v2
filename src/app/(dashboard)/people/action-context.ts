@@ -7,7 +7,7 @@
  */
 
 import type { User } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat, type Capability } from "@/lib/auth/seats";
 import type { ActionResult } from "@/lib/people/types";
 import { unstable_rethrow } from "next/navigation";
 import type { ZodError } from "zod";
@@ -31,6 +31,10 @@ const DEFAULT_KNOWN_ERRORS: Record<string, string> = {
   "Skill not found": "Skill not found",
 };
 
+/** What a seat refusal reads as. One sentence for every capability (#498). */
+const NOT_PERMITTED_MESSAGE =
+  "You do not have permission to do that in this church.";
+
 /** How an action's failures map to user-facing error strings. */
 export interface ActionMessages {
   /** Returned when the session user has no church. Default: "Unauthorized". */
@@ -52,17 +56,26 @@ export interface ActionMessages {
 }
 
 /**
- * The one session + churchId + try/catch envelope every people action shares:
- * verify the session, refuse churchless users, run the body, and map thrown
- * errors to the action's message table (logging the original).
+ * The one session + seat + churchId + try/catch envelope every people action
+ * shares: check the caller's seat against the capability (which mints the actor
+ * — `requireSeat` returns what `verifySession` returned), refuse churchless
+ * users, run the body, and map thrown errors to the action's message table
+ * (logging the original).
+ *
+ * THE CAPABILITY IS THE FIRST ARGUMENT so the guard is the first thing this
+ * envelope does and, transitively, the first thing every people action does —
+ * ahead of the `safeParse` each of them runs inside `fn`. The directory is not
+ * one permission: a Member may READ it (`"read"`) and may not write to it
+ * (`"people.write"`), and this is where those two answers are told apart.
  */
 export async function withChurchSession<T>(
+  capability: Capability,
   label: string,
   messages: ActionMessages,
   fn: (ctx: ChurchActionContext) => Promise<ActionResult<T>>
 ): Promise<ActionResult<T>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat(capability);
 
     if (!user.churchId) {
       return { success: false, error: messages.noChurch ?? "Unauthorized" };
@@ -77,6 +90,13 @@ export async function withChurchSession<T>(
     console.error(`${label} error:`, error);
 
     if (error instanceof Error) {
+      // The seat refusal, turned into a sentence that does not name the guard.
+      // `requireSeat` throws `Forbidden: <capability> …`, which says which rule
+      // refused and belongs in the log above, not in a response.
+      if (error.message.startsWith("Forbidden")) {
+        return { success: false, error: NOT_PERMITTED_MESSAGE };
+      }
+
       const known = { ...DEFAULT_KNOWN_ERRORS, ...messages.known }[
         error.message
       ];

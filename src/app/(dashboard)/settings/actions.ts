@@ -1,11 +1,10 @@
 "use server";
 
-import { isPlantOwner } from "@/lib/auth/tenancy";
+import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import { setChurchTimeZone } from "@/lib/churches/timezone";
 import { isValidTimeZone } from "@/lib/datetime";
 import {
@@ -157,7 +156,7 @@ const setDigestCadenceInputSchema = z.enum(digestCadences);
 export async function setNotificationPreferenceAction(
   input: SetPreferenceActionInput
 ): Promise<PreferenceActionResult> {
-  const session = await verifySession();
+  const session = await requireSeat("self.write");
   const owner = preferenceOwnerFromSession(session);
 
   const parsed = setPreferenceInputSchema.safeParse(input);
@@ -213,7 +212,7 @@ export async function setNotificationPreferenceAction(
 export async function setDigestCadenceAction(
   cadence: string
 ): Promise<PreferenceActionResult> {
-  const session = await verifySession();
+  const session = await requireSeat("self.write");
   const owner = preferenceOwnerFromSession(session);
 
   const parsed = setDigestCadenceInputSchema.safeParse(cadence);
@@ -296,7 +295,7 @@ export type SuppressionActionResult =
  * already holds; the screen simply stops showing the notice.
  */
 export async function clearMyEmailSuppressionAction(): Promise<SuppressionActionResult> {
-  const session = await verifySession();
+  const session = await requireSeat("self.write");
 
   try {
     const cleared = await clearAddressSuppression({
@@ -343,7 +342,7 @@ const churchTimeZoneSchema = z.string().min(1).max(64).refine(isValidTimeZone);
 export async function setChurchTimeZoneAction(
   timeZone: string
 ): Promise<TimeZoneActionResult> {
-  const session = await verifySession();
+  const session = await requireSeat("church.profile");
 
   const parsed = churchTimeZoneSchema.safeParse(timeZone);
   if (!parsed.success) {
@@ -351,13 +350,6 @@ export async function setChurchTimeZoneAction(
   }
 
   try {
-    if (!isPlantOwner(session.user)) {
-      return {
-        success: false,
-        error: "Only the church planter can change this plant's timezone",
-      };
-    }
-
     if (!session.user.churchId) {
       return { success: false, error: "Create your church plant first" };
     }

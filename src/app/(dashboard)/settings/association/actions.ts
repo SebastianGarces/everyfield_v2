@@ -1,9 +1,9 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import {
   InvitationError,
   acceptInvitationAs,
@@ -155,7 +155,9 @@ async function run(
 export async function acceptAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("association.answer")
+  );
 
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
@@ -183,7 +185,9 @@ export async function acceptAssociationInvitation(
 export async function declineAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("association.answer")
+  );
 
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
@@ -207,7 +211,9 @@ export async function declineAssociationInvitation(
 export async function leaveOversightOrg(
   orgType: string
 ): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("association.leave")
+  );
 
   const parsed = orgTypeSchema.safeParse(orgType);
   if (!parsed.success) {
@@ -239,6 +245,8 @@ export async function leaveOversightOrg(
  * the sending church is refused there, server-side.
  */
 export async function leaveNetwork(): Promise<AssociationActionResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("org.association.leave")
+  );
   return run("leaveNetwork", () => leaveNetworkAsSendingChurchAdmin(actor));
 }

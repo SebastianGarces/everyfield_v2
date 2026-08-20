@@ -45,6 +45,7 @@ export async function createAssessmentAction(
   }
 ): Promise<ActionResult<Assessment>> {
   return withChurchSession(
+    "people.write",
     "createAssessmentAction",
     {
       fallback: "Failed to create assessment",
@@ -125,6 +126,7 @@ export async function createInterviewAction(
   }
 ): Promise<ActionResult<Interview>> {
   return withChurchSession(
+    "people.write",
     "createInterviewAction",
     {
       fallback: "Failed to create interview",
@@ -193,6 +195,7 @@ export async function createCommitmentAction(
   formData: FormData
 ): Promise<ActionResult<Commitment>> {
   return withChurchSession(
+    "people.write",
     "createCommitmentAction",
     {
       fallback: "Failed to create commitment",
@@ -301,6 +304,7 @@ export async function getCommitmentDownloadUrlAction(
   commitmentId: string
 ): Promise<ActionResult<{ url: string }>> {
   return withChurchSession(
+    "read",
     "getCommitmentDownloadUrlAction",
     { fallback: "Failed to generate download URL" },
     async ({ churchId }) => {

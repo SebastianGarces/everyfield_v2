@@ -13,7 +13,7 @@
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat, type Capability } from "@/lib/auth/seats";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
@@ -27,6 +27,10 @@ export interface ChurchActor {
 }
 
 /**
+ * THE CAPABILITY IS THE FIRST ARGUMENT, so the guard is the first thing this
+ * shell does and, transitively, the first thing every team action does — ahead
+ * of the parse each of them runs inside `run` (#498).
+ *
  * Run a team action as the session's church actor — the ONE shell, one error
  * policy (ruling 409-6C, 2026-08-12): a thrown `ExpectedError` carries user
  * copy and its message is surfaced verbatim ("Person not found", "Training
@@ -35,11 +39,12 @@ export interface ChurchActor {
  * of the contract lives in `src/lib/ministry-teams/expected-error.ts`.
  */
 export async function withChurch<T>(
+  capability: Capability,
   fallbackError: string,
   run: (actor: ChurchActor) => Promise<ActionResult<T>>
 ): Promise<ActionResult<T>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat(capability);
     if (!user.churchId) {
       return { success: false, error: "No church associated" };
     }
@@ -47,6 +52,14 @@ export async function withChurch<T>(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
       return { success: false, error: "You must be logged in" };
+    }
+    // `requireSeat` throws `Forbidden: <capability> …`. The sentence names the
+    // rule that refused, which is a log line, not a response.
+    if (error instanceof Error && error.message.startsWith("Forbidden")) {
+      return {
+        success: false,
+        error: "You do not have permission to do that in this church.",
+      };
     }
     if (error instanceof ExpectedError) {
       return { success: false, error: error.message };

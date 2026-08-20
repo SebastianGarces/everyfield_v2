@@ -912,7 +912,7 @@ test("the action refuses a malformed id before anything is sent", () => {
   assertInOrder(
     action,
     "oversight/invitations/actions.ts → resendInvitationEmailAction (comments stripped)",
-    ["verifySession()", "resendSchema.safeParse"],
+    ["requireSeat(", "resendSchema.safeParse"],
     "the session mint must precede the parse"
   );
 

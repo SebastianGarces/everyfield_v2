@@ -568,7 +568,7 @@ test("the search action passes the session's church, never the query alone", () 
   );
   assert.match(
     code,
-    /const \{ user \} = await verifySession\(\);/,
+    /const \{ user \} = await requireSeat\("[\w.]+"\);/,
     "the church a search is scoped to must be read off the session, not taken as an argument"
   );
 
@@ -579,7 +579,7 @@ test("the search action passes the session's church, never the query alone", () 
   // minting below the guards would answer a malformed argument differently
   // from a well-formed one (#411).
   const body = code.slice(code.indexOf("export async function"));
-  const mint = body.indexOf("await verifySession()");
+  const mint = body.indexOf("await requireSeat(");
   assert.ok(mint !== -1, "the search action never mints an actor");
   assert.ok(
     mint < body.indexOf("try {"),

@@ -304,8 +304,8 @@ test("createInvitation parses a strict schema before the logic layer", () => {
   assertInOrder(
     fn,
     "invitations/service.ts → createInvitation",
-    ["verifySession", "safeParse"],
-    "the session check must precede the parse"
+    ["requireSeat", "safeParse"],
+    "the seat guard must precede the parse"
   );
 });
 

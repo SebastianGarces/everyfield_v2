@@ -1,9 +1,9 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { revalidatePath } from "next/cache";
 
-import { requireChurchAccess, requirePlantOwner } from "@/lib/auth/access";
-import { verifySession } from "@/lib/auth/session";
+import { requireChurchAccess } from "@/lib/auth/access";
 import {
   transitionPhase,
   transitionPhaseSchema,
@@ -58,10 +58,10 @@ export async function transitionPhaseAction(
   input: TransitionPhaseActionInput
 ): Promise<ActionResult<TransitionResult>> {
   try {
-    const { user } = await verifySession();
-
-    // Only the plant's Owner controls its phase.
-    requirePlantOwner(user);
+    // `phase.declare` is the plant Owner's (@/lib/auth/seats): a declaration is
+    // a plant-level decision, and it is the one Owner-only verb that predates
+    // the 185 (1) list rather than coming from it.
+    const { user } = await requireSeat("phase.declare");
 
     // The plant is the session's, not the caller's. An Owner with no church
     // has nothing to move.

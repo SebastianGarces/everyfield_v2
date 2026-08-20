@@ -63,7 +63,7 @@ import type { ActionResult } from "./action-shell";
 export async function listTeamsAction(): Promise<
   ActionResult<TeamWithStats[]>
 > {
-  return withChurch("Failed to load teams", async ({ churchId }) => {
+  return withChurch("read", "Failed to load teams", async ({ churchId }) => {
     const teams = await listTeams(churchId);
     return { success: true, data: teams };
   });
@@ -72,49 +72,62 @@ export async function listTeamsAction(): Promise<
 export async function createTeamAction(
   formData: FormData
 ): Promise<ActionResult<MinistryTeam>> {
-  return withChurch("Failed to create team", async ({ churchId, userId }) => {
-    const parsed = teamCreateSchema.safeParse(
-      Object.fromEntries(formData.entries())
-    );
-    if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch(
+    "teams.write",
+    "Failed to create team",
+    async ({ churchId, userId }) => {
+      const parsed = teamCreateSchema.safeParse(
+        Object.fromEntries(formData.entries())
+      );
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const team = await createTeam(churchId, userId, parsed.data);
-    revalidateTeamSurfaces();
-    return { success: true, data: team };
-  });
+      const team = await createTeam(churchId, userId, parsed.data);
+      revalidateTeamSurfaces();
+      return { success: true, data: team };
+    }
+  );
 }
 
 export async function updateTeamAction(
   teamId: string,
   formData: FormData
 ): Promise<ActionResult<MinistryTeam>> {
-  return withChurch("Failed to update team", async ({ churchId }) => {
-    const parsed = teamUpdateSchema.safeParse(
-      Object.fromEntries(formData.entries())
-    );
-    if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch(
+    "teams.write",
+    "Failed to update team",
+    async ({ churchId }) => {
+      const parsed = teamUpdateSchema.safeParse(
+        Object.fromEntries(formData.entries())
+      );
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const team = await updateTeam(churchId, teamId, parsed.data);
-    revalidateTeamSurfaces();
-    return { success: true, data: team };
-  });
+      const team = await updateTeam(churchId, teamId, parsed.data);
+      revalidateTeamSurfaces();
+      return { success: true, data: team };
+    }
+  );
 }
 
 export async function assignTeamLeaderAction(
   teamId: string,
   personId: string
 ): Promise<ActionResult<MinistryTeam>> {
-  return withChurch("Failed to assign leader", async ({ churchId, userId }) => {
-    const team = await assignTeamLeader(churchId, teamId, personId, userId);
-    revalidateTeamSurfaces();
-    return { success: true, data: team };
-  });
+  return withChurch(
+    "teams.write",
+    "Failed to assign leader",
+    async ({ churchId, userId }) => {
+      const team = await assignTeamLeader(churchId, teamId, personId, userId);
+      revalidateTeamSurfaces();
+      return { success: true, data: team };
+    }
+  );
 }
 
 export async function initializeTeamsAction(
   teamKeys?: PredefinedTeamKey[]
 ): Promise<ActionResult<MinistryTeam[]>> {
   return withChurch(
+    "teams.write",
     "Failed to initialize teams",
     async ({ churchId, userId }) => {
       const teams = await initializePredefinedTeams(churchId, userId, teamKeys);
@@ -206,36 +219,48 @@ export async function createRoleAction(
   teamId: string,
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
-  return withChurch("Failed to create role", async ({ churchId, userId }) => {
-    const parsed = roleCreateSchema.safeParse(formEntries(formData));
-    if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch(
+    "teams.write",
+    "Failed to create role",
+    async ({ churchId, userId }) => {
+      const parsed = roleCreateSchema.safeParse(formEntries(formData));
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const role = await createRole(churchId, teamId, userId, parsed.data);
-    revalidateTeamSurfaces();
-    return { success: true, data: role };
-  });
+      const role = await createRole(churchId, teamId, userId, parsed.data);
+      revalidateTeamSurfaces();
+      return { success: true, data: role };
+    }
+  );
 }
 
 export async function updateRoleAction(
   roleId: string,
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
-  return withChurch("Failed to update role", async ({ churchId }) => {
-    const parsed = roleUpdateSchema.safeParse(formEntries(formData));
-    if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch(
+    "teams.write",
+    "Failed to update role",
+    async ({ churchId }) => {
+      const parsed = roleUpdateSchema.safeParse(formEntries(formData));
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const role = await updateRole(churchId, roleId, parsed.data);
-    revalidateTeamSurfaces();
-    return { success: true, data: role };
-  });
+      const role = await updateRole(churchId, roleId, parsed.data);
+      revalidateTeamSurfaces();
+      return { success: true, data: role };
+    }
+  );
 }
 
 export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
-  return withChurch("Failed to delete role", async ({ churchId, userId }) => {
-    await deleteRole(churchId, roleId, userId);
-    revalidateTeamSurfaces();
-    return { success: true, data: undefined };
-  });
+  return withChurch(
+    "teams.write",
+    "Failed to delete role",
+    async ({ churchId, userId }) => {
+      await deleteRole(churchId, roleId, userId);
+      revalidateTeamSurfaces();
+      return { success: true, data: undefined };
+    }
+  );
 }
 
 export async function importRoleTemplatesAction(
@@ -244,6 +269,7 @@ export async function importRoleTemplatesAction(
   roleKeys?: string[]
 ): Promise<ActionResult<TeamRole[]>> {
   return withChurch(
+    "teams.write",
     "Failed to import templates",
     async ({ churchId, userId }) => {
       const roles = await importRoleTemplates(
@@ -268,31 +294,39 @@ export async function assignMemberAction(
   roleId: string,
   data: { personId: string; startDate?: string }
 ): Promise<ActionResult<TeamMembership>> {
-  return withChurch("Failed to assign member", async ({ churchId, userId }) => {
-    const parsed = memberAssignSchema.safeParse(data);
-    if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch(
+    "teams.own",
+    "Failed to assign member",
+    async ({ churchId, userId }) => {
+      const parsed = memberAssignSchema.safeParse(data);
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const membership = await assignMember(
-      churchId,
-      teamId,
-      roleId,
-      parsed.data.personId,
-      userId,
-      parsed.data.startDate
-    );
-    revalidateTeamSurfaces();
-    return { success: true, data: membership };
-  });
+      const membership = await assignMember(
+        churchId,
+        teamId,
+        roleId,
+        parsed.data.personId,
+        userId,
+        parsed.data.startDate
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: membership };
+    }
+  );
 }
 
 export async function removeMemberAction(
   membershipId: string
 ): Promise<ActionResult> {
-  return withChurch("Failed to remove member", async ({ churchId, userId }) => {
-    await removeMember(churchId, membershipId, userId);
-    revalidateTeamSurfaces();
-    return { success: true, data: undefined };
-  });
+  return withChurch(
+    "teams.own",
+    "Failed to remove member",
+    async ({ churchId, userId }) => {
+      await removeMember(churchId, membershipId, userId);
+      revalidateTeamSurfaces();
+      return { success: true, data: undefined };
+    }
+  );
 }
 
 // ============================================================================
@@ -304,6 +338,7 @@ export async function createMeetingAction(
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
   return withChurch(
+    "teams.own",
     "Failed to create meeting",
     async ({ churchId, userId }) => {
       const rawData: Record<string, unknown> = formEntries(formData);
@@ -336,6 +371,7 @@ export async function createTrainingProgramAction(
   formData: FormData
 ): Promise<ActionResult<TrainingProgram>> {
   return withChurch(
+    "teams.own",
     "Failed to create program",
     async ({ churchId, userId }) => {
       const parsed = trainingProgramCreateSchema.safeParse(
@@ -358,19 +394,23 @@ export async function markTrainingCompleteAction(data: {
   personId: string;
   programId: string;
 }): Promise<ActionResult<TrainingCompletion>> {
-  return withChurch("Failed to mark complete", async ({ churchId, userId }) => {
-    const parsed = trainingCompleteSchema.safeParse(data);
-    if (!parsed.success) {
-      return { success: false, error: "Validation failed" };
-    }
+  return withChurch(
+    "teams.own",
+    "Failed to mark complete",
+    async ({ churchId, userId }) => {
+      const parsed = trainingCompleteSchema.safeParse(data);
+      if (!parsed.success) {
+        return { success: false, error: "Validation failed" };
+      }
 
-    const completion = await markTrainingComplete(
-      churchId,
-      parsed.data.personId,
-      parsed.data.programId,
-      userId
-    );
-    revalidateTeamSurfaces();
-    return { success: true, data: completion };
-  });
+      const completion = await markTrainingComplete(
+        churchId,
+        parsed.data.personId,
+        parsed.data.programId,
+        userId
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: completion };
+    }
+  );
 }

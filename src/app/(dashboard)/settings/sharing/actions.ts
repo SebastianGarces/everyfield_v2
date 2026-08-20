@@ -1,10 +1,9 @@
 "use server";
 
-import { isPlantOwner } from "@/lib/auth/tenancy";
+import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import { setSharingActivityWithOversight } from "@/lib/notifications/oversight-sharing";
 
 // ============================================================================
@@ -43,18 +42,11 @@ const inputSchema = z.boolean();
 export async function setOversightSharingAction(
   enabled: boolean
 ): Promise<SharingActionResult> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("sharing.toggle");
 
   const parsed = inputSchema.safeParse(enabled);
   if (!parsed.success) {
     return { success: false, error: "That is not a setting we can save" };
-  }
-
-  if (!isPlantOwner(user)) {
-    return {
-      success: false,
-      error: "Only the church planter can change what this plant shares",
-    };
   }
 
   if (!user.churchId) {

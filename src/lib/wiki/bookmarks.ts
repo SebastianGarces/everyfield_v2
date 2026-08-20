@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { db } from "@/db";
 import { wikiBookmarks } from "@/db/schema";
-import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
@@ -13,7 +13,7 @@ import { bookmarkDeleteQuery, bookmarkInsertQuery } from "./write-queries";
  * Check if an article is bookmarked by the current user
  */
 export async function isBookmarked(slug: string): Promise<boolean> {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user) return false;
 
   const [bookmark] = await db
@@ -37,7 +37,7 @@ export async function isBookmarked(slug: string): Promise<boolean> {
 export async function getBookmarkedSlugs(
   slugs: string[]
 ): Promise<Set<string>> {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user || slugs.length === 0) return new Set();
 
   const bookmarks = await db
@@ -57,7 +57,7 @@ export async function getBookmarkedSlugs(
  * Get all bookmarks for the current user
  */
 export async function getBookmarks(limit: number = 10) {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user) return [];
 
   const safeLimit = Math.min(limit, 50);
@@ -117,7 +117,7 @@ export async function getBookmarks(limit: number = 10) {
  * a caller cannot be told a malformed slug that way.
  */
 export async function toggleBookmark(slug: string): Promise<boolean> {
-  const session = await getCurrentSession();
+  const session = await requireSeat("self.write");
   if (!session?.user) {
     throw new Error("Unauthorized");
   }

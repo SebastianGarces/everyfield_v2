@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { db } from "@/db";
 import { wikiProgress, type WikiProgressStatus } from "@/db/schema";
-import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
@@ -30,7 +30,7 @@ import { progressUpsertQuery, recordViewUpsertQuery } from "./write-queries";
  * Returns a map of slug -> progress
  */
 export async function getArticlesProgress(slugs: string[]) {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user || slugs.length === 0) return new Map();
 
   const progressList = await db
@@ -62,7 +62,7 @@ export async function getArticlesProgress(slugs: string[]) {
  * Get recently viewed articles (last 5)
  */
 export async function getRecentlyViewed(limit: number = 5) {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user) return [];
 
   // Enforce max limit
@@ -113,7 +113,7 @@ export async function getRecentlyViewed(limit: number = 5) {
  * Returns completed/in_progress counts per category based on user progress
  */
 export async function getProgressStats() {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user) return null;
 
   // Get all user progress
@@ -151,7 +151,7 @@ export async function getProgressStats() {
  * Get the last in-progress article for "Continue Reading"
  */
 export async function getLastInProgress() {
-  const session = await getCurrentSession();
+  const session = await requireSeat("read");
   if (!session?.user) return null;
 
   const [progress] = await db
@@ -208,7 +208,7 @@ export async function getLastInProgress() {
  * both are shapes only a bug or a probe produces.
  */
 export async function updateProgress(slug: string, data: ProgressPatch) {
-  const session = await getCurrentSession();
+  const session = await requireSeat("self.write");
   if (!session?.user) return null;
 
   const parsedSlug = wikiSlugSchema.safeParse(slug);
@@ -241,7 +241,7 @@ export async function updateProgress(slug: string, data: ProgressPatch) {
  * an unparsed one is an unbounded row keyed on a name that addresses nothing.
  */
 export async function recordView(slug: string) {
-  const session = await getCurrentSession();
+  const session = await requireSeat("self.write");
   if (!session?.user) return null;
 
   const parsedSlug = wikiSlugSchema.safeParse(slug);

@@ -50,6 +50,7 @@ export async function createPersonAction(
   formData: FormData
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "createPersonAction",
     {
       noChurch: "You must be associated with a church to create people",
@@ -89,6 +90,7 @@ export async function updatePersonAction(
   formData: FormData
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "updatePersonAction",
     {
       noChurch: "You must be associated with a church to update people",
@@ -158,6 +160,7 @@ export async function deletePersonAction(
   personId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "deletePersonAction",
     {
       noChurch: "You must be associated with a church to delete people",
@@ -188,6 +191,7 @@ export async function changeStatusAction(
   newStatus: PersonStatus
 ): Promise<ActionResult<{ person: Person }>> {
   return withChurchSession(
+    "people.write",
     "changeStatusAction",
     {
       noChurch: "You must be associated with a church to update people",
@@ -225,6 +229,7 @@ export async function changeStatusWithReasonAction(
   reason?: string
 ): Promise<ActionResult<{ person: Person; transition: StatusTransition }>> {
   return withChurchSession(
+    "people.write",
     "changeStatusWithReasonAction",
     {
       noChurch: "You must be associated with a church to update people",
@@ -274,6 +279,7 @@ export async function checkForDuplicatesAction(data: {
   phone?: string;
 }): Promise<ActionResult<DuplicateCheck>> {
   return withChurchSession(
+    "read",
     "checkForDuplicatesAction",
     { fallback: "Failed to check for duplicates" },
     async ({ churchId }) => {
@@ -300,6 +306,7 @@ export async function quickAddPersonAction(data: {
   source?: string;
 }): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "quickAddPersonAction",
     {
       noChurch: "You must be associated with a church to create people",

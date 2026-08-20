@@ -29,6 +29,7 @@ export async function listHouseholdsAction(): Promise<
   ActionResult<Household[]>
 > {
   return withChurchSession(
+    "read",
     "listHouseholdsAction",
     { fallback: "Failed to list households" },
     async ({ churchId }) => {
@@ -52,6 +53,7 @@ export async function createHouseholdWithHeadAction(
   usePersonAddress: boolean
 ): Promise<ActionResult<{ household: Household; person: Person }>> {
   return withChurchSession(
+    "people.write",
     "createHouseholdWithHeadAction",
     {
       known: { "Person not found": "Person not found or has been deleted" },
@@ -111,6 +113,7 @@ export async function updateHouseholdAction(
   }
 ): Promise<ActionResult<Household>> {
   return withChurchSession(
+    "people.write",
     "updateHouseholdAction",
     {
       fallback: "Failed to update household",
@@ -143,6 +146,7 @@ export async function deleteHouseholdAction(
   householdId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "deleteHouseholdAction",
     {
       mapError: (error) =>
@@ -168,6 +172,7 @@ export async function addToHouseholdAction(
   role: HouseholdRole
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "addToHouseholdAction",
     {
       fallback: "Failed to add to household",
@@ -213,6 +218,7 @@ export async function removeFromHouseholdAction(
   personId: string
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "removeFromHouseholdAction",
     {
       fallback: "Failed to remove from household",
@@ -263,6 +269,7 @@ export async function propagateAddressAction(
   householdId: string
 ): Promise<ActionResult<number>> {
   return withChurchSession(
+    "people.write",
     "propagateAddressAction",
     {
       fallback: "Failed to propagate address",
@@ -282,6 +289,7 @@ export async function getHouseholdMembersAction(
   householdId: string
 ): Promise<ActionResult<Person[]>> {
   return withChurchSession(
+    "read",
     "getHouseholdMembersAction",
     { fallback: "Failed to get household members" },
     async ({ churchId }) => {

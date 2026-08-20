@@ -1,7 +1,7 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import type { Task } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
 import {
   bulkCompleteTasks,
   bulkRescheduleTasks,
@@ -140,7 +140,7 @@ function parsePostedPrerequisiteIds(
 export async function createTaskAction(
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     if (!user.churchId) {
@@ -214,7 +214,7 @@ export async function createTaskAction(
 export async function quickAddTaskAction(
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     if (!user.churchId) {
@@ -265,7 +265,7 @@ export async function updateTaskAction(
   taskId: string,
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     if (!user.churchId) {
@@ -337,7 +337,7 @@ export async function updateTaskAction(
 export async function completeTaskAction(
   taskId: string
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -381,7 +381,7 @@ export async function completeTaskAction(
 export async function reopenTaskAction(
   taskId: string
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -415,7 +415,7 @@ export async function reopenTaskAction(
 export async function deleteTaskAction(
   taskId: string
 ): Promise<ActionResult<void>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     if (!user.churchId) {
@@ -456,7 +456,7 @@ export async function updateTaskStatusAction(
   taskId: string,
   status: string
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -518,7 +518,7 @@ export async function addSubtaskAction(
   parentTaskId: string,
   formData: FormData
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -576,7 +576,7 @@ export async function setSubtaskCompletionAction(
   subtaskId: string,
   complete: boolean
 ): Promise<ActionResult<Task>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -634,7 +634,7 @@ export async function setSubtaskCompletionAction(
 export async function bulkCompleteTasksAction(
   taskIds: string[]
 ): Promise<ActionResult<BulkTaskResult>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.own");
 
   try {
     if (!user.churchId) {
@@ -671,7 +671,7 @@ export async function bulkRescheduleTasksAction(
   taskIds: string[],
   dueDate: string
 ): Promise<ActionResult<BulkTaskResult>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     if (!user.churchId) {
@@ -749,7 +749,7 @@ export interface TemplateImportSummary {
 export async function importTaskTemplateAction(
   templateKey: string
 ): Promise<ActionResult<TemplateImportSummary>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("tasks.write");
 
   try {
     // Not part of the auth check: a session with no church is a signed-in user

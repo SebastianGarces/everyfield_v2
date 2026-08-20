@@ -190,7 +190,7 @@ const HANDLES_MINUS_ONE: ReadonlyMap<string, readonly string[]> = new Map([
       // The repo-wide SESSION-FIRST walker. An action that takes no argument
       // has no `.safeParse(`, so -1 is a real answer — the `if (parse >= 0)`
       // below it is the branch, and `mint` gets its own `assert.ok(mint >= 0)`.
-      'const mint = scoped.indexOf("verifySession()");',
+      'const mint = scoped.indexOf("requireSeat(");',
       'const parse = scoped.indexOf(".safeParse(");',
       // `returning()` is optional on an UPDATE; -1 means "no returning", and
       // the next line hands back the whole tail.
