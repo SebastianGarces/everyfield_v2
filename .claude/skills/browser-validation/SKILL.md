@@ -48,6 +48,14 @@ navigate → https://everyfield-v2-<hash>.vercel.app/people
 "development" && !process.env.VERCEL`. Log in through the real form; previews read the same
 development database as local dev.
 
+**The login form does carry a preview-only picker for the table below** (#146). Pick an account and
+it *types the email and password into the two fields*; you still press **Sign in** and the normal
+login POST runs. It is form autofill and nothing else — no route, no server action, no cookie, no
+session — which is why it is allowed where the switcher is not, and a change that turns it into a
+one-click sign-in is a change to reject. It renders only on `VERCEL_ENV === "preview"`, so it is
+absent locally (use the switcher) and absent in production. The two oversight admins appear in it
+with the email only: their password is not in the repo, per the block below.
+
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything list-shaped |
