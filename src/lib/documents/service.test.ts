@@ -335,11 +335,41 @@ test("the generation route records after render, and a preview does not record",
 
   assert.match(
     routeSource,
-    /churchId:\s*user\.churchId/,
-    "the route must persist against the session church, not a client-supplied one"
+    /churchId:\s*context\.churchId/,
+    "the route must persist against the resolved session church, not a client-supplied one"
   );
   assert.match(routeSource, /userId:\s*user\.id/);
   assert.match(routeSource, /bytes:\s*file/);
+});
+
+test("the route asks the churchId question exactly once, above the render", () => {
+  const route = sourceReader(routeSource, "route.ts");
+  const handler = route.after("export async function GET");
+
+  const refusals = handler.match(
+    /No church associated with this account/g
+  )?.length;
+  assert.equal(
+    refusals,
+    1,
+    "one refusal only — a second check after the render is unreachable, and a reader has to prove it"
+  );
+
+  assertInOrder(
+    handler,
+    "GET /api/documents/[templateId]",
+    [
+      "const context = await resolveDocumentMergeContext();",
+      "if (!context) {",
+      "file = await renderDocument(format, templateId, values);",
+    ],
+    "the refusal precedes the render, so no bytes are produced for a churchless caller"
+  );
+  assert.doesNotMatch(
+    handler,
+    /if \(!user\.churchId\)/,
+    "the resolved context owns the churchId; the handler must not re-derive it"
+  );
 });
 
 // ============================================================================

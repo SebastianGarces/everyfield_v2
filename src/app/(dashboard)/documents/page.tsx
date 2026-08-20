@@ -26,7 +26,7 @@ export default async function DocumentsPage() {
   // Resolve auto-fill defaults server-side; the client library filters/renders.
   const items = DOCUMENT_TEMPLATES.map((template) => ({
     template,
-    defaults: buildAutoFillDefaults(template, context),
+    defaults: buildAutoFillDefaults(template, context.merge),
   }));
 
   // A contextual link (DOC-014) arrives with `?template=<id>` and opens that

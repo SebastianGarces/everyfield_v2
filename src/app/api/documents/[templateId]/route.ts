@@ -58,6 +58,9 @@ export async function GET(
     );
   }
 
+  // The ONLY place this handler asks whether the caller has a church. The
+  // context carries the id it resolved, so nothing downstream re-checks and
+  // nothing downstream can answer the question differently.
   const context = await resolveDocumentMergeContext();
   if (!context) {
     return NextResponse.json(
@@ -73,7 +76,7 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
-  const values = resolveMergeValues(template, context, provided);
+  const values = resolveMergeValues(template, context.merge, provided);
 
   let file: Buffer;
   try {
@@ -95,15 +98,9 @@ export async function GET(
     format === "pdf" && request.nextUrl.searchParams.get("preview") === "1";
 
   if (!inline) {
-    if (!user.churchId) {
-      return NextResponse.json(
-        { error: "No church associated with this account" },
-        { status: 400 }
-      );
-    }
     try {
       await recordGeneratedDocument({
-        churchId: user.churchId,
+        churchId: context.churchId,
         userId: user.id,
         templateId: template.id,
         format,
