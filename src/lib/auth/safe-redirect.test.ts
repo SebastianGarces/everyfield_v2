@@ -123,7 +123,7 @@ test("a missing return path is the default destination, not a broken URL", () =>
   }
 });
 
-test("a '#' in the return path is encoded, not a truncated login URL", () => {
+test("a fragment, if one ever arrived, is encoded into the param rather than truncating the login URL", () => {
   // Documented rather than fixed (#503 AC). A browser does not send the
   // fragment, so `/settings#notification-preferences` arrives at the proxy and
   // at the layout as `/settings` and there is nothing here to preserve. What
