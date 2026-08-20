@@ -50,8 +50,9 @@ export default async function LoginPage({
     redirect(redirectTo);
   }
 
-  // The auth layout is a flex row; stack so the dev switcher sits BELOW the
-  // form rather than beside it.
+  // The auth layout is a flex row; stack so the two scaffolding blocks — the
+  // preview picker (rendered by `LoginForm` as a sibling of its card) and the
+  // dev switcher — sit BELOW the form rather than beside it.
   //
   // `listPreviewAccounts()` is empty everywhere but a Vercel preview, so on
   // production this passes `[]` and the picker renders nothing — and because

@@ -50,14 +50,17 @@ export function PreviewAccountPicker({
   return (
     <div
       data-testid="preview-account-picker"
-      className="border-muted-foreground/30 space-y-3 rounded-lg border border-dashed p-3"
+      // The dev account switcher's own block, to the class — the picker sits in
+      // the same slot beneath the card and should read as the same kind of
+      // scaffolding, not as part of the product.
+      className="border-muted-foreground/30 mt-6 w-full max-w-md space-y-3 rounded-lg border border-dashed p-4"
     >
       <div className="flex items-center gap-2">
         <FlaskConical className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">
           <p className="text-sm font-medium">Preview QA accounts</p>
           <p className="text-muted-foreground text-xs">
-            Fills the form below. You still sign in.
+            Fills the form above. You still sign in.
           </p>
         </div>
       </div>
