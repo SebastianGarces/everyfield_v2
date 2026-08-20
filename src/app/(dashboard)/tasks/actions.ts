@@ -205,7 +205,11 @@ export async function createTaskAction(
       }
     }
 
-    refresh();
+    // NO `refresh()` (#529). The only caller is `TaskForm`, and it always
+    // leaves — a refresh here re-renders /tasks/new, the route the form's
+    // `router.push("/tasks")` is trying to replace, which is the shape
+    // memory/invariants.md forbids. `revalidatePath` is the right half: it
+    // freshens the list the planter lands on.
     revalidatePath("/tasks");
 
     return { success: true, data: task };
@@ -323,7 +327,9 @@ export async function updateTaskAction(
       await setTaskPrerequisites(user.churchId, taskId, prerequisites.ids);
     }
 
-    refresh();
+    // NO `refresh()`, same reason as `createTaskAction` (#529): the one caller
+    // is `TaskForm`, which pushes to /tasks, and a refresh would re-render
+    // /tasks/<id>/edit while that push is in flight.
     revalidatePath("/tasks");
     revalidatePath(`/tasks/${taskId}`);
 
