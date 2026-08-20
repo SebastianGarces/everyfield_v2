@@ -6,8 +6,8 @@ import { NextRequest } from "next/server";
 import {
   CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
   isCrawlerPreviewRequest,
-  PATHNAME_HEADER,
 } from "./lib/crawler";
+import { ROUTED_URL_HEADER } from "./lib/routed-url";
 import { proxy } from "./proxy";
 
 // ============================================================================
@@ -133,13 +133,16 @@ test("an unauthenticated browser is still sent to /login", () => {
 });
 
 // ============================================================================
-// The authenticated bounce off /login, and its `?redirect=` param.
+// The cookie-bearing bounce off an auth route, and its `?redirect=` param.
 //
 // The param is followed through `safeRedirectPath` — the ONE open-redirect
 // predicate, shared with `login` and `devLoginAs` (ruling 408-1A). The proxy
 // used to hand-roll `startsWith("/")`, which `//evil.com` satisfies: resolved
 // against the request URL it is a PROTOCOL-RELATIVE URL, so a signed-in user
-// clicking `https://<app>/login?redirect=//evil.com` was sent off-site.
+// clicking `https://<app>/register?redirect=//evil.com` was sent off-site.
+//
+// These assert on `/register` because `/login` LEFT this branch (#503): see the
+// loop test below for why a cookie is the wrong thing to ask there.
 // ============================================================================
 
 function authedGet(path: string): NextRequest {
@@ -154,7 +157,7 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   // A legitimate path is followed unchanged…
   assert.equal(
     loginRedirect(
-      proxy(authedGet("/login?redirect=%2Fwiki%2Fgetting-started"))
+      proxy(authedGet("/register?redirect=%2Fwiki%2Fgetting-started"))
     ),
     `${BASE}/wiki/getting-started`
   );
@@ -169,7 +172,7 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   ]) {
     assert.equal(
       loginRedirect(
-        proxy(authedGet(`/login?redirect=${encodeURIComponent(attack)}`))
+        proxy(authedGet(`/register?redirect=${encodeURIComponent(attack)}`))
       ),
       `${BASE}/dashboard`,
       `${attack} escaped safeRedirectPath`
@@ -177,7 +180,46 @@ test("a signed-in user's ?redirect= is followed only within the app", () => {
   }
 
   // No param at all still lands on the dashboard.
-  assert.equal(loginRedirect(proxy(authedGet("/login"))), `${BASE}/dashboard`);
+  assert.equal(
+    loginRedirect(proxy(authedGet("/register"))),
+    `${BASE}/dashboard`
+  );
+
+  // And `/` is still an auth route, so the same branch covers it.
+  assert.equal(loginRedirect(proxy(authedGet("/"))), `${BASE}/dashboard`);
+});
+
+test("a cookie that no longer verifies reaches the login form (#503)", () => {
+  // THE LOOP, pinned. `hasSessionCookie` is presence, not validity, so an
+  // expired or revoked session looks signed-in to this proxy and signed-out to
+  // everything that checks properly. The layout bounced such a reader to
+  // `/login?redirect=<where they were>`; with `/login` on `AUTH_ROUTES` this
+  // proxy sent them back to that same route on the strength of the dead cookie,
+  // which bounced them again — ERR_TOO_MANY_REDIRECTS, and no way to reach the
+  // form that would have fixed it.
+  //
+  // What must hold is that `/login` is a DEAD END for the redirect chain: the
+  // request continues into the app, where the page asks the session rather than
+  // the cookie. Asserting `loginRedirect === null` is the whole property — one
+  // more hop and the loop is back.
+  for (const path of [
+    "/login",
+    "/login?redirect=%2Fsettings",
+    "/login?redirect=%2Fsettings%3Ftab%3Dbilling",
+  ]) {
+    const response = proxy(authedGet(path));
+    assert.equal(
+      loginRedirect(response),
+      null,
+      `${path} bounced a stale-cookie reader away from the login form`
+    );
+    // It continues into the app rather than being answered at the edge.
+    assert.equal(
+      response.headers.get(`x-middleware-request-${ROUTED_URL_HEADER}`),
+      path,
+      `${path} did not continue into the app`
+    );
+  }
 });
 
 test("/dashboard bounces a crawler exactly like a browser (#297)", () => {
@@ -255,16 +297,16 @@ test("forging x-is-crawler buys nothing — with it or without it, same result",
 });
 
 /**
- * The pathname the app will actually see, i.e. what the proxy stamped on the
- * REQUEST headers. `NextResponse.next({ request: { headers } })` encodes an
+ * The relative URL the app will actually see, i.e. what the proxy stamped on
+ * the REQUEST headers. `NextResponse.next({ request: { headers } })` encodes an
  * override as `x-middleware-request-<name>` plus a name list; reading it back is
  * the only way to assert from outside what a Server Component downstream reads.
  */
-function stampedPathname(response: Response): string | null {
-  return response.headers.get(`x-middleware-request-${PATHNAME_HEADER}`);
+function stampedUrl(response: Response): string | null {
+  return response.headers.get(`x-middleware-request-${ROUTED_URL_HEADER}`);
 }
 
-test("the proxy stamps the routed pathname on every request it lets through", () => {
+test("the proxy stamps the routed URL on every request it lets through", () => {
   // The layout has no other way to know which route it is rendering, and the
   // whole route scope hangs off that.
   const cases: Array<[string, Record<string, string>]> = [
@@ -273,24 +315,47 @@ test("the proxy stamps the routed pathname on every request it lets through", ()
     ["/login", {}], // no session, no protection
   ];
   for (const [path, headers] of cases) {
-    assert.equal(stampedPathname(proxy(get(path, headers))), path, path);
+    assert.equal(stampedUrl(proxy(get(path, headers))), path, path);
   }
 
   // Non-GET continuations too: a Server Action re-renders the same layout.
   assert.equal(
-    stampedPathname(
+    stampedUrl(
       proxy(post("/settings", { Origin: BASE, Host: "app.everyfield.test" }))
     ),
     "/settings"
   );
 });
 
-test("a forged x-pathname is overwritten with the real path, everywhere", () => {
+test("the stamp carries the query, and the route scope ignores it (#503)", () => {
+  // The layout builds its own `/login` return path out of this header, and
+  // `/settings?tab=billing` without its query is a different destination — so
+  // the stamp is the relative URL, not the pathname. The crawler scope reads
+  // the same header and must still answer about the ROUTE.
+  assert.equal(
+    stampedUrl(proxy(get("/settings?tab=billing", { "user-agent": CHROME }))),
+    "/settings?tab=billing"
+  );
+
+  const wiki = stampedUrl(
+    proxy(
+      get("/wiki/getting-started?utm_source=x", { "user-agent": GOOGLEBOT })
+    )
+  );
+  assert.equal(wiki, "/wiki/getting-started?utm_source=x");
+  assert.equal(
+    isCrawlerPreviewRequest(GOOGLEBOT, wiki),
+    true,
+    "a tracking parameter cost a crawler its preview"
+  );
+});
+
+test("a forged routed URL is overwritten with the real one, everywhere", () => {
   // The stamp is only trustworthy because it is unconditional. A client that
   // claims to be on /wiki while asking for /people must not be believed — that
   // claim is the one thing that could talk the layout into the session-less
   // shell on a route whose page then throws.
-  const forged = { [PATHNAME_HEADER]: "/wiki/getting-started" };
+  const forged = { [ROUTED_URL_HEADER]: "/wiki/getting-started" };
 
   // `previewable` is the verdict the REAL path earns on its own merit — never
   // the one the forged header claims. `/dashboard` is the case #297 changed: the
@@ -307,22 +372,22 @@ test("a forged x-pathname is overwritten with the real path, everywhere", () => 
     ["/wiki/church-planting", { "user-agent": GOOGLEBOT, ...forged }, true],
   ] as Array<[string, Record<string, string>, boolean]>) {
     const response = proxy(get(path, headers));
-    const stamped = stampedPathname(response);
+    const stamped = stampedUrl(response);
 
     if (loginRedirect(response)) {
       // `/dashboard` since #297: the proxy bounces on the REAL path, so the
       // forged claim never reaches a layout to be believed. Nothing is stamped
       // because nothing continues into the app.
-      assert.equal(stamped, null, `${path} stamped a pathname on a redirect`);
+      assert.equal(stamped, null, `${path} stamped a routed URL on a redirect`);
       assert.equal(previewable, false, path);
       continue;
     }
 
-    assert.equal(stamped, path, `a forged x-pathname survived on ${path}`);
+    assert.equal(stamped, path, `a forged routed URL survived on ${path}`);
     assert.equal(
       isCrawlerPreviewRequest(headers["user-agent"], stamped),
       previewable,
-      `the forged x-pathname changed the layout's verdict for ${path}`
+      `the forged routed URL changed the layout's verdict for ${path}`
     );
   }
 });
@@ -344,7 +409,7 @@ test("a crawler on a route the proxy does not admit gets no preview downstream",
   ]) {
     const response = proxy(get(path, { "user-agent": GOOGLEBOT }));
     assert.equal(
-      isCrawlerPreviewRequest(GOOGLEBOT, stampedPathname(response)),
+      isCrawlerPreviewRequest(GOOGLEBOT, stampedUrl(response)),
       false,
       `${path} would still render the session-less crawler shell`
     );

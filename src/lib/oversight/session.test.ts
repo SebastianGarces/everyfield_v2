@@ -135,15 +135,24 @@ test("no oversight route resolves the caller's tenancy itself", () => {
   }
 });
 
-test("the two refusals stay different, and neither is a 404", () => {
-  // No session → /login (signing in is what is missing); a church-level tenancy
-  // → /dashboard (they have a home). `notFound()` is reserved for the one page
-  // whose EXISTENCE is the disclosure, and it stays at that page.
+test("the one refusal it owns is /dashboard, and it is not a 404", () => {
+  // A church-level tenancy → /dashboard (they have a home). `notFound()` is
+  // reserved for the one page whose EXISTENCE is the disclosure, and it stays
+  // at that page.
+  //
+  // The signed-out refusal is NOT this guard's to make (#503). It used to spell
+  // its own `redirect("/login")`, which named no destination to come back to,
+  // and it sat behind two bounces that do — the proxy's, and the `(dashboard)`
+  // layout's. Asserting its ABSENCE is the point: a third copy growing back is
+  // how a reader ends up somewhere with no way back to the page they wanted.
   const guard = readCode(
     path.join(ROOT, "src", "lib", "oversight", "session.ts")
   );
-  assert.match(guard, /redirect\("\/login"\)/);
   assert.match(guard, /redirect\("\/dashboard"\)/);
+  assert.ok(
+    !/redirect\("\/login"\)/.test(guard),
+    "the oversight guard bounces to /login itself — that belongs to the (dashboard) layout, which carries the return path"
+  );
   assert.ok(
     !guard.includes("notFound"),
     "the shared guard 404s, which would hide /dashboard from a planter who has one"

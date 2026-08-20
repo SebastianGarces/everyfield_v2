@@ -1,4 +1,4 @@
-import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth";
 import {
   resolveFinishedDashboardStepRequest,
   shouldShowOnboarding,
@@ -34,22 +34,19 @@ export default async function DashboardPage({
     step?: string | string[];
   }>;
 }) {
+  // `verifySession` rather than `getCurrentSession`: the `(dashboard)` layout
+  // has already bounced a signed-out reader — it is the ONE place that does
+  // (#503) — so the session is established by the time this renders and `user`
+  // needs no null branch.
   const [{ user }, resolvedSearchParams] = await Promise.all([
-    getCurrentSession(),
+    verifySession(),
     searchParams,
   ]);
   const { churchCreated, step } = resolvedSearchParams;
 
   // Redirect an oversight tenancy to its dedicated dashboard
-  if (user && isOversightUser(user)) {
+  if (isOversightUser(user)) {
     redirect("/oversight");
-  }
-
-  // The proxy already bounces unauthenticated requests to /login
-  // (`PROTECTED_ROUTE_PREFIXES`); a null session here is a request that
-  // slipped past it, and it gets the same answer.
-  if (!user) {
-    redirect("/login");
   }
 
   // F12 / OB-001: the onboarding flow is the primary dashboard content for a

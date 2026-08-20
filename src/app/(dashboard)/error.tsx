@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
 
 import { Button } from "@/components/ui/button";
+import { loginPathFor } from "@/lib/auth/safe-redirect";
 
 /**
  * Error boundary for all dashboard routes.
@@ -43,6 +45,15 @@ export default function DashboardError({
     Sentry.captureException(error);
   }, [error]);
 
+  // "Sign in and come back" is a promise, so the link keeps it (#503). The most
+  // likely cause of landing here is the expired session the copy names, and the
+  // reader is standing on the page they wanted — sending them to a bare /login
+  // spent that fact and dropped them on the dashboard afterwards. `usePathname`
+  // is the client-side spelling of what the proxy stamps for the server side;
+  // `loginPathFor` is the same builder both of those use, and `safe-redirect`
+  // is an import-free leaf, so pulling it into this client bundle costs nothing.
+  const signInHref = loginPathFor(usePathname());
+
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
       <h2 className="text-2xl font-bold">That didn&apos;t go through</h2>
@@ -55,7 +66,7 @@ export default function DashboardError({
           Try again
         </Button>
         <Button asChild variant="outline">
-          <Link href="/login">Sign in</Link>
+          <Link href={signInHref}>Sign in</Link>
         </Button>
       </div>
     </div>

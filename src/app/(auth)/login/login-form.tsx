@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState } from "react";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,9 +17,14 @@ import { login, type LoginState } from "./actions";
 
 const initialState: LoginState = {};
 
-export function LoginForm() {
-  const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") || "/dashboard";
+/**
+ * `redirectTo` arrives as a prop, already through `safeRedirectPath` on the
+ * page. The form used to read `?redirect=` itself with `useSearchParams`, which
+ * made it a SECOND reader of the param and the only ungated one — harmless
+ * because the action re-checks the field it submits, but it is one round trip
+ * and it should have one gate (#503).
+ */
+export function LoginForm({ redirectTo }: { redirectTo: string }) {
   const [state, formAction, pending] = useActionState(login, initialState);
 
   return (
