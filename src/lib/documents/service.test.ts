@@ -362,6 +362,29 @@ test("the generation route records after render, and a preview does not record",
   assert.match(routeSource, /bytes:\s*file/);
 });
 
+test("a preview does not record in ANY format — the write is gated off the raw flag", () => {
+  assert.match(
+    routeSource,
+    /const preview = request\.nextUrl\.searchParams\.get\("preview"\) === "1";/,
+    "the raw flag is read once, on its own"
+  );
+  assert.match(
+    routeSource,
+    /if \(!preview\) \{/,
+    "persistence is gated off the flag itself, never off the delivery mode"
+  );
+  assert.doesNotMatch(
+    routeSource,
+    /if \(!inline\) \{/,
+    "`inline` is PDF-only, so gating the write on it recorded every non-PDF preview"
+  );
+  assert.match(
+    routeSource,
+    /const inline = preview && format === "pdf";/,
+    "inline stays the Content-Disposition question: only a PDF renders in a tab"
+  );
+});
+
 test("a persist failure and a render failure do not say the same thing", () => {
   const renders = routeSource.match(/"Failed to generate document"/g)?.length;
   assert.equal(renders, 1, "only the render catch may claim generation failed");

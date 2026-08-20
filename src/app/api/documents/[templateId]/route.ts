@@ -95,12 +95,16 @@ export async function GET(
     );
   }
 
-  // `?preview=1` renders inline (PDF only — browsers can't preview .docx inline).
+  // Two independent questions off one flag. `preview` decides whether this
+  // request WRITES: a look never records, whatever format it asked for.
+  // `inline` decides how it is DELIVERED, and only a PDF can be shown in a
+  // browser tab — a .docx preview still downloads. Deriving the write from
+  // `inline` recorded every non-PDF preview.
   const { mime } = FORMAT_OUTPUT[format];
-  const inline =
-    format === "pdf" && request.nextUrl.searchParams.get("preview") === "1";
+  const preview = request.nextUrl.searchParams.get("preview") === "1";
+  const inline = preview && format === "pdf";
 
-  if (!inline) {
+  if (!preview) {
     try {
       await recordGeneratedDocument({
         churchId: context.churchId,
