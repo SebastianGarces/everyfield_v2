@@ -362,6 +362,16 @@ test("the generation route records after render, and a preview does not record",
   assert.match(routeSource, /bytes:\s*file/);
 });
 
+test("a persist failure and a render failure do not say the same thing", () => {
+  const renders = routeSource.match(/"Failed to generate document"/g)?.length;
+  assert.equal(renders, 1, "only the render catch may claim generation failed");
+  assert.match(
+    routeSource,
+    /"Generated the document but could not save it to history"/,
+    "a failed history write must name the half that broke"
+  );
+});
+
 test("the route asks the churchId question exactly once, above the render", () => {
   const route = sourceReader(routeSource, "route.ts");
   const handler = route.after("export async function GET");

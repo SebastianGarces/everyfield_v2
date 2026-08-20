@@ -114,8 +114,12 @@ export async function GET(
         `[documents] failed to persist ${templateId} (${format}):`,
         error
       );
+      // The bytes exist; only the history row failed. The download still
+      // fails closed — we do not hand back a file we could not record — but
+      // the message must say which half broke, or the planter retries a
+      // render that was never the problem.
       return NextResponse.json(
-        { error: "Failed to generate document" },
+        { error: "Generated the document but could not save it to history" },
         { status: 500 }
       );
     }
