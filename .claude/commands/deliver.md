@@ -1,33 +1,30 @@
 ---
-description: Hand the Agent Delivery OS a list of work to build autonomously to PRs (intake → plan → build-until-done).
+description: Hand a list of work to the agent to build autonomously to PRs (spec-intake → issues → build per ops/process.md).
 ---
 
-Deliver the following work autonomously to reviewable PRs. Operating manual:
-`ops/agent-os/README.md`. Definition of Done: `ops/agent-os/dod.md`.
+Deliver the following work autonomously to PRs. How we work: `ops/process.md` — read it first.
 
 Work to deliver:
 $ARGUMENTS
 
 ## The pipeline
 
-1. **Intake → issues.** Run `spec-intake` **once over the whole list**, not once per item. Each
-   issue gets observable acceptance criteria, a risk class, and a file-ownership guess, labelled
-   `agent:queued` (+ `risk:high`). Ask the user a question only when an ambiguity changes *what gets
-   built*; otherwise rule it, default, and note the ruling in the issue.
+1. **Intake → issues.** Run `spec-intake` **once over the whole list**, not once per item. Each issue
+   gets observable acceptance criteria, a validation plan, and a file-ownership guess, labelled
+   `agent:queued`. Ask the user a question only when an ambiguity changes *what gets built*;
+   otherwise rule it, default, and note the ruling in the issue.
 
-2. **Plan onto the board.** An FRD-scale feature → run `frd-plan`, which publishes file-disjoint
-   tracks as issues with native `blocked_by` edges. An ad-hoc list → group the issues yourself and
-   write the semantic dependencies as edges: `gh issue edit <n> --add-blocked-by <m>`. Shared files
-   versus blocking edges are defined once in `ops/agent-os/labels.md` — read it there.
+2. **Write the blocking edges.** A dependency is semantic: `gh issue edit <n> --add-blocked-by <m>`.
+   Create the blockers first so each edge can name a real number. File overlap is scheduling, not a
+   dependency — it belongs in `## Likely files`.
 
-3. **Build the frontier.** Take every queued issue with zero open blockers and no assignee (the
-   frontier query lives in `ops/agent-os/labels.md`) and run the `build-until-done` workflow on it.
-   A PR opens only when the DoD passes with evidence: CI green, one code review, and one browser
-   look for UI. Merging a PR closes its issue, clears its edges, and moves whatever it blocked onto
-   the frontier — re-query and go again. Do not start a batch you cannot finish.
+3. **Build it.** Run the work per `ops/process.md` — directly, or through the `dispatch` skill for an
+   unattended pass. Merging a PR closes its issue, clears its edges, and moves whatever it blocked
+   onto the frontier: re-query and go again until the list is done.
 
-4. **Report.** PRs opened (the review queue), anything blocked with its failing gate, and what is
-   still queued. `/standup` gives the live board anytime.
+4. **Report.** PRs opened, anything that failed with what failed, and what is still queued.
+   `/standup` gives the live board anytime.
 
-Do not ask for approval to proceed unless a spec ambiguity changes what gets built. High-risk work
-still ships to a PR; it never auto-merges.
+Do not ask for approval to proceed unless a spec ambiguity changes what gets built. Rule it, record
+the ruling (product rulings in `product-docs/decisions.md`, code rulings in the PR body), and keep
+going. CI green is the merge bar: enable auto-merge and move on.

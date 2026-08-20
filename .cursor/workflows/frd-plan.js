@@ -1,1 +1,0 @@
-../../.claude/workflows/frd-plan.js

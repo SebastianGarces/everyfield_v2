@@ -17,7 +17,7 @@ before writing or editing anything in `product-docs/`.
   understandable, may reference only the Brief and Architecture.
 - **Implementation status lives on the GitHub board, not in any file** — a `feature` parent
   issue per FRD with sub-issues per requirement (`gh issue list --label feature`). The board
-  structure is `ops/agent-os/labels.md`; the delivery model is `ops/agent-os/README.md`.
+  structure is `ops/process.md`; the delivery model is `ops/process.md`.
   (`product-docs/board-design-2026-07.md` is the historical design log, superseded by those two.)
   The checklist files were deleted 2026-07-26.
 - Implementation plans implement the FRD — they never introduce requirements.
