@@ -51,6 +51,55 @@ left-to-right pass over comments and string literals, and
 `server-action-surface.test.ts` pins the case against the real file.
 
 
+## One answer for a sessionless POST (#508)
+
+`verifySession()` throws. Whether that throw REACHES the caller is a separate
+question from whether the guard ran, and for a round it was answered six
+different ways: `people/action-context.ts` and `teams/action-shell.ts` rethrew,
+while launch, phase, meetings and feedback caught the same throw and returned
+`{ success: false, error: "You must be logged in …" }`. Two of six followed the
+rule, and the four that did not were handing an anonymous caller a well-formed
+answer from an endpoint whose only correct reply is a 500 with no information.
+
+**The condition is the shape, not the module.** A catch can only intercept the
+refusal when the guard is INSIDE the `try`. `tasks/actions.ts` and
+`settings/actions.ts` mint above it, so their catches never see it — that is the
+stronger fix, and adopting it drops a module out of the walk entirely. Where the
+guard stays inside (a domain envelope owns the `try` for sixty actions, so it
+often must), the catch opens with `rethrowUnauthorized(error)`.
+
+**It is a function, not a rule in prose,** because a rule in prose is exactly
+what the four modules were breaking. `rethrowUnauthorized` is shaped like
+`unstable_rethrow` — a `void` call that throws — so it reads as a statement
+rather than a branch, and the classification below it never mentions
+`Unauthorized` again. `server-action-surface.test.ts` walks every module under
+`src/app` that is neither a client entry nor a public route group, finds each
+exported function whose guard offset is greater than its `try` offset, and
+asserts both halves: every catch reaches the rethrow, and no catch still
+compares the message. The rethrow is found through `reachingNames`, the same
+resolver the mint and guard walks use, so `launch/actions.ts` passes by
+funnelling all six catches through its own `toActionError` helper instead of
+copying a line six times.
+
+## The boundary says only what it knows
+
+`(dashboard)/error.tsx` used to tell every reader their sign-in had probably
+expired. During #498's validation it said that about a database schema drift and
+offered a Sign in button that could not have helped — a diagnosis the boundary
+had no evidence for.
+
+The evidence is a digest. A client error boundary is handed `{ message, digest }`
+and nothing else, and in production Next.js replaces the message with a generic
+sentence before the client sees it, so `digest` is the whole channel.
+`UnauthorizedError` (`src/lib/auth/unauthorized.ts`) sets `SESSION_EXPIRED_DIGEST`
+on itself, and Next.js keeps a digest an error already carries rather than
+hashing a new one (`create-error-handler.js` — "respect the original digest").
+`isSessionExpiry` reads it; only that case names sessions or shows Sign in.
+
+That module is an IMPORT-FREE LEAF for the same reason `@/lib/auth/roles` is:
+the client boundary imports it, and anything it imported would be pulled into
+that bundle behind it.
+
 ## What this guard does NOT cover
 
 **Route handlers.** Everything above is about `"use server"` exports, because

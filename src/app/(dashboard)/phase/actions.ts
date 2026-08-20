@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { revalidatePath } from "next/cache";
 
 import { requireChurchAccess } from "@/lib/auth/access";
@@ -102,15 +103,11 @@ export async function transitionPhaseAction(
 
     return { success: true, data: result };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("transitionPhaseAction error:", error);
 
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") {
-        return {
-          success: false,
-          error: "You must be logged in to change the phase",
-        };
-      }
       if (error.message.startsWith("Forbidden")) {
         return {
           success: false,

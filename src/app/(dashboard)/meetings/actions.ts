@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -150,10 +151,9 @@ export async function createMeetingAction(
     revalidatePath("/meetings");
     meetingId = meeting.id;
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("createMeetingAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in" };
-    }
     return {
       success: false,
       error: "An unexpected error occurred while creating the meeting",
@@ -198,10 +198,10 @@ export async function updateMeetingAction(
 
     return { success: true, data: meeting };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("updateMeetingAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
       if (error.message === "Meeting not found")
         return {
           success: false,
@@ -233,10 +233,10 @@ export async function deleteMeetingAction(
 
     return { success: true, data: undefined };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("deleteMeetingAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
       if (error.message === "Meeting not found")
         return {
           success: false,
@@ -279,10 +279,10 @@ export async function updateMeetingStatusAction(
 
     return { success: true, data: meeting };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("updateMeetingStatusAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
       if (error.message === "Meeting not found")
         return {
           success: false,
@@ -328,9 +328,9 @@ export async function createLocationAction(
     revalidatePath("/meetings");
     return { success: true, data: location };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("createLocationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     return {
       success: false,
       error: "An unexpected error occurred while creating the location",
@@ -371,10 +371,10 @@ export async function updateLocationAction(
     revalidatePath("/meetings");
     return { success: true, data: location };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("updateLocationAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
       if (error.message === "Location not found")
         return {
           success: false,
@@ -422,9 +422,9 @@ export async function addAttendeeAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("addAttendeeAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     return {
       success: false,
       error: "An unexpected error occurred while adding the attendee",
@@ -483,9 +483,9 @@ export async function quickAddAttendeeAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("quickAddAttendeeAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     return {
       success: false,
       error: "An unexpected error occurred while adding the attendee",
@@ -510,10 +510,10 @@ export async function removeAttendeeAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: undefined };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("removeAttendeeAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
       if (error.message === "Attendance record not found")
         return {
           success: false,
@@ -558,9 +558,9 @@ export async function finalizeAttendanceAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: result };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("finalizeAttendanceAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     if (error instanceof FinalizeAttendanceError)
       return {
         success: false,
@@ -602,9 +602,9 @@ export async function recordAttendanceBatchAction(
     revalidatePath("/teams");
     return { success: true, data: undefined };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("recordAttendanceBatchAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     return {
       success: false,
       error: "An unexpected error occurred while recording attendance",
@@ -652,9 +652,9 @@ export async function createEvaluationAction(
     revalidatePath(`/meetings/${meetingId}/evaluation`);
     return { success: true, data: evaluation };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("createEvaluationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
     return {
       success: false,
       error: "An unexpected error occurred while saving the evaluation",
@@ -680,6 +680,8 @@ export async function toggleChecklistItemAction(
     revalidatePath("/meetings");
     return { success: true, data: item };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("toggleChecklistItemAction error:", error);
     if (error instanceof Error && error.message === "Checklist item not found")
       return { success: false, error: "Checklist item not found" };
@@ -712,6 +714,8 @@ export async function updateChecklistItemAction(
     revalidatePath("/meetings");
     return { success: true, data: item };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("updateChecklistItemAction error:", error);
     if (error instanceof Error && error.message === "Checklist item not found")
       return { success: false, error: "Checklist item not found" };
@@ -740,6 +744,8 @@ export async function addToGuestListAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("addToGuestListAction error:", error);
     return { success: false, error: "Failed to add to guest list" };
   }
@@ -757,6 +763,8 @@ export async function removeFromGuestListAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("removeFromGuestListAction error:", error);
     return { success: false, error: "Failed to remove from guest list" };
   }
@@ -783,6 +791,8 @@ export async function updateRsvpStatusAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("updateRsvpStatusAction error:", error);
     return { success: false, error: "Failed to update RSVP status" };
   }
@@ -832,6 +842,8 @@ export async function quickAddPersonToGuestListAction(
     revalidatePath("/people");
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("quickAddPersonToGuestListAction error:", error);
     return { success: false, error: "Failed to add person" };
   }
@@ -872,6 +884,8 @@ export async function toggleAttendanceStatusAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("toggleAttendanceStatusAction error:", error);
     return { success: false, error: "Failed to toggle attendance" };
   }
@@ -909,6 +923,8 @@ export async function addWalkInAttendeeAction(
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("addWalkInAttendeeAction error:", error);
     return { success: false, error: "Failed to add walk-in" };
   }
@@ -970,6 +986,8 @@ export async function quickAddWalkInAction(
     revalidatePath("/people");
     return { success: true, data: record };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("quickAddWalkInAction error:", error);
     return { success: false, error: "Failed to add walk-in" };
   }
@@ -1019,6 +1037,8 @@ export async function addAttendeeNoteAction(
     revalidatePath(`/people/${personId}`);
     return { success: true, data: null };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("addAttendeeNoteAction error:", error);
     return { success: false, error: "Failed to save note" };
   }

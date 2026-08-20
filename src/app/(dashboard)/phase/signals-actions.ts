@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { revalidatePath } from "next/cache";
 import { requireChurchAccess } from "@/lib/auth/access";
 import {
@@ -63,14 +64,9 @@ export async function setManualSignalAction(
 
     return { success: true, data: { signal } };
   } catch (error) {
-    console.error("setManualSignalAction error:", error);
+    rethrowUnauthorized(error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to attest signals",
-      };
-    }
+    console.error("setManualSignalAction error:", error);
 
     return {
       success: false,

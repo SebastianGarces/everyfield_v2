@@ -15,6 +15,7 @@ import type { z } from "zod";
 
 import { requireSeat } from "@/lib/auth/seats";
 import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
@@ -58,9 +59,7 @@ export async function withChurch<T>(
     // endpoint that should only ever have said no
     // (`memory/invariants.md` → Authentication). It lands on
     // `src/app/(dashboard)/error.tsx`, which offers a way back.
-    if (error instanceof Error && error.message === "Unauthorized") {
-      throw error;
-    }
+    rethrowUnauthorized(error);
     // An `instanceof` and not a message prefix: `requireChurchAccess` throws
     // `Forbidden: …` too, so a prefix test quietly widens to every refusal that
     // happens to open with the word, and a reword changes control flow.

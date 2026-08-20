@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { db } from "@/db";
 import { churches } from "@/db/schema";
 import { sendEmail } from "@/lib/email/client";
@@ -72,14 +73,9 @@ export async function submitFeedbackAction(
 
     return { success: true };
   } catch (error) {
-    console.error("[submitFeedbackAction] error:", error);
+    rethrowUnauthorized(error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to send feedback",
-      };
-    }
+    console.error("[submitFeedbackAction] error:", error);
 
     return {
       success: false,
