@@ -43,8 +43,16 @@ export const UNSUBSCRIBE_PATH = "/api/notifications/unsubscribe";
 /** The confirmation page the GET renders — and where the button posts from. */
 export const UNSUBSCRIBE_CONFIRMATION_PATH = "/unsubscribe";
 
-/** The full preference screen (N-006), linked from every email and the page. */
-export const NOTIFICATION_PREFERENCES_PATH = "/settings";
+/**
+ * The full preference screen (N-006), linked from every email and the page.
+ *
+ * The fragment is the deep link: `/settings` is one page of sections, and
+ * `notification-preferences` is the id of the Notifications heading that
+ * `aria-labelledby` already points at. A reader sent here from an email or from
+ * /unsubscribe wants the matrix, not the top of Settings (#467).
+ */
+export const NOTIFICATION_PREFERENCES_PATH =
+  "/settings#notification-preferences";
 
 /**
  * Absolute base for links that have to work from an inbox.

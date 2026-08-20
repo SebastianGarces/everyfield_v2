@@ -147,13 +147,23 @@ function SubjectCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* The mutation. A POST, so following the link never performs it. */}
+        {/* The mutation. A POST, so following the link never performs it.
+
+            After an undo the card's job is to confirm the choice the reader
+            just made, so the opt-out drops to a quiet link (#467). It stays
+            reachable — the FRD requires it — but a full-width button under
+            "You're subscribed again" reads as the next step, which is the
+            opposite of what the reader asked for. */}
         <form action={confirmUnsubscribeAction}>
           <input type="hidden" name="token" value={token} />
           <Button
             type="submit"
-            variant={justResubscribed ? "outline" : "default"}
-            className="w-full cursor-pointer"
+            variant={justResubscribed ? "link" : "default"}
+            className={
+              justResubscribed
+                ? "text-muted-foreground h-auto cursor-pointer p-0 underline"
+                : "w-full cursor-pointer"
+            }
           >
             Unsubscribe from {label} emails
           </Button>
