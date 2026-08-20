@@ -193,6 +193,19 @@ test("the download filename is the template id plus extension, never a storage k
   );
 });
 
+test("the generation route names the download through the one filename rule", () => {
+  assert.match(
+    routeSource,
+    /generatedDocumentFilename\(template\.id, format\)/,
+    "the route must call the shared rule, not rebuild it"
+  );
+  assert.doesNotMatch(
+    routeSource,
+    /\$\{template\.id\}\.\$\{ext\}/,
+    "a second copy of the id-plus-extension rule can drift from the stored artifact's name"
+  );
+});
+
 // ============================================================================
 // Signed URL — church re-check, never a client-supplied key
 // ============================================================================

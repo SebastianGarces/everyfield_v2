@@ -11,7 +11,10 @@ import {
 } from "@/lib/documents";
 import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
 import { canRenderDocument, renderDocument } from "@/lib/documents/render";
-import { recordGeneratedDocument } from "@/lib/documents/service";
+import {
+  generatedDocumentFilename,
+  recordGeneratedDocument,
+} from "@/lib/documents/service";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -93,7 +96,7 @@ export async function GET(
   }
 
   // `?preview=1` renders inline (PDF only — browsers can't preview .docx inline).
-  const { mime, ext } = FORMAT_OUTPUT[format];
+  const { mime } = FORMAT_OUTPUT[format];
   const inline =
     format === "pdf" && request.nextUrl.searchParams.get("preview") === "1";
 
@@ -118,12 +121,15 @@ export async function GET(
     }
   }
 
+  // One owner for the download name (`service.ts`), so a fresh generation and
+  // a re-download from history cannot disagree about what the file is called.
   const disposition = inline ? "inline" : "attachment";
+  const filename = generatedDocumentFilename(template.id, format);
   return new NextResponse(new Uint8Array(file), {
     status: 200,
     headers: {
       "Content-Type": mime,
-      "Content-Disposition": `${disposition}; filename="${template.id}.${ext}"`,
+      "Content-Disposition": `${disposition}; filename="${filename}"`,
       "Content-Length": String(file.length),
       "Cache-Control": "no-store",
     },
