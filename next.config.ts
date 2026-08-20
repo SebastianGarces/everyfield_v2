@@ -3,6 +3,15 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  experimental: {
+    // A person photo is a server-action payload (P-024a), and the default cap
+    // on one is 1MB — under it a 2MB avatar died as a bare 413 with a console
+    // error, never reaching the action that would have explained itself. This
+    // sits above `PERSON_PHOTO_MAX_BYTES` (3MB) so the refusal a planter sees
+    // is always ours, and under the serverless platform's own 4.5MB body cap,
+    // which no config here can raise.
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   async redirects() {
     return [
       {

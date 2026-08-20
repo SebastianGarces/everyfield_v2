@@ -1,6 +1,7 @@
 "use server";
 
 import { checkForDuplicates } from "@/lib/people/duplicates";
+import { personPhotoRefusal } from "@/lib/people/photo";
 import { emitPersonStatusChanged } from "@/lib/people/events";
 import {
   parsePeopleListSearchParams,
@@ -27,8 +28,6 @@ import type {
 import {
   deleteFile,
   getExtensionFromMimeType,
-  isAllowedPhotoFileType,
-  isValidPhotoFileSize,
   personPhotoStorageKey,
   uploadFile,
 } from "@/lib/storage";
@@ -244,18 +243,11 @@ export async function uploadPersonPhotoAction(
         return { success: false, error: "Choose a photo to upload." };
       }
 
-      if (!isAllowedPhotoFileType(file.type)) {
-        return {
-          success: false,
-          error: "That file is not an image. Use a JPG, PNG or WebP.",
-        };
-      }
-
-      if (!isValidPhotoFileSize(file.size)) {
-        return {
-          success: false,
-          error: "That image is too large. The limit is 5MB.",
-        };
+      // THE GATE, and the same rule the picker applied before sending. A POST
+      // that never saw the picker meets it here for the first time.
+      const refusal = personPhotoRefusal(file);
+      if (refusal) {
+        return { success: false, error: refusal };
       }
 
       // Never write against a personId the caller's church does not own —

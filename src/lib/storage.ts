@@ -174,26 +174,9 @@ export function personPhotoStorageKey(
   return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
 }
 
-/** The image types a person photo may be. */
-const ALLOWED_PHOTO_MIME_TYPES = [
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-];
-
-/** Validate that a file type is allowed for a person photo. */
-export function isAllowedPhotoFileType(mimeType: string): boolean {
-  return ALLOWED_PHOTO_MIME_TYPES.includes(mimeType);
-}
-
-/** Maximum file size for a person photo (5MB). */
-export const MAX_PHOTO_FILE_SIZE = 5 * 1024 * 1024;
-
-/** Validate file size for a person photo. */
-export function isValidPhotoFileSize(size: number): boolean {
-  return size <= MAX_PHOTO_FILE_SIZE;
-}
+// What a photo MAY be lives in `@/lib/people/photo` instead, and deliberately:
+// the picker in the browser applies the same rule before it sends, and this
+// module pulls in the AWS SDK, so it can never be imported there.
 
 // ============================================================================
 // Commitment Documents

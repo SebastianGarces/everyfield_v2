@@ -4,7 +4,11 @@ import { uploadPersonPhotoAction } from "@/app/(dashboard)/people/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { personPhotoSrc } from "@/lib/people/photo";
+import {
+  PERSON_PHOTO_MIME_TYPES,
+  personPhotoRefusal,
+  personPhotoSrc,
+} from "@/lib/people/photo";
 import type { PersonForClient } from "@/lib/people/types";
 import { Loader2, Upload } from "lucide-react";
 import { useRef, useState, useTransition } from "react";
@@ -39,6 +43,18 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
 
   const handleFile = (file: File) => {
     setError(null);
+
+    // THE SAME RULE THE ACTION APPLIES, applied before the request exists.
+    // Not a duplicate of the gate — one function, called from both sides —
+    // and it is here because a file over the body cap never reaches the
+    // action: the platform answers 413 and the planter gets a console error
+    // where a sentence belongs.
+    const refusal = personPhotoRefusal(file);
+    if (refusal) {
+      setError(refusal);
+      toast.error(refusal);
+      return;
+    }
 
     const formData = new FormData();
     formData.append("photo", file);
@@ -78,7 +94,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
           ref={inputRef}
           type="file"
           name="photo"
-          accept="image/jpeg,image/png,image/webp"
+          accept={PERSON_PHOTO_MIME_TYPES.join(",")}
           className="sr-only"
           data-testid="person-photo-input"
           disabled={isPending}
@@ -105,7 +121,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
           {person.photoUrl || preview ? "Replace photo" : "Upload photo"}
         </Button>
         <p className="text-muted-foreground text-xs">
-          JPG, PNG or WebP. Up to 5MB.
+          JPG, PNG or WebP. Up to 3MB.
         </p>
         {error && (
           <Alert variant="destructive" data-testid="person-photo-error">
