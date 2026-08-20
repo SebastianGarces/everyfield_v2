@@ -199,20 +199,3 @@ test("the step says what bringing people in turns on", () => {
   assert.match(PEOPLE_STEP, /duplicates/i);
   assert.match(PEOPLE_STEP, /template/i);
 });
-
-// ----------------------------------------------------------------------------
-// 5. Every clickable carries cursor-pointer (repo rule, FRD AC 7).
-// ----------------------------------------------------------------------------
-
-test("every button the step renders is marked cursor-pointer", () => {
-  const buttons = PEOPLE_STEP.match(/<Button\b[\s\S]*?>/g) ?? [];
-  assert.ok(buttons.length > 0, "expected the step to render buttons");
-
-  for (const button of buttons) {
-    assert.match(
-      button,
-      /cursor-pointer/,
-      `a <Button> in people-step.tsx is missing cursor-pointer: ${button}`
-    );
-  }
-});

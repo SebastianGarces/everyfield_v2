@@ -412,14 +412,6 @@ describe("the print contract, across every file that holds a piece of it", () =>
 });
 
 describe("the download control", () => {
-  test("both controls carry cursor-pointer", () => {
-    // Project hard rule (AGENTS.md): every clickable says so.
-    const buttons = ARTICLE_ACTIONS.match(/<Button/g) ?? [];
-    const pointers = ARTICLE_ACTIONS.match(/className="cursor-pointer"/g) ?? [];
-    assert.equal(buttons.length, 2);
-    assert.equal(pointers.length, buttons.length);
-  });
-
   test("the renderer is loaded on click, not on every wiki page view", () => {
     // Every file on the download path, not just this one: `render.tsx` is
     // imported statically FROM here, so a static import of the renderer over

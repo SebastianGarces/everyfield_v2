@@ -441,16 +441,3 @@ test("the analytics chart never wraps a design token in hsl()", () => {
   assert.match(source, /stroke="var\(--primary\)"/);
   assert.match(source, /dot=\{\{ fill: "var\(--primary\)" \}\}/);
 });
-
-test("every filter control carries cursor-pointer", () => {
-  // Project hard rule (AGENTS.md): every clickable element.
-  const source = readFileSync(
-    path.join(
-      process.cwd(),
-      "src/app/(dashboard)/meetings/[id]/analytics/page.tsx"
-    ),
-    "utf8"
-  );
-
-  assert.match(source, /cursor-pointer/);
-});

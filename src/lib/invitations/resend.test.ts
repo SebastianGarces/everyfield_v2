@@ -802,15 +802,12 @@ test("the Resend button is rendered for pending rows and nothing else", () => {
   assert.doesNotMatch(stripComments(LIST_CODE), /canResend/);
 });
 
-test("the Resend control is a button with cursor-pointer and an accessible name", () => {
+test("the Resend control is a submit button with an accessible name", () => {
   const button = LIST.span(
     "function ResendEmailButton",
     "const initialRevokeState"
   );
 
-  // Whatever else the className carries (`tabular-nums`, so a shrinking
-  // countdown does not jog the row), the repo's cursor rule is not negotiable.
-  assert.match(button, /className="[^"]*\bcursor-pointer\b[^"]*"/);
   assert.match(button, /type="submit"/);
   // The visible label repeats on every pending row, so the address is what
   // makes each one distinguishable to a screen reader.

@@ -184,23 +184,6 @@ test("the sending church's pending list refuses rows whose window has closed", (
 // 3. House rules on the surfaces this unit owns
 // ----------------------------------------------------------------------------
 
-test("every clickable on the association surfaces carries cursor-pointer", () => {
-  for (const [name, source] of [
-    ["invitation-answer", ANSWER],
-    ["leave-org-dialog", LEAVE_DIALOG],
-    ["association-reminder", REMINDER],
-  ] as const) {
-    const clickables =
-      source.match(/<(Button|AlertDialogCancel|Link)\b/g) ?? [];
-    const pointers = source.match(/cursor-pointer/g) ?? [];
-    assert.ok(clickables.length > 0, name);
-    assert.ok(
-      pointers.length >= clickables.length,
-      `${name}: ${clickables.length} clickables, ${pointers.length} cursor-pointer`
-    );
-  }
-});
-
 test("the leave dialog is type-to-confirm, and the typing is not the authority", () => {
   // OV-007a. The match is trimmed and case-insensitive on purpose — the control
   // is deliberateness, not transcription — and the button stays disabled until

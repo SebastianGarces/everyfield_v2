@@ -81,18 +81,6 @@ test("the cadence area renders the variant it was given, not an assumed one", ()
   assert.doesNotMatch(CODE, /once a day/i);
 });
 
-test("every clickable in the matrix carries cursor-pointer", () => {
-  // The repo-wide rule. The Switch, the Select trigger, each Select item and
-  // the labels that stand in for the switch on a phone are all pressable.
-  for (const control of [
-    /<Switch[\s\S]*?className="cursor-pointer"/,
-    /<SelectTrigger[\s\S]*?cursor-pointer/,
-    /<SelectItem[\s\S]*?className="cursor-pointer"/,
-  ]) {
-    assert.match(CODE, control, String(control));
-  }
-});
-
 test("the header comment claims only what the file does", () => {
   // The other half of #236: the comment already promised a toast on failure
   // while the actions were still throwing, so the file documented behaviour it

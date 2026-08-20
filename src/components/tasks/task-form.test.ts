@@ -44,11 +44,9 @@ function hiddenDescriptionInput(html: string): RenderedElement | undefined {
 }
 
 test("the toolbar renders one named control per editor command", () => {
-  // The `cursor-pointer` loop that used to sit here is gone (#502). These
-  // buttons all take their class from `richTextControlClass`, and that constant
-  // is asserted where it is DEFINED —
-  // `src/components/shared/rich-text-editor-controls.test.ts` — so a copy of
-  // the rule here only ever went green after the real one did.
+  // The cursor loop that used to sit here is gone (#502): these buttons take
+  // their class from `richTextControlClass`, which is asserted where it is
+  // written — `src/components/shared/rich-text-editor-controls.test.ts`.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);
@@ -144,24 +142,13 @@ test("prerequisite ids travel in the form under the name the server reads", () =
   assert.equal(input.attrs["value"], PREREQ_A);
 });
 
-test("every prerequisite control is a clickable that carries cursor-pointer", () => {
-  // The remove control is a bare `<button>` written inline, so this call site is
-  // the only place its class exists — the check stays. The add-prerequisite
-  // trigger's check does not: it is a `SelectTrigger`, and its class lives in
-  // `src/components/ui/select.tsx` under `cursor-pointer.test.ts` (#502).
+test("a selected prerequisite can be removed, and another can be added", () => {
   const html = renderPrereqs();
   const buttons = namedButtons(html);
   assert.ok(
     buttons.length >= 1,
     "the selected prerequisite has no named remove control"
   );
-  for (const button of buttons) {
-    assert.match(
-      button.attrs["class"] ?? "",
-      /\bcursor-pointer\b/,
-      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
-    );
-  }
 
   const trigger = parseElements(html).find(
     (el) => el.attrs["data-slot"] === "select-trigger"

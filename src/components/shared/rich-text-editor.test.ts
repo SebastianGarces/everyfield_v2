@@ -12,13 +12,11 @@ import { RICH_TEXT_CONTROLS } from "./rich-text-editor-controls";
 // ----------------------------------------------------------------------------
 // A DOM assertion over the markup the browser actually receives — no jsdom
 // needed for a contract that is entirely attributes and class names. The reader
-// itself is `src/lib/testing/rendered-markup.ts`, shared rather than copied:
-// that regex is the mechanism behind the cursor-pointer rule on every surface
-// that pins it, and a private copy weakens quietly.
+// itself is `src/lib/testing/rendered-markup.ts`, shared rather than copied,
+// because a private copy of a markup regex weakens quietly.
 //
-// What is pinned here: every toolbar control is a real, named, clickable button
-// (`cursor-pointer` is the project hard rule), and the surface itself is a
-// labelled multiline textbox rather than an anonymous div.
+// What is pinned here: every toolbar control is a real, named button, and the
+// surface itself is a labelled multiline textbox rather than an anonymous div.
 // ----------------------------------------------------------------------------
 
 function render(props: Partial<Parameters<typeof RichTextEditor>[0]> = {}) {
@@ -32,17 +30,12 @@ function render(props: Partial<Parameters<typeof RichTextEditor>[0]> = {}) {
   );
 }
 
-test("every editor control is a clickable that carries cursor-pointer", () => {
+test("the toolbar renders one named control per editor command", () => {
+  // The cursor loop that used to sit here is gone (#502): the class comes from
+  // `richTextControlClass` and is asserted where that constant is written.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);
-  for (const button of buttons) {
-    assert.match(
-      button.attrs["class"] ?? "",
-      /\bcursor-pointer\b/,
-      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
-    );
-  }
 });
 
 test("every editor control is named and reports its pressed state", () => {
@@ -162,7 +155,7 @@ test("a link box with nothing wrong describes itself with nothing", () => {
   assert.equal(input.attrs["aria-describedby"], undefined);
 });
 
-test("both link controls are clickable and carry cursor-pointer", () => {
+test("both link controls are buttons that do not submit the form", () => {
   const html = renderLinkEditor(null);
   for (const label of ["Add link", "Cancel"]) {
     assert.ok(html.includes(`>${label}<`), `${label} is missing`);
@@ -170,7 +163,6 @@ test("both link controls are clickable and carry cursor-pointer", () => {
   const buttons = parseElements(html).filter((el) => el.tag === "button");
   assert.equal(buttons.length, 2);
   for (const button of buttons) {
-    assert.match(button.attrs["class"] ?? "", /\bcursor-pointer\b/);
     assert.equal(button.attrs["type"], "button");
   }
 });

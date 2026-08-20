@@ -23,13 +23,12 @@ import { ResponseSummary } from "./response-summary";
 // screen — the approach `attendance-capture.test.ts` and `ui/progress.test.ts`
 // already use, with no jsdom needed for contracts that are text and attributes.
 //
-// Three things are pinned here, and each has already gone wrong somewhere in
+// Two things are pinned here, and each has already gone wrong somewhere in
 // this repo:
 //   - the breakdown reports the counts it was given (a summary that quietly
 //     recomputed would drift from the query),
 //   - the empty state says the cards are not KEYED IN rather than that nobody
-//     responded, and it says it where a planter is looking,
-//   - every clickable carries `cursor-pointer` (project hard rule, AGENTS.md).
+//     responded, and it says it where a planter is looking.
 // ----------------------------------------------------------------------------
 
 function render(element: Parameters<typeof renderToStaticMarkup>[0]): string {
@@ -181,32 +180,6 @@ test("a meeting with no attendance at all renders without crashing", () => {
   );
 
   assert.match(textOf(html), /0 attendees marked here\./);
-});
-
-// ============================================================================
-// The capture control — every clickable carries cursor-pointer
-// ============================================================================
-
-test("the response picker's trigger is a clickable that says so", () => {
-  // AGENTS.md hard rule: every clickable element gets `cursor-pointer`. A Radix
-  // `SelectTrigger` renders as a `<button>` whose cursor is set by class, so
-  // this is the assertion that the class survived.
-  const html = render(
-    createElement(ResponsePicker, {
-      meetingId: "77777777-7777-4777-8777-777777777777",
-      personId: "88888888-8888-4888-8888-888888888888",
-      personName: "Ada Lovelace",
-      value: null,
-    })
-  );
-
-  const trigger = /<button[^>]*data-slot="select-trigger"[^>]*>/.exec(html);
-  assert.ok(trigger, "the picker renders a trigger button");
-  assert.match(
-    trigger[0],
-    /class="[^"]*cursor-pointer/,
-    "the trigger carries cursor-pointer"
-  );
 });
 
 test("the picker names whose card it takes, state-free", () => {

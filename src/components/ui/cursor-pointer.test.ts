@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { sourceReader } from "@/lib/testing/source-span";
+import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 // ----------------------------------------------------------------------------
 // `cursor-pointer` ON EVERY CLICKABLE (AGENTS.md), GUARDED WHERE THE CLASS IS
@@ -116,6 +116,17 @@ const CLICKABLE_BASES: readonly ClickableBase[] = [
   },
 ];
 
+// SWEPT AND LEFT OUT, so the next reader does not re-derive it: every other
+// interactive primitive under `src/components/ui/` renders a NATIVE clickable
+// and takes the cursor from rung 1 — the Radix `Trigger`s and `Close`s
+// (dialog, sheet, alert-dialog, popover, tooltip, hover-card, collapsible),
+// `Switch` (`button[role=switch]`), `Button`, every `Sidebar*` action and rail,
+// `BreadcrumbLink` (`a`). `SelectScrollUpButton` carries `cursor-default` on
+// purpose. `Label` is deliberately NOT here: a label's cursor follows the
+// control it names — a pointer over a checkbox, a text caret over a text field
+// — so it is a call-site decision, and the call sites that need it are scanned
+// where they are written.
+
 test("every interactive shadcn base carries cursor-pointer in its own class", () => {
   for (const base of CLICKABLE_BASES) {
     const span = sourceReader(read(base.file), base.file).span(
@@ -149,6 +160,85 @@ test("globals.css keeps the native rung: button, role=button, a[href], tabindex=
     assert.ok(
       selectors.includes(selector),
       `globals.css no longer gives the pointer to ${selector}`
+    );
+  }
+});
+
+/**
+ * The suites still allowed to scan a CALL SITE for the class, and why.
+ *
+ * Every entry names a clickable neither rung reaches: rung 1 is four selectors
+ * wide and rung 2 only covers what `src/components/ui/` writes. The list is a
+ * tripwire in both directions — an entry that stops scanning is dead weight and
+ * fails here, so the list shrinks as coverage grows.
+ */
+const CALL_SITE_SCANS: readonly {
+  readonly file: string;
+  readonly clickable: string;
+}[] = [
+  {
+    file: "src/app/(dashboard)/settings/actions.test.ts",
+    clickable:
+      "a <label htmlFor> — no selector and no base gives a label a cursor",
+  },
+  {
+    file: "src/components/tasks/phase-template-prompt.test.ts",
+    clickable: 'a native <input type="checkbox"> and its <label>',
+  },
+  {
+    file: "src/components/phase-engine/exit-criteria.test.ts",
+    clickable:
+      '<summary> — focusable without a tabindex="0" attribute to match',
+  },
+  {
+    file: "src/components/shared/rich-text-editor-controls.test.ts",
+    clickable:
+      "richTextControlClass — a shared constant, guarded where it is written",
+  },
+];
+
+function testFilesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) return testFilesUnder(full);
+
+    return entry.name.endsWith(".test.ts") ? [full] : [];
+  });
+}
+
+test("no suite outside the allowlist scans a call site for cursor-pointer", () => {
+  // #502's second half. The scans this replaced went green on every call site
+  // they knew about while `select.tsx` — the file the class actually lives in —
+  // had no test at all, which is the shape of a rule enforced in the wrong
+  // place. Two weak rungs read as coverage; they are not.
+  const here = path.join(
+    process.cwd(),
+    "src/components/ui/cursor-pointer.test.ts"
+  );
+  const allowed = new Set(
+    CALL_SITE_SCANS.map((scan) =>
+      path.join(process.cwd(), ...scan.file.split("/"))
+    )
+  );
+
+  for (const file of testFilesUnder(path.join(process.cwd(), "src"))) {
+    if (file === here || allowed.has(file)) continue;
+
+    assert.doesNotMatch(
+      stripComments(readFileSync(file, "utf8")),
+      /cursor-pointer/,
+      `${path.relative(process.cwd(), file)} scans a call site for cursor-pointer. If the clickable is a native button, an a[href], or a shadcn base, this file already guards it — delete the scan. If it is neither, add the file to CALL_SITE_SCANS with what it renders.`
+    );
+  }
+
+  for (const scan of CALL_SITE_SCANS) {
+    assert.match(
+      stripComments(
+        readFileSync(path.join(process.cwd(), ...scan.file.split("/")), "utf8")
+      ),
+      /cursor-pointer/,
+      `${scan.file} no longer scans for the class — drop it from CALL_SITE_SCANS`
     );
   }
 });

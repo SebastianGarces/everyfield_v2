@@ -134,12 +134,11 @@ test("the accessible name contains the guest's name, and the state stays in aria
   assert.equal(attended.attrs["aria-label"], "Mark Grace Hopper as attended");
 });
 
-test("the checkbox is still a cursor-pointer control and keeps its toggle wiring", () => {
+test("the checkbox is a real control and keeps its toggle wiring", () => {
   const html = renderCapture([guest({ id: "1" })]);
   const [box] = checkboxes(html);
 
   assert.equal(box.tag, "button");
-  assert.ok(box.attrs["class"]?.includes("cursor-pointer"));
   assert.equal(box.attrs["disabled"], undefined);
 });
 
