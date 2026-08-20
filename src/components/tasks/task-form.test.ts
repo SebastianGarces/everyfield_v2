@@ -24,7 +24,7 @@ import { TaskDescriptionField, TaskPrerequisitesField } from "./task-form";
 // outside a mounted app router), which is exactly why the description field is
 // its own exported component. Everything worth pinning lives in this subtree:
 //
-//   * every editor control is a clickable carrying `cursor-pointer` (hard rule)
+//   * every editor control the toolbar offers is rendered and named
 //   * the description reaches the request as HTML, under the name the server
 //     action already reads
 //   * a description written before T-021 loads into the editor as text, not as
@@ -43,17 +43,15 @@ function hiddenDescriptionInput(html: string): RenderedElement | undefined {
   );
 }
 
-test("every description control is a clickable that carries cursor-pointer", () => {
+test("the toolbar renders one named control per editor command", () => {
+  // The `cursor-pointer` loop that used to sit here is gone (#502). These
+  // buttons all take their class from `richTextControlClass`, and that constant
+  // is asserted where it is DEFINED —
+  // `src/components/shared/rich-text-editor-controls.test.ts` — so a copy of
+  // the rule here only ever went green after the real one did.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);
-  for (const button of buttons) {
-    assert.match(
-      button.attrs["class"] ?? "",
-      /\bcursor-pointer\b/,
-      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
-    );
-  }
 });
 
 test("bold, italic, links and both lists are all reachable", () => {
@@ -147,6 +145,10 @@ test("prerequisite ids travel in the form under the name the server reads", () =
 });
 
 test("every prerequisite control is a clickable that carries cursor-pointer", () => {
+  // The remove control is a bare `<button>` written inline, so this call site is
+  // the only place its class exists — the check stays. The add-prerequisite
+  // trigger's check does not: it is a `SelectTrigger`, and its class lives in
+  // `src/components/ui/select.tsx` under `cursor-pointer.test.ts` (#502).
   const html = renderPrereqs();
   const buttons = namedButtons(html);
   assert.ok(
@@ -165,9 +167,4 @@ test("every prerequisite control is a clickable that carries cursor-pointer", ()
     (el) => el.attrs["data-slot"] === "select-trigger"
   );
   assert.ok(trigger, "no select trigger to add a prerequisite");
-  assert.match(
-    trigger.attrs["class"] ?? "",
-    /\bcursor-pointer\b/,
-    "the add-prerequisite trigger is clickable without cursor-pointer"
-  );
 });
