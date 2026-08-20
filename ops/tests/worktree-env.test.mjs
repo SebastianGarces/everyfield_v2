@@ -340,10 +340,7 @@ test("worktree-add.sh does not run env when git worktree add fails", (t) => {
 });
 
 test("no prompt or skill re-implements the mechanism", () => {
-  const dirs = [
-    ".claude/skills",
-    ".cursor",
-  ];
+  const dirs = [".claude/skills", ".cursor"];
   const files = dirs.flatMap((d) =>
     fs
       .readdirSync(path.join(ROOT, d), { recursive: true, withFileTypes: true })
