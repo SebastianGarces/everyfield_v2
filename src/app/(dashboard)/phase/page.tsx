@@ -41,7 +41,7 @@ import {
 import { db } from "@/db";
 import { churches, insightFeedback } from "@/db/schema";
 import type { InsightFeedbackRating } from "@/db/schema";
-import { getCurrentSession } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import {
   buildCsfScorecard,
   buildExitCriteriaProgress,
@@ -60,11 +60,12 @@ export const metadata = {
 };
 
 export default async function PhasePage() {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
+  // The `(dashboard)` layout is what bounces a signed-out reader, and it is
+  // the only place that does (#503). This asks for the session the layout has
+  // already established so `user` is non-null; a second `redirect("/login")`
+  // here would be a second bounce racing the first, and it wrote no return
+  // path.
+  const { user } = await verifySession();
 
   // Owner-facing surface only. An oversight tenancy has its own aggregate view.
   if (!isPlantOwner(user) || !user.churchId) {

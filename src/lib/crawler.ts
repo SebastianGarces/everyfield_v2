@@ -22,6 +22,8 @@
  * belongs behind `getCurrentSession()` in the page, not behind this check.
  */
 
+import { routedPathname } from "@/lib/routed-url";
+
 /**
  * Social-media and search-engine crawlers that need pages for metadata/OG
  * scraping. A plain string is a substring test against the lowercased UA; a
@@ -98,10 +100,13 @@ export function isCrawlerUserAgent(
  * - `/dashboard` failed the first (#297, ruled 2026-08-04). The page calls
  *   `verifySession()`, which THROWS with no session, so the listing made the
  *   exact promise the page could not keep and every crawler-UA request 500'd.
- * - `/oversight` failed the second (ruled 2026-08-09, PR #354). Every page under
- *   it reads the session and `redirect("/login")`s without one — graceful, not a
- *   500, but the crawler still ends at the login page. The allowance produced no
- *   card, so the prefix bought only exposure.
+ * - `/oversight` failed the second (ruled 2026-08-09, PR #354). It sits in the
+ *   `(dashboard)` group, whose layout bounces a session-less reader to `/login`
+ *   before any page under it renders — graceful, not a 500, but the crawler
+ *   still ends at the login page. The allowance produced no card, so the prefix
+ *   bought only exposure. (The pages used to spell that refusal a second time
+ *   themselves; those copies are gone — #503 — and the conclusion is unchanged,
+ *   because the layout above them was always the bounce a crawler met first.)
  *
  * Both remain PROTECTED by the proxy, named explicitly there rather than through
  * the spread of this list. Off this list they get the same 307 to /login a
@@ -113,22 +118,6 @@ export function isCrawlerUserAgent(
  * browser — still hold for every prefix here.
  */
 export const CRAWLER_PREVIEWABLE_ROUTE_PREFIXES = ["/wiki"] as const;
-
-/**
- * The header the proxy stamps on the REQUEST with the pathname it routed, so a
- * Server Component can scope a decision by route.
- *
- * A Server Component has no other way to learn the pathname — hence the one
- * documented channel from proxy to app: `NextResponse.next({ request: { headers } })`.
- * This is not the trap #240 removed. The distinction is who writes it: the
- * proxy sets this on EVERY continuation, so a client-supplied `x-pathname` is
- * always overwritten with the real path before the app sees it, and its absence
- * means the proxy did not run — which every reader must treat as "not
- * previewable" rather than guessing. It also carries a fact (which path), never
- * a verdict (whether to trust this request); the verdict is re-derived on both
- * sides from the same inputs by `isCrawlerPreviewRequest` below.
- */
-export const PATHNAME_HEADER = "x-pathname";
 
 /** True when `pathname` is one the proxy admits session-less crawlers to. */
 export function isCrawlerPreviewableRoute(
@@ -144,14 +133,19 @@ export function isCrawlerPreviewableRoute(
  * The whole crawler allowance, in one predicate both sides call: a known
  * crawler, on a route we admit session-less crawlers to.
  *
- * The proxy calls it with `request.nextUrl.pathname`; the layout calls it with
- * the `PATHNAME_HEADER` the proxy stamped. Both are the same fact from the same
- * authority, so the two cannot drift — and both fail CLOSED, because an unknown
- * UA or an unknown path is simply not a preview.
+ * Both sides hand it the URL the proxy routed — the proxy its own
+ * `request.nextUrl`, the layout the `ROUTED_URL_HEADER` it stamped — and
+ * `routedPathname` takes the route off the front, so neither caller has to know
+ * that the value carries a query. Same fact from the same authority, so the two
+ * cannot drift, and both fail CLOSED: an unknown UA, an absent header or an
+ * unknown path is simply not a preview.
  */
 export function isCrawlerPreviewRequest(
   userAgent: string | null | undefined,
-  pathname: string | null | undefined
+  routedUrl: string | null | undefined
 ): boolean {
-  return isCrawlerUserAgent(userAgent) && isCrawlerPreviewableRoute(pathname);
+  return (
+    isCrawlerUserAgent(userAgent) &&
+    isCrawlerPreviewableRoute(routedPathname(routedUrl))
+  );
 }

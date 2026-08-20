@@ -65,21 +65,25 @@ export type OversightSession = { user: User; org: OversightOrg };
 /**
  * The session behind every `/oversight` page, or a redirect.
  *
- * Two refusals, and they are deliberately different: no session goes to
- * `/login` because signing in is what is missing, and a church-level account
- * goes to `/dashboard` because they have a home to be sent to. Neither is a
- * 404 — that answer is reserved for the one case where the ROUTE's existence is
- * itself the disclosure (`/oversight/sending-churches` refusing a sending-church
- * account), and it stays at that page because it is that page's rule.
+ * ONE refusal lives here: a church-level account goes to `/dashboard`, because
+ * they have a home to be sent to. It is not a 404 — that answer is reserved for
+ * the one case where the ROUTE's existence is itself the disclosure
+ * (`/oversight/sending-churches` refusing a sending-church account), and it
+ * stays at that page because it is that page's rule.
+ *
+ * The signed-out refusal USED to be here too, as a second `redirect("/login")`.
+ * It is gone (#503). `/oversight` is inside the `(dashboard)` group, so the
+ * layout has already bounced a session-less reader — carrying the return path,
+ * which this copy did not — and the proxy bounces them at the edge before that.
+ * A third bounce could only race the two that work and send the reader somewhere
+ * with no way back. `verifySession` asks for the session those guards have
+ * already established; if it ever throws, the reader is at a boundary that
+ * offers a sign-in link back to where they were, not at a redirect loop.
  */
 export async function requireOversightUser(): Promise<OversightSession> {
-  const { getCurrentSession } = await import("@/lib/auth");
+  const { verifySession } = await import("@/lib/auth");
 
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
+  const { user } = await verifySession();
 
   const org = oversightOrgOf(user);
 
