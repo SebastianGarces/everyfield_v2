@@ -18,10 +18,7 @@ import {
   type NotificationViewer,
 } from "@/lib/notifications/feed";
 
-import {
-  DEGRADED_UNREAD_COUNT,
-  loadUnreadBadgeCountSafely,
-} from "./notification-badge";
+import { loadUnreadBadgeCountSafely } from "./notification-badge";
 
 /**
  * The badge, read inside its own boundary rather than in the layout body.
@@ -145,14 +142,20 @@ export default async function DashboardLayout({
         <HeaderProvider>
           <DashboardHeader>
             {viewer && (
-              // The fallback is the bell itself at zero, so the header's
+              // The fallback is the bell in its LOADING state, so the header's
               // geometry and its link to /notifications are there from the
-              // first byte and the count fills in when it arrives.
-              <Suspense
-                fallback={
-                  <NotificationBell unreadCount={DEGRADED_UNREAD_COUNT} />
-                }
-              >
+              // first byte while the count itself stays unclaimed until it
+              // arrives.
+              //
+              // It is NOT `DEGRADED_UNREAD_COUNT` (#308 WS2, from #232). That
+              // constant is what the count degrades to when the query FAILS,
+              // and reusing it here made "we could not read it" and "we have
+              // not read it yet" the same render — one that announces
+              // "Notifications, none unread" to a screen reader and then
+              // corrects itself to "1 unread" a moment later. Two different
+              // facts need two different renders; see
+              // `notification-bell.tsx`'s header for the rest of the argument.
+              <Suspense fallback={<NotificationBell unreadCount="loading" />}>
                 <NotificationBellSlot viewer={viewer} />
               </Suspense>
             )}

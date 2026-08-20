@@ -14,12 +14,9 @@ import {
   type NotificationViewer,
   type ViewerSession,
 } from "./feed";
-import {
-  preferenceOwnerFromSession,
-  resolveInAppCategories,
-} from "./preferences";
+import { resolveInAppCategories } from "./preferences";
 
-import type { TenancyFields } from "@/lib/auth/tenancy";
+import type { OversightOrg, TenancyFields } from "@/lib/auth/tenancy";
 
 // ----------------------------------------------------------------------------
 // The read path resolves with the viewer's AUDIENCE (N-027, ruled on #259).
@@ -78,28 +75,23 @@ function viewerFor(
 }
 
 /**
- * An oversight reader's viewer, built directly rather than minted from a
- * session — and that is the seat model talking, not a shortcut.
+ * An oversight reader's viewer, minted from a real oversight session (N-027).
  *
- * An oversight tenancy names `sending_church_id` or `sending_network_id` and
- * leaves `church_id` NULL, so `notificationViewer` returns null for it (that is
- * the test below, and it is the one thing left between an oversight account and
- * the feed until #225 decides which plants their feed spans). Naming a church
- * AND an oversight org on one row does not produce an oversight reader either:
- * `oversightOrgOf` refuses a row naming two tenancies, so such a fixture would
- * resolve to the CHURCH audience and quietly assert the opposite of what it
- * reads like.
+ * It used to be built by hand, because an oversight tenancy names
+ * `sending_church_id` or `sending_network_id` and leaves `church_id` NULL, and
+ * `notificationViewer` returned null for exactly that shape. Minting it is now
+ * the point: the boundary the paths below resolve their allow-list for is the
+ * one a real session produces, not one a fixture asserted into existence.
  *
- * So the audience these paths must carry is stated here, and what the paths do
- * with it is what the tests below are about. The derivation itself — tenancy to
- * audience — is pinned at `audienceForTenancy` in `preferences.test.ts`.
+ * Naming a church AND an oversight org on one row still does not produce an
+ * oversight reader — `oversightOrgOf` refuses a row naming two tenancies — so
+ * the fixture names exactly one, as every real oversight row does.
  */
 function oversightViewer(): NotificationViewer {
-  return {
-    scope: { churchId: PLANT, recipientUserId: OVERSIGHT_ADMIN },
-    owner: preferenceOwnerFromSession({ user: { id: OVERSIGHT_ADMIN } }),
-    audience: "oversight",
-  };
+  return viewerFor(OVERSIGHT_ADMIN, {
+    churchId: null,
+    sendingNetworkId: NETWORK,
+  });
 }
 
 /**
@@ -187,23 +179,55 @@ test("the viewer's audience is derived from the session tenancy", () => {
   assert.equal(viewerFor(PLANTER).audience, "church");
 });
 
-test("a session naming no church still has no feed, whatever tenancy it names", () => {
-  // Unchanged, and it is the ONLY thing between an oversight user and the feed
-  // now that the audience is settled: their rows are scoped to each plant they
-  // oversee, and deciding which plants one feed spans is #225's question.
-  assert.equal(notificationViewer(session(PLANTER, { churchId: null })), null);
-  for (const [who, tenancy] of [
-    ["a sending church's account", { sendingChurchId: SENDING_CHURCH }],
-    ["a network's account", { sendingNetworkId: NETWORK }],
-  ] as [string, Partial<TenancyFields>][]) {
-    assert.equal(
-      notificationViewer(
-        session(OVERSIGHT_ADMIN, { churchId: null, ...tenancy })
-      ),
-      null,
-      `${who} was given a feed with no plant to scope it to`
+test("an oversight tenancy now mints a viewer, scoped to its ORG (N-027)", () => {
+  // The inverse of what this test used to assert. An oversight account had no
+  // feed at all because `NotificationScope` could not be built without a
+  // church; the boundary is now the org, resolved into "the plants that have
+  // opted in, plus this org's own rows" inside the WHERE clause.
+  for (const [who, tenancy, org] of [
+    [
+      "a sending church's account",
+      { sendingChurchId: SENDING_CHURCH },
+      { type: "sending_church", id: SENDING_CHURCH },
+    ],
+    [
+      "a network's account",
+      { sendingNetworkId: NETWORK },
+      { type: "network", id: NETWORK },
+    ],
+  ] as [string, Partial<TenancyFields>, OversightOrg][]) {
+    const viewer = notificationViewer(
+      session(OVERSIGHT_ADMIN, { churchId: null, ...tenancy })
     );
+
+    assert.ok(viewer, `${who} was given no feed`);
+    assert.deepEqual(
+      viewer.scope,
+      { org, recipientUserId: OVERSIGHT_ADMIN },
+      `${who} was scoped to something other than its own org`
+    );
+    // The audience travels with it, or the digest row this viewer exists to
+    // show would be filtered straight back out.
+    assert.equal(viewer.audience, "oversight");
   }
+});
+
+test("no tenancy at all is still no feed", () => {
+  // The one remaining null: an account mid-registration whose plant does not
+  // exist yet. It names no church to read and no org to read across.
+  assert.equal(notificationViewer(session(PLANTER, { churchId: null })), null);
+});
+
+test("a row naming TWO tenancies reaches neither boundary", () => {
+  // `oversightOrgOf` refuses it, so the org arm is not taken; and the church
+  // arm is not a consolation prize — the same rule `getAccessibleChurchIds`
+  // applies means such a row reaches nothing in either direction.
+  assert.equal(
+    notificationViewer(
+      session(OVERSIGHT_ADMIN, { churchId: PLANT, sendingNetworkId: NETWORK })
+    )?.scope,
+    undefined
+  );
 });
 
 // ----------------------------------------------------------------------------

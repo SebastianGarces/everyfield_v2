@@ -97,9 +97,10 @@ export type LoadMoreInput = z.infer<typeof loadMoreSchema>;
 /**
  * Resolve the session into a feed viewer, or say why there isn't one.
  *
- * A user with no church has no notifications — every row is church-scoped — so
- * this is a real (if rare) state rather than an assertion: an oversight user
- * mid-association, or an account whose church was removed.
+ * Rare but real, and it is no longer "an oversight user": since N-027 an
+ * oversight account gets a viewer scoped to its org. What is left is an account
+ * with no tenancy at all — mid-registration, or one whose church was removed —
+ * and a row naming two, which reaches nothing in either direction.
  */
 async function currentViewer(
   capability: Capability
@@ -109,7 +110,10 @@ async function currentViewer(
   const viewer = notificationViewer(await requireSeat(capability));
 
   if (!viewer) {
-    return { ok: false, error: "You are not associated with a church" };
+    return {
+      ok: false,
+      error: "You are not associated with a church or an organization",
+    };
   }
 
   return { ok: true, viewer };

@@ -49,8 +49,11 @@ export default async function NotificationsPage({
   const session = await verifySession();
   const viewer = notificationViewer(session);
 
-  // Every notification is church-scoped, so a user with no church has no feed
-  // to show — send them somewhere that means something instead of rendering an
+  // Who has no feed at all is now a narrow question (N-027): an account with no
+  // tenancy, or one naming two. An oversight account HAS one — `viewer.scope`
+  // carries their org and the read spans the plants that opted in — so this is
+  // no longer the redirect that kept them off the page. Anyone left has nothing
+  // to read; send them somewhere that means something instead of rendering an
   // empty page that looks broken.
   if (!viewer) {
     redirect("/dashboard");
