@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "preinstall": "node -e \"const fs=require('fs');if(fs.existsSync('node_modules')&&fs.lstatSync('node_modules').isSymbolicLink()){console.error('node_modules is a symlink — install refused. pnpm has ALREADY rewired the checkout the symlink points into (lifecycle scripts run after linking): repair it there with CI=true pnpm install. Then remove this symlink and run a real pnpm install here. See AGENTS.md hard conventions.');process.exit(1)}\"",
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
