@@ -9,6 +9,7 @@ import { FORMAT_OUTPUT, type DocumentFormat } from "@/lib/documents/types";
 import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 import {
+  GENERATED_DOCUMENT_HISTORY_LIMIT,
   GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN,
   generatedDocumentFilename,
   generatedDocumentForChurchQuery,
@@ -137,6 +138,12 @@ test("the list query scopes church_id and orders newest first", () => {
 
   assert.match(text, /"generated_documents"\."church_id" = \$\d/);
   assert.match(text, /order by "generated_documents"\."created_at" desc/i);
+  assert.match(
+    text,
+    /limit \$\d/,
+    "the history read is bounded — an uncapped select is a church-controlled payload"
+  );
+  assert.ok(params.includes(GENERATED_DOCUMENT_HISTORY_LIMIT));
   assert.ok(params.includes(CHURCH_A));
   assert.ok(!params.includes(CHURCH_B), "another church's id reached the list");
 });

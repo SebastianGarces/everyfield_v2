@@ -28,6 +28,17 @@ import { deleteFile, getSignedDownloadUrl, uploadFile } from "@/lib/storage";
 /** Signed re-download URLs expire after one hour, same as commitment files. */
 export const GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN = 3600;
 
+/**
+ * The most recent artifacts the history page will read. Generation is
+ * unthrottled, so an unbounded `SELECT *` here is a church-controlled payload
+ * — the cap is what keeps one busy church from returning every row it ever
+ * made. The `(church_id, created_at)` index serves the ordered slice.
+ *
+ * The cap is SILENT: the page shows the newest 100 and says nothing about
+ * older ones. Retired by the first paging control on this surface.
+ */
+export const GENERATED_DOCUMENT_HISTORY_LIMIT = 100;
+
 export type GeneratedDocumentListItem = {
   id: string;
   templateId: string;
@@ -85,13 +96,14 @@ export function toGeneratedDocumentListItem(
   };
 }
 
-/** Church-scoped history, newest first. */
+/** Church-scoped history, newest first, capped at `GENERATED_DOCUMENT_HISTORY_LIMIT`. */
 export function generatedDocumentsForChurchQuery(churchId: string) {
   return db
     .select()
     .from(generatedDocuments)
     .where(eq(generatedDocuments.churchId, churchId))
-    .orderBy(desc(generatedDocuments.createdAt));
+    .orderBy(desc(generatedDocuments.createdAt))
+    .limit(GENERATED_DOCUMENT_HISTORY_LIMIT);
 }
 
 /**
