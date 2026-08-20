@@ -20,6 +20,12 @@ import {
   bindOpenInvitationTarget,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
+import {
+  claimSeatInvitationStatement,
+  describeSeatInvitationForRegistration,
+  seatInvitationActedOnAtRegistration,
+} from "@/lib/invitations/seat";
+import { findLinkablePersonId } from "@/lib/people/account-person-link";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -102,10 +108,29 @@ export async function register(
   // indistinguishable in the response, and they are only indistinguishable if
   // every later branch reads the same null. The mismatch MESSAGE was the last
   // thing that told them apart, and Ruling C deleted it.
-  const invitation = invitationActedOnAtRegistration(
-    await describeInvitationForRegistration(invitationId),
+  // TWO KINDS OF TOKEN ARRIVE IN ONE FIELD, and one lookup decides which.
+  //
+  // `?invitation=` carries an ORGANIZATION invitation's uuid or a SEAT
+  // invitation's random token (#495). The two never collide — a seat token is
+  // 43 base64url characters and the org one is a uuid — and the seat lookup is
+  // a point read on a sha256, so a uuid matches no row. The SEAT path is tried
+  // first because it is the narrower one; whichever answers, the other is null
+  // and every branch below reads exactly one variable.
+  //
+  // The address binding is applied to BOTH, by the same rule and for the same
+  // reason: an invitation link travels by email, so acting on one submitted with
+  // a different address would hand the holder somebody else's plant.
+  const seatInvitation = seatInvitationActedOnAtRegistration(
+    await describeSeatInvitationForRegistration(invitationId),
     identifier
   );
+
+  const invitation = seatInvitation
+    ? null
+    : invitationActedOnAtRegistration(
+        await describeInvitationForRegistration(invitationId),
+        identifier
+      );
 
   // Private-beta gate (server-side enforced). Skipped entirely when the env
   // var is unset/empty. Org-invitation signups (the invitation IS the invite)
@@ -118,7 +143,11 @@ export async function register(
   // `hasValidInvitationBypass` applies the same `isOpenRedeemableInvitation`
   // rule again on its own read, so this is belt AND braces rather than a
   // delegation — round 11 exists because those two readers disagreed.
-  if (isBetaGateEnabled()) {
+  // A SEAT INVITATION IS AN INVITE TOO, so it bypasses the beta gate on exactly
+  // the same footing: the plant's Owner or Admin addressed this person by name,
+  // which is the fact the code stands in for. The bypass rides `seatInvitation`,
+  // which is already address-bound, so a forwarded link buys nothing.
+  if (isBetaGateEnabled() && !seatInvitation) {
     const bypassed = await hasValidInvitationBypass(
       invitation?.id ?? null,
       identifier
@@ -210,7 +239,22 @@ export async function register(
     // tuple mints a `persons` row from this (#378) — the lowercased address the
     // users insert stores, so the person and the account agree on it.
     { name, email: identifier },
-    invitedPlanter
+    invitedPlanter,
+    // AS-013's match-or-create, resolved here because the planner awaits
+    // nothing. The plant may already hold a contact record for this address —
+    // somebody invited to a vision meeting months ago — and it is LINKED rather
+    // than duplicated. The recipe itself is the directory's
+    // (`accountPersonLinkStatements`); this is only its input.
+    seatInvitation
+      ? {
+          churchId: seatInvitation.churchId,
+          seat: seatInvitation.seat,
+          matchedPersonId: await findLinkablePersonId(
+            seatInvitation.churchId,
+            identifier
+          ),
+        }
+      : null
   );
   const { seat, churchId, sendingChurchId, sendingNetworkId } = account;
 
@@ -234,7 +278,14 @@ export async function register(
         // insert, so the link contract has exactly one spelling (ruling
         // 408-4B). `account.churchId` still names the church for the
         // invitation redemption below.
-        churchId: null,
+        //
+        // A SEAT INVITEE IS THE OTHER CASE, and `userChurchId` is what tells
+        // them apart (#495). Their plant already exists, so there is no race to
+        // compare-and-set against and the tenancy goes in HERE, beside the seat
+        // — which is exactly what AS-012 means by "the same write that creates
+        // the account". The planner decides which value this is; this insert
+        // never re-decides it.
+        churchId: account.userChurchId,
         sendingChurchId,
         sendingNetworkId,
       })
@@ -244,8 +295,18 @@ export async function register(
     // The `ON CONFLICT DO NOTHING` on the privacy row comes with the shared
     // statements (#198): a retry racing its own predecessor cannot dead-end
     // on the unique index.
+    //
+    // For a seat invitee: the ONE person-link statement AS-013 asks for.
     ...account.linkStatements,
   ];
+
+  // THE GRANT AND THE CLAIM COMMIT TOGETHER (AS-012). The claim is a
+  // compare-and-set on `pending`, appended to the SAME batch as the users
+  // insert, so an account can never exist holding a seat from an invitation
+  // this batch did not close — and a failure anywhere rolls both back.
+  if (seatInvitation) {
+    statements.push(claimSeatInvitationStatement(seatInvitation.id, userId));
+  }
 
   // The org entity goes FIRST — the users FKs point at it. (`unshift` rather
   // than a spread literal only because `db.batch` wants a provably non-empty

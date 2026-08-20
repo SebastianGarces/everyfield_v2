@@ -7,6 +7,7 @@ export * from "./user";
 export * from "./wiki";
 export * from "./coach-assignment";
 export * from "./organization-invitation";
+export * from "./user-invitation";
 export * from "./association-event";
 export * from "./church-privacy-settings";
 export * from "./ministry-teams";

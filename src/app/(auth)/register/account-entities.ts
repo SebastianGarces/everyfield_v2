@@ -17,11 +17,28 @@
 // ============================================================================
 
 import { db } from "@/db";
-import type { UserSeat } from "@/db/schema";
+import type { InvitableSeat, UserSeat } from "@/db/schema";
 import { sendingChurches, sendingNetworks } from "@/db/schema";
 import { churchCreationStatements } from "@/lib/onboarding/create-church";
+import { accountPersonLinkStatements } from "@/lib/people/account-person-link";
 import type { AccountType } from "@/lib/validations/auth";
 import type { BatchItem } from "drizzle-orm/batch";
+
+/**
+ * A seat invitation this registration is redeeming (AS-012, #495) — resolved by
+ * the action from the emailed token, never from anything a client said.
+ *
+ * `matchedPersonId` comes from `findLinkablePersonId`: the plant may already
+ * hold a contact record for this address, and AS-013 says it is LINKED rather
+ * than duplicated. The read happens in the action because this planner awaits
+ * nothing; the DECISION about which statement to issue stays in the directory's
+ * own `accountPersonLinkStatements`.
+ */
+export type RedeemedSeatInvitation = {
+  churchId: string;
+  seat: InvitableSeat;
+  matchedPersonId: string | null;
+};
 
 /**
  * Plan the organizational entity for the account type: the seat and tenancy FK
@@ -46,12 +63,33 @@ export function createAccountEntities(
    * branch has a church to put a person in.
    */
   account: { name: string | null; email: string },
-  createChurchForPlanter = false
+  createChurchForPlanter = false,
+  /**
+   * A seat invitation being redeemed. When present it DECIDES the whole plan and
+   * every other argument about organizations is ignored: the plant already
+   * exists, nothing is created, and the account joins it with the invited seat.
+   */
+  seatInvitation: RedeemedSeatInvitation | null = null
 ): {
   seat: UserSeat | null;
   churchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
+  /**
+   * What the USERS INSERT writes into `church_id`.
+   *
+   * Not the same field as `churchId` above, and the difference is the whole
+   * reason it exists. `churchId` names the plant this registration ends up in,
+   * whoever writes the link; this is the value the insert itself may carry.
+   *
+   *   * an invited PLANTER: `null`. Their plant is created in the same batch and
+   *     the link is written by `linkUserToChurchFilter`'s compare-and-set, so the
+   *     link contract keeps one spelling (ruling 408-4B).
+   *   * an invited SEAT: the invitation's plant, which already exists. There is
+   *     no race to compare-and-set against — the seat and its tenancy are
+   *     written together, in the one insert, which is what AS-012 asks for.
+   */
+  userChurchId: string | null;
   /**
    * Statements the users FKs point at — batched BEFORE its insert. Empty for
    * planters: an invited planter's church tuple lives in `linkStatements`.
@@ -63,6 +101,34 @@ export function createAccountEntities(
    */
   linkStatements: BatchItem<"pg">[];
 } {
+  // A SEAT INVITATION DECIDES EVERYTHING, and it is checked before the account
+  // type is even read (AS-012, #495).
+  //
+  // The registrant clicked a link that already names a plant and a seat, so
+  // whichever radio button their form carried is not a question: creating a
+  // second organization for them would leave the account naming two tenancies,
+  // which `holdsSeatFor` refuses outright and no product path can repair. The
+  // ONLY writes are the account's own — the seat and its tenancy go into the
+  // users insert, and the person record AS-013 asks for is minted or claimed
+  // after it.
+  if (seatInvitation) {
+    return {
+      seat: seatInvitation.seat,
+      churchId: seatInvitation.churchId,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      userChurchId: seatInvitation.churchId,
+      statements: [],
+      linkStatements: accountPersonLinkStatements({
+        userId,
+        churchId: seatInvitation.churchId,
+        name: account.name,
+        email: account.email,
+        matchedPersonId: seatInvitation.matchedPersonId,
+      }),
+    };
+  }
+
   switch (accountType) {
     case "planter": {
       // An INVITED planter is the exception: the invitation exists to associate
@@ -87,6 +153,7 @@ export function createAccountEntities(
           churchId,
           sendingChurchId: null,
           sendingNetworkId: null,
+          userChurchId: null,
           statements: [],
           linkStatements: [
             ...churchCreationStatements({
@@ -110,6 +177,7 @@ export function createAccountEntities(
         churchId: null,
         sendingChurchId: null,
         sendingNetworkId: null,
+        userChurchId: null,
         statements: [],
         linkStatements: [],
       };
@@ -129,6 +197,7 @@ export function createAccountEntities(
         churchId: null,
         sendingChurchId,
         sendingNetworkId: null,
+        userChurchId: null,
         statements: [
           db
             .insert(sendingChurches)
@@ -150,6 +219,7 @@ export function createAccountEntities(
         churchId: null,
         sendingChurchId: null,
         sendingNetworkId,
+        userChurchId: null,
         statements: [
           db
             .insert(sendingNetworks)

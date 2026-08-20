@@ -12,6 +12,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import type { InvitableSeat } from "@/db/schema/user-invitation";
+import { invitedSeatWithArticle } from "@/lib/invitations/seat-copy";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
@@ -79,12 +81,31 @@ const ACCOUNT_TYPE_CONFIG: Record<
  * the ordinary sign-up in silence, so the form's job is to make the wrong
  * address hard to submit in the first place.
  */
+export type SeatInvitationForForm = {
+  /** The raw `?invitation=` value — the wire the action re-resolves from. */
+  token: string;
+  inviteeEmail: string;
+  churchName: string;
+  /** The invitation's own vocabulary, never a second spelling of it. */
+  seat: InvitableSeat;
+};
+
 export function RegisterForm({
   betaGateEnabled,
   invitation = null,
+  seatInvitation = null,
 }: {
   betaGateEnabled: boolean;
   invitation?: RegistrationInvitation | null;
+  /**
+   * A SEAT invitation (#495) — the other thing `?invitation=` can carry. It
+   * decides more of this form than an org invitation does, because there is
+   * nothing left to ask: the plant exists, the seat is named, and the address is
+   * the invitation's. So the account-type radio, the organization-name field
+   * and the beta-code input are all absent, and what remains is the person's
+   * name and a password.
+   */
+  seatInvitation?: SeatInvitationForForm | null;
 }) {
   const [state, formAction, pending] = useActionState(register, initialState);
   // EVERY INVITATION THAT REACHES THIS FORM IS REDEEMABLE (#304 round 10,
@@ -102,6 +123,15 @@ export function RegisterForm({
     invitation?.accountType ?? "planter"
   );
 
+  // ONE FLAG for "an invitation decided this form", so the four places that
+  // used to test `invitation` cannot start disagreeing about the second kind
+  // (#495). NOT a redeemability branch — that word and that idea were deleted
+  // by #304 round 10 and `invitations-ui.test.ts` §9b fails on their return.
+  // This is the presence of a token, which is a fact this form was rendered
+  // with rather than anything the server discovered about an address.
+  const invited = Boolean(invitation) || Boolean(seatInvitation);
+  const invitationToken = seatInvitation?.token ?? invitation?.id ?? null;
+
   // Controlled so a rejected submit (e.g. invalid invite code) keeps everything
   // the user already typed instead of clearing the form.
   const [name, setName] = useState("");
@@ -110,8 +140,10 @@ export function RegisterForm({
   // walk off with somebody else's association. So the field is pre-filled and
   // read-only (read-only, not `disabled` — a disabled input is not submitted),
   // and the action re-checks it anyway, since a POST never saw this form.
-  const emailLockedToInvitation = Boolean(invitation);
-  const [email, setEmail] = useState(invitation?.inviteeEmail ?? "");
+  const emailLockedToInvitation = invited;
+  const [email, setEmail] = useState(
+    seatInvitation?.inviteeEmail ?? invitation?.inviteeEmail ?? ""
+  );
   const [organizationName, setOrganizationName] = useState("");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -137,10 +169,24 @@ export function RegisterForm({
           field it never arrived, so the beta-gate bypass never fired and an
           invited planter finished signup unassociated (#23).
         */}
-        {invitation && (
-          <input type="hidden" name="invitationId" value={invitation.id} />
+        {invitationToken !== null && (
+          <input type="hidden" name="invitationId" value={invitationToken} />
         )}
         <CardContent className="space-y-6">
+          {seatInvitation && (
+            <div
+              role="status"
+              className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
+            >
+              <p className="font-medium">
+                {seatInvitation.churchName} invited you to EveryField
+              </p>
+              <p className="text-muted-foreground mt-1">
+                Finish signing up and you will join them as{" "}
+                {invitedSeatWithArticle(seatInvitation.seat)}.
+              </p>
+            </div>
+          )}
           {invitation && (
             <div
               role="status"
@@ -162,9 +208,9 @@ export function RegisterForm({
             </div>
           )}
 
-          {/* Account Type Selection — not offered while redeeming an
-              invitation, which already decided it (see above). */}
-          {!invitation && (
+          {/* Account Type Selection — not offered while an invitation is being
+              answered, since it already decided the answer (see above). */}
+          {!invited && (
             <div className="space-y-3">
               <Label>I am a...</Label>
               <RadioGroup
@@ -201,7 +247,7 @@ export function RegisterForm({
           {/* Organization Name — always for sending church / network, and for
               an INVITED planter, whose plant is created at signup so the
               invitation has something to associate. */}
-          {(accountType !== "planter" || needsPlantName) && (
+          {!seatInvitation && (accountType !== "planter" || needsPlantName) && (
             <div className="space-y-2">
               <Label htmlFor="organizationName">{config.orgLabel}</Label>
               <Input
@@ -305,7 +351,7 @@ export function RegisterForm({
           {/* Private-beta invite code (only rendered when gating is on, and
               never for an invited user — the invitation IS the invite, and the
               server grants the same bypass). */}
-          {betaGateEnabled && !invitation && (
+          {betaGateEnabled && !invited && (
             <div className="space-y-2 pb-8">
               <Label htmlFor="inviteCode">Invite code</Label>
               <Input

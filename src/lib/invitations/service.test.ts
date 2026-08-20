@@ -521,6 +521,10 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
     "#304/OV-007b — the ORG ADMIN'S sever, the mirror of the planter's and on the same ruling (#274): each side's wrapper ships with the surface that owns its authority rule, never as a fifth lifecycle action. `removePlantFromOrgAs` takes a church id — an org has many plants, so which one is a real choice — and NOTHING else: the org, its kind and the actor all come from the session, and the FK is nulled only while it still points at that org",
   ],
   [
+    "src/app/(dashboard)/settings/team/actions.ts",
+    "#495/AS-010 — the PLANT'S seat invitations, over `user_invitations` rather than `organization_invitations`. It reaches `./core` only transitively, through `./seat`, and only for the shared vocabulary AS-010 forbids a second copy of: `INVITATION_EXPIRY_DAYS`, `INVITES_PER_INVITEE_PER_WINDOW`, `ACCOUNT_NOT_INVITABLE_MESSAGE`, `InvitationError` and `invitationActorFromSession`. It imports NO core primitive of its own — every write it makes is `createSeatInvitationAs` / `revokeSeatInvitationAs` / `resendSeatInvitationEmailAs`, each of which takes a branded actor and asserts `seat.invitation.manage` inside the logic layer as well as at the action's `requireSeat`",
+  ],
+  [
     "src/app/(auth)/register/actions.ts",
     "two things, both necessarily session-free because no account exists yet: (1) the private-beta gate — `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ, because an invitation id IS the bypass token (core.ts → Query Invitations); (2) #23's redemption — `bindOpenInvitationTarget` then `acceptInvitationAs`, which turn an invite link into an association. The WRITES are reached only from inside `register`, after the account has been created, and the actor is minted from the user row this same request inserted",
   ],

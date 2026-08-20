@@ -17,7 +17,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { invitationCreatedNotice } from "./create-notice";
-import { toInvitationListRow } from "./list-row";
+import { toInvitationListRow, toSeatInvitationListRow } from "./list-row";
 import {
   assertInOrder,
   sourceReader,
@@ -99,6 +99,30 @@ const INVITATIONS_LIST = read(
   "invitations-list.tsx"
 );
 const LIST_ROW = read("lib", "invitations", "list-row.ts");
+
+// ----------------------------------------------------------------------------
+// THE SECOND INVITATION SURFACE — `/settings/team`'s seat invitations (#495).
+//
+// `user_invitations` is a different table with a different subject, but ruling
+// 185 (5) says the surface reuses the org rulings WHOLE — including item 5,
+// "no admin surface renders a `/register?invitation=` link". That ruling was
+// pinned by regexes naming two files; a second surface that nobody added to
+// them would have inherited the words and none of the guard, which is exactly
+// how the oracle came back twice on the org side.
+//
+// So the guard below is a TABLE of surfaces rather than a pair of asserts, and
+// a third one (the org-side seat invites, the coach invites) is a row.
+// ----------------------------------------------------------------------------
+const SEAT_INVITE_FORM = read("components", "settings", "seat-invite-form.tsx");
+const TEAM_PAGE = read("app", "(dashboard)", "settings", "team", "page.tsx");
+const TEAM_ACTIONS = read(
+  "app",
+  "(dashboard)",
+  "settings",
+  "team",
+  "actions.ts"
+);
+
 const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
 const REGISTER_ENTITIES = read(
   "app",
@@ -1038,13 +1062,25 @@ test("the register form fills the invited address in and locks it", () => {
   // Not the enforcement — that is above — but the half that stops an honest
   // user walking into it. `readOnly`, deliberately not `disabled`: a disabled
   // input is not submitted, so locking it that way would send no address at all.
+  //
+  // TWO KINDS OF INVITATION REACH THIS FORM SINCE #495 — an ORGANIZATION one
+  // and a SEAT one — and the lock is the SAME rule for both: an invitation is
+  // issued to one address, and a link holder who typed another used to walk off
+  // with somebody else's association (org) or somebody else's plant (seat). So
+  // this assertion pins the flag both kinds feed rather than the old
+  // `Boolean(invitation)` spelling: a form that locked only one of them would
+  // still match a regex naming only that one.
   assert.match(
     REGISTER_FORM,
-    /const emailLockedToInvitation = Boolean\(invitation\)/
+    /const invited = Boolean\(invitation\) \|\| Boolean\(seatInvitation\)/
   );
+  assert.match(REGISTER_FORM, /const emailLockedToInvitation = invited/);
   assert.match(REGISTER_FORM, /readOnly=\{emailLockedToInvitation\}/);
   assert.doesNotMatch(REGISTER_FORM, /disabled=\{emailLockedToInvitation\}/);
-  assert.match(REGISTER_FORM, /useState\(invitation\?\.inviteeEmail \?\? ""\)/);
+  assert.match(
+    REGISTER_FORM,
+    /useState\(\s*seatInvitation\?\.inviteeEmail \?\? invitation\?\.inviteeEmail \?\? ""\s*\)/
+  );
   // And it says why the field cannot be edited, wired to the input for a screen
   // reader rather than floating next to it.
   assert.match(REGISTER_FORM, /aria-describedby=\{/);
@@ -1124,11 +1160,7 @@ test("the create surface renders no register link and no target branch", () => {
   // this surface — `/register` is the invitee's own path, not something an
   // admin is handed to forward. #293 shipped the email the ruling called this
   // link a stopgap for, so it does not come back with delivery.
-  assert.doesNotMatch(form, /register\?invitation=/);
-  assert.doesNotMatch(form, /invitationRegisterPath/);
-  assert.doesNotMatch(form, /clipboard/);
-  assert.doesNotMatch(form, /location\.origin/);
-  assert.doesNotMatch(form, /Copy link/);
+  assertRendersNoRegisterLink("the org create form", form);
 
   // The words are no longer JSX — they come from `invitationCreatedNotice`, so
   // the sentences #293's AC names are executable. The component renders them
@@ -1354,10 +1386,7 @@ test("the pending list renders no register link and no per-row variation", () =>
   const list = stripComments(INVITATIONS_LIST);
 
   // The control, its URL composition and the clipboard call are all gone.
-  assert.doesNotMatch(list, /register\?invitation=/);
-  assert.doesNotMatch(list, /clipboard/);
-  assert.doesNotMatch(list, /location\.origin/);
-  assert.doesNotMatch(list, /Copy link/);
+  assertRendersNoRegisterLink("the shared pending list", list);
 
   // Every pending row renders the SAME controls. The only row fields this
   // component may read are the five `toInvitationListRow` builds — `status` is
@@ -1379,6 +1408,86 @@ test("the pending list renders no register link and no per-row variation", () =>
   for (const field of readFields) {
     assert.ok(allowed.has(field), `row.${field} is not an allowed row field`);
   }
+});
+
+/**
+ * ITEM 5, AS ONE FUNCTION — so widening it to a new surface is adding a caller
+ * rather than remembering five regexes.
+ *
+ * The register link is the invitee's own credential. An admin surface that
+ * renders it, composes its URL, or offers to copy it hands one admin a link
+ * meant for one address — and, on the org side, told them whether that address
+ * had an account. Neither half may come back with a second table.
+ */
+function assertRendersNoRegisterLink(what: string, source: string): void {
+  for (const banned of [
+    /register\?invitation=/,
+    /invitationRegisterPath/,
+    /clipboard/,
+    /location\.origin/,
+    /Copy link/,
+  ]) {
+    assert.doesNotMatch(
+      source,
+      banned,
+      `${what} renders something matching ${banned} — ruling 4 item 5 (2026-08-09) forbids a copyable /register?invitation= link on every invitation surface`
+    );
+  }
+}
+
+test("the SEAT invitation surface renders no register link either (#495)", () => {
+  // The same ruling, on the second table. `/settings/team` is three files and a
+  // row mapper, and every one of them is inside the claim — the form the admin
+  // types into, the page that lists the pending rows, the action that answers
+  // the create, and the projection the list is built from.
+  //
+  // THE ACTION IS IN THE LIST ON PURPOSE. The org oracle came back twice by
+  // travelling in the PAYLOAD rather than in the JSX, so a guard that only read
+  // components would have missed both. `createSeatInvitationAction` returns
+  // `{ inviteeEmail, emailSent }`; a path added to it would fail here.
+  for (const [what, source] of [
+    ["the seat invite form", SEAT_INVITE_FORM],
+    ["/settings/team", TEAM_PAGE],
+    ["the seat invitation actions", TEAM_ACTIONS],
+    ["the shared row mapper", LIST_ROW],
+  ] as const) {
+    assertRendersNoRegisterLink(what, stripComments(source));
+  }
+
+  // …and the seat row is the SAME five fields, so the widened list component
+  // has nothing new to render and no sixth field to leak. `toSeatInvitationListRow`
+  // is asserted by CALLING it, because a regex cannot see a transitive
+  // derivation — that is the lesson `kindLabel` cost twice.
+  const row = toSeatInvitationListRow({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    kind: "seat",
+    inviteeEmail: "stranger@example.com",
+    churchId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    seat: "admin",
+    tokenHash: "f".repeat(64),
+    inviterUserId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    status: "pending",
+    respondedBy: null,
+    respondedAt: null,
+    createdAt: new Date("2026-08-20T12:00:00.000Z"),
+    expiresAt: new Date("2026-09-19T12:00:00.000Z"),
+  });
+
+  assert.deepEqual(Object.keys(row).sort(), [
+    "expiresLabel",
+    "id",
+    "inviteeEmail",
+    "sentLabel",
+    "status",
+  ]);
+  // THE TOKEN IS THE CREDENTIAL AND IT IS NOT A ROW FIELD — neither the hash
+  // nor anything derived from it. Nor is `seat`, which the shared component has
+  // no place to render.
+  const rendered = JSON.stringify(row);
+  assert.doesNotMatch(rendered, /f{8}/);
+  assert.doesNotMatch(rendered, /admin/);
 });
 
 // ----------------------------------------------------------------------------

@@ -64,6 +64,7 @@ import type {
   OrganizationInvitation,
   OrganizationInvitationStatus,
 } from "@/db/schema/organization-invitation";
+import type { UserInvitation } from "@/db/schema/user-invitation";
 import { formatDate } from "@/lib/datetime";
 
 export type InvitationListRow = {
@@ -87,5 +88,38 @@ export function toInvitationListRow(
     expiresLabel: invitation.expiresAt
       ? formatDate(invitation.expiresAt, "short")
       : null,
+  };
+}
+
+/**
+ * The SAME five fields, for a seat invitation (`user_invitations`, #495).
+ *
+ * ONE ROW TYPE, TWO TABLES, and that is the point rather than a convenience:
+ * `/settings/team` renders its pending list through the component
+ * `/oversight/invitations` uses, so the countdown, the wrapping control cluster
+ * and the accessible names are written once. A second row type would have been
+ * a second place for a field to be added without the rule above being read.
+ *
+ * THE RULE HOLDS HERE TOO. A seat invitation carries no target columns at all —
+ * it names the inviting plant and nothing about the invitee's own tenancy,
+ * because AS-010 refuses any address that already has one — so there is
+ * nothing target-derived to leak. What must NOT appear is the token or its hash:
+ * the register link is the credential, and the ruling that keeps it off every
+ * admin surface (item 5) is exactly why neither is in this projection.
+ *
+ * `seat` is deliberately absent as well. It is the inviter's own choice rather
+ * than a fact about a stranger, so it would be admissible — but the shared row
+ * has no field for it and adding one would mean the org list rendering a blank.
+ * The invited seat belongs on the roster (AS-023), which is a different issue.
+ */
+export function toSeatInvitationListRow(
+  row: UserInvitation
+): InvitationListRow {
+  return {
+    id: row.id,
+    inviteeEmail: row.inviteeEmail,
+    status: row.status,
+    sentLabel: formatDate(row.createdAt, "short"),
+    expiresLabel: formatDate(row.expiresAt, "short"),
   };
 }

@@ -180,6 +180,22 @@ const CAPABILITIES = {
   /** Sending a message and managing the church's templates. */
   "communication.send": { seats: ADMIN_PLUS, tenancy: "plant" },
   /**
+   * Creating, resending and revoking a SEAT invitation — the row that gives
+   * another person a login on this plant (AS-010, #495).
+   *
+   * `ADMIN_PLUS`, and it is the row `org.invitation.manage` said would arrive
+   * "with `/settings/team`". The two are different verbs over different tables:
+   * that one binds an ORGANIZATION into an association and is Owner-only
+   * because association is an Owner decision; this one staffs a tenancy, which
+   * AS-005 gives an Admin.
+   *
+   * `plant` because this track ships the plant side only. The org side is the
+   * sibling issue over the same table, and it widens the tenancy here rather
+   * than declaring a second verb — an org Admin inviting an org Member is the
+   * same decision about the same row shape.
+   */
+  "seat.invitation.manage": { seats: ADMIN_PLUS, tenancy: "plant" },
+  /**
    * Setting a manual phase signal. The DECLARATION is the planter's
    * (`phase.declare`); the signals that feed the recommendation are an ordinary
    * plant-level write, so this is where "everything else an Admin may do" lands.

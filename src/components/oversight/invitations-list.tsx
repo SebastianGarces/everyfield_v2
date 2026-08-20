@@ -94,6 +94,13 @@ import {
   type ResendInvitationEmailState,
   type RevokeInvitationState,
 } from "@/app/(dashboard)/oversight/invitations/actions";
+// The org surface's own actions are the DEFAULT below and nothing more. A
+// second caller — `/settings/team`, whose rows are seat invitations over
+// `user_invitations` (#495) — passes its own pair, so the countdown, the
+// wrapping cluster, the accessible names and the four states this component
+// spent three rulings getting right are written ONCE. Both tables answer the
+// same two questions on a pending row ("email it again", "close it"), so the
+// component's contract is those two verbs and not either table.
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -134,7 +141,39 @@ const STATUS_STYLE: Record<
   revoked: { label: "Revoked", variant: "outline" },
 };
 
-export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
+/**
+ * The two writes a pending row offers. Passed in rather than imported so this
+ * component serves both invitation surfaces; each caller's own action module
+ * carries the `requireSeat` guard for its own capability, and neither is
+ * decided here.
+ */
+export type InvitationRowActions = {
+  resend: (
+    prevState: ResendInvitationEmailState,
+    formData: FormData
+  ) => Promise<ResendInvitationEmailState>;
+  revoke: (
+    prevState: RevokeInvitationState,
+    formData: FormData
+  ) => Promise<RevokeInvitationState>;
+};
+
+const ORG_INVITATION_ACTIONS: InvitationRowActions = {
+  resend: resendInvitationEmailAction,
+  revoke: revokeInvitationAction,
+};
+
+export function InvitationsList({
+  rows,
+  actions = ORG_INVITATION_ACTIONS,
+  pendingDescription = "Waiting on an answer. Anyone who can invite for your organization can resend the email or revoke the invitation — revoking closes it immediately, and the invitation stops working.",
+  answeredDescription = "Every invitation your organization has sent that is no longer open.",
+}: {
+  rows: InvitationListRow[];
+  actions?: InvitationRowActions;
+  pendingDescription?: string;
+  answeredDescription?: string;
+}) {
   const pending = rows.filter((row) => row.status === "pending");
   const answered = rows.filter((row) => row.status !== "pending");
 
@@ -143,11 +182,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
       <Card>
         <CardHeader>
           <CardTitle>Pending invitations</CardTitle>
-          <CardDescription>
-            Waiting on an answer. Anyone who can invite for your organization
-            can resend the email or revoke the invitation — revoking closes it
-            immediately, and the invitation stops working.
-          </CardDescription>
+          <CardDescription>{pendingDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           {pending.length === 0 ? (
@@ -157,7 +192,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           ) : (
             <ul className="divide-border divide-y">
               {pending.map((row) => (
-                <InvitationRow key={row.id} row={row} />
+                <InvitationRow key={row.id} row={row} actions={actions} />
               ))}
             </ul>
           )}
@@ -167,9 +202,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
       <Card>
         <CardHeader>
           <CardTitle>Answered and closed</CardTitle>
-          <CardDescription>
-            Every invitation your organization has sent that is no longer open.
-          </CardDescription>
+          <CardDescription>{answeredDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           {answered.length === 0 ? (
@@ -179,7 +212,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           ) : (
             <ul className="divide-border divide-y">
               {answered.map((row) => (
-                <InvitationRow key={row.id} row={row} />
+                <InvitationRow key={row.id} row={row} actions={actions} />
               ))}
             </ul>
           )}
@@ -189,7 +222,13 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
   );
 }
 
-function InvitationRow({ row }: { row: InvitationListRow }) {
+function InvitationRow({
+  row,
+  actions,
+}: {
+  row: InvitationListRow;
+  actions: InvitationRowActions;
+}) {
   const status = STATUS_STYLE[row.status];
 
   return (
@@ -216,10 +255,18 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
             invitation is refused by the guard inside `sendInvitationEmail`
             anyway, but offering it would be a lie. */}
         {row.status === "pending" && (
-          <ResendEmailButton invitationId={row.id} email={row.inviteeEmail} />
+          <ResendEmailButton
+            invitationId={row.id}
+            email={row.inviteeEmail}
+            resend={actions.resend}
+          />
         )}
         {row.status === "pending" && (
-          <RevokeButton invitationId={row.id} email={row.inviteeEmail} />
+          <RevokeButton
+            invitationId={row.id}
+            email={row.inviteeEmail}
+            revoke={actions.revoke}
+          />
         )}
       </div>
     </li>
@@ -372,12 +419,14 @@ function useResendCooldown(cooldown: ResendCooldown | undefined): number {
 function ResendEmailButton({
   invitationId,
   email,
+  resend,
 }: {
   invitationId: string;
   email: string;
+  resend: InvitationRowActions["resend"];
 }) {
   const [state, formAction, pending] = useActionState(
-    resendInvitationEmailAction,
+    resend,
     initialResendState
   );
   const secondsLeft = useResendCooldown(state.cooldown);
@@ -444,12 +493,14 @@ const initialRevokeState: RevokeInvitationState = {};
 function RevokeButton({
   invitationId,
   email,
+  revoke,
 }: {
   invitationId: string;
   email: string;
+  revoke: InvitationRowActions["revoke"];
 }) {
   const [state, formAction, pending] = useActionState(
-    revokeInvitationAction,
+    revoke,
     initialRevokeState
   );
 
