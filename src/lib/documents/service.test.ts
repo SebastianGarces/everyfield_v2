@@ -17,7 +17,9 @@ import {
   generatedDocumentsForChurchQuery,
   generatedDocumentStorageKey,
   insertGeneratedDocumentQuery,
+  recordGeneratedDocument,
   toGeneratedDocumentListItem,
+  type GeneratedDocumentEffects,
 } from "./service";
 
 const CHURCH_A = "11111111-1111-4111-8111-111111111111";
@@ -309,32 +311,127 @@ test("the documents action module is a use-server endpoint", () => {
 // Storage failure must not leave a history row pointing at a missing object
 // ============================================================================
 
-test("recordGeneratedDocument uploads before it inserts, and deletes on insert failure", () => {
-  assertInOrder(
-    recordBody,
-    "recordGeneratedDocument",
-    [
-      "await uploadFile(row.storageKey, input.bytes, mime);",
-      "try {",
-      "const [inserted] = await insertGeneratedDocumentQuery(row);",
-      "await deleteFile(row.storageKey);",
-      "throw error;",
-    ],
-    "upload first; a failed insert must delete the object and must not leave the row"
+// These four RUN `recordGeneratedDocument` against forced failures rather than
+// reading its source, because the property under test is what survives a bad
+// moment: an object with no row is garbage we can sweep, a row with no object
+// is a download button that 404s and cannot be repaired from the app.
+
+const RECORDED_AT = new Date("2026-02-11T09:30:00.000Z");
+
+type Effect =
+  | { kind: "upload"; key: string; mime: string; size: number }
+  | { kind: "insert"; key: string }
+  | { kind: "remove"; key: string };
+
+/** `fails` names the ONE effect that throws; the rest behave. */
+function effectHarness(fails?: "upload" | "insert" | "remove") {
+  const calls: Effect[] = [];
+
+  const effects: GeneratedDocumentEffects = {
+    async upload(key, bytes, mime) {
+      calls.push({ kind: "upload", key, mime, size: bytes.length });
+      if (fails === "upload") throw new Error("PutObject refused");
+      return key;
+    },
+    async insert(row) {
+      calls.push({ kind: "insert", key: row.storageKey });
+      if (fails === "insert") throw new Error("insert into … failed");
+      return {
+        id: row.id ?? ARTIFACT_ID,
+        churchId: row.churchId,
+        userId: row.userId,
+        templateId: row.templateId,
+        format: row.format,
+        storageKey: row.storageKey,
+        createdAt: RECORDED_AT,
+      };
+    },
+    async remove(key) {
+      calls.push({ kind: "remove", key });
+      if (fails === "remove") throw new Error("DeleteObject refused");
+    },
+  };
+
+  return { effects, calls, kinds: () => calls.map((call) => call.kind) };
+}
+
+const RECORD_INPUT = {
+  churchId: CHURCH_A,
+  userId: USER_A,
+  templateId: "commitment-card",
+  format: "pdf" as const,
+  bytes: Buffer.from("%PDF-1.7 pretend bytes"),
+};
+
+test("a successful record uploads, then inserts, and deletes nothing", async () => {
+  const harness = effectHarness();
+  const row = await recordGeneratedDocument(RECORD_INPUT, harness.effects);
+
+  assert.deepEqual(harness.kinds(), ["upload", "insert"]);
+  assert.equal(row.churchId, CHURCH_A);
+  assert.equal(row.createdAt, RECORDED_AT);
+  assert.match(row.storageKey, /^documents\/.+\.pdf$/);
+});
+
+test("a forced upload failure records NOTHING — no insert, no cleanup", async () => {
+  const harness = effectHarness("upload");
+
+  await assert.rejects(
+    () => recordGeneratedDocument(RECORD_INPUT, harness.effects),
+    /PutObject refused/,
+    "the caller must learn the artifact was not stored"
+  );
+
+  assert.deepEqual(
+    harness.kinds(),
+    ["upload"],
+    "the insert must not run — a row whose object does not exist is unrepairable"
   );
 });
 
-test("recordGeneratedDocument never inserts a key that was not uploaded", () => {
-  const uploadAt = recordBody.indexOf("await uploadFile(");
-  const insertAt = recordBody.indexOf("insertGeneratedDocumentQuery(");
-  assert.ok(uploadAt >= 0 && insertAt > uploadAt);
+test("a forced insert failure deletes the object it just uploaded", async () => {
+  const harness = effectHarness("insert");
 
-  const beforeUpload = recordBody.slice(0, uploadAt);
-  assert.equal(
-    /insertGeneratedDocumentQuery|db\.insert\(/.test(beforeUpload),
-    false,
-    "an insert before upload would record a key whose object does not exist"
+  await assert.rejects(
+    () => recordGeneratedDocument(RECORD_INPUT, harness.effects),
+    /insert into/
   );
+
+  assert.deepEqual(harness.kinds(), ["upload", "insert", "remove"]);
+  const [upload, , remove] = harness.calls;
+  assert.equal(
+    remove.key,
+    upload.key,
+    "cleanup must delete the key it uploaded, not a recomputed one"
+  );
+});
+
+test("an empty insert result is a failure, and a failed cleanup does not mask it", async () => {
+  const orphaned = effectHarness();
+  orphaned.effects.insert = async () => undefined;
+
+  await assert.rejects(
+    () => recordGeneratedDocument(RECORD_INPUT, orphaned.effects),
+    /Failed to record generated document/,
+    "a returning() that yielded no row is not a success"
+  );
+  assert.deepEqual(orphaned.kinds(), ["upload", "remove"]);
+
+  const cleanupFails = effectHarness("remove");
+  cleanupFails.effects.insert = async () => {
+    throw new Error("insert into … failed");
+  };
+
+  await assert.rejects(
+    () => recordGeneratedDocument(RECORD_INPUT, cleanupFails.effects),
+    /insert into/,
+    "the original failure propagates; a stuck object is logged, not thrown"
+  );
+});
+
+test("recordGeneratedDocument never opens a transaction", () => {
+  // `db.transaction()` throws at runtime on neon-http (memory/invariants.md →
+  // Transactions / Atomicity), so this one stays a source assertion.
   assert.doesNotMatch(recordBody, /db\.transaction\(/);
 });
 

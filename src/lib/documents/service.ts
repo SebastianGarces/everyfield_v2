@@ -160,13 +160,34 @@ export async function getGeneratedDocumentDownloadUrl(
   );
 }
 
-export async function recordGeneratedDocument(input: {
-  churchId: string;
-  userId: string;
-  templateId: string;
-  format: DocumentFormat;
-  bytes: Buffer;
-}): Promise<GeneratedDocument> {
+/**
+ * The three effects `recordGeneratedDocument` sequences, injectable so the
+ * crash-safety contract can be asserted by RUNNING the function against a
+ * forced failure instead of by reading its source. Production never passes
+ * this — the defaults below are the real bucket and the real table.
+ */
+export type GeneratedDocumentEffects = {
+  upload: (key: string, bytes: Buffer, mime: string) => Promise<unknown>;
+  insert: (row: NewGeneratedDocument) => Promise<GeneratedDocument | undefined>;
+  remove: (key: string) => Promise<unknown>;
+};
+
+const LIVE_EFFECTS: GeneratedDocumentEffects = {
+  upload: uploadFile,
+  insert: async (row) => (await insertGeneratedDocumentQuery(row))[0],
+  remove: deleteFile,
+};
+
+export async function recordGeneratedDocument(
+  input: {
+    churchId: string;
+    userId: string;
+    templateId: string;
+    format: DocumentFormat;
+    bytes: Buffer;
+  },
+  effects: GeneratedDocumentEffects = LIVE_EFFECTS
+): Promise<GeneratedDocument> {
   const id = crypto.randomUUID();
   const row = generatedDocumentRow({
     id,
@@ -177,17 +198,19 @@ export async function recordGeneratedDocument(input: {
   });
   const { mime } = FORMAT_OUTPUT[input.format];
 
-  await uploadFile(row.storageKey, input.bytes, mime);
+  // Upload FIRST and let a failure propagate untouched: the insert below is
+  // never reached, so a key whose object does not exist is never recorded.
+  await effects.upload(row.storageKey, input.bytes, mime);
 
   try {
-    const [inserted] = await insertGeneratedDocumentQuery(row);
+    const inserted = await effects.insert(row);
     if (!inserted) {
       throw new Error("Failed to record generated document");
     }
     return inserted;
   } catch (error) {
     try {
-      await deleteFile(row.storageKey);
+      await effects.remove(row.storageKey);
     } catch (cleanupError) {
       console.error(
         "[documents] failed to delete object after insert failure:",
