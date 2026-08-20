@@ -16,32 +16,64 @@ carries it, the entry says so.
 
 ---
 
-## 1. The five user roles
+## 1. Seats and tenancies
 
-There are exactly five roles: `planter`, `coach`, `team_member`, `sending_church_admin`,
-`network_admin`. No sixth role exists — not `team_leader`, not `admin`, not `owner`. Team
-leadership is derived from `MinistryTeam.leader_id`, never from a role.
+Access has two axes, and a sentence that names only one is incomplete.
 
-| Canonical word | Who they are | What they see |
-|---|---|---|
-| **planter** | The person leading one church plant. Full CRUD on their own plant, and the only person who may accept an association, sever one, schedule a launch, or set the sharing toggles. | Everything in their own plant. |
-| **team_member** | Someone inside a plant who is not the planter. Feature-limited within that one plant. | Their own plant, minus planter-only actions. |
-| **coach** | An experienced leader assigned to specific plants through `coach_assignments`. The assignment is **planter-initiated** — the planter invites their coach. | Read-only access to the plants assigned to them. |
-| **sending_church_admin** | Staff at a church that sends planters. | Aggregate metrics for plants whose `sending_church_id` matches theirs, gated by that plant's `share_*` toggles. |
-| **network_admin** | Staff at a church-planting network. | Aggregate metrics for plants whose `sending_network_id` matches theirs, gated by that plant's `share_*` toggles, plus the roster of member sending churches. |
+**Tenancy** — where an account lives. There are three, one per hierarchy level, named by the three
+FKs on the account: **plant** (`church_id`), **sending church** (`sending_church_id`), **sending
+network** (`sending_network_id`). One account belongs to exactly one tenancy.
+
+**Seat** — what the account may do there. There are three, and they mean the same three things in
+all three tenancies:
+
+| Canonical word | What the seat is | In a plant | In an oversight org |
+|---|---|---|---|
+| **Owner** | The one account per tenancy that holds the relationship decisions. Enforced as one per tenancy in the database. | The planter. | The staff member who holds the org's account. |
+| **Admin** | Appointed by the Owner. Runs the day-to-day. | Church profile, and writes across people, meetings, tasks and teams. Invites Members and coaches. | Invites, revokes and resends the org's invitations; manages the roster. |
+| **Member** | Participates. Never appoints, never removes. | Reads the plant; writes only their own duties. | Full read parity with the Owner, zero admin actions. |
+
+**The Owner-only list**, identical in every tenancy: sharing toggles · association accept, leave and
+sever · launch scheduling · seat appointment, demotion and removal · org settings and billing.
+
+**coach** is **not a seat.** A coach is an experienced leader assigned to specific plants through
+`coach_assignments`, read-only on each. The assignment is **planter-initiated** — the planter invites
+their coach — and it sits beside a seat rather than replacing one: an account may hold a seat in its
+own tenancy and any number of assignments elsewhere, and its access is the **union** of the two.
+
+**planter** stays the word for the person leading one church plant. It names a person, not a seat:
+the planter is that plant's Owner. Never write `planter` as though it were a role identifier.
+
+**oversight admin** now means the **Owner or Admin seat on an oversight org** — the accounts that can
+act. Where a sentence covers org Members too, say **oversight seat holder**.
 
 **Deprecated synonyms**
 
+- **The five old role names — `planter`, `coach`, `team_member`, `sending_church_admin`,
+  `network_admin` — used as ROLES.** Say the seat and the tenancy instead: "the plant's Owner", "an
+  org Admin", "a plant Member". `planter` and `coach` survive as the words above; the other three do
+  not survive at all.
 - **"coach" meaning "whoever oversees a plant."** This is the failure this glossary exists to
-  stop. `coach` is one role with one reach path (`coach_assignments`). A sending church admin is
-  not a coach; a network admin is not a coach. Where a sentence means all of them, say
-  **oversight admin** (§5) or name the roles. Where it means only the role, say **coach**.
-- **"mentor", "overseer", "supervisor", "sponsor"** → use the role name, or **oversight admin**
-  for the two org-level roles collectively.
-- **"network user"** → **network_admin**, or **oversight admin** if sending churches are included.
-- **"admin", "church admin", "org admin"** on their own → name the role.
-- **"user"** where a specific role is meant → name the role. "User" is fine only when the sentence
-  is true of every role.
+  stop. A coach reaches a plant one way (`coach_assignments`). A sending church's Owner is not a
+  coach; a network's Admin is not a coach. Where a sentence means all of them, say **oversight
+  admin** or **oversight seat holder**. Where it means only the assignment, say **coach**.
+- **"mentor", "overseer", "supervisor", "sponsor"** → **coach**, or **oversight admin** for the
+  org-level seats collectively.
+- **"network user"** → the seat plus the tenancy, or **oversight seat holder** if sending churches
+  are included.
+- **"admin", "church admin", "org admin"** on their own → name the seat and the tenancy.
+- **"role"** for what an account may do → **seat**. "Role" stays correct for a ministry-team role on
+  a roster, which is a job, not access.
+- **"user"** where a specific seat is meant → name the seat. "User" is fine only when the sentence
+  is true of every account.
+
+**Team leadership is not a seat.** A ministry team's leader is `MinistryTeam.leader_id`, and the
+writes leadership grants derive from that column. There is no `team_leader`.
+
+**The code is mid-migration.** `users.role` still carries the five old names; the seat column, the
+three partial unique indexes and the caller migration ship under
+[#185](https://github.com/SebastianGarces/everyfield_v2/issues/185). This entry governs prose from
+today: new and edited text uses seats and tenancies, whatever the column is called this week.
 
 **Two things named "coach" that this entry does not govern.** Both are content, not prose about
 the role, and both keep their names:
@@ -111,8 +143,8 @@ Two circles, and no sentence may blur them:
 
 | Canonical word | Who | Governing rule |
 |---|---|---|
-| **the plant's own team** | `planter` and `team_member` of that plant, plus the `coach` assigned to it | Sees the plant's own records, individual people included. |
-| **oversight** | `sending_church_admin`, `network_admin` — collectively **oversight admins** | **Aggregate metrics only, never an individual person record.** The six `share_*` toggles default to false and gate what oversight may pull; push is narrower still. |
+| **the plant's own team** | Every seat in that plant's tenancy — Owner, Admin, Member — plus the coaches assigned to it | Sees the plant's own records, individual people included. |
+| **oversight** | Every seat in an oversight org's tenancy — collectively **oversight seat holders**; the Owner and Admin seats are the **oversight admins** | **Aggregate metrics only, never an individual person record**, whatever the seat. The six `share_*` toggles default to false and gate what oversight may pull; push is narrower still. |
 
 The plant's **directory listing** on an oversight surface is deliberately ungated — only the
 feature data inside it is gated. Consent copy may not claim otherwise.
@@ -129,12 +161,14 @@ feature data inside it is gated. Consent copy may not claim otherwise.
 | **association** | The relationship the accept creates: the plant's `sending_church_id` or `sending_network_id` pointing at an oversight org. |
 | **disassociation** (or **sever**) | Ending an association. Either side may do it, behind type-to-confirm, with the other side notified and an `association_events` row written. |
 
-An accept never *replaces* an existing association — it only fills an empty slot. Only the
-**planter** may accept or sever on the plant's side; only the org's **admin** may sever on the
-org's side.
+An accept never *replaces* an association that is already in place — it only fills an empty slot.
+Only the plant's **Owner** may accept or sever on the plant's side; only the org's **Owner** may
+sever on the org's side (§1, the Owner-only list).
 
 Coach assignment is **not** an association. It is a separate, planter-initiated assignment
-(`coach_assignments`) and creates no hierarchy edge.
+(`coach_assignments`) and creates no hierarchy edge. Its invitation is also not an org invitation:
+an **invitation** in this entry is org-to-org and creates an association, while a **seat
+invitation** and a **coach invitation** create or extend an account (§1).
 
 **Deprecated synonyms:** "link", "connect", "affiliation", "join request" → **invitation** or
 **association**, whichever the sentence means. "invite" as a noun → **invitation**.
