@@ -10,6 +10,7 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 - **New UI components come from the shadcn CLI**, never hand-written: `pnpm dlx shadcn@latest add <component>` (new-york style).
 - **Migrations run with `pnpm db:migrate`, never `pnpm db:push`** — versioned SQL in `src/db/migrations/` keeps them auditable.
 - **Every clickable element gets `cursor-pointer`** — shadcn components and custom clickables must add it; native `<button>`/`<a>` inherit it from `globals.css`.
+- **Never symlink `node_modules` between checkouts** — a fresh worktree gets a real `pnpm install`. pnpm run through such a symlink rewires the checkout it points into and breaks it when the worktree is deleted (guarded by `ops/guard-worktree-pnpm.sh` via hooks, plus a `preinstall` tripwire).
 
 ## Knowledge Routing
 

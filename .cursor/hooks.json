@@ -1,6 +1,13 @@
 {
   "version": 1,
   "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/guard-worktree-pnpm.sh",
+        "timeout": 10,
+        "failClosed": false
+      }
+    ],
     "afterFileEdit": [
       {
         "command": ".cursor/hooks/format.sh",
