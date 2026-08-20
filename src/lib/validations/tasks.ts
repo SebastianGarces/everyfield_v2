@@ -19,6 +19,24 @@ export const taskRelatedTypeSchema = z.enum(taskRelatedTypes);
 // ============================================================================
 // Task Schemas
 // ============================================================================
+//
+// `completionEvent` IS ABSENT FROM BOTH SCHEMAS, AND ITS ABSENCE IS THE FIX
+// (#323 WS1, from #162). The column exists and `tasks/events.ts` writes it —
+// on the ONE row it owns, the meeting evaluation task. Neither `createTask`
+// nor `updateTask` ever read the parsed field, so accepting it from a form was
+// dead weight with a live edge: `tasks_meeting_evaluation_unique_idx` is
+// partial on `completion_event = 'meeting.evaluation.completed'` and keyed on
+// (church_id, related_id) ALONE, while the guard that reads it also demands
+// `related_type = 'meeting'`. A task posted with that completion event, a
+// meeting's id as `relatedId` and `relatedType: 'person'` therefore occupied
+// the index slot while remaining invisible to the guard — the real INSERT then
+// failed on that index, was classified as a benign lost race, and the meeting
+// finalized with zero follow-up tasks, permanently.
+//
+// So the field the form could not use is the field the form no longer has. Do
+// not re-add it to reach the column: an auto-completion hook is a decision the
+// generator makes, never a value a client posts. `tasks.test.ts` fails if it
+// comes back.
 
 export const taskCreateSchema = z.object({
   title: z
@@ -36,7 +54,6 @@ export const taskCreateSchema = z.object({
   relatedType: taskRelatedTypeSchema.optional(),
   relatedId: z.string().uuid().optional().or(z.literal("")),
   parentTaskId: z.string().uuid().optional().or(z.literal("")),
-  completionEvent: z.string().max(100).optional(),
 });
 
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
@@ -58,7 +75,6 @@ export const taskUpdateSchema = z.object({
   relatedType: taskRelatedTypeSchema.nullish(),
   relatedId: z.string().uuid().nullish(),
   parentTaskId: z.string().uuid().nullish(),
-  completionEvent: z.string().max(100).nullish(),
 });
 
 export type TaskUpdateInput = z.infer<typeof taskUpdateSchema>;

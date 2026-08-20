@@ -137,7 +137,7 @@ function fourMetrics(): TrendMetric[] {
     }),
     trendMetric({
       key: "follow_up_completion",
-      label: "Follow-up completion",
+      label: "First-time follow-up completion",
       unit: "rate",
       value: 0.8,
       reading: "8 of 10 open contacts touched within 14 days",
@@ -271,7 +271,7 @@ test("a reading older than the card's as-of date says which day it is from", () 
   // to date its own number or the header speaks for a reading it did not make.
   const stale = trendMetric({
     key: "follow_up_completion",
-    label: "Follow-up completion",
+    label: "First-time follow-up completion",
     unit: "rate",
     value: 0.8,
     valueAt: new Date("2026-05-15T00:00:00.000Z"),

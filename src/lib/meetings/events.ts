@@ -21,16 +21,32 @@ export interface MeetingAttendanceRecordedEvent {
 }
 
 /**
+ * One person who was in the room, and WHICH KIND of attendance that was.
+ *
+ * The pair travels together because every subscriber that acts on an attendee
+ * acts on the kind: VM-007 gives a follow-up task to first-timers and to nobody
+ * else (#323 WS2). Two parallel lists — ids here, first-timer ids beside them —
+ * would be two things to keep in step; `attendance_type` is derived once, when
+ * the register is marked (`meetings/attendance-type.ts`), and read from the
+ * row. `null` is a row written before the derivation shipped: unknown, not
+ * first-time.
+ */
+export interface FinalizedAttendee {
+  personId: string;
+  attendanceType: AttendanceType | null;
+}
+
+/**
  * Event payload for meeting.attendance.finalized
  * Emitted once when all attendance is finalized for a meeting.
- * F5 (Task Management) subscribes to create follow-up tasks for all attendees.
+ * F5 (Task Management) subscribes to create the follow-up + evaluation tasks.
  */
 export interface MeetingAttendanceFinalizedEvent {
   type: "meeting.attendance.finalized";
   meetingId: string;
   meetingType: MeetingType;
   churchId: string;
-  attendeeIds: string[];
+  attendees: FinalizedAttendee[];
   totalAttendance: number;
   timestamp: Date;
 }
@@ -103,7 +119,7 @@ export async function emitAttendanceFinalized(
   meetingId: string,
   meetingType: MeetingType,
   churchId: string,
-  attendeeIds: string[],
+  attendees: FinalizedAttendee[],
   totalAttendance: number
 ): Promise<void> {
   await eventBus.emit<MeetingAttendanceFinalizedEvent>(
@@ -112,7 +128,7 @@ export async function emitAttendanceFinalized(
       meetingId,
       meetingType,
       churchId,
-      attendeeIds,
+      attendees,
       totalAttendance,
       timestamp: new Date(),
     },

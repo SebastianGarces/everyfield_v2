@@ -5,6 +5,8 @@ import {
   bulkRescheduleSchema,
   bulkTaskIdsSchema,
   isCalendarDate,
+  taskCreateSchema,
+  taskUpdateSchema,
 } from "./tasks";
 import { MAX_BULK_TASKS } from "@/lib/tasks/types";
 
@@ -104,4 +106,48 @@ test("bulkTaskIdsSchema caps the selection at MAX_BULK_TASKS", () => {
 
 test("bulkTaskIdsSchema rejects a non-uuid id", () => {
   assert.equal(bulkTaskIdsSchema.safeParse(["not-a-uuid"]).success, false);
+});
+
+// ----------------------------------------------------------------------------
+// The follow-up suppression vector (#323 WS1, from #162).
+//
+// `tasks_meeting_evaluation_unique_idx` is partial on
+// `completion_event = 'meeting.evaluation.completed'` and keyed on
+// (church_id, related_id) alone; the guard in `handleMeetingAttendanceFinalized`
+// additionally demands `related_type = 'meeting'`. A task a planter could POST
+// with that completion event, a meeting's id and `relatedType: 'person'` sat in
+// the index slot unseen by the guard, so the real generation INSERT failed
+// 23505, was read as a benign lost race, and the meeting finalized with no
+// follow-up tasks at all.
+//
+// The route taken: DELETE THE DEAD FIELD (the issue's other option was widening
+// the index predicate, which is a migration). Nothing ever read the parsed
+// value, so this closes the vector at the boundary rather than behind it —
+// there is no longer any client-reachable way to write `completion_event`.
+// ----------------------------------------------------------------------------
+
+const MEETING_ID = "33333333-3333-4333-8333-333333333333";
+
+test("taskCreateSchema cannot carry a completionEvent", () => {
+  const parsed = taskCreateSchema.parse({
+    title: "Crafted",
+    relatedType: "person",
+    relatedId: MEETING_ID,
+    completionEvent: "meeting.evaluation.completed",
+  });
+
+  assert.equal(
+    "completionEvent" in parsed,
+    false,
+    "a posted completion event must not survive the parse — it is how the index slot was stolen"
+  );
+});
+
+test("taskUpdateSchema cannot carry a completionEvent either", () => {
+  const parsed = taskUpdateSchema.parse({
+    title: "Crafted",
+    completionEvent: "meeting.evaluation.completed",
+  });
+
+  assert.equal("completionEvent" in parsed, false);
 });

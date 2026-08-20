@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { createElement } from "react";
@@ -7,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AttendanceCapture,
   attendanceCheckboxLabel,
+  finalizeOutcomeMessage,
   guestFullName,
 } from "./attendance-capture";
 
@@ -63,7 +66,7 @@ function guest(overrides: Partial<Guest> & { id: string }): Guest {
   };
 }
 
-function renderCapture(guests: Guest[]): string {
+function renderCapture(guests: Guest[], finalized = false): string {
   return renderToStaticMarkup(
     createElement(AttendanceCapture, {
       meetingId: "meeting-1",
@@ -74,6 +77,7 @@ function renderCapture(guests: Guest[]): string {
         returning: 0,
         coreGroup: 0,
       },
+      finalized,
     })
   );
 }
@@ -274,5 +278,77 @@ test("the running attendance total is announced, not just repainted", () => {
       .replace(/\s+/g, " ")
       .trim(),
     "1 of 2 marked as attended"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// #323 WS3 (from #158) — the button used to say "Finalize Attendance" forever,
+// and reported the same silent success whatever the press actually did. A
+// planter who finalized Ann and Bob, spotted Cy, added him and pressed again got
+// a success and — before this issue — no follow-up task for Cy. Two things had
+// to change: the control has to say which job it is doing, and the outcome has
+// to say which job it did.
+// ----------------------------------------------------------------------------
+
+test("before a finalize the control offers to finalize", () => {
+  const html = renderCapture([
+    guest({ id: "1", attendanceStatus: "attended" }),
+  ]);
+
+  assert.ok(html.includes("Finalize Attendance"));
+  assert.equal(html.includes("Update Attendance"), false);
+});
+
+test("after a finalize the control offers to UPDATE, not to finalize again", () => {
+  const html = renderCapture(
+    [guest({ id: "1", attendanceStatus: "attended" })],
+    true
+  );
+
+  assert.ok(
+    html.includes("Update Attendance"),
+    "a second press reconciles the register; calling it Finalize hides that"
+  );
+  assert.equal(html.includes("Finalize Attendance"), false);
+});
+
+test("each outcome is reported as the different thing it is", () => {
+  const finalized = finalizeOutcomeMessage("finalized", 3);
+  const reconciled = finalizeOutcomeMessage("reconciled", 3);
+  const unchanged = finalizeOutcomeMessage("already_finalized", 3);
+
+  // Three distinct sentences: the bug was one success message for all three.
+  assert.equal(new Set([finalized, reconciled, unchanged]).size, 3);
+
+  // Each one carries the count it is talking about.
+  for (const message of [finalized, reconciled, unchanged]) {
+    assert.match(message, /3 attended/);
+  }
+
+  // The one that did nothing must not read as success.
+  assert.match(unchanged, /Nothing to update/);
+  assert.equal(/finalized:/.test(unchanged), false);
+
+  // The one that DID something for the late-added attendee says so.
+  assert.match(reconciled, /added since/);
+});
+
+test("the outcome is announced politely, not as an error", () => {
+  // It shares the region role with the running count, so a planter using a
+  // screen reader hears the result of their press without it interrupting.
+  const source = readFileSync(
+    path.join(process.cwd(), "src/components/meetings/attendance-capture.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /data-testid="finalize-outcome"/,
+    "the outcome line is addressable, so a browser check can assert on it"
+  );
+  assert.match(
+    source,
+    /\{finalizeOutcome && \(\s*<p\s+role="status"\s+aria-live="polite"/,
+    "the outcome is a polite status region, never an alert"
   );
 });

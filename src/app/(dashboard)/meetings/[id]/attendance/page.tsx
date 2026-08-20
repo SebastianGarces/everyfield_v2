@@ -43,6 +43,11 @@ export default async function AttendancePage({ params }: AttendancePageProps) {
       summary={summary}
       showResponseCards={meeting.type === "vision_meeting"}
       responseCards={responseCards}
+      // `actual_attendance` is written only by finalization, so a non-null
+      // value IS "this meeting has been finalized" (MEET-011). The control
+      // below says "Update" rather than "Finalize" once it is set, because a
+      // second press does a different job (#323 WS3).
+      finalized={meeting.actualAttendance !== null}
     />
   );
 }

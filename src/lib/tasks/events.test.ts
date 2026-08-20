@@ -6,7 +6,14 @@ import { test } from "node:test";
 import { isUniqueViolation } from "@/db/errors";
 import { sourceReader } from "@/lib/testing/source-span";
 
-import { TASKS_MEETING_EVALUATION_UNIQUE } from "./events";
+import type { FinalizedAttendee } from "@/lib/meetings/events";
+
+import {
+  TASKS_MEETING_EVALUATION_UNIQUE,
+  followUpDueDate,
+  followUpRecipients,
+  handleMeetingAttendanceFinalized,
+} from "./events";
 
 // ----------------------------------------------------------------------------
 // MEET-011 — two concurrent finalizes both pass the SELECT guard in
@@ -98,4 +105,83 @@ test("a violation of THIS index is the expected race outcome, and no other", () 
     false,
     "swallowing this would finalize a meeting whose tasks never landed"
   );
+});
+
+// ----------------------------------------------------------------------------
+// VM-007 (#323 WS2) — who gets a follow-up, and when it is due.
+//
+// Both rules are pure functions of the register, so they are read here without
+// a database. The end-to-end proof that the generated ROWS carry them is
+// `scripts/g3-followup-generation.ts`, which runs the real finalize against a
+// real database and reads the tasks back.
+// ----------------------------------------------------------------------------
+
+function attendee(
+  personId: string,
+  attendanceType: FinalizedAttendee["attendanceType"]
+): FinalizedAttendee {
+  return { personId, attendanceType };
+}
+
+test("a mixed register owes a follow-up to the first-timers alone", () => {
+  const register = [
+    attendee("ann", "first_time"),
+    attendee("bob", "returning"),
+    attendee("dee", "core_group"),
+    attendee("cy", "first_time"),
+    // A row written before `attendance_type` was derived: unknown, and unknown
+    // is not first-time.
+    attendee("eve", null),
+  ];
+
+  assert.deepEqual(followUpRecipients(register), ["ann", "cy"]);
+});
+
+test("a register with no first-timers owes no follow-ups at all", () => {
+  assert.deepEqual(
+    followUpRecipients([
+      attendee("bob", "returning"),
+      attendee("dee", "core_group"),
+    ]),
+    []
+  );
+});
+
+test("the follow-up window is anchored to the MEETING day, not to the finalize", () => {
+  // Sunday's meeting, finalized whenever: the task is due Tuesday either way.
+  const meetingDay = new Date("2026-08-16T19:30:00.000Z");
+
+  assert.equal(followUpDueDate(meetingDay), "2026-08-18");
+
+  // The anchoring is the point of VM-007 AC 7: a planter who finalizes late
+  // gets a task that is ALREADY DUE, because the window closed while the
+  // register sat unfinished. Nothing about `now` can move this value.
+  const lateFinalize = new Date("2026-08-20T14:00:00.000Z");
+  assert.ok(
+    followUpDueDate(meetingDay) < lateFinalize.toISOString().slice(0, 10),
+    "a meeting finalized four days later is due before the finalize"
+  );
+});
+
+test("the window is whole calendar days, so a late-evening meeting does not roll", () => {
+  assert.equal(
+    followUpDueDate(new Date("2026-08-16T23:59:00.000Z")),
+    "2026-08-18"
+  );
+  assert.equal(
+    followUpDueDate(new Date("2026-08-16T00:00:00.000Z")),
+    "2026-08-18"
+  );
+});
+
+test("a non-vision meeting generates nothing — and reaches no query to find out", async () => {
+  // The type guard is the FIRST statement of the handler, so this resolves
+  // without a database. That is what is being asserted: under `pnpm test:ci`
+  // the DATABASE_URL is a placeholder that no query can reach, so a handler
+  // that had started reading would reject here instead of resolving.
+  for (const type of ["team_meeting", "orientation", "training"]) {
+    await handleMeetingAttendanceFinalized("meeting-1", type, "church-1", [
+      attendee("ann", "first_time"),
+    ]);
+  }
 });

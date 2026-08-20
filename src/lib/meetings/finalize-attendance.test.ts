@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { AttendanceType, MeetingType } from "@/db/schema";
 
+import type { FinalizedAttendee } from "./events";
 import {
   FinalizeAttendanceError,
   runFinalizeAttendance,
@@ -16,13 +17,23 @@ import {
 // built from ordering + idempotency (see the block comment above
 // `finalizeAttendance` in service.ts). These tests drive the orchestration
 // through its injectable seam and assert the ordering holds: nothing is marked
-// finalized unless every downstream step succeeded, and a replay never
-// re-emits.
+// finalized unless every downstream step succeeded.
+//
+// WHAT CHANGED WITH #323 WS3, and why the old assertions were the bug. This
+// suite used to pin "a replay never re-emits": an already-finalized meeting
+// updated its visible count and ran nothing downstream. That is exactly how a
+// planter who finalized Ann and Bob, then noticed Cy in the room and added him,
+// got a success and no follow-up task for Cy. Re-emission is now the CONTRACT,
+// and the no-duplicate guarantee moved to where it can actually be kept — the
+// handler, which writes only what the meeting is still owed
+// (`tasks/events.test.ts`). What this suite still owns is the ORDERING:
+// downstream first, the marker after, and a downstream failure leaves the
+// stored count untouched.
 // ----------------------------------------------------------------------------
 
 type Call =
   | { kind: "recorded"; personId: string; attendanceType?: AttendanceType }
-  | { kind: "finalized"; attendeeIds: string[]; total: number }
+  | { kind: "finalized"; attendees: FinalizedAttendee[]; total: number }
   | { kind: "commit"; total: number }
   | { kind: "reconcile"; total: number };
 
@@ -63,11 +74,11 @@ function makeHarness(options: {
       }
       calls.push({ kind: "recorded", personId, attendanceType });
     },
-    async emitFinalized(_meetingType, attendeeIds, total) {
+    async emitFinalized(_meetingType, attendees, total) {
       if (options.failFinalized) {
         throw new Error("follow-up task generation failed");
       }
-      calls.push({ kind: "finalized", attendeeIds, total });
+      calls.push({ kind: "finalized", attendees, total });
     },
     async commitFinalized(total) {
       calls.push({ kind: "commit", total });
@@ -114,7 +125,7 @@ test("a normal finalize records the count and generates follow-ups", async () =>
     { kind: "recorded", personId: "person-3", attendanceType: undefined },
     {
       kind: "finalized",
-      attendeeIds: ["person-1", "person-2", "person-3"],
+      attendees: ATTENDED,
       total: 3,
     },
     { kind: "commit", total: 3 },
@@ -130,7 +141,7 @@ test("finalizing a meeting nobody attended still generates the evaluation follow
   assert.equal(result.total, 0);
   assert.equal(h.storedAttendance(), 0);
   assert.deepEqual(h.calls, [
-    { kind: "finalized", attendeeIds: [], total: 0 },
+    { kind: "finalized", attendees: [], total: 0 },
     { kind: "commit", total: 0 },
   ]);
 });
@@ -149,7 +160,7 @@ test("a failing follow-up step leaves the meeting in its pre-finalized state", a
         error instanceof FinalizeAttendanceError,
         "expected a FinalizeAttendanceError"
       );
-      assert.match(error.message, /un-finalized/);
+      assert.match(error.message, /count was left alone/);
       assert.ok(error.cause instanceof Error, "expected the cause preserved");
       return true;
     }
@@ -209,36 +220,80 @@ test("retrying after a downstream failure rolls fully forward", async () => {
 // Idempotency: re-running never duplicates follow-ups or events
 // ----------------------------------------------------------------------------
 
-test("re-running finalize on an unchanged meeting emits nothing", async () => {
+test("re-running finalize on an unchanged meeting re-runs downstream and moves no marker", async () => {
   const h = makeHarness({ attended: ATTENDED, actualAttendance: 3 });
 
   const result = await runFinalizeAttendance(h.deps);
 
   assert.equal(result.outcome, "already_finalized");
   assert.equal(result.total, 3);
-  assert.deepEqual(h.calls, [], "a replay must not re-emit any event");
   assert.equal(h.storedAttendance(), 3);
+
+  // Downstream runs — it is convergent, so a replay writes nothing — and the
+  // count is neither re-committed nor pointlessly rewritten.
+  assert.deepEqual(
+    h.calls.map((c) => c.kind),
+    ["recorded", "recorded", "recorded", "finalized"]
+  );
 });
 
-test("re-running after attendance was edited reconciles the count without re-emitting", async () => {
+test("re-running after a LATE ADDITION reaches the generator with the new attendee", async () => {
+  // The #158 sequence: Ann and Bob were finalized, then Cy was added. The
+  // planter presses the button again; Cy must reach the follow-up generator.
   const h = makeHarness({
-    attended: ATTENDED.slice(0, 2),
-    actualAttendance: 3,
+    attended: [
+      { personId: "ann", attendanceType: "returning" },
+      { personId: "bob", attendanceType: "returning" },
+      { personId: "cy", attendanceType: "first_time" },
+    ],
+    actualAttendance: 2,
   });
 
   const result = await runFinalizeAttendance(h.deps);
 
   assert.equal(result.outcome, "reconciled");
-  assert.equal(result.total, 2);
-  assert.equal(h.storedAttendance(), 2);
+  assert.equal(result.total, 3);
+  assert.equal(h.storedAttendance(), 3);
+
+  const finalized = h.calls.find((c) => c.kind === "finalized");
+  assert.ok(finalized, "the generator must be reached on a reconcile");
   assert.deepEqual(
-    h.calls,
-    [{ kind: "reconcile", total: 2 }],
-    "reconciling must not duplicate follow-up tasks or events"
+    finalized.attendees.map((a) => a.personId),
+    ["ann", "bob", "cy"],
+    "the whole register is handed over; the generator writes only what is missing"
+  );
+
+  // And the count is refreshed AFTER generation, never before.
+  assert.deepEqual(
+    h.calls.map((c) => c.kind),
+    ["recorded", "recorded", "recorded", "finalized", "reconcile"]
   );
 });
 
-test("running finalize twice in a row emits exactly one finalized event", async () => {
+test("re-running when the COUNT did not move still reaches the generator", async () => {
+  // The twin of the bug above, one step further in: swap one attendee for
+  // another and `actual_attendance` never changes. Gating downstream on the
+  // count would drop the new person exactly as gating on the marker did.
+  const h = makeHarness({
+    attended: [
+      { personId: "ann", attendanceType: "returning" },
+      { personId: "cy", attendanceType: "first_time" },
+    ],
+    actualAttendance: 2,
+  });
+
+  const result = await runFinalizeAttendance(h.deps);
+
+  assert.equal(result.outcome, "already_finalized");
+  const finalized = h.calls.find((c) => c.kind === "finalized");
+  assert.ok(finalized);
+  assert.deepEqual(
+    finalized.attendees.map((a) => a.personId),
+    ["ann", "cy"]
+  );
+});
+
+test("running finalize twice in a row commits the marker exactly once", async () => {
   const calls: Call[] = [];
   let stored: number | null = null;
 
@@ -252,8 +307,8 @@ test("running finalize twice in a row emits exactly one finalized event", async 
     async emitRecorded(_t, personId, attendanceType) {
       calls.push({ kind: "recorded", personId, attendanceType });
     },
-    async emitFinalized(_t, attendeeIds, total) {
-      calls.push({ kind: "finalized", attendeeIds, total });
+    async emitFinalized(_t, attendees, total) {
+      calls.push({ kind: "finalized", attendees, total });
     },
     async commitFinalized(total) {
       calls.push({ kind: "commit", total });
@@ -270,11 +325,19 @@ test("running finalize twice in a row emits exactly one finalized event", async 
   await runFinalizeAttendance(deps);
 
   assert.equal(
-    calls.filter((c) => c.kind === "finalized").length,
+    calls.filter((c) => c.kind === "commit").length,
     1,
-    "the second run must not re-emit meeting.attendance.finalized"
+    "the marker is claimed once; the second run has nothing to claim"
   );
-  assert.equal(calls.filter((c) => c.kind === "recorded").length, 3);
+  assert.equal(
+    calls.filter((c) => c.kind === "reconcile").length,
+    0,
+    "the count did not move, so it is not rewritten"
+  );
+  // The event fires on both passes. That is the point of #323 WS3 — what stops
+  // a duplicate is the generator, not a skipped emit.
+  assert.equal(calls.filter((c) => c.kind === "finalized").length, 2);
+  assert.equal(calls.filter((c) => c.kind === "recorded").length, 6);
   assert.equal(stored, 3);
 });
 

@@ -118,8 +118,10 @@ export function registerSubscriptions(bus: EventBusLike): void {
   // F3 (Meetings) -> F5 (Task Management)
   // --------------------------------------------------------------------------
 
-  // When attendance is finalized for a vision meeting, create follow-up tasks
-  // for all attendees (48h due) and a meeting evaluation task (24h due).
+  // When attendance is finalized for a vision meeting, create a follow-up task
+  // for each FIRST-TIME attendee (due the meeting day + 2, VM-007) and one
+  // meeting evaluation task (24h due). Re-emitted on a reconcile, where the
+  // handler tops up whatever is missing rather than starting again.
   bus.on<MeetingAttendanceFinalizedEvent>(
     "meeting.attendance.finalized",
     async (event) => {
@@ -127,7 +129,7 @@ export function registerSubscriptions(bus: EventBusLike): void {
         event.meetingId,
         event.meetingType,
         event.churchId,
-        event.attendeeIds
+        event.attendees
       );
     }
   );

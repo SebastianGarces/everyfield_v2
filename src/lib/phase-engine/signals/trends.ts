@@ -310,9 +310,20 @@ const TREND_METRIC_DEFINITIONS: readonly TrendMetricDefinition[] = [
     reading: () => null,
   },
   {
+    // THE DENOMINATOR IS FIRST-TIMERS, AND THE LABEL SAYS SO (#323 WS2).
+    // `followUpOpenCount` counts people in the three open follow-up statuses
+    // (attendee / following_up / interviewed), and the only way into that
+    // cohort is `prospect -> attendee` on a vision meeting — which by
+    // derivation is a person's FIRST one (`meetings/attendance-type.ts`). So
+    // the cohort was always the first-timers; what changed is that VM-007 now
+    // generates a follow-up task for exactly that cohort and nobody else, so
+    // the rate and the work it measures finally name the same people. A label
+    // reading plain "Follow-up completion" invited the planter to read it as
+    // "of everyone I mean to follow up", which is a wider set than anything
+    // here counts.
     key: "follow_up_completion",
-    label: "Follow-up completion",
-    description: "Open follow-up contacts reached inside the follow-up window.",
+    label: "First-time follow-up completion",
+    description: "First-time attendees still open, reached inside the window.",
     unit: "rate",
     higherIsBetter: true,
     fields: [

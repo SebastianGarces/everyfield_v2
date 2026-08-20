@@ -53,6 +53,7 @@ import {
   deleteMeeting,
   finalizeAttendance,
   FinalizeAttendanceError,
+  type FinalizeAttendanceResult,
   recordAttendanceBatch,
   removeAttendee,
   updateChecklistItem,
@@ -531,13 +532,19 @@ export async function removeAttendeeAction(
  *
  * `finalizeAttendance` is idempotent and never leaves a meeting half-finalized
  * (see the block comment above it in `src/lib/meetings/service.ts`), so this
- * action is safe to retry: a repeat click reconciles the count at most, and a
- * downstream failure leaves the meeting un-finalized with a message that says
- * so rather than a generic error.
+ * action is safe to retry: a repeat click tops up whatever the meeting is still
+ * owed, and a downstream failure leaves the count alone with a message that
+ * says so rather than a generic error.
+ *
+ * THE OUTCOME IS RETURNED, NOT DISCARDED (#323 WS3). The three outcomes are
+ * three different things to tell a planter, and the button that produces them
+ * used to report the same silent success for all three — including the one
+ * where their late-added attendee got nothing. The caller renders the
+ * difference.
  */
 export async function finalizeAttendanceAction(
   meetingId: string
-): Promise<ActionResult<void>> {
+): Promise<ActionResult<FinalizeAttendanceResult>> {
   try {
     const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
@@ -546,10 +553,10 @@ export async function finalizeAttendanceAction(
         error: "You must be associated with a church to finalize attendance",
       };
 
-    await finalizeAttendance(user.churchId, meetingId);
+    const result = await finalizeAttendance(user.churchId, meetingId);
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
-    return { success: true, data: undefined };
+    return { success: true, data: result };
   } catch (error) {
     console.error("finalizeAttendanceAction error:", error);
     if (error instanceof Error && error.message === "Unauthorized")
