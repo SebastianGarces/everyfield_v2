@@ -310,7 +310,7 @@ test("the removal takes a church id and derives everything else from the session
   assert.match(remove, /churchIdSchema\.safeParse\(churchId\)/);
   assert.match(
     remove,
-    /const actor = invitationActorFromSession\(await verifySession\(\)\);/
+    /const actor = invitationActorFromSession\(\s*await requireSeat\("[\w.]+"\)\s*\);/
   );
 
   // The org, its kind and the actor are NOT parameters — that is the rule from

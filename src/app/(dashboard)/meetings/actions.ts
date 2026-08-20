@@ -1,5 +1,6 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -20,6 +21,7 @@ import {
   updateRsvpStatus,
 } from "@/lib/meetings/guest-list";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
+import type { AgendaSaveResult, AgendaSection } from "@/lib/meetings/agenda";
 import type {
   ChurchMeeting,
   Location,
@@ -28,8 +30,8 @@ import type {
   MeetingEvaluation,
 } from "@/db/schema";
 import type { ResponseStatus } from "@/db/schema/meetings";
-import { verifySession } from "@/lib/auth/session";
 import { createPerson } from "@/lib/people/service";
+import { setMeetingAgenda } from "@/lib/meetings/service";
 import {
   attendanceCreateSchema,
   attendanceBatchSchema,
@@ -63,7 +65,7 @@ import {
   recordMeetingResponse,
 } from "@/lib/meetings/response-queries";
 import type { ActionResult } from "@/lib/meetings/types";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 /**
@@ -120,7 +122,7 @@ export async function createMeetingAction(
   let meetingId: string;
 
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
 
     if (!user.churchId) {
       return {
@@ -166,7 +168,7 @@ export async function updateMeetingAction(
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
 
     if (!user.churchId) {
       return {
@@ -216,7 +218,7 @@ export async function deleteMeetingAction(
   meetingId: string
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
 
     if (!user.churchId) {
       return {
@@ -252,7 +254,7 @@ export async function updateMeetingStatusAction(
   newStatus: string
 ): Promise<ActionResult<ChurchMeeting>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
 
     if (!user.churchId) {
       return {
@@ -301,7 +303,7 @@ export async function createLocationAction(
   formData: FormData
 ): Promise<ActionResult<Location>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -340,7 +342,7 @@ export async function updateLocationAction(
   formData: FormData
 ): Promise<ActionResult<Location>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -394,7 +396,7 @@ export async function addAttendeeAction(
   formData: FormData
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -434,7 +436,7 @@ export async function quickAddAttendeeAction(
   formData: FormData
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -495,7 +497,7 @@ export async function removeAttendeeAction(
   personId: string
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -537,7 +539,7 @@ export async function finalizeAttendanceAction(
   meetingId: string
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -570,7 +572,7 @@ export async function recordAttendanceBatchAction(
   records: { personId: string; status: "attended" | "absent" | "excused" }[]
 ): Promise<ActionResult<void>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -612,7 +614,7 @@ export async function createEvaluationAction(
   formData: FormData
 ): Promise<ActionResult<MeetingEvaluation>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId)
       return {
         success: false,
@@ -662,7 +664,7 @@ export async function toggleChecklistItemAction(
   isChecked: boolean
 ): Promise<ActionResult<MeetingChecklistItem>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "Unauthorized" };
 
     const item = await updateChecklistItem(user.churchId, itemId, {
@@ -683,7 +685,7 @@ export async function updateChecklistItemAction(
   formData: FormData
 ): Promise<ActionResult<MeetingChecklistItem>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "Unauthorized" };
 
     const rawData = formDataToObject(formData);
@@ -719,7 +721,7 @@ export async function addToGuestListAction(
   personId: string
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     const record = await addToGuestList(
@@ -741,7 +743,7 @@ export async function removeFromGuestListAction(
   personId: string
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     await removeFromGuestList(user.churchId, meetingId, personId);
@@ -759,7 +761,7 @@ export async function updateRsvpStatusAction(
   status: string
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     if (!responseStatuses.includes(status as ResponseStatus)) {
@@ -784,7 +786,7 @@ export async function quickAddPersonToGuestListAction(
   formData: FormData
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     const firstName = (formData.get("firstName") as string)?.trim();
@@ -837,7 +839,7 @@ export async function toggleAttendanceStatusAction(
   attended: boolean
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     // Only set attendance_type when marking attended; clear it when un-marking.
@@ -876,7 +878,7 @@ export async function addWalkInAttendeeAction(
   personId: string
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     const record = await addToGuestList(
@@ -913,7 +915,7 @@ export async function quickAddWalkInAction(
   formData: FormData
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     const firstName = (formData.get("firstName") as string)?.trim();
@@ -982,7 +984,7 @@ export async function addAttendeeNoteAction(
   note: string
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     const trimmedNote = note.trim();
@@ -1035,7 +1037,7 @@ export async function recordResponseCardAction(
   meetingId: string,
   input: unknown
 ): Promise<ActionResult<null>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("meetings.write");
 
   try {
     if (!user.churchId) return { success: false, error: "No church" };
@@ -1074,7 +1076,7 @@ export async function clearResponseCardAction(
   meetingId: string,
   personId: string
 ): Promise<ActionResult<null>> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("meetings.write");
 
   try {
     if (!user.churchId) return { success: false, error: "No church" };
@@ -1088,4 +1090,41 @@ export async function clearResponseCardAction(
     console.error("clearResponseCardAction error:", error);
     return { success: false, error: "Failed to clear the response card" };
   }
+}
+
+/**
+ * Save this meeting's running order (VM-013).
+ *
+ * IT WAS AN INLINE `"use server"` CLOSURE in `meetings/[id]/page.tsx` (#498
+ * review). A function-level directive publishes a POST endpoint just as a
+ * module-level one does, but it is invisible to the export-walk that enforces
+ * the seat guard — so this write sat outside the auth surface that walk claims
+ * to cover. Here it is an export like every other meetings write, guarded the
+ * same way.
+ *
+ * It takes no actor — the church comes from the guard and `setMeetingAgenda`
+ * puts it in the `WHERE`, so a meeting id from another tenant matches nothing.
+ * `refresh()`, not `revalidatePath` (memory/contracts/data-patterns.md).
+ */
+export async function saveAgendaAction(
+  meetingId: string,
+  sections: AgendaSection[]
+): Promise<AgendaSaveResult> {
+  const { user } = await requireSeat("meetings.write");
+
+  if (!user.churchId) {
+    return { success: false, error: "This account has no church yet." };
+  }
+
+  try {
+    await setMeetingAgenda(user.churchId, meetingId, sections);
+  } catch {
+    return {
+      success: false,
+      error: "The agenda could not be saved. Try again.",
+    };
+  }
+
+  refresh();
+  return { success: true };
 }

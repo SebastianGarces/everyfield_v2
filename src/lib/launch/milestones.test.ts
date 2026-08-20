@@ -257,15 +257,17 @@ test("milestone completion follows TASK rules, not the planter-only rule", () =>
   // LS-007 splits them deliberately: the planter owns the DATE and the OUTCOME;
   // "milestone/task completion follows normal task rules", so a team member who
   // may tick a task may close the milestone it belongs to. What must NOT happen
-  // is oversight ticking a plant's readiness — `CHURCH_LEVEL_ROLES` is the line.
+  // is oversight ticking a plant's readiness, or a COACH doing it — and since
+  // #498 that line is the `launch.milestone` capability rather than
+  // `requireChurchLevel`, which admitted the coach (AS-008).
   const source = readFileSync(
     path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
     "utf8"
   );
-  assert.match(source, /requireChurchLevel\(user\)/);
+  assert.match(source, /assertSeatFor\(user, "launch\.milestone"\)/);
   assert.match(source, /await requireChurchAccess\(user, churchId\)/);
   assert.ok(
-    !/requirePlantOwner\(user\)/.test(source),
+    !/"launch\.schedule"/.test(source),
     "milestone completion must not be planter-only (LS-007)"
   );
 });

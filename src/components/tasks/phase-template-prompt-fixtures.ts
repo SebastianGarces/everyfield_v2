@@ -52,11 +52,17 @@ export const TRANSITIONED_AT = new Date("2026-03-02T09:15:00.000Z");
 /** The transition every fixture here is answering. */
 export const TRANSITION_ID = "22222222-2222-4222-8222-222222222222";
 
-/** The server module and the island, as source — three of the properties below
- *  are about what a `"use server"` closure or a `"use client"` module DOES, and
- *  neither can be called from a test process. */
+/** The panel, the island and the two ACTIONS, as source — several properties
+ *  below are about what a `"use client"` module or a server action DOES, and
+ *  neither can be called from a test process.
+ *
+ *  The actions moved out of the panel in #498's review: an inline `"use server"`
+ *  closure publishes a POST endpoint the seat-guard walk cannot see, so they are
+ *  a module of their own now and the assertions about them read THAT file. */
 export const PROMPT_SOURCE_PATH =
   "src/components/tasks/phase-template-prompt.tsx";
+export const PROMPT_ACTIONS_SOURCE_PATH =
+  "src/app/(dashboard)/tasks/phase-prompt-actions.ts";
 export const CONTROLS_SOURCE_PATH =
   "src/components/tasks/phase-template-prompt-controls.tsx";
 

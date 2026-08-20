@@ -13,10 +13,10 @@
 // the lookup re-asserts; a foreign uuid reads as missing.
 // ============================================================================
 
+import { requireSeat } from "@/lib/auth/seats";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import { getGeneratedDocumentDownloadUrl } from "@/lib/documents/service";
 
 const downloadInputSchema = z.strictObject({
@@ -26,7 +26,7 @@ const downloadInputSchema = z.strictObject({
 export async function getGeneratedDocumentDownloadUrlAction(
   input: unknown
 ): Promise<GeneratedDocumentDownloadResult> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
 
   const parsed = downloadInputSchema.safeParse(input);
   if (!parsed.success) {

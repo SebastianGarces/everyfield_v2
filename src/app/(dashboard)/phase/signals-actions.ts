@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { revalidatePath } from "next/cache";
 import { requireChurchAccess } from "@/lib/auth/access";
-import { verifySession } from "@/lib/auth/session";
 import {
   setManualSignalSchema,
   upsertManualSignal,
@@ -32,7 +32,7 @@ export async function setManualSignalAction(
   input: SetManualSignalInput
 ): Promise<ActionResult<{ signal: PlantSignal }>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("phase.signal");
 
     if (!user.churchId) {
       return {

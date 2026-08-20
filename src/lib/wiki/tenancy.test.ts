@@ -512,8 +512,12 @@ const WIKI_READ_CALL_SITES = [
   "src/app/(dashboard)/wiki/[...slug]/page.tsx",
   "src/app/(dashboard)/wiki/actions.ts",
   "src/app/api/wiki/article/route.ts",
-  "src/lib/wiki/bookmarks.ts",
-  "src/lib/wiki/progress.ts",
+  // The per-reader reads. They lived in `bookmarks.ts` / `progress.ts` until
+  // #498's review moved them out: those two are `"use server"` modules, and a
+  // guard that throws on a session-less caller has no business on `/wiki`'s
+  // render path (`wiki-read-graph.test.ts`). The two writers left behind
+  // resolve no articles, so there is no church for them to drop.
+  "src/lib/wiki/reads.ts",
   "src/components/phase-engine/insight-card.tsx",
 ];
 
@@ -568,7 +572,7 @@ test("the search action passes the session's church, never the query alone", () 
   );
   assert.match(
     code,
-    /const \{ user \} = await verifySession\(\);/,
+    /const \{ user \} = await requireSeat\("[\w.]+"\);/,
     "the church a search is scoped to must be read off the session, not taken as an argument"
   );
 
@@ -579,7 +583,7 @@ test("the search action passes the session's church, never the query alone", () 
   // minting below the guards would answer a malformed argument differently
   // from a well-formed one (#411).
   const body = code.slice(code.indexOf("export async function"));
-  const mint = body.indexOf("await verifySession()");
+  const mint = body.indexOf("await requireSeat(");
   assert.ok(mint !== -1, "the search action never mints an actor");
   assert.ok(
     mint < body.indexOf("try {"),

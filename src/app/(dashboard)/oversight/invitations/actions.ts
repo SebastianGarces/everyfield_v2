@@ -44,10 +44,10 @@
 // and the server is what reconciles it.
 // ============================================================================
 
+import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import {
   createInvitation,
   resendInvitationEmail,
@@ -190,7 +190,7 @@ export async function createInvitationAction(
   formData: FormData
 ): Promise<CreateInvitationState> {
   // SESSION FIRST — nothing on this FormData is read until a session exists.
-  await verifySession();
+  await requireSeat("org.invitation.manage");
 
   const parsed = createSchema.safeParse({
     inviteeEmail: formData.get("inviteeEmail") ?? "",
@@ -257,7 +257,7 @@ export async function resendInvitationEmailAction(
   // SESSION FIRST — see the module header; the service mints its own actor, and
   // this guard is what answers an anonymous POST before the parse can tell it
   // what shape the endpoint wants (ruled 2026-08-10, round 6 of #304).
-  await verifySession();
+  await requireSeat("org.invitation.manage");
 
   const parsed = resendSchema.safeParse({
     invitationId: formData.get("invitationId") ?? "",
@@ -315,7 +315,7 @@ export async function revokeInvitationAction(
   formData: FormData
 ): Promise<RevokeInvitationState> {
   // SESSION FIRST — see the module header; the service mints its own actor.
-  await verifySession();
+  await requireSeat("org.invitation.manage");
 
   const parsed = revokeSchema.safeParse({
     invitationId: formData.get("invitationId") ?? "",

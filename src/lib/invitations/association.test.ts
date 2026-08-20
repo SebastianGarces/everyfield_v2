@@ -239,7 +239,7 @@ test("the action takes a KIND, never a church or an org id", () => {
   // And every action in the module mints its actor from the session rather than
   // accepting one.
   const mints = ACTIONS_CODE.match(
-    /const actor = invitationActorFromSession\(await verifySession\(\)\);/g
+    /const actor = invitationActorFromSession\(\s*await requireSeat\("[\w.]+"\)\s*\);/g
   );
   assert.equal(
     mints?.length,

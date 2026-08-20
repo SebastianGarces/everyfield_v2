@@ -15,6 +15,7 @@ export async function reorderPipelineAction(
   orderedPersonIds: string[]
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "reorderPipelineAction",
     { fallback: "Failed to reorder pipeline" },
     async ({ churchId }) => {

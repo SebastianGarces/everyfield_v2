@@ -13,7 +13,8 @@
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat } from "@/lib/auth/seats";
+import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
@@ -27,6 +28,10 @@ export interface ChurchActor {
 }
 
 /**
+ * THE CAPABILITY IS THE FIRST ARGUMENT, so the guard is the first thing this
+ * shell does and, transitively, the first thing every team action does — ahead
+ * of the parse each of them runs inside `run` (#498).
+ *
  * Run a team action as the session's church actor — the ONE shell, one error
  * policy (ruling 409-6C, 2026-08-12): a thrown `ExpectedError` carries user
  * copy and its message is surfaced verbatim ("Person not found", "Training
@@ -35,18 +40,35 @@ export interface ChurchActor {
  * of the contract lives in `src/lib/ministry-teams/expected-error.ts`.
  */
 export async function withChurch<T>(
+  capability: Capability,
   fallbackError: string,
   run: (actor: ChurchActor) => Promise<ActionResult<T>>
 ): Promise<ActionResult<T>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat(capability);
     if (!user.churchId) {
       return { success: false, error: "No church associated" };
     }
     return await run({ churchId: user.churchId, userId: user.id });
   } catch (error) {
+    // A SESSIONLESS CALL THROWS, and it leaves through here rather than
+    // becoming a handled result — the same rule `withChurchSession` follows.
+    // Converting `Unauthorized` into `{ success: false, error: "You must be
+    // logged in" }` hands an anonymous caller a well-formed answer from an
+    // endpoint that should only ever have said no
+    // (`memory/invariants.md` → Authentication). It lands on
+    // `src/app/(dashboard)/error.tsx`, which offers a way back.
     if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in" };
+      throw error;
+    }
+    // An `instanceof` and not a message prefix: `requireChurchAccess` throws
+    // `Forbidden: …` too, so a prefix test quietly widens to every refusal that
+    // happens to open with the word, and a reword changes control flow.
+    if (error instanceof SeatRefusalError) {
+      return {
+        success: false,
+        error: "You do not have permission to do that in this church.",
+      };
     }
     if (error instanceof ExpectedError) {
       return { success: false, error: error.message };

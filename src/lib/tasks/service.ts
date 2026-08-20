@@ -8,6 +8,8 @@ import {
   type TaskStatus,
   type TaskCategory,
 } from "@/db/schema";
+import type { User } from "@/db/schema";
+import { SeatRefusalError, holdsSeatFor } from "@/lib/auth/seat-rules";
 import type { TaskCreateInput, TaskUpdateInput } from "@/lib/validations/tasks";
 import {
   and,
@@ -1057,15 +1059,62 @@ export async function createNextRecurrence(
  * a planter relies on; a completion with no successor leaves a gap that
  * reopening and re-completing the task repairs. We take the recoverable one.
  */
+
+// ----------------------------------------------------------------------------
+// The OWN-DUTY half of `tasks.own` (AS-006)
+// ----------------------------------------------------------------------------
+
+/**
+ * May this account act on THIS task?
+ *
+ * The seat guard on the action decides half of it — `tasks.own` requires a seat
+ * in the plant, which refuses a coach and an oversight account. This is the
+ * other half, and it needs the argument, so it cannot be asked before the parse:
+ * a Member may complete, reopen or restatus a task ASSIGNED TO THEM, and an
+ * Admin or Owner may do it to anybody's (`tasks.write`).
+ *
+ * IT IS ASKED IN THE SERVICE, after the row is loaded, so it holds for every
+ * caller rather than for the six actions somebody remembered. `/launch`'s
+ * milestone ticks reach `completeTask` and `reopenTask` too.
+ *
+ * `assignedToId` REFERENCES `users.id`, which is what makes this rule writable
+ * at all — the sibling own-duty verbs (`teams.own`, `meetings.rsvp`) name a
+ * PERSON and have no link back to an account until AS-013 lands, so their
+ * subject half is still an accepted residual.
+ */
+export function mayActOnTask(
+  actor: User,
+  task: Pick<Task, "assignedToId">
+): boolean {
+  return task.assignedToId === actor.id || holdsSeatFor(actor, "tasks.write");
+}
+
+/**
+ * {@link mayActOnTask}, refused loudly.
+ *
+ * The single-task paths want the throw — there is one subject and one answer.
+ * The BULK path wants the predicate instead: a press over a mixed selection
+ * turns each refused row into a named failure beside "Task is already complete"
+ * rather than losing the whole batch to the first task somebody else owns.
+ */
+export function assertMayActOnTask(
+  actor: User,
+  task: Pick<Task, "assignedToId">
+): void {
+  if (!mayActOnTask(actor, task)) throw new SeatRefusalError("tasks.own");
+}
+
 export async function completeTask(
   churchId: string,
   taskId: string,
-  userId: string
+  actor: User
 ): Promise<TaskCompletionResult> {
   const existing = await getTask(churchId, taskId);
   if (!existing) {
     throw new Error("Task not found");
   }
+
+  assertMayActOnTask(actor, existing);
 
   if (existing.status === "complete") {
     throw new Error("Task is already complete");
@@ -1083,7 +1132,7 @@ export async function completeTask(
     .set({
       status: "complete",
       completedAt,
-      completedById: userId,
+      completedById: actor.id,
       updatedAt: completedAt,
     })
     .where(
@@ -1113,7 +1162,7 @@ export async function completeTask(
     completed.category,
     completed.relatedType,
     completed.relatedId,
-    userId
+    actor.id
   );
 
   let nextInstance: Task | null = null;
@@ -1140,12 +1189,15 @@ export async function completeTask(
  */
 export async function reopenTask(
   churchId: string,
-  taskId: string
+  taskId: string,
+  actor: User
 ): Promise<Task> {
   const existing = await getTask(churchId, taskId);
   if (!existing) {
     throw new Error("Task not found");
   }
+
+  assertMayActOnTask(actor, existing);
 
   if (existing.status !== "complete") {
     throw new Error("Task is not complete");
@@ -1293,7 +1345,18 @@ export interface BulkTaskCandidate {
   category: TaskCategory | null;
   relatedType: string | null;
   relatedId: string | null;
+  /** The own-duty subject (AS-006). `users.id`, or null for an unassigned task. */
+  assignedToId: string | null;
 }
+
+/**
+ * What a Member is told about a task that is not theirs.
+ *
+ * It names the reason rather than saying "could not be completed": the row IS
+ * completable, by somebody else, and a press that reports nothing actionable
+ * teaches the planter to press again.
+ */
+export const NOT_YOUR_TASK_REASON = "That task is assigned to somebody else";
 
 /** What a bulk operation intends to do, before it touches anything. */
 export interface BulkTaskPlan {
@@ -1314,7 +1377,17 @@ export interface BulkTaskPlan {
 export function planBulkTaskOperation(
   requestedIds: string[],
   found: BulkTaskCandidate[],
-  options: { rejectCompleted?: boolean; completedReason?: string } = {}
+  options: {
+    rejectCompleted?: boolean;
+    completedReason?: string;
+    /**
+     * When given, a row this actor may not act on becomes a NAMED FAILURE
+     * rather than being silently written (AS-006). Eligibility already lives
+     * here — "already complete", "not found" — so the own-duty rule is decided
+     * in the same pure function rather than in a second loop beside it.
+     */
+    actor?: User;
+  } = {}
 ): BulkTaskPlan {
   const requested = [...new Set(requestedIds)];
   const byId = new Map(found.map((row) => [row.id, row]));
@@ -1335,6 +1408,15 @@ export function planBulkTaskOperation(
         taskId: id,
         title: row.title,
         reason: options.completedReason ?? "Task is already complete",
+      });
+      continue;
+    }
+
+    if (options.actor && !mayActOnTask(options.actor, row)) {
+      failures.push({
+        taskId: id,
+        title: row.title,
+        reason: NOT_YOUR_TASK_REASON,
       });
       continue;
     }
@@ -1424,6 +1506,7 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
         category: tasks.category,
         relatedType: tasks.relatedType,
         relatedId: tasks.relatedId,
+        assignedToId: tasks.assignedToId,
       })
       .from(tasks)
       .where(
@@ -1537,7 +1620,7 @@ function assertBulkSize(requested: string[]): void {
 export async function bulkCompleteTasks(
   churchId: string,
   taskIds: string[],
-  userId: string,
+  actor: User,
   deps: BulkTaskDeps = defaultBulkTaskDeps
 ): Promise<BulkTaskResult> {
   const requested = [...new Set(taskIds)];
@@ -1545,8 +1628,12 @@ export async function bulkCompleteTasks(
   assertBulkSize(requested);
 
   const found = await deps.loadCandidates(churchId, requested);
+  // PER TASK, not once for the press: a Member ticking eight rows may own three
+  // of them, and the other five come back named rather than taking the batch
+  // down or being written anyway (AS-006).
   const plan = planBulkTaskOperation(requested, found, {
     rejectCompleted: true,
+    actor,
   });
 
   let writtenIds: string[] = [];
@@ -1559,7 +1646,7 @@ export async function bulkCompleteTasks(
       writtenIds = await deps.completeMany(
         churchId,
         plan.actionable.map((row) => row.id),
-        userId
+        actor.id
       );
     } catch (error) {
       console.error("bulkCompleteTasks write failed:", error);
@@ -1599,7 +1686,7 @@ export async function bulkCompleteTasks(
   // One event per completed task, emitted one at a time (see header note).
   for (const task of written) {
     try {
-      await deps.emitCompleted(task, userId);
+      await deps.emitCompleted(task, actor.id);
       result.eventsEmitted += 1;
     } catch (error) {
       // The write already landed — a failed emit degrades downstream

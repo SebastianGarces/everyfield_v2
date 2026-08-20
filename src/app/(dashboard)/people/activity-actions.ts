@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { db } from "@/db";
 import { personActivities } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
 import { getActivities, logPersonActivity } from "@/lib/people/activity";
 import { assertPersonInChurch } from "@/lib/people/service";
 import type { ActionResult } from "@/lib/people/types";
@@ -20,6 +20,7 @@ export async function addNoteAction(
   note: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "addNoteAction",
     {
       fallback: "Failed to add note",
@@ -59,6 +60,7 @@ export async function deleteNoteAction(
   activityId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "deleteNoteAction",
     { fallback: "Failed to delete note" },
     async ({ user, churchId }) => {
@@ -95,7 +97,7 @@ export async function deleteNoteAction(
  * Fetch more activities for pagination
  */
 export async function getMoreActivitiesAction(personId: string, cursor: Date) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
   if (!user.churchId) throw new Error("Unauthorized");
   return getActivities(user.churchId, personId, { cursor, limit: 10 });
 }

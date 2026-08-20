@@ -31,6 +31,21 @@
 import type { MeetingType } from "@/db/schema";
 
 /**
+ * What the save action reports back. Never throws at the component.
+ *
+ * IT LIVES HERE AND NOT ON THE COMPONENT because both sides of the boundary
+ * name it: `saveAgendaAction` (`"use server"`) returns it and `AgendaBuilder`
+ * (`"use client"`) consumes it. It used to be declared on the builder, which
+ * made an action module import a type from a client component — erased at
+ * compile time, so harmless to the bundle, and backwards to read: the endpoint
+ * is not downstream of the button. This module is already the shared leaf the
+ * two halves meet in.
+ */
+export type AgendaSaveResult =
+  | { success: true }
+  | { success: false; error: string };
+
+/**
  * One line of a meeting's running order.
  *
  * The agenda lives in `church_meetings.agenda`, a `jsonb` column typed

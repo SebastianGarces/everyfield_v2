@@ -102,3 +102,61 @@ before they could be repaired, so it is not in 0050. The state therefore stays r
 every reader fails closed on it — including the notifications audience, which reaches such a row on
 the FK alone and COUNTS it as misprovisioned rather than dropping it silently inside a `WHERE`.
 Retired by adding that CHECK once no writer can produce one.
+
+## What the seat DECIDES, once #498 landed
+
+`getAccessibleChurchIds` answers what a tenancy REACHES. `@/lib/auth/seats`
+answers what a seat may DO there, and the two are deliberately separate: an org
+Member reads the same portfolio as its Owner (ruling 185 (3)), so the reach
+never branches on the seat.
+
+**Why the table carries a tenancy column.** `seat = 'owner'` says nothing about
+whose owner, so a capability names a seat set AND a tenancy requirement, and the
+three composite predicates the readers spell by hand fall out of it:
+`OWNER_ONLY + "plant"` is `isPlantOwner`, `OWNER_ONLY + "oversight"` is
+`isOrgOwner`, `OWNER_ONLY + "church-level"` is `isChurchLevelOwner`. Those three
+stay in `tenancy.ts` as the READ side — a page deciding what to render — and the
+guard derives the same rule from the sets rather than importing them, so there
+is one declaration of each half and no second spelling of the pair.
+
+**Three things are not in either set, and each is marked rather than parked in
+`ADMIN_PLUS`:**
+
+- `seats: SEATED` — an own-duty verb (AS-006). The seat half refuses a coach
+  (NULL seat) and an oversight account; the SUBJECT half needs the argument, so
+  it belongs after the parse. **`tasks.own` is the only one that ships**, and the
+  reason is a column: `tasks.assigned_to_id` references `users.id`, so
+  `assertMayActOnTask` can ask "is this yours?" once the row is loaded. It runs
+  in the SERVICE rather than in the six actions, so `/launch`'s milestone ticks
+  are covered too, and `planBulkTaskOperation` applies it PER ROW — a Member
+  ticking eight tasks writes the ones they own and gets the rest back named.
+
+  The first round shipped `teams.own` and `meetings.rsvp` the same way and that
+  was WRONG, in the direction a capability name hides: `ministry_teams.leader_id`
+  and the meeting guest list reference `persons.id`, nothing links a person row
+  to an account, and so those two had a floor with nothing above it — every
+  Member in the plant reaching every team and every RSVP, which is wider than
+  the `teams.write` it was replacing. They are `teams.write` / `meetings.write`
+  now: narrower than AS-006 describes, and a team leader holding only a Member
+  seat cannot yet make their team's writes. That is the residual in
+  [`../invariants.md`](../invariants.md), retired by AS-013's person link.
+
+- `seats: null` — a session is the whole rule. A read, or a write whose row is
+  keyed by the caller's own user id. A coach and an org Member reach these ON
+  PURPOSE (AS-007, AS-008), which is the answer a per-module matrix would have
+  got wrong in at least one module.
+- `church.claim` — the OB-010 answer, which GRANTS a seat rather than spending
+  one. Its ruled `{owner, member}` pair (no `admin`) stays in
+  `onboarding/leadership.ts`; putting it in a set here would make a grant look
+  like a permission and invite someone to "reconcile" the two.
+
+**What moved, and what deliberately did not.** Encoding the ruling narrowed some
+verbs and widened one. Narrowed: every feature-data write now refuses a plant
+Member, and a coach is refused every write including the launch milestone ticks
+that `requireChurchLevel` used to admit them to. Widened: the church profile
+(`setChurchTimeZoneAction`) went from Owner-only to `ADMIN_PLUS`, which is AS-004
+verbatim. Unchanged on purpose: the phase declaration stays the planter's under
+the phase engine's own rule, and the seven `isOrgOwner` arms in
+`invitations/core.ts` stay Owner-only — the ruling's list names the association
+verbs, and those arms are the argument-side half of the same rule, reached only
+after the endpoint's own `requireSeat` has already refused everyone else.

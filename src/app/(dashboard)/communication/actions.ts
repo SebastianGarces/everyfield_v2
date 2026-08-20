@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { verifySession } from "@/lib/auth/session";
 import {
   sendCommunication,
   resendToNonOpeners,
@@ -27,7 +27,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export async function sendMessageAction(formData: FormData) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   const recipientIdsRaw = formData.get("recipientIds") as string;
@@ -73,7 +73,7 @@ export async function sendMessageAction(formData: FormData) {
  * argument (`memory/invariants.md` -> Authentication).
  */
 export async function resendToNonOpenersAction(communicationId: string) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   try {
@@ -107,7 +107,7 @@ export async function resendToNonOpenersAction(communicationId: string) {
  * silently truncated any group larger than its page size.
  */
 export async function resolveGroupAction(group: string) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
   if (!user.churchId) return { people: [] };
 
   const people = await getGroupRecipients(user.churchId, group);
@@ -119,7 +119,7 @@ export async function resolveGroupAction(group: string) {
 // ---------------------------------------------------------------------------
 
 export async function searchPeopleAction(query: string) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
   if (!user.churchId) return [];
 
   const { listPeople } = await import("@/lib/people/service");
@@ -142,14 +142,14 @@ export async function searchPeopleAction(query: string) {
 // ---------------------------------------------------------------------------
 
 export async function getTemplatesAction(filters?: TemplateFilters) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("read");
   if (!user.churchId) return [];
 
   return getTemplates(user.churchId, filters);
 }
 
 export async function createTemplateAction(input: CreateTemplateInput) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   const template = await createTemplate(user.churchId, input);
@@ -161,7 +161,7 @@ export async function updateTemplateAction(
   id: string,
   input: UpdateTemplateInput
 ) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   const template = await updateTemplate(id, user.churchId, input);
@@ -170,7 +170,7 @@ export async function updateTemplateAction(
 }
 
 export async function deleteTemplateAction(id: string) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   await deleteTemplate(id, user.churchId);
@@ -178,7 +178,7 @@ export async function deleteTemplateAction(id: string) {
 }
 
 export async function forkTemplateAction(systemTemplateId: string) {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("communication.send");
   if (!user.churchId) redirect("/dashboard");
 
   const fork = await forkTemplate(systemTemplateId, user.churchId);

@@ -42,6 +42,29 @@ export const TS_FILES: string[] = (function collect(dir: string): string[] {
 const CODE_CACHE = new Map<string, string>();
 
 /**
+ * Comments and string literals, matched in ONE left-to-right pass so that
+ * whichever opens first wins.
+ *
+ * TWO SEQUENTIAL `replace` CALLS GOT THIS WRONG, and the way it was wrong is
+ * the way a static guard is worst: it deleted code silently. Stripping block
+ * comments first meant a slash-star written INSIDE a line comment opened a
+ * block that ran to the next star-slash anywhere below. `launch/actions.ts` has
+ * one — a header
+ * bullet naming the path `src/lib/launch/*` — and it swallowed the file's
+ * entire import list plus the next docblock. Nothing failed: the mint walk was
+ * looking for a literal `verifySession()` that survived below the wreckage, and
+ * only #498's guard walk, which has to RESOLVE an import to see the guard,
+ * noticed the imports were gone. A module could have hidden an unguarded export
+ * the same way.
+ *
+ * String and template literals are matched too, and kept, so a `//` inside one
+ * is not a comment — the same reason `https://` never was (the `(^|\s)` anchor
+ * the old line pattern used).
+ */
+const COMMENT_OR_LITERAL =
+  /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
+
+/**
  * A module with its comments removed. Every assertion built on this is about
  * CODE: a file that explains a rule by naming the shape it forbids
  * (`respondingUser`, `db.`, `"use server"`) would otherwise trip the test that
@@ -51,9 +74,10 @@ export function codeOf(file: string): string {
   const cached = CODE_CACHE.get(file);
   if (cached !== undefined) return cached;
 
-  const code = readFileSync(file, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
+  const code = readFileSync(file, "utf8").replace(
+    COMMENT_OR_LITERAL,
+    (match, literal: string | undefined) => literal ?? ""
+  );
   CODE_CACHE.set(file, code);
   return code;
 }
@@ -346,7 +370,7 @@ export function importedBindings(
   return bindings;
 }
 
-const MINTING_EXPORTS = new Map<string, Set<string>>();
+const REACHING_EXPORTS = new Map<string, Set<string>>();
 
 /**
  * The names that MINT an actor when called from `file`: the two session reads,
@@ -366,18 +390,28 @@ const MINTING_EXPORTS = new Map<string, Set<string>>();
  * `stack` breaks import cycles: a module already being resolved contributes
  * nothing rather than recursing, which under-approximates (a cyclic mint would
  * be missed) and so fails CLOSED — the assertion complains rather than passing.
+ *
+ * IT IS PARAMETERISED BY ITS ROOTS because the seat guard asks the identical
+ * question of a different base case (#498): "which names reach `requireSeat`",
+ * where the answer has to follow the same three edges — a local helper, a
+ * domain's session envelope one module away (`withChurchSession`, `withChurch`,
+ * `requireChurchSession`), and a re-export. That is this walk exactly, and a
+ * second copy of it would be a second set of blind spots to keep in sync.
  */
-export function mintingNames(
+export function reachingNames(
   file: string,
   code: string,
+  roots: readonly string[],
   stack: ReadonlySet<string> = new Set()
 ): Set<string> {
-  const mints = new Set(SESSION_READS);
+  const reaching = new Set(roots);
 
   for (const [local, { module, original }] of importedBindings(file, code)) {
     if (stack.has(module)) continue;
-    if (mintingExportsOf(module, new Set([...stack, file])).has(original)) {
-      mints.add(local);
+    if (
+      reachingExportsOf(module, roots, new Set([...stack, file])).has(original)
+    ) {
+      reaching.add(local);
     }
   }
 
@@ -386,10 +420,10 @@ export function mintingNames(
   for (let pass = 0; pass <= bodies.length; pass++) {
     let grew = false;
     for (const fn of bodies) {
-      if (mints.has(fn.name)) continue;
-      for (const mint of mints) {
-        if (new RegExp(`\\b${mint}\\s*\\(`).test(fn.body)) {
-          mints.add(fn.name);
+      if (reaching.has(fn.name)) continue;
+      for (const root of reaching) {
+        if (new RegExp(`\\b${root}\\s*\\(`).test(fn.body)) {
+          reaching.add(fn.name);
           grew = true;
           break;
         }
@@ -398,28 +432,31 @@ export function mintingNames(
     if (!grew) break;
   }
 
-  return mints;
+  return reaching;
 }
 
-/** Which of `file`'s exported functions mint, for an importer to consult. */
-export function mintingExportsOf(
+/** Which of `file`'s exported functions reach `roots`, for an importer. */
+export function reachingExportsOf(
   file: string,
+  roots: readonly string[],
   stack: ReadonlySet<string>
 ): Set<string> {
-  const cached = MINTING_EXPORTS.get(file);
+  const key = `${roots.join(",")} ${file}`;
+  const cached = REACHING_EXPORTS.get(key);
   if (cached !== undefined) return cached;
 
   const code = codeOf(file);
-  const mints = mintingNames(file, code, stack);
+  const reaching = reachingNames(file, code, roots, stack);
   const exported = new Set(
     functionBodies(code)
-      .filter((fn) => fn.exported && mints.has(fn.name))
+      .filter((fn) => fn.exported && reaching.has(fn.name))
       .map((fn) => fn.name)
   );
 
-  // `verifySession` and `getCurrentSession` are exported from session.ts as the
-  // base case; they mint by definition rather than by reaching anything.
-  for (const name of SESSION_READS) {
+  // A root exported from the module that DEFINES it — `verifySession` and
+  // `getCurrentSession` in session.ts, `requireSeat` in seats.ts — is a base
+  // case: it qualifies by definition rather than by reaching anything.
+  for (const name of roots) {
     if (
       new RegExp(
         `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
@@ -429,8 +466,25 @@ export function mintingExportsOf(
     }
   }
 
-  if (stack.size === 0) MINTING_EXPORTS.set(file, exported);
+  if (stack.size === 0) REACHING_EXPORTS.set(key, exported);
   return exported;
+}
+
+/** The mint walk — {@link reachingNames} rooted at the two session reads. */
+export function mintingNames(
+  file: string,
+  code: string,
+  stack: ReadonlySet<string> = new Set()
+): Set<string> {
+  return reachingNames(file, code, SESSION_READS, stack);
+}
+
+/** Which of `file`'s exported functions mint, for an importer to consult. */
+export function mintingExportsOf(
+  file: string,
+  stack: ReadonlySet<string>
+): Set<string> {
+  return reachingExportsOf(file, SESSION_READS, stack);
 }
 
 /**
@@ -490,4 +544,138 @@ export function parsingServerActionExports(): ServerActionExport[] {
  */
 export function isPublicRouteGroup(file: string): boolean {
   return /\/app\/\((?:auth|marketing)\)\//.test(file);
+}
+
+/** The one guard every `"use server"` export is required to reach (#498). */
+export const SEAT_GUARD = ["requireSeat"];
+
+/**
+ * A `"use server"` directive that is NOT this module's prologue — a FUNCTION
+ * -level directive, which publishes an endpoint the walks here cannot see.
+ *
+ * `isUseServerModule` asks about the prologue, and every walk in this file is
+ * built on it, so an inline `async function act() { "use server"; … }` is a live
+ * POST endpoint outside the auth surface those walks claim to cover. #498's
+ * review found three of them — `saveAgendaAction` in a meetings page and the two
+ * phase-template prompt actions in a component — one of which created 22–26
+ * tasks per press, none of them carrying a seat check.
+ *
+ * The `codeOf` pass strips string literals only where they are LITERALS, so the
+ * directive survives as one; a prologue directive is excluded by starting the
+ * search after it. Returns the byte offsets, so the caller can report them.
+ */
+export function inlineServerDirectives(code: string): number[] {
+  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
+  const found: number[] = [];
+
+  for (const match of code.matchAll(/["']use server["']/g)) {
+    if (match.index >= prologue.length) found.push(match.index);
+  }
+
+  return found;
+}
+
+/**
+ * One exported endpoint of one `"use server"` module, with the two offsets the
+ * SEAT-GUARD rule is stated in terms of.
+ *
+ * EVERY export, not only the ones that parse — which is the difference between
+ * this reader and {@link parsingServerActionExports}. The ordering rule needs an
+ * argument to be a rule about; the guard rule does not, and an export with no
+ * argument at all is still a POSTable endpoint that has to say who may call it.
+ */
+export type GuardedExport = {
+  file: string;
+  name: string;
+  /** Where the export reaches `requireSeat`, directly or through an envelope. */
+  guard: number;
+  /** Where it first parses an argument, or -1 if it parses none. */
+  parse: number;
+  /**
+   * WHICH capability the guard was called with — the first string literal of
+   * the guarding call, which is the capability in every shape the product uses:
+   * `requireSeat("x")` directly, and `withChurchSession("x", …)`,
+   * `withChurch("x", …)`, `requireChurchSession("x")` and `currentViewer("x")`
+   * through the four session envelopes, each of which takes it FIRST.
+   *
+   * `null` when the export reaches no guard, or reaches one through a call
+   * whose first argument is not a literal — which the mapping assertion in
+   * `seat-guard.test.ts` treats as a failure, because a capability chosen at
+   * runtime is one no reviewer can read off the diff.
+   */
+  capability: string | null;
+  label: string;
+};
+
+/** The capability a guarding call names, from the first string literal in it. */
+function capabilityAt(body: string, guard: number): string | null {
+  if (guard < 0) return null;
+
+  const open = body.indexOf("(", guard);
+  if (open < 0) return null;
+
+  // Only the FIRST argument counts, so the scan ends at the top-level comma
+  // that closes it OR at the call's own `)`, whichever comes first. Both
+  // terminators are needed: `withChurch(cap, "Failed to create team", …)` would
+  // otherwise report the fallback copy, and `requireSeat("read")` — which has no
+  // comma at all — would run to whatever comma turned up next in the body.
+  let depth = 0;
+  let end = -1;
+
+  for (let i = open + 1; i < body.length; i++) {
+    const char = body[i];
+    if (char === "(" || char === "[" || char === "{") depth++;
+    else if (char === ")" && depth === 0) {
+      end = i;
+      break;
+    } else if (char === ")" || char === "]" || char === "}") depth--;
+    else if (char === "," && depth === 0) {
+      end = i;
+      break;
+    }
+  }
+
+  if (end < 0) return null;
+  return (
+    /^\s*["']([^"']+)["']\s*$/.exec(body.slice(open + 1, end))?.[1] ?? null
+  );
+}
+
+/**
+ * Every exported function of every `"use server"` module under `src/`, with the
+ * offset at which it reaches the seat guard.
+ *
+ * `reachingNames` is what makes the envelope modules work without exemptions:
+ * `people/actions.ts` guards through `withChurchSession`, `teams/actions.ts`
+ * through `withChurch` and `launch/actions.ts` through its local
+ * `requireChurchSession`, and each of those calls `requireSeat` one module (or
+ * one function) away. A scan that only knew the literal string would have
+ * called sixty correctly-guarded endpoints unguarded and forced a hand-written
+ * exemption list — which is the thing this rule exists to not have.
+ */
+export function guardedServerActionExports(): GuardedExport[] {
+  const found: GuardedExport[] = [];
+
+  for (const file of TS_FILES.filter(isUseServerModule)) {
+    const code = codeOf(file);
+    const guards = reachingNames(file, code, SEAT_GUARD);
+    const guardPattern = new RegExp(`\\b(?:${[...guards].join("|")})\\s*\\(`);
+
+    for (const fn of functionBodies(code)) {
+      if (!fn.exported) continue;
+
+      const guard = fn.body.search(guardPattern);
+
+      found.push({
+        file,
+        name: fn.name,
+        guard,
+        parse: fn.body.indexOf(".safeParse("),
+        capability: capabilityAt(fn.body, guard),
+        label: `${rel(file)} → ${fn.name}`,
+      });
+    }
+  }
+
+  return found;
 }

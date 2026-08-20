@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -413,6 +414,34 @@ test("a directive is a directive without its semicolon", () => {
   assert.ok(declaresDirective('"use client"\n', "use client"));
   assert.ok(TS_FILES.some(isUseClientModule), "no client entries found");
   assert.ok(TS_FILES.some(isUseServerModule), "no action modules found");
+});
+
+test("a slash-star inside a line comment does not swallow the file", () => {
+  // THE HOLE #498 FELL INTO. `codeOf` used to strip block comments first and
+  // line comments second, so a path written in a `//` line — `src/lib/launch/*`
+  // in this module's own header — opened a block comment that ran to the next
+  // star-slash below and deleted everything between. In `launch/actions.ts`
+  // that was the entire import list plus a docblock, and NOTHING failed: the
+  // mint walk was matching a literal `verifySession()` that happened to survive
+  // lower down. Only a walk that has to RESOLVE an import saw it.
+  //
+  // Asserted against the real file rather than a fixture, because the shape
+  // that triggers it is a comment somebody writes without thinking — so the
+  // guard has to be a claim about the tree, not about a string in this test.
+  const launch = TS_FILES.find((file) =>
+    file.endsWith(path.join("launch", "actions.ts"))
+  )!;
+  const code = codeOf(launch);
+
+  assert.match(readFileSync(launch, "utf8"), /\/\/.*launch\/\*/);
+  assert.match(
+    code,
+    /import \{[^}]*requireSeat[^}]*\} from "@\/lib\/auth\/seats"/
+  );
+  assert.ok(
+    !code.includes("EVERY EXPORT OF THIS FILE"),
+    "the header comment survived the strip"
+  );
 });
 
 // ----------------------------------------------------------------------------

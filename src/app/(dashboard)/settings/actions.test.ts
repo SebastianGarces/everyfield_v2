@@ -74,7 +74,7 @@ test("every exported settings action mints its actor from the session", () => {
   // Counting owner mints alone would have said the third action checks nobody.
   const exported = ACTIONS_CODE.match(/export async function /g) ?? [];
   const sessions =
-    ACTIONS_CODE.match(/const session = await verifySession\(\)/g) ?? [];
+    ACTIONS_CODE.match(/const session = await requireSeat\("[\w.]+"\)/g) ?? [];
 
   assert.ok(exported.length > 0, "no exported actions found — check the path");
   assert.equal(
@@ -90,7 +90,7 @@ test("every exported settings action mints its actor from the session", () => {
   // lookahead, so a mint fed from some third value fails here.
   assert.doesNotMatch(
     ACTIONS_CODE,
-    /preferenceOwnerFromSession\((?!session\)|await verifySession\(\)\))/
+    /preferenceOwnerFromSession\((?!session\)|await requireSeat\("[\w.]+"\)\))/
   );
 
   // …and the same rule for the address: every `email:` this module writes is
@@ -330,7 +330,7 @@ test("the un-suppress action accepts no arguments at all", () => {
 test("the un-suppress action clears the session's own address and no other", () => {
   const body = clearActionBody();
 
-  assert.match(body, /const session = await verifySession\(\)/);
+  assert.match(body, /const session = await requireSeat\("[\w.]+"\)/);
   assert.match(
     body,
     /email:\s*session\.user\.email/,
@@ -340,7 +340,7 @@ test("the un-suppress action clears the session's own address and no other", () 
 
   // Session FIRST and ABOVE the try, so a sessionless call THROWS rather than
   // being converted into a handled `{ success: false }` by the catch.
-  const mintAt = body.indexOf("await verifySession()");
+  const mintAt = body.indexOf("await requireSeat(");
   const tryAt = body.indexOf("try {");
   const clearAt = body.indexOf("clearAddressSuppression(");
 
@@ -397,7 +397,11 @@ test("the timezone action takes an IANA id and mints the church from the session
     /export async function setChurchTimeZoneAction\(\s*timeZone: string\s*\)/
   );
   assert.match(ACTIONS_CODE, /refine\(isValidTimeZone\)/);
-  assert.match(ACTIONS_CODE, /!isPlantOwner\(session\.user\)/);
+  // The Owner-only spelling this line used to assert is gone: the timezone is
+  // the CHURCH PROFILE (AS-004), which a plant Admin may edit, and the rule is
+  // now the capability the guard is called with rather than a predicate
+  // repeated in the body.
+  assert.match(ACTIONS_CODE, /requireSeat\("church\.profile"\)/);
   assert.match(
     ACTIONS_CODE,
     /setChurchTimeZone\(\s*session\.user\.churchId,\s*parsed\.data\s*\)/

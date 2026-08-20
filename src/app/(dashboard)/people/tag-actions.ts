@@ -19,6 +19,7 @@ import { toFieldErrors, withChurchSession } from "./action-context";
  */
 export async function listTagsAction(): Promise<ActionResult<Tag[]>> {
   return withChurchSession(
+    "read",
     "listTagsAction",
     { fallback: "Failed to list tags" },
     async ({ churchId }) => {
@@ -36,6 +37,7 @@ export async function createTagAction(
   color?: string
 ): Promise<ActionResult<Tag>> {
   return withChurchSession(
+    "people.write",
     "createTagAction",
     { fallback: "Failed to create tag" },
     async ({ churchId }) => {
@@ -68,6 +70,7 @@ export async function updateTagAction(
   data: { name?: string; color?: string | null }
 ): Promise<ActionResult<Tag>> {
   return withChurchSession(
+    "people.write",
     "updateTagAction",
     {
       fallback: "Failed to update tag",
@@ -104,6 +107,7 @@ export async function assignTagAction(
   tagId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "assignTagAction",
     {
       fallback: "Failed to assign tag",
@@ -129,6 +133,7 @@ export async function removeTagAction(
   tagId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "removeTagAction",
     {
       fallback: "Failed to remove tag",
@@ -153,6 +158,7 @@ export async function deleteTagAction(
   tagId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "deleteTagAction",
     { fallback: "Failed to delete tag" },
     async ({ churchId }) => {

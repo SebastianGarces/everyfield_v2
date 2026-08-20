@@ -1,6 +1,6 @@
 "use server";
 
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat } from "@/lib/auth/seats";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import {
   createChurchDeps,
@@ -17,7 +17,6 @@ import { declareInitialPhase } from "@/lib/phase-engine/transitions";
 import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { isChurchLevelOwner } from "@/lib/auth/tenancy";
 
 import {
   confirmLeadershipDeps,
@@ -57,7 +56,7 @@ function revalidateDashboard() {
 export async function createChurchBasics(
   formData: FormData
 ): Promise<ChurchBasicsState> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("church.create");
 
   return runCreateChurch(
     createChurchDeps(revalidateDashboard),
@@ -96,7 +95,7 @@ export type ConfirmLeadershipState = ConfirmLeadershipOutcome;
 export async function confirmLeadership(
   answer: string
 ): Promise<ConfirmLeadershipState> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("church.claim");
 
   return runConfirmLeadership(
     confirmLeadershipDeps(revalidateDashboard),
@@ -142,7 +141,7 @@ export type {
 export async function declareJourney(
   input: DeclareJourneyInput
 ): Promise<DeclareJourneyState> {
-  const { user } = await verifySession();
+  const { user } = await requireSeat("church.create");
 
   return runDeclareJourney(
     {
@@ -182,11 +181,7 @@ export type CompleteOnboardingState = { status: "error"; error: string };
  * is typed as.
  */
 export async function completeOnboarding(): Promise<CompleteOnboardingState | void> {
-  const { user } = await verifySession();
-
-  if (!isChurchLevelOwner(user)) {
-    return { status: "error", error: "Only church planters can onboard" };
-  }
+  const { user } = await requireSeat("church.create");
 
   if (!user.churchId) {
     return {

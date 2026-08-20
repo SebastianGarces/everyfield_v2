@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+
+import { SeatRefusalError } from "@/lib/auth/seat-rules";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { mock, test } from "node:test";
@@ -7,7 +9,6 @@ import { PgDialect } from "drizzle-orm/pg-core";
 
 import {
   CHURCH_SAVE_FAILED_MESSAGE,
-  NOT_A_PLANTER_MESSAGE,
   churchCreationStatements,
   discardChurchStatements,
   runCreateChurch,
@@ -108,11 +109,18 @@ function basics(entries: Record<string, string> = { name: "Grace Church" }) {
 // ----------------------------------------------------------------------------
 
 test("a non-planter is refused before anything is written", async () => {
+  // IT THROWS now rather than returning a rendered refusal (#498). The
+  // action calls `requireSeat("church.create")` on line one, so a wrong seat
+  // reaching this service means a caller arrived some other way — a defect to
+  // see, not an outcome to render. What the test still pins is the property
+  // that matters: nothing is written.
   const { deps, calls } = harness();
 
-  const result = await runCreateChurch(deps, planter({ seat: null }), basics());
+  await assert.rejects(
+    () => runCreateChurch(deps, planter({ seat: null }), basics()),
+    (error: Error) => error instanceof SeatRefusalError
+  );
 
-  assert.deepEqual(result, { status: "error", error: NOT_A_PLANTER_MESSAGE });
   assert.deepEqual(calls, []);
 });
 

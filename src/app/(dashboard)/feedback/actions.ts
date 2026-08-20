@@ -1,8 +1,8 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { db } from "@/db";
 import { churches } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
 import { sendEmail } from "@/lib/email/client";
 import { feedbackNotificationEmail } from "@/lib/email/templates/feedback-notification";
 import { createFeedback } from "@/lib/feedback/service";
@@ -29,7 +29,7 @@ export async function submitFeedbackAction(
   formData: FormData
 ): Promise<ActionResult> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat("self.write");
 
     // Parse and validate input
     const rawData = {

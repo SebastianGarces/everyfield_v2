@@ -876,7 +876,7 @@ test("the session mint is the FIRST statement of every invitation-domain action"
       const end = body.search(/\n\}/);
       const scoped = end === -1 ? body : body.slice(0, end);
 
-      const mint = scoped.indexOf("verifySession()");
+      const mint = scoped.indexOf("requireSeat(");
       const parse = scoped.indexOf(".safeParse(");
 
       assert.ok(mint >= 0, `${rel(file)} → ${match[1]} never mints an actor`);
@@ -1078,7 +1078,7 @@ test("every exported invitation action mints its actor from the session", () => 
   // counted too.
   const minted =
     SERVICE_CODE.match(
-      /invitationActorFromSession\(await verifySession\(\)\)/g
+      /invitationActorFromSession\(\s*await requireSeat\("[\w.]+"\)\s*\)/g
     ) ?? [];
 
   assert.ok(EXPORTED.length > 0, "no exported actions found — check the path");

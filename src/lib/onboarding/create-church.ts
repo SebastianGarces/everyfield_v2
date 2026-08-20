@@ -50,7 +50,8 @@ import {
 } from "@/lib/validations/onboarding";
 import { and, eq, notExists, type SQL } from "drizzle-orm";
 
-import { isChurchLevelOwner, type SeatFields } from "@/lib/auth/tenancy";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
+import type { SeatFields } from "@/lib/auth/tenancy";
 
 /**
  * The subset of the signed-in user this path needs. Minted from
@@ -84,8 +85,6 @@ export type CreateChurchDeps = {
   revalidate: () => void;
 };
 
-export const NOT_A_PLANTER_MESSAGE = "Only church planters can create a church";
-
 export const CHURCH_SAVE_FAILED_MESSAGE =
   "We could not save your church plant. Please try again.";
 
@@ -105,13 +104,18 @@ export async function runCreateChurch(
   actor: OnboardingActor,
   formData: FormData
 ): Promise<CreateChurchOutcome> {
-  // `isChurchLevelOwner`, not `isPlantOwner`: this is the path that CREATES the
-  // plant, so the actor holds the Owner seat and no tenancy yet. The
-  // church-level half still refuses an oversight org's Owner, who also holds
-  // `owner`.
-  if (!isChurchLevelOwner(actor)) {
-    return { status: "error", error: NOT_A_PLANTER_MESSAGE };
-  }
+  // THE ONE TABLE, not a predicate spelled here. `church.create` is
+  // `OWNER_ONLY + "church-level"`, which is `isChurchLevelOwner` by
+  // construction — the Owner seat with no tenancy yet, because this is the path
+  // that CREATES the plant, and still refusing an oversight org's Owner, who
+  // also holds `owner`.
+  //
+  // IT THROWS rather than returning the refusal it used to. The action above
+  // calls `requireSeat("church.create")` on line one (#498), so by the time
+  // this runs the answer is already yes — a `false` here means a caller reached
+  // the service some other way, which is a defect to see and not an outcome to
+  // render. `assertSeatFor` is the same decision either way.
+  assertSeatFor(actor, "church.create");
 
   if (actor.churchId) {
     deps.revalidate();

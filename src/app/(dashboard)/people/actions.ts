@@ -50,10 +50,10 @@ export async function createPersonAction(
   formData: FormData
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "createPersonAction",
     {
       noChurch: "You must be associated with a church to create people",
-      known: { Unauthorized: "You must be logged in to create people" },
       fallback: "An unexpected error occurred while creating the person",
     },
     async ({ user, churchId }) => {
@@ -89,11 +89,11 @@ export async function updatePersonAction(
   formData: FormData
 ): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "updatePersonAction",
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person",
@@ -158,11 +158,11 @@ export async function deletePersonAction(
   personId: string
 ): Promise<ActionResult<void>> {
   return withChurchSession(
+    "people.write",
     "deletePersonAction",
     {
       noChurch: "You must be associated with a church to delete people",
       known: {
-        Unauthorized: "You must be logged in to delete people",
         "Person not found": "Person not found or has already been deleted",
       },
       fallback: "An unexpected error occurred while deleting the person",
@@ -188,11 +188,11 @@ export async function changeStatusAction(
   newStatus: PersonStatus
 ): Promise<ActionResult<{ person: Person }>> {
   return withChurchSession(
+    "people.write",
     "changeStatusAction",
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person status",
@@ -225,11 +225,11 @@ export async function changeStatusWithReasonAction(
   reason?: string
 ): Promise<ActionResult<{ person: Person; transition: StatusTransition }>> {
   return withChurchSession(
+    "people.write",
     "changeStatusWithReasonAction",
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person status",
@@ -274,6 +274,7 @@ export async function checkForDuplicatesAction(data: {
   phone?: string;
 }): Promise<ActionResult<DuplicateCheck>> {
   return withChurchSession(
+    "read",
     "checkForDuplicatesAction",
     { fallback: "Failed to check for duplicates" },
     async ({ churchId }) => {
@@ -300,6 +301,7 @@ export async function quickAddPersonAction(data: {
   source?: string;
 }): Promise<ActionResult<Person>> {
   return withChurchSession(
+    "people.write",
     "quickAddPersonAction",
     {
       noChurch: "You must be associated with a church to create people",

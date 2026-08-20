@@ -7,52 +7,12 @@ import {
   type User,
   type ChurchPrivacySettings,
 } from "@/db/schema";
-// Imported for this module's OWN rules below, never re-served:
-// `@/lib/auth/tenancy` is the one place these come from, and a re-export from
-// here — whose first statement is `import { db } from "@/db"` — would give one
-// authority policy two import paths, the failure
-// `@/lib/invitations/register-path` and `@/lib/oversight/org-label` are both
-// written to avoid.
-import {
-  isChurchLevelUser,
-  isPlantOwner,
-  oversightOrgOf,
-} from "@/lib/auth/tenancy";
-
-// ============================================================================
-// Seat Guards
-// ============================================================================
-//
-// The two rules `requireRole` used to spell as role lists, re-pointed at the
-// pair (tenancy, seat). They are the SAME refusals — this track migrates the
-// readers of the old column and adds no enforcement. The single `requireSeat`
-// guard and the permissions module that states the Owner-only set as data are
-// #495's, and these two collapse into it when it lands.
-//
-// The message keeps its `Forbidden: ` prefix: `launch/actions.ts` documents
-// that prefix as what its actions turn into a user-facing refusal.
-
-/**
- * The Owner of a plant — the Owner-only actions (AS-003).
- * @throws Error if the account is not its plant's Owner.
- */
-export function requirePlantOwner(user: User): void {
-  if (!isPlantOwner(user)) {
-    throw new Error("Forbidden: requires the plant's owner seat");
-  }
-}
-
-/**
- * Any church-level account — a seat in a plant, or a coach with no tenancy.
- * The refusal this states is oversight's: an org account may not tick a plant's
- * own progress, whichever seat it holds.
- * @throws Error if the account's tenancy is an oversight org.
- */
-export function requireChurchLevel(user: User): void {
-  if (!isChurchLevelUser(user)) {
-    throw new Error("Forbidden: requires a church-level account");
-  }
-}
+// Imported for this module's OWN rules below, never re-served: `@/lib/auth/tenancy`
+// is the one place these come from, and a re-export from here — whose first
+// statement is `import { db } from "@/db"` — would give one authority policy two
+// import paths, the failure `@/lib/invitations/register-path` and
+// `@/lib/oversight/org-label` are both written to avoid.
+import { isChurchLevelUser, oversightOrgOf } from "@/lib/auth/tenancy";
 
 // ============================================================================
 // Church Access Resolution
@@ -71,7 +31,8 @@ export function requireChurchLevel(user: User): void {
  *   matches. In a network: where churches.sending_network_id matches.
  *
  * THE SEAT IS NOT CONSULTED BEYOND "IS THERE ONE". Access is what the tenancy
- * reaches; the seat decides what may be DONE there, and that is #495's guard.
+ * reaches; the seat decides what may be DONE there, and that is `@/lib/auth/seats`'s
+ * guard (#498).
  * An org Member reads the same portfolio as its Owner (ruling 185 (3)), so
  * branching on the seat here would be the wrong answer as well as a second
  * copy of a rule.

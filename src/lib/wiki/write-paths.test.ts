@@ -416,10 +416,10 @@ test("the parsed value is what reaches the statement", () => {
   // never for the shape of the body it sent — which would otherwise make the
   // endpoint a shape oracle for a caller with no cookie. The previous wording
   // of this message stated the inverse of what the comparison asserts.
-  const mint = body.body.indexOf("getCurrentSession()");
+  const mint = body.body.indexOf("requireSeat(");
   const parseIndex = body.body.indexOf("progressPatchSchema.safeParse(");
 
-  assert.notEqual(mint, -1, "updateProgress no longer mints a session");
+  assert.notEqual(mint, -1, "updateProgress no longer reaches the seat guard");
   assert.notEqual(parseIndex, -1, "updateProgress no longer parses its body");
   assert.ok(mint < parseIndex, "the session mint must precede the parse");
 });
@@ -465,10 +465,10 @@ test("every write endpoint parses its slug, and the builder gets the parsed one"
 
     assert.ok(fn, `${name} is gone from ${file}`);
 
-    const mint = fn.body.indexOf("getCurrentSession()");
+    const mint = fn.body.indexOf("requireSeat(");
     const parseIndex = fn.body.indexOf("wikiSlugSchema.safeParse(");
 
-    assert.notEqual(mint, -1, `${name} does not mint a session`);
+    assert.notEqual(mint, -1, `${name} does not reach the seat guard`);
     assert.notEqual(
       parseIndex,
       -1,
@@ -619,12 +619,16 @@ test("the feedback action mints, then parses, then stamps the session church", (
 
   assert.ok(body, "submitArticleFeedbackAction is gone from wiki/actions.ts");
 
-  const mint = body.body.indexOf("verifySession()");
+  const mint = body.body.indexOf("requireSeat(");
   const parseIndex = body.body.indexOf(
     "submitArticleFeedbackSchema.safeParse("
   );
 
-  assert.notEqual(mint, -1, "the feedback action no longer mints a session");
+  assert.notEqual(
+    mint,
+    -1,
+    "the feedback action no longer reaches the seat guard"
+  );
   assert.notEqual(
     parseIndex,
     -1,

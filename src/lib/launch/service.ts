@@ -22,7 +22,8 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import type { User } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
-import { requireChurchAccess, requirePlantOwner } from "@/lib/auth/access";
+import { requireChurchAccess } from "@/lib/auth/access";
+import { assertSeatFor } from "@/lib/auth/seat-rules";
 import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
 import { launchNoteSchema, launchTargetDateSchema } from "./validation";
 
@@ -254,7 +255,7 @@ interface WriteRow extends Record<string, unknown> {
  * Set, move, or postpone a plant's launch date.
  *
  * AUTHORISES ITSELF, and the rule is LS-007's: the OWNER of THIS plant.
- * `requirePlantOwner` refuses a coach, a plant Member and an oversight account
+ * `launch.schedule` refuses a coach, a plant Member and an oversight account
  * — an oversight account has church ACCESS to an associated plant and would
  * sail past `requireChurchAccess` alone, which would let the milestone
  * notification announce itself to the person who caused it — and
@@ -274,7 +275,7 @@ export async function setLaunchDate(
   targetDate: string,
   options: SetLaunchDateOptions = {}
 ): Promise<SetLaunchDateResult> {
-  requirePlantOwner(user);
+  assertSeatFor(user, "launch.schedule");
   await requireChurchAccess(user, churchId);
 
   const parsed = launchTargetDateSchema.safeParse(targetDate);

@@ -17,17 +17,20 @@
 //     predicate, the journal insert) live. An action that wrote its own SQL
 //     would be a second write path with none of them.
 //
-// LS-007's SPLIT, which is why the role check is not uniform below:
-//   scheduling / postponing / recording the outcome  → the PLANTER's alone.
-//   milestone and task completion                    → normal task rules, so a
-//                                                      team member may do it.
-// The UI hides what a role may not do; these are the checks that make it true.
+// LS-007's SPLIT, which is why the capability is not uniform below:
+//   scheduling / postponing / recording the outcome  → `launch.schedule`, the
+//                                                      plant OWNER's alone.
+//   milestone and task completion                    → `launch.milestone`,
+//                                                      normal task rules, so a
+//                                                      Member may do it.
+// The UI hides what a seat may not do; these are the checks that make it true.
 // ============================================================================
 
+import { requireSeat } from "@/lib/auth/seats";
+import { type Capability } from "@/lib/auth/seat-rules";
 import { refresh, revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import {
   launchNoteSchema,
   launchTargetDateSchema,
@@ -53,15 +56,21 @@ import type { ActionResult } from "@/lib/tasks/types";
 // ----------------------------------------------------------------------------
 
 /**
- * The session's user and church, or a refusal.
+ * The session's user and church, or a refusal — and the seat guard (#498).
  *
  * A planter with no church cannot have a launch, and every read and write below
  * is church-scoped, so this is the one place the missing-church case is
  * answered — in a sentence, rather than by a `null` that becomes a crash three
  * frames later.
+ *
+ * THE CAPABILITY IS AN ARGUMENT because LS-007's split is exactly the two
+ * capabilities: `launch.schedule` is the Owner's (setting, moving and recording
+ * the outcome of a date), `launch.milestone` follows normal task rules and a
+ * Member may do it. Threading it here rather than adding a second statement to
+ * each export keeps the guard on line one, ahead of every parse.
  */
-async function requireChurchSession() {
-  const { user } = await verifySession();
+async function requireChurchSession(capability: Capability) {
+  const { user } = await requireSeat(capability);
   if (!user.churchId) {
     return { user: null, churchId: null } as const;
   }
@@ -73,9 +82,9 @@ const NO_CHURCH_MESSAGE =
 
 /**
  * Turn a thrown error into a sentence, without telling the caller which guard
- * refused them. `requirePlantOwner`, `requireChurchLevel` and
- * `requireChurchAccess` throw `Forbidden: …` strings that name seats and ids;
- * those belong in the server log, not in a response.
+ * refused them. `requireSeat` / `assertSeatFor` throw `Forbidden: <capability>
+ * …` and `requireChurchAccess` throws one naming a church id; both belong in
+ * the server log, not in a response.
  */
 function toActionError(error: unknown, verb: string): ActionResult<never> {
   console.error(`launch action failed while ${verb}:`, error);
@@ -166,7 +175,7 @@ export async function scheduleLaunchAction(
   input: ScheduleLaunchActionInput
 ): Promise<ActionResult<ScheduleLaunchActionResult>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.schedule");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const parsed = scheduleLaunchInputSchema.safeParse(input);
@@ -220,7 +229,7 @@ export async function completeMilestoneAction(
   milestoneId: string
 ): Promise<ActionResult<{ changed: boolean }>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.milestone");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const result = await completeLaunchMilestone(user, churchId, milestoneId);
@@ -240,7 +249,7 @@ export async function reopenMilestoneAction(
   milestoneId: string
 ): Promise<ActionResult<{ changed: boolean }>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.milestone");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const result = await reopenLaunchMilestone(user, churchId, milestoneId);
@@ -276,7 +285,7 @@ export async function setLaunchTaskCompleteAction(
   complete: boolean
 ): Promise<ActionResult<{ complete: boolean }>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.milestone");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     if (!(await isLaunchTask(churchId, taskId))) {
@@ -287,9 +296,9 @@ export async function setLaunchTaskCompleteAction(
     }
 
     if (complete) {
-      await completeTask(churchId, taskId, user.id);
+      await completeTask(churchId, taskId, user);
     } else {
-      await reopenTask(churchId, taskId);
+      await reopenTask(churchId, taskId, user);
     }
 
     revalidateLaunchSurfaces();
@@ -317,7 +326,7 @@ export async function recordLaunchOutcomeAction(
   input: LaunchOutcomeInput
 ): Promise<ActionResult<{ targetDate: string }>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.schedule");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const result = await recordLaunchOutcome(user, churchId, input);
@@ -348,7 +357,7 @@ export async function updateLaunchOutcomeAction(
   input: LaunchOutcomeInput
 ): Promise<ActionResult<{ targetDate: string; changed: boolean }>> {
   try {
-    const { user, churchId } = await requireChurchSession();
+    const { user, churchId } = await requireChurchSession("launch.schedule");
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const result = await updateLaunchOutcome(user, churchId, input);

@@ -7,6 +7,7 @@ import { assertInOrder } from "@/lib/testing/source-span";
 import { ClearReceiptCookie } from "./phase-template-prompt-controls";
 import {
   CONTROLS_SOURCE_PATH,
+  PROMPT_ACTIONS_SOURCE_PATH,
   PROMPT_SOURCE_PATH,
   TRANSITION_ID,
   elementsOfType,
@@ -54,7 +55,7 @@ test("the action performs the decision rather than re-deciding it", () => {
   // The seam only helps if the action still routes through it. Both branches
   // used to be written out inline, which is how the partial case acquired a
   // revalidation nobody could test.
-  const action = readSource(PROMPT_SOURCE_PATH);
+  const action = readSource(PROMPT_ACTIONS_SOURCE_PATH);
 
   assert.match(action, /decidePhaseTemplateImportOutcome\(/);
   assert.match(action, /decidePhaseTemplateDismissOutcome\(/);
@@ -64,7 +65,7 @@ test("the action performs the decision rather than re-deciding it", () => {
   // Server Action re-renders the route by itself.
   assertInOrder(
     action,
-    PROMPT_SOURCE_PATH,
+    PROMPT_ACTIONS_SOURCE_PATH,
     ["markPartialImportReceipt(decision.receipt)", "refresh();"],
     "the route is re-read before the receipt exists, so the render that has to draw it finds nothing"
   );

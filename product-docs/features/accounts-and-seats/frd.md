@@ -186,7 +186,7 @@ blast radius: the assignment goes inactive, the coach loses that plant, and noth
 | AS-016 | Must | The Owner removes any other seat from `/settings/team` behind an explicit confirmation. The removal revokes sessions, clears the tenancy FK and the seat, leaves the account row and the person record intact, reassigns the person's open tasks to the Owner, and clears any ministry-team leadership they hold so the team shows an open leader slot. |
 | AS-017 | Must | An Owner may not remove their own seat; the control is absent and the action is refused. |
 | AS-018 | Must | The Owner, and the Admin who created it, may end a coach assignment from `/settings/team`. The assignment goes inactive and the coach loses that plant on the next request. |
-| AS-019 | Must | Permission is decided in one place: a single module stating the Owner-only and Admin-and-above sets as data, and a single guard every state-changing action calls. A test walks every export of every `"use server"` module and fails when one reaches its work without the guard. *Why:* a per-module permission matrix drifts the moment two modules disagree, and the export list is the auth surface. |
+| AS-019 | Must | Permission is decided in one place: a single module stating the Owner-only and Admin-and-above sets as data, one capability table naming which set each verb belongs to, and a single guard every state-changing action calls. A test walks every export of every `"use server"` module and fails when one reaches its work without the guard. *Why:* a per-module permission matrix drifts the moment two modules disagree, and the export list is the auth surface. |
 | AS-020 | Must | Every write affordance is hidden — not merely disabled — for a read-only context, on every surface in the read-only surface checklist below. A read-only context is a coach on an assigned plant, an org Member on any surface, and a plant Member on a surface they may read but not write. |
 | AS-021 | Must | Navigation shows an **Assigned plants** section whenever the account holds at least one active coach assignment, listing one entry per assigned plant, and hides it entirely when none exist. |
 | AS-022 | Must | An account with no tenancy and no active assignment reaches no plant or org data and sees a signed-in state that explains it has no access and names the support path. |
@@ -321,8 +321,9 @@ arrives asking why a removed person can still sign in.
   plant with no Owner, are their own work.
 - **A bespoke Member duties dashboard.** A Member's duties surface through the same screens everyone
   else uses; a purpose-built home for them is out of the first release.
-- **A per-module permission matrix.** Permissions are two named sets and one guard; a per-feature
-  grid of capabilities is explicitly rejected.
+- **A per-module permission matrix.** Permissions are two named sets, one capability table naming
+  which set each verb belongs to, and one guard; a per-module matrix or a per-feature grid of
+  capabilities is rejected.
 - **Moving an account between tenancies in-app.** A person who changes plants or orgs is handled by
   support.
 - **More than one seat per account.** One account, one home tenancy; overlap is expressed by coach

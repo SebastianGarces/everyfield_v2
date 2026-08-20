@@ -1,9 +1,9 @@
 "use server";
 
+import { requireSeat } from "@/lib/auth/seats";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
 import {
   InvitationError,
   invitationActorFromSession,
@@ -90,7 +90,9 @@ const churchIdSchema = z.string().refine(isUuid, "Unknown church plant");
 export async function removePlantFromOrg(
   churchId: string
 ): Promise<RemovePlantResult> {
-  const actor = invitationActorFromSession(await verifySession());
+  const actor = invitationActorFromSession(
+    await requireSeat("org.association.sever")
+  );
 
   const parsed = churchIdSchema.safeParse(churchId);
   if (!parsed.success) {

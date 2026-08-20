@@ -33,6 +33,7 @@ export async function downloadCsvTemplateAction(): Promise<
   ActionResult<string>
 > {
   return withChurchSession(
+    "read",
     "downloadCsvTemplateAction",
     { fallback: "Failed to generate template" },
     async () => {
@@ -66,6 +67,7 @@ export async function exportPeopleAction(
   ActionResult<{ csv: string; filename: string; contentType: string }>
 > {
   return withChurchSession(
+    "read",
     "exportPeopleAction",
     {
       noChurch: "You must be associated with a church to export people",
@@ -113,6 +115,7 @@ export async function previewImportAction(
   formData: FormData
 ): Promise<ActionResult<ImportPreview>> {
   return withChurchSession(
+    "people.write",
     "previewImportAction",
     { fallback: "Failed to process CSV file" },
     async ({ churchId }) => {
@@ -142,6 +145,7 @@ export async function executeBulkImportAction(
   duplicateResolutions: Record<number, "skip" | "create">
 ): Promise<ActionResult<ImportSummary>> {
   return withChurchSession(
+    "people.write",
     "executeBulkImportAction",
     { fallback: "Failed to execute import" },
     async ({ user, churchId }) => {

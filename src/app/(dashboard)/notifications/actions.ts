@@ -3,7 +3,8 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat } from "@/lib/auth/seats";
+import { type Capability } from "@/lib/auth/seat-rules";
 import {
   loadOlderNotifications,
   markAllVisibleNotificationsRead,
@@ -100,10 +101,12 @@ export type LoadMoreInput = z.infer<typeof loadMoreSchema>;
  * this is a real (if rare) state rather than an assertion: an oversight user
  * mid-association, or an account whose church was removed.
  */
-async function currentViewer(): Promise<
+async function currentViewer(
+  capability: Capability
+): Promise<
   { ok: true; viewer: NotificationViewer } | { ok: false; error: string }
 > {
-  const viewer = notificationViewer(await verifySession());
+  const viewer = notificationViewer(await requireSeat(capability));
 
   if (!viewer) {
     return { ok: false, error: "You are not associated with a church" };
@@ -121,7 +124,7 @@ async function currentViewer(): Promise<
 export async function markNotificationReadAction(
   notificationId: string
 ): Promise<MarkReadActionResult> {
-  const resolved = await currentViewer();
+  const resolved = await currentViewer("self.write");
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
   }
@@ -143,7 +146,7 @@ export async function markNotificationReadAction(
 
 /** Mark every visible unread notification read (N-009). */
 export async function markAllNotificationsReadAction(): Promise<MarkReadActionResult> {
-  const resolved = await currentViewer();
+  const resolved = await currentViewer("self.write");
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
   }
@@ -167,7 +170,7 @@ export async function markAllNotificationsReadAction(): Promise<MarkReadActionRe
 export async function loadMoreNotificationsAction(
   input: LoadMoreInput
 ): Promise<LoadMoreActionResult> {
-  const resolved = await currentViewer();
+  const resolved = await currentViewer("read");
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
   }

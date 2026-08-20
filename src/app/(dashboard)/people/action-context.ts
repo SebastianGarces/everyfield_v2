@@ -7,7 +7,8 @@
  */
 
 import type { User } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
+import { requireSeat } from "@/lib/auth/seats";
+import { SeatRefusalError, type Capability } from "@/lib/auth/seat-rules";
 import type { ActionResult } from "@/lib/people/types";
 import { unstable_rethrow } from "next/navigation";
 import type { ZodError } from "zod";
@@ -31,15 +32,24 @@ const DEFAULT_KNOWN_ERRORS: Record<string, string> = {
   "Skill not found": "Skill not found",
 };
 
+/** What a seat refusal reads as. One sentence for every capability (#498). */
+const NOT_PERMITTED_MESSAGE =
+  "You do not have permission to do that in this church.";
+
 /** How an action's failures map to user-facing error strings. */
 export interface ActionMessages {
   /** Returned when the session user has no church. Default: "Unauthorized". */
   noChurch?: string;
   /**
    * Thrown Error message → returned error string, merged over
-   * DEFAULT_KNOWN_ERRORS (an entry here wins). Only list strings that
-   * differ from the defaults, e.g. the "You must be logged in to …"
-   * mappings for "Unauthorized".
+   * DEFAULT_KNOWN_ERRORS (an entry here wins). Only list strings that differ
+   * from the defaults.
+   *
+   * `"Unauthorized"` is NOT one of them and cannot be: the catch below rethrows
+   * it before this table is consulted, so a sessionless call leaves as a throw
+   * (#498). Every action here used to carry a "You must be logged in to …"
+   * entry, and every one of them was the handled answer an anonymous caller
+   * should never have got.
    */
   known?: Record<string, string>;
   /**
@@ -52,17 +62,26 @@ export interface ActionMessages {
 }
 
 /**
- * The one session + churchId + try/catch envelope every people action shares:
- * verify the session, refuse churchless users, run the body, and map thrown
- * errors to the action's message table (logging the original).
+ * The one session + seat + churchId + try/catch envelope every people action
+ * shares: check the caller's seat against the capability (which mints the actor
+ * — `requireSeat` returns what `verifySession` returned), refuse churchless
+ * users, run the body, and map thrown errors to the action's message table
+ * (logging the original).
+ *
+ * THE CAPABILITY IS THE FIRST ARGUMENT so the guard is the first thing this
+ * envelope does and, transitively, the first thing every people action does —
+ * ahead of the `safeParse` each of them runs inside `fn`. The directory is not
+ * one permission: a Member may READ it (`"read"`) and may not write to it
+ * (`"people.write"`), and this is where those two answers are told apart.
  */
 export async function withChurchSession<T>(
+  capability: Capability,
   label: string,
   messages: ActionMessages,
   fn: (ctx: ChurchActionContext) => Promise<ActionResult<T>>
 ): Promise<ActionResult<T>> {
   try {
-    const { user } = await verifySession();
+    const { user } = await requireSeat(capability);
 
     if (!user.churchId) {
       return { success: false, error: messages.noChurch ?? "Unauthorized" };
@@ -76,7 +95,31 @@ export async function withChurchSession<T>(
 
     console.error(`${label} error:`, error);
 
+    // A SESSIONLESS CALL THROWS, and it has to leave through here rather than
+    // become a handled result. `verifySession` is what `requireSeat` opens on,
+    // and converting its `Unauthorized` into `{ success: false, … }` is what
+    // gives an anonymous caller a well-formed answer from an endpoint that
+    // should only ever have said no (`memory/invariants.md` → Authentication).
+    //
+    // WHERE IT LANDS FOR A REAL PERSON: `src/app/(dashboard)/error.tsx`, which
+    // says the sign-in probably expired and offers Try again / Sign in. Before
+    // that boundary existed the only one in the tree was `global-error.tsx`,
+    // which swaps in a bare document — so this rethrow was a blank page on a
+    // filled-in form. A seat refusal does NOT go that way; it is answered
+    // inline below, because "you may not do this" is an answer, not a fault.
+    if (error instanceof Error && error.message === "Unauthorized") {
+      throw error;
+    }
+
     if (error instanceof Error) {
+      // The seat refusal, turned into a sentence that does not name the guard.
+      // An `instanceof` and not a message prefix: `requireChurchAccess` and the
+      // invitation layer also throw `Forbidden: …`, so a prefix test is a
+      // classification resting on prose that a reword silently changes.
+      if (error instanceof SeatRefusalError) {
+        return { success: false, error: NOT_PERMITTED_MESSAGE };
+      }
+
       const known = { ...DEFAULT_KNOWN_ERRORS, ...messages.known }[
         error.message
       ];
