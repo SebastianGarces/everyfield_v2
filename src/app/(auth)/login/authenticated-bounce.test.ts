@@ -20,8 +20,8 @@ import { SRC, codeOf } from "@/lib/auth/server-action-surface";
 // Server Component that awaits a database-backed session cannot be invoked from
 // a unit test, so what is checkable here is that the page still asks the live
 // session and still redirects through the sanitised value. `codeOf` strips
-// comments and string literals first, so a paragraph promising this — including
-// the one above — cannot satisfy it.
+// comments first, so a paragraph promising this — including the one above —
+// cannot satisfy it.
 // ============================================================================
 
 const LOGIN_PAGE = path.join(SRC, "app", "(auth)", "login", "page.tsx");

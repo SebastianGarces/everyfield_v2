@@ -100,10 +100,13 @@ export function isCrawlerUserAgent(
  * - `/dashboard` failed the first (#297, ruled 2026-08-04). The page calls
  *   `verifySession()`, which THROWS with no session, so the listing made the
  *   exact promise the page could not keep and every crawler-UA request 500'd.
- * - `/oversight` failed the second (ruled 2026-08-09, PR #354). Every page under
- *   it reads the session and `redirect("/login")`s without one — graceful, not a
- *   500, but the crawler still ends at the login page. The allowance produced no
- *   card, so the prefix bought only exposure.
+ * - `/oversight` failed the second (ruled 2026-08-09, PR #354). It sits in the
+ *   `(dashboard)` group, whose layout bounces a session-less reader to `/login`
+ *   before any page under it renders — graceful, not a 500, but the crawler
+ *   still ends at the login page. The allowance produced no card, so the prefix
+ *   bought only exposure. (The pages used to spell that refusal a second time
+ *   themselves; those copies are gone — #503 — and the conclusion is unchanged,
+ *   because the layout above them was always the bounce a crawler met first.)
  *
  * Both remain PROTECTED by the proxy, named explicitly there rather than through
  * the spread of this list. Off this list they get the same 307 to /login a
