@@ -36,10 +36,10 @@ const initialState: LoginState = {};
  */
 export function LoginForm({
   redirectTo,
-  previewAccounts = [],
+  previewAccounts,
 }: {
   redirectTo: string;
-  previewAccounts?: PreviewAccount[];
+  previewAccounts: PreviewAccount[];
 }) {
   const [state, formAction, pending] = useActionState(login, initialState);
   const [email, setEmail] = useState("");
@@ -86,7 +86,12 @@ export function LoginForm({
               autoComplete="email"
               required
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              // Typing drops the pick, so the picker never names an account
+              // whose credentials are no longer the ones in these fields.
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setPicked(null);
+              }}
               aria-invalid={!!state.fieldErrors?.email}
             />
             {state.fieldErrors?.email && (
@@ -106,7 +111,10 @@ export function LoginForm({
               autoComplete="current-password"
               required
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setPicked(null);
+              }}
               aria-invalid={!!state.fieldErrors?.password}
             />
             {state.fieldErrors?.password && (
