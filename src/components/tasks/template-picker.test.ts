@@ -58,23 +58,14 @@ function buttons(html: string): string[] {
   return html.match(/<button[^>]*>/g) ?? [];
 }
 
-test("every import control carries cursor-pointer", () => {
+test("the picker renders one import control per template", () => {
   const html = render(2);
-  const controls = buttons(html);
 
   assert.equal(
-    controls.length,
+    buttons(html).length,
     TASK_TEMPLATES.length,
     "expected one import control per template"
   );
-
-  for (const control of controls) {
-    assert.match(
-      control,
-      /cursor-pointer/,
-      `an import control is missing cursor-pointer: ${control}`
-    );
-  }
 });
 
 test("every template in the catalog is offered, grouped under its phase", () => {

@@ -379,13 +379,11 @@ test("the settings screen renders the notice only for a suppressed address", () 
   );
 });
 
-test("the control is a real control — it calls the action and it is clickable", () => {
+test("the control is a real control — it calls the action", () => {
   assert.match(NOTICE_SOURCE, /clearMyEmailSuppressionAction\(\)/);
-  assert.match(
-    NOTICE_SOURCE,
-    /className="cursor-pointer"/,
-    "every clickable element gets cursor-pointer"
-  );
+  // The cursor scan that used to sit here is gone (#502): the control is a
+  // `<Button>`, so it renders a native `<button>` and `globals.css` gives it
+  // the pointer — asserted once, in `src/components/ui/cursor-pointer.test.ts`.
   // The notice takes the address as a PROP from the server and holds no server
   // data of its own (memory/contracts/data-patterns.md).
   assert.doesNotMatch(NOTICE_SOURCE, /useState|useEffect/);
@@ -426,12 +424,9 @@ test("the timezone control is optimistic, calls the action, and is clickable", (
     /htmlFor="church-time-zone"[^>]*className="cursor-pointer"/
   );
   assert.match(TIMEZONE_SELECT_SOURCE, /data-testid="church-time-zone-select"/);
-  assert.match(
-    TIMEZONE_SELECT_SOURCE,
-    /className="w-full max-w-md cursor-pointer"/
-  );
-  assert.match(
-    TIMEZONE_SELECT_SOURCE,
-    /SelectItem[\s\S]*className="cursor-pointer"/
-  );
+  // The trigger is pinned for its WIDTH only. Its cursor, and every
+  // `SelectItem`'s, come from `src/components/ui/select.tsx` — the one place a
+  // `shadcn add` could drop them, and where the guard now sits (#502).
+  // The LABEL above is a different case: no selector reaches a `<label>`.
+  assert.match(TIMEZONE_SELECT_SOURCE, /className="w-full max-w-md/);
 });

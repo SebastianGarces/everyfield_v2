@@ -81,15 +81,12 @@ test("the cadence area renders the variant it was given, not an assumed one", ()
   assert.doesNotMatch(CODE, /once a day/i);
 });
 
-test("every clickable in the matrix carries cursor-pointer", () => {
-  // The repo-wide rule. The Switch, the Select trigger, each Select item and
-  // the labels that stand in for the switch on a phone are all pressable.
-  for (const control of [
-    /<Switch[\s\S]*?className="cursor-pointer"/,
-    /<SelectTrigger[\s\S]*?cursor-pointer/,
-    /<SelectItem[\s\S]*?className="cursor-pointer"/,
-  ]) {
-    assert.match(CODE, control, String(control));
+test("the matrix is built from the shared primitives, not hand-rolled ones", () => {
+  // A per-channel Switch and a cadence Select, both from src/components/ui/.
+  // Reaching for a raw <input type="checkbox"> or a <select> here would leave
+  // the surface styled and guarded by nothing the rest of the app shares.
+  for (const primitive of [/<Switch\b/, /<SelectTrigger\b/, /<SelectItem\b/]) {
+    assert.match(CODE, primitive, String(primitive));
   }
 });
 

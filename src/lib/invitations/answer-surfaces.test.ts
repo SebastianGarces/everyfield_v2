@@ -518,14 +518,6 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
     );
     assert.match(dialog, /toLowerCase\(\) ===/, "no type-to-confirm match");
     assert.match(dialog, /disabled=\{!confirmed \|\| pending\}/);
-    // Every clickable carries `cursor-pointer` (repo rule), including the
-    // trigger, the cancel and the destructive confirm.
-    assert.equal(
-      (dialog.match(/cursor-pointer/g) ?? []).length,
-      3,
-      "trigger, cancel and confirm each need cursor-pointer"
-    );
-
     // …and the action behind it exists, takes no entity id, and is the one the
     // logic layer guards. A LEAVE that took an org id would be aimable at
     // somebody else's association; both of these derive it from the session.

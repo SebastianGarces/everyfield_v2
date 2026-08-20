@@ -34,18 +34,24 @@ import { partialImportMessage } from "./phase-template-prompt";
 // `phase-template-prompt-fixtures.ts`.
 // ----------------------------------------------------------------------------
 
-test("every control carries cursor-pointer", () => {
+test("every control is rendered, and each checklist label says it is clickable", () => {
   const html = render();
   const controls = clickables(html);
 
   // Two buttons, plus a checkbox and a label per checklist on offer.
   assert.equal(controls.length, 2 + promptData().offers.length * 2);
 
-  for (const control of controls) {
+  // Only the LABELS are scanned for the class (#502). The buttons and the
+  // checkbox inputs take their cursor from globals.css; a <label> is the one
+  // clickable in this subtree that no selector and no shadcn base reaches.
+  const labels = controls.filter((control) => control.startsWith("<label"));
+  assert.equal(labels.length, promptData().offers.length);
+
+  for (const label of labels) {
     assert.match(
-      control,
+      label,
       /cursor-pointer/,
-      `a control is missing cursor-pointer: ${control}`
+      `a checklist label is missing cursor-pointer: ${label}`
     );
   }
 });

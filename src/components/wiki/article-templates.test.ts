@@ -166,15 +166,6 @@ const relatedTemplatesSource = readFileSync(
   "utf8"
 );
 
-test("every template link carries cursor-pointer (project hard rule)", () => {
-  const linkClassName = relatedTemplatesSource.match(
-    /data-testid="wiki-related-template"[\s\S]*?className="([^"]*)"/
-  );
-
-  assert.ok(linkClassName, "the template link's className was not found");
-  assert.match(linkClassName[1], /\bcursor-pointer\b/);
-});
-
 test("template links open in a new tab, safely and audibly", () => {
   // A template is fetched WHILE reading, so following it in place would cost
   // the reader their place in the article (#317 ruling).

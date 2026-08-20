@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { HistoryDownloadButton } from "./history-download-button";
 
-test("the history download control carries cursor-pointer", () => {
+test("the history download control names the document it downloads", () => {
   const html = renderToStaticMarkup(
     createElement(HistoryDownloadButton, {
       artifactId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -14,7 +14,6 @@ test("the history download control carries cursor-pointer", () => {
     })
   );
 
-  assert.match(html, /cursor-pointer/);
   assert.match(html, /Download Core Group Commitment Card/);
   assert.match(html, />Download</);
 });

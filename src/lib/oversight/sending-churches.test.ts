@@ -238,18 +238,6 @@ test("the roster links only to a page that exists", () => {
   );
 });
 
-test("every link on the roster carries cursor-pointer", () => {
-  const source = read(COMPONENT_FILE);
-  const links = [...source.matchAll(/<Link[\s\S]*?>/g)];
-  assert.ok(links.length > 0, "the link scan found nothing to check");
-  for (const [link] of links) {
-    assert.ok(
-      link.includes("cursor-pointer"),
-      `a <Link> on the roster has no cursor-pointer:\n${link}`
-    );
-  }
-});
-
 // The oversight index's projection and tenancy used to be asserted HERE, by a
 // regex over `oversight/page.tsx`'s source text — a test that lived in a file
 // named for a different module, broke on a variable rename, and could not see

@@ -24,7 +24,7 @@ import { TaskDescriptionField, TaskPrerequisitesField } from "./task-form";
 // outside a mounted app router), which is exactly why the description field is
 // its own exported component. Everything worth pinning lives in this subtree:
 //
-//   * every editor control is a clickable carrying `cursor-pointer` (hard rule)
+//   * every editor control the toolbar offers is rendered and named
 //   * the description reaches the request as HTML, under the name the server
 //     action already reads
 //   * a description written before T-021 loads into the editor as text, not as
@@ -43,17 +43,12 @@ function hiddenDescriptionInput(html: string): RenderedElement | undefined {
   );
 }
 
-test("every description control is a clickable that carries cursor-pointer", () => {
+test("the toolbar renders one named control per editor command", () => {
+  // The cursor loop that used to sit here is gone (#502): these controls are
+  // native <button>s, so globals.css gives them the pointer.
   const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);
-  for (const button of buttons) {
-    assert.match(
-      button.attrs["class"] ?? "",
-      /\bcursor-pointer\b/,
-      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
-    );
-  }
 });
 
 test("bold, italic, links and both lists are all reachable", () => {
@@ -146,28 +141,16 @@ test("prerequisite ids travel in the form under the name the server reads", () =
   assert.equal(input.attrs["value"], PREREQ_A);
 });
 
-test("every prerequisite control is a clickable that carries cursor-pointer", () => {
+test("a selected prerequisite can be removed, and another can be added", () => {
   const html = renderPrereqs();
   const buttons = namedButtons(html);
   assert.ok(
     buttons.length >= 1,
     "the selected prerequisite has no named remove control"
   );
-  for (const button of buttons) {
-    assert.match(
-      button.attrs["class"] ?? "",
-      /\bcursor-pointer\b/,
-      `${button.attrs["aria-label"]} is clickable without cursor-pointer`
-    );
-  }
 
   const trigger = parseElements(html).find(
     (el) => el.attrs["data-slot"] === "select-trigger"
   );
   assert.ok(trigger, "no select trigger to add a prerequisite");
-  assert.match(
-    trigger.attrs["class"] ?? "",
-    /\bcursor-pointer\b/,
-    "the add-prerequisite trigger is clickable without cursor-pointer"
-  );
 });

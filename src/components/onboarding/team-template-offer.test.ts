@@ -474,19 +474,6 @@ test("no count is ever fused to the word after it", () => {
 // 7. Repo rules (FRD AC 7)
 // ----------------------------------------------------------------------------
 
-test("every clickable on the finish screen carries cursor-pointer", () => {
-  const clickables = SCREEN.match(/<(?:Button|Link)\b[\s\S]*?>/g) ?? [];
-  assert.ok(clickables.length > 0, "expected the screen to render controls");
-
-  for (const clickable of clickables) {
-    assert.match(
-      clickable,
-      /cursor-pointer/,
-      `a control in finish-screen.tsx is missing cursor-pointer: ${clickable}`
-    );
-  }
-});
-
 test("the screen holds no server data in state", () => {
   // memory/contracts/data-patterns.md. The only state is the in-flight press
   // and the failure sentence; what was created is read on /teams, after the

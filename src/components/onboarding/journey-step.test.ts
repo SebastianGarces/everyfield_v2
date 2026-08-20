@@ -332,9 +332,6 @@ test("every stage and launch-date radio has an accessible name", () => {
         `${radio.attrs.id} is described by a missing ${id}`
       );
     }
-
-    // The hard rule: every clickable carries `cursor-pointer`.
-    assert.match(radio.attrs.class ?? "", /cursor-pointer/);
   }
 
   // ONE component draws all ten options, which is why one fix reaches all ten:

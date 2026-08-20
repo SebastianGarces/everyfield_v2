@@ -533,7 +533,6 @@ test("the history page lists the session church's documents, newest first", () =
   assert.match(pageSource, /artifactId=\{document\.id\}/);
   assert.match(pageSource, /HeaderBreadcrumbs/);
   assert.match(pageSource, /formatDateWithoutWeekday/);
-  assert.match(pageSource, /className="cursor-pointer"/);
 });
 
 test("the history page renders Generated in the church's zone, not UTC", () => {
@@ -554,11 +553,10 @@ test("the history page renders Generated in the church's zone, not UTC", () => {
   assert.match(pageSource, /getCurrentUserChurch\(\)/);
 });
 
-test("the documents library links to history with cursor-pointer", () => {
+test("the documents library links to history", () => {
   const libraryPage = readFileSync(
     path.join(SRC, "app", "(dashboard)", "documents", "page.tsx"),
     "utf8"
   );
   assert.match(libraryPage, /href="\/documents\/history"/);
-  assert.match(libraryPage, /cursor-pointer/);
 });

@@ -10,7 +10,7 @@ import { sourceReader } from "@/lib/testing/source-span";
 //
 // The rating is server data, so it must ride `useOptimistic` over the prop
 // (never `useState` seeded from it). The action calls `refresh()`, so the
-// control updates in place. Both thumbs carry `cursor-pointer`.
+// control updates in place.
 // ----------------------------------------------------------------------------
 
 const SOURCE = sourceReader(
@@ -25,14 +25,6 @@ test("the rating is useOptimistic over the server prop, never useState", () => {
     /useState\(initialRating/,
     "seeding useState from the server rating goes stale the moment refresh() re-renders"
   );
-});
-
-test("both thumbs carry cursor-pointer", () => {
-  const yes = SOURCE.span('aria-label="Mark article helpful"', "Yes");
-  const no = SOURCE.span('aria-label="Mark article unhelpful"', "No");
-
-  assert.match(yes, /cursor-pointer/);
-  assert.match(no, /cursor-pointer/);
 });
 
 test("voting does not navigate", () => {
