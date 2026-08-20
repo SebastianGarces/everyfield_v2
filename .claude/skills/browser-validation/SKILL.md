@@ -88,6 +88,13 @@ await page.context().clearCookies();
 await page.goto('<preview>/login?x-vercel-protection-bypass=…&x-vercel-set-bypass-cookie=true');
 ```
 
+**A fresh registration on a preview never goes through the beta gate.** `BETA_INVITE_CODE` is a
+Vercel *sensitive* variable: `vercel env pull` returns the literal `[REDACTED]`, so no agent can
+obtain it — do not burn time trying, and do not settle for post-state evidence because of it. The
+app's own bypass is the path: create an invitation from the network admin account (an invited
+registration skips the code via `hasValidInvitationBypass`), then register through the invite link.
+Proven on #378's validation: the full onboarding flow ran cold on a preview this way.
+
 ## 4. Drive it and capture evidence
 
 The gate thresholds live in `.claude/skills/validate/SKILL.md`. Two facts belong here. Evidence is
