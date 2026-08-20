@@ -405,9 +405,16 @@ function NotificationRow({
 // ----------------------------------------------------------------------------
 
 function EmptyState({ hasAny }: { hasAny: boolean }) {
-  // Cold start: this recipient has never had a visible notification. Almost
-  // always a brand-new plant, where an unexplained blank panel is the difference
-  // between "the app is quiet" and "the app is broken".
+  // Cold start: this recipient has never had a visible notification. Usually a
+  // brand-new plant, where an unexplained blank panel is the difference between
+  // "the app is quiet" and "the app is broken".
+  //
+  // The copy names no tenancy on purpose (#308 WS1). Since N-027 an OVERSIGHT
+  // account lands here too, and it has no plant of its own — "your plant has not
+  // generated any yet" told a network admin about a church they do not have. The
+  // component has no viewer to branch on and does not need one: what is true for
+  // both readers is that nothing has arrived, and the examples below are things
+  // either of them would be notified about.
   if (!hasAny) {
     return (
       <div
@@ -419,7 +426,7 @@ function EmptyState({ hasAny }: { hasAny: boolean }) {
         <p className="text-muted-foreground max-w-md text-sm text-pretty">
           This is where you will see what happened while you were away — tasks
           coming due, meetings scheduled, messages that did not reach someone.
-          Your plant has not generated any yet.
+          Nothing has arrived yet.
         </p>
         <Button asChild variant="outline" size="sm" className="cursor-pointer">
           <Link href="/dashboard" className="cursor-pointer">
