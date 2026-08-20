@@ -11,6 +11,10 @@ import {
 } from "@/lib/documents";
 import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
 import { canRenderDocument, renderDocument } from "@/lib/documents/render";
+import {
+  generatedDocumentFilename,
+  recordGeneratedDocument,
+} from "@/lib/documents/service";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -21,7 +25,9 @@ export const runtime = "nodejs";
  * Renders a code-defined document template and streams it as a download.
  * Format defaults to the template's first supported format. Merge values come
  * from query params; missing fields fall back to church/user auto-fill
- * defaults. Generate-on-demand (no persistence).
+ * defaults. The bytes are stored and a history row is written so the planter
+ * can re-download without regenerating. A preview (`?preview=1`) does not
+ * record.
  */
 export async function GET(
   request: NextRequest,
@@ -55,6 +61,9 @@ export async function GET(
     );
   }
 
+  // The ONLY place this handler asks whether the caller has a church. The
+  // context carries the id it resolved, so nothing downstream re-checks and
+  // nothing downstream can answer the question differently.
   const context = await resolveDocumentMergeContext();
   if (!context) {
     return NextResponse.json(
@@ -70,7 +79,7 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
-  const values = resolveMergeValues(template, context, provided);
+  const values = resolveMergeValues(template, context.merge, provided);
 
   let file: Buffer;
   try {
@@ -86,16 +95,49 @@ export async function GET(
     );
   }
 
-  // `?preview=1` renders inline (PDF only — browsers can't preview .docx inline).
-  const { mime, ext } = FORMAT_OUTPUT[format];
-  const inline =
-    format === "pdf" && request.nextUrl.searchParams.get("preview") === "1";
+  // Two independent questions off one flag. `preview` decides whether this
+  // request WRITES: a look never records, whatever format it asked for.
+  // `inline` decides how it is DELIVERED, and only a PDF can be shown in a
+  // browser tab — a .docx preview still downloads. Deriving the write from
+  // `inline` recorded every non-PDF preview.
+  const { mime } = FORMAT_OUTPUT[format];
+  const preview = request.nextUrl.searchParams.get("preview") === "1";
+  const inline = preview && format === "pdf";
+
+  if (!preview) {
+    try {
+      await recordGeneratedDocument({
+        churchId: context.churchId,
+        userId: user.id,
+        templateId: template.id,
+        format,
+        bytes: file,
+      });
+    } catch (error) {
+      console.error(
+        `[documents] failed to persist ${templateId} (${format}):`,
+        error
+      );
+      // The bytes exist; only the history row failed. The download still
+      // fails closed — we do not hand back a file we could not record — but
+      // the message must say which half broke, or the planter retries a
+      // render that was never the problem.
+      return NextResponse.json(
+        { error: "Generated the document but could not save it to history" },
+        { status: 500 }
+      );
+    }
+  }
+
+  // One owner for the download name (`service.ts`), so a fresh generation and
+  // a re-download from history cannot disagree about what the file is called.
   const disposition = inline ? "inline" : "attachment";
+  const filename = generatedDocumentFilename(template.id, format);
   return new NextResponse(new Uint8Array(file), {
     status: 200,
     headers: {
       "Content-Type": mime,
-      "Content-Disposition": `${disposition}; filename="${template.id}.${ext}"`,
+      "Content-Disposition": `${disposition}; filename="${filename}"`,
       "Content-Length": String(file.length),
       "Cache-Control": "no-store",
     },

@@ -15,10 +15,21 @@ import { getLaunchForChurch } from "@/lib/launch/queries";
 import type { MergeContext } from "./merge";
 
 /**
- * Resolve the merge context for the current user's church, or `null` when the
- * session has no church behind it (no session, no `churchId`, or a dangling
- * church row). Each caller keeps its own failure shape — the route answers
- * 400, the page redirects.
+ * The current planter's church, resolved once: the id every church-scoped
+ * write binds, and the merge values every render fills in. They travel
+ * together because the church row answers both, so a caller that got a
+ * context has already been told it has a church and never asks again.
+ */
+export type ResolvedDocumentContext = {
+  churchId: string;
+  merge: MergeContext;
+};
+
+/**
+ * Resolve the document context for the current user's church, or `null` when
+ * the session has no church behind it (no session, no `churchId`, or a
+ * dangling church row). Each caller keeps its own failure shape — the route
+ * answers 400, the page redirects.
  *
  * The launch date comes from the LAUNCH ENTITY (`launches.target_date`,
  * LS-001) and never from the church row, whose `launch_date` column migration
@@ -27,7 +38,7 @@ import type { MergeContext } from "./merge";
  * `?launch_date=` still overrides it: provided values win in
  * `resolveMergeValues`, and this is only the auto-fill default.
  */
-export async function resolveDocumentMergeContext(): Promise<MergeContext | null> {
+export async function resolveDocumentMergeContext(): Promise<ResolvedDocumentContext | null> {
   const church = await getCurrentUserChurch();
   if (!church) return null;
 
@@ -37,8 +48,11 @@ export async function resolveDocumentMergeContext(): Promise<MergeContext | null
   const launch = await getLaunchForChurch(church.id);
 
   return {
-    churchName: church.name,
-    userName: user?.name ?? null,
-    launchDate: launch?.targetDate ?? null,
+    churchId: church.id,
+    merge: {
+      churchName: church.name,
+      userName: user?.name ?? null,
+      launchDate: launch?.targetDate ?? null,
+    },
   };
 }

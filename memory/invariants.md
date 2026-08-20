@@ -105,6 +105,14 @@ Applies to `src/lib/phase-engine/**` and the `/phase` surfaces rendering `plant_
 - A church's published row for a slug overrides the global one in SQL and ONLY in SQL: a JS collapse cannot answer for a RANKED read, because it sees only the rows that survived the `ts_rank` cut and the church's rewritten copy need not be among them. The test pins the ABSENCE of a second implementation, never that reason.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose and never seeded: a prose link duplicating the column renders that link twice. No test catches a violation.
 
+## Generated Documents
+
+Applies to `generated_documents`, `src/lib/documents/service.ts`, and `/documents/history`.
+
+- The upload comes BEFORE the insert because the two failure modes are not symmetrical: an object with no row is garbage a sweep can collect, while a row with no object is a download button that 404s and cannot be repaired from inside the app. `service.test.ts` runs both forced failures; the source order alone never proved it.
+- A foreign artifact id reads as MISSING, not forbidden — the church-scoped lookup IS the answer, so no separate refusal exists to distinguish "not yours" from "not there".
+- `storage_key`'s UNIQUE index guards nothing constructible today (keys carry a fresh uuid). It is kept as a fence for a future DETERMINISTIC key scheme, where a collision would silently overwrite one church's artifact with another's render.
+
 ## Rich Text — Stored HTML & the Sanitiser
 
 → [rich-text](invariants/rich-text.md) — `src/lib/rich-text/**` and every writer or reader of a rich-text body.
