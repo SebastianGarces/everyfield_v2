@@ -18,7 +18,7 @@ import { toPersonForClient } from "./types";
 // TWO ENDS, because neither one holds alone:
 //
 //   1. THE RUNTIME STRIP. `toPersonForClient` is the only spelling of it, and
-//      the third test below is the proof it removes the KEY rather than setting
+//      the last test below is the proof it removes the KEY rather than setting
 //      it to undefined — `JSON.stringify` and the RSC serializer both carry a
 //      key that exists.
 //   2. THE TYPE SPELLING. `PersonForClient` is `Omit<Person, "userId">`, and
@@ -28,12 +28,24 @@ import { toPersonForClient } from "./types";
 //      SPREADING a full row into a value typed `PersonWithTags`, so the type
 //      asserted the column was gone while the object carried it into
 //      `quick-add-form.tsx`. A compiler that cannot see the difference is why
-//      the first two tests are source-shaped scans rather than type assertions.
+//      the two scans below are source-shaped rather than type assertions, and
+//      why one of them carries a fixture pinning its own pattern.
 //
-// The scans are RATCHETS. They do not prove today's rows are clean — test 3 and
-// the strip do that. They fail the moment a NEW surface spells the raw row type
-// where the narrow one belongs, which is the shape every instance of this bug
-// has had.
+// The scans are RATCHETS. They do not prove today's rows are clean — the
+// behavioural test and the strip do that. They fail the moment a NEW surface
+// spells the raw row type where the narrow one belongs, which is the shape
+// every instance of this bug has had.
+//
+// WHAT THEY MEASURED WHEN THEY FIRST RAN, against a1a08f9, the commit before
+// the fix: 15 client-component props typed `Person` across 11 files, and 19
+// raw-row return lines in the six boundary modules — 18 that the fix changed
+// plus `getPeopleForExport`, which stands. Both numbers are reproducible by
+// running this file at that commit. The fix's own message says 13 for the
+// second one and that is WRONG twice over: it was read off a `sort -u` that
+// silently collapsed the repeated `): Promise<Person> {` lines, and the
+// pattern it was read with still had the anchor bug described at
+// RAW_PERSON_RETURN. The corrected number is recorded here because the commit
+// message cannot be.
 // ----------------------------------------------------------------------------
 
 const ROOT = process.cwd();
@@ -49,16 +61,34 @@ const ROOT = process.cwd();
 const RAW_PERSON_TYPE = /(?::\s*|<)Person\b/;
 
 /**
- * A RETURN type mentioning the raw row — `): Promise<Person>`,
- * `): Promise<Person | null>`, `): Promise<ActionResult<Person>>`,
- * `): Promise<{ household: Household; person: Person }>`.
+ * A RETURN type mentioning the raw row, in EVERY shape a signature takes.
  *
- * What a boundary module HANDS OUT is the whole rule, so this is deliberately
- * blind to the type inside it: `const updateData: Partial<Person>` builds a
- * drizzle `.set()` payload and `let exactRow: Person | null` is a local in a
- * server-only read. Both are correct as `Person` and neither leaves the module.
+ * The anchor this pattern does NOT have is the point. It shipped as
+ * `/^\):\s*Promise<.*\bPerson\b/`, which only ever saw a return type that began
+ * its own line — the shape a multi-line parameter list happens to produce. Two
+ * forms already in this codebase walked straight past it: a one-parameter
+ * signature keeps everything on one line (`export async function getFoo(id:
+ * string): Promise<Person> {`, and `household.ts`'s `listHouseholds` shows that
+ * is house style), and a destructured object parameter closes with
+ * `}): Promise<…>` (`quickAddPersonAction`). Ratchet 1 would not have caught
+ * either, because it only reads `"use client"` files, and `tsc` says nothing
+ * about any of it — so a future one-param boundary read returning `Person`
+ * would have slipped every guard here. `PATTERN_FIXTURE` below pins all of it.
+ *
+ * `\):` therefore matches wherever the parameter list closes, and `.*` is
+ * deliberately blind to the type between there and the row: `Promise<Person>`,
+ * `Promise<Person | null>`, `Promise<ActionResult<Person>>`, the inline object
+ * in `Promise<{ household: Household; person: Person }>`, and a synchronous
+ * `): Person` alike. Requiring `Promise<` would re-narrow it to today's shapes,
+ * and an object return type rules out matching up to the body brace.
+ *
+ * What a module HANDS OUT is the whole rule, which is why nothing without a
+ * closing paren in front of it counts: `const updateData: Partial<Person>`
+ * builds a drizzle `.set()` payload and `let exactRow: Person | null` is a
+ * local in a server-only read. Both are correct as `Person`, and neither
+ * leaves the module.
  */
-const RAW_PERSON_RETURN = /^\):\s*Promise<.*\bPerson\b/;
+const RAW_PERSON_RETURN = /\):.*\bPerson\b/;
 
 /** Every source file under `dir`, recursively. */
 function sourceFiles(dir: string): string[] {
@@ -136,6 +166,69 @@ const BOUNDARY_MODULES = [
  * paying for a strip nothing observes.
  */
 const SERVER_ONLY_READS = ["src/lib/people/service.ts: ): Promise<Person[]> {"];
+
+/**
+ * What the ratchet must see, and what it must not — the scan is only worth its
+ * green if the pattern behind it bites.
+ *
+ * A ratchet that reads real files can go quiet in two ways, and the tree makes
+ * neither visible: the pattern stops matching a shape nobody has written YET
+ * (the anchor bug above — every form in the tree was multi-line, so the tree
+ * agreed with a broken pattern), or it starts matching a local and gets
+ * "fixed" by loosening the rule. Both are answered here rather than on the
+ * source, so the failure names the pattern instead of a file.
+ */
+const PATTERN_FIXTURE = {
+  catch: [
+    // The hole this fixture exists for: one parameter, one line.
+    "export async function getFoo(id: string): Promise<Person> {",
+    // A destructured object parameter closes the list with `}`.
+    "}): Promise<ActionResult<Person>> {",
+    // The multi-line shapes, which are what the tree happened to contain.
+    "): Promise<Person> {",
+    "): Promise<Person | null> => {",
+    "): Promise<Person[]> {",
+    "): Promise<ActionResult<Person>> {",
+    "): Promise<{ household: Household; person: Person }> {",
+    // Nothing says a future boundary read has to be async.
+    "export function headOf(rows: Row[]): Person {",
+    "const pick = (rows: Row[]): Person => rows[0];",
+  ],
+  ignore: [
+    // Locals and payloads. Correct as `Person`; they never leave the module.
+    "const updateData: Partial<Person> = {",
+    "let exactRow: Person | null = null;",
+    // The narrow row, which is the whole point.
+    "): Promise<PersonForClient> {",
+    "): Promise<ActionResult<PersonForClient[]>> {",
+    // Other rows, and no row at all.
+    "): Promise<Household[]> {",
+    "): Promise<void> {",
+    // `Person` before the `):`, never after — a parameter, not a return.
+    "function getInitials(person: Person): string {",
+    "  person: Person;",
+  ],
+};
+
+test("the return-type pattern catches every shape a signature takes", () => {
+  const missed = PATTERN_FIXTURE.catch.filter(
+    (line) => !RAW_PERSON_RETURN.test(line)
+  );
+  assert.deepEqual(
+    missed,
+    [],
+    `RAW_PERSON_RETURN must catch a raw-row return in any signature shape — these slipped:\n${missed.join("\n")}`
+  );
+
+  const falsePositives = PATTERN_FIXTURE.ignore.filter((line) =>
+    RAW_PERSON_RETURN.test(line)
+  );
+  assert.deepEqual(
+    falsePositives,
+    [],
+    `RAW_PERSON_RETURN must ignore parameters, locals and the narrow row — these matched:\n${falsePositives.join("\n")}`
+  );
+});
 
 test("the people boundary hands out PersonForClient, not Person", () => {
   const offenders: string[] = [];
