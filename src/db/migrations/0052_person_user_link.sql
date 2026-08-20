@@ -115,7 +115,49 @@
 --     AND NOT EXISTS (SELECT 1 FROM "team_memberships" m WHERE m."person_id" = "persons"."id")
 --     AND NOT EXISTS (SELECT 1 FROM "ministry_teams" t WHERE t."leader_id" = "persons"."id");
 --
--- (guarded, because §2a may have claimed a row the plant typed in itself).
+-- The guard is there because §2a may have claimed a row the plant typed in
+-- itself. IT IS NOT ENOUGH. Read the rest of this section before running it.
+--
+-- *** THE RESIDUE CLEAR DESTROYS ADOPTED ROWS ONCE 0053 HAS BEEN ROLLED BACK,
+-- *** WHICH IS THE ORDER THIS SECTION REQUIRES FOUR LINES ABOVE. ***
+--
+-- The two NOT EXISTS clauses ask whether a row is IN USE. They do not ask where
+-- it came from, and nothing else records that either: §2a writes `user_id` and
+-- `updated_at` and no marker, §2b INSERTs, and the column that would tell the
+-- two apart is the one this rollback drops. On an adopted row the membership is
+-- the only clause that ever holds — 0053's §4 seats the planter by writing a
+-- `team_memberships` row and never touches `ministry_teams.leader_id` — and the
+-- second statement of 0053's own §5 is `DELETE FROM "team_memberships" … WHERE
+-- t."template_key" = 'senior_pastor' AND p."user_id" IS NOT NULL`. Rolling 0053
+-- back removes the guard's only protection for exactly these rows.
+--
+-- After that an adopted row and a minted one are indistinguishable — both
+-- linked, neither seated — and the DELETE takes a contact the plant typed in.
+-- Re-applying does not give it back: §2a has nothing left to match, §2b MINTS a
+-- replacement, and the record returns in this migration's spelling instead of
+-- the plant's. Seen on the scratch database: an adopted "Bo TypedInByThePlant"
+-- at `core_group` came back as "Bo", blank last name, `leader`.
+--
+-- 0053's rollback WIDENS this rather than causing it. Even with 0053 still
+-- applied, an adopted row §4 never seated — the plant is not
+-- `planter_confirmed`, or its Senior Pastor role was already filled — carries no
+-- membership either, and the guard deletes it just the same.
+--
+-- SO NAME THE MINTED ROWS FIRST AND DELETE BY THAT LIST, not by the guard. §2b
+-- takes both timestamps from one `now()` while §2a bumps `updated_at` alone, so
+-- until something edits them the minted rows are exactly:
+--
+--   CREATE TABLE "minted_0052" AS
+--   SELECT "id" FROM "persons"
+--    WHERE "user_id" IS NOT NULL AND "created_at" = "updated_at";
+--
+-- Capture that BEFORE the rollback begins — it reads `user_id`, which the last
+-- step drops — then roll 0053 back, then `DELETE FROM "persons" WHERE "id" IN
+-- (SELECT "id" FROM "minted_0052")`, then drop the scratch table. A minted row
+-- edited since reads as adopted and is KEPT, which is the direction to fail in.
+-- Where §2a adopted NOTHING the question does not arise and the guarded DELETE
+-- is exact — the shared branch measured 0 (§2), a count worth re-running rather
+-- than assuming.
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
