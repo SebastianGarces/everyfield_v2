@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { LoginForm } from "./login-form";
 import { isDevLoginEnabled, listDevAccounts } from "./dev-accounts";
+import { listPreviewAccounts } from "./preview-accounts";
 import { getCurrentSession } from "@/lib/auth";
 import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
@@ -51,9 +52,18 @@ export default async function LoginPage({
 
   // The auth layout is a flex row; stack so the dev switcher sits BELOW the
   // form rather than beside it.
+  //
+  // `listPreviewAccounts()` is empty everywhere but a Vercel preview, so on
+  // production this passes `[]` and the picker renders nothing — and because
+  // the roster only ever crosses to the browser as this prop, no seeded address
+  // is in a production client chunk. It is a plain in-repo constant, not a
+  // query: there is no second thing to gate.
   return (
     <div className="flex w-full max-w-md flex-col items-center">
-      <LoginForm redirectTo={redirectTo} />
+      <LoginForm
+        redirectTo={redirectTo}
+        previewAccounts={listPreviewAccounts()}
+      />
       <DevAccountSwitcherSlot redirectTo={redirectTo} />
     </div>
   );

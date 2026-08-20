@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { login, type LoginState } from "./actions";
+import { PreviewAccountPicker } from "./preview-account-picker";
+import type { PreviewAccount } from "./preview-accounts";
 
 const initialState: LoginState = {};
 
@@ -23,9 +25,26 @@ const initialState: LoginState = {};
  * made it a SECOND reader of the param and the only ungated one — harmless
  * because the action re-checks the field it submits, but it is one round trip
  * and it should have one gate (#503).
+ *
+ * `previewAccounts` is empty everywhere but a Vercel preview, where it carries
+ * the seeded QA roster (`preview-accounts.ts`). The picker it feeds only WRITES
+ * THESE TWO FIELDS — this component owns both values, the form action below is
+ * the same one a hand-typed login submits, and there is no second path to a
+ * session. Both inputs are controlled for exactly that reason: an autofill that
+ * reached around into the DOM would be a second owner of the field, and the
+ * value React submits is the one in this state.
  */
-export function LoginForm({ redirectTo }: { redirectTo: string }) {
+export function LoginForm({
+  redirectTo,
+  previewAccounts,
+}: {
+  redirectTo: string;
+  previewAccounts: PreviewAccount[];
+}) {
   const [state, formAction, pending] = useActionState(login, initialState);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [picked, setPicked] = useState<PreviewAccount | null>(null);
 
   return (
     <Card className="w-full max-w-md">
@@ -38,6 +57,19 @@ export function LoginForm({ redirectTo }: { redirectTo: string }) {
       <form action={formAction}>
         <input type="hidden" name="redirect" value={redirectTo} />
         <CardContent className="space-y-4">
+          <PreviewAccountPicker
+            accounts={previewAccounts}
+            picked={picked}
+            onPick={(account) => {
+              setPicked(account);
+              setEmail(account.email);
+              // `null` means the password is not in the repo. Clear the field
+              // rather than leaving a stale one from the previous pick, so what
+              // is on screen is what will be submitted.
+              setPassword(account.password ?? "");
+            }}
+          />
+
           {state.error && (
             <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
               {state.error}
@@ -53,6 +85,13 @@ export function LoginForm({ redirectTo }: { redirectTo: string }) {
               placeholder="you@example.com"
               autoComplete="email"
               required
+              value={email}
+              // Typing drops the pick, so the picker never names an account
+              // whose credentials are no longer the ones in these fields.
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setPicked(null);
+              }}
               aria-invalid={!!state.fieldErrors?.email}
             />
             {state.fieldErrors?.email && (
@@ -71,6 +110,11 @@ export function LoginForm({ redirectTo }: { redirectTo: string }) {
               placeholder="••••••••"
               autoComplete="current-password"
               required
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setPicked(null);
+              }}
               aria-invalid={!!state.fieldErrors?.password}
             />
             {state.fieldErrors?.password && (
