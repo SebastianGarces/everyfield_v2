@@ -346,7 +346,7 @@ export function importedBindings(
   return bindings;
 }
 
-const MINTING_EXPORTS = new Map<string, Set<string>>();
+const REACHING_EXPORTS = new Map<string, Set<string>>();
 
 /**
  * The names that MINT an actor when called from `file`: the two session reads,
@@ -366,18 +366,28 @@ const MINTING_EXPORTS = new Map<string, Set<string>>();
  * `stack` breaks import cycles: a module already being resolved contributes
  * nothing rather than recursing, which under-approximates (a cyclic mint would
  * be missed) and so fails CLOSED — the assertion complains rather than passing.
+ *
+ * IT IS PARAMETERISED BY ITS ROOTS because the seat guard asks the identical
+ * question of a different base case (#498): "which names reach `requireSeat`",
+ * where the answer has to follow the same three edges — a local helper, a
+ * domain's session envelope one module away (`withChurchSession`, `withChurch`,
+ * `requireChurchSession`), and a re-export. That is this walk exactly, and a
+ * second copy of it would be a second set of blind spots to keep in sync.
  */
-export function mintingNames(
+export function reachingNames(
   file: string,
   code: string,
+  roots: readonly string[],
   stack: ReadonlySet<string> = new Set()
 ): Set<string> {
-  const mints = new Set(SESSION_READS);
+  const reaching = new Set(roots);
 
   for (const [local, { module, original }] of importedBindings(file, code)) {
     if (stack.has(module)) continue;
-    if (mintingExportsOf(module, new Set([...stack, file])).has(original)) {
-      mints.add(local);
+    if (
+      reachingExportsOf(module, roots, new Set([...stack, file])).has(original)
+    ) {
+      reaching.add(local);
     }
   }
 
@@ -386,10 +396,10 @@ export function mintingNames(
   for (let pass = 0; pass <= bodies.length; pass++) {
     let grew = false;
     for (const fn of bodies) {
-      if (mints.has(fn.name)) continue;
-      for (const mint of mints) {
-        if (new RegExp(`\\b${mint}\\s*\\(`).test(fn.body)) {
-          mints.add(fn.name);
+      if (reaching.has(fn.name)) continue;
+      for (const root of reaching) {
+        if (new RegExp(`\\b${root}\\s*\\(`).test(fn.body)) {
+          reaching.add(fn.name);
           grew = true;
           break;
         }
@@ -398,28 +408,31 @@ export function mintingNames(
     if (!grew) break;
   }
 
-  return mints;
+  return reaching;
 }
 
-/** Which of `file`'s exported functions mint, for an importer to consult. */
-export function mintingExportsOf(
+/** Which of `file`'s exported functions reach `roots`, for an importer. */
+export function reachingExportsOf(
   file: string,
+  roots: readonly string[],
   stack: ReadonlySet<string>
 ): Set<string> {
-  const cached = MINTING_EXPORTS.get(file);
+  const key = `${roots.join(",")} ${file}`;
+  const cached = REACHING_EXPORTS.get(key);
   if (cached !== undefined) return cached;
 
   const code = codeOf(file);
-  const mints = mintingNames(file, code, stack);
+  const reaching = reachingNames(file, code, roots, stack);
   const exported = new Set(
     functionBodies(code)
-      .filter((fn) => fn.exported && mints.has(fn.name))
+      .filter((fn) => fn.exported && reaching.has(fn.name))
       .map((fn) => fn.name)
   );
 
-  // `verifySession` and `getCurrentSession` are exported from session.ts as the
-  // base case; they mint by definition rather than by reaching anything.
-  for (const name of SESSION_READS) {
+  // A root exported from the module that DEFINES it — `verifySession` and
+  // `getCurrentSession` in session.ts, `requireSeat` in seats.ts — is a base
+  // case: it qualifies by definition rather than by reaching anything.
+  for (const name of roots) {
     if (
       new RegExp(
         `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
@@ -429,8 +442,25 @@ export function mintingExportsOf(
     }
   }
 
-  if (stack.size === 0) MINTING_EXPORTS.set(file, exported);
+  if (stack.size === 0) REACHING_EXPORTS.set(key, exported);
   return exported;
+}
+
+/** The mint walk — {@link reachingNames} rooted at the two session reads. */
+export function mintingNames(
+  file: string,
+  code: string,
+  stack: ReadonlySet<string> = new Set()
+): Set<string> {
+  return reachingNames(file, code, SESSION_READS, stack);
+}
+
+/** Which of `file`'s exported functions mint, for an importer to consult. */
+export function mintingExportsOf(
+  file: string,
+  stack: ReadonlySet<string>
+): Set<string> {
+  return reachingExportsOf(file, SESSION_READS, stack);
 }
 
 /**
@@ -490,4 +520,62 @@ export function parsingServerActionExports(): ServerActionExport[] {
  */
 export function isPublicRouteGroup(file: string): boolean {
   return /\/app\/\((?:auth|marketing)\)\//.test(file);
+}
+
+/** The one guard every `"use server"` export is required to reach (#498). */
+export const SEAT_GUARD = ["requireSeat"];
+
+/**
+ * One exported endpoint of one `"use server"` module, with the two offsets the
+ * SEAT-GUARD rule is stated in terms of.
+ *
+ * EVERY export, not only the ones that parse — which is the difference between
+ * this reader and {@link parsingServerActionExports}. The ordering rule needs an
+ * argument to be a rule about; the guard rule does not, and an export with no
+ * argument at all is still a POSTable endpoint that has to say who may call it.
+ */
+export type GuardedExport = {
+  file: string;
+  name: string;
+  /** Where the export reaches `requireSeat`, directly or through an envelope. */
+  guard: number;
+  /** Where it first parses an argument, or -1 if it parses none. */
+  parse: number;
+  label: string;
+};
+
+/**
+ * Every exported function of every `"use server"` module under `src/`, with the
+ * offset at which it reaches the seat guard.
+ *
+ * `reachingNames` is what makes the envelope modules work without exemptions:
+ * `people/actions.ts` guards through `withChurchSession`, `teams/actions.ts`
+ * through `withChurch` and `launch/actions.ts` through its local
+ * `requireChurchSession`, and each of those calls `requireSeat` one module (or
+ * one function) away. A scan that only knew the literal string would have
+ * called sixty correctly-guarded endpoints unguarded and forced a hand-written
+ * exemption list — which is the thing this rule exists to not have.
+ */
+export function guardedServerActionExports(): GuardedExport[] {
+  const found: GuardedExport[] = [];
+
+  for (const file of TS_FILES.filter(isUseServerModule)) {
+    const code = codeOf(file);
+    const guards = reachingNames(file, code, SEAT_GUARD);
+    const guardPattern = new RegExp(`\\b(?:${[...guards].join("|")})\\s*\\(`);
+
+    for (const fn of functionBodies(code)) {
+      if (!fn.exported) continue;
+
+      found.push({
+        file,
+        name: fn.name,
+        guard: fn.body.search(guardPattern),
+        parse: fn.body.indexOf(".safeParse("),
+        label: `${rel(file)} → ${fn.name}`,
+      });
+    }
+  }
+
+  return found;
 }
