@@ -14,18 +14,22 @@ import { cn } from "@/lib/utils";
 //
 // It is also NOT a client component. Nothing here is interactive beyond a link,
 // so the shell ships no extra JavaScript for it, and the count updates the way
-// every other server-rendered value does: the mark-read actions call
-// `refresh()`, the layout re-renders, the number changes.
+// every other server-rendered value does: a `router.refresh()` re-renders the
+// tree the layout is part of and the number changes. Which caller owns that
+// refresh is `notification-feed.tsx`'s business, not the bell's — the two
+// mark-read presses that STAY on the feed call it themselves, and the row click
+// that LEAVES must not own work on the route it is replacing (#228).
 //
 // ----------------------------------------------------------------------------
-// LOADING IS A THIRD STATE, NOT A COUNT OF ZERO (#308 WS2, from #232)
+// NEITHER "NOT YET" NOR "COULD NOT" IS A COUNT (#308 WS2, from #232; #528)
 // ----------------------------------------------------------------------------
 //
 // The count is read below a `<Suspense>` boundary in the dashboard layout, so
-// the bell renders once before it is known. That render used to pass
-// `DEGRADED_UNREAD_COUNT` — the constant the FAILURE path degrades to — and the
-// bell has no way to tell the two apart, so it did what it does for any zero:
-// it announced "Notifications, none unread". Two things were wrong with that.
+// the bell renders once before it is known — and the read can also fail, which
+// is why `loadUnreadBadgeCountSafely` exists at all. Both used to arrive here as
+// the number `0`, and zero is a real answer the bell is allowed to give, so the
+// bell did what it does for any zero: it announced "Notifications, none unread".
+// Two things were wrong with that.
 //
 // It is an assertion the shell has not earned. A screen-reader user with one
 // unread notification was told there were none, and then, when the count
@@ -33,11 +37,14 @@ import { cn } from "@/lib/utils";
 // a question it had not yet asked. And it made a rendered zero the thing a red
 // badge pops out of, which is the visual half of the same lie.
 //
-// So `"loading"` is a value of the prop rather than a number standing in for
-// one. In that state the bell renders its geometry and its link — the header
-// must not reflow when the count arrives — and nothing else: no badge, no
-// `data-unread-count`, and a NEUTRAL accessible name under `aria-busy`, which
-// is the ARIA spelling of "this will be answered shortly".
+// So both are VALUES of the prop rather than numbers standing in for one, and
+// the compiler is what enforces it: nothing can print `"loading"` or
+// `"unavailable"` as a count without saying which it means. In either state the
+// bell renders its geometry and its link — the header must not reflow when the
+// count arrives — and nothing else: no badge, no `data-unread-count`, and a
+// NEUTRAL accessible name. They differ in one thing only, `aria-busy`, which is
+// the ARIA spelling of "this will be answered shortly" and would be a lie on a
+// read that has already finished failing.
 // ============================================================================
 
 /** Above this, the badge stops being a number and starts being a mood. */
@@ -61,26 +68,33 @@ export function unreadBellLabel(count: number): string {
 }
 
 /**
- * The accessible name while the count is still being read.
+ * The accessible name whenever there is no count to give — still being read, or
+ * read and failed.
  *
- * Deliberately says nothing about unread state. `aria-busy` on the same element
- * carries "not yet", so a screen reader announces the control without a number
- * that is about to change.
+ * Deliberately says nothing about unread state. `aria-busy`, present only on
+ * the loading render, carries "not yet"; a screen reader announces the control
+ * either way without a number the shell has not earned.
  */
-export const LOADING_BELL_LABEL = "Notifications";
+export const UNCOUNTED_BELL_LABEL = "Notifications";
+
+/**
+ * What the bell was told about the viewer's unread work.
+ *
+ * STRINGS RATHER THAN SENTINEL NUMBERS. There is no count that means "I do not
+ * know yet" or "I could not read it": zero is a real answer the bell is allowed
+ * to give, and while all three shared a representation the shell made that
+ * answer on the viewer's behalf. Anything that has to tell them apart now has
+ * to say which it means, and the compiler asks.
+ */
+export type UnreadCount = number | "loading" | "unavailable";
 
 export interface NotificationBellProps {
   /**
-   * Visible unread notifications for this viewer, or `"loading"` while the
-   * count is still being read below the layout's Suspense boundary.
-   *
-   * A STRING RATHER THAN A SENTINEL NUMBER. There is no count that means "I do
-   * not know yet": zero is a real answer the bell is allowed to give, and while
-   * the two shared a representation the loading render made that answer on the
-   * shell's behalf. Anything that has to tell them apart now has to say which
-   * it means, and the compiler asks.
+   * Visible unread notifications for this viewer, `"loading"` while the count
+   * is still being read below the layout's Suspense boundary, or
+   * `"unavailable"` when the read failed (`loadUnreadBadgeCountSafely`).
    */
-  unreadCount: number | "loading";
+  unreadCount: UnreadCount;
   className?: string;
 }
 
@@ -89,7 +103,8 @@ export function NotificationBell({
   className,
 }: NotificationBellProps) {
   const loading = unreadCount === "loading";
-  const hasUnread = !loading && unreadCount > 0;
+  const counted = typeof unreadCount === "number";
+  const hasUnread = counted && unreadCount > 0;
 
   return (
     <Button
@@ -100,20 +115,24 @@ export function NotificationBell({
     >
       <Link
         href="/notifications"
-        aria-label={loading ? LOADING_BELL_LABEL : unreadBellLabel(unreadCount)}
+        aria-label={
+          counted ? unreadBellLabel(unreadCount) : UNCOUNTED_BELL_LABEL
+        }
         // The ARIA spelling of "an answer is coming". Omitted, not `false`,
         // once it has arrived — a permanently-present `aria-busy="false"` is
-        // noise a screen reader has to step over on every header.
+        // noise a screen reader has to step over on every header — and omitted
+        // on the failed read too, which is an answer, just not a number.
         aria-busy={loading ? true : undefined}
         // The count as data, so the shell's state is assertable without
-        // scraping a badge that may be capped, hidden or restyled. ABSENT while
-        // loading, because the attribute is the machine-readable form of the
-        // same assertion the label makes, and a test that read `0` here would
-        // be reading the placeholder as the answer.
-        data-unread-count={loading ? undefined : unreadCount}
+        // scraping a badge that may be capped, hidden or restyled. ABSENT
+        // unless there is a count, because the attribute is the
+        // machine-readable form of the same assertion the label makes, and a
+        // test that read `0` here would be reading a placeholder as the answer.
+        data-unread-count={counted ? unreadCount : undefined}
         // Which of the three states this render is, for a test that has to
-        // catch the loading one before it resolves.
-        data-unread-state={loading ? "loading" : "ready"}
+        // catch the loading one before it resolves — and for an operator
+        // looking at a bell that never got its number.
+        data-unread-state={counted ? "ready" : unreadCount}
         data-testid="notification-bell"
         className="cursor-pointer"
       >

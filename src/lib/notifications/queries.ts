@@ -87,59 +87,19 @@ export interface DispatcherScope {
 /**
  * Compose a WHERE clause that always begins with BOTH boundary predicates.
  *
- * Exported so the scoping is directly assertable: rendering any query built
- * from it shows `church_id = $n and recipient_user_id = $m` with the scope's
- * values bound. There is no conditional here on purpose — a predicate that can
- * be skipped is a predicate that will be skipped.
+ * NOT exported: `feedScopedWhere` is the only door, and this is one of the two
+ * things behind it. There is no conditional here on purpose — a predicate that
+ * can be skipped is a predicate that will be skipped. The scoping stays
+ * directly assertable through the composer: rendering any query built from a
+ * plant scope shows `church_id = $n and recipient_user_id = $m` with the
+ * scope's values bound.
  */
-export function scopedWhere(
+function scopedWhere(
   scope: NotificationScope,
   ...extra: (SQL | undefined)[]
 ): SQL {
   return and(
     eq(notifications.churchId, scope.churchId),
-    eq(notifications.recipientUserId, scope.recipientUserId),
-    ...extra
-  ) as SQL;
-}
-
-/**
- * Scope for an ORG-ANCHORED read (#304 WS3, ruling #351) — the notifications a
- * sending church or a network holds about its OWN relationships, which name no
- * plant and are therefore filed under `anchor_org_id`.
- *
- * A SEPARATE TYPE FROM `NotificationScope`, deliberately, and the separation is
- * the safety property. The two tenancy spaces are different columns; a single
- * scope type carrying "an id, of one kind or another" is how a plant's feed
- * would come to contain an org's rows on a uuid collision, or — far more likely
- * — how a caller would pass a church id into an org read and get a silent empty
- * list that looks like "nothing to show". Both fields are required, for the same
- * reason `NotificationScope`'s are: an optional recipient fails OPEN exactly
- * where it must fail closed.
- */
-export interface OrgNotificationScope {
-  /** A `sending_churches.id` or a `sending_networks.id` — never a church id. */
-  orgId: string;
-  recipientUserId: string;
-}
-
-/**
- * The org-anchored WHERE, and it names `anchor_org_id` explicitly — never a
- * coalesce over the two anchor columns.
- *
- * Exported so the scoping is directly assertable: rendering any query built from
- * it shows `anchor_org_id = $n and recipient_user_id = $m`, and a test can prove
- * that `church_id` appears nowhere in it. That is what keeps the church reads
- * and this one from ever seeing each other's rows — the CHECK guarantees a row
- * populates exactly one of the two columns, so two predicates that each name one
- * column partition the table.
- */
-export function orgScopedWhere(
-  scope: OrgNotificationScope,
-  ...extra: (SQL | undefined)[]
-): SQL {
-  return and(
-    eq(notifications.anchorOrgId, scope.orgId),
     eq(notifications.recipientUserId, scope.recipientUserId),
     ...extra
   ) as SQL;
@@ -252,7 +212,12 @@ function optedInPlantIds(org: OversightOrg) {
  *   3. ORG-ANCHORED ROWS — a sending church's own membership of a network
  *      (#304 WS3), filed under `anchor_org_id` because they name no plant.
  *      This arm is what retires the "org-anchored notifications are write-only
- *      in-app" residual in memory/invariants.md.
+ *      in-app" residual in memory/invariants.md, and it is the ONLY read of
+ *      that column. #304 WS3 shipped a parallel `org*` family — its own scope
+ *      type, composer, feed query, count query and two entrypoints — which
+ *      reached the same rows through a bare `string` org id, applied no consent
+ *      subquery and no recipient tenancy check, and had zero callers: a second
+ *      door that type-checked. Deleted in #528; this arm subsumes it.
  *
  * A row matches at most one arm: the CHECK partitions `church_id` and
  * `anchor_org_id`, and arms 1 and 2 differ on `type`.
@@ -483,11 +448,12 @@ function olderThan(cursor: FeedCursor): SQL {
  * A tenancy scope, as the ONE thing a read needs from it: "give me a WHERE that
  * opens with your boundary predicates, then these".
  *
- * The church composer is `scopedWhere` and the org composer is `orgScopedWhere`,
- * and this type is the only thing the builders below know about either. That is
- * deliberate: a feed and its badge that were written out twice, once per anchor,
- * are two implementations of one rule, and the copy is always the one that
- * misses the fix (memory/invariants.md says this about `daysUntilTarget`,
+ * The plant composer is `scopedWhere` and the oversight one is
+ * `oversightScopedWhere`, `feedScopedWhere` picks between them, and this type is
+ * the only thing the builders below know about any of it. That is deliberate: a
+ * feed and its badge that were written out twice, once per boundary, are two
+ * implementations of one rule, and the copy is always the one that misses the
+ * fix (memory/invariants.md says this about `daysUntilTarget`,
  * `peopleTextSearch` and `lookupInvitingOrgName` alike). Ordering, projection,
  * the limit clamp, the keyset predicate and every visibility rule are now
  * written once; only the boundary varies, which is the only thing that differs.
@@ -541,39 +507,6 @@ export function notificationFeedQuery(
 ) {
   return feedQueryWithin(
     (...extra) => feedScopedWhere(scope, ...extra),
-    options
-  );
-}
-
-/**
- * Newest-first feed for one recipient within one ORG (#304 WS3).
- *
- * The org-anchored twin of `notificationFeedQuery` — literally, now: both are
- * `feedQueryWithin` under a different boundary, so the projection, the
- * visibility rules, the keyset predicate and the ordering cannot drift between
- * them. It exists at all, with the anchor, rather than being deferred with the
- * oversight feed surface itself (#225): the rows are being written from that
- * change onward, and a write with no read is a queue that silently fills up.
- * What #225 still owns is the SCREEN — which orgs and plants one oversight
- * admin's feed spans, and how the two are presented together.
- */
-export function orgNotificationFeedQuery(
-  scope: OrgNotificationScope,
-  options: FeedOptions = {}
-) {
-  return feedQueryWithin(
-    (...extra) => orgScopedWhere(scope, ...extra),
-    options
-  );
-}
-
-/** The org-anchored rows one admin has not read — the org half of the badge. */
-export function orgUnreadCountQuery(
-  scope: OrgNotificationScope,
-  options: VisibilityOptions = {}
-) {
-  return unreadCountWithin(
-    (...extra) => orgScopedWhere(scope, ...extra),
     options
   );
 }
@@ -755,23 +688,6 @@ export async function hasAnyNotifications(
 ): Promise<boolean> {
   const rows = await hasAnyNotificationsQuery(scope, options);
   return rows.length > 0;
-}
-
-/** One page of an ORG's own notifications for one admin (#304 WS3). */
-export async function listOrgNotifications(
-  scope: OrgNotificationScope,
-  options: FeedOptions = {}
-): Promise<FeedNotification[]> {
-  return orgNotificationFeedQuery(scope, options);
-}
-
-/** Unread count for one admin within one org (#304 WS3). */
-export async function getOrgUnreadCount(
-  scope: OrgNotificationScope,
-  options: VisibilityOptions = {}
-): Promise<number> {
-  const [row] = await orgUnreadCountQuery(scope, options);
-  return row?.value ?? 0;
 }
 
 /**
