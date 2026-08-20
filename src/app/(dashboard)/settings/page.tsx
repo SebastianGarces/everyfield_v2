@@ -7,6 +7,7 @@ import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
+import { NOTIFICATION_PREFERENCES_HEADING_ID } from "@/lib/notifications/channels/email";
 import { isAddressSuppressed } from "@/lib/notifications/channels/suppression";
 import {
   audienceForRole,
@@ -88,21 +89,13 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        {/* ABOVE the matrix, because it changes what every row in it means: a
-            suppressed address makes every `email` switch below inert, and a
-            notice under them would be read after the reader had already
-            concluded their settings were fine. */}
-        {emailSuppressed && (
-          <EmailSuppressionNotice email={session.user.email} />
-        )}
-
         <section
-          aria-labelledby="notification-preferences"
+          aria-labelledby={NOTIFICATION_PREFERENCES_HEADING_ID}
           className="space-y-4"
         >
           <div className="space-y-1">
             <h2
-              id="notification-preferences"
+              id={NOTIFICATION_PREFERENCES_HEADING_ID}
               className="text-lg font-semibold tracking-tight"
             >
               Notifications
@@ -112,6 +105,20 @@ export default async function SettingsPage() {
               them and apply from the next send.
             </p>
           </div>
+
+          {/* INSIDE the section and ABOVE the matrix, because it changes what
+              every row in it means: a suppressed address makes every `email`
+              switch below inert, and a notice under them would be read after
+              the reader had already concluded their settings were fine.
+
+              Inside, not above the heading, because the heading is what the
+              deep link lands on (#467) — every email and /unsubscribe now send
+              readers to `#notification-preferences`, and a notice sitting above
+              that anchor is scrolled off the top of the screen for exactly the
+              readers who most need to see it. */}
+          {emailSuppressed && (
+            <EmailSuppressionNotice email={session.user.email} />
+          )}
 
           <PreferenceMatrix view={view} />
         </section>

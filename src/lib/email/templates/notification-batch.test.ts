@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { notificationPreferencesUrl } from "@/lib/notifications/channels/email";
+
 import { notificationBatchEmail } from "./notification-batch";
 
 // ----------------------------------------------------------------------------
@@ -27,7 +29,7 @@ const BASE = {
   recipientName: "Maria",
   categoryLabel: "Tasks",
   unsubscribeUrl: "https://everyfield.test/unsubscribe?token=abc",
-  preferencesUrl: "https://everyfield.test/settings/notifications",
+  preferencesUrl: notificationPreferencesUrl("https://everyfield.test"),
 };
 
 test("a group of one renders that one notification", async () => {

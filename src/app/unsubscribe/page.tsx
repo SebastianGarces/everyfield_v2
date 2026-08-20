@@ -97,6 +97,9 @@ export default async function UnsubscribePage({
  * The one card that can name an account fact — and it names exactly two: the
  * category and the address, both of which the reader already had in the email
  * that brought them here.
+ *
+ * This is the dispatcher for the four states listed at the top of the file: one
+ * component per state, each holding its own copy and its own single action.
  */
 function SubjectCard({
   token,
@@ -122,48 +125,86 @@ function SubjectCard({
     );
   }
 
+  if (justResubscribed) {
+    return <ResubscribedCard token={token} subject={subject} label={label} />;
+  }
+
+  return (
+    <ConfirmUnsubscribeCard token={token} subject={subject} label={label} />
+  );
+}
+
+/**
+ * State 1 — on, and the reader arrived from an email. The opt-out is what they
+ * came for, so it is the card's one primary action. A POST, so following the
+ * link never performs it.
+ */
+function ConfirmUnsubscribeCard({
+  token,
+  subject,
+  label,
+}: {
+  token: string;
+  subject: UnsubscribeSubjectView;
+  label: string;
+}) {
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle>
-          {justResubscribed
-            ? "You're subscribed again"
-            : `Unsubscribe from ${label} emails?`}
-        </CardTitle>
+        <CardTitle>Unsubscribe from {label} emails?</CardTitle>
         <CardDescription>
-          {justResubscribed ? (
-            <>
-              We will keep sending <strong>{label}</strong> emails to{" "}
-              <strong>{subject.email}</strong>.
-            </>
-          ) : (
-            <>
-              We currently send <strong>{label}</strong> emails to{" "}
-              <strong>{subject.email}</strong>. Nothing has changed yet — other
-              notifications stay as they are either way.
-            </>
-          )}
+          We currently send <strong>{label}</strong> emails to{" "}
+          <strong>{subject.email}</strong>. Nothing has changed yet — other
+          notifications stay as they are either way.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* The mutation. A POST, so following the link never performs it.
+        <form action={confirmUnsubscribeAction}>
+          <input type="hidden" name="token" value={token} />
+          <Button type="submit" className="w-full cursor-pointer">
+            Unsubscribe from {label} emails
+          </Button>
+        </form>
 
-            After an undo the card's job is to confirm the choice the reader
-            just made, so the opt-out drops to a quiet link (#467). It stays
-            reachable — the FRD requires it — but a full-width button under
-            "You're subscribed again" reads as the next step, which is the
-            opposite of what the reader asked for. */}
+        <PreferencesNote />
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * State 4 — on, because the undo just landed. Same opt-out, demoted: the
+ * confirmation is the message, and a primary button here would read as the next
+ * step right after the reader chose the opposite (#467).
+ */
+function ResubscribedCard({
+  token,
+  subject,
+  label,
+}: {
+  token: string;
+  subject: UnsubscribeSubjectView;
+  label: string;
+}) {
+  return (
+    <Card className="w-full max-w-md">
+      <CardHeader>
+        <CardTitle>You're subscribed again</CardTitle>
+        <CardDescription>
+          We will keep sending <strong>{label}</strong> emails to{" "}
+          <strong>{subject.email}</strong>.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
         <form action={confirmUnsubscribeAction}>
           <input type="hidden" name="token" value={token} />
           <Button
             type="submit"
-            variant={justResubscribed ? "link" : "default"}
-            className={
-              justResubscribed
-                ? "text-muted-foreground h-auto cursor-pointer p-0 underline"
-                : "w-full cursor-pointer"
-            }
+            variant="ghost"
+            size="sm"
+            className="cursor-pointer"
           >
             Unsubscribe from {label} emails
           </Button>
