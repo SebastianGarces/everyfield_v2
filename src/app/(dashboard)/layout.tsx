@@ -10,7 +10,8 @@ import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
-import { isCrawlerPreviewRequest, PATHNAME_HEADER } from "@/lib/crawler";
+import { loginPathFor } from "@/lib/auth/safe-redirect";
+import { isCrawlerPreviewRequest, ROUTED_URL_HEADER } from "@/lib/crawler";
 import {
   notificationViewer,
   type NotificationViewer,
@@ -61,21 +62,22 @@ export default async function DashboardLayout({
   const headersList = await headers();
   // Re-derived here from the same two inputs, and by the same predicate, the
   // proxy used to decide not to bounce this request to /login: the request's own
-  // `user-agent`, and the pathname the proxy stamped on the request. It used to
+  // `user-agent`, and the URL the proxy stamped on the request. It used to
   // read an `x-is-crawler` request header instead, which the proxy only ever set
   // on the RESPONSE — nothing in the app wrote that header, so the branch fired
   // only for a client that forged it (#240).
   //
-  // The pathname half is what keeps this branch to the ~3 routes the proxy
+  // The route half is what keeps this branch to the ~3 routes the proxy
   // actually admits crawlers to. Without it, every route in the group took the
   // bare shell, and the six that need a session (/people, /settings, /tasks,
   // /teams, /meetings, /notifications) answered a crawler-shaped User-Agent with
   // a 500 from the page's own `verifySession()` instead of this redirect — which
   // a logged-out human in WhatsApp's in-app browser would have hit too. See
   // `src/lib/crawler.ts` for what this check does and does not authorise.
+  const routedUrl = headersList.get(ROUTED_URL_HEADER);
   const isCrawlerPreview = isCrawlerPreviewRequest(
     headersList.get("user-agent"),
-    headersList.get(PATHNAME_HEADER)
+    routedUrl
   );
 
   // For crawlers without auth, render minimal shell for metadata scraping only
@@ -84,7 +86,15 @@ export default async function DashboardLayout({
   }
 
   if (!user) {
-    redirect("/login");
+    // Carrying where to come back to, from the same header and through the same
+    // builder the proxy uses (#503). This branch is not the proxy's leftovers:
+    // it is the ONLY bounce for the routes in this group the proxy does not
+    // protect — /settings, /people, /tasks, /teams, /meetings, /notifications —
+    // and the only one at all for a session cookie that exists but fails to
+    // verify, which the proxy cannot detect because it only reads the cookie.
+    // A bare `/login` here is what sent a reader following a deep link to the
+    // dashboard instead of the page they asked for.
+    redirect(loginPathFor(routedUrl));
   }
 
   const cookieStore = await cookies();

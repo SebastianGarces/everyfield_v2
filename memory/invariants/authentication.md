@@ -76,3 +76,26 @@ and `requireSeat("read")` on a write compiles and passes. So the mapping is
 checked in (`@/lib/auth/capability-map`) and asserted with `deepEqual`: a
 permission change is a one-line diff beside the endpoint, not something a
 reviewer reconstructs by opening thirty action modules.
+
+## The signed-out bounce, and why it is one function (#503)
+
+Two places send a signed-out reader to `/login`, and they cover different
+populations. `src/proxy.ts` bounces `PROTECTED_ROUTE_PREFIXES` at the edge on
+the presence of the session COOKIE. The `(dashboard)` layout bounces everything
+else in its group — `/settings`, `/people`, `/tasks`, `/teams`, `/meetings`,
+`/notifications` are in no proxy list — and it is the only bounce at all for a
+cookie that exists but does not VERIFY, which the proxy cannot see.
+
+So both must name the destination, under one param, and both call
+`loginPathFor`. The layout used to `redirect("/login")` bare, which is why a
+reader following a deep link into `/settings` signed in and landed on the
+dashboard. The param is sanitised on the way out as well as on the way back:
+`safeRedirectPath` is the read half, so an attacker's URL never reaches the
+address bar of the login page either.
+
+The layout learns the destination from `ROUTED_URL_HEADER`, which is why that
+header carries the query as well as the path. A layout is never handed
+`searchParams` — `headers()` is the whole channel — so `/settings?tab=billing`
+would otherwise come back as `/settings`. Fragments never make the trip at all:
+a browser does not send one, so preserving `#notification-preferences` is a
+client-side job and is out of scope by ruling on #503.

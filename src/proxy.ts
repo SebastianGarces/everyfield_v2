@@ -4,9 +4,9 @@ import { NextResponse } from "next/server";
 import {
   CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
   isCrawlerPreviewRequest,
-  PATHNAME_HEADER,
+  ROUTED_URL_HEADER,
 } from "@/lib/crawler";
-import { safeRedirectPath } from "@/lib/auth/safe-redirect";
+import { loginPathFor, safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -61,22 +61,27 @@ function isProtectedRoute(pathname: string): boolean {
 }
 
 export function proxy(request: NextRequest): NextResponse {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  // The relative URL this request asked for. Route decisions below match on
+  // `pathname`; the two things that must name the REQUEST rather than the route
+  // — the stamp and the login return path — use this.
+  const routedUrl = `${pathname}${search}`;
   const hasSessionCookie = request.cookies.has(SESSION_COOKIE_NAME);
 
   /**
-   * Continue to the app, stamping the routed pathname on the REQUEST headers.
+   * Continue to the app, stamping the routed URL on the REQUEST headers.
    *
    * Every `NextResponse.next()` in this file goes through here, and that is the
-   * point: the stamp is unconditional, so whatever `x-pathname` a client sent is
-   * overwritten with the real path before any Server Component can read it. The
-   * `(dashboard)` layout needs it to scope the crawler shell to the same routes
-   * this proxy admits crawlers to (`isCrawlerPreviewRequest`), and a layout has
-   * no other way to learn the pathname.
+   * point: the stamp is unconditional, so whatever a client sent under that name
+   * is overwritten with the real URL before any Server Component can read it.
+   * The `(dashboard)` layout needs it twice over — to scope the crawler shell to
+   * the same routes this proxy admits crawlers to (`isCrawlerPreviewRequest`),
+   * and to name the destination in its own `/login` bounce — and a layout has no
+   * other way to learn either half.
    */
   function proceed(): NextResponse {
     const requestHeaders = new Headers(request.headers);
-    requestHeaders.set(PATHNAME_HEADER, pathname);
+    requestHeaders.set(ROUTED_URL_HEADER, routedUrl);
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
@@ -104,9 +109,12 @@ export function proxy(request: NextRequest): NextResponse {
       if (
         !isCrawlerPreviewRequest(request.headers.get("user-agent"), pathname)
       ) {
-        const loginUrl = new URL("/login", request.url);
-        loginUrl.searchParams.set("redirect", pathname);
-        return NextResponse.redirect(loginUrl);
+        // The return path is the whole relative URL, query included, and it is
+        // built by the same `loginPathFor` the `(dashboard)` layout uses for the
+        // routes this list does not cover (#503).
+        return NextResponse.redirect(
+          new URL(loginPathFor(routedUrl), request.url)
+        );
       }
       // Crawler detected on a previewable route — let it through for the
       // metadata. The verdict is deliberately NOT handed downstream: the old
