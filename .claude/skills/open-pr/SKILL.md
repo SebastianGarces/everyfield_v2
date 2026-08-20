@@ -18,6 +18,12 @@ both inline rather than calling this skill; anything opening a PR by hand follow
      --title "<type>: <concise summary> (#<issue>)" \
      --body-file <path>
    ```
+   **The body file is owned, never shared**: write it to a path carrying the issue number —
+   `pr-body-<issue>.md` — never a generic `pr-body.md`. Concurrent tracks share one scratchpad, and
+   a generic name is a silent cross-track clobber (it happened: a `gh pr edit --body-file` pushed
+   another track's body onto a merged PR). Re-read the file immediately before every
+   `--body-file` use and confirm it opens with your own `Closes #<issue>`.
+
    The schema diff below is owed by any diff carrying a migration — no label decides that, the diff
    does. The issues keep `agent:in-progress`; the merge closes them via `Closes #`, and a closed
    issue's labels are history (ruled 2026-08-19 — `agent:in-review` is retired with the review
