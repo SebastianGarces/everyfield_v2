@@ -278,6 +278,27 @@ function buildVisionMeetingSignals(
 // ----------------------------------------------------------------------------
 // Follow-up staleness
 // ----------------------------------------------------------------------------
+//
+// HOW TO READ THESE NUMBERS, and whose follow-up they are about (#323 WS2).
+// `openCount` is people in the three open follow-up statuses — attendee,
+// following_up, interviewed — and the only door into that cohort is
+// `prospect -> attendee`, stamped when somebody attends a vision meeting they
+// had never attended before. So the denominator is the plant's FIRST-TIME
+// attendees who have not yet committed, never "everyone the planter means to
+// follow up".
+//
+// That matters more since VM-007: the follow-up TASKS finalization generates
+// now go to first-time attendees and to nobody else, so the prompted work and
+// the measured cohort are the same people. Before, the tasks covered every
+// attendee while this rate covered a narrower set, and "follow-up completion"
+// silently meant two different populations depending on which screen you were
+// on. The trend that renders it is labelled `First-time follow-up completion`
+// (`trends.ts`) for the same reason.
+//
+// STALENESS IS THE PROXY FOR COMPLETION, and the threshold below is the whole
+// definition of "reached": a contact untouched for longer than
+// FOLLOW_UP_STALE_THRESHOLD_DAYS counts against the rate. It measures the
+// person row's `updated_at`, not whether the generated task was ticked.
 
 function buildFollowUpSignals(
   rows: FollowUpRow[],

@@ -41,6 +41,7 @@ import {
   emitAttendanceFinalized,
   emitEvaluationCompleted,
   emitMeetingCompleted,
+  type FinalizedAttendee,
 } from "./events";
 import { kitTemplate } from "./kit-template";
 // The ONE thing this module wants from the response-card queries: `removeAttendee`
@@ -857,14 +858,15 @@ export async function getAttendanceSummary(
 //
 //   1. `church_meetings.actual_attendance` is written ONLY here. A non-null
 //      value therefore means "this meeting has already been finalized", which
-//      makes it both the durable marker and the idempotency key.
+//      makes it the durable marker.
 //   2. Everything downstream runs FIRST, and the marker is written LAST. If any
-//      downstream step throws, the meeting is left exactly as it was —
-//      un-finalized — and the operation is safely retryable. A meeting can
-//      never be marked finalized without its tasks.
-//   3. Every downstream step is idempotent (person auto-advance only moves
-//      prospects; follow-up task generation skips a meeting that already has
-//      its evaluation task), so a retry converges rather than duplicating.
+//      downstream step throws, the count is left exactly as it was and the
+//      operation is safely retryable. A meeting can never be marked finalized
+//      without its tasks.
+//   3. Every downstream step is idempotent AND CONVERGENT (#323 WS3): person
+//      auto-advance only moves prospects, and task generation writes whatever
+//      the meeting is still owed and nothing else. So downstream runs on EVERY
+//      call, not only the first.
 //   4. The marker write is a compare-and-set on `actual_attendance IS NULL`, so
 //      two concurrent finalizes cannot both claim to have rolled forward.
 //   5. Ordering + idempotency make a REPLAY safe; they do not make concurrency
@@ -873,11 +875,27 @@ export async function getAttendanceSummary(
 //      by the database instead: `tasks_meeting_evaluation_unique_idx` aborts
 //      the loser's whole INSERT (see `src/lib/tasks/events.ts`).
 //
+// WHY DOWNSTREAM IS NOT SKIPPED ON A REPEAT (#323 WS3, from #158). It used to
+// be: a meeting with a non-null marker updated the visible count and emitted
+// nothing. A planter who finalized Ann and Bob, noticed Cy in the room, added
+// him and pressed the button again therefore got a refreshed count, a success,
+// and NO follow-up task for Cy — the one thing they pressed it for. Guarding on
+// the count instead of on the set had the same hole one step further in
+// (swap Bob for Cy and the count never moves). So the marker no longer gates
+// the work; it only decides what this call REPORTS and whether the count needs
+// refreshing. What stops the duplicate is the generation being convergent.
+//
 // Known and accepted: `meeting.attendance.recorded` is emitted non-strictly, so
 // a failed prospect -> attendee auto-advance is logged by the bus and swallowed
 // while the meeting still finalizes. That is deliberate — a status nudge must
 // not be able to block a planter from finalizing — and the next status change
-// heals it. Only follow-up generation is load-bearing enough to be strict.
+// heals it. `meeting.attendance.finalized` is emitted STRICTLY, and strictness
+// is a property of the EMIT, not of one handler: EVERY subscriber to that event
+// is load-bearing, so a handler added to it can fail a finalize. Today they are
+// task generation (which owes exactly that) and the phase-engine dirty stamp
+// (which catches its own errors and never throws back). A third one has to be
+// safe to fail a planter's finalize, or the strict flag has to become
+// handler-scoped first.
 //
 // The orchestration is expressed against an injectable `FinalizeAttendanceDeps`
 // seam so the failure ordering can be unit-tested without a database.
@@ -894,9 +912,9 @@ export class FinalizeAttendanceError extends Error {
 export type FinalizeAttendanceOutcome =
   /** Downstream ran and this call wrote the finalized marker. */
   | "finalized"
-  /** Already finalized; nothing re-emitted, nothing changed. */
+  /** Already finalized and the count was unchanged; downstream converged. */
   | "already_finalized"
-  /** Already finalized, but attendance was edited since — count refreshed only. */
+  /** Already finalized, attendance was edited since — count refreshed too. */
   | "reconciled";
 
 export interface FinalizeAttendanceResult {
@@ -905,11 +923,12 @@ export interface FinalizeAttendanceResult {
   attendeeIds: string[];
 }
 
-/** One attendance row, reduced to what finalization actually needs. */
-interface AttendedRecord {
-  personId: string;
-  attendanceType: AttendanceType | null;
-}
+/**
+ * One attendance row, reduced to what finalization actually needs — the same
+ * pair the finalized event carries, so it is that type rather than a second
+ * spelling of it.
+ */
+type AttendedRecord = FinalizedAttendee;
 
 /** The DB + event seams `runFinalizeAttendance` orchestrates. */
 export interface FinalizeAttendanceDeps {
@@ -925,7 +944,7 @@ export interface FinalizeAttendanceDeps {
   ): Promise<void>;
   emitFinalized(
     meetingType: MeetingType,
-    attendeeIds: string[],
+    attendees: AttendedRecord[],
     total: number
   ): Promise<void>;
   /** Compare-and-set the marker. Resolves true only if THIS call set it. */
@@ -950,20 +969,10 @@ export async function runFinalizeAttendance(
   const total = attended.length;
   const attendeeIds = attended.map((r) => r.personId);
 
-  // --- Idempotency guard --------------------------------------------------
-  // Re-running finalize must not re-emit: that would duplicate follow-up tasks
-  // and re-run every other subscriber. If attendance was edited after the fact
-  // we still reconcile the visible count, which is a plain UPDATE with no
-  // downstream effects.
-  if (meeting.actualAttendance !== null) {
-    if (meeting.actualAttendance !== total) {
-      await deps.reconcileCount(total);
-      return { outcome: "reconciled", total, attendeeIds };
-    }
-    return { outcome: "already_finalized", total, attendeeIds };
-  }
-
-  // --- Downstream generation (must succeed before we commit the marker) ----
+  // --- Downstream generation (runs on EVERY call, marker or no marker) ----
+  // Not gated on `actual_attendance`: gating it there is what dropped a
+  // late-added attendee's follow-up (#323 WS3 — see the note above). Both
+  // steps converge instead, so a repeat writes only what is still owed.
   try {
     // Per-attendee events. F2 auto-advances prospect -> attendee for vision
     // meetings; the handler ignores anyone who is not still a prospect, so
@@ -978,15 +987,26 @@ export async function runFinalizeAttendance(
 
     // F5 creates the follow-up + evaluation tasks. Emitted strictly, so a
     // failure lands here instead of being swallowed by the bus.
-    await deps.emitFinalized(meeting.type, attendeeIds, total);
+    await deps.emitFinalized(meeting.type, attended, total);
   } catch (error) {
     throw new FinalizeAttendanceError(
-      "Follow-up generation failed; the meeting was left un-finalized and can be retried",
+      "Follow-up generation failed; the attendance count was left alone and the operation can be retried",
       { cause: error }
     );
   }
 
-  // --- Commit the marker last ---------------------------------------------
+  // --- Then the marker ----------------------------------------------------
+  // An already-finalized meeting only needs its visible count refreshed, and
+  // only when it actually moved; a first finalize claims the marker with a
+  // compare-and-set so two racing calls cannot both report they rolled forward.
+  if (meeting.actualAttendance !== null) {
+    if (meeting.actualAttendance === total) {
+      return { outcome: "already_finalized", total, attendeeIds };
+    }
+    await deps.reconcileCount(total);
+    return { outcome: "reconciled", total, attendeeIds };
+  }
+
   const committed = await deps.commitFinalized(total);
   return {
     outcome: committed ? "finalized" : "already_finalized",
@@ -1047,12 +1067,12 @@ function createFinalizeAttendanceDeps(
       );
     },
 
-    emitFinalized(meetingType, attendeeIds, total) {
+    emitFinalized(meetingType, attendees, total) {
       return emitAttendanceFinalized(
         meetingId,
         meetingType,
         churchId,
-        attendeeIds,
+        attendees,
         total
       );
     },

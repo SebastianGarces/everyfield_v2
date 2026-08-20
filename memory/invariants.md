@@ -23,6 +23,7 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 - In a `WITH` chain a `FOR UPDATE` snapshot CTE must be a DEPENDENCY of the write (`update … from current c`), never a sibling only the journal joins: pulled lazily it reads nothing, and the history row is lost.
 - A migration that adds an arbiter index goes FIRST: `ON CONFLICT (…) WHERE …` against a database lacking it is SQLSTATE 42P10 on EVERY call, and nothing here applies migrations on deploy — code-first is the default unless an operator runs `pnpm db:migrate`.
 - Accepted residual: `createHouseholdWithHead`'s two statements take separate READ COMMITTED snapshots, so a person soft-deleted between them commits an orphan household.
+- `isUniqueViolation` (`@/db/errors`) matches on the `constraint` FIELD and nothing else. The `message.includes(<index name>)` fallback was DELETED (#323): Postgres puts the offending VALUE into some unique-violation messages, so a crafted row made somebody else's violation read as our index doing its job — and every caller swallows that as a benign race. Both shapes the drivers really raise populate the field.
 
 ## Multi-Tenancy
 
@@ -141,6 +142,11 @@ Applies to `generated_documents`, `src/lib/documents/service.ts`, and `/document
 
 ## Tasks, Subtasks & Recurrence
 
+- ⚖ A vision meeting's follow-up tasks go to the FIRST-TIME attendees and to nobody else (VM-007, #323): `followUpRecipients` (`tasks/events.ts`) reads the `attendance_type` the register already derived, and `null` is unknown rather than first-time. Returning and core-group attendees get none.
+- ⚖ Their due date is the MEETING's day + 2, never the finalize's (`followUpDueDate`) — a late finalize creates a task that is already due, which is the true statement about that window. The planter's 24-hour evaluation task still anchors to `now`.
+- That due date IS the identity of "this meeting's follow-up", because the row relates to a PERSON and no column names the meeting: (church, person, category `follow_up`, due date). `handleMeetingAttendanceFinalized` writes only what a meeting is still owed, so a reconcile tops up a late-added first-timer instead of dropping them, and a replay writes nothing.
+- `completion_event` IS NOT CLIENT-WRITABLE: it is absent from `taskCreateSchema`/`taskUpdateSchema` (#323, deleting a field neither `createTask` nor `updateTask` ever read). It was the follow-up SUPPRESSION VECTOR — the partial index is keyed on (church_id, related_id) while the guard also demands `related_type = 'meeting'`, so a posted task with that event, a meeting's id and `relatedType: 'person'` held the slot unseen and stranded the meeting at zero tasks.
+- Accepted residual: a TOP-UP insert carries no evaluation row, so no unique index stands over it and two concurrent reconciles can each write one late attendee a follow-up. Retired by a partial unique index over (church, person, due date) for live follow-up tasks.
 - ⚖ The answer to a phase-template prompt belongs to the PLANT, not to the planter: the key is the transition alone and `/tasks` has no role gate, so any church member who opens it first answers for everyone. Widening that key to a per-person answer needs the idempotency argument re-made against it — a new ruling, not a refactor.
 - The static `/tasks/templates` route is what keeps `importTaskTemplateAction` legal under the Authentication invariant: unmount the picker and it becomes a POSTable endpoint no UI reaches. Neither `page.tsx` nor `actions.ts` says so.
 - Accepted residual: `findOpenInSeries` is a SELECT-then-INSERT, so two instances of one recurring series completed concurrently each mint a successor. The honest fix is a partial unique index on the series key for open rows.
@@ -153,6 +159,9 @@ Applies to `generated_documents`, `src/lib/documents/service.ts`, and `/document
 
 ## Meetings
 
+- ⚖ `finalizeAttendance` runs its downstream generation on EVERY call, not only the first (#323): the `actual_attendance` marker decides what the call REPORTS (`finalized` / `reconciled` / `already_finalized`) and whether the count needs refreshing, never whether the work happens. Gating the work on the marker is what dropped a late-added attendee's follow-up; gating it on the count has the same hole one step in.
+- `meeting.attendance.finalized` is emitted STRICTLY, and strictness is a property of the EMIT: EVERY subscriber to it is load-bearing and can fail a planter's finalize. A third subscriber must be safe to fail one, or the flag has to become handler-scoped first.
+- The meeting-title lookup inside the task generator is tenant-filtered (`eq(churchMeetings.churchId, churchId)`); the id reaches it from a route parameter, and there is no RLS behind it.
 - Accepted residual: the meetings client boundary — no `"use client"` module reaching a meetings DB module (`service.ts`, `response-queries.ts`), directly or transitively — is a TEST (`client-boundary.test.ts`), not the compiler. `import "server-only"` is unresolvable under `pnpm test`, and `--conditions=react-server` breaks every email-rendering test. Retired by a `react-server` lane.
 
 ## People — Contacts, Import & Households

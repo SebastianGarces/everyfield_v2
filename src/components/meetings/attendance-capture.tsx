@@ -91,6 +91,38 @@ interface AttendanceCaptureProps {
    * `buildResponseBreakdown`.
    */
   responseCards?: Record<string, ResponseCardType>;
+  /**
+   * Whether this meeting has already been finalized. It changes what the
+   * button is FOR: the first press finalizes, every later one reconciles the
+   * register — which is a real job (a late-added first-timer gets their
+   * follow-up) but not the same job, and a control that keeps saying
+   * "Finalize" hides the difference (#323 WS3).
+   */
+  finalized?: boolean;
+}
+
+/**
+ * What the planter is told after the action returns. One sentence per outcome,
+ * because they are three different things that happened — and the middle one
+ * used to be reported as the same silent success as the others while their
+ * late-added attendee got nothing.
+ *
+ * The counts are facts. The task claims are stated as a RULE ("any first-time
+ * attendee ..."), which stays true for a meeting where nobody was new, rather
+ * than as a count this call does not have.
+ */
+export function finalizeOutcomeMessage(
+  outcome: "finalized" | "already_finalized" | "reconciled",
+  total: number
+): string {
+  switch (outcome) {
+    case "finalized":
+      return `Attendance finalized: ${total} attended. Any first-time attendee now has a follow-up task, due 48 hours after the meeting.`;
+    case "reconciled":
+      return `Attendance updated: ${total} attended. Any first-time attendee added since is covered too.`;
+    case "already_finalized":
+      return `Nothing to update — ${total} attended, unchanged since you finalized.`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +181,7 @@ export function AttendanceCapture({
   summary,
   showResponseCards = false,
   responseCards = {},
+  finalized = false,
 }: AttendanceCaptureProps) {
   const [isPending, startTransition] = useTransition();
 
@@ -164,6 +197,9 @@ export function AttendanceCapture({
 
   // Finalize error state
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  // What the last press actually did. Cleared on the next press, so the planter
+  // never reads a stale outcome beside a spinner.
+  const [finalizeOutcome, setFinalizeOutcome] = useState<string | null>(null);
 
   const guestPersonIds = new Set(guests.map((g) => g.personId));
   const attendedCount = guests.filter(
@@ -224,16 +260,23 @@ export function AttendanceCapture({
   };
 
   // ------- Finalize -------
-  // The action reports a failed finalize instead of throwing (the meeting is
-  // left un-finalized and the click is safe to repeat), so the result has to be
-  // read — otherwise the spinner just stops and the user is told nothing.
+  // The action reports a failed finalize instead of throwing (the count is left
+  // alone and the click is safe to repeat), so the result has to be read —
+  // otherwise the spinner just stops and the user is told nothing. The SUCCESS
+  // half is read for the same reason: three different things can have happened
+  // and only one of them is "your register is now the record" (#323 WS3).
   const handleFinalize = () => {
     setFinalizeError(null);
+    setFinalizeOutcome(null);
     startTransition(async () => {
       const result = await finalizeAttendanceAction(meetingId);
       if (!result.success) {
         setFinalizeError(result.error ?? "Something went wrong");
+        return;
       }
+      setFinalizeOutcome(
+        finalizeOutcomeMessage(result.data.outcome, result.data.total)
+      );
     });
   };
 
@@ -595,6 +638,16 @@ export function AttendanceCapture({
               {finalizeError}
             </p>
           )}
+          {finalizeOutcome && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-muted-foreground text-sm"
+              data-testid="finalize-outcome"
+            >
+              {finalizeOutcome}
+            </p>
+          )}
           <div className="flex items-center justify-between">
             {/* A live region, because this count is the only feedback a
                 toggle produces (#361). The checkbox announces its own state,
@@ -622,7 +675,8 @@ export function AttendanceCapture({
               ) : (
                 <CheckCircle className="mr-2 h-5 w-5" />
               )}
-              Finalize Attendance ({attendedCount})
+              {finalized ? "Update Attendance" : "Finalize Attendance"} (
+              {attendedCount})
             </Button>
           </div>
         </div>

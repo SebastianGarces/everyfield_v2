@@ -10,8 +10,19 @@ export const PG_UNIQUE_VIOLATION = "23505";
  * bug and must still propagate, or a caller could swallow a failed insert as
  * an expected race. Drizzle wraps driver errors, so the cause chain is walked
  * (bounded, in case something ever builds a cycle) rather than just the top
- * error; the constraint is matched by field or by message because which one
- * the driver populates varies by wrapping.
+ * error.
+ *
+ * THE `constraint` FIELD DECIDES, AND NOTHING ELSE (#323 WS1). This used to
+ * fall back to `message.includes(constraint)`, which is a substring test over
+ * text an attacker can steer: Postgres puts the offending VALUE into some
+ * 23505 messages, so a row crafted to carry an index name in a unique column
+ * made an unrelated violation read as "our index just did its job" — and a
+ * swallowed violation is a meeting finalized with no follow-up tasks. The
+ * fallback also bought nothing measurable: both shapes the drivers really
+ * raise populate `constraint` on the error the walk reaches
+ * (`membership-conflict.test.ts` pins both, captured against Postgres 16 over
+ * neon-http), and the Drizzle wrapper that carries only the message carries
+ * the real error on `cause` one level down.
  */
 export function isUniqueViolation(error: unknown, constraint: string): boolean {
   let current: unknown = error;
@@ -22,15 +33,12 @@ export function isUniqueViolation(error: unknown, constraint: string): boolean {
     const candidate = current as {
       code?: unknown;
       constraint?: unknown;
-      message?: unknown;
       cause?: unknown;
     };
-    const message =
-      typeof candidate.message === "string" ? candidate.message : "";
 
     if (
       candidate.code === PG_UNIQUE_VIOLATION &&
-      (candidate.constraint === constraint || message.includes(constraint))
+      candidate.constraint === constraint
     ) {
       return true;
     }

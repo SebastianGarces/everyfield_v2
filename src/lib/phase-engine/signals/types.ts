@@ -89,7 +89,14 @@ export interface VisionMeetingSignals {
   isEmpty: boolean;
 }
 
-/** Follow-up health: how stale the warmest pre-commitment contacts are. */
+/**
+ * Follow-up health: how stale the warmest pre-commitment contacts are.
+ *
+ * The cohort is the plant's FIRST-TIME attendees who have not yet committed —
+ * the only door into these statuses is a person's first vision meeting — which
+ * is the same set VM-007 generates follow-up tasks for (#323 WS2). The
+ * interpretation note lives above `buildFollowUpSignals`.
+ */
 export interface FollowUpSignals {
   /** People in active follow-up stages (attendee / following_up / interviewed). */
   openCount: number;
