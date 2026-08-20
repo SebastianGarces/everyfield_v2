@@ -5,6 +5,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { EmailSuppressionNotice } from "@/components/notifications/email-suppression-notice";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
@@ -74,6 +75,12 @@ export default async function SettingsPage() {
     oversightOrgOf(session.user)?.type === "sending_church";
   const canManageAssociation =
     isPlanterWithPlant || isSendingChurchAdminWithOrg;
+
+  // The SAME question `/settings/team` redirects on and its actions guard with
+  // (#495), asked through the one capability table rather than re-derived here —
+  // a link an Admin can see leading to a page that redirects them is the visible
+  // half of a permission drift.
+  const canManageTeam = holdsSeatFor(session.user, "seat.invitation.manage");
 
   return (
     <>
@@ -203,6 +210,31 @@ export default async function SettingsPage() {
                 className="cursor-pointer font-medium underline underline-offset-4"
               >
                 Manage your association
+              </Link>
+            </p>
+          </section>
+        )}
+
+        {/* #495 / AS-014 — the third org-wide decision, on the same "linked
+            rather than inlined" footing as Association and Sharing. Who has a
+            login on this plant is not a preference about email volume either.
+
+            Shown on the same rule the page itself guards with — an Admin
+            reaches it as well as the Owner, which is what `seat.invitation.manage`
+            says and what `/settings/team` redirects on. */}
+        {canManageTeam && (
+          <section aria-labelledby="team-link" className="space-y-1">
+            <h2 id="team-link" className="text-lg font-semibold tracking-tight">
+              Team
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Invite people onto this church plant, and see who is still to
+              answer.{" "}
+              <Link
+                href="/settings/team"
+                className="cursor-pointer font-medium underline underline-offset-4"
+              >
+                Manage your team
               </Link>
             </p>
           </section>

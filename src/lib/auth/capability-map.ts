@@ -209,6 +209,12 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "association.leave",
   "src/app/(dashboard)/settings/sharing/actions.ts → setOversightSharingAction":
     "sharing.toggle",
+  "src/app/(dashboard)/settings/team/actions.ts → createSeatInvitationAction":
+    "seat.invitation.manage",
+  "src/app/(dashboard)/settings/team/actions.ts → resendSeatInvitationEmailAction":
+    "seat.invitation.manage",
+  "src/app/(dashboard)/settings/team/actions.ts → revokeSeatInvitationAction":
+    "seat.invitation.manage",
   "src/app/(dashboard)/tasks/actions.ts → addSubtaskAction": "tasks.own",
   "src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction": "tasks.own",
   "src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction":

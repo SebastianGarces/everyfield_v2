@@ -1,0 +1,203 @@
+// ============================================================================
+// Sending a SEAT invitation — AS-010 (#495).
+//
+// The sibling of `./email.ts`, and it keeps that module's four rules verbatim
+// because they are the rules of this channel and not of that table:
+//
+// 1. IT NEVER THROWS AND IT NEVER FAILS THE CREATE. The row is the durable
+//    thing; the email is best-effort. Every failure comes back as
+//    `{ sent: false, reason }` and the surface reports it with the SAME words
+//    the org path uses (`resendRefusalMessage`, `./resend`).
+// 2. ONLY A PENDING INVITATION IS EMAILED, and the guard is HERE rather than at
+//    the call site, so it holds for the resend as well as the create.
+// 3. IT IS NOT A NOTIFICATION. The invitee has no account, so there is no
+//    preference row, no category and nothing to unsubscribe from.
+// 4. THE TOKEN IS NEVER LOGGED, and here that is stronger than on the org path:
+//    the org token is the row's id, so a log that named the id named the
+//    credential. This token is a random string that exists only in transit — the
+//    database stores its sha256 — so the failure logs below can safely carry the
+//    invitation ID and still carry nothing anybody can spend.
+//
+// WHY IT IS A SECOND MODULE AND NOT A BRANCH IN `./email.ts`. That module's
+// whole vocabulary is org-shaped: `InvitationEmailFacts` carries an
+// `OrganizationInvitationType`, and every refusal it can produce
+// (`unknown_type`, `no_inviting_org`) is about resolving WHICH ORG invited. A
+// seat invitation has no type to resolve and no org to name — it names a plant
+// — so a shared function would have been two disjoint bodies behind one
+// signature. What IS shared is everything that would otherwise drift: the
+// refusal codes, the words for them, the register-path spelling and the dedupe
+// bucket, all imported rather than restated.
+// ============================================================================
+
+import type { InvitableSeat } from "@/db/schema/user-invitation";
+import type { UserInvitationStatus } from "@/db/schema/user-invitation";
+import { formatDate } from "@/lib/datetime";
+import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
+import { redactForLog } from "@/lib/email/redact";
+import { seatInvitationEmail } from "@/lib/email/templates/seat-invitation";
+import { appBaseUrl } from "@/lib/notifications/channels/email";
+
+import type {
+  InvitationEmailMessage,
+  InvitationEmailOutcome,
+  InvitationEmailRefusal,
+  InvitationSendOccasion,
+} from "./email";
+// The `?invitation=` contract, from the import-free leaf that owns it — never
+// hand-built, and never re-exported from here (see `./register-path`).
+import { invitationRegisterPath } from "./register-path";
+import { resendDedupeWindowAt } from "./resend-window";
+
+/**
+ * Everything the message needs, already read by the caller. A plain record and
+ * not a row, so the whole send path is exercisable without a database.
+ *
+ * `token` is the ONLY place the plaintext token appears outside the create that
+ * minted it: the database holds its hash, so nothing else can reconstruct this
+ * link.
+ */
+export interface SeatInvitationEmailFacts {
+  invitationId: string;
+  token: string;
+  inviteeEmail: string;
+  status: UserInvitationStatus;
+  churchName: string | null;
+  inviterName: string | null;
+  seat: InvitableSeat;
+  expiresAt: Date | null;
+}
+
+export interface SeatInvitationEmailDeps {
+  /** The transport. Defaults to the shared Resend client; tests replace it. */
+  send?: (
+    message: InvitationEmailMessage
+  ) => Promise<{ success: boolean; error?: string }>;
+  /** Absolute base override. Tests pass one; production reads the env. */
+  baseUrl?: string;
+  /** Which send this is. Defaults to the automatic one at create time. */
+  occasion?: InvitationSendOccasion;
+}
+
+/**
+ * The provider-side dedupe key — invitation-scoped, exactly as the org one is,
+ * and with the same resend suffix so a deliberate resend is not collapsed onto
+ * the create's message.
+ *
+ * The key is built from the invitation ID and never from the token: an
+ * idempotency key travels to a third party, and a credential must not.
+ */
+export function seatInvitationEmailIdempotencyKey(
+  invitationId: string,
+  occasion: InvitationSendOccasion = { kind: "create" }
+): string {
+  const base = `seat-invitation-${invitationId}`;
+  if (occasion.kind === "create") return base;
+  return `${base}-resend-${resendDedupeWindowAt(occasion.at).index}`;
+}
+
+/** The absolute, token-bound register URL — what the email actually links to. */
+export function seatInvitationRegisterUrl(
+  token: string,
+  baseUrl?: string
+): string {
+  return `${baseUrl ?? appBaseUrl()}${invitationRegisterPath(token)}`;
+}
+
+/** Render the message, or say why it cannot be rendered. */
+export async function buildSeatInvitationEmail(
+  facts: SeatInvitationEmailFacts,
+  baseUrl?: string,
+  occasion?: InvitationSendOccasion
+): Promise<
+  | { ok: true; message: InvitationEmailMessage }
+  | { ok: false; reason: InvitationEmailRefusal }
+> {
+  if (facts.status !== "pending") return { ok: false, reason: "not_pending" };
+
+  const to = facts.inviteeEmail.trim();
+  if (to.length === 0) return { ok: false, reason: "no_address" };
+
+  const churchName = (facts.churchName ?? "").trim();
+  if (churchName.length === 0) {
+    // The same refusal the org path gives a row whose inviting org will not
+    // resolve, and for the same reason: an email that misnames who invited you
+    // is indistinguishable from a phishing attempt, so nothing is sent.
+    return { ok: false, reason: "no_inviting_org" };
+  }
+
+  const { subject, html, text } = await seatInvitationEmail({
+    churchName,
+    inviterName: facts.inviterName?.trim() || null,
+    seat: facts.seat,
+    inviteeEmail: to,
+    inviteUrl: seatInvitationRegisterUrl(facts.token, baseUrl),
+    // Formatted HERE, through `@/lib/datetime`, so the date the invitee reads is
+    // the one every surface shows (`memory/invariants.md` → Date & Time
+    // Rendering).
+    expiresLabel: facts.expiresAt ? formatDate(facts.expiresAt) : null,
+  });
+
+  return {
+    ok: true,
+    message: {
+      to,
+      subject,
+      html,
+      text,
+      replyTo: EMAIL_REPLY_TO,
+      idempotencyKey: seatInvitationEmailIdempotencyKey(
+        facts.invitationId,
+        occasion
+      ),
+    },
+  };
+}
+
+/** Send it. Never throws, whatever happens — see rule 1 at the top of the file. */
+export async function sendSeatInvitationEmail(
+  facts: SeatInvitationEmailFacts,
+  deps: SeatInvitationEmailDeps = {}
+): Promise<InvitationEmailOutcome> {
+  const send = deps.send ?? defaultTransport;
+
+  try {
+    const built = await buildSeatInvitationEmail(
+      facts,
+      deps.baseUrl,
+      deps.occasion
+    );
+    if (!built.ok) return refused(facts, built.reason);
+
+    const result = await send(built.message);
+    if (!result.success) return refused(facts, "provider_refused");
+
+    return { sent: true };
+  } catch (error) {
+    // Only the message, and only after `redactForLog` has stripped URLs and ids
+    // out of it: the error object may quote the payload, and the payload holds
+    // the token-bearing URL.
+    console.error("seat invitation email transport threw", {
+      invitationId: facts.invitationId,
+      message: redactForLog(error),
+    });
+    return { sent: false, reason: "transport_threw" };
+  }
+}
+
+/** One refusal path, so no branch can start logging the token by accident. */
+function refused(
+  facts: SeatInvitationEmailFacts,
+  reason: InvitationEmailRefusal
+): InvitationEmailOutcome {
+  console.error("seat invitation email not sent", {
+    invitationId: facts.invitationId,
+    reason,
+  });
+  return { sent: false, reason };
+}
+
+async function defaultTransport(
+  message: InvitationEmailMessage
+): Promise<{ success: boolean; error?: string }> {
+  return sendEmail(message);
+}
