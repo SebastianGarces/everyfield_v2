@@ -15,10 +15,12 @@ import { cn } from "@/lib/utils";
 // It is also NOT a client component. Nothing here is interactive beyond a link,
 // so the shell ships no extra JavaScript for it, and the count updates the way
 // every other server-rendered value does: a `router.refresh()` re-renders the
-// tree the layout is part of and the number changes. Which caller owns that
-// refresh is `notification-feed.tsx`'s business, not the bell's — the two
-// mark-read presses that STAY on the feed call it themselves, and the row click
-// that LEAVES must not own work on the route it is replacing (#228).
+// tree this layout is part of and the number changes. NOTHING ELSE MOVES IT —
+// the dashboard layout is a segment every notification destination shares, and a
+// client-side push reuses a shared segment instead of re-rendering it, so a
+// navigation alone leaves the count exactly as it was (#527). When each
+// mark-read caller fires that refresh is `notification-feed.tsx`'s business:
+// inside the press if it stays, chained after the push if it leaves (#228).
 //
 // ----------------------------------------------------------------------------
 // NEITHER "NOT YET" NOR "COULD NOT" IS A COUNT (#308 WS2, from #232; #528)

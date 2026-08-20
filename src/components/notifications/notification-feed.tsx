@@ -40,8 +40,12 @@ import { cn } from "@/lib/utils";
 //     from `feed-view` are types, so they are erased and bring none of it.
 //
 // Read state is optimistic (memory/contracts/data-patterns.md): the row un-bolds
-// the instant it is clicked, the server action reconciles, and its `refresh()`
-// is what moves the count in the app shell's bell.
+// the instant it is clicked, the server action reconciles, and a client
+// `router.refresh()` is what moves the count in the app shell's bell. The
+// refresh is the CLIENT's because only the caller knows whether it is staying —
+// and every caller here has to do it, including the one that leaves, because the
+// bell is in a layout the destination shares and therefore does not re-render
+// (#527). What differs is WHEN: see `markReadOnNavigate` below.
 //
 // The ONE piece of client state here is the paging cursor and the pages it has
 // fetched — which data-patterns.md names explicitly as legitimate. It is not a
@@ -106,6 +110,49 @@ function applyFeedAction(state: FeedState, action: FeedAction): FeedState {
     ),
     unreadCount: Math.max(0, state.unreadCount - 1),
   };
+}
+
+/** How long the leaving click waits for its own push before refreshing anyway. */
+const PUSH_COMMIT_TIMEOUT_MS = 3000;
+
+/**
+ * Resolve once the push the click started has COMMITTED AND PAINTED, or after
+ * {@link PUSH_COMMIT_TIMEOUT_MS} if the user never left `from`.
+ *
+ * A `router.refresh()` cannot supersede a navigation that has already landed, so
+ * this is the whole of what makes the leaving click's reconcile safe (#527).
+ *
+ * BOTH HALVES ARE LOAD-BEARING, and the second was found by measuring. The URL
+ * is written when the router STARTS committing, so a refresh fired on that alone
+ * lands while React is still rendering the destination and is coalesced away
+ * about one time in ten (20 of 22 counts moved). Waiting a frame past it — the
+ * standard double-`requestAnimationFrame` "after paint" idiom — puts the refresh
+ * after the destination's own render instead of inside it.
+ *
+ * The timeout is the case where the user never left: a click the browser
+ * swallowed, or a same-path href. Refreshing then is correct too — they are
+ * still on the feed, which is the caller-that-stays case.
+ */
+function whenPushCommits(from: string): Promise<void> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const afterPaint = () =>
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => resolve())
+      );
+    const tick = () => {
+      if (window.location.pathname !== from) {
+        afterPaint();
+        return;
+      }
+      if (Date.now() - startedAt >= PUSH_COMMIT_TIMEOUT_MS) {
+        resolve();
+        return;
+      }
+      window.setTimeout(tick, 50);
+    };
+    tick();
+  });
 }
 
 /**
@@ -209,12 +256,20 @@ export function NotificationFeed({
   // just stopped being unread. #228 reported it as 1 in 5 and left it as
   // possible noise. It is not noise. It reproduces on demand once the
   // destination is not already prefetched — a second click on the row is enough
-  // — and the four measured arrangements say which parts of `markRead` cause it:
+  // — and the measured arrangements say which parts of `markRead` cause it:
   //
   //   transition + refresh (what shipped) ....... 22 of 22 stranded
   //   no transition + refresh ................... 20 of 22 stranded
   //   transition + no refresh ................... 11 of 11 stranded
-  //   NEITHER (this) ............................ 22 of 22 navigated
+  //   neither ................................... 22 of 22 navigated
+  //
+  // …and the two arrangements #527 measured on top of that, once "neither" was
+  // found to leave the bell reading its old number for the rest of the session:
+  //
+  //   no reconcile at all (what #308 shipped) ... 12/12 navigated, 0/12 counted
+  //   refresh chained on the ACTION ............. 8 of 11 stranded
+  //   refresh on the URL change ................. 22/22 navigated, 20/22 counted
+  //   …one frame later, after paint (this) ...... 22/22 navigated, 22/22 counted
   //
   // Both halves strand it, and for the same reason: each turns the click into
   // work React owns on the route being LEFT. A transition entangles `Link`'s
@@ -224,15 +279,57 @@ export function NotificationFeed({
   // everything else — the same double-click on a plain sidebar link, no action
   // and no refresh behind it, navigated 10 times out of 10.
   //
-  // So the click that leaves does neither. It refreshes nothing, because the
-  // unread count the user arrives with is server-rendered by the destination's
-  // own layout, which is a fresher read than a refresh of the screen being left.
-  // And it is a plain call rather than a transition, because there is no
-  // optimistic row to hold on a page nobody is looking at any more. A
-  // client-side navigation does not unload the document, so the request the
-  // click started finishes on the destination.
+  // The last row is what ships, and it is not another setting of the same two
+  // switches: the refresh waits for the URL to change and only then runs, so it
+  // re-renders where the user now IS. The ordering is the fix, not the absence.
+  //
+  // So the click that leaves owns neither, SYNCHRONOUSLY. It is a plain call
+  // rather than a transition, because there is no optimistic row to hold on a
+  // page nobody is looking at any more. A client-side navigation does not unload
+  // the document, so the request the click started finishes on the destination.
+  //
+  // WHAT IT STILL HAS TO DO: RECONCILE, AFTERWARDS (#527)
+  //
+  // The first version of this fix refreshed nothing at all, on the premise that
+  // "the unread count the user arrives with is server-rendered by the
+  // destination's own layout". That is false, and the bell went stale on exactly
+  // the click this was fixing: 25 unread, click a row, land on the person — the
+  // row is read in the database and the bell still reads 25, for the rest of the
+  // session (measured: 12 of 12 navigated, 0 of 12 counted). Every
+  // `notificationEntityHref` destination lives under
+  // `src/app/(dashboard)/`, so the layout holding the bell is the layout the
+  // feed was ALREADY under — a COMMON segment, which a client-side push reuses
+  // rather than re-renders (partial rendering; .next-docs
+  // 01-app/02-guides/authentication.mdx:1350 states it as the reason a session
+  // check does not belong in a layout). There is no destination render of the
+  // badge to be fresher than anything.
+  //
+  // So the refresh comes back, but ONLY ONCE THE PUSH HAS COMMITTED. Chaining
+  // it on the action alone is not enough and was measured not to be: the action
+  // settles in 200–500 ms and the push commits in 180–430 ms, so the two overlap
+  // and the refresh still lands on the route being replaced. On this branch's
+  // own preview that arrangement stranded 8 of 11 (double click) and 2 of 5
+  // (single click) — better than the 22 of 22 it replaced, and still the same
+  // bug.
+  //
+  // `whenPushCommits` is the missing ordering, and it has TWO waits because one
+  // was not enough either. It waits for the URL to change — the point after
+  // which nothing here can supersede the navigation — and then for one more
+  // frame, because the URL is written when the router STARTS committing, so a
+  // refresh fired on it alone lands inside the destination's own render and is
+  // coalesced away about one time in ten (22/22 navigated, 20/22 counted). Past
+  // the paint, the re-render lands on the tree the user is now looking at:
+  // 22/22 navigated, 22/22 counted, median 422 ms.
+  //
+  // The `.catch` is not decoration: an unhandled rejection here is a failed
+  // mark-read on a page the user has left, and there is nothing to tell them.
+  // The row's read state is server truth on the next render either way.
   const markReadOnNavigate = (id: string) => {
-    void markNotificationReadAction(id);
+    const leaving = window.location.pathname;
+    void markNotificationReadAction(id)
+      .then(() => whenPushCommits(leaving))
+      .then(() => router.refresh())
+      .catch(() => {});
   };
 
   const markAllRead = () => {
