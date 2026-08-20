@@ -75,6 +75,14 @@ export const generatedDocuments = pgTable(
       table.churchId,
       table.createdAt
     ),
+    // Guards NOTHING today, deliberately. The key is
+    // `documents/{churchId}/{id}.{ext}` off a fresh `crypto.randomUUID()`, so
+    // no code path can construct a collision and no insert can violate this.
+    // It is a fence for a FUTURE deterministic key scheme — one derived from
+    // (church, template, format) rather than a uuid — where a collision
+    // becomes constructible and silently overwriting one church's artifact
+    // with another render is the failure. Keeping it costs one index; adding
+    // it later, after the scheme changes, means backfilling a duplicate.
     uniqueIndex("generated_documents_storage_key_idx").on(table.storageKey),
     check(
       "generated_documents_format_check",
