@@ -14,8 +14,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { verifySession } from "@/lib/auth/session";
-import { formatDateWithoutWeekday } from "@/lib/datetime";
+import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
+import {
+  DEFAULT_CHURCH_TIME_ZONE,
+  formatDateWithoutWeekday,
+} from "@/lib/datetime";
 import { FORMAT_LABELS } from "@/lib/documents";
 import { listGeneratedDocuments } from "@/lib/documents/service";
 
@@ -32,7 +35,12 @@ export default async function GeneratedDocumentsHistoryPage() {
     redirect("/dashboard");
   }
 
-  const documents = await listGeneratedDocuments(user.churchId);
+  const [church, documents] = await Promise.all([
+    getCurrentUserChurch(),
+    listGeneratedDocuments(user.churchId),
+  ]);
+
+  const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
   return (
     <>
@@ -94,7 +102,11 @@ export default async function GeneratedDocumentsHistoryPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {formatDateWithoutWeekday(document.createdAt, "short")}
+                      {formatDateWithoutWeekday(
+                        document.createdAt,
+                        "short",
+                        timeZone
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <HistoryDownloadButton

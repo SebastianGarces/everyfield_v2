@@ -356,6 +356,24 @@ test("the history page lists the session church's documents, newest first", () =
   assert.match(pageSource, /className="cursor-pointer"/);
 });
 
+test("the history page renders Generated in the church's zone, not UTC", () => {
+  // `formatDateWithoutWeekday` defaults its third argument to APP_TIME_ZONE
+  // (UTC). A church-scoped surface must pass the church's IANA zone down
+  // (memory/invariants.md → Date & Time Rendering), so the call site is pinned
+  // here at three arguments, and the zone itself at the church row.
+  assert.match(
+    pageSource,
+    /formatDateWithoutWeekday\(\s*document\.createdAt,\s*"short",\s*timeZone,?\s*\)/,
+    "the Generated column must be formatted in an explicit zone argument"
+  );
+  assert.match(
+    pageSource,
+    /const timeZone = church\?\.timeZone \?\? DEFAULT_CHURCH_TIME_ZONE;/,
+    "the zone comes from the church row, falling back to the default IANA zone"
+  );
+  assert.match(pageSource, /getCurrentUserChurch\(\)/);
+});
+
 test("the documents library links to history with cursor-pointer", () => {
   const libraryPage = readFileSync(
     path.join(SRC, "app", "(dashboard)", "documents", "page.tsx"),
