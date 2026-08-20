@@ -7,6 +7,7 @@ import * as Sentry from "@sentry/nextjs";
 
 import { Button } from "@/components/ui/button";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
+import { isSessionExpiry } from "@/lib/auth/unauthorized";
 
 /**
  * Error boundary for all dashboard routes.
@@ -33,6 +34,14 @@ import { loginPathFor } from "@/lib/auth/safe-redirect";
  * It is NOT an authorization surface. A seat refusal never reaches here: the
  * envelopes catch `SeatRefusalError` and return a sentence inline, because a
  * signed-in caller who may not do a thing is a normal answer, not a fault.
+ *
+ * WHAT IT SAYS DEPENDS ON WHAT IT CAUGHT (#508). It used to tell every reader
+ * their sign-in had probably expired, and during #498's own validation it said
+ * that about a schema drift — a diagnosis the boundary had no evidence for,
+ * offering a Sign in button that could not have helped. `isSessionExpiry` reads
+ * the marker `verifySession`'s throw carries, so the sentence about sessions is
+ * said only where it is true and everything else gets a sentence that does not
+ * pretend to know.
  */
 export default function DashboardError({
   error,
@@ -45,8 +54,7 @@ export default function DashboardError({
     Sentry.captureException(error);
   }, [error]);
 
-  // "Sign in and come back" is a promise, so the link keeps it (#503). The most
-  // likely cause of landing here is the expired session the copy names, and the
+  // "Sign in and come back" is a promise, so the link keeps it (#503). The
   // reader is standing on the page they wanted — sending them to a bare /login
   // spent that fact and dropped them on the dashboard afterwards. `usePathname`
   // is the client-side spelling of what the proxy stamps for the server side;
@@ -54,20 +62,30 @@ export default function DashboardError({
   // is an import-free leaf, so pulling it into this client bundle costs nothing.
   const signInHref = loginPathFor(usePathname());
 
+  // THE ONE DISCRIMINATOR, and it has to be the digest: in production Next.js
+  // replaces the message of a server error before the client ever sees it, so
+  // `error.message` here is a generic sentence and `error.digest` is the whole
+  // channel. `UnauthorizedError` sets its own, and Next.js keeps a digest an
+  // error already carries (`@/lib/auth/unauthorized`).
+  const sessionExpired = isSessionExpiry(error);
+
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
       <h2 className="text-2xl font-bold">That didn&apos;t go through</h2>
       <p className="text-muted-foreground max-w-sm">
-        Your sign-in may have expired while this page was open. Try again, or
-        sign in and come back — anything already saved is safe.
+        {sessionExpired
+          ? "Your sign-in expired while this page was open. Sign in and come back, or try again — anything already saved is safe."
+          : "Something went wrong on our end, and we have been told about it. Try again — anything already saved is safe."}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button onClick={reset} className="cursor-pointer">
           Try again
         </Button>
-        <Button asChild variant="outline">
-          <Link href={signInHref}>Sign in</Link>
-        </Button>
+        {sessionExpired && (
+          <Button asChild variant="outline">
+            <Link href={signInHref}>Sign in</Link>
+          </Button>
+        )}
       </div>
     </div>
   );
