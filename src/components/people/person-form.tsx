@@ -26,7 +26,7 @@ import {
   backgroundCheckStatuses,
   personSources,
   personStatuses,
-  type Person,
+  type PersonForClient,
 } from "@/lib/people/types";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -41,13 +41,13 @@ function formatEnumLabel(value: string): string {
 }
 
 interface PersonFormProps {
-  person?: Person;
+  person?: PersonForClient;
   mode: "create" | "edit";
   onSuccess?: () => void;
   onCancel?: () => void;
 }
 
-type FormState = ActionResult<Person> | null;
+type FormState = ActionResult<PersonForClient> | null;
 
 export function PersonForm({
   person,

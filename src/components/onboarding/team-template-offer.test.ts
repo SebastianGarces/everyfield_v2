@@ -359,7 +359,7 @@ test("the offer's action is a caller of the shipped initialization", () => {
   assert.match(OFFER_ACTION, /await initializeTeamsAction\(\)/);
   assert.match(
     OFFER_ACTION,
-    /await importRoleTemplatesAction\(team\.id, teamKey\)/
+    /await importRoleTemplatesAction\(team\.id, team\.templateKey\)/
   );
 
   // No second write path: no template list of its own, and no database reach.

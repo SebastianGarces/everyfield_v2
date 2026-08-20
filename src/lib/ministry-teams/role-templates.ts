@@ -1,4 +1,15 @@
-import type { TimeCommitment } from "@/db/schema/ministry-teams";
+import {
+  PREDEFINED_TEAM_KEYS,
+  type PredefinedTeamKey,
+  type TimeCommitment,
+} from "@/db/schema/ministry-teams";
+
+// The keys are DECLARED beside the column that stores them
+// (`src/db/schema/ministry-teams.ts`) and re-exported here, where every caller
+// already looks for them. One declaration, one import path, no cast anywhere
+// between a `ministry_teams` row and `getRoleTemplates`.
+export { PREDEFINED_TEAM_KEYS };
+export type { PredefinedTeamKey };
 
 // ============================================================================
 // Role Template Types
@@ -14,7 +25,12 @@ export interface RoleTemplate {
 }
 
 export interface TeamTemplate {
-  teamKey: string;
+  /**
+   * The stored key, typed as the column's own union — so the template DATA is
+   * checked against the schema rather than the schema being widened to admit
+   * whatever the data happens to say.
+   */
+  teamKey: PredefinedTeamKey;
   teamName: string;
   icon: string;
   description: string;
@@ -23,32 +39,18 @@ export interface TeamTemplate {
 }
 
 // ============================================================================
-// Predefined Team Keys (used for matching templates to teams)
-// ============================================================================
-
-export const PREDEFINED_TEAM_KEYS = [
-  "senior_pastor",
-  "launch_coordinator",
-  "worship",
-  "childrens_ministry",
-  "facilities",
-  "assimilation",
-  "small_groups",
-  "promotion",
-  "prayer",
-  "technology",
-] as const;
-
-export type PredefinedTeamKey = (typeof PREDEFINED_TEAM_KEYS)[number];
-
-// ============================================================================
 // Team Templates with Role Definitions
 // ============================================================================
 
 export const TEAM_TEMPLATES: TeamTemplate[] = [
   {
     teamKey: "senior_pastor",
-    teamName: "Senior Pastor",
+    // "Leadership", not "Senior Pastor" (ruled 2026-08-09, #378): a TEAM carries
+    // a ministry's name and a ROLE carries a person's, and this was the one
+    // template that named the team after the role inside it. The `teamKey` and
+    // both role names are unchanged — `ministry_teams.template_key` is what
+    // identifies the template now, so this is a display change end to end.
+    teamName: "Leadership",
     icon: "crown",
     description:
       "Overall leadership, vision casting, preaching calendar, shepherding, leader development",
@@ -577,6 +579,19 @@ export const TEAM_TEMPLATES: TeamTemplate[] = [
   },
 ];
 
+/**
+ * The Leadership template's key, named ONCE.
+ *
+ * Three places need to recognise this one template and nothing else does: the
+ * org chart roots on it, the leadership auto-fill triggers on it, and migration
+ * 0053 reconciles it. A string literal repeated across them is a rename waiting
+ * to half-land — the org chart would quietly stop having a root while
+ * everything still compiled. The MIGRATION keeps its own SQL literal, because a
+ * migration is a historical record of what ran and must not change meaning when
+ * this constant does.
+ */
+export const LEADERSHIP_TEAM_KEY: PredefinedTeamKey = "senior_pastor";
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -641,19 +656,19 @@ export const BACKGROUND_CHECK_TEAM_KEYS: readonly PredefinedTeamKey[] = [
 /**
  * Whether a team's roster shows its members' background-check status.
  *
- * Matched on NAME, because a `ministry_teams` row stores no template key — the
- * same handle the role-template import already uses to find a team's templates.
- * A custom team, or a predefined one a planter renamed, answers false: the
- * status is still on every person's profile, so nothing is hidden, it is only
- * not claimed to be required.
+ * Matched on `ministry_teams.template_key`, the column that says WHICH template
+ * a team came from (ruling 2026-08-12, #378). It used to match on the team's
+ * NAME, because no such column existed — so a planter who renamed their
+ * Children's Ministry team silently lost the roster's status column, and
+ * renaming a template in this file would have done the same to every plant at
+ * once. A custom team carries no key and answers false: the status is still on
+ * every person's profile, so nothing is hidden, it is only not claimed to be
+ * required.
  */
-export function teamRequiresBackgroundCheck(teamName: string): boolean {
-  const normalized = teamName.trim().toLowerCase();
-
-  return TEAM_TEMPLATES.some(
-    (template) =>
-      BACKGROUND_CHECK_TEAM_KEYS.includes(
-        template.teamKey as PredefinedTeamKey
-      ) && template.teamName.toLowerCase() === normalized
+export function teamRequiresBackgroundCheck(
+  templateKey: PredefinedTeamKey | null
+): boolean {
+  return (
+    templateKey !== null && BACKGROUND_CHECK_TEAM_KEYS.includes(templateKey)
   );
 }

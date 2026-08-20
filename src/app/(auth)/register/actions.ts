@@ -206,6 +206,10 @@ export async function register(
     accountType,
     organizationName ?? null,
     userId,
+    // The registrant themselves. For an invited planter the church-creation
+    // tuple mints a `persons` row from this (#378) — the lowercased address the
+    // users insert stores, so the person and the account agree on it.
+    { name, email: identifier },
     invitedPlanter
   );
   const { seat, churchId, sendingChurchId, sendingNetworkId } = account;

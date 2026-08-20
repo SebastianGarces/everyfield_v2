@@ -52,6 +52,7 @@ import {
   churches,
   launchEvents,
   launches,
+  persons,
   sendingChurches,
   sendingNetworks,
   users,
@@ -60,6 +61,7 @@ import {
   type UserSeat,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+import { accountPersonValues } from "../src/lib/people/account-person";
 import {
   oversightAdminSeeds,
   oversightAdminUpsert,
@@ -729,6 +731,35 @@ async function seedDatabase(): Promise<void> {
     const churchName = church ? church.name : "No church";
     console.log(`   [${user.seat ?? "no seat"}] ${user.email} - ${churchName}`);
   }
+  console.log();
+
+  // 3b. The Owners' own person rows (#378). In the product these are minted by
+  // `churchCreationStatements`, which this script does not go through — it
+  // inserts churches and users directly — so the values come from
+  // `accountPersonValues`, the same function that path uses, rather than from a
+  // second spelling here. Without them the seeded planter is missing from their
+  // own plant's people and cannot be assigned to a ministry team, which is the
+  // exact defect this issue closes.
+  //
+  // Owners only. A seeded coach holds no seat and a team member is not a plant
+  // Owner; the link is written at CHURCH-GAIN, and neither of them gained one.
+  console.log("🧑 Linking Owners to their own person records...");
+  const owners = createdUsers.filter(
+    (user) => user.churchId !== null && user.seat === "owner"
+  );
+  if (owners.length > 0) {
+    await db.insert(persons).values(
+      owners.map((owner) =>
+        accountPersonValues({
+          userId: owner.id,
+          churchId: owner.churchId as string,
+          name: owner.name,
+          email: owner.email,
+        })
+      )
+    );
+  }
+  console.log(`   ${owners.length} linked person records`);
   console.log();
 
   // 4. Create launches (#305 / LS-001)

@@ -15,10 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { importRoleTemplatesAction } from "@/app/(dashboard)/teams/actions";
-import {
-  TEAM_TEMPLATES,
-  type PredefinedTeamKey,
-} from "@/lib/ministry-teams/role-templates";
+import { TEAM_TEMPLATES } from "@/lib/ministry-teams/role-templates";
 
 interface RoleTemplateImportProps {
   teamId: string;
@@ -61,7 +58,7 @@ export function RoleTemplateImport({
     try {
       const result = await importRoleTemplatesAction(
         teamId,
-        template.teamKey as PredefinedTeamKey,
+        template.teamKey,
         Array.from(selectedKeys)
       );
       if (result.success) {

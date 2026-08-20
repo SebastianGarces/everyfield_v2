@@ -8,6 +8,7 @@ import {
   type Person,
 } from "@/db/schema";
 import type { HouseholdUpdateInput } from "@/lib/validations/people";
+import { toPersonForClient, type PersonForClient } from "./types";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 // ============================================================================
@@ -50,8 +51,8 @@ export async function listHouseholds(churchId: string): Promise<Household[]> {
 export async function getHouseholdMembers(
   churchId: string,
   householdId: string
-): Promise<Person[]> {
-  return db
+): Promise<PersonForClient[]> {
+  const members = await db
     .select()
     .from(persons)
     .where(
@@ -71,6 +72,9 @@ export async function getHouseholdMembers(
       END`,
       persons.firstName
     );
+
+  // Drawn by `HouseholdMembers`, a client component (#378).
+  return members.map(toPersonForClient);
 }
 
 /**
@@ -181,7 +185,7 @@ export async function addToHousehold(
   personId: string,
   householdId: string,
   role: HouseholdRole
-): Promise<Person> {
+): Promise<PersonForClient> {
   // Verify household exists
   const household = await getHousehold(churchId, householdId);
   if (!household) {
@@ -249,7 +253,7 @@ export async function addToHousehold(
     throw new Error("Failed to update person");
   }
 
-  return updated;
+  return toPersonForClient(updated);
 }
 
 /**
@@ -258,7 +262,7 @@ export async function addToHousehold(
 export async function removeFromHousehold(
   churchId: string,
   personId: string
-): Promise<Person> {
+): Promise<PersonForClient> {
   const [updated] = await db
     .update(persons)
     .set({
@@ -279,7 +283,7 @@ export async function removeFromHousehold(
     throw new Error("Person not found");
   }
 
-  return updated;
+  return toPersonForClient(updated);
 }
 
 /**
@@ -415,7 +419,7 @@ export async function createHouseholdWithHead(
   personId: string,
   householdName: string,
   usePersonAddress: boolean
-): Promise<{ household: Household; person: Person }> {
+): Promise<{ household: Household; person: PersonForClient }> {
   const { insertHousehold, updatePerson } =
     buildCreateHouseholdWithHeadStatements(
       churchId,
@@ -437,5 +441,5 @@ export async function createHouseholdWithHead(
     throw new Error("Person not found");
   }
 
-  return { household, person: updatedPerson };
+  return { household, person: toPersonForClient(updatedPerson) };
 }

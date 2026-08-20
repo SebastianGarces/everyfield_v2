@@ -62,6 +62,11 @@ export async function createChurchBasics(
     createChurchDeps(revalidateDashboard),
     {
       id: user.id,
+      // From the SESSION row, never the form: the `persons` row this batch
+      // mints is the planter themselves (#378), so its name and address are the
+      // account's.
+      name: user.name,
+      email: user.email,
       seat: user.seat,
       churchId: user.churchId,
       sendingChurchId: user.sendingChurchId,

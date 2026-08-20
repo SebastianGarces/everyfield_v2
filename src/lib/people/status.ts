@@ -8,7 +8,11 @@ import { persons, type Person, type PersonStatus } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { logPersonActivity } from "./activity";
 import { emitPersonStatusChanged } from "./events";
-import type { StatusTransition } from "./types";
+import {
+  toPersonForClient,
+  type PersonForClient,
+  type StatusTransition,
+} from "./types";
 
 // Re-export client-safe utilities for convenience (server-side usage)
 export {
@@ -182,7 +186,7 @@ export async function changeStatus(
   userId: string,
   newStatus: PersonStatus,
   reason?: string
-): Promise<{ person: Person; transition: StatusTransition }> {
+): Promise<{ person: PersonForClient; transition: StatusTransition }> {
   // Get the existing person
   const existing = await db.query.persons.findFirst({
     where: and(
@@ -201,7 +205,7 @@ export async function changeStatus(
   // If status hasn't changed, return early
   if (oldStatus === newStatus) {
     return {
-      person: existing,
+      person: toPersonForClient(existing),
       transition: {
         from: oldStatus,
         to: newStatus,
@@ -245,7 +249,7 @@ export async function changeStatus(
   await emitPersonStatusChanged(updated, oldStatus, newStatus);
 
   return {
-    person: updated,
+    person: toPersonForClient(updated),
     transition,
   };
 }

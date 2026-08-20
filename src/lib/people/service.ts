@@ -25,7 +25,11 @@ import {
 import { cache } from "react";
 import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
-import type { PersonCreationSource } from "./types";
+import {
+  toPersonForClient,
+  type PersonCreationSource,
+  type PersonForClient,
+} from "./types";
 
 // ============================================================================
 // Types
@@ -42,7 +46,13 @@ export interface ListPeopleOptions {
 }
 
 export interface ListPeopleResult {
-  people: Person[];
+  /**
+   * `PersonForClient`, not `Person` — the account link is stripped below (#378).
+   * Both surfaces this feeds hand their rows to a `"use client"` component (the
+   * /people list, and the team page's assign dialog), so a column added to
+   * `persons` reaches the browser unless a read declines it.
+   */
+  people: PersonForClient[];
   total: number;
   nextCursor: string | null;
 }
@@ -63,13 +73,19 @@ export interface GetPersonOptions {
  * memory/invariants.md → Request Deduplication) so the [id] layout and the
  * page under it, which both need the same row every navigation, issue one
  * query per request instead of two.
+ *
+ * `PersonForClient`, because this read IS the person profile: the [id] page,
+ * the profile wrapper and the assessment entry shell all hand what comes back
+ * straight to a `"use client"` component (#378). Nothing that calls it reads
+ * the account link — the guards below want `deletedAt` and `status`, and the
+ * three places that care about `user_id` ask SQL about it instead.
  */
 export const getPerson = cache(
   async (
     churchId: string,
     personId: string,
     options: GetPersonOptions = {}
-  ): Promise<Person | null> => {
+  ): Promise<PersonForClient | null> => {
     const { includeDeleted = false } = options;
 
     const conditions = includeDeleted
@@ -82,7 +98,7 @@ export const getPerson = cache(
 
     const result = await db.select().from(persons).where(conditions).limit(1);
 
-    return result[0] ?? null;
+    return result[0] ? toPersonForClient(result[0]) : null;
   }
 );
 
@@ -252,7 +268,13 @@ export async function paginatePeopleByCreatedAtCursor(
     : null;
 
   return {
-    people: resultPeople,
+    // STRIPPED, not just untyped. `Person` is structurally assignable to
+    // `PersonForClient`, so the narrower type alone would let `user_id` ride to
+    // the browser in the RSC payload while the signature claimed otherwise
+    // (#378). The `.select()` above takes every column deliberately — a
+    // hand-listed projection here is a second place to remember a new column —
+    // so the one the lists must not carry is dropped at the boundary instead.
+    people: resultPeople.map(toPersonForClient),
     total,
     nextCursor,
   };
@@ -306,6 +328,12 @@ export interface ExportPeopleOptions {
  * Scoped to churchId (tenancy invariant) and excludes soft-deleted by default.
  * No pagination: this is intended for export, where the full filtered set is
  * needed. Reuses the same filter semantics as {@link listPeople}.
+ *
+ * THE ONE READ HERE THAT KEEPS THE FULL ROW (#378), because it is the one that
+ * never reaches a component: `export.ts` renders these into CSV by naming its
+ * columns (`EXPORT_CSV_HEADERS`, no account column), and the only thing that
+ * leaves the server is the finished string. `client-boundary.test.ts` names it
+ * as the single exception, so a second one has to argue for itself there.
  */
 export async function getPeopleForExport(
   churchId: string,
@@ -409,7 +437,7 @@ export async function createPerson(
   userId: string,
   data: PersonCreateInput,
   activitySource: PersonCreationSource
-): Promise<Person> {
+): Promise<PersonForClient> {
   // Transform empty string email to null
   const email = data.email === "" ? null : data.email;
 
@@ -447,7 +475,9 @@ export async function createPerson(
     performedBy: userId,
   });
 
-  return person;
+  // The event above got the full row; the caller — a server action, whose
+  // result the browser awaits — gets it without the account link (#378).
+  return toPersonForClient(person);
 }
 
 /**
@@ -458,7 +488,7 @@ export async function updatePerson(
   churchId: string,
   personId: string,
   data: PersonUpdateInput
-): Promise<Person> {
+): Promise<PersonForClient> {
   // First check if person exists and is not deleted
   const existing = await getPerson(churchId, personId);
 
@@ -514,7 +544,7 @@ export async function updatePerson(
     throw new Error("Failed to update person");
   }
 
-  return updated;
+  return toPersonForClient(updated);
 }
 
 /**
@@ -550,7 +580,7 @@ export async function deletePerson(
 export async function restorePerson(
   churchId: string,
   personId: string
-): Promise<Person> {
+): Promise<PersonForClient> {
   const existing = await getPerson(churchId, personId, {
     includeDeleted: true,
   });
@@ -573,5 +603,5 @@ export async function restorePerson(
     throw new Error("Failed to restore person");
   }
 
-  return restored;
+  return toPersonForClient(restored);
 }

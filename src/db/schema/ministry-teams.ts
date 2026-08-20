@@ -23,6 +23,35 @@ import { users } from "./user";
 export const teamTypes = ["predefined", "custom"] as const;
 export type TeamType = (typeof teamTypes)[number];
 
+/**
+ * The closed set of team templates, and the values `ministry_teams.template_key`
+ * may hold (#378, ruling 2026-08-12).
+ *
+ * IT LIVES HERE, BESIDE THE COLUMN THAT STORES IT, and not next to the template
+ * DATA in `ministry-teams/role-templates.ts` where it started. The column is
+ * what makes a predefined team identifiable, so the column's type is the
+ * authoritative statement of what a key IS; `TEAM_TEMPLATES` then declares
+ * `teamKey: PredefinedTeamKey` and the compiler checks the data against the
+ * schema rather than the other way round. Keeping it over there meant `@/db`
+ * could not name the type, so every reader that got a key out of a row had to
+ * widen it back with `as PredefinedTeamKey` — three casts, each of them a lie
+ * the compiler was told rather than a fact it checked.
+ */
+export const PREDEFINED_TEAM_KEYS = [
+  "senior_pastor",
+  "launch_coordinator",
+  "worship",
+  "childrens_ministry",
+  "facilities",
+  "assimilation",
+  "small_groups",
+  "promotion",
+  "prayer",
+  "technology",
+] as const;
+
+export type PredefinedTeamKey = (typeof PREDEFINED_TEAM_KEYS)[number];
+
 export const teamStatuses = ["forming", "active", "paused"] as const;
 export type TeamStatus = (typeof teamStatuses)[number];
 
@@ -85,6 +114,28 @@ export const ministryTeams = pgTable(
       .references(() => churches.id)
       .notNull(),
     name: varchar("name", { length: 255 }).notNull(),
+    /**
+     * WHICH template this team came from — `TEAM_TEMPLATES[].teamKey` — or NULL
+     * for a team the planter made themselves (ruling 2026-08-12 on #378, from
+     * sweep #403 / PR #409 DECISION 2).
+     *
+     * IT EXISTS SO THE DISPLAY NAME CAN CHANGE. Four surfaces used to identify a
+     * predefined team by its NAME — the org-chart root, the responsibilities
+     * lookup, the name→template map behind the role import, and
+     * `teamRequiresBackgroundCheck` — so renaming "Senior Pastor" to
+     * "Leadership" would have silently broken all four for every plant that
+     * already had teams, and a planter renaming their Children's Ministry team
+     * already dropped the roster's background-check column. The key is the
+     * identity; `name` is now display and nothing else.
+     *
+     * BRANDED, so a reader that gets this off a row can hand it straight to
+     * `getRoleTemplates` with no cast. NULL still means "not a template team",
+     * and the brand is a compile-time claim only — migration 0053's backfill is
+     * what makes it true of the rows, and nothing in the database enforces it.
+     */
+    templateKey: varchar("template_key", {
+      length: 50,
+    }).$type<PredefinedTeamKey>(),
     type: varchar("type", { length: 20 })
       .$type<TeamType>()
       .notNull()

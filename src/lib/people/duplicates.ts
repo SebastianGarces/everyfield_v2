@@ -2,7 +2,11 @@ import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
 import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { getTagsForPeople } from "./tags";
-import type { DuplicateCheck, DuplicateMatches } from "./types";
+import {
+  toPersonForClient,
+  type DuplicateCheck,
+  type DuplicateMatches,
+} from "./types";
 
 /**
  * Find duplicate persons in a church — the two SELECTs, nothing more.
@@ -93,6 +97,12 @@ export async function findDuplicateMatches(
  * quick-add dialog (`checkForDuplicatesAction`), the one consumer that
  * renders them. Tag resolution is ONE batched query via the canonical
  * helper in tags.ts, not a per-match round trip.
+ *
+ * The decoration goes THROUGH the strip rather than around it (#378). Spreading
+ * a full row into a value typed `PersonWithTags` is what shipped the account
+ * link to the browser the first time: `Person` is structurally assignable to
+ * the narrow type, so the spread compiled and the object carried `user_id`
+ * into the dialog while the signature said it could not.
  */
 export async function checkForDuplicates(
   churchId: string,
@@ -117,11 +127,13 @@ export async function checkForDuplicates(
 
   return {
     exactMatch: exactMatch
-      ? { ...exactMatch, tags: tagMap.get(exactMatch.id) ?? [] }
+      ? toPersonForClient({
+          ...exactMatch,
+          tags: tagMap.get(exactMatch.id) ?? [],
+        })
       : null,
-    potentialMatches: potentialMatches.map((match) => ({
-      ...match,
-      tags: tagMap.get(match.id) ?? [],
-    })),
+    potentialMatches: potentialMatches.map((match) =>
+      toPersonForClient({ ...match, tags: tagMap.get(match.id) ?? [] })
+    ),
   };
 }

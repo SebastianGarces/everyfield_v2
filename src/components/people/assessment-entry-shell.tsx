@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Person } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { verifySession } from "@/lib/auth/session";
 import { getPerson } from "@/lib/people/service";
 import { ArrowLeft } from "lucide-react";
@@ -19,7 +19,7 @@ interface AssessmentEntryShellProps {
   backTab: "assessments" | "interviews" | "commitments";
   title: string;
   /** Renders the entry form once the person is resolved */
-  renderForm: (person: Person) => React.ReactNode;
+  renderForm: (person: PersonForClient) => React.ReactNode;
 }
 
 /**

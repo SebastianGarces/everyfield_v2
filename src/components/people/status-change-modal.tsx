@@ -23,14 +23,14 @@ import {
   STATUS_LABELS,
   validateStatusTransition,
 } from "@/lib/people/status.shared";
-import type { Person, PersonStatus } from "@/lib/people/types";
+import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { StatusTransitionFields } from "./status-transition-fields";
 
 interface StatusChangeModalProps {
-  person: Person;
+  person: PersonForClient;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;

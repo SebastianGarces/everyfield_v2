@@ -2,7 +2,7 @@
 
 import { deletePersonAction } from "@/app/(dashboard)/people/actions";
 import type { Household } from "@/db/schema";
-import type { Person, PersonStatus } from "@/lib/people/types";
+import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState } from "react";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { PersonHeader } from "./person-header";
 import { PersonTabs } from "./person-tabs";
 
 interface PersonProfileShellProps {
-  person: Person;
+  person: PersonForClient;
   activeTab:
     | "overview"
     | "activity"

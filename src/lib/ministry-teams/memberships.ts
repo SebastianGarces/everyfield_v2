@@ -311,8 +311,10 @@ export async function assignMember(
           } satisfies NewTeamMembership)
           .onConflictDoNothing({
             target: teamMemberships.roleId,
-            // The index predicate, repeated byte for byte. A mismatch is
-            // "there is no unique or exclusion constraint matching the ON
+            // The index predicate, repeated VERBATIM — inference has to prove
+            // the index covers this statement's conflicts, and copying the
+            // stored predicate is what leaves it nothing to prove. A mismatch
+            // is "there is no unique or exclusion constraint matching the ON
             // CONFLICT specification", on every assignment.
             //
             // It names the SEAT index, which since migration 0039 is the ONLY

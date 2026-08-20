@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -182,6 +183,24 @@ export const persons = pgTable(
       length: 20,
     }).$type<HouseholdRole>(),
     pipelineSortOrder: integer("pipeline_sort_order").default(0).notNull(),
+    /**
+     * The account this person record IS, when the person holds one (AS-013,
+     * #378). Written at CHURCH-GAIN and nowhere else: the one batch that gives
+     * an account a `church_id` — `churchCreationStatements` — mints this row in
+     * the same statement list, so an Owner exists in their own plant's people
+     * from the moment the plant does.
+     *
+     * NULL IS THE ORDINARY VALUE. Most people in a plant are contacts and never
+     * hold a login; `created_by` beside it is audit ("who typed this in") and
+     * says nothing about whose record it is.
+     *
+     * IT GRANTS NOTHING. Authority is the seat in its tenancy
+     * (`memory/invariants/seats-and-tenancy.md`) and this column is never read
+     * to widen one — it makes an account ADDRESSABLE as a person (assignable to
+     * a team role, nameable as a team leader), which is a different question
+     * from what that account may do.
+     */
+    userId: uuid("user_id").references(() => users.id),
     createdBy: uuid("created_by")
       .references(() => users.id)
       .notNull(),
@@ -195,6 +214,24 @@ export const persons = pgTable(
     index("persons_email_idx").on(table.email),
     index("persons_household_id_idx").on(table.householdId),
     index("persons_deleted_at_idx").on(table.deletedAt),
+    // ONE PERSON ROW PER ACCOUNT PER CHURCH, AND THE DATABASE IS WHAT SAYS SO
+    // (#378). The auto-create runs inside the church-gain batch, which a retry
+    // can re-send; `memory/invariants.md` → Transactions rules out a
+    // SELECT-then-INSERT guard, so this index IS the arbiter and the insert
+    // carries `ON CONFLICT … DO NOTHING` inferred against it.
+    //
+    // PARTIAL ON `user_id IS NOT NULL`, and that is what keeps every contact
+    // writable: a btree unique index treats NULLs as distinct, so unlinked
+    // people would index separately anyway — the predicate says so out loud and
+    // keeps them out of the index entirely.
+    //
+    // CHURCH-SCOPED, because the row is a person IN A PLANT. Nothing in the
+    // schema holds an account to one tenancy (`memory/invariants.md` → Seats),
+    // so a per-account unique index would state a rule the rest of the schema
+    // does not keep.
+    uniqueIndex("persons_church_user_unique_idx")
+      .on(table.churchId, table.userId)
+      .where(sql`${table.userId} is not null`),
     // The vocabulary, in the data. `.$type<>()` on a varchar is a compile-time
     // brand and nothing else, and this column is the one a children's-ministry
     // roster reads to say a volunteer is cleared — so what may be stored in it

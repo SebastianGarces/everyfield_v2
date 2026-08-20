@@ -25,7 +25,7 @@ import {
 import type { Household } from "@/db/schema";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
-import type { Person, PersonStatus } from "@/lib/people/types";
+import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import {
   ArrowRightLeft,
@@ -41,7 +41,7 @@ import { BackgroundCheckBadge } from "./background-check-badge";
 import { StatusChangeModal } from "./status-change-modal";
 
 interface PersonHeaderProps {
-  person: Person;
+  person: PersonForClient;
   household?: Household | null;
   onEdit: () => void;
   onDelete: () => void;

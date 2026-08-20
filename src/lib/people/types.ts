@@ -50,23 +50,58 @@ export {
 // Extended Types
 // ============================================================================
 
-import type { Household, Person, PersonActivity, Tag } from "@/db/schema";
+import type { Person, PersonActivity, Tag } from "@/db/schema";
+
+/**
+ * A person as ANY CLIENT SURFACE may receive them — the shape the people
+ * domain hands out.
+ *
+ * `user_id` is withheld (#378). It is an account identifier, nothing any
+ * surface draws needs it, and in the App Router a person row handed to a
+ * `"use client"` component crosses to the browser WHOLE in the RSC payload —
+ * every column, drawn or not. So it would ride along on every row, every
+ * profile and every mutation response for no reason at all.
+ *
+ * WITHHELD RATHER THAN MERELY UNTYPED, and that distinction is the whole
+ * point: `Person` is STRUCTURALLY ASSIGNABLE to this type, so a full row
+ * passes for it at every call site and `tsc` says nothing. The narrow type is
+ * a claim; `toPersonForClient` is what makes it true. It shipped once as a
+ * claim alone — `checkForDuplicates` SPREAD a full row into a value typed
+ * `PersonWithTags` and carried the column into the quick-add dialog while the
+ * signature swore it was gone.
+ *
+ * The column is a SQL-level concern and stays one: `person-user.ts` asks about
+ * it in a predicate, `create-church.ts` writes it in an upsert target, and
+ * `leadership-fill.ts` joins through it. No caller reads it off a fetched row,
+ * which is why the domain reads below can decline it outright rather than
+ * keeping a wider row for someone.
+ */
+export type PersonForClient = Omit<Person, "userId">;
+
+/**
+ * Drop the account link — the ONE spelling of the strip (#378).
+ *
+ * Generic over the row so a decorated person keeps its decorations:
+ * `toPersonForClient({ ...person, tags })` is a `PersonWithTags`, which is what
+ * the duplicate check and the pipeline hand their consumers.
+ *
+ * It removes the KEY rather than blanking the value, because the RSC
+ * serializer carries a key that exists — `{ userId: undefined }` still ships
+ * the column name. It also copies rather than mutates: `createPerson` emits
+ * `person.created` from the full row it just wrote and strips only what it
+ * RETURNS.
+ */
+export function toPersonForClient<T extends Person>(row: T): Omit<T, "userId"> {
+  const { userId: _accountLink, ...forClient } = row;
+  return forClient;
+}
 
 /**
  * Person with related data for list views
  */
-export type PersonWithTags = Person & {
+export type PersonWithTags = PersonForClient & {
   tags: Tag[];
   lastActivityAt?: Date | null;
-};
-
-/**
- * Person with full related data for detail view
- */
-export type PersonWithRelations = Person & {
-  tags: Tag[];
-  household: Household | null;
-  householdMembers: Person[];
 };
 
 /**

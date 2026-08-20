@@ -12,7 +12,7 @@ import { changeStatus, recordStatusChange } from "@/lib/people/status";
 import type {
   ActionResult,
   DuplicateCheck,
-  Person,
+  PersonForClient,
   PersonStatus,
   StatusTransition,
 } from "@/lib/people/types";
@@ -48,7 +48,7 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
  */
 export async function createPersonAction(
   formData: FormData
-): Promise<ActionResult<Person>> {
+): Promise<ActionResult<PersonForClient>> {
   return withChurchSession(
     "people.write",
     "createPersonAction",
@@ -87,7 +87,7 @@ export async function createPersonAction(
 export async function updatePersonAction(
   personId: string,
   formData: FormData
-): Promise<ActionResult<Person>> {
+): Promise<ActionResult<PersonForClient>> {
   return withChurchSession(
     "people.write",
     "updatePersonAction",
@@ -186,7 +186,7 @@ export async function deletePersonAction(
 export async function changeStatusAction(
   personId: string,
   newStatus: PersonStatus
-): Promise<ActionResult<{ person: Person }>> {
+): Promise<ActionResult<{ person: PersonForClient }>> {
   return withChurchSession(
     "people.write",
     "changeStatusAction",
@@ -223,7 +223,9 @@ export async function changeStatusWithReasonAction(
   personId: string,
   newStatus: PersonStatus,
   reason?: string
-): Promise<ActionResult<{ person: Person; transition: StatusTransition }>> {
+): Promise<
+  ActionResult<{ person: PersonForClient; transition: StatusTransition }>
+> {
   return withChurchSession(
     "people.write",
     "changeStatusWithReasonAction",
@@ -299,7 +301,7 @@ export async function quickAddPersonAction(data: {
   email?: string;
   phone?: string;
   source?: string;
-}): Promise<ActionResult<Person>> {
+}): Promise<ActionResult<PersonForClient>> {
   return withChurchSession(
     "people.write",
     "quickAddPersonAction",

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { Person } from "@/db/schema";
+import type { PersonForClient } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 interface AssessmentFormProps {
-  person: Person;
+  person: PersonForClient;
   onSuccess?: () => void;
 }
 

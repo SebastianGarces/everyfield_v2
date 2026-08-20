@@ -6,18 +6,21 @@ import { Badge } from "@/components/ui/badge";
 import { TEAM_TEMPLATES } from "@/lib/ministry-teams/role-templates";
 
 interface ResponsibilitiesTabProps {
-  teamName: string;
+  /** `ministry_teams.template_key` — NULL for a team the planter made. */
+  templateKey: string | null;
 }
 
 /**
  * Derives responsibility items from the team template description.
  * In a future iteration, these could be stored in the database
  * as checklist items with status tracking.
+ *
+ * Looked up by TEMPLATE KEY, not by name (ruling 2026-08-12, #378): a display
+ * name is not an identity, and matching on one meant a renamed team — the
+ * planter's rename or ours — quietly showed nothing here.
  */
-function getTeamResponsibilities(teamName: string): string[] {
-  const template = TEAM_TEMPLATES.find(
-    (t) => t.teamName.toLowerCase() === teamName.toLowerCase()
-  );
+function getTeamResponsibilities(templateKey: string | null): string[] {
+  const template = TEAM_TEMPLATES.find((t) => t.teamKey === templateKey);
 
   if (!template) return [];
 
@@ -28,8 +31,8 @@ function getTeamResponsibilities(teamName: string): string[] {
     .filter(Boolean);
 }
 
-export function ResponsibilitiesTab({ teamName }: ResponsibilitiesTabProps) {
-  const responsibilities = getTeamResponsibilities(teamName);
+export function ResponsibilitiesTab({ templateKey }: ResponsibilitiesTabProps) {
+  const responsibilities = getTeamResponsibilities(templateKey);
 
   if (responsibilities.length === 0) {
     return (

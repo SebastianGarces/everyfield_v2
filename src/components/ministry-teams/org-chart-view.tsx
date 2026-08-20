@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { LEADERSHIP_TEAM_KEY } from "@/lib/ministry-teams/role-templates";
 import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
 
@@ -15,13 +16,13 @@ interface OrgChartViewProps {
 }
 
 export function OrgChartView({ teams }: OrgChartViewProps) {
-  // Senior Pastor is the root node
-  const seniorPastor = teams.find((t) =>
-    t.name.toLowerCase().includes("senior pastor")
-  );
-  const otherTeams = teams.filter(
-    (t) => !t.name.toLowerCase().includes("senior pastor")
-  );
+  // The root is the LEADERSHIP TEMPLATE, matched on `template_key` and not on
+  // the display name (ruling 2026-08-12, #378): the team is called
+  // "Leadership" now, and the substring test against its name that used to be
+  // here would have dropped the root the moment it was renamed, leaving a chart
+  // of ten peers with nothing to say so.
+  const rootTeam = teams.find((t) => t.templateKey === LEADERSHIP_TEAM_KEY);
+  const otherTeams = teams.filter((t) => t.templateKey !== LEADERSHIP_TEAM_KEY);
 
   return (
     <div className="space-y-6">
@@ -33,10 +34,10 @@ export function OrgChartView({ teams }: OrgChartViewProps) {
       </div>
 
       <div className="flex flex-col items-center gap-6">
-        {/* Root: Senior Pastor */}
-        {seniorPastor && (
+        {/* Root: the Leadership team */}
+        {rootTeam && (
           <>
-            <OrgNode team={seniorPastor} isRoot />
+            <OrgNode team={rootTeam} isRoot />
             {/* Connector line */}
             <div className="bg-border h-8 w-px" />
             {/* Horizontal connector */}
@@ -48,7 +49,7 @@ export function OrgChartView({ teams }: OrgChartViewProps) {
         <div className="grid w-full max-w-6xl gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {otherTeams.map((team) => (
             <div key={team.id} className="flex flex-col items-center gap-2">
-              {seniorPastor && <div className="bg-border h-4 w-px" />}
+              {rootTeam && <div className="bg-border h-4 w-px" />}
               <OrgNode team={team} />
             </div>
           ))}

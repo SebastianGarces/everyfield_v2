@@ -39,6 +39,13 @@ export function createAccountEntities(
   accountType: AccountType,
   organizationName: string | null,
   userId: string,
+  /**
+   * The account being registered, for the `persons` row an invited planter's
+   * church-creation tuple mints them (AS-013, #378). Every account type takes
+   * it because it describes the registrant, not the entity — only the planter
+   * branch has a church to put a person in.
+   */
+  account: { name: string | null; email: string },
   createChurchForPlanter = false
 ): {
   seat: UserSeat | null;
@@ -85,6 +92,8 @@ export function createAccountEntities(
             ...churchCreationStatements({
               churchId,
               plantedBy: userId,
+              plantedByName: account.name,
+              plantedByEmail: account.email,
               name: organizationName,
               city: null,
               stateRegion: null,

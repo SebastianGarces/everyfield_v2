@@ -1,8 +1,9 @@
 import { db } from "@/db";
-import { persons, type Person, type PersonStatus } from "@/db/schema";
+import { persons, type PersonStatus } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import { changeStatus } from "./status";
+import type { PersonForClient } from "./types";
 
 // ============================================================================
 // Event Types
@@ -38,7 +39,9 @@ export interface PersonStatusChangedEvent {
 /**
  * Emit an event when a person is created.
  */
-export async function emitPersonCreated(person: Person): Promise<void> {
+export async function emitPersonCreated(
+  person: PersonForClient
+): Promise<void> {
   await eventBus.emit<PersonCreatedEvent>({
     type: "person.created",
     personId: person.id,
@@ -52,7 +55,7 @@ export async function emitPersonCreated(person: Person): Promise<void> {
  * Emit an event when a person's status changes.
  */
 export async function emitPersonStatusChanged(
-  person: Person,
+  person: PersonForClient,
   oldStatus: PersonStatus,
   newStatus: PersonStatus
 ): Promise<void> {

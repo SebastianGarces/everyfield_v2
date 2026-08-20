@@ -14,7 +14,7 @@ import {
   updateHousehold,
 } from "@/lib/people/household";
 import { getPerson } from "@/lib/people/service";
-import type { ActionResult, Person } from "@/lib/people/types";
+import type { ActionResult, PersonForClient } from "@/lib/people/types";
 import {
   householdCreateSchema,
   householdUpdateSchema,
@@ -51,7 +51,7 @@ export async function createHouseholdWithHeadAction(
   personId: string,
   householdName: string,
   usePersonAddress: boolean
-): Promise<ActionResult<{ household: Household; person: Person }>> {
+): Promise<ActionResult<{ household: Household; person: PersonForClient }>> {
   return withChurchSession(
     "people.write",
     "createHouseholdWithHeadAction",
@@ -170,7 +170,7 @@ export async function addToHouseholdAction(
   personId: string,
   householdId: string,
   role: HouseholdRole
-): Promise<ActionResult<Person>> {
+): Promise<ActionResult<PersonForClient>> {
   return withChurchSession(
     "people.write",
     "addToHouseholdAction",
@@ -216,7 +216,7 @@ export async function addToHouseholdAction(
  */
 export async function removeFromHouseholdAction(
   personId: string
-): Promise<ActionResult<Person>> {
+): Promise<ActionResult<PersonForClient>> {
   return withChurchSession(
     "people.write",
     "removeFromHouseholdAction",
@@ -287,7 +287,7 @@ export async function propagateAddressAction(
  */
 export async function getHouseholdMembersAction(
   householdId: string
-): Promise<ActionResult<Person[]>> {
+): Promise<ActionResult<PersonForClient[]>> {
   return withChurchSession(
     "read",
     "getHouseholdMembersAction",

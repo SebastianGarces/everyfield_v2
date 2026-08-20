@@ -9,6 +9,7 @@ import {
 import { and, eq, asc } from "drizzle-orm";
 import { emitTeamStaffingChanged } from "./events";
 import { ExpectedError } from "./expected-error";
+import { fillLeadershipRole } from "./leadership-fill";
 import { getRoleTemplates, type PredefinedTeamKey } from "./role-templates";
 import { getTeamStaffingCounts, verifyTeamOwnership } from "./shared";
 
@@ -190,6 +191,13 @@ export async function importRoleTemplates(
   );
 
   const roles = await db.insert(teamRoles).values(rows).returning();
+
+  // OB-004's answer, applied (#378 WS2). A plant whose `leadership_status` is
+  // `planter_confirmed` has already said who the Senior Pastor is, so the role
+  // this import just created is filled with them rather than offered back as a
+  // question. Runs BEFORE the staffing count below so that count reflects it.
+  // Never raises — see `leadership-fill.ts`.
+  await fillLeadershipRole(churchId, teamId, userId, teamKey, roles);
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, teamId);

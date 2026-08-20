@@ -28,12 +28,49 @@ import { users } from "@/db/schema/user";
 // and skips anyone who fails it. These helpers decide who to OFFER; they never
 // decide who is allowed.
 //
+// AND `persons.user_id` IS NOT THIS, so do not collapse the two (#378). That
+// column is an IDENTITY written at church-gain — "this person row IS that
+// account" — and it exists only for accounts that gained a plant, today the
+// Owner. This is DISCOVERY: "which people in this plant happen to hold a
+// login", for everyone the FK says nothing about, which is most of them. An
+// audience read that switched to the FK would silently shrink to one recipient
+// per plant. The bridge retires when every account-holding person carries the
+// FK, and that is a different issue (`memory/invariants/seats-and-tenancy.md`).
+//
 // Addresses are compared case-insensitively because `users.email` is stored
 // lowercased (`src/lib/invitations/core.ts`) while `persons.email` is typed by
 // hand and is not. A NULL person address matches nothing, which is the correct
 // answer rather than an accident — and `personHoldsLoginFilter` says so out
 // loud rather than leaving it to the comparison.
 // ============================================================================
+
+/**
+ * "This row is somebody the plant RECRUITED, not the plant's own account."
+ *
+ * WHY THIS EXISTS AS A NAME (#378). `persons.status` is a recruitment pipeline,
+ * and the planter's own row sits at its top (`leader`) because they are the
+ * plant's lead from the moment the plant exists — see
+ * `people/account-person.ts` for why no other value is honest. But three reads
+ * had been counting that pipeline as a measure of RECRUITING PROGRESS, and a
+ * row that arrived by owning the plant is not progress: the core-group metric
+ * would open at 1 on a brand-new plant, the phase engine would score a
+ * leadership candidate the planter never developed, and the compose form's
+ * "Leaders" quick-select would put the sender in their own audience.
+ *
+ * So the exclusion is ONE named predicate rather than `isNull(persons.userId)`
+ * spelled at each site with a comment: the name carries the reason, grep finds
+ * every reader, and a fourth one added later has something to find. It is
+ * NOT a blanket rule — the planter is a real person in their plant, and every
+ * read about WHO IS HERE (the people list, the assignment dialog, the roster,
+ * meeting attendance) must keep them. Only reads that measure what the plant
+ * has GATHERED exclude them.
+ *
+ * Composed for `and(...)`, and it is deliberately a function rather than a
+ * shared constant so no two call sites can hold the same SQL object.
+ */
+export function isRecruitedContact(): SQL {
+  return sql`${isNull(persons.userId)}`;
+}
 
 /**
  * The `INNER JOIN users ON …` condition that resolves a person to their login.

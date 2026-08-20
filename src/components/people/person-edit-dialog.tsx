@@ -7,10 +7,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Person } from "@/lib/people/types";
+import type { PersonForClient } from "@/lib/people/types";
 
 interface PersonEditDialogProps {
-  person: Person;
+  person: PersonForClient;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }

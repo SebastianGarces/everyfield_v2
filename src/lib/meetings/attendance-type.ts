@@ -20,6 +20,18 @@ import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import type { AttendanceType } from "@/db/schema/meetings";
 
+/**
+ * NO `isRecruitedContact()` HERE, and that is the decision rather than an
+ * oversight (#378). The three reads that MEASURE recruiting — the dashboard's
+ * core-group count, the phase engine's leadership candidates and the compose
+ * form's status cohorts — exclude the planter's own person row, because a row
+ * that arrived by owning the plant is not progress. This read is not one of
+ * them: it classifies somebody who actually turned up at a meeting, and the
+ * planter attending their own vision meeting is a real attendance with a real
+ * answer. `core_group` is the honest label for it — they are not a first-timer
+ * and calling them one would corrupt the new-vs-returning breakdown in the
+ * other direction.
+ */
 const CORE_GROUP_STATUSES = ["core_group", "launch_team", "leader"] as const;
 
 /**
