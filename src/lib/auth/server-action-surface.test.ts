@@ -4,8 +4,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  SEAT_GUARD,
   SRC,
   TS_FILES,
+  UNAUTHORIZED_RETHROW,
+  catchBlocks,
   codeOf,
   declaresDirective,
   functionBodies,
@@ -14,6 +17,7 @@ import {
   isUseServerModule,
   mintingNames,
   parsingServerActionExports,
+  reachingNames,
   rel,
   staticValueSpecifiers,
   valueExportStatements,
@@ -204,6 +208,131 @@ test("the try-wrapped mints are a closed, named set — an unlisted one fails he
   for (const action of parsingServerActionExports()) {
     if (isPublicRouteGroup(action.file)) continue;
     assert.ok(action.mint < action.parse, action.label);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// ONE ANSWER FOR A SESSIONLESS POST (#508)
+// ----------------------------------------------------------------------------
+
+/**
+ * The modules a server-side `catch` can live in: everything under `src/app`
+ * that is not a client entry and not a public route group.
+ *
+ * NOT just `"use server"` modules, and the two exclusions are why. A domain's
+ * session envelope — `people/action-context.ts → withChurchSession`,
+ * `teams/action-shell.ts → withChurch` — is deliberately NOT a `"use server"`
+ * module (its exports are helpers, not endpoints), and it is exactly where the
+ * `try` and the `catch` live for sixty actions. A scan restricted to the
+ * directive would have walked every action that spells its own catch and
+ * skipped the two that own one on everybody's behalf.
+ *
+ * `"use client"` modules are excluded for the opposite reason: a component
+ * wrapping an action call in its own `try/catch` is the browser's side of the
+ * boundary, where the refusal has already become a rejected promise and there
+ * is nothing to rethrow to.
+ */
+function serverCatchModules(): string[] {
+  const app = path.join(SRC, "app") + path.sep;
+  return TS_FILES.filter(
+    (file) =>
+      file.startsWith(app) &&
+      !isPublicRouteGroup(file) &&
+      !/\.test\.tsx?$/.test(file) &&
+      !isUseClientModule(file)
+  );
+}
+
+/** The six modules #508 found; a scan that missed them proves nothing. */
+const RETHROW_SITES = [
+  "feedback/actions.ts",
+  "launch/actions.ts",
+  "meetings/actions.ts",
+  "people/action-context.ts",
+  "phase/actions.ts",
+  "teams/action-shell.ts",
+];
+
+test("an action that mints inside its `try` rethrows the sessionless refusal from every catch", () => {
+  // THE PROPERTY: an anonymous POST to any action gets ONE answer — a throw.
+  //
+  // #498 made `verifySession()`'s `Unauthorized` leave `withChurchSession` and
+  // `withChurch` unhandled, which is what the Authentication invariant asks
+  // for. Four other modules — launch, phase, meetings, feedback — caught the
+  // same throw and returned `{ success: false, error: "You must be logged in
+  // …" }`, so the same request got a well-formed answer from four modules and
+  // a 500 from two. #508 unified them on `rethrowUnauthorized`.
+  //
+  // THE RULE IS CONDITIONAL, AND THE CONDITION IS THE POINT: it applies only
+  // where the guard sits INSIDE the `try`, because that is the only shape with
+  // a catch standing between the throw and the framework. `tasks/actions.ts`
+  // and `settings/actions.ts` mint ABOVE their `try` — the stronger fix — and
+  // are silently correct here rather than exempted, and any module that adopts
+  // that shape drops out of this walk with nothing to edit.
+  //
+  // The rethrow is found through `reachingNames`, the same resolver the mint
+  // and guard walks use, so `launch/actions.ts` passes by funnelling all six
+  // catches through its own `toActionError` helper. A rule that demanded the
+  // literal call in every catch body would have forced six copies of a line
+  // that belongs in one place.
+  const offenders: string[] = [];
+  const converters: string[] = [];
+  const checked: string[] = [];
+
+  for (const file of serverCatchModules()) {
+    const code = codeOf(file);
+    // Cheap gate before the expensive one: `reachingNames` resolves an import
+    // graph per file, and a module with no `catch (…)` in it has no claim to
+    // check. Skipping those first is what keeps this walk seconds rather than
+    // minutes over the whole of `src/app`.
+    if (!/(?<![.\w])catch\s*\(/.test(code)) continue;
+
+    const guards = reachingNames(file, code, SEAT_GUARD);
+    const guardPattern = new RegExp(`\\b(?:${[...guards].join("|")})\\s*\\(`);
+    const rethrows = reachingNames(file, code, UNAUTHORIZED_RETHROW);
+    const rethrowPattern = new RegExp(
+      `\\b(?:${[...rethrows].join("|")})\\s*\\(`
+    );
+
+    for (const fn of functionBodies(code)) {
+      const guard = fn.body.search(guardPattern);
+      const tryAt = fn.body.search(/\btry\s*\{/);
+      if (guard < 0 || tryAt < 0 || tryAt > guard) continue;
+
+      for (const block of catchBlocks(fn.body)) {
+        const label = `${rel(file)} → ${fn.name}`;
+        checked.push(label);
+
+        if (!rethrowPattern.test(block.body)) offenders.push(label);
+        // The catch-and-convert pattern itself, asserted absent. Comments are
+        // already stripped by `codeOf`, so this is the classification in CODE:
+        // once the refusal leaves through `rethrowUnauthorized`, nothing below
+        // it may branch on the message again.
+        if (block.body.includes('"Unauthorized"')) converters.push(label);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    offenders.toSorted(),
+    [],
+    "this action mints its actor inside the `try`, so its `catch` sees `verifySession()`'s `Unauthorized` and answers an anonymous POST with a handled result. Open the catch with `rethrowUnauthorized(error)` (`@/lib/auth/unauthorized`), or move the guard above the `try` as `tasks/actions.ts` does:\n  " +
+      offenders.join("\n  ")
+  );
+
+  assert.deepEqual(
+    converters.toSorted(),
+    [],
+    "a `catch` still classifies the sessionless refusal by its message. `rethrowUnauthorized` has already taken it out of the block:\n  " +
+      converters.join("\n  ")
+  );
+
+  // The scan reached the sites, rather than matching nothing and passing.
+  for (const module of RETHROW_SITES) {
+    assert.ok(
+      checked.some((label) => label.includes(module)),
+      `the scan never reached ${module} — it saw ${[...new Set(checked)].join(", ")}`
+    );
   }
 });
 

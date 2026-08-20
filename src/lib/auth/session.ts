@@ -2,6 +2,7 @@ import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { getSessionToken } from "./cookies";
+import { UnauthorizedError } from "./unauthorized";
 import {
   sessions,
   users,
@@ -201,13 +202,20 @@ export const getCurrentSession = cache(
 /**
  * Verify that a valid session exists
  * Throws an error if unauthorized - use in Server Actions
- * @throws Error if no valid session exists
+ *
+ * It throws `UnauthorizedError`, whose only addition to `Error` is a `digest`
+ * (`@/lib/auth/unauthorized`): the throw leaves every action unhandled by
+ * design, and the digest is what lets `@/components/app-error` tell THIS 500
+ * from any other one — a client boundary is handed no message in production.
+ * The message is still `"Unauthorized"`, so every reader of it is unaffected.
+ *
+ * @throws UnauthorizedError if no valid session exists
  */
 export async function verifySession(): Promise<SessionValidationResult> {
   const result = await getCurrentSession();
 
   if (!result.session || !result.user) {
-    throw new Error("Unauthorized");
+    throw new UnauthorizedError();
   }
 
   return result as SessionValidationResult;

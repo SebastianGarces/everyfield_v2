@@ -307,6 +307,52 @@ export function functionBodies(
 }
 
 /**
+ * Every `catch (binding) { … }` block in `code`, with its body.
+ *
+ * A CATCH IS WHERE THE SESSIONLESS REFUSAL GOES WRONG (#508). `verifySession()`
+ * throws, and an action that mints inside its `try` has a `catch` standing
+ * between that throw and the framework — six modules turned it into
+ * `{ success: false, error: "You must be logged in …" }`, which is the handled
+ * answer an anonymous POST is never supposed to get. So the rule the sibling
+ * test asserts is about catch bodies, and this is the reader for them.
+ *
+ * `.catch(` IS NOT ONE, and the lookbehind is what says so: a fire-and-forget
+ * `sendEmail(…).catch((err) => …)` is a promise handler, not a boundary the
+ * refusal passes through. `catch {` with no binding is not returned either —
+ * there is no name to rethrow — which under-approximates on purpose, the same
+ * way the rest of this module does.
+ */
+export function catchBlocks(code: string): { binding: string; body: string }[] {
+  const found: { binding: string; body: string }[] = [];
+
+  for (const match of code.matchAll(
+    /(?<![.\w])catch\s*\(\s*(\w+)\s*\)\s*\{/g
+  )) {
+    const open = match.index + match[0].length - 1;
+
+    let depth = 0;
+    let end = code.length;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === "{") depth++;
+      else if (code[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+
+    found.push({ binding: match[1], body: code.slice(open + 1, end) });
+  }
+
+  return found;
+}
+
+/** The one way out of a catch for a sessionless call (`@/lib/auth/unauthorized`). */
+export const UNAUTHORIZED_RETHROW = ["rethrowUnauthorized"];
+
+/**
  * Export statements whose endpoint `functionBodies` CANNOT read — a value
  * binding (`export const fooAction = async (input) => {…}`), a default export,
  * or a re-export.

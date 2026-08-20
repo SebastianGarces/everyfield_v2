@@ -28,6 +28,7 @@
 
 import { requireSeat } from "@/lib/auth/seats";
 import { type Capability } from "@/lib/auth/seat-rules";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { refresh, revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -85,14 +86,21 @@ const NO_CHURCH_MESSAGE =
  * refused them. `requireSeat` / `assertSeatFor` throw `Forbidden: <capability>
  * …` and `requireChurchAccess` throws one naming a church id; both belong in
  * the server log, not in a response.
+ *
+ * EXCEPT THE SESSIONLESS ONE, which is not a sentence at all: it leaves as a
+ * throw (#508). Every export here mints inside its `try`, so this helper is the
+ * one place all six catches funnel through, and `rethrowUnauthorized` is the
+ * first thing it does — before the log, because an anonymous POST is not a
+ * launch failure. It used to answer `"You must be logged in to <verb>."`, which
+ * is the well-formed answer an endpoint should never give a caller with no
+ * session (`memory/invariants.md` → Authentication).
  */
 function toActionError(error: unknown, verb: string): ActionResult<never> {
+  rethrowUnauthorized(error);
+
   console.error(`launch action failed while ${verb}:`, error);
 
   if (error instanceof Error) {
-    if (error.message === "Unauthorized") {
-      return { success: false, error: `You must be logged in to ${verb}.` };
-    }
     if (error.message.startsWith("Forbidden")) {
       return {
         success: false,

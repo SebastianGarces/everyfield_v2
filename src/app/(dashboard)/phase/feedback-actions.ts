@@ -1,6 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
+import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
 import { revalidatePath } from "next/cache";
 import { requireChurchAccess } from "@/lib/auth/access";
 import {
@@ -66,19 +67,14 @@ export async function submitInsightFeedbackAction(
 
     return { success: true, data: { feedback } };
   } catch (error) {
+    rethrowUnauthorized(error);
+
     console.error("submitInsightFeedbackAction error:", error);
 
     if (error instanceof InsightNotFoundError) {
       return {
         success: false,
         error: "Insight not found",
-      };
-    }
-
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to rate insights",
       };
     }
 

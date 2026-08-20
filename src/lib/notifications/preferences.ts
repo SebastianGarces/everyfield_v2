@@ -14,6 +14,7 @@ import {
   type User,
 } from "@/db/schema";
 import { isOversightUser, type TenancyFields } from "@/lib/auth/tenancy";
+import { UNAUTHORIZED_MESSAGE } from "@/lib/auth/unauthorized";
 
 import {
   audienceMayReceiveCategory,
@@ -870,16 +871,6 @@ export function digestCadenceWriteIsNoop(
 // mapping is worth a unit test of its own.
 // ============================================================================
 
-/**
- * The message `verifySession()` throws with (`src/lib/auth/session.ts`).
- *
- * Matching on a message is fragile, so it is not left implicit: it is named
- * here and `preferences.test.ts` reads `session.ts` to prove the two still
- * agree. If the throw is ever changed, that test fails rather than this
- * silently degrading to the generic message.
- */
-export const SESSION_EXPIRED_ERROR_MESSAGE = "Unauthorized";
-
 /** Shown when the session behind an open settings tab has expired. */
 export const PREFERENCE_SESSION_EXPIRED_MESSAGE =
   "Your sign-in expired. Sign in again, then change this setting.";
@@ -900,12 +891,17 @@ export interface PreferenceSaveFailure {
  * Both doors are covered: `verifySession()` throws first for a session that has
  * gone, and `preferenceOwnerFromSession` throws for a session object that
  * arrives empty. They are the same fact to the user and get the same sentence.
+ *
+ * `UNAUTHORIZED_MESSAGE` IS IMPORTED, not copied. This module used to declare
+ * its own `SESSION_EXPIRED_ERROR_MESSAGE = "Unauthorized"` and the suite read
+ * `session.ts` as text to prove the two still agreed — a pin that broke the
+ * moment `verifySession` started throwing a subclass (#508). The constant now
+ * has one home beside the throw, so there is nothing left to keep in step.
  */
 export function isUnauthenticatedPreferenceError(error: unknown): boolean {
   if (error instanceof UnauthenticatedPreferenceAccessError) return true;
   return (
-    error instanceof Error &&
-    error.message.trim() === SESSION_EXPIRED_ERROR_MESSAGE
+    error instanceof Error && error.message.trim() === UNAUTHORIZED_MESSAGE
   );
 }
 

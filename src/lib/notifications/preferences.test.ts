@@ -38,7 +38,6 @@ import {
   resolveInAppCategories,
   resolvePreference,
   resolvePreferenceMatrix,
-  SESSION_EXPIRED_ERROR_MESSAGE,
   setDigestCadenceQuery,
   setPreferenceQuery,
   setPreferenceSchema,
@@ -47,6 +46,10 @@ import {
   type PreferenceMatrixView,
   type PreferenceOwner,
 } from "./preferences";
+import {
+  UNAUTHORIZED_MESSAGE,
+  UnauthorizedError,
+} from "@/lib/auth/unauthorized";
 
 // ----------------------------------------------------------------------------
 // Preference resolution (N-005). The rule under test is that ABSENCE means the
@@ -1492,29 +1495,28 @@ test("an expired session becomes a message, not a throw", () => {
 });
 
 test("verifySession's own Unauthorized is the same case to the user", () => {
+  // THE ACTUAL THROWN OBJECT, not a hand-built stand-in for it (#508):
+  // `verifySession()` throws `UnauthorizedError`, so this is the value the
+  // mapping really receives.
+  assert.equal(isUnauthenticatedPreferenceError(new UnauthorizedError()), true);
   assert.equal(
-    isUnauthenticatedPreferenceError(new Error(SESSION_EXPIRED_ERROR_MESSAGE)),
-    true
-  );
-  assert.equal(
-    preferenceSaveFailure(new Error(SESSION_EXPIRED_ERROR_MESSAGE)).error,
+    preferenceSaveFailure(new UnauthorizedError()).error,
     PREFERENCE_SESSION_EXPIRED_MESSAGE
   );
-});
 
-test("the message verifySession throws with is pinned to its source", () => {
-  // Matching on an error message is fragile, so the two are held together: if
-  // `verifySession` ever throws something else, this fails loudly rather than
-  // the expired session silently degrading to the generic sentence.
-  const source = readFileSync(
-    path.join(process.cwd(), "src/lib/auth/session.ts"),
-    "utf8"
+  // A bare Error carrying the same message is the same fact to the user, and
+  // the mapping matches on the MESSAGE, so it must still be.
+  assert.equal(
+    isUnauthenticatedPreferenceError(new Error(UNAUTHORIZED_MESSAGE)),
+    true
   );
 
-  assert.ok(
-    source.includes(`throw new Error("${SESSION_EXPIRED_ERROR_MESSAGE}")`),
-    "verifySession no longer throws the message preferences.ts matches on"
-  );
+  // There is no longer a source-text pin here, because there is no longer a
+  // second copy of the string to pin: this module imports the constant from
+  // `@/lib/auth/unauthorized`, where the throw is built. A test that read
+  // `session.ts` as text and matched `throw new Error("Unauthorized")` failed
+  // on the day the throw became a subclass carrying the same message — a pin
+  // reporting on a spelling rather than on the property.
 });
 
 test("any other failure still surfaces something, and leaks nothing", () => {
