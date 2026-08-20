@@ -266,8 +266,10 @@ export function NotificationFeed({
   // …and the two arrangements #527 measured on top of that, once "neither" was
   // found to leave the bell reading its old number for the rest of the session:
   //
+  //   no reconcile at all (what #308 shipped) ... 12/12 navigated, 0/12 counted
   //   refresh chained on the ACTION ............. 8 of 11 stranded
-  //   refresh chained on the PUSH (this) ........ 0 of 12 stranded, count moved
+  //   refresh on the URL change ................. 22/22 navigated, 20/22 counted
+  //   …one frame later, after paint (this) ...... 22/22 navigated, 22/22 counted
   //
   // Both halves strand it, and for the same reason: each turns the click into
   // work React owns on the route being LEFT. A transition entangles `Link`'s
@@ -291,9 +293,10 @@ export function NotificationFeed({
   // The first version of this fix refreshed nothing at all, on the premise that
   // "the unread count the user arrives with is server-rendered by the
   // destination's own layout". That is false, and the bell went stale on exactly
-  // the click this was fixing: 26 unread, click a row, land on the person — the
-  // row is read in the database and the bell still reads 26, for the rest of the
-  // session. Every `notificationEntityHref` destination lives under
+  // the click this was fixing: 25 unread, click a row, land on the person — the
+  // row is read in the database and the bell still reads 25, for the rest of the
+  // session (measured: 12 of 12 navigated, 0 of 12 counted). Every
+  // `notificationEntityHref` destination lives under
   // `src/app/(dashboard)/`, so the layout holding the bell is the layout the
   // feed was ALREADY under — a COMMON segment, which a client-side push reuses
   // rather than re-renders (partial rendering; .next-docs
@@ -309,10 +312,14 @@ export function NotificationFeed({
   // (single click) — better than the 22 of 22 it replaced, and still the same
   // bug.
   //
-  // `whenPushCommits` is the missing ordering. It waits for the URL to change,
-  // which is the point after which nothing this component does can supersede the
-  // navigation, and only then refreshes — so the re-render lands on the tree the
-  // user is now looking at. The count moves without the click costing anything.
+  // `whenPushCommits` is the missing ordering, and it has TWO waits because one
+  // was not enough either. It waits for the URL to change — the point after
+  // which nothing here can supersede the navigation — and then for one more
+  // frame, because the URL is written when the router STARTS committing, so a
+  // refresh fired on it alone lands inside the destination's own render and is
+  // coalesced away about one time in ten (22/22 navigated, 20/22 counted). Past
+  // the paint, the re-render lands on the tree the user is now looking at:
+  // 22/22 navigated, 22/22 counted, median 422 ms.
   //
   // The `.catch` is not decoration: an unhandled rejection here is a failed
   // mark-read on a page the user has left, and there is nothing to tell them.

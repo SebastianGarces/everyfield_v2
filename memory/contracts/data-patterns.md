@@ -33,7 +33,7 @@ either half, the write lands and the navigation does not; with neither, 22 of 22
 const markReadOnNavigate = (id) => {
   const leaving = window.location.pathname;
   void markNotificationReadAction(id)
-    .then(() => whenPushCommits(leaving)) // resolves when location.pathname changes
+    .then(() => whenPushCommits(leaving)) // pathname changed, then one more frame
     .then(() => router.refresh())
     .catch(() => {});
 };
@@ -47,11 +47,14 @@ session check does not belong in a layout), and the badge that needed reconcilin
 a shared layout: the feed's own. 25 unread, click a row, land on the person — read in the database,
 still 25 in the bell, for the rest of the session.
 
-Chaining on the ACTION is not enough either: it settles in 200–500 ms while the push commits in
-180–430 ms, so the two overlap and the refresh still supersedes the navigation (8 of 11 stranded).
-Waiting on the URL is what orders them — measured 22/22 navigated with every count moving. The
-`.catch` is part of the shape: an unhandled rejection on a page the user has left has nobody to tell.
-See `memory/invariants.md` → Client/Server Data Synchronization.
+Two separate waits, both found by measuring, both needed. Chaining on the ACTION is not enough: it
+settles in 200–500 ms while the push commits in 180–430 ms, so the two overlap and the refresh still
+supersedes the navigation (8 of 11 stranded). Waiting on the URL alone is not enough either: the URL
+is written when the router *starts* committing, so the refresh lands inside the destination's own
+render and is coalesced away about one time in ten (22/22 navigated, 20/22 counted). Waiting one
+frame past the URL change puts it after the paint — **22/22 navigated, 22/22 counted**, median
+422 ms. The `.catch` is part of the shape: an unhandled rejection on a page the user has left has
+nobody to tell. See `memory/invariants.md` → Client/Server Data Synchronization.
 
 In the repo: `ActivityTimelineClient` owns optimistic add/delete while `ActivityFeed` takes
 activities as props; the pipeline view keeps useState for drag-and-drop visuals only and lets the
