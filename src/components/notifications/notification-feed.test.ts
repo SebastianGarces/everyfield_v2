@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { sourceReader, stripComments } from "@/lib/testing/source-span";
+import {
+  assertInOrder,
+  sourceReader,
+  stripComments,
+} from "@/lib/testing/source-span";
 
 // ----------------------------------------------------------------------------
 // THE CLICK THAT LEAVES OWNS NO SYNCHRONOUS WORK ON THE ROUTE IT IS LEAVING
@@ -12,21 +16,30 @@ import { sourceReader, stripComments } from "@/lib/testing/source-span";
 // The defect: clicking a feed row marked it read and did not navigate. The row
 // was un-bolded, the URL never changed, and the user sat on the feed looking at
 // a notification they had just "opened". #228 saw it 1 in 5 and left it as
-// possible noise; on this branch's preview it reproduced on demand once the
+// possible noise; on #308's preview it reproduced on demand once the
 // destination was not already prefetched, and four arrangements were measured:
 //
 //   transition + action `refresh()` (what shipped) ...... 22 of 22 stranded
 //   no transition + action `refresh()` .................. 20 of 22 stranded
 //   transition + no `refresh()` ......................... 11 of 11 stranded
 //   neither ............................................. 22 of 22 navigated
-//   neither, `refresh()` chained AFTER the push (#527) .. 22 of 22 navigated
 //
 // Both halves cause it, and for the same reason: each turns the click into work
 // React owns on the route being LEFT, and either can supersede a push that has
-// not committed. What it is NOT is a reason to skip reconciliation: the fourth
-// row shipped with no refresh at all and the bell went stale on exactly this
-// click. The fifth is what ships — same two switches off, and the refresh
-// chained on the action so it lands on the destination.
+// not committed.
+//
+// WHAT "NEITHER" ALSO DID (#527) is leave the bell reading its old number for
+// the rest of the session — the destination shares the layout the bell lives in,
+// and a client-side push reuses a shared layout rather than re-rendering it. So
+// the reconcile has to come back, and #527 measured where it can go:
+//
+//   no reconcile at all (what shipped) ... 12/12 navigated, 0/12 count moved
+//   refresh chained on the ACTION ........ 8 of 11 stranded
+//   refresh chained on the PUSH (this) ... 12/12 navigated, 12/12 count moved
+//
+// The middle row is why "after the action" is not the same claim as "after the
+// push": the action settles in 200-500 ms and the push commits in 180-430 ms, so
+// they overlap. `whenPushCommits` waits for the URL to change instead.
 //
 // So the fix is a shape, and a shape is what a later edit re-breaks by accident
 // — `markReadOnNavigate` looks like an oversight next to `markRead`, and "the
@@ -81,31 +94,46 @@ test("the leaving handler starts no transition and owns no synchronous work", ()
   assert.match(leaving, /markNotificationReadAction\(id\)/);
 });
 
-test("the leaving handler's refresh is CHAINED, never in the click (#527)", () => {
+test("the leaving handler refreshes only AFTER the push commits (#527)", () => {
   // The half of the #526 fix that went too far. Removing the refresh entirely
-  // left the bell reading 26 for the rest of the session after a row click: the
+  // left the bell reading 25 for the rest of the session after a row click: the
   // destination shares the dashboard layout the bell lives in, and a client-side
   // push REUSES a common layout rather than re-rendering it, so nothing re-read
-  // the badge on arrival.
+  // the badge on arrival. Measured on the pre-#527 preview: 12 of 12 navigated,
+  // 0 of 12 decremented.
   //
-  // It comes back chained on the action's promise. By the time that settles the
-  // push has been issued, so the re-render lands on the destination instead of
-  // superseding the navigation. The shape is what matters, so the shape is what
-  // is pinned: a `router.refresh()` that is NOT inside a `.then(` is the
-  // 22-of-22-stranded arrangement again.
+  // Chaining the refresh on the ACTION is not the fix either — the action
+  // settles in 200-500 ms and the push commits in 180-430 ms, so they overlap
+  // and the refresh still supersedes the navigation (8 of 11 stranded). The
+  // ordering that works is: wait for the URL to change, THEN refresh.
+  //
+  // Pinned as a shape, in order, because either link alone is one of the two
+  // broken arrangements.
   const feed = reader(FEED, "notification-feed.tsx (stripped)");
   const leaving = feed.span("const markReadOnNavigate", "const markAllRead");
 
+  assertInOrder(
+    leaving,
+    "markReadOnNavigate",
+    [
+      "markNotificationReadAction(id)",
+      "whenPushCommits(",
+      "router.refresh()",
+      ".catch(",
+    ],
+    "the action, then the wait for the push, then the refresh, then the catch — any other order is one of the two arrangements that stranded the click"
+  );
+
   assert.match(
     leaving,
-    /markNotificationReadAction\(id\)\s*\.then\(\(\) => router\.refresh\(\)\)/,
-    "the leaving refresh is not chained on the action — an unchained one strands the push"
+    /\.then\(\(\) => whenPushCommits\(leaving\)\)\s*\.then\(\(\) => router\.refresh\(\)\)/,
+    "the refresh no longer waits for the push to commit — an early one strands it"
   );
-  assert.match(
-    leaving,
-    /\.catch\(/,
-    "the leaving path floats an uncaught promise on a page the user has left"
-  );
+
+  // …and the wait is a real one: a URL comparison, not a fixed sleep somebody
+  // will shorten.
+  const wait = feed.span("function whenPushCommits", "function appendRows");
+  assert.match(wait, /window\.location\.pathname !== from/);
 });
 
 test("the two presses that STAY are the ones that refresh", () => {

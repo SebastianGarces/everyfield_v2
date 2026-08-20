@@ -112,6 +112,38 @@ function applyFeedAction(state: FeedState, action: FeedAction): FeedState {
   };
 }
 
+/** How long the leaving click waits for its own push before refreshing anyway. */
+const PUSH_COMMIT_TIMEOUT_MS = 3000;
+
+/**
+ * Resolve once the browser's URL has left `from` — that is, once the push the
+ * click started has actually COMMITTED — or after {@link PUSH_COMMIT_TIMEOUT_MS}
+ * if it never does.
+ *
+ * A `router.refresh()` cannot supersede a navigation that has already landed, so
+ * this is the whole of what makes the leaving click's reconcile safe (#527). It
+ * reads `location.pathname` rather than any router state because the History
+ * entry is what "committed" means here: Next writes it when the push lands.
+ *
+ * The timeout is the case where the user never left — a click the browser
+ * swallowed, or a same-path href. Refreshing then is correct too: they are still
+ * on the feed, which is the caller-that-stays case.
+ */
+function whenPushCommits(from: string): Promise<void> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const tick = () => {
+      const left = window.location.pathname !== from;
+      if (left || Date.now() - startedAt >= PUSH_COMMIT_TIMEOUT_MS) {
+        resolve();
+        return;
+      }
+      window.setTimeout(tick, 50);
+    };
+    tick();
+  });
+}
+
 /**
  * Append older pages without ever showing a row twice.
  *
@@ -219,7 +251,12 @@ export function NotificationFeed({
   //   no transition + refresh ................... 20 of 22 stranded
   //   transition + no refresh ................... 11 of 11 stranded
   //   neither ................................... 22 of 22 navigated
-  //   neither, refresh AFTER the push (this) .... 22 of 22 navigated (#527)
+  //
+  // …and the two arrangements #527 measured on top of that, once "neither" was
+  // found to leave the bell reading its old number for the rest of the session:
+  //
+  //   refresh chained on the ACTION ............. 8 of 11 stranded
+  //   refresh chained on the PUSH (this) ........ 0 of 12 stranded, count moved
   //
   // Both halves strand it, and for the same reason: each turns the click into
   // work React owns on the route being LEFT. A transition entangles `Link`'s
@@ -229,10 +266,9 @@ export function NotificationFeed({
   // everything else — the same double-click on a plain sidebar link, no action
   // and no refresh behind it, navigated 10 times out of 10.
   //
-  // The last row is what ships, and it is not a fifth setting of the same two
-  // switches: the refresh is CHAINED on the action's promise, so it runs after
-  // the push has been issued and re-renders where the user now IS. The ordering
-  // is the fix, not the absence.
+  // The last row is what ships, and it is not another setting of the same two
+  // switches: the refresh waits for the URL to change and only then runs, so it
+  // re-renders where the user now IS. The ordering is the fix, not the absence.
   //
   // So the click that leaves owns neither, SYNCHRONOUSLY. It is a plain call
   // rather than a transition, because there is no optimistic row to hold on a
@@ -254,17 +290,26 @@ export function NotificationFeed({
   // check does not belong in a layout). There is no destination render of the
   // badge to be fresher than anything.
   //
-  // So the refresh comes back, CHAINED ON THE ACTION rather than sitting in the
-  // click. By the time the promise settles the push has long been issued, so the
-  // re-render lands on the tree the user is now looking at — which is the whole
-  // difference between this and the arrangement that stranded 22 of 22. The
-  // ordering is what matters, not the absence.
+  // So the refresh comes back, but ONLY ONCE THE PUSH HAS COMMITTED. Chaining
+  // it on the action alone is not enough and was measured not to be: the action
+  // settles in 200–500 ms and the push commits in 180–430 ms, so the two overlap
+  // and the refresh still lands on the route being replaced. On this branch's
+  // own preview that arrangement stranded 8 of 11 (double click) and 2 of 5
+  // (single click) — better than the 22 of 22 it replaced, and still the same
+  // bug.
+  //
+  // `whenPushCommits` is the missing ordering. It waits for the URL to change,
+  // which is the point after which nothing this component does can supersede the
+  // navigation, and only then refreshes — so the re-render lands on the tree the
+  // user is now looking at. The count moves without the click costing anything.
   //
   // The `.catch` is not decoration: an unhandled rejection here is a failed
   // mark-read on a page the user has left, and there is nothing to tell them.
   // The row's read state is server truth on the next render either way.
   const markReadOnNavigate = (id: string) => {
+    const leaving = window.location.pathname;
     void markNotificationReadAction(id)
+      .then(() => whenPushCommits(leaving))
       .then(() => router.refresh())
       .catch(() => {});
   };
