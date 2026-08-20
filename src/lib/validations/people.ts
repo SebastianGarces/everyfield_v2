@@ -68,7 +68,14 @@ export const personCreateSchema = z.object({
 export type PersonCreateInput = z.infer<typeof personCreateSchema>;
 
 export const personUpdateSchema = personCreateSchema.partial().extend({
-  photoUrl: z.string().url().max(500).optional(),
+  // NO `photoUrl` (P-024a). `persons.photo_url` holds a PRIVATE-BUCKET KEY, and
+  // the profile form is a `FormData` bag any POST can shape — a `photoUrl`
+  // field here would let a caller point their own person's avatar at
+  // `people/{another church}/…` and then read that object through the photo
+  // route, which trusts the stored key precisely because nothing but the upload
+  // action writes it. The key is written by `setPersonPhoto` alone, from a key
+  // this server just built. The field is absent rather than filtered so the
+  // rule cannot be re-broken by a second form that forgets to filter.
   status: personStatusSchema.optional(), // no default for updates
   country: z.string().max(100).optional(), // no default for updates
 });

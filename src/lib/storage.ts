@@ -97,6 +97,39 @@ export async function getSignedDownloadUrl(
 }
 
 // ============================================================================
+// Reading Objects Back
+// ============================================================================
+
+/**
+ * Read a stored object back as bytes.
+ *
+ * The bucket is private and stays private: nothing outside the server ever
+ * holds a key or a signed URL for a person photo, so the only way to read one
+ * is through a route handler that has already checked the session and the
+ * church. That handler needs the bytes, not a URL — see
+ * `src/app/api/people/[personId]/photo/route.ts`.
+ *
+ * Returns null when the object is gone, so a row pointing at a deleted object
+ * reads as "no photo" instead of throwing the route's own failure.
+ */
+export async function getFileBytes(
+  key: string
+): Promise<{ body: Uint8Array; contentType: string } | null> {
+  try {
+    const result = await s3Client.send(
+      new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key })
+    );
+    if (!result.Body) return null;
+    return {
+      body: await result.Body.transformToByteArray(),
+      contentType: result.ContentType ?? "application/octet-stream",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
@@ -109,10 +142,62 @@ export function getExtensionFromMimeType(mimeType: string): string {
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
     "image/png": "png",
+    "image/webp": "webp",
   };
 
   return mimeToExt[mimeType] || "bin";
 }
+
+// ============================================================================
+// Person Photos (P-024a)
+// ============================================================================
+
+/**
+ * The one spelling of a person photo's storage key.
+ *
+ * `{domain}/{churchId}/{personId}/{uuid}.{ext}` — the convention the
+ * commitment documents already follow. The church id is IN the key so an
+ * operator reading the bucket can tell whose object it is, but nothing outside
+ * this server ever sees a key: the read path is a session-checked route
+ * handler, not a URL handed to the browser.
+ *
+ * The uuid is fresh on every upload rather than derived from the person, which
+ * is what makes a replacement a NEW object — the old one is deleted explicitly
+ * after the row stops pointing at it, so a failed delete leaves collectable
+ * garbage rather than a broken avatar.
+ */
+export function personPhotoStorageKey(
+  churchId: string,
+  personId: string,
+  ext: string
+): string {
+  return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
+}
+
+/** The image types a person photo may be. */
+const ALLOWED_PHOTO_MIME_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+];
+
+/** Validate that a file type is allowed for a person photo. */
+export function isAllowedPhotoFileType(mimeType: string): boolean {
+  return ALLOWED_PHOTO_MIME_TYPES.includes(mimeType);
+}
+
+/** Maximum file size for a person photo (5MB). */
+export const MAX_PHOTO_FILE_SIZE = 5 * 1024 * 1024;
+
+/** Validate file size for a person photo. */
+export function isValidPhotoFileSize(size: number): boolean {
+  return size <= MAX_PHOTO_FILE_SIZE;
+}
+
+// ============================================================================
+// Commitment Documents
+// ============================================================================
 
 /**
  * Validate that a file type is allowed for commitment documents.

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDebounce } from "use-debounce";
 import { Search, UserPlus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,7 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { assignMemberAction } from "@/app/(dashboard)/teams/actions";
+import {
+  assignMemberAction,
+  searchTeamCandidatesAction,
+} from "@/app/(dashboard)/teams/actions";
 import type { PersonForClient } from "@/lib/people/types";
 import { assignRefusalDelivery } from "./assign-refusal";
 
@@ -27,6 +31,7 @@ interface MemberAssignDialogProps {
   teamId: string;
   roleId: string;
   roleName: string;
+  /** The first page of people, from the server component. */
   people: PersonForClient[];
   /**
    * Active team count per person id, resolved by the server component next to
@@ -53,12 +58,50 @@ export function MemberAssignDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const teamCount = selectedPerson ? (teamCounts[selectedPerson.id] ?? 0) : 0;
+  // SEARCH IS A SERVER READ (ruling 2026-08-12). Filtering the prefetched
+  // array in the browser made everyone past the prefetch invisible: a planter
+  // typing a real member's name was told "No people found". The matches — and
+  // the team counts the warning below needs for them — are a search result, so
+  // they live in state; the props remain the answer while the box is empty.
+  const [debouncedSearch] = useDebounce(search.trim(), 250);
+  const [matches, setMatches] = useState<{
+    people: PersonForClient[];
+    teamCounts: Record<string, number>;
+  } | null>(null);
+  const [searching, setSearching] = useState(false);
 
-  const filteredPeople = people.filter((p) => {
-    const fullName = `${p.firstName} ${p.lastName}`.toLowerCase();
-    return fullName.includes(search.toLowerCase());
-  });
+  useEffect(() => {
+    if (debouncedSearch.length === 0) {
+      setMatches(null);
+      setSearching(false);
+      return;
+    }
+
+    let current = true;
+    setSearching(true);
+
+    searchTeamCandidatesAction(debouncedSearch)
+      .then((result) => {
+        if (!current) return;
+        setMatches(
+          result.success ? result.data : { people: [], teamCounts: {} }
+        );
+      })
+      .finally(() => {
+        if (current) setSearching(false);
+      });
+
+    // The answer to a query the planter has already typed past is not an answer
+    // any more — a slow request must not overwrite a faster later one.
+    return () => {
+      current = false;
+    };
+  }, [debouncedSearch]);
+
+  const shownPeople = matches?.people ?? people;
+  const shownCounts = matches?.teamCounts ?? teamCounts;
+
+  const teamCount = selectedPerson ? (shownCounts[selectedPerson.id] ?? 0) : 0;
 
   async function handleAssign() {
     if (!selectedPerson) return;
@@ -151,12 +194,16 @@ export function MemberAssignDialog({
               />
             </div>
             <div className="max-h-64 overflow-auto rounded-md border">
-              {filteredPeople.length === 0 ? (
+              {searching ? (
+                <div className="text-muted-foreground p-4 text-center text-sm">
+                  Searching…
+                </div>
+              ) : shownPeople.length === 0 ? (
                 <div className="text-muted-foreground p-4 text-center text-sm">
                   No people found
                 </div>
               ) : (
-                filteredPeople.map((person) => {
+                shownPeople.map((person) => {
                   const initials =
                     `${person.firstName[0]}${person.lastName[0]}`.toUpperCase();
                   return (

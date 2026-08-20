@@ -523,7 +523,6 @@ export async function updatePerson(
   if (data.sourceDetails !== undefined)
     updateData.sourceDetails = data.sourceDetails;
   if (data.notes !== undefined) updateData.notes = data.notes;
-  if (data.photoUrl !== undefined) updateData.photoUrl = data.photoUrl;
   if (data.householdId !== undefined) updateData.householdId = data.householdId;
   if (data.householdRole !== undefined)
     updateData.householdRole = data.householdRole;
@@ -545,6 +544,47 @@ export async function updatePerson(
   }
 
   return toPersonForClient(updated);
+}
+
+/**
+ * Point a person at a stored photo object (P-024a).
+ *
+ * THE ONE WRITER OF `photo_url`, and separate from `updatePerson` on purpose.
+ * That function takes a `PersonUpdateInput` parsed out of the profile form's
+ * `FormData` — a bag whose keys a POST chooses — so a photo field there would
+ * be a client-supplied storage key, and the photo route trusts the stored key
+ * precisely because nothing client-supplied can reach it. `key` here is always
+ * one `personPhotoStorageKey` just built on this server.
+ *
+ * Returns the previous key so the caller can delete the object the row no
+ * longer names, and `null` when the person is gone.
+ */
+export async function setPersonPhoto(
+  churchId: string,
+  personId: string,
+  key: string
+): Promise<{ person: PersonForClient; previousKey: string | null } | null> {
+  const existing = await getPerson(churchId, personId);
+  if (!existing) return null;
+
+  const [updated] = await db
+    .update(persons)
+    .set({ photoUrl: key, updatedAt: new Date() })
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        eq(persons.id, personId),
+        isNull(persons.deletedAt)
+      )
+    )
+    .returning();
+
+  if (!updated) return null;
+
+  return {
+    person: toPersonForClient(updated),
+    previousKey: existing.photoUrl,
+  };
 }
 
 /**

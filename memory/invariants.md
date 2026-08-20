@@ -135,6 +135,20 @@ Applies to `generated_documents`, `src/lib/documents/service.ts`, and `/document
 - A foreign artifact id reads as MISSING, not forbidden — the church-scoped lookup IS the answer, so no separate refusal exists to distinguish "not yours" from "not there".
 - `storage_key`'s UNIQUE index guards nothing constructible today (keys carry a fresh uuid). It is kept as a fence for a future DETERMINISTIC key scheme, where a collision would silently overwrite one church's artifact with another's render.
 
+## Person Photos
+
+Applies to `persons.photo_url`, `src/app/api/people/[personId]/photo/route.ts` and `uploadPersonPhotoAction`.
+
+- `persons.photo_url` holds a PRIVATE-BUCKET STORAGE KEY, never a URL, despite the column's name. The only address a browser gets is `/api/people/{id}/photo`, which checks the session and reads the person church-scoped before streaming bytes — no signed URL reaches the page, because a signed URL is a bearer token anyone can pass on.
+- `setPersonPhoto` is the ONLY writer of that column, and `personUpdateSchema` deliberately has NO `photoUrl` field: the profile form is a `FormData` bag a POST shapes, so a photo key there would let a caller aim their own person's avatar at another church's object and read it through a route that trusts the stored key.
+- Upload BEFORE the row points at the object, delete the old object AFTER it stops (same asymmetry as Generated Documents). A failed delete is collectable garbage; a row naming a missing object is an avatar nothing in the app can repair — the route answers 404 for it and the initials fallback renders.
+
+## List Pagination — `/people` and `/tasks`
+
+- A keyset cursor MUST compare the expression the query is `ORDER BY`-ed on, with the id tie-break in the SAME direction. `listTasks` ordered by due date and paged on `created_at`, which skips and repeats rows at every boundary; `TASK_SORT_KEYS` now names the SQL expression and its TypeScript key together so the two cannot drift (`src/lib/tasks/pagination.test.ts` pins both halves).
+- "Load more" reads the URL through the SAME parser the page used (`parsePeopleListSearchParams`, `parseTaskListSearchParams`), never a filter object marshalled by the client — a second reading of the URL is free to drift and returns a different query's rows.
+- The tasks list REGROUPS over every loaded row rather than merging a page into the groups already drawn, so a bucket that first appears on page two gets its heading instead of dropping its rows. The grouping recompute uses the server's single `now`, never a fresh clock read.
+
 ## Rich Text — Stored HTML & the Sanitiser
 
 → [rich-text](invariants/rich-text.md) — `src/lib/rich-text/**` and every writer or reader of a rich-text body.

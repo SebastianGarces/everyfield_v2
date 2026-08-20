@@ -23,7 +23,20 @@ import {
   createTrainingProgram,
   markTrainingComplete,
 } from "@/lib/ministry-teams/service";
+import { getTeamCountsForPeople } from "@/lib/ministry-teams/service";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
+import { listPeople } from "@/lib/people/service";
+import type { PersonForClient } from "@/lib/people/types";
+
+/**
+ * How many matches the assign dialog shows. A search is a NARROWING — a planter
+ * who types three letters and gets fifty rows types a fourth — so this is a cap
+ * on the render, not a ceiling on who is findable.
+ */
+// NOT exported: a "use server" module's export list IS its endpoint surface
+// (memory/invariants.md → Authentication), and the repo-wide walk refuses a
+// non-function export here by name.
+const TEAM_CANDIDATE_SEARCH_LIMIT = 50;
 import { createMeeting as createUnifiedMeeting } from "@/lib/meetings/service";
 import type { ChurchMeeting } from "@/lib/meetings/types";
 import {
@@ -64,6 +77,42 @@ export async function listTeamsAction(): Promise<
   return withChurch("read", "Failed to load teams", async ({ churchId }) => {
     const teams = await listTeams(churchId);
     return { success: true, data: teams };
+  });
+}
+
+/**
+ * The assign dialog's people search, answered by the DATABASE (ruling
+ * 2026-08-12, from sweep #403 / PR #409 DECISION 3).
+ *
+ * The dialog used to be handed `listPeople(churchId, { limit: 100 })` and
+ * filter that array in the browser. Past a hundred people, everyone outside the
+ * prefetched hundred simply did not exist as far as the search box was
+ * concerned — a planter typing a real member's name was told "No people found".
+ * A bigger prefetch moves the ceiling; it does not remove it.
+ *
+ * So the search is a scoped read: `listPeople(..., { search })` goes through
+ * `peopleTextSearch`, the one people text predicate, and the team counts the
+ * dialog's warning needs come back with the matches rather than from a props
+ * table that only covered the prefetch.
+ */
+export async function searchTeamCandidatesAction(query: string): Promise<
+  ActionResult<{
+    people: PersonForClient[];
+    teamCounts: Record<string, number>;
+  }>
+> {
+  return withChurch("read", "Failed to search people", async ({ churchId }) => {
+    const { people } = await listPeople(churchId, {
+      search: query,
+      limit: TEAM_CANDIDATE_SEARCH_LIMIT,
+    });
+
+    const teamCounts = await getTeamCountsForPeople(
+      churchId,
+      people.map((person) => person.id)
+    );
+
+    return { success: true, data: { people, teamCounts } };
   });
 }
 

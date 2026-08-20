@@ -84,9 +84,70 @@ export interface ListTasksOptions {
    * footer counts the same things the list shows.
    */
   includeSubtasks?: boolean; // default false
-  sortBy?: "due_date" | "priority" | "status" | "created_at" | "title";
+  sortBy?: TaskSortBy;
   sortDir?: "asc" | "desc";
 }
+
+/** The orders `/tasks` can be read in. */
+export type TaskSortBy =
+  | "due_date"
+  | "priority"
+  | "status"
+  | "created_at"
+  | "title";
+
+/** The columns a sort key is computed from — every list row has them. */
+export interface TaskSortableRow {
+  id: string;
+  dueDate: string | null;
+  priority: TaskPriority;
+  status: TaskStatus;
+  title: string;
+  createdAt: Date;
+}
+
+/**
+ * THE ONE PLACE A SORT ORDER IS DEFINED (#320).
+ *
+ * Each entry names the SQL expression rows are ordered by AND the value that
+ * expression produces for a row. `ORDER BY` and the keyset cursor predicate
+ * below both read `.sql`, so they cannot describe different orders — which is
+ * exactly what they used to do. The list was ordered by due date while the
+ * cursor compared `created_at`, so "Load more" would have skipped rows whose
+ * due date came after the cursor's but whose `created_at` came before it, and
+ * repeated the ones the other way round. Nothing caught it because the button
+ * was a disabled placeholder.
+ *
+ * `.of` is the same key in TypeScript, which is what lets the pagination test
+ * page through a fixture without a database and still be testing the order the
+ * query actually uses.
+ */
+export const TASK_SORT_KEYS: Record<
+  TaskSortBy,
+  { sql: SQL; of: (row: TaskSortableRow) => string }
+> = {
+  // Null due dates sort to the end, in SQL and in the key alike.
+  due_date: {
+    sql: sql`COALESCE(${tasks.dueDate}, '9999-12-31')`,
+    of: (row) => row.dueDate ?? "9999-12-31",
+  },
+  priority: {
+    sql: sql`CASE ${tasks.priority}
+      WHEN 'urgent' THEN 0
+      WHEN 'high' THEN 1
+      WHEN 'medium' THEN 2
+      WHEN 'low' THEN 3
+    END`,
+    of: (row) =>
+      String(["urgent", "high", "medium", "low"].indexOf(row.priority)),
+  },
+  status: { sql: sql`${tasks.status}`, of: (row) => row.status },
+  title: { sql: sql`${tasks.title}`, of: (row) => row.title },
+  created_at: {
+    sql: sql`${tasks.createdAt}`,
+    of: (row) => row.createdAt.toISOString(),
+  },
+};
 
 /**
  * A task as a LIST query returns it: everything `getTask` returns, plus the
@@ -299,46 +360,28 @@ export async function listTasks(
 
   const total = countResult?.count ?? 0;
 
-  // Build sort order
-  const priorityOrder = sql`CASE ${tasks.priority}
-    WHEN 'urgent' THEN 0
-    WHEN 'high' THEN 1
-    WHEN 'medium' THEN 2
-    WHEN 'low' THEN 3
-  END`;
-
-  const getSortColumn = () => {
-    switch (sortBy) {
-      case "due_date":
-        // Null due dates go to the end
-        return sql`COALESCE(${tasks.dueDate}, '9999-12-31')`;
-      case "priority":
-        return priorityOrder;
-      case "status":
-        return tasks.status;
-      case "title":
-        return tasks.title;
-      case "created_at":
-      default:
-        return tasks.createdAt;
-    }
-  };
-
-  const sortColumn = getSortColumn();
+  // THE SORT KEY AND THE CURSOR ARE THE SAME EXPRESSION, from one entry in
+  // TASK_SORT_KEYS. The id is the tie-break, in the SAME direction as the key,
+  // so `(key, id)` is a total order a row-value comparison can walk.
+  const sortKey = TASK_SORT_KEYS[sortBy];
   const orderFn = sortDir === "desc" ? desc : asc;
 
-  // Cursor-based pagination
+  // Cursor-based pagination. The cursor is a task id; its position is the
+  // (key, id) pair, looked up church-scoped so a cursor cannot be aimed across
+  // tenants.
   const queryConditions = [...baseConditions];
   if (cursor) {
     const cursorTask = await db
-      .select({ createdAt: tasks.createdAt })
+      .select({ sortValue: sortKey.sql })
       .from(tasks)
       .where(and(eq(tasks.id, cursor), eq(tasks.churchId, churchId)))
       .limit(1);
 
     if (cursorTask[0]) {
       queryConditions.push(
-        sql`(${tasks.createdAt}, ${tasks.id}) < (${cursorTask[0].createdAt}, ${cursor})`
+        sortDir === "desc"
+          ? sql`(${sortKey.sql}, ${tasks.id}) < (${cursorTask[0].sortValue}, ${cursor})`
+          : sql`(${sortKey.sql}, ${tasks.id}) > (${cursorTask[0].sortValue}, ${cursor})`
       );
     }
   }
@@ -349,7 +392,7 @@ export async function listTasks(
     .from(tasks)
     .leftJoin(users, eq(tasks.assignedToId, users.id))
     .where(and(...queryConditions))
-    .orderBy(orderFn(sortColumn), desc(tasks.id))
+    .orderBy(orderFn(sortKey.sql), orderFn(tasks.id))
     .limit(safeLimit + 1);
 
   const hasMore = result.length > safeLimit;

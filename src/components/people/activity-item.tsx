@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { formatRelativeTimestamp } from "@/lib/datetime";
 import {
   type ActivityWithPerformer,
@@ -21,6 +22,7 @@ import {
   UserPlus,
   XCircle,
 } from "lucide-react";
+import { useState } from "react";
 
 interface ActivityItemProps {
   activity: ActivityWithPerformer;
@@ -32,6 +34,8 @@ interface ActivityItemProps {
   now: Date;
   onDelete?: (activityId: string) => void;
   canDelete?: boolean;
+  onEdit?: (activityId: string, note: string) => void;
+  canEdit?: boolean;
 }
 
 export function ActivityItem({
@@ -39,9 +43,20 @@ export function ActivityItem({
   now,
   onDelete,
   canDelete,
+  onEdit,
+  canEdit,
 }: ActivityItemProps) {
   const metadata = activity.metadata as Record<string, unknown> | null;
   const isNote = activity.activityType === "note_added";
+  const noteBody =
+    metadata && typeof metadata.note === "string" ? metadata.note : null;
+  const editedAt =
+    metadata && typeof metadata.editedAt === "string"
+      ? metadata.editedAt
+      : null;
+
+  const [draft, setDraft] = useState<string | null>(null);
+  const isEditing = draft !== null;
   const isStatusChange = activity.activityType === "status_changed";
   const isBackwardChange = isStatusChange && isStatusChangeBackward(metadata);
   const hasReason = isStatusChange && !!metadata?.reason;
@@ -104,20 +119,78 @@ export function ActivityItem({
           </span>
         </div>
 
-        {isNote && metadata && typeof metadata.note === "string" && (
-          <div className="bg-muted/50 group relative rounded-md px-3 py-2 text-sm">
-            <p className="whitespace-pre-wrap">{metadata.note}</p>
-            {canDelete && onDelete && (
+        {isNote && noteBody !== null && !isEditing && (
+          <div
+            className="bg-muted/50 group relative rounded-md px-3 py-2 text-sm"
+            data-testid="note-body"
+          >
+            <p className="whitespace-pre-wrap">{noteBody}</p>
+            {editedAt && (
+              <p
+                className="text-muted-foreground mt-1 text-xs"
+                data-testid="note-edited-marker"
+              >
+                Edited {formatRelativeTimestamp(new Date(editedAt), now)}
+              </p>
+            )}
+            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+              {canEdit && onEdit && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground h-7 w-7 cursor-pointer"
+                  onClick={() => setDraft(noteBody)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span className="sr-only">Edit note</span>
+                </Button>
+              )}
+              {canDelete && onDelete && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive h-7 w-7 cursor-pointer"
+                  onClick={() => onDelete(activity.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="sr-only">Delete note</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isNote && isEditing && onEdit && (
+          <div className="bg-muted/50 space-y-2 rounded-md px-3 py-2">
+            <Textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={3}
+              aria-label="Edit note"
+              data-testid="note-edit-input"
+              className="min-h-0 resize-none bg-transparent text-sm"
+            />
+            <div className="flex justify-end gap-2">
               <Button
                 variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-destructive absolute top-1 right-1 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={() => onDelete(activity.id)}
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => setDraft(null)}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span className="sr-only">Delete note</span>
+                Cancel
               </Button>
-            )}
+              <Button
+                size="sm"
+                className="cursor-pointer"
+                disabled={draft.trim().length === 0}
+                onClick={() => {
+                  onEdit(activity.id, draft.trim());
+                  setDraft(null);
+                }}
+              >
+                Save note
+              </Button>
+            </div>
           </div>
         )}
 

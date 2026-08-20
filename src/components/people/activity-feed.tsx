@@ -2,6 +2,7 @@
 
 import {
   deleteNoteAction,
+  editNoteAction,
   getMoreActivitiesAction,
 } from "@/app/(dashboard)/people/activity-actions";
 import {
@@ -31,7 +32,9 @@ interface ActivityFeedProps {
   currentUserId: string;
 }
 
-type OptimisticAction = { type: "delete"; activityId: string };
+type OptimisticAction =
+  | { type: "delete"; activityId: string }
+  | { type: "edit"; activityId: string; note: string; editedAt: string };
 
 export function ActivityFeed({
   activities,
@@ -62,6 +65,23 @@ export function ActivityFeed({
       if (action.type === "delete") {
         return state.filter((a) => a.id !== action.activityId);
       }
+      if (action.type === "edit") {
+        // MAPPED IN PLACE, never re-sorted: the timeline's order is the
+        // person's history, and an edit is a correction to one entry, not a
+        // new event (P-010e).
+        return state.map((a) =>
+          a.id === action.activityId
+            ? {
+                ...a,
+                metadata: {
+                  ...((a.metadata as Record<string, unknown> | null) ?? {}),
+                  note: action.note,
+                  editedAt: action.editedAt,
+                },
+              }
+            : a
+        );
+      }
       return state;
     }
   );
@@ -87,6 +107,38 @@ export function ActivityFeed({
 
   const handleDeleteNote = (activityId: string) => {
     setDeleteTarget(activityId);
+  };
+
+  const handleEditNote = (activityId: string, note: string) => {
+    const editedAt = new Date().toISOString();
+
+    startTransition(async () => {
+      updateOptimistic({ type: "edit", activityId, note, editedAt });
+
+      const result = await editNoteAction(personId, activityId, note);
+      if (result.success) {
+        toast.success("Note updated");
+        // A note loaded by pagination lives in this component's own state, not
+        // in the server props `refresh()` reconciles — so it is corrected here
+        // too, or it would snap back to the old body on the next render.
+        setLoadedMoreActivities((prev) =>
+          prev.map((a) =>
+            a.id === activityId
+              ? {
+                  ...a,
+                  metadata: {
+                    ...((a.metadata as Record<string, unknown> | null) ?? {}),
+                    note,
+                    editedAt,
+                  },
+                }
+              : a
+          )
+        );
+      } else {
+        toast.error("Failed to edit note", { description: result.error });
+      }
+    });
   };
 
   const confirmDeleteNote = async () => {
@@ -126,6 +178,13 @@ export function ActivityFeed({
             now={now}
             onDelete={handleDeleteNote}
             canDelete={
+              activity.activityType === "note_added" &&
+              activity.performedBy === currentUserId
+            }
+            onEdit={handleEditNote}
+            // A note's AUTHOR edits it — the same test the delete control uses,
+            // and the same one `editNoteAction` re-asserts in SQL.
+            canEdit={
               activity.activityType === "note_added" &&
               activity.performedBy === currentUserId
             }

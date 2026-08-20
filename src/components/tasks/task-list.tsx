@@ -1,7 +1,13 @@
+"use client";
+
+import { loadMoreTasksAction } from "@/app/(dashboard)/tasks/actions";
 import { Button } from "@/components/ui/button";
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
+import type { SearchParamValue } from "@/lib/tasks/list-params";
 import type { TaskListRow } from "@/lib/tasks/service";
-import { ListChecks } from "lucide-react";
+import { ListChecks, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import {
   BulkActionsBar,
   TaskGroupSelectAll,
@@ -144,6 +150,11 @@ interface TaskListProps {
   nextCursor: string | null;
   personNotes?: Record<string, string>;
   /**
+   * The search params the first page was read under, so "Load more" asks for
+   * the next page of the SAME query.
+   */
+  searchParams: { [key: string]: SearchParamValue };
+  /**
    * The instant every relative due date on this page is measured against.
    *
    * ONE read of the clock for the whole list, taken by the server component
@@ -156,13 +167,46 @@ interface TaskListProps {
 }
 
 export function TaskList({
-  tasks: allTasks,
+  tasks: firstPage,
   total,
-  nextCursor,
+  nextCursor: initialNextCursor,
   personNotes,
+  searchParams,
   now,
 }: TaskListProps) {
-  const tasks = topLevelOnly(allTasks);
+  // Pagination state — UI state, the shape `ActivityFeed` already uses
+  // (`memory/invariants.md` → Client/Server Data Synchronization). The FIRST
+  // page still comes from the server on every render and is never copied here.
+  const [appended, setAppended] = useState<TaskListRow[]>([]);
+  const [appendedNotes, setAppendedNotes] = useState<Record<string, string>>(
+    {}
+  );
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  const tasks = topLevelOnly([...firstPage, ...appended]);
+  const notes = { ...personNotes, ...appendedNotes };
+
+  const handleLoadMore = async () => {
+    if (!nextCursor) return;
+
+    setIsLoadingMore(true);
+    try {
+      const result = await loadMoreTasksAction(searchParams, nextCursor);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      setAppended((prev) => [...prev, ...result.data.tasks]);
+      setAppendedNotes((prev) => ({ ...prev, ...result.data.personNotes }));
+      setNextCursor(result.data.nextCursor);
+    } catch (error) {
+      console.error("Failed to load more tasks:", error);
+      toast.error("Failed to load more tasks");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   if (tasks.length === 0) {
     return (
@@ -178,11 +222,18 @@ export function TaskList({
     );
   }
 
+  // REGROUPED OVER EVERY LOADED ROW, not merged into the groups already drawn.
+  // A page-2 task whose bucket has no heading yet — the first "Later" row, say
+  // — creates that heading, and a row joining an existing bucket lands under
+  // it with the count in the heading updated. Merging pages into prebuilt
+  // groups is the version that drops those rows on the floor.
+  //
+  // `now` is the server's single clock read, threaded in, so this recompute
+  // decides the same buckets the server-rendered markup did
+  // (`memory/invariants.md` → Date & Time Rendering).
   const groups = groupTasksByDueDate(tasks, now);
 
   return (
-    // Selection is client state; the list itself stays a server component so
-    // the due-date grouping is computed once, on the server.
     <TaskSelectionProvider>
       <div className="space-y-6">
         {groups.map((group) => (
@@ -213,7 +264,7 @@ export function TaskList({
                     now={now}
                     personNote={
                       task.relatedType === "person" && task.relatedId
-                        ? (personNotes?.[task.relatedId] ?? null)
+                        ? (notes[task.relatedId] ?? null)
                         : null
                     }
                   />
@@ -225,13 +276,25 @@ export function TaskList({
 
         {nextCursor && (
           <div className="flex justify-center pt-4">
-            <Button variant="outline" disabled>
-              Load more (Pagination coming soon)
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              onClick={handleLoadMore}
+              disabled={isLoadingMore}
+              data-testid="tasks-load-more"
+            >
+              {isLoadingMore && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              {isLoadingMore ? "Loading…" : "Load more"}
             </Button>
           </div>
         )}
 
-        <div className="text-muted-foreground text-center text-xs">
+        <div
+          className="text-muted-foreground text-center text-xs"
+          data-testid="tasks-count"
+        >
           Showing {tasks.length} of {total} tasks
         </div>
 

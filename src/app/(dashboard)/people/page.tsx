@@ -12,15 +12,17 @@ import {
   PipelineWrapper,
   QuickAddForm,
   ViewToggle,
-  type PeopleView,
 } from "@/components/people";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
 import { getCurrentUserChurch } from "@/lib/auth/session";
+import {
+  parsePeopleListSearchParams,
+  PEOPLE_PAGE_SIZE,
+} from "@/lib/people/list-params";
 import { getPipelineData } from "@/lib/people/pipeline";
 import { listPeople } from "@/lib/people/service";
 import { listTags } from "@/lib/people/tags";
-import { PersonSource, PersonStatus } from "@/lib/people/types";
 
 // Force dynamic rendering since we read search params and verify session
 export const dynamic = "force-dynamic";
@@ -36,34 +38,12 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
     redirect("/dashboard");
   }
 
+  // Parsed, never cast — and parsed in the module "Load more" reads too, so
+  // the appended pages are answers to the same query (`src/lib/people/
+  // list-params.ts`).
   const params = await searchParams;
-  const view = (params.view === "pipeline" ? "pipeline" : "list") as PeopleView;
-  const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
-  const search = typeof params.search === "string" ? params.search : undefined;
-
-  // Parse status filters
-  const statusParam = params.status;
-  const status = statusParam
-    ? ((Array.isArray(statusParam)
-        ? statusParam
-        : [statusParam]) as PersonStatus[])
-    : undefined;
-
-  // Parse source filters
-  const sourceParam = params.source;
-  const source = sourceParam
-    ? ((Array.isArray(sourceParam)
-        ? sourceParam
-        : [sourceParam]) as PersonSource[])
-    : undefined;
-
-  // Parse tag filters
-  const tagParam = params.tag;
-  const tags = tagParam
-    ? Array.isArray(tagParam)
-      ? tagParam
-      : [tagParam]
-    : undefined;
+  const { view, cursor, search, status, source, tagIds } =
+    parsePeopleListSearchParams(params);
 
   // Fetch data based on view
   const isPipelineView = view === "pipeline";
@@ -76,8 +56,8 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
           status,
           source,
           search,
-          tagIds: tags,
-          limit: 24,
+          tagIds,
+          limit: PEOPLE_PAGE_SIZE,
         })
       : Promise.resolve({ people: [], total: 0, nextCursor: null }),
     isPipelineView ? getPipelineData(user.churchId) : Promise.resolve(null),
@@ -149,6 +129,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
               people={listResult.people}
               total={listResult.total}
               nextCursor={listResult.nextCursor}
+              searchParams={params}
             />
           )}
         </div>

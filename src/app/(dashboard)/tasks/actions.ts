@@ -26,6 +26,8 @@ import {
   DEPENDENCY_TASK_MISSING_ERROR,
   setTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
+import type { SearchParamValue } from "@/lib/tasks/list-params";
+import { readTaskListPage, type TaskListPage } from "@/lib/tasks/list-page";
 import { parseRecurrenceForm } from "@/lib/tasks/recurrence";
 import { UNKNOWN_TEMPLATE_ERROR, importTaskTemplate } from "@/lib/tasks/import";
 import { findTaskTemplate } from "@/lib/tasks/templates";
@@ -855,5 +857,46 @@ export async function importTaskTemplateAction(
       success: false,
       error: "Failed to import the checklist. Please try again.",
     };
+  }
+}
+
+// ============================================================================
+// List Pagination
+// ============================================================================
+
+/**
+ * The next page of `/tasks` for the "Load more" button (P-006a).
+ *
+ * TAKES THE URL, NOT A FILTER OBJECT. The list's filters live in the address
+ * bar, and the appended rows must come from the SAME query the first page came
+ * from — so the client hands back the search params it is rendering under and
+ * this action reads them through `readTaskListPage`, which is also what the
+ * page calls. A filter object marshalled by the client would be a second
+ * reading of the URL, free to drift from the page's.
+ *
+ * The cursor is explicit rather than taken from those params: the URL's
+ * `cursor` is where the FIRST page started, and the button walks on from
+ * wherever the client has got to.
+ *
+ * The mint is above the `try`, like every other export in this module.
+ */
+export async function loadMoreTasksAction(
+  params: { [key: string]: SearchParamValue },
+  cursor: string
+): Promise<ActionResult<TaskListPage>> {
+  const { user } = await requireSeat("read");
+
+  try {
+    if (!user.churchId) {
+      return { success: false, error: "No church association" };
+    }
+
+    const page = await readTaskListPage(user.churchId, user.id, params, cursor);
+
+    return { success: true, data: page };
+  } catch (error) {
+    console.error("loadMoreTasksAction error:", error);
+
+    return { success: false, error: "Failed to load more tasks." };
   }
 }

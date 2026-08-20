@@ -8,9 +8,9 @@ import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
-import { getLatestPersonNote } from "@/lib/people/service";
 import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
-import { getTaskCounts, listTasks } from "@/lib/tasks/service";
+import { readTaskListPage } from "@/lib/tasks/list-page";
+import { getTaskCounts } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
 export const dynamic = "force-dynamic";
@@ -29,8 +29,8 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // Parsed, never cast: a `?status=` a browser typed reaches `inArray` and then
   // the CHECK constraint on the column, and this route has no error boundary
   // (`src/lib/tasks/list-params.ts`).
-  const { view, showCompleted, status, priority, category, cursor } =
-    parseTaskListSearchParams(await searchParams);
+  const params = await searchParams;
+  const { view, showCompleted } = parseTaskListSearchParams(params);
 
   // ONE clock read for the page. Every relative due date under it — the group
   // headings and each card's "2 days overdue" — is measured against this
@@ -38,49 +38,13 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // markup it is replacing (`memory/invariants.md` → Date & Time Rendering).
   const now = new Date();
 
-  // Fetch tasks and counts in parallel
+  // Fetch tasks and counts in parallel. The page read is the SAME one "Load
+  // more" performs (`src/lib/tasks/list-page.ts`), so the appended rows are
+  // the continuation of this query and not a second reading of the URL.
   const [result, counts] = await Promise.all([
-    listTasks(user.churchId, {
-      cursor,
-      status,
-      priority,
-      category,
-      assignedToId: view === "my_tasks" ? user.id : undefined,
-      includeCompleted: showCompleted,
-      sortBy: "due_date",
-      sortDir: "asc",
-      limit: 50,
-    }),
+    readTaskListPage(user.churchId, user.id, params),
     getTaskCounts(user.churchId, view === "my_tasks" ? user.id : undefined),
   ]);
-
-  // Pre-fetch person notes for person-related tasks.
-  //
-  // CHURCH-SCOPED, because `related_id` is a value a client chose: the create
-  // action accepts `relatedType: "person"` with any uuid, so a task pointing at
-  // ANOTHER tenant's person would otherwise print that person's latest note on
-  // this card. `getLatestPersonNote` takes the church and joins through the
-  // person row, so a foreign id reads as "no note".
-  const uniquePersonIds = [
-    ...new Set(
-      result.tasks
-        .filter((task) => task.relatedType === "person" && task.relatedId)
-        .map((task) => task.relatedId!)
-    ),
-  ];
-
-  const personNotes: Record<string, string> = {};
-  if (uniquePersonIds.length > 0) {
-    const noteResults = await Promise.all(
-      uniquePersonIds.map(async (personId) => {
-        const note = await getLatestPersonNote(user.churchId!, personId);
-        return { personId, note: note?.note ?? null };
-      })
-    );
-    for (const { personId, note } of noteResults) {
-      if (note) personNotes[personId] = note;
-    }
-  }
 
   return (
     <>
@@ -183,7 +147,8 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             tasks={result.tasks}
             total={result.total}
             nextCursor={result.nextCursor}
-            personNotes={personNotes}
+            personNotes={result.personNotes}
+            searchParams={params}
             now={now}
           />
         </div>
