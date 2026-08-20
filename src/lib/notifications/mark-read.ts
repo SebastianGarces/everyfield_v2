@@ -2,9 +2,9 @@ import { eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
 import {
+  feedScopedWhere,
   feedVisibility,
-  scopedWhere,
-  type NotificationScope,
+  type FeedScope,
   type VisibilityOptions,
 } from "./queries";
 
@@ -23,12 +23,16 @@ import {
 //      anything. Nothing in this file imports `notificationDeliveries`, so the
 //      separation is structural rather than remembered.
 //
-//   2. THE SAME TWO BOUNDARIES AS EVERY READ.
-//      Both statements are built with `scopedWhere`, so `church_id` AND
-//      `recipient_user_id` are in the WHERE clause of the UPDATE itself — a
-//      write is not permitted to be looser than the read that surfaced the row.
-//      Marking another church's notification read is not "blocked in the UI",
-//      it updates zero rows.
+//   2. THE SAME BOUNDARY AS EVERY READ.
+//      Both statements are built with `feedScopedWhere`, the one composer the
+//      feed, the badge and the cold-start probe go through — so the write can
+//      never be looser than the read that surfaced the row, on either arm of
+//      `FeedScope`. For a seat in a plant that is `church_id` AND
+//      `recipient_user_id`; for an oversight account it is the recipient plus
+//      the three anchors they may be shown. Marking another church's
+//      notification read is not "blocked in the UI", it updates zero rows — and
+//      an oversight admin cannot mark read a plant that has not opted in,
+//      because the UPDATE carries the same consent subquery the SELECT does.
 //
 //   3. YOU CAN ONLY MARK READ WHAT THE FEED COULD SHOW YOU.
 //      `feedVisibility` is applied to both, so a cancelled row and a row
@@ -77,7 +81,7 @@ function readStatePatch(now: Date) {
  * than what already happened to be read.
  */
 export function markNotificationReadQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   id: string,
   options: VisibilityOptions = {}
 ) {
@@ -87,7 +91,7 @@ export function markNotificationReadQuery(
     .update(notifications)
     .set(readStatePatch(now))
     .where(
-      scopedWhere(
+      feedScopedWhere(
         scope,
         eq(notifications.id, id),
         isNull(notifications.readAt),
@@ -105,7 +109,7 @@ export function markNotificationReadQuery(
  * press a no-op instead of a mass re-stamp of every row's read instant.
  */
 export function markAllNotificationsReadQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ) {
   const now = options.now ?? new Date();
@@ -114,7 +118,7 @@ export function markAllNotificationsReadQuery(
     .update(notifications)
     .set(readStatePatch(now))
     .where(
-      scopedWhere(
+      feedScopedWhere(
         scope,
         isNull(notifications.readAt),
         ...feedVisibility(now, options.categories)
@@ -133,7 +137,7 @@ export function markAllNotificationsReadQuery(
  * notification exists.
  */
 export async function markNotificationRead(
-  scope: NotificationScope,
+  scope: FeedScope,
   id: string,
   options: VisibilityOptions = {}
 ): Promise<MarkReadResult> {
@@ -143,7 +147,7 @@ export async function markNotificationRead(
 
 /** Mark every visible unread notification read for this recipient (N-009). */
 export async function markAllNotificationsRead(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ): Promise<MarkReadResult> {
   const rows = await markAllNotificationsReadQuery(scope, options);

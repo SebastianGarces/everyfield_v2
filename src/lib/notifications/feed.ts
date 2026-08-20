@@ -1,4 +1,8 @@
-import type { TenancyFields } from "@/lib/auth/tenancy";
+import {
+  isChurchLevelUser,
+  oversightOrgOf,
+  type TenancyFields,
+} from "@/lib/auth/tenancy";
 
 import type { NotificationAudience, NotificationCategory } from "./categories";
 import {
@@ -13,7 +17,7 @@ import {
   listNotificationPage,
   type FeedCursor,
   type FeedPage,
-  type NotificationScope,
+  type FeedScope,
 } from "./queries";
 import {
   markAllNotificationsRead,
@@ -76,12 +80,12 @@ import {
  * have expressed no preference.
  *
  * All three are minted from a verified session and none can be assembled from
- * request input — `NotificationScope` is required-field by construction,
+ * request input — both arms of `FeedScope` are required-field by construction,
  * `PreferenceOwner` is branded so only `preferenceOwnerFromSession` can produce
  * one, and the audience is derived from the session's tenancy.
  */
 export interface NotificationViewer {
-  scope: NotificationScope;
+  scope: FeedScope;
   owner: PreferenceOwner;
   /**
    * Whose coded defaults an ABSENT preference row resolves to. NOT a
@@ -99,34 +103,44 @@ export interface ViewerSession {
 /**
  * Mint a viewer, or null when this user has no in-app feed at all.
  *
- * Null means one specific thing: no church to scope the read to. Every
- * notification row is church-scoped and `NotificationScope` has no branch that
- * can omit the church (see the header of ./queries.ts), so a session naming no
- * church has nothing to read rather than an empty list — the callers turn that
- * into a redirect and a hidden bell.
+ * THE TENANCY DECIDES WHICH BOUNDARY, and it is asked in that order (N-027).
+ * An oversight account reads its org's portfolio: `oversightOrgOf` answers only
+ * for a row naming EXACTLY ONE tenancy, and `oversightScopedWhere` turns that
+ * org into "the plants that have opted in, plus this org's own rows" inside the
+ * WHERE clause. A seat in a plant reads that plant. Asking the org first is
+ * what keeps the two-tenancy data defect out of both arms: it resolves to no
+ * org, and it falls through to a `churchId` test that a defective row also
+ * fails, because `getAccessibleChurchIds` refuses it on the same rule.
  *
- * That is still true for an oversight account, and it is now the ONLY thing
- * standing between them and the feed. Their rows are scoped to each PLANT they
- * oversee, not to a church of their own (`users.church_id` is null for an
- * oversight tenancy — see `resolveSeatAssignment` in
- * `src/app/(auth)/register/actions.ts`), so serving them means deciding which
- * plants one feed spans. That decision, and the surface it feeds, is #225.
+ * Null now means one of two narrow things: an account with no tenancy at all —
+ * one mid-registration whose plant does not exist yet — or a row naming TWO
+ * tenancies. The second is why the plant arm asks `isChurchLevelUser` rather
+ * than testing `churchId`: such a row is a data defect that reaches nothing in
+ * either direction (memory/invariants.md → Seats & Tenancy), and a bare
+ * `churchId` test would have handed it the plant's feed after the org arm had
+ * just refused it. There is nothing to read for either rather than an empty
+ * list — the callers turn that into a redirect and a hidden bell.
  *
- * What this unit settles is the other half, which #225 must not have to
- * re-litigate: the AUDIENCE is resolved here, from the tenancy, independently
- * of the church. So the moment #225 hands this function a plant to scope to,
- * the defaults it reads with are already the oversight ones.
+ * The AUDIENCE is still resolved from the tenancy, independently of the
+ * boundary, so an oversight viewer reads with the oversight coded defaults
+ * (`OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES`) — which is what makes their in-app
+ * digest row visible instead of being filtered straight back out.
  */
 export function notificationViewer(
   session: ViewerSession
 ): NotificationViewer | null {
-  if (!session.user.churchId) return null;
+  const org = oversightOrgOf(session.user);
+
+  const scope: FeedScope | null = org
+    ? { org, recipientUserId: session.user.id }
+    : isChurchLevelUser(session.user) && session.user.churchId
+      ? { churchId: session.user.churchId, recipientUserId: session.user.id }
+      : null;
+
+  if (!scope) return null;
 
   return {
-    scope: {
-      churchId: session.user.churchId,
-      recipientUserId: session.user.id,
-    },
+    scope,
     owner: preferenceOwnerFromSession(session),
     audience: audienceForTenancy(session.user),
   };

@@ -27,7 +27,21 @@ import {
 // redirect into a silent zero.
 // ============================================================================
 
-/** What the badge shows when the count could not be read. */
+/**
+ * What the badge shows when the count could not be read.
+ *
+ * FAILURE ONLY. It is not the value to render while the count is still in
+ * flight, and it was used that way for a release: the layout's Suspense
+ * fallback passed it, so every dashboard route's first paint announced
+ * "Notifications, none unread" and then corrected itself when the real count
+ * arrived (#308 WS2, from #232). "We could not read it" and "we have not read
+ * it yet" are different facts and the bell now takes them as different values —
+ * `NotificationBell`'s `unreadCount` accepts `"loading"` for the second.
+ *
+ * This one stays a number, because a failed read still has to render SOMETHING
+ * and zero is the honest floor: it under-claims rather than inventing unread
+ * work. Nothing outside the catch below may reach for it.
+ */
 export const DEGRADED_UNREAD_COUNT = 0;
 
 /**

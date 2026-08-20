@@ -1,6 +1,5 @@
 "use server";
 
-import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { requireSeat } from "@/lib/auth/seats";
@@ -34,13 +33,29 @@ import {
 // directly is what keeps the reads and the writes filtered by the same in-app
 // preference allow-list the page was rendered with (N-005).
 //
-// `refresh()` rather than `revalidatePath("/notifications")` because the unread
-// badge does not live on this page: it lives in the dashboard LAYOUT's header,
-// which every route renders. `refresh()` re-renders the current tree including
-// its layouts, so the count in the app shell reconciles with the same server
-// state the feed just re-read. The feed itself does not wait for it — it holds
-// an optimistic row state (memory/contracts/data-patterns.md) — so the visible
-// effect is instant and the badge follows.
+// THE SHELL REFRESH IS THE CALLER'S, NOT THIS MODULE'S (#228, #308 WS2).
+//
+// Marking a notification read changes the unread badge, and the badge does not
+// live on this page: it lives in the dashboard LAYOUT's header, which every
+// route renders. So something has to re-render the current tree including its
+// layouts. These actions used to do it themselves, with `refresh()` on the way
+// out.
+//
+// That is right for the two presses that STAY on the feed and wrong for the one
+// that does not. A row click marks read AND navigates, and the refresh lands on
+// the route the user is leaving: it re-renders `/notifications` while `Link`'s
+// push is still waiting for its RSC payload, the push is superseded, and the
+// user stays put looking at a row that just stopped being unread. That is
+// #228's "1 in 5", and it reproduced 22 times out of 22 once the destination
+// was not already prefetched.
+//
+// Only the caller knows which of the two it is, so the caller now says:
+// `notification-feed.tsx` calls `router.refresh()` after the "Mark read" and
+// "Mark all read" buttons, and calls nothing after a row click, because the
+// destination's own render is a fresher read of the badge than a refresh of the
+// screen being left. The feed does not wait for either — it holds an optimistic
+// row state (memory/contracts/data-patterns.md) — so the visible effect is
+// instant and the badge follows.
 //
 // SESSION FIRST, THEN THE PARSE (ruled 2026-08-10; extended repo-wide in round
 // 8 of #304). Every export opens with `currentViewer()`, which is this module's
@@ -97,9 +112,10 @@ export type LoadMoreInput = z.infer<typeof loadMoreSchema>;
 /**
  * Resolve the session into a feed viewer, or say why there isn't one.
  *
- * A user with no church has no notifications — every row is church-scoped — so
- * this is a real (if rare) state rather than an assertion: an oversight user
- * mid-association, or an account whose church was removed.
+ * Rare but real, and it is no longer "an oversight user": since N-027 an
+ * oversight account gets a viewer scoped to its org. What is left is an account
+ * with no tenancy at all — mid-registration, or one whose church was removed —
+ * and a row naming two, which reaches nothing in either direction.
  */
 async function currentViewer(
   capability: Capability
@@ -109,7 +125,10 @@ async function currentViewer(
   const viewer = notificationViewer(await requireSeat(capability));
 
   if (!viewer) {
-    return { ok: false, error: "You are not associated with a church" };
+    return {
+      ok: false,
+      error: "You are not associated with a church or an organization",
+    };
   }
 
   return { ok: true, viewer };
@@ -139,8 +158,6 @@ export async function markNotificationReadAction(
     parsed.data
   );
 
-  refresh();
-
   return { success: true, markedCount };
 }
 
@@ -154,8 +171,6 @@ export async function markAllNotificationsReadAction(): Promise<MarkReadActionRe
   const { markedCount } = await markAllVisibleNotificationsRead(
     resolved.viewer
   );
-
-  refresh();
 
   return { success: true, markedCount };
 }

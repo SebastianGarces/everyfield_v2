@@ -14,11 +14,17 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  churchPrivacySettings,
+  churches,
   notifications,
   type Notification,
   type NotificationCategory,
   type NotificationEntityType,
 } from "@/db/schema";
+import type { OversightOrg } from "@/lib/auth/tenancy";
+
+import { OVERSIGHT_SHARING_EXEMPT_TYPES } from "./categories";
+import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
 // ============================================================================
 // Notification read paths (N-008, N-010).
@@ -137,6 +143,151 @@ export function orgScopedWhere(
     eq(notifications.recipientUserId, scope.recipientUserId),
     ...extra
   ) as SQL;
+}
+
+/**
+ * Scope for an OVERSIGHT viewer's feed (N-027) — one account, reading across
+ * every plant its org reaches plus the org's own rows.
+ *
+ * It carries the ORG, not a list of church ids, and that is the safety
+ * property. Which plants are in reach and which of them have consented is a
+ * question about the database at the instant of the read, so it is answered in
+ * the WHERE clause (`optedInPlantIds` below) rather than resolved into an array
+ * somewhere upstream and passed in. An array of ids is something a caller can
+ * compose, widen or forget to refresh; a subquery is not.
+ *
+ * `org` is minted by `oversightOrgOf` (`@/lib/auth/tenancy`) from the session's
+ * tenancy — the same function every other oversight surface resolves reach
+ * with, and one that answers only for a row naming EXACTLY ONE tenancy. The
+ * recipient is required for the same reason it is on `NotificationScope`: an
+ * optional recipient fails OPEN precisely where it must fail closed.
+ */
+export interface OversightNotificationScope {
+  org: OversightOrg;
+  recipientUserId: string;
+}
+
+/**
+ * The tenancy boundary ONE user-facing read runs under: a seat in a plant, or
+ * an oversight org's portfolio.
+ *
+ * A union rather than a widened `NotificationScope`, so neither arm can be
+ * reached by leaving a field off the other. `NotificationScope` still requires
+ * both of its fields; `OversightNotificationScope` requires both of its; and
+ * `feedScopedWhere` is total over the two, so there is no third shape and no
+ * default.
+ */
+export type FeedScope = NotificationScope | OversightNotificationScope;
+
+/** Which arm of {@link FeedScope} this is. Presence of `org` is the tag. */
+export function isOversightScope(
+  scope: FeedScope
+): scope is OversightNotificationScope {
+  return "org" in scope;
+}
+
+/**
+ * The plants an oversight org may be shown notifications about: in its
+ * portfolio AND opted in.
+ *
+ * BOTH HALVES, AS A SUBQUERY, AT READ TIME. `enqueue` already refuses to WRITE
+ * a consent-governed row for a plant that has not turned
+ * `share_activity_with_oversight` on, so this is not the only gate — it is the
+ * one that survives the plant changing its mind. A toggle flipped off on
+ * Tuesday is a statement about the digests already sitting in the org's feed,
+ * not only about the ones not yet enqueued, and read-time filtering is the same
+ * answer this layer already gives for the in-app category preference (see the
+ * header of ./feed.ts). Nothing has to sweep the queue for a consent change to
+ * take effect.
+ *
+ * The portfolio half is `churches.<org fk> = org.id`, indexed off
+ * `OVERSIGHT_ADMIN` so a third kind of oversight org widens it with the row
+ * rather than by somebody remembering a column name. It is the SQL twin of
+ * `getAccessibleChurchIds`'s oversight arm; a plant that has left the org has
+ * a null FK and drops out of the feed with the association.
+ */
+function optedInPlantIds(org: OversightOrg) {
+  return db
+    .select({ id: churches.id })
+    .from(churches)
+    .innerJoin(
+      churchPrivacySettings,
+      eq(churchPrivacySettings.churchId, churches.id)
+    )
+    .where(
+      and(
+        eq(churches[OVERSIGHT_ADMIN[org.type].fk], org.id),
+        eq(churchPrivacySettings.shareActivityWithOversight, true)
+      )
+    );
+}
+
+/**
+ * The oversight WHERE: one recipient, three anchors they may be shown.
+ *
+ * The recipient predicate is UNCONDITIONAL and sits outside the disjunction, so
+ * every arm is bounded by it — an oversight admin reads their own rows and
+ * nobody else's, exactly as a plant's team does.
+ *
+ * The three arms, and why each is a separate one:
+ *
+ *   1. CONSENT-GOVERNED PLANT ROWS — the daily digest and the two gated
+ *      milestones. Visible only while the plant is in the org's portfolio AND
+ *      sharing is on (`optedInPlantIds`). This is the arm the privacy promise
+ *      rests on: with the toggle off there is no row for that plant in the
+ *      list, in the count, in the cold-start probe or by direct id.
+ *
+ *   2. THE ORG'S OWN RELATIONSHIP EVENTS — `OVERSIGHT_SHARING_EXEMPT_TYPES`,
+ *      the three milestones ruled consent-exempt on 2026-08-01 and extended by
+ *      #304 (an invitation accepted, an invitation declined, an association
+ *      ended). They are plant-ANCHORED but they are not facts about the plant,
+ *      and `enqueue` writes them whatever the toggle says. Filtering them out
+ *      here would re-apply, on the read, the consent gate the ruling removed
+ *      from the write — and it would land hardest on the one milestone the
+ *      ruling was made for: at the moment an invitation is accepted the toggle
+ *      is off in essentially every real case, so "they accepted your
+ *      invitation" would be written and never shown. The arm reads the SAME
+ *      constant `enqueue`'s gate does, so the write and the read cannot drift.
+ *
+ *   3. ORG-ANCHORED ROWS — a sending church's own membership of a network
+ *      (#304 WS3), filed under `anchor_org_id` because they name no plant.
+ *      This arm is what retires the "org-anchored notifications are write-only
+ *      in-app" residual in memory/invariants.md.
+ *
+ * A row matches at most one arm: the CHECK partitions `church_id` and
+ * `anchor_org_id`, and arms 1 and 2 differ on `type`.
+ */
+export function oversightScopedWhere(
+  scope: OversightNotificationScope,
+  ...extra: (SQL | undefined)[]
+): SQL {
+  return and(
+    eq(notifications.recipientUserId, scope.recipientUserId),
+    or(
+      inArray(notifications.churchId, optedInPlantIds(scope.org)),
+      inArray(notifications.type, [...OVERSIGHT_SHARING_EXEMPT_TYPES]),
+      eq(notifications.anchorOrgId, scope.org.id)
+    ),
+    ...extra
+  ) as SQL;
+}
+
+/**
+ * The ONE boundary composer every user-facing read and both mark-read writes go
+ * through — total over {@link FeedScope}.
+ *
+ * Exported and total on purpose: a builder that took the union and switched
+ * inside itself would be a second copy of this decision, and a builder that
+ * took only `NotificationScope` would silently exclude oversight from whichever
+ * path forgot to widen. There is one switch, here.
+ */
+export function feedScopedWhere(
+  scope: FeedScope,
+  ...extra: (SQL | undefined)[]
+): SQL {
+  return isOversightScope(scope)
+    ? oversightScopedWhere(scope, ...extra)
+    : scopedWhere(scope, ...extra);
 }
 
 /** The church-only WHERE, reachable only through the dispatcher entrypoints. */
@@ -268,7 +419,7 @@ export interface VisibilityOptions {
  * enforce on theirs.
  */
 export function notificationByIdQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   id: string,
   options: VisibilityOptions = {}
 ) {
@@ -276,7 +427,7 @@ export function notificationByIdQuery(
     .select(feedColumns)
     .from(notifications)
     .where(
-      scopedWhere(
+      feedScopedWhere(
         scope,
         eq(notifications.id, id),
         ...feedVisibility(options.now ?? new Date(), options.categories)
@@ -385,10 +536,13 @@ function unreadCountWithin(where: ScopedWhere, options: VisibilityOptions) {
 
 /** Newest-first feed for one recipient within one church (N-008). */
 export function notificationFeedQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: FeedOptions = {}
 ) {
-  return feedQueryWithin((...extra) => scopedWhere(scope, ...extra), options);
+  return feedQueryWithin(
+    (...extra) => feedScopedWhere(scope, ...extra),
+    options
+  );
 }
 
 /**
@@ -429,10 +583,13 @@ export function orgUnreadCountQuery(
  * the badge counts exactly the rows the feed lists.
  */
 export function unreadCountQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ) {
-  return unreadCountWithin((...extra) => scopedWhere(scope, ...extra), options);
+  return unreadCountWithin(
+    (...extra) => feedScopedWhere(scope, ...extra),
+    options
+  );
 }
 
 /**
@@ -452,14 +609,14 @@ export function unreadCountQuery(
  * not this one's.
  */
 export function hasAnyNotificationsQuery(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ) {
   return db
     .select({ id: notifications.id })
     .from(notifications)
     .where(
-      scopedWhere(
+      feedScopedWhere(
         scope,
         ...feedVisibility(options.now ?? new Date(), options.categories)
       )
@@ -504,7 +661,7 @@ export function dispatchQueueQuery(
  * rules: a cancelled or not-yet-due row is null here too.
  */
 export async function getNotificationById(
-  scope: NotificationScope,
+  scope: FeedScope,
   id: string,
   options: VisibilityOptions = {}
 ): Promise<FeedNotification | null> {
@@ -513,7 +670,7 @@ export async function getNotificationById(
 }
 
 export async function listNotifications(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: FeedOptions = {}
 ): Promise<FeedNotification[]> {
   return notificationFeedQuery(scope, options);
@@ -571,7 +728,7 @@ export function feedPageLimit(limit?: number): number {
  * for the page after it (N-008).
  */
 export async function listNotificationPage(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: FeedOptions = {}
 ): Promise<FeedPage> {
   const limit = feedPageLimit(options.limit);
@@ -581,7 +738,7 @@ export async function listNotificationPage(
 }
 
 export async function getUnreadCount(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ): Promise<number> {
   const [row] = await unreadCountQuery(scope, options);
@@ -593,7 +750,7 @@ export async function getUnreadCount(
  * feed's empty state needs to tell "nothing yet" from "all caught up".
  */
 export async function hasAnyNotifications(
-  scope: NotificationScope,
+  scope: FeedScope,
   options: VisibilityOptions = {}
 ): Promise<boolean> {
   const rows = await hasAnyNotificationsQuery(scope, options);
