@@ -130,10 +130,17 @@ test("the leaving handler refreshes only AFTER the push commits (#527)", () => {
     "the refresh no longer waits for the push to commit — an early one strands it"
   );
 
-  // …and the wait is a real one: a URL comparison, not a fixed sleep somebody
-  // will shorten.
+  // …and the wait is a real one: a URL comparison plus a frame, not a fixed
+  // sleep somebody will shorten. The frame is the half that took the count from
+  // 20 of 22 to 22 of 22 — without it the refresh lands inside the
+  // destination's own render and is coalesced away.
   const wait = feed.span("function whenPushCommits", "function appendRows");
   assert.match(wait, /window\.location\.pathname !== from/);
+  assert.match(
+    wait,
+    /requestAnimationFrame\([\s\S]*requestAnimationFrame\(/,
+    "the wait no longer clears the destination's own render"
+  );
 });
 
 test("the two presses that STAY are the ones that refresh", () => {

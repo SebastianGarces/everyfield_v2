@@ -116,25 +116,36 @@ function applyFeedAction(state: FeedState, action: FeedAction): FeedState {
 const PUSH_COMMIT_TIMEOUT_MS = 3000;
 
 /**
- * Resolve once the browser's URL has left `from` — that is, once the push the
- * click started has actually COMMITTED — or after {@link PUSH_COMMIT_TIMEOUT_MS}
- * if it never does.
+ * Resolve once the push the click started has COMMITTED AND PAINTED, or after
+ * {@link PUSH_COMMIT_TIMEOUT_MS} if the user never left `from`.
  *
  * A `router.refresh()` cannot supersede a navigation that has already landed, so
- * this is the whole of what makes the leaving click's reconcile safe (#527). It
- * reads `location.pathname` rather than any router state because the History
- * entry is what "committed" means here: Next writes it when the push lands.
+ * this is the whole of what makes the leaving click's reconcile safe (#527).
  *
- * The timeout is the case where the user never left — a click the browser
- * swallowed, or a same-path href. Refreshing then is correct too: they are still
- * on the feed, which is the caller-that-stays case.
+ * BOTH HALVES ARE LOAD-BEARING, and the second was found by measuring. The URL
+ * is written when the router STARTS committing, so a refresh fired on that alone
+ * lands while React is still rendering the destination and is coalesced away
+ * about one time in ten (20 of 22 counts moved). Waiting a frame past it — the
+ * standard double-`requestAnimationFrame` "after paint" idiom — puts the refresh
+ * after the destination's own render instead of inside it.
+ *
+ * The timeout is the case where the user never left: a click the browser
+ * swallowed, or a same-path href. Refreshing then is correct too — they are
+ * still on the feed, which is the caller-that-stays case.
  */
 function whenPushCommits(from: string): Promise<void> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
+    const afterPaint = () =>
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => resolve())
+      );
     const tick = () => {
-      const left = window.location.pathname !== from;
-      if (left || Date.now() - startedAt >= PUSH_COMMIT_TIMEOUT_MS) {
+      if (window.location.pathname !== from) {
+        afterPaint();
+        return;
+      }
+      if (Date.now() - startedAt >= PUSH_COMMIT_TIMEOUT_MS) {
         resolve();
         return;
       }
