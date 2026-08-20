@@ -61,8 +61,8 @@ Architecture + FRD; must not introduce new requirements.
 ## 6. Implementation status — on the board, not in a file
 
 **There is no `checklist.md`.** All eleven were deleted 2026-07-26; status lives on GitHub.
-The live contract is `ops/agent-os/labels.md` (`product-docs/board-design-2026-07.md` is the
-historical design log).
+Labels are canonical (`ops/process.md`; `product-docs/board-design-2026-07.md` is the historical
+design log).
 
 ```
 Feature issue (label: feature)   ← links to the FRD, renders the progress bar

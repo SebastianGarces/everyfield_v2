@@ -5,8 +5,8 @@ description: Interview the user relentlessly about a plan, decision, or idea unt
 
 # Grilling
 
-The factory builds correctly whatever it is aimed at. `ops/agent-os/dod.md` proves the code works,
-never that it was the right code. This skill is the gate before that gate.
+The factory builds correctly whatever it is aimed at. CI and the preview look prove the code works,
+never that it was the right code. This skill is the check before that check.
 
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (`grilling`).
 
@@ -24,8 +24,8 @@ far easier to react to than an open prompt. Wait for the answer before asking th
 
 **Walk every branch** where a wrong guess changes what gets built. Two the repo will not settle for
 you: **tenancy, auth and permissions** — who can see and do this, beyond what `memory/invariants.md`
-already fixes — and **data shape**, because schema means `risk:high` and you should say so during
-the session, not after.
+already fixes — and **data shape**, because what gets persisted decides what can be built on top of
+it, and the schema is the hardest part to walk back.
 
 **Do not act until they confirm.** No files, no issues, no code. When the understanding is shared,
 say so and hand off to `spec-intake` — the answers become its ACs and its `## Out of scope`.

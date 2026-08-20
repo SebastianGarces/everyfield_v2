@@ -69,7 +69,8 @@ body {
    What a token IS and what it is FOR is stated here. What it MEASURES is not:
    every contrast figure lives in a test that re-derives it from these values
    (`src/app/theme-tokens.test.ts`, `focus-ring.test.ts`, `text-contrast.test.ts`),
-   and the reasoning behind each rule lives in `memory/invariants/design-tokens.md`.
+   and the reasoning behind each rule lives in `memory/invariants.md` → Design
+   Tokens — Contrast.
    A number written into this file is a number nothing re-checks — which is the
    #357 defect the file's own comments were added to prevent, so it is not
    written here. The one exception is called out where it appears, and a test

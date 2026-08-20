@@ -1,7 +1,6 @@
 ---
 name: better-interface
-description: >-
-  User-invoked, cross-discipline interface review that coordinates better-accessibility, better-layout, better-writing, better-typography, better-colors, and better-ui. Use when explicitly invoked for a holistic review of a screen, flow, feature, or product interface. Supports quick and full review modes. Triggers on better-interface, full interface review, holistic UI audit, cross-discipline design review, review the whole interface.
+description: User-invoked, cross-discipline interface review that coordinates the other better-* skills. Use when explicitly invoked for a holistic review of a screen, flow, or feature. Supports quick and full modes. Triggers on better-interface, full interface review, holistic UI audit, design review.
 ---
 
 # Review the interface as one system

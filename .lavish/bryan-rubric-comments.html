@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bryan’s rubric comments — classified</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #181d19;
+        --color-cream: #fbf8ea;
+        --color-card: #fffef6;
+        --color-green: #1ce362;
+        --color-field: #0b7a3f;
+        --color-danger: #b4432f;
+        --color-secondary: #4e584f;
+        --color-muted: #616b62;
+        --color-hairline: rgba(24, 29, 25, 0.12);
+        --color-edge: rgba(24, 29, 25, 0.3);
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #fbf8ea;
+        color: #181d19;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .wrap {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .hair {
+        border: 1px solid rgba(24, 29, 25, 0.3);
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(24, 29, 25, 0.3);
+        background: #fffef6;
+      }
+      .chip-change {
+        background: #181d19;
+        color: #fbf8ea;
+        border-color: #181d19;
+      }
+      .chip-keep {
+        background: #fbf8ea;
+        color: #0b7a3f;
+        border-color: #0b7a3f;
+      }
+      .chip-add {
+        background: #1ce362;
+        color: #181d19;
+        border-color: #181d19;
+      }
+      .chip-product {
+        background: #fffef6;
+        color: #b4432f;
+        border-color: #b4432f;
+      }
+      .chip-confirm {
+        color: #4e584f;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        color: #181d19;
+        white-space: pre-wrap;
+      }
+      .navbtn[aria-current="true"] {
+        background: #181d19;
+        color: #fbf8ea;
+      }
+      .radio-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .radio-row label {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.65rem 0.75rem;
+        border: 1px solid rgba(24, 29, 25, 0.3);
+        background: #fffef6;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.875rem;
+      }
+      .radio-row label:has(input:checked) {
+        outline: 2px solid #181d19;
+        outline-offset: -2px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.65rem 0.75rem;
+        border-bottom: 1px solid rgba(24, 29, 25, 0.12);
+      }
+      th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #4e584f;
+        font-weight: 500;
+      }
+      .queued {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #0b7a3f;
+      }
+    </style>
+  </head>
+  <body class="bg-cream text-ink">
+    <div class="min0 mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-10">
+      <header class="mb-8">
+        <p
+          class="display text-field text-xs font-medium tracking-[0.18em] uppercase"
+        >
+          Plant Intelligence · Rubric v0 review
+        </p>
+        <h1
+          class="display mt-2 max-w-3xl text-[clamp(2rem,4vw,2.85rem)] leading-[1.05] font-normal tracking-[-0.03em]"
+        >
+          Bryan’s comments, classified for the rubric
+        </h1>
+        <p class="text-secondary mt-4 max-w-2xl text-lg leading-relaxed">
+          26 open comments from Bryan Nass on the Google Doc. Walk them one by
+          one, or review the 19 unique rubric changes they collapse into. Queue
+          a ruling on each card; Send to Agent when you want the v1 edits
+          applied.
+        </p>
+      </header>
+
+      <section class="min0 bg-edge mb-8 grid grid-cols-2 gap-px sm:grid-cols-4">
+        <div class="bg-cream p-4">
+          <p class="display text-muted text-xs tracking-[0.14em] uppercase">
+            Comments
+          </p>
+          <p class="display mt-1 text-4xl tracking-[-0.03em]">26</p>
+          <p class="text-secondary mt-1 text-sm">
+            All from Bryan, all still open
+          </p>
+        </div>
+        <div class="bg-cream p-4">
+          <p class="display text-muted text-xs tracking-[0.14em] uppercase">
+            Unique changes
+          </p>
+          <p class="display mt-1 text-4xl tracking-[-0.03em]">19</p>
+          <p class="text-secondary mt-1 text-sm">Duplicates grouped</p>
+        </div>
+        <div class="bg-cream p-4">
+          <p class="display text-muted text-xs tracking-[0.14em] uppercase">
+            Must change
+          </p>
+          <p class="display mt-1 text-4xl tracking-[-0.03em]">12</p>
+          <p class="text-secondary mt-1 text-sm">Edit the rubric text</p>
+        </div>
+        <div class="bg-cream p-4">
+          <p class="display text-muted text-xs tracking-[0.14em] uppercase">
+            Still to rule
+          </p>
+          <p class="display mt-1 text-4xl tracking-[-0.03em]">4</p>
+          <p class="text-secondary mt-1 text-sm">
+            Sharing, weekly cadence, planter care, 50/100 config
+          </p>
+        </div>
+      </section>
+
+      <section class="hair bg-card mb-8 p-5 sm:p-6">
+        <h2 class="display text-xl tracking-[-0.015em]">
+          The four lines he is drawing
+        </h2>
+        <ol class="min0 mt-4 grid gap-4 sm:grid-cols-2">
+          <li class="min0">
+            <p class="display text-sm font-medium">
+              1. Say only what the data supports
+            </p>
+            <p class="text-secondary mt-1">
+              Stale follow-ups do not prove the planter is carrying them.
+              Unfilled roles do not prove there are no emerging leaders.
+            </p>
+          </li>
+          <li class="min0">
+            <p class="display text-sm font-medium">
+              2. Measure the thing the lens is named for
+            </p>
+            <p class="text-secondary mt-1">
+              Unity is cohesion. Prayer is rhythms, not a title. Generosity is
+              giving culture, not solvency. 60 days is a candidate, not
+              readiness.
+            </p>
+          </li>
+          <li class="min0">
+            <p class="display text-sm font-medium">
+              3. Be a short coaching list
+            </p>
+            <p class="text-secondary mt-1">
+              One primary, two supplements. Network language points at a
+              conversation. The planter sees the same diagnosis first.
+            </p>
+          </li>
+          <li class="min0">
+            <p class="display text-sm font-medium">
+              4. Be honest about blindness
+            </p>
+            <p class="text-secondary mt-1">
+              A blank is not healthy. Launch metrics are not church health.
+              Transfer growth is not Great Commission fruit.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <nav class="min0 mb-6 flex flex-wrap gap-2" aria-label="Review mode">
+        <button
+          type="button"
+          class="navbtn display hair bg-card px-3 py-2 text-sm"
+          data-mode="walk"
+          aria-current="true"
+        >
+          Comments one by one
+        </button>
+        <button
+          type="button"
+          class="navbtn display hair bg-card px-3 py-2 text-sm"
+          data-mode="changes"
+        >
+          Unique rubric changes
+        </button>
+        <button
+          type="button"
+          class="navbtn display hair bg-card px-3 py-2 text-sm"
+          data-mode="thresholds"
+        >
+          Threshold table
+        </button>
+        <button
+          type="button"
+          class="navbtn display hair bg-card px-3 py-2 text-sm"
+          data-mode="delta"
+        >
+          v1 delta
+        </button>
+      </nav>
+
+      <div id="view" class="min0"></div>
+    </div>
+
+    <script>
+      const CHANGES = [
+        {
+          id: 1,
+          status: "Change",
+          title: "Observation budget: 1 primary + 2 supplements",
+          where: "§6 · Appendix C Q1",
+          comments: ["C09", "C18"],
+          v0: "4–7 observations; instinct that more than five stops being a priority list.",
+          bryan:
+            "Even five is too many. “1 main 2 supplement.” Everything else behind a drill-down.",
+          edit: "Cap the planter-facing list at one primary + up to two secondary.",
+        },
+        {
+          id: 2,
+          status: "Change",
+          title:
+            "Shared ownership — stop inferring the planter is the bottleneck",
+          where: "Lens 2 · Appendix B follow-up sample",
+          comments: ["C01", "C13"],
+          v0: "Infers “you are carrying all the follow-up yourself” from stale volume.",
+          bryan:
+            "Capture an owner per follow-up, or only say what is known: eight are stale, give each a clear owner.",
+          edit: "Lens 2 may not accuse the planter until ownership is a measured fact.",
+        },
+        {
+          id: 3,
+          status: "Keep, reframe",
+          title: "50 / 100 are methodology benchmarks, not universal health",
+          where: "Lens 3 Critical Mass",
+          comments: ["C03"],
+          v0: "Minimum 50, target 100, marked Playbook-derived.",
+          bryan:
+            "Fine if framed as this methodology. His plant launched at 25. Long term, networks should configure this.",
+          edit: "Preface Lens 3 with “for this methodology.” Park configurability as later, not a v1 block.",
+        },
+        {
+          id: 4,
+          status: "Change",
+          title: "Stalled growth: 28 days to say stalled; any new adult resets",
+          where: "Lens 3 · Appendix C Q3",
+          comments: ["C02", "C22"],
+          v0: "Flag stalled growth at 3 weeks flat.",
+          bryan:
+            "First pass: 3 weeks ok but +1 adult resets. Second pass: do not label stalled until ~28 days; “slowed” can fire sooner.",
+          edit: "Recommended: “Slowed” at ~21 days. “Stalled” at 28 days flat. Any net +1 committed adult resets both.",
+        },
+        {
+          id: 5,
+          status: "Change",
+          title: "Rename Lens 4: Unity → Cohesion / Engagement",
+          where: "Lens 4",
+          comments: ["C04"],
+          v0: "Called Unity; fed by attendance and engagement.",
+          bryan:
+            "Attendance cannot tell you the group is unified. Call it Cohesion or Engagement.",
+          edit: "Rename. Stop using “unity is fragile” copy. Keep attendance signals.",
+        },
+        {
+          id: 6,
+          status: "Change",
+          title: "Prayer — attest rhythms, not a Prayer Leader title",
+          where: "Lens 5 · Appendix C Q2",
+          comments: ["C05", "C21"],
+          v0: "Health signal is “Prayer Leader identified.”",
+          bryan:
+            "A title does not mean the plant prays. Capture corporate rhythm, last 30 days, and prayer in gatherings.",
+          edit: "Feed Lens 5 from those three attestations. Keep the role as coverage (Lens 7), not as prayer health.",
+        },
+        {
+          id: 7,
+          status: "Change",
+          title: "Split Generosity from Financial Readiness",
+          where: "Lens 6",
+          comments: ["C06", "C21"],
+          v0: "One lens, one “financial base” attestation, covering giving and solvency.",
+          bryan:
+            "Two questions. Outside support can look healthy while the core does not give — and the reverse.",
+          edit: "Score sacrificial giving and launch solvency separately. Never collapse into “finances in place.”",
+        },
+        {
+          id: 8,
+          status: "Keep, reframe",
+          title: "60 days is a Leadership Candidate Signal, not readiness",
+          where: "Lens 7",
+          comments: ["C07", "C22"],
+          v0: "~60 days unbroken attendance + volunteering = emerging leader / readiness.",
+          bryan:
+            "Keep the number. Do not call the person ready. “It’s been 60 days — have you considered more for this person?”",
+          edit: "Rename. Insight type is “worth a conversation,” never “this person is ready to lead.”",
+        },
+        {
+          id: 9,
+          status: "Keep, reframe",
+          title: "Phase 1 gate: keep 30–40, only as a cluster",
+          where: "Phase 1 readiness · Appendix C Q3",
+          comments: ["C08", "C23"],
+          v0: "30–40 adults + finances + worship leader + geography. Author was least sure of 30–40.",
+          bryan:
+            "Keep. This is ready to begin Launch Team Formation, not launch. Combination, not a magic headcount.",
+          edit: "Keep 30–40. State that no single mark fires “ready.”",
+        },
+        {
+          id: 10,
+          status: "Product decision",
+          title: "Sharing: agreement vs forever-optional toggles",
+          where: "§7 planter controls sharing, off by default",
+          comments: ["C10"],
+          v0: "Planter-controlled, off by default.",
+          bryan:
+            "Right for trust. If a sending church is actually responsible, should oversight stay optional forever?",
+          edit: "Do not silently change this. Needs a product ruling. If you keep the current rule, say so in the rubric.",
+        },
+        {
+          id: 11,
+          status: "Change",
+          title: "Private plants must not look “on track”",
+          where: "§7 network posture",
+          comments: ["C11"],
+          v0: "Unshared plants show only phase. Healthy-private and struggling-private look identical.",
+          bryan:
+            "Privacy tradeoff is probably right if the view says Limited visibility. Absence of warnings ≠ on track.",
+          edit: "Required network posture for unshared plants: Limited visibility. Never On track / Worth a look / Readiness focus.",
+        },
+        {
+          id: 12,
+          status: "Confirm",
+          title:
+            "Vision cadence: he practiced weekly; rubric says every two weeks",
+          where: "Appendix B planter sample · Lens 1",
+          comments: ["C12"],
+          v0: "Cadence target: at least every two weeks (Playbook).",
+          bryan:
+            "“Yes. We met weekly and consistently. Inconsistency makes it hard for even committed members to know when meetings happen.”",
+          edit: "Minimum: add predictable rhythm to Lens 1 healthy. Optional: move the target from biweekly toward weekly.",
+        },
+        {
+          id: 13,
+          status: "Change",
+          title: "Unfilled roles ≠ “lack of emerging leadership”",
+          where: "Appendix B network sample",
+          comments: ["C14"],
+          v0: "“None of the 8 key ministry roles are filled, indicating a lack of emerging leadership.”",
+          bryan:
+            "Zero assigned roles does not mean no emerging leaders. Talk about leadership coverage.",
+          edit: "Coverage-gap insights talk about assignment, never the absence of leaders as people.",
+        },
+        {
+          id: 14,
+          status: "Change",
+          title: "Every lens has an evidence quality — including unknown",
+          where: "Appendix C Q2",
+          comments: ["C17"],
+          v0: "Nearly-blind lenses can sit quiet. A blank can look like a pass.",
+          bryan:
+            "Prefer “We do not have enough information to assess prayer health.” Measured / attested / inferred / unknown.",
+          edit: "Unknown ≠ healthy. Inferred conclusions must be named and constrained.",
+        },
+        {
+          id: 15,
+          status: "Change",
+          title:
+            "Remaining ⚠️ thresholds (cadence, disengagement, follow-up, 30-day trigger)",
+          where: "Appendix C Q3",
+          comments: ["C22", "C23"],
+          v0: "21-day crisis-shaped slip; absolute 4-person cluster; universal 14-day stale; 30 days out = readiness focus.",
+          bryan:
+            "Watch at 21, stronger at 28. Cluster = 20–25% over 28 days, min 3, leaders weighted. Follow-up contextual (warm 7/14). 30 days out only with unresolved gaps.",
+          edit: "Rewrite those four rules. Keep the 28-day growth comparison window.",
+        },
+        {
+          id: 16,
+          status: "Change",
+          title: "Network tone and planter-first diagnosis",
+          where: "§7 · Appendix B · Appendix C Q4",
+          comments: ["C15", "C16", "C24", "C25"],
+          v0: "Philosophy is already conservative. Appendix B still says “Intervention to boost growth is needed.”",
+          bryan:
+            "Philosophy right, samples too strong. Same concern to both audiences; planter first; patterns not causes; coaching register.",
+          edit: "Ban verdict verbs for the network. Require a planter observation for every network observation. Replace Appendix B samples.",
+        },
+        {
+          id: 17,
+          status: "Change",
+          title: "Scope: launch health, not church health",
+          where: "Appendix C Q5",
+          comments: ["C20"],
+          v0: "Eight CSFs presented as what the engine evaluates, without a scope fence.",
+          bryan:
+            "Good at “moving toward launch.” Not shepherding, discipleship, membership, pastoral care. Be explicit.",
+          edit: "Open the rubric with: this assesses progress toward a healthy launch under this methodology, not full church health.",
+        },
+        {
+          id: 18,
+          status: "Add",
+          title: "Missing: planter sustainability",
+          where: "Appendix C Q5",
+          comments: ["C19"],
+          v0: "No planter-care lens or attestation.",
+          bryan:
+            "Biggest absence. Spiritual health, marriage/family, financial sustainability, pace. Periodic planter/coach attestation.",
+          edit: "Add an attestation block the engine may prompt. Do not infer it from activity. Do not let launch-green wash planter-red.",
+        },
+        {
+          id: 19,
+          status: "Add",
+          title: "Missing: source of growth (transfer vs. new believers)",
+          where: "Appendix C Q5",
+          comments: ["C26"],
+          v0: "Counts people joining the core. Does not ask where they came from.",
+          bryan:
+            "20→60 from neighboring churches is launch growth and a different Great Commission story. Light visibility; do not gamify conversions.",
+          edit: "If source is unseen, say so. When capture exists, report mix without ranking plants on conversion count.",
+        },
+      ];
+
+      const COMMENTS = [
+        {
+          id: "C01",
+          change: 2,
+          where: "Lens 2 — inference note",
+          anchor:
+            "I currently infer this indirectly from follow-up volume and staleness…",
+          text: "I think this is too important to infer. Eight stale follow-ups could mean the planter is carrying everything, or it could mean responsibilities were distributed poorly, or people simply did not do what they agreed to do. I would either capture an owner for each follow-up or change the output so it only says what the system actually knows.",
+        },
+        {
+          id: "C02",
+          change: 4,
+          where: "Lens 3 — flag stalled growth at 3 weeks",
+          anchor: "Flag stalled growth at: 3 weeks flat",
+          text: "ya 3 weeks seems ok but even one extra adult should change this",
+        },
+        {
+          id: "C03",
+          change: 3,
+          where: "Lens 3 — 50 min / 100 target",
+          anchor: "Minimum: 50 committed adults · Target: 100",
+          text: "I’m okay with these numbers if we are explicitly saying, “These are the benchmarks of this planting methodology.” I would be cautious about letting them become universal definitions of a healthy plant. Different contexts and models could reasonably launch at very different sizes. Long term, these may need to be configurable by a network.\n\nwe only had 25 when we launched\ni wanted to wait the team wanted to go",
+        },
+        {
+          id: "C04",
+          change: 5,
+          where: "Lens 4 — what feeds Unity",
+          anchor:
+            "What feeds it: core-group meeting cadence, attendance consistency, breadth of engagement.",
+          text: "I’m not sure I would call this Unity. Attendance and engagement can tell me something about cohesion, but they cannot really tell me whether the group is unified. Four people missing could be conflict, vacation, sickness, work schedules, etc. Maybe this lens is better called Core Group Cohesion or Engagement, and actual unity remains something assessed relationally by the planter/coach.",
+        },
+        {
+          id: "C05",
+          change: 6,
+          where: "Lens 5 — Healthy",
+          anchor:
+            "Healthy: prayer leadership identified and rhythms established.",
+          text: "I would be careful not to equate having a Prayer Leader with being a praying plant. If prayer really is a critical success factor, I think a simple planter attestation about actual rhythms would tell us more. Something like: “Does the core team have an established rhythm of corporate prayer?” That seems more meaningful than whether somebody has the title",
+        },
+        {
+          id: "C06",
+          change: 7,
+          where: "Lens 6 — Generosity",
+          anchor: "The whole Generosity lens",
+          text: "I wonder if Generosity and Financial Readiness need to be separated. A plant could have a healthy financial base because of outside support while the core group is not giving sacrificially. The opposite could also be true. Those feel like related but distinct questions. We want to grow in plant ownership but we are in year 2 and people give sacrificially but we arent solvent yet.",
+        },
+        {
+          id: "C07",
+          change: 8,
+          where: "Lens 7 — 60-day threshold",
+          anchor: "Individual-readiness threshold: roughly 60 days",
+          text: 'Sixty days feels reasonable as a “pay attention to this person” signal, but I would not call it leadership readiness. Attendance and volunteering can identify a potential leader, but character, doctrine, gifting, relational maturity, teachability, etc. still require human judgment. Maybe call this a Leadership Candidate Signal rather than readiness.\n"its been 60 days, have you considered more for this person?"',
+        },
+        {
+          id: "C08",
+          change: 9,
+          where: "Phase 1 — 30–40 adults",
+          anchor: "Ready to advance when: 30–40 committed adults…",
+          text: "30–40 feels reasonable to me if this means “ready to begin Launch Team Formation,” not “ready to launch.” I would probably make sure the engine treats this as a cluster of indicators rather than 30–40 being a magic number. Size + trajectory + finances + leadership seems more meaningful than size alone.",
+        },
+        {
+          id: "C09",
+          change: 1,
+          where: "§6 — how many observations",
+          anchor: "Today a plant typically receives four to seven…",
+          text: "I think even five may be too many for the main view. As a planter, I already have 25 things competing for my attention. The value of this tool would be telling me, “Of everything going on, these are the 1–3 things that matter most right now.” Maybe show one primary focus and up to two secondary observations, with everything else available if I want to dig deeper.",
+        },
+        {
+          id: "C10",
+          change: 10,
+          where: "§7 — sharing off by default",
+          anchor:
+            "The planter controls what is shared, and it is off by default.",
+          text: "I like the instinct here, especially for planter trust. One question though: should this work differently when someone has a formal sending/oversight relationship? If my sending church is actually responsible for me, I’m not sure all oversight data should simply be optional forever. Maybe the sharing agreement is established up front by the planter and sending organization rather than handled only as individual toggles.",
+        },
+        {
+          id: "C11",
+          change: 11,
+          where: "§7 — private plants look identical",
+          anchor:
+            "A healthy private plant and a struggling private plant look identical…",
+          text: "I think the privacy tradeoff is probably right, but could the network view explicitly say “Limited visibility” or “Plant has chosen not to share assessment data”? I would not want absence of warning signs to accidentally look like an “on track” signal.",
+        },
+        {
+          id: "C12",
+          change: 12,
+          where: "Appendix B — Increase Vision Meeting Frequency",
+          anchor: "Increase Vision Meeting Frequency and Attendee Engagement…",
+          text: "yes. we met weekly and consistently. inconsistency makes it hard for even the most committed team members to know when meetings happen.",
+        },
+        {
+          id: "C13",
+          change: 2,
+          where: "Appendix B — Delegate Follow-Up…",
+          anchor: "Delegate Follow-Up Responsibilities to Core Group Members",
+          text: "This is a good example of the inference issue above. The system knows there are eight stale follow-ups. It does not currently know that the planter is personally responsible for them. I would say something like, “Eight follow-ups are currently stale. Make sure each one has a clear owner and reconnect with them this week.” That stays completely inside what the data can support.",
+        },
+        {
+          id: "C14",
+          change: 13,
+          where: "Appendix B — lack of emerging leadership",
+          anchor: "indicating a lack of emerging leadership.",
+          text: "Same issue here. Zero assigned ministry roles does not necessarily mean there is a lack of emerging leadership. There may be several potential leaders who simply have not been assigned yet. I’d say, “No ministry roles have been assigned yet, so leadership coverage needs attention.”",
+        },
+        {
+          id: "C15",
+          change: 16,
+          where: "Appendix B — Intervention to boost growth",
+          anchor:
+            "Intervention to boost growth is needed to reach the critical mass target…",
+          text: "This feels too clinical/organizational to me. It sounds like an underperforming business unit. I would prefer something like, “Core-group momentum has slowed. This may be worth a coaching conversation around vision cadence, invitations, and follow-up.” Still direct, but it sounds like church planting and coaching rather than corporate intervention.",
+        },
+        {
+          id: "C16",
+          change: 16,
+          where: "Appendix B — should both audiences see the same headline?",
+          anchor:
+            "Is it correct that the network sees the growth stall while the planter is told about meeting cadence?",
+          text: "I would want the planter to see the underlying diagnosis before the network does. The audiences can absolutely get different wording, but I would not want the network receiving a negative conclusion that the planter was never shown. Maybe planter: “Growth has stalled, and two contributing signals are vision cadence and stale follow-up.” Network: the same concern, framed more conservatively. I always liked when I had an explanation of why something is happening that the elders are seeing.",
+        },
+        {
+          id: "C17",
+          change: 14,
+          where: "Appendix C Q2 — Prayer and Generosity nearly invisible",
+          anchor:
+            "Prayer and Generosity. These two lenses are nearly invisible to software.",
+          text: "Could the system have an explicit “insufficient evidence” state? I would rather EveryField say, “We do not currently have enough information to assess prayer health” than leave a blank that could be interpreted as healthy. Maybe every lens internally knows whether its conclusion is measured, attested, inferred, or simply unknown.",
+        },
+        {
+          id: "C18",
+          change: 1,
+          where: "Appendix C Q1 — how many observations",
+          anchor: "How many observations per assessment?",
+          text: "too many... 1 main 2 supplement",
+        },
+        {
+          id: "C19",
+          change: 18,
+          where: "Appendix C Q5 — anything absent",
+          anchor:
+            "Anything absent. The eight lenses came from the Playbook’s Critical Success Factors.",
+          text: "My biggest question about what is absent is planter sustainability. Is the planter spiritually healthy? Is his marriage/family surviving the process? Is he financially sustainable? Is he building at a pace he can actually maintain? I understand that software cannot measure most of that, but I would love some periodic planter/coach attestation because a plant can hit every launch metric while the planter himself is falling apart.",
+        },
+        {
+          id: "C20",
+          change: 17,
+          where: "Appendix C Q5 — nested",
+          anchor:
+            "If there is something you assess in a plant that has no lens here…",
+          text: "The other thing I keep wondering about is whether we are measuring “launch health” or “church health.” These eight factors seem very good at evaluating whether someone is successfully moving toward launch. They tell us less about whether a healthy local church is actually being formed: qualified shepherding, discipleship, theological alignment, meaningful membership, pastoral care, etc. That may be totally outside the intended scope, but I think the product should be really clear about which of those two things it is claiming to assess.",
+        },
+        {
+          id: "C21",
+          change: 6,
+          where: "Appendix C Q2 — what a planter could record",
+          anchor:
+            "What would a planter plausibly record that would make prayer health visible…",
+          text: "For Prayer, I would probably capture things like:\nDoes your core group have an established corporate prayer rhythm?\nHas that prayer gathering/rhythm actually happened in the last 30 days?\nIs prayer regularly incorporated into core-group/leadership gatherings?\nI don't think “Do you have a Prayer Leader?” tells you very much about whether prayer is actually central.\nFor Generosity, I think there are actually two different things hiding under one lens:\nGenerosity = are the people of the plant learning to give sacrificially?\nFinancial readiness = does the plant have enough money/support to launch and sustain ministry",
+        },
+        {
+          id: "C22",
+          change: 15,
+          where: "Appendix C Q3 — the ⚠️ list",
+          anchor:
+            "21 days · 28-day window · 3 weeks flat · 4+ members · 60 days · 14 days stale",
+          text: '21 days without a vision meeting: KEEP, but make it a "watch."\nIf the intended rhythm is every 14 days, 21 days is a reasonable point for the system to notice that you\'re off cadence. I wouldn\'t make it sound like a crisis. At 28+ days, the language can get more direct.\n\n28-day growth comparison: KEEP.\n\nThree weeks flat = stalled: CHANGE TO 28 DAYS.\nI\'d probably say "momentum has slowed" sooner, but I wouldn\'t confidently label growth "stalled" until roughly four weeks.\n\nFour members disengaging: CHANGE COMPLETELY.\nThis should be percentage based. 20-25% of the active committed group over 28 days, absolute minimum of three people. Leaders carry more weight.\n\n60 days leadership readiness: KEEP THE SIGNAL, CHANGE THE NAME.\n\n14 days stale follow-up: DEPENDS ON THE CONTACT.\nWarm / just came to a vision meeting: 48-72 hours ideal, flag at 7, seriously stale at 14. Colder contacts: 14 may be fine.',
+        },
+        {
+          id: "C23",
+          change: 15,
+          where: "Appendix C Q3 — 30-day trigger and 30–40 gate",
+          anchor:
+            "30 days out for network readiness escalation · 30–40 for the Phase 1 gate",
+          text: '30 days for network readiness escalation: CHANGE THE TRIGGER.\nThirty days out alone should not create a warning. Thirty days out with significant unresolved readiness gaps should.\n\n"30 days from launch + 3 critical roles unfilled + training incomplete" = readiness focus.\n"30 days from launch + everything is on track" = nothing to escalate.\n\n30-40 committed adults to leave Phase 1: KEEP.\nThe next phase is Launch Team Formation, not Launch Sunday. Combination of indicators, not simply hitting 30.',
+        },
+        {
+          id: "C24",
+          change: 16,
+          where: "Appendix C Q4 — network conservatism",
+          anchor: "Is the Appendix B network wording appropriately restrained?",
+          text: "My answer: the philosophy is right, but the Appendix B network language is still too strong.",
+        },
+        {
+          id: "C25",
+          change: 16,
+          where: "Appendix C Q4 — the surveillance line",
+          anchor:
+            "Where is the line between useful oversight and a planter feeling surveilled?",
+          text: 'The planter should never discover the diagnosis through his overseer. If the network is being told, "Core-group momentum has stalled," the planter should already have been told, "Your core-group momentum has stalled."\n\nThe network should see patterns that warrant conversation, not conclusions about causes. The system can say, "Growth has been flat for four weeks." It should hesitate to tell a network director why unless it really knows why.\n\nNetwork language should almost always point toward coaching.',
+        },
+        {
+          id: "C26",
+          change: 19,
+          where: "Appendix C Q5 — missing lenses",
+          anchor:
+            "If there is something you assess in a plant that has no lens here…",
+          text: "Right now the system measures whether people are joining the core group. But where are those people coming from?\n\nA plant could grow from 20 to 60 entirely by attracting Christians from neighboring churches. From a launch standpoint, that's growth. From a Great Commission standpoint, that's telling me something very different from conversions, baptisms, and new believers being discipled.\n\nI would want some light visibility into: Are we actually reaching people who were far from Christ?\n\nAgain, don't gamify conversion counts. But professions of faith, baptisms, evangelistic relationships, etc. seem important enough that I would want them somewhere.",
+        },
+      ];
+
+      const THRESHOLDS = [
+        [
+          "21 days, no vision meeting",
+          "Flag a slip",
+          "Keep as a watch; stronger at 28+",
+          "Two-level cadence rule",
+        ],
+        ["28-day growth window", "28 vs prior 28", "Keep", "None"],
+        [
+          "3 weeks flat = stalled",
+          "3 weeks",
+          "Change to 28 days; “slowed” sooner; +1 adult resets",
+          "Rewrite Lens 3",
+        ],
+        [
+          "4+ members disengaging",
+          "Absolute 4",
+          "20–25% over 28 days, min 3, leaders weighted",
+          "Rewrite Lens 4 flag",
+        ],
+        [
+          "60 days leadership",
+          "Readiness",
+          "Keep number, rename Candidate Signal",
+          "Rename + copy",
+        ],
+        [
+          "14 days stale follow-up",
+          "Universal 14",
+          "Warm: 48–72h / flag 7 / stale 14. Cold: 14 ok",
+          "Split by warmth",
+        ],
+        [
+          "30 days → readiness focus",
+          "Time alone",
+          "Time + unresolved gaps only",
+          "Compound trigger",
+        ],
+        [
+          "30–40 to leave Phase 1",
+          "Author unsure",
+          "Keep as a cluster, not a headcount",
+          "Keep, reframe",
+        ],
+      ];
+
+      const DELTA = [
+        "Scope sentence: launch health under this methodology, not church health.",
+        "Observation budget: 1 primary + 2 secondary.",
+        "Evidence quality: measured / attested / inferred / unknown. Unknown ≠ healthy.",
+        "Lens 2: do not accuse the planter until ownership is measured.",
+        "Lens 3: methodology benchmarks; stall = 28 days; +1 adult resets.",
+        "Lens 4: rename; cluster flag becomes 20–25% over 28 days, min 3.",
+        "Lens 5: prayer rhythms, not the Prayer Leader title.",
+        "Lens 6: split generosity vs financial readiness.",
+        "Lens 7: Leadership Candidate Signal; coverage copy never says “no emerging leaders.”",
+        "Phase 1 gate kept as a cluster.",
+        "Cadence: watch at 21, stronger at 28; healthy includes consistency.",
+        "Follow-up stale split by warmth.",
+        "Network: compound trigger; Limited visibility; planter-first same diagnosis; coaching register.",
+        "New attestations: planter sustainability; later, growth source.",
+      ];
+
+      const chipClass = {
+        Change: "chip-change",
+        "Keep, reframe": "chip-keep",
+        Add: "chip-add",
+        "Product decision": "chip-product",
+        Confirm: "chip-confirm",
+      };
+
+      const state = { mode: "walk", walk: 0, change: 0 };
+      const localRuling = {};
+
+      function esc(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function changeById(id) {
+        return CHANGES.find((c) => c.id === id);
+      }
+
+      function rulingForm(key, title) {
+        const queued = localRuling[key];
+        return `
+          <form class="mt-5" data-lavish-question="${esc(key)}" data-ruling-key="${esc(key)}" data-ruling-title="${esc(title)}" onsubmit="return queueRuling(event)">
+            <p class="display text-xs uppercase tracking-[0.14em] text-muted">Your ruling</p>
+            <div class="radio-row mt-2">
+              <label><input type="radio" name="ruling" value="accept" ${queued === "accept" ? "checked" : ""} /> Accept the proposed rubric edit</label>
+              <label><input type="radio" name="ruling" value="tweak" /> Accept, with a tweak (write it below)</label>
+              <label><input type="radio" name="ruling" value="disagree" /> Disagree — keep v0</label>
+              <label><input type="radio" name="ruling" value="brett" /> Wait for Brett / discuss more</label>
+            </div>
+            <textarea name="note" class="mt-3 w-full min-w-0 hair bg-cream p-3 text-sm" rows="3" placeholder="Optional tweak or reason"></textarea>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+              <button type="submit" class="display hair bg-ink px-4 py-2 text-sm text-cream">Queue this ruling</button>
+              ${queued ? `<span class="queued">Queued: ${esc(queued)}</span>` : ""}
+            </div>
+          </form>`;
+      }
+
+      function queueRuling(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const key = form.getAttribute("data-ruling-key");
+        const title = form.getAttribute("data-ruling-title");
+        const data = new FormData(form);
+        const ruling = data.get("ruling");
+        const note = (data.get("note") || "").trim();
+        if (!ruling) return false;
+        localRuling[key] = ruling;
+        const labels = {
+          accept: "Accept proposed rubric edit",
+          tweak: "Accept with tweak",
+          disagree: "Disagree — keep v0",
+          brett: "Wait for Brett / discuss more",
+        };
+        const text = `Rubric ruling on ${title}: ${labels[ruling]}${note ? ". Note: " + note : ""}`;
+        if (window.lavish && window.lavish.queuePrompt) {
+          window.lavish.queuePrompt(text, {
+            tag: "ruling",
+            text,
+            element: event.currentTarget,
+            data: { question: key, answer: ruling, note, title },
+            queueKey: key,
+          });
+        }
+        render();
+        return false;
+      }
+
+      function walkView() {
+        const i = state.walk;
+        const c = COMMENTS[i];
+        const ch = changeById(c.change);
+        return `
+          <article class="hair bg-card p-5 sm:p-7 min0">
+            <div class="flex min0 flex-wrap items-center justify-between gap-3">
+              <p class="display text-xs uppercase tracking-[0.14em] text-muted">${esc(c.id)} of C26 · ${esc(c.where)}</p>
+              <p class="display text-sm text-secondary">${i + 1} / ${COMMENTS.length}</p>
+            </div>
+            <div class="mt-4 h-1 w-full bg-hairline">
+              <div class="h-1 bg-green" style="width:${((i + 1) / COMMENTS.length) * 100}%"></div>
+            </div>
+            <h2 class="display mt-5 max-w-3xl text-2xl tracking-[-0.02em] wrap">${esc(ch.title)}</h2>
+            <p class="mt-2"><span class="chip ${chipClass[ch.status]}">${esc(ch.status)}</span></p>
+            <p class="mt-4 text-sm text-secondary wrap"><span class="display font-medium text-ink">On this text:</span> ${esc(c.anchor)}</p>
+            <blockquote class="quote mt-4 wrap">${esc(c.text)}</blockquote>
+            <div class="mt-6 grid min0 gap-4 sm:grid-cols-2">
+              <div class="min0 hair bg-cream p-4">
+                <p class="display text-xs uppercase tracking-[0.14em] text-muted">v0 says</p>
+                <p class="mt-2 wrap">${esc(ch.v0)}</p>
+              </div>
+              <div class="min0 hair bg-cream p-4">
+                <p class="display text-xs uppercase tracking-[0.14em] text-muted">Proposed rubric edit</p>
+                <p class="mt-2 wrap">${esc(ch.edit)}</p>
+              </div>
+            </div>
+            ${rulingForm("comment-" + c.id, c.id + " — " + ch.title)}
+            <div class="mt-6 flex flex-wrap justify-between gap-2">
+              <button type="button" class="display hair bg-cream px-4 py-2 text-sm" ${i === 0 ? "disabled" : ""} onclick="stepWalk(-1)">Previous comment</button>
+              <button type="button" class="display hair bg-ink px-4 py-2 text-sm text-cream" ${i === COMMENTS.length - 1 ? "disabled" : ""} onclick="stepWalk(1)">Next comment</button>
+            </div>
+          </article>`;
+      }
+
+      function changesView() {
+        const i = state.change;
+        const ch = CHANGES[i];
+        const related = COMMENTS.filter((c) => ch.comments.includes(c.id));
+        return `
+          <article class="hair bg-card p-5 sm:p-7 min0">
+            <div class="flex min0 flex-wrap items-center justify-between gap-3">
+              <p class="display text-xs uppercase tracking-[0.14em] text-muted">Change ${ch.id} of ${CHANGES.length} · ${esc(ch.where)}</p>
+              <p class="display text-sm text-secondary">${i + 1} / ${CHANGES.length}</p>
+            </div>
+            <div class="mt-4 h-1 w-full bg-hairline">
+              <div class="h-1 bg-green" style="width:${((i + 1) / CHANGES.length) * 100}%"></div>
+            </div>
+            <h2 class="display mt-5 max-w-3xl text-2xl tracking-[-0.02em] wrap">${esc(ch.title)}</h2>
+            <p class="mt-2 flex flex-wrap gap-2">
+              <span class="chip ${chipClass[ch.status]}">${esc(ch.status)}</span>
+              ${ch.comments.map((id) => `<span class="chip">${esc(id)}</span>`).join("")}
+            </p>
+            <div class="mt-6 grid min0 gap-4 sm:grid-cols-2">
+              <div class="min0 hair bg-cream p-4">
+                <p class="display text-xs uppercase tracking-[0.14em] text-muted">v0</p>
+                <p class="mt-2 wrap">${esc(ch.v0)}</p>
+              </div>
+              <div class="min0 hair bg-cream p-4">
+                <p class="display text-xs uppercase tracking-[0.14em] text-muted">Bryan</p>
+                <p class="mt-2 wrap">${esc(ch.bryan)}</p>
+              </div>
+            </div>
+            <p class="mt-5 wrap"><span class="display font-medium">Rubric edit:</span> ${esc(ch.edit)}</p>
+            <div class="mt-5 space-y-3">
+              ${related
+                .map(
+                  (c) => `
+                <details class="hair bg-cream p-4 min0">
+                  <summary class="display text-sm">${esc(c.id)} · ${esc(c.where)}</summary>
+                  <blockquote class="quote mt-3 wrap">${esc(c.text)}</blockquote>
+                </details>`
+                )
+                .join("")}
+            </div>
+            ${rulingForm("change-" + ch.id, "Change " + ch.id + " — " + ch.title)}
+            <div class="mt-6 flex flex-wrap justify-between gap-2">
+              <button type="button" class="display hair bg-cream px-4 py-2 text-sm" ${i === 0 ? "disabled" : ""} onclick="stepChange(-1)">Previous change</button>
+              <button type="button" class="display hair bg-ink px-4 py-2 text-sm text-cream" ${i === CHANGES.length - 1 ? "disabled" : ""} onclick="stepChange(1)">Next change</button>
+            </div>
+          </article>`;
+      }
+
+      function thresholdsView() {
+        return `
+          <section class="hair bg-card p-5 sm:p-6 min0">
+            <h2 class="display text-xl tracking-[-0.015em]">Every ⚠️ threshold, Bryan’s ruling</h2>
+            <p class="mt-2 max-w-2xl text-secondary">This is Appendix C question 3, which he called the highest-value edits. 28-day growth window is the only keep-as-written.</p>
+            <div class="mt-4 overflow-x-auto min0">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Threshold</th>
+                    <th>v0</th>
+                    <th>Bryan</th>
+                    <th>Rubric edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${THRESHOLDS.map(
+                    (row) =>
+                      `<tr>${row.map((cell) => `<td class="wrap">${esc(cell)}</td>`).join("")}</tr>`
+                  ).join("")}
+                </tbody>
+              </table>
+            </div>
+          </section>`;
+      }
+
+      function deltaView() {
+        return `
+          <section class="hair bg-card p-5 sm:p-6 min0">
+            <h2 class="display text-xl tracking-[-0.015em]">If you accept his comments, v1 needs</h2>
+            <ol class="mt-4 space-y-2">
+              ${DELTA.map((item, i) => `<li class="wrap"><span class="display text-sm text-field">${i + 1}.</span> ${esc(item)}</li>`).join("")}
+            </ol>
+            <div class="mt-6 hair bg-cream p-4">
+              <p class="display text-sm font-medium">Still needs a product ruling, not just a rubric edit</p>
+              <ul class="mt-2 list-disc pl-5 text-secondary">
+                <li>Sharing: forever-optional toggles vs. an up-front sending agreement</li>
+                <li>Vision-meeting target: stay biweekly, or move toward weekly</li>
+                <li>Planter care: attestation block, coach prompt, or a named lens</li>
+                <li>50/100 configurability: later, or in v1</li>
+              </ul>
+            </div>
+            <form class="mt-6" data-lavish-question="accept-all-delta" onsubmit="return queueDelta(event)">
+              <p class="display text-xs uppercase tracking-[0.14em] text-muted">Whole-delta ruling</p>
+              <div class="radio-row mt-2">
+                <label><input type="radio" name="delta" value="accept-all" /> Accept the full v1 delta and draft rubric v1</label>
+                <label><input type="radio" name="delta" value="walk-first" /> I still want to walk comments one by one first</label>
+                <label><input type="radio" name="delta" value="wait-brett" /> Wait for Brett before rewriting the rubric</label>
+              </div>
+              <button type="submit" class="display hair bg-ink mt-3 px-4 py-2 text-sm text-cream">Queue this</button>
+            </form>
+          </section>`;
+      }
+
+      function queueDelta(event) {
+        event.preventDefault();
+        const choice = new FormData(event.currentTarget).get("delta");
+        if (!choice) return false;
+        const labels = {
+          "accept-all": "Accept the full v1 delta and draft rubric v1",
+          "walk-first": "Still walk comments one by one first",
+          "wait-brett": "Wait for Brett before rewriting the rubric",
+        };
+        const text = "Whole-delta ruling: " + labels[choice];
+        if (window.lavish && window.lavish.queuePrompt) {
+          window.lavish.queuePrompt(text, {
+            tag: "choice",
+            text,
+            element: event.currentTarget,
+            data: { question: "accept-all-delta", answer: choice },
+            queueKey: "accept-all-delta",
+          });
+        }
+        return false;
+      }
+
+      function render() {
+        const view = document.getElementById("view");
+        const html =
+          state.mode === "walk"
+            ? walkView()
+            : state.mode === "changes"
+              ? changesView()
+              : state.mode === "thresholds"
+                ? thresholdsView()
+                : deltaView();
+        view.innerHTML = html;
+        document.querySelectorAll(".navbtn").forEach((btn) => {
+          btn.setAttribute(
+            "aria-current",
+            btn.dataset.mode === state.mode ? "true" : "false"
+          );
+        });
+      }
+
+      function stepWalk(d) {
+        state.walk = Math.min(COMMENTS.length - 1, Math.max(0, state.walk + d));
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      function stepChange(d) {
+        state.change = Math.min(
+          CHANGES.length - 1,
+          Math.max(0, state.change + d)
+        );
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      document.querySelectorAll(".navbtn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.mode = btn.dataset.mode;
+          render();
+        });
+      });
+
+      window.queueRuling = queueRuling;
+      window.queueDelta = queueDelta;
+      window.stepWalk = stepWalk;
+      window.stepChange = stepChange;
+      render();
+    </script>
+  </body>
+</html>

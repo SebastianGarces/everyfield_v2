@@ -158,8 +158,9 @@ entries. `__drizzle_migrations.id` is a sequence; a rollback that `DELETE`s a le
 a hole. Filename gaps in the repo (`0035` never existed; `0034` then `0036`) are a different
 axis and do not explain the serial holes.
 
-`share_phase` / `share_digest` still present on the live `church_privacy_settings` row are
-**not** ledger drift: 0029 is expand-only; #255 is the contract drop.
+`share_phase` / `share_digest` on `church_privacy_settings` were never ledger drift: 0029 is
+expand-only, and `0045_drop_share_phase_digest.sql` is the contract half that drops both
+columns (#255).
 
 ### Proposed ruling
 

@@ -1,14 +1,12 @@
 ---
 name: open-pr
-description: The PR body template and the label-write discipline for a completed track. Use when opening or updating a PR from a Definition of Done bundle — the loop's ship pass applies this inline. Refuses to open a PR on a FAIL verdict.
+description: The PR body template and the label-write discipline for a completed track. Use when opening or updating a PR from an evidence bundle — the loop's ship pass applies this inline.
 ---
 
 # open-pr
 
 **The authority for the PR body template and the label discipline.** The loop's ship pass applies
 both inline rather than calling this skill; anything opening a PR by hand follows it directly.
-Precondition either way: a `definition-of-done` verdict of `PASS` or `PASS_WITH_WARNINGS`. On `FAIL`,
-or with required evidence missing, do not open a PR — return control to the loop.
 
 ## Procedure
 
@@ -18,21 +16,17 @@ or with required evidence missing, do not open a PR — return control to the lo
    ```bash
    gh pr create --base main --head <branch> \
      --title "<type>: <concise summary> (#<issue>)" \
-     --body-file <path> --label "agent:in-review" \
-     $([ "$HIGH_RISK" = true ] && echo --label risk:high)
+     --body-file <path>
    ```
-   `HIGH_RISK` is the track's declared tier — auth, permissions, tenant boundaries or payments, per
-   `ops/agent-os/dod.md`. **A migration never sets it**, and neither does anything else the body has
-   to carry: the schema diff below is owed by any diff carrying a migration, at any tier. Never
-   raise the tier to make a section of the template apply.
-3. Flip **every** issue the track closes, and read each label back:
-   ```bash
-   for i in <issue>...; do
-     gh issue edit $i --add-label agent:in-review --remove-label agent:in-progress
-     gh issue view $i --json labels --jq '[.labels[].name]'   # must print agent:in-review
-   done
-   ```
-4. Anchor on CI: `gh pr checks <number> --watch --fail-fast`.
+   The schema diff below is owed by any diff carrying a migration — no label decides that, the diff
+   does. The issues keep `agent:in-progress`; the merge closes them via `Closes #`, and a closed
+   issue's labels are history (ruled 2026-08-19 — `agent:in-review` is retired with the review
+   queue).
+3. Anchor on CI: `gh pr checks <number> --watch --fail-fast`, then enable auto-merge:
+   `gh pr merge <number> --squash --auto`.
+4. **Back-fill the body from the anchor**, then read it back: `gh pr edit <number> --body-file <path>`
+   replaces the CI row with the conclusion GitHub reported and the sha it ran at, and
+   `gh pr view <number> --json headRefOid` proves the body still describes the head.
 5. Return the PR URL.
 
 ## The CI anchor, and the labels
@@ -43,12 +37,14 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 
 - **Report what CI said, not what you believe.** "The failure looks unrelated" is an opinion about a
   conclusion, not a conclusion. **`none` is not success** — a check that never reported reads as "not
-  yet run" forever. A green DoD with a red check is a failed attempt whose error feeds back.
+  yet run" forever. A red check is a failed attempt whose error feeds back.
 - **Never report a label you did not observe.** `gh issue edit` exiting 0 is not proof; what
-  `gh issue view --json labels` prints is. Retry a write that did not stick — it is idempotent — and
-  make sure `agent:in-progress` is *gone*, not merely joined by `agent:in-review`.
-- **A label that cannot be confirmed is an ERROR**, reported as such. A green PR whose issue still
-  reads `agent:in-progress` is worse than a failed one, because it will be believed.
+  `gh issue view --json labels` prints is. Retry a write that did not stick — it is idempotent.
+- **The body is evidence, so it is checked like evidence: every sha it cites must be the head sha.**
+  A table still reading `⏳ anchoring`, or `CI ❌ at <ancestor sha>`, or a preview validated one
+  commit back, describes a different commit than the one about to merge — and it will be believed
+  too. **This refuses the merge**, it is not a note for later: back-fill the CI cell from the landed
+  anchor, correct any cell the fix round moved, and only then merge or enable auto-merge.
 
 ## PR body template
 
@@ -56,10 +52,10 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 ## What & why
 <1–3 sentences. One `Closes #<issue>` line per issue this track closes.>
 
-## Definition of Done ✅
+## Evidence ✅
 
-| Gate | Status | Evidence |
-|------|--------|----------|
+| Check | Status | Evidence |
+|-------|--------|----------|
 | CI green | ✅ | `Format, Lint, Typecheck, Build` at <sha> |
 | Works | ✅ | screenshots <refs> · a11y <n> · console clean — or the request transcript |
 | Reviewed | ✅ | code-reviewer: PASS — <n> findings, all applied |
@@ -86,18 +82,32 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
 **Known limitations / deliberate cuts**
 - <scope explicitly excluded, so it does not read as a bug>
 
-<details><summary>Schema diff (whenever the diff carries a migration, at any risk tier)</summary>
+<details><summary>Schema diff (whenever the diff carries a migration)</summary>
 
 ```sql
 <DDL delta>
+```
+
+**Applies** (`pnpm db:migrate` on a scratch DB):
+```
+<transcript, verbatim>
+```
+
+**Rolls back** (the down path, on that same scratch DB):
+```
+<transcript, verbatim>
 ```
 </details>
 
 🤖 Built and validated by the Agent Delivery OS.
 ```
 
+**The schema-diff section is owed whole or not at all**: the DDL delta alone is a FAIL, because a
+delta nobody applied is a claim. Both transcripts, both directions, from a scratch DB — and if either
+direction will not run, fix the migration rather than writing the section anyway.
+
 **Never omit `Closes #<issue>`** — one line per issue the track closes, or the board silently keeps an
-issue open. **Never let Manual QA restate the acceptance criteria**: the gates proved those, and human
+issue open. **Never let Manual QA restate the acceptance criteria**: the checks proved those, and human
 attention is the scarcest resource here. That section earns its place only by naming what the
 automation cannot judge — whether it looks right, reads right, feels right, and whether an unasserted
 edge case bites. A pure refactor or docs change says so in one line rather than padding the list.
