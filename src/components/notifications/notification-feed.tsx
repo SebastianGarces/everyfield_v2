@@ -40,8 +40,12 @@ import { cn } from "@/lib/utils";
 //     from `feed-view` are types, so they are erased and bring none of it.
 //
 // Read state is optimistic (memory/contracts/data-patterns.md): the row un-bolds
-// the instant it is clicked, the server action reconciles, and its `refresh()`
-// is what moves the count in the app shell's bell.
+// the instant it is clicked, the server action reconciles, and a client
+// `router.refresh()` is what moves the count in the app shell's bell. The
+// refresh is the CLIENT's because only the caller knows whether it is staying —
+// and every caller here has to do it, including the one that leaves, because the
+// bell is in a layout the destination shares and therefore does not re-render
+// (#527). What differs is WHEN: see `markReadOnNavigate` below.
 //
 // The ONE piece of client state here is the paging cursor and the pages it has
 // fetched — which data-patterns.md names explicitly as legitimate. It is not a
@@ -209,12 +213,13 @@ export function NotificationFeed({
   // just stopped being unread. #228 reported it as 1 in 5 and left it as
   // possible noise. It is not noise. It reproduces on demand once the
   // destination is not already prefetched — a second click on the row is enough
-  // — and the four measured arrangements say which parts of `markRead` cause it:
+  // — and the measured arrangements say which parts of `markRead` cause it:
   //
   //   transition + refresh (what shipped) ....... 22 of 22 stranded
   //   no transition + refresh ................... 20 of 22 stranded
   //   transition + no refresh ................... 11 of 11 stranded
-  //   NEITHER (this) ............................ 22 of 22 navigated
+  //   neither ................................... 22 of 22 navigated
+  //   neither, refresh AFTER the push (this) .... 22 of 22 navigated (#527)
   //
   // Both halves strand it, and for the same reason: each turns the click into
   // work React owns on the route being LEFT. A transition entangles `Link`'s
@@ -224,15 +229,44 @@ export function NotificationFeed({
   // everything else — the same double-click on a plain sidebar link, no action
   // and no refresh behind it, navigated 10 times out of 10.
   //
-  // So the click that leaves does neither. It refreshes nothing, because the
-  // unread count the user arrives with is server-rendered by the destination's
-  // own layout, which is a fresher read than a refresh of the screen being left.
-  // And it is a plain call rather than a transition, because there is no
-  // optimistic row to hold on a page nobody is looking at any more. A
-  // client-side navigation does not unload the document, so the request the
-  // click started finishes on the destination.
+  // The last row is what ships, and it is not a fifth setting of the same two
+  // switches: the refresh is CHAINED on the action's promise, so it runs after
+  // the push has been issued and re-renders where the user now IS. The ordering
+  // is the fix, not the absence.
+  //
+  // So the click that leaves owns neither, SYNCHRONOUSLY. It is a plain call
+  // rather than a transition, because there is no optimistic row to hold on a
+  // page nobody is looking at any more. A client-side navigation does not unload
+  // the document, so the request the click started finishes on the destination.
+  //
+  // WHAT IT STILL HAS TO DO: RECONCILE, AFTERWARDS (#527)
+  //
+  // The first version of this fix refreshed nothing at all, on the premise that
+  // "the unread count the user arrives with is server-rendered by the
+  // destination's own layout". That is false, and the bell went stale on exactly
+  // the click this was fixing: 26 unread, click a row, land on the person — the
+  // row is read in the database and the bell still reads 26, for the rest of the
+  // session. Every `notificationEntityHref` destination lives under
+  // `src/app/(dashboard)/`, so the layout holding the bell is the layout the
+  // feed was ALREADY under — a COMMON segment, which a client-side push reuses
+  // rather than re-renders (partial rendering; .next-docs
+  // 01-app/02-guides/authentication.mdx:1350 states it as the reason a session
+  // check does not belong in a layout). There is no destination render of the
+  // badge to be fresher than anything.
+  //
+  // So the refresh comes back, CHAINED ON THE ACTION rather than sitting in the
+  // click. By the time the promise settles the push has long been issued, so the
+  // re-render lands on the tree the user is now looking at — which is the whole
+  // difference between this and the arrangement that stranded 22 of 22. The
+  // ordering is what matters, not the absence.
+  //
+  // The `.catch` is not decoration: an unhandled rejection here is a failed
+  // mark-read on a page the user has left, and there is nothing to tell them.
+  // The row's read state is server truth on the next render either way.
   const markReadOnNavigate = (id: string) => {
-    void markNotificationReadAction(id);
+    void markNotificationReadAction(id)
+      .then(() => router.refresh())
+      .catch(() => {});
   };
 
   const markAllRead = () => {

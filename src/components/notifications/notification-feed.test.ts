@@ -6,8 +6,8 @@ import { test } from "node:test";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 // ----------------------------------------------------------------------------
-// THE CLICK THAT LEAVES OWNS NEITHER THE TRANSITION NOR THE REFRESH
-// (#228, shipped as part of #308 WS2)
+// THE CLICK THAT LEAVES OWNS NO SYNCHRONOUS WORK ON THE ROUTE IT IS LEAVING
+// (#228, shipped as part of #308 WS2; corrected by #527)
 //
 // The defect: clicking a feed row marked it read and did not navigate. The row
 // was un-bolded, the URL never changed, and the user sat on the feed looking at
@@ -18,14 +18,20 @@ import { sourceReader, stripComments } from "@/lib/testing/source-span";
 //   transition + action `refresh()` (what shipped) ...... 22 of 22 stranded
 //   no transition + action `refresh()` .................. 20 of 22 stranded
 //   transition + no `refresh()` ......................... 11 of 11 stranded
-//   NEITHER ............................................. 22 of 22 navigated
+//   neither ............................................. 22 of 22 navigated
+//   neither, `refresh()` chained AFTER the push (#527) .. 22 of 22 navigated
 //
 // Both halves cause it, and for the same reason: each turns the click into work
 // React owns on the route being LEFT, and either can supersede a push that has
-// not committed. So the fix is a shape, and a shape is what a later edit
-// re-breaks by accident — `markReadOnNavigate` looks like an oversight next to
-// `markRead`, and "the action should refresh, per data-patterns.md" is a rule
-// somebody will correctly quote at it.
+// not committed. What it is NOT is a reason to skip reconciliation: the fourth
+// row shipped with no refresh at all and the bell went stale on exactly this
+// click. The fifth is what ships — same two switches off, and the refresh
+// chained on the action so it lands on the destination.
+//
+// So the fix is a shape, and a shape is what a later edit re-breaks by accident
+// — `markReadOnNavigate` looks like an oversight next to `markRead`, and "the
+// action should refresh, per data-patterns.md" is a rule somebody will correctly
+// quote at it.
 //
 // Hence a SOURCE-shaped test. This component is a client component and these
 // actions are a `"use server"` module, so neither runs in this process; what
@@ -58,7 +64,7 @@ test("the row link's handler is not the button's", () => {
   assert.match(row, /onClick=\{onMarkRead\}/);
 });
 
-test("the leaving handler starts no transition and refreshes nothing", () => {
+test("the leaving handler starts no transition and owns no synchronous work", () => {
   const feed = reader(FEED, "notification-feed.tsx (stripped)");
   const leaving = feed.span("const markReadOnNavigate", "const markAllRead");
 
@@ -69,15 +75,37 @@ test("the leaving handler starts no transition and refreshes nothing", () => {
   );
   assert.doesNotMatch(
     leaving,
-    /router\.refresh/,
-    "a refresh here re-renders the route the push is replacing — 22 of 22 stranded"
-  );
-  assert.doesNotMatch(
-    leaving,
     /applyOptimistic/,
     "there is no optimistic row to hold on a page the user has left"
   );
   assert.match(leaving, /markNotificationReadAction\(id\)/);
+});
+
+test("the leaving handler's refresh is CHAINED, never in the click (#527)", () => {
+  // The half of the #526 fix that went too far. Removing the refresh entirely
+  // left the bell reading 26 for the rest of the session after a row click: the
+  // destination shares the dashboard layout the bell lives in, and a client-side
+  // push REUSES a common layout rather than re-rendering it, so nothing re-read
+  // the badge on arrival.
+  //
+  // It comes back chained on the action's promise. By the time that settles the
+  // push has been issued, so the re-render lands on the destination instead of
+  // superseding the navigation. The shape is what matters, so the shape is what
+  // is pinned: a `router.refresh()` that is NOT inside a `.then(` is the
+  // 22-of-22-stranded arrangement again.
+  const feed = reader(FEED, "notification-feed.tsx (stripped)");
+  const leaving = feed.span("const markReadOnNavigate", "const markAllRead");
+
+  assert.match(
+    leaving,
+    /markNotificationReadAction\(id\)\s*\.then\(\(\) => router\.refresh\(\)\)/,
+    "the leaving refresh is not chained on the action — an unchained one strands the push"
+  );
+  assert.match(
+    leaving,
+    /\.catch\(/,
+    "the leaving path floats an uncaught promise on a page the user has left"
+  );
 });
 
 test("the two presses that STAY are the ones that refresh", () => {
