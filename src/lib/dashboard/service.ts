@@ -7,6 +7,7 @@ import {
   tasks,
 } from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { isRecruitedContact } from "@/lib/people/person-user";
 import { getTaskCounts } from "@/lib/tasks/service";
 // The activity feed names a meeting the same way /meetings and /meetings/[id]
 // do. It carried its own copy of both the label table and the title branch.
@@ -69,7 +70,11 @@ export async function getDashboardMetrics(
 ): Promise<DashboardMetrics> {
   const [coreGroupResult, totalPeopleResult, taskCounts, meetingsResult] =
     await Promise.all([
-      // Core Group Size: persons with status in (core_group, launch_team, leader)
+      // Core Group Size: persons with status in (core_group, launch_team,
+      // leader) that the plant RECRUITED. The planter's own row sits at
+      // `leader` from the moment the plant exists (#378), so without
+      // `isRecruitedContact()` this metric opens at 1 on a brand-new plant and
+      // reads "you have gathered one person" about the person reading it.
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(persons)
@@ -77,7 +82,8 @@ export async function getDashboardMetrics(
           and(
             eq(persons.churchId, churchId),
             inArray(persons.status, ["core_group", "launch_team", "leader"]),
-            isNull(persons.deletedAt)
+            isNull(persons.deletedAt),
+            isRecruitedContact()
           )
         ),
 

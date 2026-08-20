@@ -6,10 +6,13 @@ import { and, eq, isNull, like, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { churchPrivacySettings, churches, persons, users } from "@/db/schema";
 import { createAccountEntities } from "@/app/(auth)/register/account-entities";
+import { getGroupRecipients } from "@/lib/communication/recipient-groups";
+import { getDashboardMetrics } from "@/lib/dashboard/service";
 import {
   churchCreationStatements,
   discardChurchStatements,
 } from "@/lib/onboarding/create-church";
+import { getLeadershipCandidates } from "@/lib/phase-engine/signals/queries";
 
 // ----------------------------------------------------------------------------
 // AS-013 (#378) — THE PERSON↔USER LINK, AGAINST A REAL POSTGRES.
@@ -181,11 +184,13 @@ test(
     await sweep();
 
     // WHAT THIS PROVES, PRECISELY. `ON CONFLICT (church_id, user_id) WHERE
-    // user_id IS NOT NULL` has to name the index EXACTLY: Postgres matches an
-    // index_predicate literally, so a mismatch is not degraded behaviour, it is
-    // "there is no unique or exclusion constraint matching the ON CONFLICT
-    // specification" on EVERY church creation. That failure is invisible to
-    // typecheck and to every hermetic test, and it is what this asserts.
+    // user_id IS NOT NULL` only works if Postgres can infer that
+    // `persons_church_user_unique_idx` covers every row the statement could
+    // conflict on — and whether it manages that is a property of the live
+    // index, which is why the assertion is here and not in a rendered-SQL test.
+    // When inference fails there is no degraded mode: it is "there is no unique
+    // or exclusion constraint matching the ON CONFLICT specification" on EVERY
+    // church creation.
     //
     // The statement is replayed rather than the whole tuple, because the tuple
     // mints a FRESH church id per attempt — its own second send fails on
@@ -397,5 +402,145 @@ test(
       .from(persons)
       .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)));
     assert.equal(orphans.length, 0, "and so is its person row");
+  }
+);
+
+// ----------------------------------------------------------------------------
+// THE BLAST RADIUS OF `status = 'leader'` (#378, review finding 1).
+//
+// The planter's row sits at the TOP of the recruitment pipeline, which is the
+// honest value for it — and that is exactly why the three reads that MEASURE
+// recruiting had to be told about it. Each of these is a backfilled plant with
+// nothing in it but its Owner: the correct answer to all three is "nothing
+// yet", and before `isRecruitedContact()` all three answered "one".
+//
+// A live suite because every one of them is a SQL predicate. A unit test would
+// have to re-implement the query to assert it, which is the same bug written
+// twice.
+// ----------------------------------------------------------------------------
+
+/** A plant whose ONLY person is its Owner — a fresh plant, post-backfill. */
+async function plantWithOnlyItsOwner() {
+  const account = await scratchAccount(SCRATCH_NAME);
+  await db.batch(gainChurch(account, "Solo Planter"));
+  const person = await linkedPersonOf(account.id);
+  assert.ok(person, "the fixture depends on the church-gain batch minting one");
+  return { account, person, churchId: person.churchId };
+}
+
+test(
+  "the dashboard's Core Group opens at ZERO on a plant that has gathered nobody",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    const plant = await plantWithOnlyItsOwner();
+    const metrics = await getDashboardMetrics(plant.churchId, plant.account.id);
+
+    assert.equal(
+      metrics.coreGroupSize,
+      0,
+      "the metric counted the planter as somebody the plant gathered"
+    );
+    // …and `totalPeople` still counts them, which is the distinction: the
+    // planter IS in the plant's people, they are just not a recruit.
+    assert.equal(metrics.totalPeople, 1);
+  }
+);
+
+test(
+  "the phase engine sees no leadership candidate the plant never developed",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    const plant = await plantWithOnlyItsOwner();
+
+    assert.deepEqual(
+      await getLeadershipCandidates(plant.churchId),
+      [],
+      "a plant one minute old was credited with raising up a leader"
+    );
+  }
+);
+
+test(
+  "the Leaders quick-select does not put the sender in their own audience",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    const plant = await plantWithOnlyItsOwner();
+
+    assert.deepEqual(
+      await getGroupRecipients(plant.churchId, "leaders"),
+      [],
+      "composing to Leaders would have emailed the planter themselves"
+    );
+
+    // `all` is NOT a cohort — it is the people list, and the planter is really
+    // in it. This is the line the exclusion must not cross.
+    const everyone = await getGroupRecipients(plant.churchId, "all");
+    assert.deepEqual(
+      everyone.map((person) => person.id),
+      [plant.person.id],
+      "`all` must still mean everyone"
+    );
+  }
+);
+
+test(
+  "the discard sweep cannot empty a plant's contact list",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    // Review finding 2. `noUserLinkedTo` asks whether anybody HOLDS this
+    // church; it says nothing about which of its PEOPLE may be deleted, and
+    // `church_id` alone named all of them. A church that has acquired contacts
+    // is not a discardable shell whatever its links say — so the sweep is
+    // scoped to the one row it minted, and the `churches` delete then fails
+    // LOUDLY on the FK rather than quietly taking the contacts with it.
+    const plant = await plantWithOnlyItsOwner();
+    const [contact] = await db
+      .insert(persons)
+      .values({
+        churchId: plant.churchId,
+        userId: null,
+        createdBy: plant.account.id,
+        firstName: "Real",
+        lastName: "Contact",
+        status: "prospect",
+      })
+      .returning({ id: persons.id });
+
+    await db
+      .update(users)
+      .set({ churchId: null })
+      .where(eq(users.id, plant.account.id));
+
+    await assert.rejects(
+      () => db.batch(discardChurchStatements(plant.churchId)),
+      (error: unknown) => {
+        assert.match(
+          causeOf(error),
+          /violates foreign key constraint "persons_church_id_churches_id_fk"/
+        );
+        return true;
+      }
+    );
+
+    const survivors = await db
+      .select({ id: persons.id })
+      .from(persons)
+      .where(eq(persons.churchId, plant.churchId));
+    assert.ok(
+      survivors.some((person) => person.id === contact.id),
+      "the sweep deleted a contact the plant really had"
+    );
   }
 );

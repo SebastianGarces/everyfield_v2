@@ -315,11 +315,13 @@ test("the batch is church, link, privacy, then the planter's person row", () => 
 });
 
 test("the planter's person row is idempotent against its own unique index", () => {
-  // AS-013 (#378). Re-sending this tuple — a retry, or an invited planter's
-  // registration racing itself — must be a no-op rather than a second copy of
-  // the planter in their own people list, and the arbiter is
-  // `persons_church_user_unique_idx`. The predicate is repeated byte for byte
-  // because Postgres matches an ON CONFLICT index_predicate literally.
+  // AS-013 (#378). Re-sending this statement must be a no-op rather than a
+  // second copy of the planter in their own people list, and the arbiter is
+  // `persons_church_user_unique_idx`. What is pinned here is the SHAPE — the
+  // arbiter columns and the predicate, copied verbatim from the index so ON
+  // CONFLICT inference has nothing to prove. Whether inference actually
+  // succeeds is a property of the live index and is asserted in
+  // `people/person-link-live.test.ts`; rendered SQL cannot answer it.
   const person = churchCreationStatements(WRITE).map(render)[3];
 
   assert.match(person, /on\s+conflict/i);

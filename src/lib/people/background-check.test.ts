@@ -6,7 +6,10 @@ import { test } from "node:test";
 import { backgroundCheckStatuses, persons } from "@/db/schema";
 import { getTableConfig } from "drizzle-orm/pg-core";
 
-import { teamRequiresBackgroundCheck } from "@/lib/ministry-teams/role-templates";
+import {
+  PREDEFINED_TEAM_KEYS,
+  teamRequiresBackgroundCheck,
+} from "@/lib/ministry-teams/role-templates";
 import {
   personCreateSchema,
   personUpdateSchema,
@@ -162,16 +165,32 @@ test("a value the database could not hold reads as the floor, never as itself", 
 test("the Children's Ministry roster requires it and no other predefined team does", () => {
   assert.equal(teamRequiresBackgroundCheck("childrens_ministry"), true);
 
-  for (const key of ["worship", "facilities", "small_groups"]) {
+  // EVERY other key, not a sample of three: this is the "and no other" half of
+  // the sentence, so a template added later is answered here rather than
+  // silently unasserted.
+  for (const key of PREDEFINED_TEAM_KEYS) {
+    if (key === "childrens_ministry") continue;
     assert.equal(teamRequiresBackgroundCheck(key), false, key);
   }
 });
 
 test("a CUSTOM team carries no template key, so it requires nothing", () => {
-  // The planter's own team, and the answer is the same for a predefined one
-  // they renamed — which used to be the bug: matched on NAME, a rename silently
-  // dropped the roster's status column (ruling 2026-08-12, #378).
   assert.equal(teamRequiresBackgroundCheck(null), false);
-  assert.equal(teamRequiresBackgroundCheck("Children's Ministry"), false);
-  assert.equal(teamRequiresBackgroundCheck(""), false);
+});
+
+test("a team NAME is not a key, and the compiler is what says so", () => {
+  // This used to be the bug: the predicate took a `string` and matched on the
+  // team's display NAME, so renaming a team silently dropped the roster's
+  // status column (ruling 2026-08-12, #378). The parameter is
+  // `PredefinedTeamKey | null` now, so the old call is not a wrong answer, it
+  // is not expressible — which is the guarantee worth pinning, and a runtime
+  // assertion could not state it.
+  const source = readFileSync(
+    path.join(process.cwd(), "src/lib/ministry-teams/role-templates.ts"),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /export function teamRequiresBackgroundCheck\(\s*templateKey: PredefinedTeamKey \| null\s*\)/
+  );
 });

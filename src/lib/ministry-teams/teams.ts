@@ -358,11 +358,15 @@ export async function assignTeamLeader(
  *
  * *** The `where` predicate and `ministry_teams_predefined_name_unique_idx`
  * change TOGETHER. *** It renders as the ON CONFLICT index_predicate, not as a
- * row filter, and Postgres matches it against the stored predicate literally —
- * a mismatch is not subtle drift, it is "there is no unique or exclusion
- * constraint matching the ON CONFLICT specification" on every initialization.
- * The literal `'predefined'` is inlined rather than parameterised for the same
- * reason: inference matches constants, not bind parameters.
+ * row filter, and Postgres has to satisfy itself that the index covers every
+ * row this statement could conflict on. It does that by reasoning about the two
+ * predicates, so a predicate that "should be equivalent" is a bet on what its
+ * inference can prove — repeat the stored one VERBATIM and there is nothing to
+ * bet on. The failure is not subtle drift: it is "there is no unique or
+ * exclusion constraint matching the ON CONFLICT specification" on every
+ * initialization. The literal `'predefined'` is inlined rather than
+ * parameterised because inference reasons about constants and cannot see
+ * through a bind parameter at all.
  *
  * THIS FUNCTION STAYS LAST IN THIS FILE. `predefined-teams-guard.test.ts`
  * slices this module's source from this export to the end of the file and
@@ -375,9 +379,7 @@ export async function initializePredefinedTeams(
   teamKeys?: PredefinedTeamKey[]
 ): Promise<MinistryTeam[]> {
   const templates = teamKeys
-    ? TEAM_TEMPLATES.filter((t) =>
-        teamKeys.includes(t.teamKey as PredefinedTeamKey)
-      )
+    ? TEAM_TEMPLATES.filter((t) => teamKeys.includes(t.teamKey))
     : TEAM_TEMPLATES;
 
   // An empty selection is a legitimate answer (`teamKeys: []`), and an INSERT

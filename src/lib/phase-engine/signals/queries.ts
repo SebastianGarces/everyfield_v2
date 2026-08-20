@@ -42,6 +42,7 @@ import {
 } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { isRecruitedContact } from "@/lib/people/person-user";
 
 /** Statuses that count as "open" follow-up (warm, pre-commitment) contacts. */
 export const FOLLOW_UP_STATUSES = [
@@ -294,7 +295,15 @@ export interface LeadershipPersonRow {
   createdAt: Date;
 }
 
-/** Candidate persons (committed / core-group / launch-team / leader). */
+/**
+ * Candidate persons (committed / core-group / launch-team / leader).
+ *
+ * RECRUITED ONES ONLY. This feeds a SIGNAL about leadership development — how
+ * far the plant has got at raising up leaders — and the planter's own person
+ * row sits at `leader` from the moment the plant exists (#378). Counting it
+ * would hand every plant a leadership candidate on day one that nobody
+ * developed, which is a fabricated signal rather than a generous one.
+ */
 export async function getLeadershipCandidates(
   churchId: string
 ): Promise<LeadershipPersonRow[]> {
@@ -309,6 +318,7 @@ export async function getLeadershipCandidates(
       and(
         eq(persons.churchId, churchId),
         isNull(persons.deletedAt),
+        isRecruitedContact(),
         inArray(persons.status, [...LEADERSHIP_CANDIDATE_STATUSES])
       )
     )

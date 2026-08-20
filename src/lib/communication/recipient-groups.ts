@@ -13,6 +13,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { persons, type PersonStatus } from "@/db/schema/people";
 import { ministryTeams, teamMemberships } from "@/db/schema/ministry-teams";
+import { isRecruitedContact } from "@/lib/people/person-user";
 import {
   isTeamGroup,
   parseTeamGroup,
@@ -51,7 +52,20 @@ const personColumns = {
   email: persons.email,
 };
 
-/** Status groups, by their quick-select id. */
+/**
+ * Status groups, by their quick-select id.
+ *
+ * EVERY ONE OF THESE NAMES A RECRUITMENT COHORT, and that is what makes them
+ * different from `all`: they answer "who has the plant gathered this far", so
+ * the sender's own person row does not belong in any of them (#378). Today
+ * that bites exactly one — the planter sits at `leader`, so "Leaders" would
+ * open every compose with the sender already in their own audience — but the
+ * rule is stated over the cohorts rather than over that one id, so hand-editing
+ * the planter's status to `core_group` cannot quietly reintroduce it.
+ *
+ * `all` keeps them, deliberately. It is not a cohort, it is the people list,
+ * and the planter is really in it.
+ */
 const STATUS_GROUPS: Record<string, PersonStatus[]> = {
   core_group: ["core_group"],
   launch_team: ["launch_team"],
@@ -97,6 +111,11 @@ export async function getGroupRecipients(
   ];
   if (statusFilter.length > 0) {
     conditions.push(inArray(persons.status, statusFilter));
+    // A COHORT, NOT THE PEOPLE LIST — see `STATUS_GROUPS` above. Bound to the
+    // same branch as the status filter so the two cannot drift: a group that
+    // names statuses is asking about recruiting, and `all`, which names none,
+    // is not.
+    conditions.push(isRecruitedContact());
   }
 
   return db

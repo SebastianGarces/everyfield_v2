@@ -34,11 +34,19 @@ import {
 import { and, eq, isNull } from "drizzle-orm";
 
 import { assignMember } from "./memberships";
-import { getRoleTemplates, type PredefinedTeamKey } from "./role-templates";
+import {
+  getRoleTemplates,
+  LEADERSHIP_TEAM_KEY,
+  type PredefinedTeamKey,
+} from "./role-templates";
 
-/** The template this rule is about — the team key AND the role key inside it. */
-export const LEADERSHIP_TEAM_KEY = "senior_pastor";
-export const SENIOR_PASTOR_ROLE_KEY = "senior_pastor";
+/**
+ * The ROLE inside the Leadership team this rule fills. The TEAM's key is
+ * `LEADERSHIP_TEAM_KEY`, declared once in `role-templates.ts` beside the
+ * templates it indexes; the two happen to spell the same word and are not the
+ * same thing.
+ */
+const SENIOR_PASTOR_ROLE_KEY = "senior_pastor";
 
 /**
  * The plant's Owner as a PERSON, but only if they answered "I'm the lead

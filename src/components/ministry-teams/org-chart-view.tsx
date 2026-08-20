@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { LEADERSHIP_TEAM_KEY } from "@/lib/ministry-teams/role-templates";
 import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
 
@@ -14,17 +15,14 @@ interface OrgChartViewProps {
   teams: TeamWithStats[];
 }
 
-/**
- * The template whose team roots the chart. Matched on `template_key`, not on
- * the display name (ruling 2026-08-12, #378) — the team is called "Leadership"
- * now, and a substring test against its name would have dropped the root the
- * moment it was renamed, leaving a chart of ten peers.
- */
-const ROOT_TEMPLATE_KEY = "senior_pastor";
-
 export function OrgChartView({ teams }: OrgChartViewProps) {
-  const rootTeam = teams.find((t) => t.templateKey === ROOT_TEMPLATE_KEY);
-  const otherTeams = teams.filter((t) => t.templateKey !== ROOT_TEMPLATE_KEY);
+  // The root is the LEADERSHIP TEMPLATE, matched on `template_key` and not on
+  // the display name (ruling 2026-08-12, #378): the team is called
+  // "Leadership" now, and the substring test against its name that used to be
+  // here would have dropped the root the moment it was renamed, leaving a chart
+  // of ten peers with nothing to say so.
+  const rootTeam = teams.find((t) => t.templateKey === LEADERSHIP_TEAM_KEY);
+  const otherTeams = teams.filter((t) => t.templateKey !== LEADERSHIP_TEAM_KEY);
 
   return (
     <div className="space-y-6">

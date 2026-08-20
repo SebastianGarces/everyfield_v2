@@ -49,7 +49,7 @@ import {
   type ChurchBasicsFieldErrors,
   type ChurchBasicsInput,
 } from "@/lib/validations/onboarding";
-import { and, eq, notExists, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, notExists, sql, type SQL } from "drizzle-orm";
 
 import { assertSeatFor } from "@/lib/auth/seat-rules";
 import type { SeatFields } from "@/lib/auth/tenancy";
@@ -218,10 +218,21 @@ export async function runCreateChurch(
  * same reason the privacy row carries one: a retry that races its own
  * predecessor must not dead-end on the index, and re-sending this tuple against
  * a plant that already has the row is a no-op rather than a second planter in
- * the people list. The index predicate is repeated byte for byte — it renders
- * as the ON CONFLICT index_predicate and Postgres matches it literally, so a
- * mismatch is "there is no unique or exclusion constraint matching the ON
- * CONFLICT specification" on every church creation.
+ * the people list.
+ *
+ * *** REPEAT THE INDEX PREDICATE VERBATIM. *** It renders as the ON CONFLICT
+ * index_predicate, and Postgres has to satisfy itself that the index covers
+ * every row this statement could conflict on — a job its inference does by
+ * reasoning about the two predicates, not by comparing their text. Which cases
+ * it can prove is not a contract worth learning, and a predicate that "should
+ * be equivalent" is a bet on the planner. So the discipline is textual even
+ * though the mechanism is not: copy `persons_church_user_unique_idx`'s
+ * predicate, change the two together, and inference cannot fail.
+ *
+ * When it does fail there is no degraded mode — every church creation raises
+ * "there is no unique or exclusion constraint matching the ON CONFLICT
+ * specification", which is why `person-link-live.test.ts` exercises this
+ * statement against a real index rather than trusting the rendered SQL.
  */
 export function churchCreationStatements(write: ChurchCreationWrite) {
   return [
@@ -286,9 +297,25 @@ function bothOf(left: SQL, right: SQL): SQL {
  * THE PERSON ROW IS A DEPENDENT AND HAS TO BE SWEPT TOO. It carries
  * `church_id`, so leaving it behind does not merely litter: the `churches`
  * delete below fails on the FK and the loser's church survives forever, which
- * is the exact orphan this sweep exists to prevent. It carries
- * `noUserLinkedTo` like both of its siblings — the guard is what keeps a
- * mis-called sweep from deleting a real plant's Owner out of its own people.
+ * is the exact orphan this sweep exists to prevent.
+ *
+ * *** IT DELETES THE MINTED ROW AND NOTHING ELSE. *** `user_id IS NOT NULL` is
+ * not decoration beside `noUserLinkedTo`, it is a DIFFERENT rule and it is the
+ * narrow one. `noUserLinkedTo` asks whether anybody holds this church; it says
+ * nothing about WHICH of that church's people this statement may take, and
+ * `church_id` alone names all of them. A church that has acquired a people list
+ * is not a discardable shell whatever its links say, and a sweep that could
+ * empty one — reached by a mis-call, a re-used id, or a future caller that
+ * reads this signature and trusts it — would delete a plant's contacts with no
+ * error and nothing to restore them from.
+ *
+ * So the scope here is exactly what `churchCreationStatements` wrote: the ONE
+ * linked row, which by `persons_church_user_unique_idx` is at most one per
+ * account per church. Any OTHER person on that church is left standing on
+ * purpose, and the `churches` delete then fails on the FK — loudly, with a
+ * constraint name, which is the correct outcome. A church with contacts in it
+ * is not this function's to discard, and finding out by exception beats finding
+ * out by absence.
  */
 export function discardChurchStatements(churchId: string) {
   return [
@@ -302,7 +329,12 @@ export function discardChurchStatements(churchId: string) {
       ),
     db
       .delete(persons)
-      .where(bothOf(eq(persons.churchId, churchId), noUserLinkedTo(churchId))),
+      .where(
+        bothOf(
+          bothOf(eq(persons.churchId, churchId), isNotNull(persons.userId)),
+          noUserLinkedTo(churchId)
+        )
+      ),
     db
       .delete(churches)
       .where(bothOf(eq(churches.id, churchId), noUserLinkedTo(churchId))),

@@ -25,7 +25,7 @@ import {
 import { cache } from "react";
 import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
-import type { PersonCreationSource } from "./types";
+import type { PersonCreationSource, PersonForList } from "./types";
 
 // ============================================================================
 // Types
@@ -42,7 +42,13 @@ export interface ListPeopleOptions {
 }
 
 export interface ListPeopleResult {
-  people: Person[];
+  /**
+   * `PersonForList`, not `Person` — the account link is stripped below (#378).
+   * Both surfaces this feeds hand their rows to a `"use client"` component (the
+   * /people list, and the team page's assign dialog), so a column added to
+   * `persons` reaches the browser unless a read declines it.
+   */
+  people: PersonForList[];
   total: number;
   nextCursor: string | null;
 }
@@ -252,7 +258,13 @@ export async function paginatePeopleByCreatedAtCursor(
     : null;
 
   return {
-    people: resultPeople,
+    // STRIPPED, not just untyped. `Person` is structurally assignable to
+    // `PersonForList`, so the narrower type alone would let `user_id` ride to
+    // the browser in the RSC payload while the signature claimed otherwise
+    // (#378). The `.select()` above takes every column deliberately — a
+    // hand-listed projection here is a second place to remember a new column —
+    // so the one the lists must not carry is dropped at the boundary instead.
+    people: resultPeople.map(({ userId: _accountLink, ...person }) => person),
     total,
     nextCursor,
   };

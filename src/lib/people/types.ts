@@ -53,9 +53,25 @@ export {
 import type { Household, Person, PersonActivity, Tag } from "@/db/schema";
 
 /**
+ * A person as a LIST SURFACE may receive them.
+ *
+ * `user_id` is withheld (#378). It is an account identifier, every list below
+ * is rendered by a `"use client"` component, and nothing any of them draw needs
+ * it — so it would cross to the browser in the RSC payload of every row for no
+ * reason at all. Withheld rather than merely untyped: a type cannot stop an
+ * extra property at runtime, so the READS strip it (`pipeline.ts` omits the
+ * column, `listPeople` drops it) and this type is what says they must.
+ *
+ * A server-side caller that genuinely needs the link reads the person row
+ * directly — `getPerson`, or the church-scoped lookup in
+ * `ministry-teams/leadership-fill.ts` — rather than widening a list.
+ */
+export type PersonForList = Omit<Person, "userId">;
+
+/**
  * Person with related data for list views
  */
-export type PersonWithTags = Person & {
+export type PersonWithTags = PersonForList & {
   tags: Tag[];
   lastActivityAt?: Date | null;
 };

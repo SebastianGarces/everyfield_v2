@@ -1,4 +1,15 @@
-import type { TimeCommitment } from "@/db/schema/ministry-teams";
+import {
+  PREDEFINED_TEAM_KEYS,
+  type PredefinedTeamKey,
+  type TimeCommitment,
+} from "@/db/schema/ministry-teams";
+
+// The keys are DECLARED beside the column that stores them
+// (`src/db/schema/ministry-teams.ts`) and re-exported here, where every caller
+// already looks for them. One declaration, one import path, no cast anywhere
+// between a `ministry_teams` row and `getRoleTemplates`.
+export { PREDEFINED_TEAM_KEYS };
+export type { PredefinedTeamKey };
 
 // ============================================================================
 // Role Template Types
@@ -14,32 +25,18 @@ export interface RoleTemplate {
 }
 
 export interface TeamTemplate {
-  teamKey: string;
+  /**
+   * The stored key, typed as the column's own union — so the template DATA is
+   * checked against the schema rather than the schema being widened to admit
+   * whatever the data happens to say.
+   */
+  teamKey: PredefinedTeamKey;
   teamName: string;
   icon: string;
   description: string;
   sortOrder: number;
   roles: RoleTemplate[];
 }
-
-// ============================================================================
-// Predefined Team Keys (used for matching templates to teams)
-// ============================================================================
-
-export const PREDEFINED_TEAM_KEYS = [
-  "senior_pastor",
-  "launch_coordinator",
-  "worship",
-  "childrens_ministry",
-  "facilities",
-  "assimilation",
-  "small_groups",
-  "promotion",
-  "prayer",
-  "technology",
-] as const;
-
-export type PredefinedTeamKey = (typeof PREDEFINED_TEAM_KEYS)[number];
 
 // ============================================================================
 // Team Templates with Role Definitions
@@ -582,6 +579,19 @@ export const TEAM_TEMPLATES: TeamTemplate[] = [
   },
 ];
 
+/**
+ * The Leadership template's key, named ONCE.
+ *
+ * Three places need to recognise this one template and nothing else does: the
+ * org chart roots on it, the leadership auto-fill triggers on it, and migration
+ * 0053 reconciles it. A string literal repeated across them is a rename waiting
+ * to half-land — the org chart would quietly stop having a root while
+ * everything still compiled. The MIGRATION keeps its own SQL literal, because a
+ * migration is a historical record of what ran and must not change meaning when
+ * this constant does.
+ */
+export const LEADERSHIP_TEAM_KEY: PredefinedTeamKey = "senior_pastor";
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -656,10 +666,9 @@ export const BACKGROUND_CHECK_TEAM_KEYS: readonly PredefinedTeamKey[] = [
  * required.
  */
 export function teamRequiresBackgroundCheck(
-  templateKey: string | null
+  templateKey: PredefinedTeamKey | null
 ): boolean {
   return (
-    templateKey !== null &&
-    BACKGROUND_CHECK_TEAM_KEYS.includes(templateKey as PredefinedTeamKey)
+    templateKey !== null && BACKGROUND_CHECK_TEAM_KEYS.includes(templateKey)
   );
 }

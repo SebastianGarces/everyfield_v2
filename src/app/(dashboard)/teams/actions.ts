@@ -200,10 +200,7 @@ export async function initializeTeamsWithRolesAction(): Promise<
   for (const team of created.data) {
     if (!team.templateKey) continue;
 
-    const roles = await importRoleTemplatesAction(
-      team.id,
-      team.templateKey as PredefinedTeamKey
-    );
+    const roles = await importRoleTemplatesAction(team.id, team.templateKey);
     if (!roles.success) {
       return { success: false, error: TEAM_ROLES_PARTIAL_MESSAGE };
     }

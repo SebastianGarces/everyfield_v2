@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button";
-import { Person } from "@/lib/people/types";
+import { PersonForList } from "@/lib/people/types";
 import { Users } from "lucide-react";
 import Link from "next/link";
 import { PersonCard } from "./person-card";
 
 interface PeopleListProps {
-  people: Person[];
+  people: PersonForList[];
   total: number;
   nextCursor: string | null;
   /** Render every card, and this list's own call to action, as inert markup

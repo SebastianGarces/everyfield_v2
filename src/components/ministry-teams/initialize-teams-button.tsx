@@ -25,7 +25,7 @@ export function InitializeTeamsButton() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<PredefinedTeamKey>>(
-    () => new Set(TEAM_TEMPLATES.map((t) => t.teamKey as PredefinedTeamKey))
+    () => new Set(TEAM_TEMPLATES.map((t) => t.teamKey))
   );
 
   function toggleTeam(key: PredefinedTeamKey) {
@@ -70,7 +70,7 @@ export function InitializeTeamsButton() {
         <ScrollArea className="max-h-[400px] pr-4">
           <div className="space-y-3 py-2">
             {TEAM_TEMPLATES.map((template) => {
-              const key = template.teamKey as PredefinedTeamKey;
+              const key = template.teamKey;
               const checked = selectedKeys.has(key);
               return (
                 <label

@@ -94,6 +94,16 @@
 -- the product shows and the membership is what is true, and a row where they
 -- disagree must not be repaired by seating somebody over a real person.
 --
+-- AND THIS FILE REPAIRS NOTHING IT DID NOT CAUSE. §4 is ONE statement with a
+-- data-modifying CTE: the INSERT returns the role ids it wrote and the UPDATE
+-- joins them, so the flip to `filled` reaches exactly those rows. The earlier
+-- shape — a second statement matching open roles that have an active member —
+-- was wider than the rule it was written for: a plant whose Senior Pastor role
+-- already read `open` while somebody sat in it (however that arose) would have
+-- been quietly corrected by a migration whose header said it only seated
+-- planters. A repair nobody asked for and nobody can find afterwards is worse
+-- than the disagreement it fixes.
+--
 -- `no_planter` AND UNANSWERED PLANTS GET NOTHING, which is the ruling: the role
 -- stays open and whoever leads the plant fills it by hand.
 --
@@ -177,40 +187,43 @@ WHERE t."template_key" = 'senior_pastor'
 			AND o."type" = 'predefined'
 			AND o."name" = 'Leadership'
 	);--> statement-breakpoint
--- §4a. Seat the confirmed planter in the open Senior Pastor role.
-INSERT INTO "team_memberships" ("church_id", "team_id", "person_id", "role_id", "status", "created_by")
-SELECT DISTINCT ON (r."team_id")
-	r."church_id", r."team_id", p."id", r."id", 'active', p."user_id"
-FROM "team_roles" r
-JOIN "ministry_teams" t
-	ON t."id" = r."team_id" AND t."template_key" = 'senior_pastor'
-JOIN "churches" c
-	ON c."id" = r."church_id" AND c."leadership_status" = 'planter_confirmed'
-JOIN "users" u
-	ON u."church_id" = r."church_id" AND u."seat" = 'owner'
-JOIN "persons" p
-	ON p."user_id" = u."id" AND p."church_id" = r."church_id" AND p."deleted_at" IS NULL
-WHERE r."name" = 'Senior Pastor'
-	AND r."status" = 'open'
-	AND NOT EXISTS (
-		SELECT 1 FROM "team_memberships" m
-		WHERE m."role_id" = r."id" AND m."status" = 'active'
-	)
-	AND NOT EXISTS (
-		SELECT 1 FROM "team_memberships" m
-		WHERE m."team_id" = r."team_id" AND m."person_id" = p."id" AND m."status" = 'active'
-	)
-ORDER BY r."team_id", r."created_at", r."id";--> statement-breakpoint
--- §4b. The role reads what is true of it. Scoped to the rows §4a can have
--- written — never a blanket "every open role with a member" repair, which would
--- silently fix disagreements this file knows nothing about.
+-- §4. Seat the confirmed planter, and flip exactly the roles that seated one.
+--
+-- ONE STATEMENT, and the CTE is what makes the second half provable: `seated`
+-- RETURNS the role ids the INSERT actually wrote, and the UPDATE joins them. A
+-- separate §4b matching "an open Senior Pastor role on a senior_pastor team
+-- with an active membership held by a linked person" would have been WIDER than
+-- its own comment claimed — it would also have repaired a pre-existing
+-- open-role-with-a-member disagreement this file knows nothing about, silently
+-- and with no record of having done it.
+WITH "seated" AS (
+	INSERT INTO "team_memberships" ("church_id", "team_id", "person_id", "role_id", "status", "created_by")
+	SELECT DISTINCT ON (r."team_id")
+		r."church_id", r."team_id", p."id", r."id", 'active', p."user_id"
+	FROM "team_roles" r
+	JOIN "ministry_teams" t
+		ON t."id" = r."team_id" AND t."template_key" = 'senior_pastor'
+	JOIN "churches" c
+		ON c."id" = r."church_id" AND c."leadership_status" = 'planter_confirmed'
+	JOIN "users" u
+		ON u."church_id" = r."church_id" AND u."seat" = 'owner'
+	JOIN "persons" p
+		ON p."user_id" = u."id" AND p."church_id" = r."church_id" AND p."deleted_at" IS NULL
+	WHERE r."name" = 'Senior Pastor'
+		AND r."status" = 'open'
+		AND NOT EXISTS (
+			SELECT 1 FROM "team_memberships" m
+			WHERE m."role_id" = r."id" AND m."status" = 'active'
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM "team_memberships" m
+			WHERE m."team_id" = r."team_id" AND m."person_id" = p."id" AND m."status" = 'active'
+		)
+	ORDER BY r."team_id", r."created_at", r."id"
+	RETURNING "role_id"
+)
 UPDATE "team_roles" r
 SET "status" = 'filled',
 	"updated_at" = now()
-FROM "team_memberships" m
-JOIN "persons" p ON p."id" = m."person_id" AND p."user_id" IS NOT NULL
-JOIN "ministry_teams" t ON t."id" = m."team_id" AND t."template_key" = 'senior_pastor'
-WHERE m."role_id" = r."id"
-	AND m."status" = 'active'
-	AND r."status" = 'open'
-	AND r."name" = 'Senior Pastor';
+FROM "seated" s
+WHERE r."id" = s."role_id";

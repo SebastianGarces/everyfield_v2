@@ -20,14 +20,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { assignMemberAction } from "@/app/(dashboard)/teams/actions";
-import type { Person } from "@/db/schema";
+import type { PersonForList } from "@/lib/people/types";
 import { assignRefusalDelivery } from "./assign-refusal";
 
 interface MemberAssignDialogProps {
   teamId: string;
   roleId: string;
   roleName: string;
-  people: Person[];
+  people: PersonForList[];
   /**
    * Active team count per person id, resolved by the server component next to
    * the people list. Server data arrives as props, never through a client-side
@@ -47,7 +47,9 @@ export function MemberAssignDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<PersonForList | null>(
+    null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

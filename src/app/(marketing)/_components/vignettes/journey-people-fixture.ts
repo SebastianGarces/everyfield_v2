@@ -33,11 +33,12 @@
 // ============================================================================
 
 import type { MeetingWithCounts } from "@/lib/meetings/types";
-import type { Person, Tag } from "@/lib/people/types";
+import type { PersonForList, Tag } from "@/lib/people/types";
 
 /** What `PersonCard` takes (person-card.tsx:13). `PeopleList` takes the
- *  narrower plain `Person[]`, which every row below also satisfies. */
-export type PersonCardPerson = Person & { tags?: Tag[] };
+ *  narrower plain `PersonForList[]`, which every row below also satisfies —
+ *  and neither carries `user_id`, which does not cross to a browser (#378). */
+export type PersonCardPerson = PersonForList & { tags?: Tag[] };
 
 const CHURCH_ID = "fixture-church";
 const CREATED_BY = "fixture-user";
@@ -63,8 +64,6 @@ const PERSON_BASE = {
   householdId: null,
   householdRole: null,
   pipelineSortOrder: 0,
-  // Contacts, not accounts — nobody in this pipeline holds a login (#378).
-  userId: null,
   createdBy: CREATED_BY,
   deletedAt: null,
 } as const;
@@ -349,7 +348,7 @@ export const COMMITTED_PEOPLE = [
     createdAt: new Date("2026-06-01T06:27:14.774Z"),
     updatedAt: new Date("2026-07-28T06:27:14.774Z"),
   },
-] satisfies Person[];
+] satisfies PersonForList[];
 
 /** The `total` the committed filter returned — the number the retired capture
  *  quoted, and the number `PeopleList` prints under the grid. */
