@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
+import { personPhotoSrc } from "@/lib/people/photo";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 import { PersonForClient, PersonStatus, Tag } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
@@ -43,7 +44,7 @@ export function PersonCard({ person, linkStatic }: PersonCardProps) {
       <CardHeader className="flex flex-row items-center gap-3 p-3 pb-1">
         <Avatar className="h-10 w-10">
           <AvatarImage
-            src={person.photoUrl || undefined}
+            src={personPhotoSrc(person.id, person.photoUrl)}
             alt={`${person.firstName} ${person.lastName}`}
           />
           <AvatarFallback>{initials}</AvatarFallback>

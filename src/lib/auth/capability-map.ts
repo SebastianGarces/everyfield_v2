@@ -124,10 +124,15 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/people/actions.ts → checkForDuplicatesAction": "read",
   "src/app/(dashboard)/people/actions.ts → createPersonAction": "people.write",
   "src/app/(dashboard)/people/actions.ts → deletePersonAction": "people.write",
+  "src/app/(dashboard)/people/actions.ts → loadMorePeopleAction": "read",
   "src/app/(dashboard)/people/actions.ts → quickAddPersonAction":
     "people.write",
   "src/app/(dashboard)/people/actions.ts → updatePersonAction": "people.write",
+  "src/app/(dashboard)/people/actions.ts → uploadPersonPhotoAction":
+    "people.write",
   "src/app/(dashboard)/people/activity-actions.ts → addNoteAction":
+    "people.write",
+  "src/app/(dashboard)/people/activity-actions.ts → editNoteAction":
     "people.write",
   "src/app/(dashboard)/people/activity-actions.ts → deleteNoteAction":
     "people.write",
@@ -213,6 +218,7 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/tasks/actions.ts → deleteTaskAction": "tasks.write",
   "src/app/(dashboard)/tasks/actions.ts → importTaskTemplateAction":
     "tasks.write",
+  "src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction": "read",
   "src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction": "tasks.write",
   "src/app/(dashboard)/tasks/actions.ts → reopenTaskAction": "tasks.own",
   "src/app/(dashboard)/tasks/actions.ts → setSubtaskCompletionAction":
@@ -241,6 +247,7 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction":
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → removeMemberAction": "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction": "read",
   "src/app/(dashboard)/teams/actions.ts → updateRoleAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → updateTeamAction": "teams.write",
   "src/app/(dashboard)/wiki/actions.ts → searchWikiArticles": "read",

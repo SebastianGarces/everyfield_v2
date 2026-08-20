@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export type PeopleView = "list" | "pipeline";
+// The URL is what a view IS, so the name comes from the module that reads it.
+export type { PeopleView } from "@/lib/people/list-params";
+import type { PeopleView } from "@/lib/people/list-params";
 
 interface ViewToggleProps {
   currentView: PeopleView;

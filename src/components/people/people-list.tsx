@@ -1,13 +1,25 @@
+"use client";
+
+import { loadMorePeopleAction } from "@/app/(dashboard)/people/actions";
 import { Button } from "@/components/ui/button";
+import type { PeopleListSearchParams } from "@/lib/people/list-params";
 import { PersonForClient } from "@/lib/people/types";
-import { Users } from "lucide-react";
+import { Loader2, Users } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { toast } from "sonner";
 import { PersonCard } from "./person-card";
 
 interface PeopleListProps {
   people: PersonForClient[];
   total: number;
   nextCursor: string | null;
+  /**
+   * The search params the first page was read under, so "Load more" asks for
+   * the next page of the SAME query. Absent for the presentational embeds,
+   * which have no button to press.
+   */
+  searchParams?: PeopleListSearchParams;
   /** Render every card, and this list's own call to action, as inert markup
    *  instead of links — for presentational embeds (the marketing page), where
    *  nothing may be clickable, focusable or prefetchable. Passed straight
@@ -18,9 +30,18 @@ interface PeopleListProps {
 export function PeopleList({
   people,
   total,
-  nextCursor,
+  nextCursor: initialNextCursor,
+  searchParams,
   linkStatic,
 }: PeopleListProps) {
+  // Pagination state — UI state, the shape `ActivityFeed` already uses
+  // (`memory/invariants.md` → Client/Server Data Synchronization: a cursor and
+  // the rows walked past it are legitimate client state; the FIRST page still
+  // comes from the server on every render and is never copied in here).
+  const [appended, setAppended] = useState<PersonForClient[]>([]);
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   if (people.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
@@ -43,24 +64,56 @@ export function PeopleList({
     );
   }
 
+  const shown = [...people, ...appended];
+
+  const handleLoadMore = async () => {
+    if (!nextCursor || !searchParams) return;
+
+    setIsLoadingMore(true);
+    try {
+      const result = await loadMorePeopleAction(searchParams, nextCursor);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      setAppended((prev) => [...prev, ...result.data.people]);
+      setNextCursor(result.data.nextCursor);
+    } catch (error) {
+      console.error("Failed to load more people:", error);
+      toast.error("Failed to load more people");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {people.map((person) => (
+        {shown.map((person) => (
           <PersonCard key={person.id} person={person} linkStatic={linkStatic} />
         ))}
       </div>
 
-      {nextCursor && (
+      {nextCursor && !linkStatic && (
         <div className="flex justify-center pt-4">
-          <Button variant="outline" disabled>
-            Load more (Pagination coming soon)
+          <Button
+            variant="outline"
+            className="cursor-pointer"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+            data-testid="people-load-more"
+          >
+            {isLoadingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isLoadingMore ? "Loading…" : "Load more"}
           </Button>
         </div>
       )}
 
-      <div className="text-muted-foreground text-center text-xs">
-        Showing {people.length} of {total} people
+      <div
+        className="text-muted-foreground text-center text-xs"
+        data-testid="people-count"
+      >
+        Showing {shown.length} of {total} people
       </div>
     </div>
   );

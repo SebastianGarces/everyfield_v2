@@ -1,12 +1,21 @@
 "use server";
 
 import { checkForDuplicates } from "@/lib/people/duplicates";
+import { personPhotoRefusal } from "@/lib/people/photo";
 import { emitPersonStatusChanged } from "@/lib/people/events";
+import {
+  parsePeopleListSearchParams,
+  PEOPLE_PAGE_SIZE,
+  type PeopleListSearchParams,
+} from "@/lib/people/list-params";
 import {
   createPerson,
   deletePerson,
   getPerson,
+  listPeople,
+  setPersonPhoto,
   updatePerson,
+  type ListPeopleResult,
 } from "@/lib/people/service";
 import { changeStatus, recordStatusChange } from "@/lib/people/status";
 import type {
@@ -16,6 +25,12 @@ import type {
   PersonStatus,
   StatusTransition,
 } from "@/lib/people/types";
+import {
+  deleteFile,
+  getExtensionFromMimeType,
+  personPhotoStorageKey,
+  uploadFile,
+} from "@/lib/storage";
 import {
   personCreateSchema,
   personQuickAddSchema,
@@ -147,6 +162,135 @@ export async function updatePersonAction(
       revalidatePath(`/people/${personId}`);
 
       return { success: true, data: person };
+    }
+  );
+}
+
+/**
+ * The next page of `/people` for the "Load more" button (P-006a).
+ *
+ * TAKES THE URL, NOT A FILTER OBJECT. The page's filters live in the address
+ * bar, and the appended rows have to come from the SAME query the first page
+ * came from — so the client hands back the search params it is rendering under
+ * and this action reads them through `parsePeopleListSearchParams`, the one
+ * reader. A filter object marshalled by the client would be a second reading of
+ * the URL, free to drift from the page's.
+ *
+ * The cursor is explicit rather than taken from those params: the URL's
+ * `cursor` is where the FIRST page started, and the button is walking on from
+ * wherever the client has got to.
+ */
+export async function loadMorePeopleAction(
+  params: PeopleListSearchParams,
+  cursor: string
+): Promise<ActionResult<ListPeopleResult>> {
+  return withChurchSession(
+    "read",
+    "loadMorePeopleAction",
+    {
+      noChurch: "You must be associated with a church to view people",
+      fallback: "Failed to load more people",
+    },
+    async ({ churchId }) => {
+      const { search, status, source, tagIds } =
+        parsePeopleListSearchParams(params);
+
+      const page = await listPeople(churchId, {
+        cursor,
+        search,
+        status,
+        source,
+        tagIds,
+        limit: PEOPLE_PAGE_SIZE,
+      });
+
+      return { success: true, data: page };
+    }
+  );
+}
+
+/**
+ * Upload (or replace) a person's photo (P-024a).
+ *
+ * The object goes up BEFORE the row points at it, and the OLD object is deleted
+ * only AFTER the row stops pointing at it — the same asymmetry the generated
+ * documents path argues (`memory/invariants.md` → Generated Documents). An
+ * orphaned object is garbage a sweep collects; a row naming an object that is
+ * not there is a broken avatar nothing inside the app can repair.
+ *
+ * The church scope is checked before a byte is written: `personId` arrives from
+ * the client, so an id from another tenant must fail here rather than land a
+ * file under this church's prefix.
+ */
+export async function uploadPersonPhotoAction(
+  personId: string,
+  formData: FormData
+): Promise<ActionResult<PersonForClient>> {
+  return withChurchSession(
+    "people.write",
+    "uploadPersonPhotoAction",
+    {
+      noChurch: "You must be associated with a church to update people",
+      known: {
+        "Person not found": "Person not found or has been deleted",
+      },
+      fallback: "An unexpected error occurred while uploading the photo",
+    },
+    async ({ churchId }) => {
+      const file = formData.get("photo");
+
+      if (!(file instanceof File) || file.size === 0) {
+        return { success: false, error: "Choose a photo to upload." };
+      }
+
+      // THE GATE, and the same rule the picker applied before sending. A POST
+      // that never saw the picker meets it here for the first time.
+      const refusal = personPhotoRefusal(file);
+      if (refusal) {
+        return { success: false, error: refusal };
+      }
+
+      // Never write against a personId the caller's church does not own —
+      // checked BEFORE the upload so no file lands for a foreign person.
+      const existing = await getPerson(churchId, personId);
+      if (!existing) {
+        return {
+          success: false,
+          error: "Person not found or has been deleted",
+        };
+      }
+
+      const key = personPhotoStorageKey(
+        churchId,
+        personId,
+        getExtensionFromMimeType(file.type)
+      );
+
+      await uploadFile(key, Buffer.from(await file.arrayBuffer()), file.type);
+
+      const updated = await setPersonPhoto(churchId, personId, key);
+      if (!updated) {
+        return {
+          success: false,
+          error: "Person not found or has been deleted",
+        };
+      }
+
+      // The row no longer names the previous object, so it is safe to remove.
+      // A failure here leaves garbage, not a broken profile, so it never fails
+      // the upload the planter just watched succeed.
+      if (updated.previousKey && updated.previousKey !== key) {
+        try {
+          await deleteFile(updated.previousKey);
+        } catch (error) {
+          console.error("uploadPersonPhotoAction stale object:", error);
+        }
+      }
+
+      revalidatePath("/people");
+      revalidatePath(`/people/${personId}`);
+
+      return { success: true, data: updated.person };
     }
   );
 }

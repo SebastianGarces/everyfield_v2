@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { personActivities, users, type ActivityType } from "@/db/schema";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, type SQL } from "drizzle-orm";
 import {
   type ActivityWithPerformer,
   type GetActivitiesOptions,
@@ -31,6 +31,36 @@ export async function logPersonActivity(entry: {
   performedBy: string;
 }): Promise<void> {
   await db.insert(personActivities).values(entry);
+}
+
+/**
+ * THE PREDICATE THAT SAYS "THIS NOTE IS YOURS TO CHANGE" (P-010e).
+ *
+ * Four terms, and every one of them is load-bearing:
+ *
+ *  - the id, which is a value the CLIENT chose;
+ *  - the church, which is therefore the tenancy boundary — without it an
+ *    `activityId` from another plant matches;
+ *  - `note_added`, so a status change or a tag entry cannot be rewritten
+ *    through the note endpoints;
+ *  - the performer, because a note is its author's sentence.
+ *
+ * Declared once because the edit and the delete must not be able to disagree
+ * about who may act: a second copy is a second place to forget the church term.
+ * A row that does not match reads as MISSING, which is the same answer a
+ * deleted note gets.
+ */
+export function authoredNoteCondition(
+  churchId: string,
+  activityId: string,
+  userId: string
+): SQL {
+  return and(
+    eq(personActivities.id, activityId),
+    eq(personActivities.churchId, churchId),
+    eq(personActivities.activityType, "note_added"),
+    eq(personActivities.performedBy, userId)
+  )!;
 }
 
 export async function getActivities(
