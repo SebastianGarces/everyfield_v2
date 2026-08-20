@@ -179,9 +179,8 @@ test("every person-status badge reads its label at AA, in both themes", () => {
   // "0 of 0" as a pass. Both floors below are external to it:
   //   · the ABSOLUTE fourteen — seven statuses across two themes, Prospect
   //     included now that its neutral variant is resolved rather than skipped.
-  //     memory/invariants.md, memory/invariants/design-tokens.md and
-  //     product-docs/decisions.md all cite that number, so it is asserted here
-  //     rather than narrated there.
+  //     memory/invariants.md and product-docs/decisions.md both cite that
+  //     number, so it is asserted here rather than narrated there.
   //   · `STATUS_LABELS` (`status.shared.ts`), the domain's one status map — so
   //     a status that gains a label but no badge fails here too.
   assert.ok(

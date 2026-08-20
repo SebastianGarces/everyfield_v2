@@ -10,7 +10,7 @@ import { users, type UserRole } from "@/db/schema";
 // them. The conflict clause is the invariant, and a conflict clause is a
 // property of the emitted SQL, so `seed-account-writes.test.ts` renders this
 // builder with `.toSQL()` rather than grepping the script's source. Same rule
-// as `memory/invariants/wiki-articles.md` / `src/lib/wiki/tenancy.test.ts`.
+// as `src/lib/wiki/tenancy.test.ts`.
 //
 // Where the password comes from, and whether it is recoverable, is a different
 // question with a single home: `protected-database.ts`.

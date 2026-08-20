@@ -274,7 +274,7 @@ test("the seeded tasks take the one description door, like every other writer", 
   // `seedLaunchMilestones` is the FOURTH writer of `tasks.description`, beside
   // `createTask`, `updateTask` and `importTaskTemplate` — a live path, run on
   // every launch schedule, not a dev seed. T-021 says every write goes through
-  // `normalizeTaskDescription` (memory/invariants/tasks.md), and this one wrote
+  // `normalizeTaskDescription` (`src/lib/tasks/descriptions.ts`), and this one wrote
   // the template's raw string straight into the column. Read off the source
   // because `planSeedRows` is private and the statement builder is handed rows
   // the test itself made up — the gate lives in the planner, not in the SQL.

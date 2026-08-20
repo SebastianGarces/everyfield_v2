@@ -31,7 +31,7 @@ import {
 //
 // WHAT IS ASSERTED, AND HOW. Where the SQL is the invariant, render the builder
 // and inspect the statement — never grep the script's source
-// (`memory/invariants/wiki-articles.md`; `src/lib/wiki/tenancy.test.ts`). The
+// (`src/lib/wiki/tenancy.test.ts`). The
 // conflict clause IS the defect, so `.toSQL()` renders it here. Which rows get
 // written is a function, `oversightAdminSeeds()`, so it is called with a
 // fixture rather than pattern-matched in the script that calls it.
