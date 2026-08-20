@@ -6,11 +6,12 @@ import { EmailSuppressionNotice } from "@/components/notifications/email-suppres
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
+import { isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
 import { NOTIFICATION_PREFERENCES_HEADING_ID } from "@/lib/notifications/channels/email";
 import { isAddressSuppressed } from "@/lib/notifications/channels/suppression";
 import {
-  audienceForRole,
+  audienceForTenancy,
   buildPreferenceMatrixView,
   loadUserPreferences,
   preferenceOwnerFromSession,
@@ -43,16 +44,15 @@ export const metadata: Metadata = {
 export default async function SettingsPage() {
   const session = await verifySession();
   const owner = preferenceOwnerFromSession(session);
-  const church =
-    session.user.role === "planter" && session.user.churchId
-      ? await getCurrentUserChurch()
-      : null;
+  const church = isPlantOwner(session.user)
+    ? await getCurrentUserChurch()
+    : null;
   // The matrix must be resolved against the SAME audience the feed, the badge
   // and the dispatcher resolve against, or an absent row renders as one value
   // here and behaves as another there (N-027).
   const view = buildPreferenceMatrixView(
     await loadUserPreferences(owner),
-    audienceForRole(session.user.role)
+    audienceForTenancy(session.user)
   );
 
   // #324. Asked for the SESSION'S OWN address and nowhere else: this is the one
@@ -61,19 +61,17 @@ export default async function SettingsPage() {
   // renders, so the ordinary case costs one bounded query and shows no notice.
   const emailSuppressed = await isAddressSuppressed(session.user.email);
 
-  const isPlanterWithPlant =
-    session.user.role === "planter" && Boolean(session.user.churchId);
+  const isPlanterWithPlant = isPlantOwner(session.user);
 
-  // #304 WS3 (ruled 2026-08-09): `/settings/association` serves TWO roles now —
-  // the planter answering for their plant, and a sending-church admin answering
-  // a network's invitation for their sending church. The link has to be visible
+  // #304 WS3 (ruled 2026-08-09): `/settings/association` serves TWO tenancies
+  // now — the plant's Owner answering for their plant, and a sending church's
+  // answering a network's invitation for their org. The link has to be visible
   // to both or the second half of "no invitation that cannot be answered"
   // (`memory/invariants.md` → Multi-Tenancy) is a page nobody can find. The
   // condition mirrors the page's own guard exactly; anyone else is redirected
   // there, and every write behind it refuses them again server-side.
   const isSendingChurchAdminWithOrg =
-    session.user.role === "sending_church_admin" &&
-    Boolean(session.user.sendingChurchId);
+    oversightOrgOf(session.user)?.type === "sending_church";
   const canManageAssociation =
     isPlanterWithPlant || isSendingChurchAdminWithOrg;
 

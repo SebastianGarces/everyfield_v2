@@ -148,7 +148,7 @@ test("the cadence action refuses the roles the screen no longer offers it to", (
   // refusal lives here too, and says the same sentence the screen does.
   assert.match(
     ACTIONS_CODE,
-    /audienceForRole\(session\.user\.role\) === "oversight"/
+    /audienceForTenancy\(session\.user\) === "oversight"/
   );
   assert.match(ACTIONS_CODE, /error: OVERSIGHT_DIGEST_CADENCE_NOTE/);
 });
@@ -397,7 +397,7 @@ test("the timezone action takes an IANA id and mints the church from the session
     /export async function setChurchTimeZoneAction\(\s*timeZone: string\s*\)/
   );
   assert.match(ACTIONS_CODE, /refine\(isValidTimeZone\)/);
-  assert.match(ACTIONS_CODE, /session\.user\.role !== "planter"/);
+  assert.match(ACTIONS_CODE, /!isPlantOwner\(session\.user\)/);
   assert.match(
     ACTIONS_CODE,
     /setChurchTimeZone\(\s*session\.user\.churchId,\s*parsed\.data\s*\)/

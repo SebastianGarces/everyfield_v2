@@ -1279,7 +1279,7 @@ async function seedAll(): Promise<SeededChurch[]> {
   await db.insert(users).values({
     email: `network-admin@${EVAL_EMAIL_DOMAIN}`,
     name: "EVAL Network Admin",
-    role: "network_admin",
+    seat: "owner",
     passwordHash,
     sendingNetworkId: network.id,
   });
@@ -1297,7 +1297,7 @@ async function seedAll(): Promise<SeededChurch[]> {
       .values({
         email: `planter-${profile.key}@${EVAL_EMAIL_DOMAIN}`,
         name: `EVAL Planter (${profile.key})`,
-        role: "planter",
+        seat: "owner",
         passwordHash,
         sendingNetworkId: network.id,
         sendingChurchId: sendingChurch.id,

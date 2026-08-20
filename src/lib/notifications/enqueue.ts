@@ -12,13 +12,8 @@ import {
   type NotificationCategory,
   type User,
 } from "@/db/schema";
-import {
-  canAccessChurch,
-  canAccessFeatureData,
-  isOversightUser,
-} from "@/lib/auth/access";
-
-import { OVERSIGHT_ADMIN } from "./oversight-admin";
+import { canAccessChurch, canAccessFeatureData } from "@/lib/auth/access";
+import { isOversightUser, oversightOrgOf } from "@/lib/auth/tenancy";
 
 import {
   churchAnchor,
@@ -526,7 +521,7 @@ export async function runCancelByEntity(
  */
 const accessColumns = {
   id: users.id,
-  role: users.role,
+  seat: users.seat,
   churchId: users.churchId,
   sendingChurchId: users.sendingChurchId,
   sendingNetworkId: users.sendingNetworkId,
@@ -537,35 +532,30 @@ const accessColumns = {
  * (#304 WS3).
  *
  * The church arm of gate 1 asks `canAccessChurch`, which resolves an oversight
- * admin's reach THROUGH a plant's FKs. An org-anchored notification has no
+ * account's reach THROUGH a plant's FKs. An org-anchored notification has no
  * plant, so there is nothing for that question to traverse, and the honest
- * question is the direct one: does this user's own org FK name the org the row
- * is filed under, and is their role an oversight one?
+ * question is the direct one: is the org this row is filed under the org this
+ * account's own tenancy names?
  *
- * Both halves matter. Without the ROLE check a `team_member` carrying a stray
- * `sending_church_id` would qualify; without the ID check every oversight admin
- * in the product would. It is deliberately NOT a hierarchy walk — a network
- * admin does not receive a sending church's own notifications, because the
- * notification is filed under the SENDING CHURCH and the network is a different
- * tenant (the same rule that keeps a plant's rows out of its network's feed).
+ * BOTH HALVES MATTER, and neither is a literal here. The KIND picks the column
+ * from `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), so there is no
+ * `anchor.type === …` branch left to forget; `oversightOrgOf`
+ * (`@/lib/auth/tenancy`) decides whether the account's FKs name that org and
+ * nothing else, so a plant Member carrying a stray `sending_church_id` does not
+ * qualify. It is deliberately NOT a hierarchy walk — a network account does not
+ * receive a sending church's own notifications, because the notification is
+ * filed under the SENDING CHURCH and the network is a different tenant (the
+ * same rule that keeps a plant's rows out of its network's feed).
  *
- * BOTH HALVES COME FROM `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), NOT FROM
- * LITERALS HERE — the role AND the `users` column that carries that kind of
- * org. That file's header says why the pairing is one table; the consequence
- * here is that there is no `anchor.type === …` branch left to forget, and that
- * the role test subsumes `isOversightUser` (every row in the table names an
- * oversight role, so a separate floor could only re-admit what this line
- * already required).
- *
- * Pure, and exported so it can be tested over the whole role × org domain.
+ * Pure, and exported so it can be tested over the whole tenancy × org domain.
  */
 export function recipientAdministersOrg(
   recipient: User,
   anchor: OrgAnchor
 ): boolean {
-  const { role, fk } = OVERSIGHT_ADMIN[anchor.type];
+  const org = oversightOrgOf(recipient);
 
-  return recipient.role === role && recipient[fk] === anchor.orgId;
+  return org?.type === anchor.type && org.id === anchor.orgId;
 }
 
 export const dbEnqueueDeps: EnqueueDeps = {
@@ -641,9 +631,9 @@ export const dbEnqueueDeps: EnqueueDeps = {
       // — including the two gated milestones and the digest — cannot reach this
       // branch at all.
       //
-      // AND THE ORG IS PAIRED TO THE ROLE (#304 round 8). `recipient` is a
-      // whole `users` row and both oversight FKs live on it, so the probe used
-      // to OR them together and a `network_admin` carrying a stray
+      // AND THE ORG IS THE ROW'S OWN TENANCY (#304 round 8). `recipient` is a
+      // whole `users` row and all three tenancy FKs live on it, so the probe
+      // used to OR the oversight two together and an account carrying a stray
       // `sending_church_id` could rest on an invitation THAT sending church
       // issued — the same hierarchy walk `recipientAdministersOrg` refuses one
       // arm up. `orgHasRecordedRelationshipWithChurch` now takes the recipient

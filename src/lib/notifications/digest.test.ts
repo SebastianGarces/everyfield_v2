@@ -662,7 +662,16 @@ test("a user who turned the digest category off is recorded suppressed_by_prefer
   const row = digestRow();
   const store = new TinyDispatchStore(
     [row],
-    [{ id: PLANTER, email: "planter@example.com", name: null, role: "planter" }]
+    [
+      {
+        id: PLANTER,
+        email: "planter@example.com",
+        name: null,
+        churchId: CHURCH_A,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
+    ]
   );
   store.disable(PLANTER, "email");
   store.disable(PLANTER, "in_app");
@@ -689,7 +698,16 @@ test("with the digest on, the dispatcher sends it through the digest template", 
   const row = digestRow();
   const store = new TinyDispatchStore(
     [row],
-    [{ id: PLANTER, email: "planter@example.com", name: null, role: "planter" }]
+    [
+      {
+        id: PLANTER,
+        email: "planter@example.com",
+        name: null,
+        churchId: CHURCH_A,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
+    ]
   );
 
   const summary = await runDispatch(store, { now: NOW });

@@ -29,37 +29,50 @@
 // without a `DATABASE_URL` is what lets `session.test.ts` assert this guard's
 // behaviour with no database at all.
 //
-// THE ROLE PAIR IS NOT DECLARED HERE. It used to be — a second `as const` tuple
-// beside `OVERSIGHT_ROLES` in `@/lib/auth/access`, reconciled by a regex that
-// parsed that module's source text. Two implementations of one authority policy,
-// with a drift guard pointed backwards: the change that removes the reason for
-// the copy (declaring `OVERSIGHT_ROLES` `as const`) was the change that failed
-// the guard. The declaration now lives in `@/lib/auth/roles`, an import-free
-// leaf that reaches no database, so this module imports it directly and
-// `isOversightRole` gets its type predicate from the one declaration.
+// WHO MAY OPEN ONE IS NOT DECLARED HERE. It used to be — a second `as const`
+// tuple of oversight roles beside the one in `@/lib/auth/access`, reconciled by
+// a regex that parsed that module's source text. Two implementations of one
+// authority policy, with a drift guard pointed backwards. The question is now
+// answered once, by `oversightOrgOf` in `@/lib/auth/tenancy`, an import-free
+// leaf that reaches no database.
+//
+// AND IT RETURNS THE ORG, NOT A BOOLEAN. Every page past this guard needed the
+// caller's org kind a second time — for the scope label, for the network-only
+// refusal on `/oversight/sending-churches` — and used to re-derive it from
+// `user.role`. With the role gone there is nothing to re-derive it FROM except
+// the same two FKs this guard already read, so it hands back what it resolved.
 // ============================================================================
 
 import { redirect } from "next/navigation";
 
 import type { User } from "@/db/schema";
-// Imported, never re-served: `@/lib/auth/roles` is the one place either symbol
-// comes from, the same rule `@/lib/invitations/register-path` lives by.
-import { isOversightRole, type OversightRole } from "@/lib/auth/roles";
+// Imported, never re-served: `@/lib/auth/tenancy` is the one place these come
+// from, the same rule `@/lib/invitations/register-path` lives by.
+import { oversightOrgOf, type OversightOrg } from "@/lib/auth/tenancy";
 
-/** A session user already known to hold one of the two oversight roles. */
-export type OversightUser = User & { role: OversightRole };
+/**
+ * A session whose tenancy is known to be an oversight org, with that org
+ * resolved — the pair every `/oversight` page reads.
+ *
+ * TWO FIELDS RATHER THAN A NARROWED `User`, because there is nothing on the row
+ * to narrow any more. The old shape was `User & { role: OversightRole }` and
+ * needed a cast, since `User` is not a discriminated union and refining a
+ * property does not refine the object. `org` carries the refinement instead: it
+ * is non-null by construction, so a page reads `org.type` without asking again.
+ */
+export type OversightSession = { user: User; org: OversightOrg };
 
 /**
  * The session behind every `/oversight` page, or a redirect.
  *
  * Two refusals, and they are deliberately different: no session goes to
- * `/login` because signing in is what is missing, and a church-level role goes
- * to `/dashboard` because they have a home to be sent to. Neither is a 404 —
- * that answer is reserved for the one case where the ROUTE's existence is
+ * `/login` because signing in is what is missing, and a church-level account
+ * goes to `/dashboard` because they have a home to be sent to. Neither is a
+ * 404 — that answer is reserved for the one case where the ROUTE's existence is
  * itself the disclosure (`/oversight/sending-churches` refusing a sending-church
- * admin), and it stays at that page because it is that page's rule.
+ * account), and it stays at that page because it is that page's rule.
  */
-export async function requireOversightUser(): Promise<OversightUser> {
+export async function requireOversightUser(): Promise<OversightSession> {
   const { getCurrentSession } = await import("@/lib/auth");
 
   const { user } = await getCurrentSession();
@@ -68,13 +81,11 @@ export async function requireOversightUser(): Promise<OversightUser> {
     redirect("/login");
   }
 
-  if (!isOversightRole(user.role)) {
+  const org = oversightOrgOf(user);
+
+  if (!org) {
     redirect("/dashboard");
   }
 
-  // The cast is the narrowing TypeScript will not do for us: `isOversightRole`
-  // is a predicate about `user.role`, and `User` is not a discriminated union,
-  // so refining the property does not refine the object. It is sound because
-  // the line above is the only way past — `redirect()` returns `never`.
-  return user as OversightUser;
+  return { user, org };
 }

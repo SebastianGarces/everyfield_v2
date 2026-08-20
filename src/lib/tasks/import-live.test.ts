@@ -60,7 +60,7 @@ async function seed(prefix: string): Promise<Fixture> {
       email: `${prefix}@example.test`,
       passwordHash: "not-a-real-hash",
       name: `${prefix} planter`,
-      role: "planter",
+      seat: "owner",
       churchId: church.id,
     })
     .returning({ id: users.id });

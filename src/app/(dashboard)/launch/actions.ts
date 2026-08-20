@@ -73,9 +73,9 @@ const NO_CHURCH_MESSAGE =
 
 /**
  * Turn a thrown error into a sentence, without telling the caller which guard
- * refused them. `requireRole` and `requireChurchAccess` throw `Forbidden: …`
- * strings that name roles and ids; those belong in the server log, not in a
- * response.
+ * refused them. `requirePlantOwner`, `requireChurchLevel` and
+ * `requireChurchAccess` throw `Forbidden: …` strings that name seats and ids;
+ * those belong in the server log, not in a response.
  */
 function toActionError(error: unknown, verb: string): ActionResult<never> {
   console.error(`launch action failed while ${verb}:`, error);

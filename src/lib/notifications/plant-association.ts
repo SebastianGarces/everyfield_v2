@@ -18,7 +18,7 @@ import {
 // oversight-eligible, and has the plant consented. This file is the other
 // direction, and it is the ordinary one:
 //
-//   * the recipient is the plant's PLANTER, a church-level role whose
+//   * the recipient is the plant's OWNER, a church-level account whose
 //     `canAccessChurch` on their own plant is true by construction;
 //   * `enqueue`'s gates 2 and 3 (`OVERSIGHT_ELIGIBLE_CATEGORIES`, the
 //     `share_activity_with_oversight` toggle) are asked only of oversight
@@ -95,8 +95,16 @@ const emptyReport = (): PlantNotifyReport => ({
 export interface PlantAssociationDeps {
   /** The real `enqueue` — the gate, and the only writer. */
   enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
-  /** WHO inside the plant is told. */
-  listPlanters(churchId: string): Promise<PlantRecipient[]>;
+  /**
+   * WHO inside the plant is told — the Owner, or nobody.
+   *
+   * SINGULAR SINCE #494. `users_church_owner_unique_idx` makes a second Owner
+   * unwritable, so "the plant's Owner" is at most one row and a list was a
+   * shape the database can no longer produce. A plant with no Owner is a real
+   * state (OB-004's `no_planter`), which is why the answer is nullable rather
+   * than assumed.
+   */
+  plantOwner(churchId: string): Promise<PlantRecipient | null>;
   /** The removing org's display name, or null when it does not resolve. */
   resolveOrgName(
     orgType: AssociationOrgType,
@@ -152,31 +160,26 @@ export async function announceRemovedFromOversightOrg(
     const orgName = await deps.resolveOrgName(facts.orgType, facts.orgId);
     if (!orgName) return report;
 
-    const recipients = await deps.listPlanters(facts.churchId);
-    report.considered = recipients.length;
+    // ONE RECIPIENT, so no loop and no per-recipient catch. Both existed to
+    // stop one recipient's failure costing the others theirs; with at most one
+    // Owner there are no others, and the outer catch below already keeps a
+    // failure from costing the caller its sever.
+    const owner = await deps.plantOwner(facts.churchId);
+    if (!owner) return report;
 
-    for (const recipient of recipients) {
-      try {
-        const result = await deps.enqueue(
-          composeRemovedFromOrg({ ...facts, orgName }, recipient.id)
-        );
-        if (result.status === "recorded") {
-          report.recorded += 1;
-          if (result.created) report.created += 1;
-        } else {
-          report.skipped += 1;
-        }
-      } catch (error) {
-        // One recipient's failure must not cost the others theirs, and none of
-        // them may cost the caller its sever.
-        report.failed += 1;
-        console.error("plant association notification failed", {
-          churchId: facts.churchId,
-          error,
-        });
-      }
+    report.considered = 1;
+
+    const result = await deps.enqueue(
+      composeRemovedFromOrg({ ...facts, orgName }, owner.id)
+    );
+    if (result.status === "recorded") {
+      report.recorded += 1;
+      if (result.created) report.created += 1;
+    } else {
+      report.skipped += 1;
     }
   } catch (error) {
+    report.failed = report.considered - report.recorded - report.skipped;
     console.error("plant association announcement failed", {
       churchId: facts.churchId,
       orgType: facts.orgType,
@@ -192,21 +195,27 @@ export async function announceRemovedFromOversightOrg(
 // ----------------------------------------------------------------------------
 
 /**
- * The plant's planter(s).
+ * The plant's Owner, or null.
  *
- * The ROLE is in the statement, not filtered afterwards: OV-010 makes the
- * planter the plant's decision-maker for its associations, so they are the
- * person this concerns. A projection rather than `select()` — answering "who"
+ * The SEAT is in the statement, not filtered afterwards: OV-010 makes the
+ * Owner the plant's decision-maker for its associations (AS-003), so they are
+ * the person this concerns. ONE ROW AT MOST, and the return type says so —
+ * `users_church_owner_unique_idx` is what makes that true, rather than the
+ * query hoping for it. A plant with no Owner answers null, which is OB-004's
+ * `no_planter` and not an error. A projection rather than `select()` — answering "who"
  * must not pull `password_hash` into application memory (the same reasoning as
  * `accessColumns` in `./enqueue.ts`).
  */
-export async function listPlantersOfChurch(
+export async function plantOwnerOfChurch(
   churchId: string
-): Promise<PlantRecipient[]> {
-  return db
+): Promise<PlantRecipient | null> {
+  const [owner] = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.churchId, churchId), eq(users.role, "planter")));
+    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .limit(1);
+
+  return owner ?? null;
 }
 
 /**
@@ -237,6 +246,6 @@ export async function resolveOversightOrgName(
 
 export const dbPlantAssociationDeps: PlantAssociationDeps = {
   enqueue,
-  listPlanters: listPlantersOfChurch,
+  plantOwner: plantOwnerOfChurch,
   resolveOrgName: resolveOversightOrgName,
 };

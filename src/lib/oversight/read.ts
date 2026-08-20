@@ -85,7 +85,7 @@ import { daysUntilTarget } from "@/lib/launch/countdown";
 // It reaches no database (`import type` only, enforced by `roles.test.ts`), so
 // it does NOT belong with the deferred imports below — and it must not: the
 // refusal in `getOversightPortfolio` has to run before any `@/db` edge.
-import { isOversightRole } from "@/lib/auth/roles";
+import { isOversightUser, oversightOrgOf } from "@/lib/auth/tenancy";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -183,18 +183,19 @@ export function portfolioPlantsStatement(
  *
  * IT REFUSES A NON-OVERSIGHT ROLE ITSELF, and the docblock used to claim this
  * was `getAccessibleChurchIds`'s job. It is not: that function answers "which
- * churches may this user read", and for a `planter` or a `team_member` the
- * answer is `[user.churchId]` and for a `coach` it is their assignments — real
- * ids, which would have reached the `in (...)` below and rendered a one-plant
- * "portfolio" for somebody with no oversight org at all. Every other exported
- * read in this module has its own refusal (`listOversightPlants` and
+ * churches may this user read", and for a seat in a plant the answer is
+ * `[user.churchId]` and for a seatless account it is their coach assignments —
+ * real ids, which would have reached the `in (...)` below and rendered a
+ * one-plant "portfolio" for somebody with no oversight org at all. Every other
+ * exported read in this module has its own refusal (`listOversightPlants` and
  * `getOversightPlantDetail` through `resolveCallerOrg`, which resolves no org
- * for a church-level role; `listNetworkSendingChurches` by role directly), and
+ * for a church-level tenancy; `listNetworkSendingChurches` by tenancy
+ * directly), and
  * `requireOversightUser` states the rule it is one half of: THE ROUTE GUARD IS
  * NOT THE ONLY GUARD AND MUST NOT BECOME ONE. This was the one read that
  * leaned on it.
  *
- * `isOversightRole` is a STATIC import on purpose: `@/lib/auth/roles` is the
+ * `isOversightUser` is a STATIC import on purpose: `@/lib/auth/tenancy` is the
  * import-free leaf (`import type` only), so the refusal costs this module
  * nothing and — unlike a check inside `@/lib/auth/access` — it runs before any
  * `@/db` edge is taken. That is what lets `read.test.ts` assert the refusal
@@ -208,7 +209,7 @@ export function portfolioPlantsStatement(
 export async function getOversightPortfolio(
   user: User
 ): Promise<OversightPortfolioPlant[]> {
-  if (!isOversightRole(user.role)) return [];
+  if (!isOversightUser(user)) return [];
 
   const { getAccessibleChurchIds } = await import("@/lib/auth/access");
 
@@ -626,55 +627,63 @@ interface CallerOrg {
 /**
  * The caller's OWN organization, read from the session user's org FK.
  *
- * Null for any role that is not an oversight admin, and for an oversight admin
- * with no organization — both of which already resolve to zero accessible
- * churches, so this is the same refusal stated once more where the name is
- * needed.
+ * Null for any tenancy that is not an oversight org, and for an oversight
+ * tenancy whose org row is gone — both of which already resolve to zero
+ * accessible churches, so this is the same refusal stated once more where the
+ * name is needed.
+ *
+ * `oversightOrgOf` decides which org the row names, so the ambiguity a bare
+ * `if (user.sendingNetworkId)` used to carry — a row holding two tenancy FKs —
+ * is refused before either query runs rather than resolved by whichever branch
+ * happened to be written first.
  */
 async function resolveCallerOrg(user: User): Promise<CallerOrg | null> {
   const { db } = await import("@/db");
 
-  if (user.role === "network_admin" && user.sendingNetworkId) {
+  const org = oversightOrgOf(user);
+  if (!org) return null;
+
+  if (org.type === "network") {
     const [network] = await db
       .select({ id: sendingNetworks.id, name: sendingNetworks.name })
       .from(sendingNetworks)
-      .where(eq(sendingNetworks.id, user.sendingNetworkId))
+      .where(eq(sendingNetworks.id, org.id))
       .limit(1);
     return network
       ? { orgType: "network", orgId: network.id, orgName: network.name }
       : null;
   }
 
-  if (user.role === "sending_church_admin" && user.sendingChurchId) {
-    const [sendingChurch] = await db
-      .select({ id: sendingChurches.id, name: sendingChurches.name })
-      .from(sendingChurches)
-      .where(eq(sendingChurches.id, user.sendingChurchId))
-      .limit(1);
-    return sendingChurch
-      ? {
-          orgType: "sending_church",
-          orgId: sendingChurch.id,
-          orgName: sendingChurch.name,
-        }
-      : null;
-  }
-
-  return null;
+  const [sendingChurch] = await db
+    .select({ id: sendingChurches.id, name: sendingChurches.name })
+    .from(sendingChurches)
+    .where(eq(sendingChurches.id, org.id))
+    .limit(1);
+  return sendingChurch
+    ? {
+        orgType: "sending_church",
+        orgId: sendingChurch.id,
+        orgName: sendingChurch.name,
+      }
+    : null;
 }
 
 /**
- * The plant's lead planter's NAME, per church.
+ * The plant's OWNER's NAME, per church.
  *
  * Not a person record: this is the account the org invited by email and whose
  * acceptance created the association (OV-001 lists it as a directory column).
  * The name is all that is selected — no email, no phone, no id.
  *
- * Ordered, because nothing stops a church having two planter accounts and the
- * first row wins below: without an ORDER BY the directory would name one of
- * them on one render and the other on the next, for no reason a reader could
- * see. Oldest account first — the one whose acceptance made the association —
- * with the id breaking a same-timestamp tie so the answer is total.
+ * THE ORDER BY IS NOW BELT AND BRACES, and it stays. It was load-bearing while
+ * nothing stopped a church having two planter accounts: without it the
+ * directory named one of them on one render and the other on the next, for no
+ * reason a reader could see. `users_church_owner_unique_idx` (migration 0050)
+ * makes a second Owner unwritable, so the query returns at most one row per
+ * church — but a query whose answer depends on which row Postgres hands back
+ * first is worth pinning whether or not a constraint currently makes the
+ * question moot. Oldest account first, with the id breaking a same-timestamp
+ * tie so the answer is total.
  */
 async function readPlanterNames(
   churchIds: string[]
@@ -684,7 +693,7 @@ async function readPlanterNames(
   const rows = await db
     .select({ churchId: users.churchId, name: users.name })
     .from(users)
-    .where(and(inArray(users.churchId, churchIds), eq(users.role, "planter")))
+    .where(and(inArray(users.churchId, churchIds), eq(users.seat, "owner")))
     .orderBy(asc(users.createdAt), asc(users.id));
 
   const names = new Map<string, string>();

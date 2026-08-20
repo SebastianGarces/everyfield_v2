@@ -2,8 +2,8 @@
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
-import type { UserRole } from "@/db/schema";
-import { sendingChurches, sendingNetworks, users } from "@/db/schema";
+import type { UserSeat } from "@/db/schema";
+import { users } from "@/db/schema";
 import {
   createSession,
   generateSessionToken,
@@ -20,12 +20,11 @@ import {
   bindOpenInvitationTarget,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
-import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
-import type { AccountType } from "@/lib/validations/auth";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { redirect } from "next/navigation";
+import { createAccountEntities } from "./account-entities";
 import {
   BETA_GATE_ERROR,
   BETA_GATE_INVALID_ERROR,
@@ -209,7 +208,7 @@ export async function register(
     userId,
     invitedPlanter
   );
-  const { role, churchId, sendingChurchId, sendingNetworkId } = account;
+  const { seat, churchId, sendingChurchId, sendingNetworkId } = account;
 
   const statements: [BatchItem<"pg">, ...BatchItem<"pg">[]] = [
     db
@@ -219,7 +218,12 @@ export async function register(
         email: identifier,
         passwordHash,
         name,
-        role,
+        // THE SEAT AND ITS TENANCY ARE WRITTEN TOGETHER, and this is the one
+        // place outside the seat-management surface where a seat is granted
+        // (AS-012). Neither half means anything alone: `owner` says nothing
+        // about whose owner, and an org FK with no seat is an account with no
+        // standing in it.
+        seat,
         // For an invited planter the church link is written by the
         // `linkUserToChurchFilter` compare-and-set in `account.linkStatements`
         // — the same statement onboarding's step 1 batches — never by this
@@ -266,7 +270,7 @@ export async function register(
   if (invitation) {
     await redeemRegistrationInvitation(invitation, {
       id: userId,
-      role,
+      seat,
       churchId,
       sendingChurchId,
       sendingNetworkId,
@@ -292,135 +296,6 @@ const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
 const USERS_EMAIL_UNIQUE = "users_email_unique";
 
 /**
- * Plan the organizational entity for the account type: the role and FK values
- * to set on the user, plus the entity's statements for the caller's batch —
- * never awaited here, so the entity, the user, the church link and the privacy
- * row commit or roll back together. Ids are minted up front
- * (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so each
- * statement can reference rows that do not exist yet.
- *
- * Planters sign up without creating a church — they get free access to
- * Phase 0 content and the Wiki. They create their church from the dashboard
- * when they're ready.
- */
-function createAccountEntities(
-  accountType: AccountType,
-  organizationName: string | null,
-  userId: string,
-  createChurchForPlanter = false
-): {
-  role: UserRole;
-  churchId: string | null;
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-  /**
-   * Statements the users FKs point at — batched BEFORE its insert. Empty for
-   * planters: an invited planter's church tuple lives in `linkStatements`.
-   */
-  statements: BatchItem<"pg">[];
-  /**
-   * Statements that need the users row to exist — batched AFTER its insert.
-   * For an invited planter this is `churchCreationStatements` whole.
-   */
-  linkStatements: BatchItem<"pg">[];
-} {
-  switch (accountType) {
-    case "planter": {
-      // An INVITED planter is the exception: the invitation exists to associate
-      // a church plant, so the plant is created here and named by the planter.
-      // Note what is NOT set — neither oversight FK. The association is written
-      // by the accept path, guarded on the invitation reading `accepted`, so
-      // the plant can never be bound to an org without an acceptance behind it.
-      if (createChurchForPlanter && organizationName) {
-        // The church-creation contract is stated ONCE, by
-        // `churchCreationStatements` (`src/lib/onboarding/create-church.ts`,
-        // ruling 408-4B), and spread here WHOLE, in the tuple's own order —
-        // no individual statement is named, so a statement added to the
-        // contract reaches this path with no edit here. The whole tuple goes
-        // AFTER the users insert, which is FK-safe: `churches` references no
-        // users column, and the users insert writes `churchId: null` (the
-        // tuple's own compare-and-set writes the link), so register and
-        // onboarding's step 1 issue identical church-creation SQL.
-        const churchId = crypto.randomUUID();
-
-        return {
-          role: "planter",
-          churchId,
-          sendingChurchId: null,
-          sendingNetworkId: null,
-          statements: [],
-          linkStatements: [
-            ...churchCreationStatements({
-              churchId,
-              plantedBy: userId,
-              name: organizationName,
-              city: null,
-              stateRegion: null,
-              country: null,
-            }),
-          ],
-        };
-      }
-
-      // No church created at signup — planter gets free Phase 0 / Wiki access
-      // They'll create a church from the dashboard when ready
-      return {
-        role: "planter",
-        churchId: null,
-        sendingChurchId: null,
-        sendingNetworkId: null,
-        statements: [],
-        linkStatements: [],
-      };
-    }
-
-    case "sending_church": {
-      if (!organizationName) {
-        throw new Error(
-          "Organization name is required for sending church accounts"
-        );
-      }
-      // Create a new sending church (independent, no network)
-      const sendingChurchId = crypto.randomUUID();
-
-      return {
-        role: "sending_church_admin",
-        churchId: null,
-        sendingChurchId,
-        sendingNetworkId: null,
-        statements: [
-          db
-            .insert(sendingChurches)
-            .values({ id: sendingChurchId, name: organizationName }),
-        ],
-        linkStatements: [],
-      };
-    }
-
-    case "network": {
-      if (!organizationName) {
-        throw new Error("Organization name is required for network accounts");
-      }
-      // Create a new sending network
-      const sendingNetworkId = crypto.randomUUID();
-
-      return {
-        role: "network_admin",
-        churchId: null,
-        sendingChurchId: null,
-        sendingNetworkId,
-        statements: [
-          db
-            .insert(sendingNetworks)
-            .values({ id: sendingNetworkId, name: organizationName }),
-        ],
-        linkStatements: [],
-      };
-    }
-  }
-}
-
-/**
  * Turn a redeemed invite link into a real association (#23 / OV-003).
  *
  * TWO WRITES, IN THIS ORDER, and the order is the whole design:
@@ -444,7 +319,7 @@ function createAccountEntities(
  * The actor is minted from the user row this request just INSERTed, which is
  * the same person the session cookie is about to be issued to — not a value
  * that arrived from a client. `verifyInvitationAuthority` then holds normally:
- * the actor is the planter of the church the invitation now targets.
+ * the actor is the Owner of the church the invitation now targets.
  *
  * Never throws. An invitation that cannot be redeemed must not cost somebody
  * their account.
@@ -453,7 +328,7 @@ async function redeemRegistrationInvitation(
   invitation: RegistrationInvitation,
   user: {
     id: string;
-    role: UserRole;
+    seat: UserSeat | null;
     churchId: string | null;
     sendingChurchId: string | null;
     sendingNetworkId: string | null;

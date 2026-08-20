@@ -50,16 +50,14 @@ import {
 } from "@/lib/validations/onboarding";
 import { and, eq, notExists, type SQL } from "drizzle-orm";
 
+import { isChurchLevelOwner, type SeatFields } from "@/lib/auth/tenancy";
+
 /**
  * The subset of the signed-in user this path needs. Minted from
  * `verifySession()` by the action; never accepted from a request
  * (`memory/invariants.md` → Authentication).
  */
-export type OnboardingActor = {
-  id: string;
-  role: string | null | undefined;
-  churchId: string | null | undefined;
-};
+export type OnboardingActor = { id: string } & SeatFields;
 
 /** Everything one church-creation batch writes, decided before it is sent. */
 export type ChurchCreationWrite = ChurchBasicsInput & {
@@ -107,7 +105,11 @@ export async function runCreateChurch(
   actor: OnboardingActor,
   formData: FormData
 ): Promise<CreateChurchOutcome> {
-  if (actor.role !== "planter") {
+  // `isChurchLevelOwner`, not `isPlantOwner`: this is the path that CREATES the
+  // plant, so the actor holds the Owner seat and no tenancy yet. The
+  // church-level half still refuses an oversight org's Owner, who also holds
+  // `owner`.
+  if (!isChurchLevelOwner(actor)) {
     return { status: "error", error: NOT_A_PLANTER_MESSAGE };
   }
 

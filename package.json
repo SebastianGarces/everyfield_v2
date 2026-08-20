@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --env-file-if-exists=.env.local --test \"src/**/*.test.ts\" \"ops/**/*.test.mjs\"",
     "test:ci": "DATABASE_URL=postgresql://ci:ci@localhost:5432/ci RESEND_API_KEY=re_ci_placeholder tsx --test \"src/**/*.test.ts\" \"ops/**/*.test.mjs\"",
-    "test:live": "tsx --env-file-if-exists=.env.local --import ./scripts/live-db-endpoint.ts --test \"src/lib/communication/fork-and-token-race.test.ts\" \"src/lib/ministry-teams/role-seat-race.test.ts\" \"src/lib/ministry-teams/teams-init-race.test.ts\" \"src/lib/phase-engine/transitions/declaration-race.test.ts\" \"src/lib/tasks/subtask-parent-fk.test.ts\"",
+    "test:live": "tsx --env-file-if-exists=.env.local --import ./scripts/live-db-endpoint.ts --test \"src/db/seat-owner-uniqueness.test.ts\" \"src/lib/auth/access.test.ts\" \"src/lib/communication/fork-and-token-race.test.ts\" \"src/lib/ministry-teams/role-seat-race.test.ts\" \"src/lib/ministry-teams/teams-init-race.test.ts\" \"src/lib/phase-engine/transitions/declaration-race.test.ts\" \"src/lib/tasks/subtask-parent-fk.test.ts\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

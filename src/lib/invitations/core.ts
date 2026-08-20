@@ -63,13 +63,20 @@ import {
   type NewOrganizationInvitation,
   type OrganizationInvitation,
   type User,
-  type UserRole,
+  type UserSeat,
 } from "@/db/schema";
 import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
 import type { AssociationOrgType } from "@/db/schema";
+import {
+  isOrgOwner,
+  isPlantOwner,
+  oversightOrgOf,
+  type SeatFields,
+  type TenancyFields,
+} from "@/lib/auth/tenancy";
 import { redactForLog } from "@/lib/email/redact";
 import {
   announceAssociationEnded,
@@ -193,7 +200,7 @@ declare const invitationActorBrand: unique symbol;
  */
 export type InvitationActor = {
   readonly id: string;
-  readonly role: UserRole;
+  readonly seat: UserSeat | null;
   readonly churchId: string | null;
   readonly sendingChurchId: string | null;
   readonly sendingNetworkId: string | null;
@@ -209,13 +216,13 @@ export type InvitationActor = {
 export function invitationActorFromSession(session: {
   user: Pick<
     User,
-    "id" | "role" | "churchId" | "sendingChurchId" | "sendingNetworkId"
+    "id" | "seat" | "churchId" | "sendingChurchId" | "sendingNetworkId"
   >;
 }): InvitationActor {
   const { user } = session;
   return {
     id: user.id,
-    role: user.role,
+    seat: user.seat,
     churchId: user.churchId,
     sendingChurchId: user.sendingChurchId,
     sendingNetworkId: user.sendingNetworkId,
@@ -419,13 +426,13 @@ export function isUuid(value: unknown): value is string {
  * Decide what invitation the actor is allowed to issue. Pure — no database —
  * so the authority rules are unit-testable.
  *
- * Only oversight roles invite, and only ON BEHALF OF THEIR OWN ORG:
- * - `sending_church_admin` → invites a church plant into THEIR sending church
- * - `network_admin`        → invites a church plant, or a sending church, into
- *                            THEIR network
+ * Only an oversight tenancy invites, and only ON BEHALF OF ITS OWN ORG:
+ * - a sending-church tenancy → invites a church plant into THEIR sending church
+ * - a network tenancy        → invites a church plant, or a sending church,
+ *                              into THEIR network
  *
  * The inviting org therefore comes from the session and the `type` follows from
- * the role plus WHAT is being invited. At most one target may be named, and an
+ * the tenancy plus WHAT is being invited. At most one target may be named, and an
  * invitation with NO target is legitimate: the invitee has no account yet, so
  * there is no row to point at until they register (`bindOpenInvitationTarget`).
  * The `type` of such an "open" invitation comes from `inviteAs`, which is why a
@@ -468,10 +475,14 @@ export function resolveInvitationRequest(
     targetSendingChurchId,
   };
 
-  if (actor.role === "sending_church_admin") {
-    if (!actor.sendingChurchId) {
-      return { ok: false, error: "Set up your sending church first" };
-    }
+  // THE SEAT HALF IS THE ROLE ALLOWLIST, MIGRATED — not #498's new enforcement.
+  // `sending_church_admin` and `network_admin` each meant "the Owner seat in
+  // this kind of org", so a seatless org row and an org Member were already
+  // refused here. `isOrgOwner` asks for both halves; #498 decides only whether
+  // `admin` joins `owner`, not whether the arm looks at the seat at all.
+  const actorOrg = isOrgOwner(actor) ? oversightOrgOf(actor) : null;
+
+  if (actorOrg?.type === "sending_church") {
     if (kind === "sending_church") {
       return {
         ok: false,
@@ -489,10 +500,7 @@ export function resolveInvitationRequest(
     };
   }
 
-  if (actor.role === "network_admin") {
-    if (!actor.sendingNetworkId) {
-      return { ok: false, error: "Set up your network first" };
-    }
+  if (actorOrg?.type === "network") {
     return {
       ok: true,
       values: {
@@ -647,29 +655,29 @@ export type InviteeTarget = Pick<
 >;
 
 export function inviteeAccountTarget(
-  existingAccount:
-    | {
-        role: UserRole;
-        churchId: string | null;
-        sendingChurchId: string | null;
-      }
-    | undefined
+  existingAccount: SeatFields | undefined
 ): { ok: true; target: InviteeTarget } | { ok: false; error: string } {
   // Nobody here yet — an open invitation, redeemed by registering.
   if (!existingAccount) return { ok: true, target: {} };
 
-  if (existingAccount.role === "planter" && existingAccount.churchId) {
+  // THE TWO ARMS ARE THE TWO OLD ROLES, EXACTLY — BOTH HALVES, BOTH ARMS.
+  // `planter` was a plant tenancy plus the Owner seat and
+  // `sending_church_admin` was a sending-church tenancy plus the Owner seat, so
+  // neither arm may ask the tenancy alone: no role mapped to a seatless org row
+  // or to an org Member, and admitting one here would WIDEN who an org can
+  // address rather than migrate the rule. An Admin or a Member of either kind
+  // gets the stranger's answer, by the positional rule this whole path lives
+  // by. #498 decides only whether `admin` joins `owner`.
+  if (isPlantOwner(existingAccount) && existingAccount.churchId) {
     return { ok: true, target: { targetChurchId: existingAccount.churchId } };
   }
 
-  if (
-    existingAccount.role === "sending_church_admin" &&
-    existingAccount.sendingChurchId
-  ) {
-    return {
-      ok: true,
-      target: { targetSendingChurchId: existingAccount.sendingChurchId },
-    };
+  const org = isOrgOwner(existingAccount)
+    ? oversightOrgOf(existingAccount)
+    : null;
+
+  if (org?.type === "sending_church") {
+    return { ok: true, target: { targetSendingChurchId: org.id } };
   }
 
   return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
@@ -694,7 +702,8 @@ export function inviteeAccountTarget(
  *     target, and the invitee answers from `/settings/association`;
  *   * any other account → refused with `ACCOUNT_NOT_INVITABLE_MESSAGE`.
  *
- * The projection is exactly the three columns `inviteeAccountTarget` reads.
+ * The projection is exactly the columns `inviteeAccountTarget` reads — the
+ * seat, and the three tenancy FKs the seat has to be read against.
  * Answering "which org is this" must not pull `password_hash` into application
  * memory — the same reasoning as `accessColumns` in
  * `@/lib/notifications/enqueue`.
@@ -708,9 +717,10 @@ export async function resolveInvitationTarget(
 ): Promise<{ ok: true; target: InviteeTarget } | { ok: false; error: string }> {
   const [existing] = await db
     .select({
-      role: users.role,
+      seat: users.seat,
       churchId: users.churchId,
       sendingChurchId: users.sendingChurchId,
+      sendingNetworkId: users.sendingNetworkId,
     })
     .from(users)
     .where(eq(users.email, inviteeEmail))
@@ -2375,13 +2385,13 @@ export const PLANTER_ONLY_SEVER_MESSAGE =
  * ITS TWO oversight associations to end, and that is a two-valued enum, not an
  * id.
  *
- * PLANTER ONLY, SERVER-SIDE (OV-010, ruled #274). A `team_member` or a `coach`
- * of the plant is refused here, in the logic layer, so a forged POST straight at
- * the action is refused by the same statement the button is. The role check is
- * repeated in the SQL by construction — the statement's WHERE names
- * `actor.churchId`, so an actor with no plant matches nothing whatever their
- * role — but the explicit refusal is what produces a legible message rather than
- * a silent no-op.
+ * OWNER ONLY, SERVER-SIDE (OV-010, ruled #274; AS-003 puts leaving an
+ * association on the Owner-only list). A plant Member or a coach is refused
+ * here, in the logic layer, so a forged POST straight at the action is refused
+ * by the same statement the button is. The check is repeated in the SQL by
+ * construction — the statement's WHERE names `actor.churchId`, so an actor with
+ * no plant matches nothing whatever their seat — but the explicit refusal is
+ * what produces a legible message rather than a silent no-op.
  *
  * ONE STATEMENT does the FK null and the audit row (`./audit` →
  * `severAssociationWithAuditStatement`), so the association and the record of
@@ -2403,7 +2413,7 @@ export async function leaveOversightOrgAs(
   actor: InvitationActor,
   orgType: AssociationOrgType
 ): Promise<{ orgType: AssociationOrgType; orgId: string }> {
-  if (actor.role !== "planter") {
+  if (!isPlantOwner(actor)) {
     throw new InvitationError(PLANTER_ONLY_SEVER_MESSAGE);
   }
   if (!actor.churchId) {
@@ -2462,9 +2472,6 @@ export async function leaveOversightOrgAs(
 export const ORG_ADMIN_ONLY_SEVER_MESSAGE =
   "Only a sending church or network admin can remove a plant from their organization";
 
-export const NO_ORG_TO_REMOVE_FROM_MESSAGE =
-  "Set up your organization before removing a plant from it";
-
 /**
  * ONE message for "no such plant", "not a uuid" and "belongs to somebody else".
  *
@@ -2493,22 +2500,12 @@ export const PLANT_NOT_IN_ORG_MESSAGE =
  * see and what they can do cannot come from two different rules. Every actual
  * WRITE still takes an `InvitationActor`.
  */
-export function oversightOrgOfUser(user: {
-  role: UserRole;
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-}): { orgType: AssociationOrgType; orgId: string } | null {
-  if (user.role === "sending_church_admin") {
-    return user.sendingChurchId
-      ? { orgType: "sending_church", orgId: user.sendingChurchId }
-      : null;
-  }
-  if (user.role === "network_admin") {
-    return user.sendingNetworkId
-      ? { orgType: "network", orgId: user.sendingNetworkId }
-      : null;
-  }
-  return null;
+export function oversightOrgOfUser(
+  user: TenancyFields
+): { orgType: AssociationOrgType; orgId: string } | null {
+  const org = oversightOrgOf(user);
+
+  return org ? { orgType: org.type, orgId: org.id } : null;
 }
 
 /**
@@ -2563,8 +2560,8 @@ export function plantHeldByOrg(org: {
  * THE PLANTER IS TOLD LAST, after the commit and best-effort. Unlike the org's
  * side of the planter's sever, this notification is an ordinary church-role one:
  * its recipient is inside the plant, `canAccessChurch` is true for them by
- * construction, and no oversight consent toggle applies (they are not an
- * oversight user). Announcing before the write would tell a planter they had
+ * construction, and no oversight consent toggle applies (their tenancy is the
+ * plant). Announcing before the write would tell a planter they had
  * been removed while they still had not been.
  */
 export async function removePlantFromOrgAs(
@@ -2575,14 +2572,17 @@ export async function removePlantFromOrgAs(
   orgId: string;
   plantName: string;
 }> {
-  if (actor.role !== "sending_church_admin" && actor.role !== "network_admin") {
+  // The Owner seat AND the org tenancy — the role allowlist this replaces
+  // (`sending_church_admin` / `network_admin`) meant both. See `isOrgOwner`.
+  if (!isOrgOwner(actor)) {
     throw new InvitationError(ORG_ADMIN_ONLY_SEVER_MESSAGE);
   }
 
-  const org = oversightOrgOfUser(actor);
-  if (!org) {
-    throw new InvitationError(NO_ORG_TO_REMOVE_FROM_MESSAGE);
-  }
+  // Non-null by construction: `isOrgOwner` above is `seat === "owner" &&
+  // oversightOrgOf(...) !== null`, and `oversightOrgOfUser` is that same
+  // resolution. The `if (!org)` arm this replaced was unreachable, and so was
+  // the message it threw.
+  const org = oversightOrgOfUser(actor)!;
 
   if (!isUuid(churchId)) {
     throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
@@ -2716,12 +2716,18 @@ export const NOT_IN_A_NETWORK_MESSAGE =
 export async function leaveNetworkAsSendingChurchAdmin(
   actor: InvitationActor
 ): Promise<{ orgType: AssociationOrgType; orgId: string }> {
-  if (actor.role !== "sending_church_admin") {
+  // The Owner seat AND the sending-church tenancy — see `isOrgOwner`.
+  //
+  // ONE refusal, not two, and the id comes OUT of the same resolution. The
+  // `if (!actor.sendingChurchId)` arm that used to sit behind this could never
+  // fire — `oversightOrgOf` answers `sending_church` only when that FK is
+  // non-null — so it is gone, and reading the id off `actorOrg` is what keeps
+  // that provable rather than re-asserted with a `!`.
+  const actorOrg = isOrgOwner(actor) ? oversightOrgOf(actor) : null;
+  if (actorOrg?.type !== "sending_church") {
     throw new InvitationError(SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE);
   }
-  if (!actor.sendingChurchId) {
-    throw new InvitationError("Set up your sending church first");
-  }
+  const actorSendingChurchId = actorOrg.id;
 
   const [org] = await db
     .select({
@@ -2729,7 +2735,7 @@ export async function leaveNetworkAsSendingChurchAdmin(
       sendingNetworkId: sendingChurches.sendingNetworkId,
     })
     .from(sendingChurches)
-    .where(eq(sendingChurches.id, actor.sendingChurchId))
+    .where(eq(sendingChurches.id, actorSendingChurchId))
     .limit(1);
 
   // A read, so not the guard — the statement below carries the same rule and is
@@ -2739,7 +2745,7 @@ export async function leaveNetworkAsSendingChurchAdmin(
   }
 
   const severed = await severAssociationWithAuditStatement(actor, {
-    subject: sendingChurchSubject(actor.sendingChurchId),
+    subject: sendingChurchSubject(actorSendingChurchId),
     orgType: "network",
     orgId: org.sendingNetworkId,
   });
@@ -2863,17 +2869,21 @@ function invitingOrgFilter(
  * The single definition of the scope, shared by the list (`invitationsForOrgQuery`)
  * and the revoke (`revokeInvitationQuery`) — a screen that shows an admin a
  * pending invitation and then refuses their Revoke is exactly what two
- * definitions of "ours" produce. Only the two oversight roles issue invitations,
- * so every other role matches NOTHING here rather than falling through to a
- * missing predicate, and so does an oversight admin who has no org yet
- * (`invitingOrgFilter(null, null)` → `false`).
+ * definitions of "ours" produce. Only an oversight org's OWNER issues
+ * invitations, so a plant, a coach and an org Member match NOTHING here rather
+ * than falling through to a missing predicate, and so does an account whose FKs
+ * name no org — or name two (`isOrgOwner`/`oversightOrgOf` → null, then
+ * `invitingOrgFilter(null, null)` → `false`). The seat half is the role
+ * allowlist migrated, not a new refusal — see `isOrgOwner`.
  */
 function invitingOrgOf(actor: InvitationActor): SQL {
-  if (actor.role === "sending_church_admin") {
-    return invitingOrgFilter(actor.sendingChurchId, null);
+  const org = isOrgOwner(actor) ? oversightOrgOf(actor) : null;
+
+  if (org?.type === "sending_church") {
+    return invitingOrgFilter(org.id, null);
   }
-  if (actor.role === "network_admin") {
-    return invitingOrgFilter(null, actor.sendingNetworkId);
+  if (org?.type === "network") {
+    return invitingOrgFilter(null, org.id);
   }
   return sql`false`;
 }
@@ -2910,9 +2920,11 @@ export function invitationsForOrgQuery(actor: InvitationActor) {
 export async function getInvitationsForOrg(
   actor: InvitationActor
 ): Promise<OrganizationInvitation[]> {
-  // No other role issues invitations, so no other role has any to list. The
-  // predicate would match nothing anyway; this saves the round trip.
-  if (actor.role !== "sending_church_admin" && actor.role !== "network_admin") {
+  // Nobody else issues invitations, so nobody else has any to list. The
+  // predicate would match nothing anyway; this saves the round trip, and it is
+  // the SAME question `invitingOrgOf` asks so the two cannot disagree about
+  // whose queue this is.
+  if (!isOrgOwner(actor)) {
     return [];
   }
 
@@ -3193,20 +3205,20 @@ export function verifyInvitationAuthority(
   switch (invitation.type) {
     case "church_to_sending_church":
     case "church_to_network": {
-      // The target is a church — the actor must be the planter for that church.
-      // The role check is new (#265): "belongs to the church" used to be enough,
-      // so any team member could bind the plant to a sending church or network.
+      // The target is a church — the actor must be the OWNER of that church.
+      // The seat half is not new (#265): "belongs to the church" used to be
+      // enough, so any team member could bind the plant to a sending church or
+      // network.
       //
       // RATIFIED 2026-08-03 (#274 (a); canon in
-      // `product-docs/features/oversight/frd.md` OV-010): planter only. Joining
-      // an oversight org is a plant-level decision and the planter's to make,
-      // the same rule `setOversightSharingAction` applies to what the plant then
-      // shares, and OV-010 pins the same rule for severing. A `team_member` or
-      // `coach` of the target church may do neither — server-side, not merely
-      // hidden in a UI.
+      // `product-docs/features/oversight/frd.md` OV-010): the Owner only.
+      // Joining an oversight org is a plant-level decision and the Owner's to
+      // make (AS-003), the same rule `setOversightSharingAction` applies to what
+      // the plant then shares, and OV-010 pins the same rule for severing. A
+      // Member or a coach of the target church may do neither — server-side,
+      // not merely hidden in a UI.
       if (
-        actor.role !== "planter" ||
-        !actor.churchId ||
+        !isPlantOwner(actor) ||
         actor.churchId !== invitation.targetChurchId
       ) {
         throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
@@ -3214,12 +3226,15 @@ export function verifyInvitationAuthority(
       break;
     }
     case "sending_church_to_network": {
-      // The target is a sending church — the actor must be admin of that
+      // The target is a sending church — the actor's own tenancy must BE that
       // sending church
+      // The Owner seat AND the tenancy: `sending_church_admin` meant both, so
+      // a Member of the target sending church is refused here exactly as it
+      // was before the migration. See `isOrgOwner`.
+      const actorOrg = isOrgOwner(actor) ? oversightOrgOf(actor) : null;
       if (
-        actor.role !== "sending_church_admin" ||
-        !actor.sendingChurchId ||
-        actor.sendingChurchId !== invitation.targetSendingChurchId
+        actorOrg?.type !== "sending_church" ||
+        actorOrg.id !== invitation.targetSendingChurchId
       ) {
         throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
       }

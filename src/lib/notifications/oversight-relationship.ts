@@ -6,11 +6,13 @@ import {
   organizationInvitations,
   type User,
 } from "@/db/schema";
+import { oversightOrgOf } from "@/lib/auth/tenancy";
+
 import {
   namesAnOversightOrg,
   noOversightOrg,
-  OVERSIGHT_ADMIN,
   OVERSIGHT_ADMIN_ROWS,
+  oversightOrgOfKind,
   type OversightAdminPairing,
   type OversightOrgIds,
 } from "./oversight-admin";
@@ -52,58 +54,51 @@ import {
 // ============================================================================
 
 /**
- * The columns the pairing reads — exactly what `enqueue` already projects.
+ * The columns the tenancy rule reads — exactly what `enqueue` already projects.
  *
- * The FK half is the pairing table's own key set, so a new org kind widens this
- * projection with the row rather than by somebody remembering to add a name.
+ * The oversight half is the pairing table's own key set, so a new org kind
+ * widens this projection with the row rather than by somebody remembering to
+ * add a name. `churchId` is named directly: it is the plant tenancy, it has no
+ * row in that table, and `oversightOrgOf` refuses any row that carries it.
  */
 export type OversightRecipient = Pick<
   User,
-  "role" | OversightAdminPairing["fk"]
+  "churchId" | OversightAdminPairing["fk"]
 >;
 
 /**
- * THE ROLE IS PAIRED WITH THE ORG KIND — #304 round 8 (ruled 2026-08-10),
- * the same rule `recipientAdministersOrg` applies to an org-ANCHORED row.
+ * THE ORG IS THE ROW'S OWN TENANCY — #304 round 8 (ruled 2026-08-10), the same
+ * rule `recipientAdministersOrg` applies to an org-ANCHORED row.
  *
- * Both oversight FKs live on one `users` row and neither implies the other
- * (memory/invariants.md → Multi-Tenancy). Until this function existed, the
- * recorded-relationship probe took the row as it came and OR'd the two arms
- * together, so a `network_admin` who also carried a `sending_church_id` — a
- * founder who administers both, or a row where the second FK was set once and
- * never cleared — could satisfy the probe through an invitation that SENDING
- * CHURCH had issued, and receive an own-relationship notification about a plant
- * they administer nothing of. That is the hierarchy walk `memory/invariants.md`
- * forbids, arriving through the role instead of through the FK.
+ * All three tenancy FKs live on one `users` row and nothing in the schema holds
+ * an account to one (memory/invariants.md → Multi-Tenancy). Until this function
+ * existed, the recorded-relationship probe took the row as it came and OR'd the
+ * two arms together, so an account that carried a network's id AND a sending
+ * church's — a founder who administers both, or a row where the second FK was
+ * set once and never cleared — could satisfy the probe through an invitation
+ * that SENDING CHURCH had issued, and receive an own-relationship notification
+ * about a plant they administer nothing of. That is the hierarchy walk
+ * `memory/invariants.md` forbids, arriving through a column nobody checked
+ * against the rest of the row.
  *
- * So each role contributes EXACTLY its own kind of org and nothing else:
- * `sending_church_admin` → the sending church, `network_admin` → the network,
- * every other role → neither, which matches nothing at all rather than
- * everything (see the `false` returns below).
+ * So a row contributes EXACTLY the one org its tenancy resolves to, and a row
+ * whose FKs name none — or name two — contributes neither, which matches
+ * nothing at all rather than everything (see the `false` returns below). That
+ * decision is `oversightOrgOf`'s (`@/lib/auth/tenancy`); this function only
+ * files the answer under the pairing table's key, which is the shape every
+ * builder downstream indexes.
  *
- * WHICH ROLE GOES WITH WHICH KIND, AND WHICH FK THAT KIND LIVES IN, are both
- * read from `OVERSIGHT_ADMIN` (`./oversight-admin.ts`, whose header carries the
- * rationale). This is the inverse direction of the other readers' lookup — a
- * role asking which org it speaks through, rather than an org kind asking which
- * role administers it — but it is the SAME pairing.
+ * The all-null base is `noOversightOrg()`, enumerated from the same table, and
+ * `oversightOrgOfKind` picks the column from the kind — so no column name is
+ * written here, and adding an org kind is a row in that table rather than an
+ * edit to this function.
  *
- * The scan carries the whole answer, so no column name is written here — the
- * all-null base included, which is `noOversightOrg()` enumerated from the same
- * table. A role that matches no row contributes nothing and that base comes
- * back unchanged, which matches NOTHING at all rather than everything (see the
- * `false` returns below). Adding a kind is a row in that table; this function
- * does not change.
- *
- * Pure, and exported so it can be tested over the whole role × org-FK domain.
+ * Pure, and exported so it can be tested over the whole tenancy × org-FK domain.
  */
 export function recipientOrgOf(recipient: OversightRecipient): OversightOrgIds {
-  const org = noOversightOrg();
+  const org = oversightOrgOf(recipient);
 
-  for (const { role, fk } of Object.values(OVERSIGHT_ADMIN)) {
-    if (recipient.role === role) org[fk] = recipient[fk];
-  }
-
-  return org;
+  return org === null ? noOversightOrg() : oversightOrgOfKind(org.type, org.id);
 }
 
 /**

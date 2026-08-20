@@ -17,6 +17,8 @@ import { declareInitialPhase } from "@/lib/phase-engine/transitions";
 import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { isChurchLevelOwner } from "@/lib/auth/tenancy";
+
 import {
   confirmLeadershipDeps,
   runConfirmLeadership,
@@ -59,7 +61,13 @@ export async function createChurchBasics(
 
   return runCreateChurch(
     createChurchDeps(revalidateDashboard),
-    { id: user.id, role: user.role, churchId: user.churchId },
+    {
+      id: user.id,
+      seat: user.seat,
+      churchId: user.churchId,
+      sendingChurchId: user.sendingChurchId,
+      sendingNetworkId: user.sendingNetworkId,
+    },
     formData
   );
 }
@@ -92,7 +100,13 @@ export async function confirmLeadership(
 
   return runConfirmLeadership(
     confirmLeadershipDeps(revalidateDashboard),
-    { id: user.id, role: user.role, churchId: user.churchId },
+    {
+      id: user.id,
+      seat: user.seat,
+      churchId: user.churchId,
+      sendingChurchId: user.sendingChurchId,
+      sendingNetworkId: user.sendingNetworkId,
+    },
     answer
   );
 }
@@ -137,7 +151,13 @@ export async function declareJourney(
       readLaunch: getLaunchForChurch,
       declareInitialPhase,
     },
-    { id: user.id, role: user.role, churchId: user.churchId },
+    {
+      id: user.id,
+      seat: user.seat,
+      churchId: user.churchId,
+      sendingChurchId: user.sendingChurchId,
+      sendingNetworkId: user.sendingNetworkId,
+    },
     input
   );
 }
@@ -164,7 +184,7 @@ export type CompleteOnboardingState = { status: "error"; error: string };
 export async function completeOnboarding(): Promise<CompleteOnboardingState | void> {
   const { user } = await verifySession();
 
-  if (user.role !== "planter") {
+  if (!isChurchLevelOwner(user)) {
     return { status: "error", error: "Only church planters can onboard" };
   }
 

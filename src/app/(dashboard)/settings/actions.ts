@@ -1,5 +1,6 @@
 "use server";
 
+import { isPlantOwner } from "@/lib/auth/tenancy";
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
@@ -19,7 +20,7 @@ import {
   SUPPRESSION_SELF_CLEAR_REASON,
 } from "@/lib/notifications/channels/suppression";
 import {
-  audienceForRole,
+  audienceForTenancy,
   digestCadenceWriteIsNoop,
   loadUserPreferences,
   OVERSIGHT_DIGEST_CADENCE_NOTE,
@@ -170,7 +171,7 @@ export async function setNotificationPreferenceAction(
     // Same audience the page rendered the matrix with — see
     // `preferenceWriteIsNoop`. Asking the no-op question with the other
     // audience's defaults would discard a real change as "already that value".
-    const audience = audienceForRole(session.user.role);
+    const audience = audienceForTenancy(session.user);
 
     // Asked BEFORE the rows are loaded: a refused category has nothing to
     // compare against, and a write that will not happen should not cost a query.
@@ -221,7 +222,7 @@ export async function setDigestCadenceAction(
   }
 
   try {
-    if (audienceForRole(session.user.role) === "oversight") {
+    if (audienceForTenancy(session.user) === "oversight") {
       return { success: false, error: OVERSIGHT_DIGEST_CADENCE_NOTE };
     }
 
@@ -350,7 +351,7 @@ export async function setChurchTimeZoneAction(
   }
 
   try {
-    if (session.user.role !== "planter") {
+    if (!isPlantOwner(session.user)) {
       return {
         success: false,
         error: "Only the church planter can change this plant's timezone",

@@ -262,10 +262,10 @@ test("milestone completion follows TASK rules, not the planter-only rule", () =>
     path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
     "utf8"
   );
-  assert.match(source, /requireRole\(user, \.\.\.CHURCH_LEVEL_ROLES\)/);
+  assert.match(source, /requireChurchLevel\(user\)/);
   assert.match(source, /await requireChurchAccess\(user, churchId\)/);
   assert.ok(
-    !/requireRole\(user, "planter"\)/.test(source),
+    !/requirePlantOwner\(user\)/.test(source),
     "milestone completion must not be planter-only (LS-007)"
   );
 });

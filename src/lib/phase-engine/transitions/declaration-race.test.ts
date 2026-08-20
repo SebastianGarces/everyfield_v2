@@ -110,7 +110,7 @@ async function createScratchActor(): Promise<string> {
       email: `${crypto.randomUUID()}@scratch.invalid`,
       passwordHash: "scratch",
       name: SCRATCH_NAME,
-      role: "planter",
+      seat: "owner",
     })
     .returning({ id: users.id });
   return actor.id;

@@ -77,8 +77,10 @@ function state(
 function actor(overrides: Partial<LeadershipActor> = {}): LeadershipActor {
   return {
     id: USER_ID,
-    role: "team_member",
+    seat: "member",
     churchId: CHURCH_ID,
+    sendingChurchId: null,
+    sendingNetworkId: null,
     ...overrides,
   };
 }
@@ -130,9 +132,12 @@ test("a team member is refused once the plant HAS a planter — the seat closes 
 test("a coach of the plant is never in scope, seat empty or not", async () => {
   const h = harness(state());
 
+  // A REAL coach: `church_id` set to the plant they coach — which is what the
+  // seed writes — and NO seat. The seat is what refuses them, so a fixture with
+  // no `church_id` either would have passed without exercising that.
   const result = await runConfirmLeadership(
     h.deps,
-    actor({ role: "coach" }),
+    actor({ seat: null, churchId: CHURCH_ID }),
     "yes"
   );
 
@@ -166,12 +171,12 @@ test("a church that no longer exists is a refusal, not a crash", async () => {
 // The three plans
 // ---------------------------------------------------------------------------
 
-test("the planter answering Yes only RECORDS — no role is written", async () => {
+test("the Owner answering Yes only RECORDS — no seat is written", async () => {
   const h = harness(state({ hasPlanterUser: true }));
 
   const result = await runConfirmLeadership(
     h.deps,
-    actor({ role: "planter" }),
+    actor({ seat: "owner" }),
     "yes"
   );
 
@@ -189,11 +194,11 @@ test("a team member answering Yes on an empty seat CLAIMS it (OB-010)", async ()
   assert.equal(h.writes[0].actorId, USER_ID);
 });
 
-test("No is the same decline from either of them, and changes nobody's role", async () => {
-  for (const role of ["planter", "team_member"]) {
-    const h = harness(state({ hasPlanterUser: role === "planter" }));
+test("No is the same decline from either of them, and changes nobody's seat", async () => {
+  for (const seat of ["owner", "member"] as const) {
+    const h = harness(state({ hasPlanterUser: seat === "owner" }));
 
-    const result = await runConfirmLeadership(h.deps, actor({ role }), "no");
+    const result = await runConfirmLeadership(h.deps, actor({ seat }), "no");
 
     assert.deepEqual(result, { status: "saved" });
     assert.equal(h.writes[0].plan, "decline");
@@ -208,7 +213,7 @@ test("re-entry has no 'already answered' guard: a plant that said No may say Yes
 
   const result = await runConfirmLeadership(
     h.deps,
-    actor({ role: "planter" }),
+    actor({ seat: "owner" }),
     "yes"
   );
 
@@ -257,7 +262,7 @@ test("a team member's No is marked as NOT holding the seat, so the write path gu
 test("a planter's No about their own seat is marked as holding it, and stays unguarded", async () => {
   const h = harness(state({ hasPlanterUser: true }));
 
-  await runConfirmLeadership(h.deps, actor({ role: "planter" }), "no");
+  await runConfirmLeadership(h.deps, actor({ seat: "owner" }), "no");
 
   assert.equal(h.writes[0].plan, "decline");
   assert.equal(h.writes[0].actorHoldsSeat, true);
@@ -309,40 +314,60 @@ test("the claim batch locks the church row FIRST", () => {
   assert.match(lock, /select .* from "churches" where .* for update/i);
 });
 
-test("the role claim only lands while NOBODY holds the planter seat", () => {
+test("the seat claim only lands while NOBODY holds the Owner seat", () => {
   const [, claim] = claimPlanterStatements(CLAIM).map(render);
 
   assert.match(claim, /update "users" set/i);
   assert.match(claim, /not exists/i);
-  assert.match(claim, /"role" = \$\d+/i);
+  assert.match(claim, /"seat" = \$\d+/i);
 });
 
-test("the status write is gated on THIS actor holding the role, not on any planter existing", () => {
+test("the status write is gated on THIS actor holding the seat, not on any Owner existing", () => {
   const [, , status] = claimPlanterStatements(CLAIM).map(render);
 
   assert.match(status, /update "churches" set/i);
   assert.match(status, /exists/i);
-  // The subquery names the actor: a loser whose role write no-opped must not
+  // The subquery names the actor: a loser whose seat write no-opped must not
   // ride the winner's planter into a "confirmed" the loser did not earn.
   assert.match(status, /"users"\."id" = \$\d+/i);
   assert.doesNotMatch(status, /not exists/i);
 });
 
-test("the role claim only lands for an in-church role", () => {
+test("the seat claim only lands for somebody who holds a seat in the plant", () => {
   const [, claim] = claimPlanterStatements(CLAIM).map(render);
 
-  // Defense in depth: `canAnswerLeadershipQuestion` already refuses coaches and
-  // oversight admins, but this statement promotes somebody, so the promotion
-  // must not be one forgotten JS check away from reachable.
-  assert.match(claim, /"role" in \(/i);
+  // Defense in depth: `canAnswerLeadershipQuestion` already refuses a coach and
+  // an oversight account, but this statement promotes somebody, so the
+  // promotion must not be one forgotten JS check away from reachable.
+  //
+  // AN ALLOWLIST OF TWO, and the seat model's spelling of the `{team_member,
+  // planter}` pair it replaces — never "any seat". `admin` is a seat the role
+  // model could not express, so a plant Admin claiming the Owner seat would be
+  // a widening nobody ruled.
+  assert.match(claim, /"seat" in \(/i);
 
-  const params = dialect.sqlToQuery(
+  // `params[0]` is the SET's own value — the `owner` this statement WRITES —
+  // so the allowlist is read from `slice(1)`. Left in, that first parameter
+  // satisfies `includes("owner")` on its own, and the predicate could drop
+  // `owner` entirely while this assertion stayed green.
+  const [written, ...allowlist] = dialect.sqlToQuery(
     claimPlanterStatements(CLAIM)[1].getSQL()
   ).params;
 
-  assert.ok(params.includes("team_member"));
-  assert.ok(params.includes("planter"));
-  assert.ok(!params.includes("coach"));
+  assert.equal(written, "owner", "the seat the claim WRITES");
+
+  assert.ok(
+    allowlist.includes("owner"),
+    "the Owner seat is claimable (OB-004)"
+  );
+  assert.ok(allowlist.includes("member"), "a Member may claim it (OB-010)");
+  assert.ok(
+    !allowlist.includes("admin"),
+    "a plant Admin must NOT be able to claim the Owner seat — that is a product widening, not a migration"
+  );
+  for (const gone of ["planter", "team_member", "coach"]) {
+    assert.ok(!allowlist.includes(gone), `${gone} is not a value any more`);
+  }
 });
 
 test("recording an answer is a plain church update — no users row is touched", () => {

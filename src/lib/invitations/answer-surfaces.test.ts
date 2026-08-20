@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { userSeats } from "@/db/schema";
 import {
   organizationInvitationTypes,
   type OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
-import type { UserRole } from "@/db/schema";
+import type { SeatFields } from "@/lib/auth/tenancy";
 
 import {
   NOT_AUTHORIZED_MESSAGE,
@@ -21,28 +22,29 @@ import {
 // 2026-08-09).
 //
 // The rule (`memory/invariants.md` → Multi-Tenancy) is that every invitation
-// TYPE which can name an EXISTING account has an in-app surface for the role
+// TYPE which can name an EXISTING account has an in-app surface for the account
 // that answers it. The 2026-08-04 version of that rule was satisfied trivially,
 // by refusing every existing account; #304 repealed the refusal, which made the
-// rule load-bearing — and #304's first build then declared it satisfied for all
-// roles while having built only the planter's half. That is the dead end HR4
-// found: a `sending_church_admin` was targetable by `sending_church_to_network`
-// with nowhere in the product to answer.
+// rule load-bearing — and #304's first build then declared it satisfied for
+// every targetable account while having built only the plant Owner's half. That
+// is the dead end HR4 found: a sending church's own account was targetable by
+// `sending_church_to_network` with nowhere in the product to answer.
 //
 // Prose cannot hold this, and neither can three hand-written cases: the failure
-// mode is a type or a role somebody ADDS without noticing it needs a surface.
-// So the test enumerates `organizationInvitationTypes` and
-// `inviteeAccountTarget`'s whole role domain, and every claim below is checked
-// for each member. A fourth type, or a third targetable role, fails here until
-// its answering view exists.
+// mode is a type or an ACCOUNT SHAPE somebody ADDS without noticing it needs a
+// surface. So the test enumerates `organizationInvitationTypes` and
+// `inviteeAccountTarget`'s whole domain of (seat, tenancy) pairs, and every
+// claim below is checked for each member. A fourth type, or a third targetable
+// shape, fails here until its answering view exists.
 //
 // Two halves per type, and they fail differently:
 //
 //   1. WHO MAY ANSWER — executed against `verifyInvitationAuthority`, the pure
 //      rule a forged POST also meets. Includes the negative that matters most
-//      for WS3: a non-admin member of the target sending church.
+//      for WS3: a member of the target sending church who does not hold its
+//      Owner seat.
 //   2. WHERE THEY ANSWER — source-shaped, because "a surface exists for this
-//      role" is a fact about which files read which list, and no unit-level
+//      account" is a fact about which files read which list, and no unit-level
 //      behaviour reveals its absence.
 // ============================================================================
 
@@ -67,13 +69,102 @@ const USER = "44444444-4444-4444-8444-444444444444";
 function actor(overrides: Partial<InvitationActor>): InvitationActor {
   return {
     id: USER,
-    role: "planter",
+    seat: "owner",
     churchId: null,
     sendingChurchId: null,
     sendingNetworkId: null,
     ...overrides,
   } as InvitationActor;
 }
+
+/**
+ * THE ACCOUNT SHAPES AN ORG CAN ADDRESS — the (seat, tenancy) pairs that
+ * replaced the five role names, one per shape `inviteeAccountTarget` can be
+ * asked about.
+ *
+ * All three tenancy FKs on every one, because the seat alone does not say
+ * whose Owner this is: `owner` + `church_id` is a plant's Owner and `owner` +
+ * `sending_church_id` is a sending church's, and a fixture that omitted an FK
+ * would be asking about a row the resolver never sees. Each names exactly ONE
+ * tenancy for the same reason — a row naming two resolves to no org at all.
+ */
+const ACCOUNTS = {
+  "the plant's Owner": {
+    seat: "owner",
+    churchId: PLANT,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  },
+  "a plant Member": {
+    seat: "member",
+    churchId: PLANT,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  },
+  "a coach, who holds no seat": {
+    seat: null,
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  },
+  "the sending church's Owner": {
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
+  },
+  "the network's Owner": {
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: NETWORK,
+  },
+  // THE NON-OWNER SEATS, so the domain is not silently the Owner seat four
+  // times over. `admin` and `member` in an org are exactly the rows no role
+  // ever mapped to, which is why the org-side arms must refuse them.
+  "a sending church ADMIN": {
+    seat: "admin",
+    churchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
+  },
+  "a sending church MEMBER": {
+    seat: "member",
+    churchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
+  },
+  "a plant ADMIN": {
+    seat: "admin",
+    churchId: PLANT,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  },
+  "an account naming NO tenancy but holding a seat": {
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  },
+} as const satisfies Record<string, SeatFields>;
+
+type AccountShape = keyof typeof ACCOUNTS;
+
+test("the account domain covers every seat the column can hold", () => {
+  // THE DOMAIN IS CLOSED AGAINST THE SCHEMA, not against what somebody
+  // remembered to type. `userSeats` is the column's own tuple, so a fourth seat
+  // fails here until this table says what it may answer — which is the whole
+  // point of a table that decides authority.
+  const covered = new Set(Object.values(ACCOUNTS).map((row) => row.seat));
+
+  for (const seat of userSeats) {
+    assert.ok(
+      covered.has(seat),
+      `no fixture holds the "${seat}" seat — the authority grid below is not asking about it`
+    );
+  }
+  assert.ok(covered.has(null), "a coach holds no seat, and that is a value");
+});
 
 function mayAnswer(
   type: OrganizationInvitationType,
@@ -99,127 +190,171 @@ function mayAnswer(
  * The contract, one entry per invitation type: who answers it, and the read the
  * surface that offers the answer performs.
  *
- * `answeredBy: null` marks a type no existing account can be targeted with —
- * there would be nobody to build a surface for. The table is checked against
- * `organizationInvitationTypes` below, so it cannot fall behind the enum.
+ * `answeredBy` names one of the {@link ACCOUNTS} shapes rather than a role, and
+ * the two tables are tied below: every shape an org can TARGET must be some
+ * type's answerer. The table is checked against `organizationInvitationTypes`
+ * below, so it cannot fall behind the enum either.
  */
 const ANSWER_CONTRACT: Record<
   OrganizationInvitationType,
   {
-    answeredBy: UserRole;
+    answeredBy: AccountShape;
     /** The actor the rule must ACCEPT. */
     answerer: InvitationActor;
     /** Actors the rule must REFUSE, and why each one is worth naming. */
     refused: { label: string; who: InvitationActor }[];
     /** The read the answering surface performs, by name. */
     surfaceRead: string;
+    /**
+     * The predicate `/settings/association` admits this account with, as source
+     * text. It is a (seat, tenancy) question now rather than a role literal —
+     * `isPlantOwner(user)` reads the seat AND the plant FK, `oversightOrgOf`
+     * resolves the org from the FKs alone — so the string is the CALL, not a
+     * comparison against a name that no longer exists.
+     */
+    pageGate: string;
     /** The `/settings` gate that makes the surface reachable. */
     settingsGate: string;
     /**
-     * The type-to-confirm LEAVE control this role gets on the same screen, and
-     * the action behind it (#304, OV-007a / OV-013).
+     * The type-to-confirm LEAVE control this account gets on the same screen,
+     * and the action behind it (#304, OV-007a / OV-013).
      *
      * Part of this contract rather than a test of its own, because it is the
-     * same claim one step on: a role that can be ASSOCIATED by an invitation
-     * must be able to END that association from the surface it answered on.
-     * The planter's two types share one control — a plant has two associations
-     * and the dialog names which — so the entry repeats.
+     * same claim one step on: an account that can be ASSOCIATED by an
+     * invitation must be able to END that association from the surface it
+     * answered on. The plant Owner's two types share one control — a plant has
+     * two associations and the dialog names which — so the entry repeats.
      */
     leave: { component: string; action: string };
   }
 > = {
   church_to_sending_church: {
-    answeredBy: "planter",
-    answerer: actor({ role: "planter", churchId: PLANT }),
+    answeredBy: "the plant's Owner",
+    answerer: actor(ACCOUNTS["the plant's Owner"]),
     refused: [
       {
-        label: "a team member of the plant",
-        who: actor({ role: "team_member", churchId: PLANT }),
+        label: "a Member of the plant",
+        who: actor(ACCOUNTS["a plant Member"]),
       },
       {
         label: "a coach of the plant",
-        who: actor({ role: "coach", churchId: PLANT }),
-      },
-      {
-        label: "the planter of another plant",
-        who: actor({ role: "planter", churchId: NETWORK }),
-      },
-      {
-        label: "the inviting sending church's own admin",
         who: actor({
-          role: "sending_church_admin",
-          sendingChurchId: SENDING_CHURCH,
+          seat: null,
+          churchId: PLANT,
+          sendingChurchId: null,
+          sendingNetworkId: null,
         }),
+      },
+      {
+        label: "the Owner of another plant",
+        who: actor({
+          seat: "owner",
+          churchId: NETWORK,
+          sendingChurchId: null,
+          sendingNetworkId: null,
+        }),
+      },
+      {
+        label: "the inviting sending church's own Owner",
+        who: actor(ACCOUNTS["the sending church's Owner"]),
       },
     ],
     surfaceRead: "getPendingInvitationsForPlant",
+    pageGate: "isPlantOwner(user) && user.churchId",
     settingsGate: "isPlanterWithPlant",
     leave: { component: "LeaveOrgDialog", action: "leaveOversightOrg" },
   },
   church_to_network: {
-    answeredBy: "planter",
-    answerer: actor({ role: "planter", churchId: PLANT }),
+    answeredBy: "the plant's Owner",
+    answerer: actor(ACCOUNTS["the plant's Owner"]),
     refused: [
       {
-        label: "a team member of the plant",
-        who: actor({ role: "team_member", churchId: PLANT }),
+        label: "a Member of the plant",
+        who: actor(ACCOUNTS["a plant Member"]),
       },
       {
         label: "a coach of the plant",
-        who: actor({ role: "coach", churchId: PLANT }),
+        who: actor({
+          seat: null,
+          churchId: PLANT,
+          sendingChurchId: null,
+          sendingNetworkId: null,
+        }),
       },
       {
-        label: "the inviting network's own admin",
-        who: actor({ role: "network_admin", sendingNetworkId: NETWORK }),
+        label: "the inviting network's own Owner",
+        who: actor(ACCOUNTS["the network's Owner"]),
       },
     ],
     surfaceRead: "getPendingInvitationsForPlant",
+    pageGate: "isPlantOwner(user) && user.churchId",
     settingsGate: "isPlanterWithPlant",
     leave: { component: "LeaveOrgDialog", action: "leaveOversightOrg" },
   },
   sending_church_to_network: {
-    answeredBy: "sending_church_admin",
-    answerer: actor({
-      role: "sending_church_admin",
-      sendingChurchId: SENDING_CHURCH,
-    }),
+    answeredBy: "the sending church's Owner",
+    answerer: actor(ACCOUNTS["the sending church's Owner"]),
     refused: [
-      // THE WS3 NEGATIVE. A member of the target sending church who is not its
-      // admin is refused server-side, not merely kept off the screen — the
-      // acceptance contract at `core.ts`'s `sending_church_to_network` arm.
+      // THE WS3 NEGATIVE, in the seat model's terms. `sending_church_admin`
+      // meant the OWNER SEAT in this sending church, so `core.ts`'s
+      // `sending_church_to_network` arm asks `isOrgOwner` AND the org id — both
+      // halves, because the role named both. Two kinds of row are refused here:
+      // one that names the target sending church alongside another tenancy (the
+      // tie the role used to break, which now resolves to NO org), and one that
+      // names it with the wrong seat (which no role ever mapped to).
       {
-        label: "a team member sitting under the target sending church",
-        who: actor({ role: "team_member", sendingChurchId: SENDING_CHURCH }),
-      },
-      {
-        label: "a coach sitting under the target sending church",
-        who: actor({ role: "coach", sendingChurchId: SENDING_CHURCH }),
-      },
-      {
-        label: "an admin of a DIFFERENT sending church",
+        label: "an account naming a plant AND the target sending church",
         who: actor({
-          role: "sending_church_admin",
-          sendingChurchId: OTHER_SENDING_CHURCH,
-        }),
-      },
-      {
-        label: "an admin whose sending church is not set",
-        who: actor({ role: "sending_church_admin" }),
-      },
-      {
-        label: "the inviting network's own admin",
-        who: actor({ role: "network_admin", sendingNetworkId: NETWORK }),
-      },
-      {
-        label: "a planter of a plant under that sending church",
-        who: actor({
-          role: "planter",
+          seat: "owner",
           churchId: PLANT,
           sendingChurchId: SENDING_CHURCH,
+          sendingNetworkId: null,
         }),
+      },
+      {
+        label: "an account naming the target sending church AND a network",
+        who: actor({
+          seat: "owner",
+          churchId: null,
+          sendingChurchId: SENDING_CHURCH,
+          sendingNetworkId: NETWORK,
+        }),
+      },
+      {
+        label: "the Owner of a DIFFERENT sending church",
+        who: actor({
+          seat: "owner",
+          churchId: null,
+          sendingChurchId: OTHER_SENDING_CHURCH,
+          sendingNetworkId: null,
+        }),
+      },
+      {
+        label: "an Owner whose sending church is not set",
+        who: actor({
+          seat: "owner",
+          churchId: null,
+          sendingChurchId: null,
+          sendingNetworkId: null,
+        }),
+      },
+      // The seat half, restored: both of these NAME the target sending church
+      // and are refused on the seat alone. No role mapped to either.
+      {
+        label: "a MEMBER of the target sending church",
+        who: actor(ACCOUNTS["a sending church MEMBER"]),
+      },
+      {
+        label: "an ADMIN of the target sending church",
+        who: actor(ACCOUNTS["a sending church ADMIN"]),
+      },
+      {
+        label: "the inviting network's own Owner",
+        who: actor(ACCOUNTS["the network's Owner"]),
       },
     ],
     surfaceRead: "getPendingInvitationsForSendingChurch",
+    pageGate: 'org?.type === "sending_church"',
     settingsGate: "isSendingChurchAdminWithOrg",
     leave: { component: "LeaveNetworkDialog", action: "leaveNetwork" },
   },
@@ -236,30 +371,21 @@ test("every invitation type the schema declares has an entry here", () => {
   );
 });
 
-test("every role an existing account can be targeted through is an answerer", () => {
+test("every account shape that can be targeted is an answerer", () => {
   // `inviteeAccountTarget` is the whole of "which existing accounts can be
-  // named". Walking the entire role domain is what makes this a property rather
-  // than two remembered cases: adding a third role to that mapping — say a
-  // coach whose plant becomes targetable — fails here until it appears as the
-  // answerer of some type.
-  const roles: UserRole[] = [
-    "planter",
-    "coach",
-    "team_member",
-    "sending_church_admin",
-    "network_admin",
-  ];
-
-  const answerers = new Set(
+  // named". Walking the entire (seat, tenancy) domain is what makes this a
+  // property rather than two remembered cases: making a third shape targetable
+  // — say a plant Member, or a network's Owner — fails here until it appears as
+  // the answerer of some type.
+  const answerers = new Set<AccountShape>(
     Object.values(ANSWER_CONTRACT).map((entry) => entry.answeredBy)
   );
 
-  for (const role of roles) {
-    const targetable = inviteeAccountTarget({
-      role,
-      churchId: PLANT,
-      sendingChurchId: SENDING_CHURCH,
-    });
+  for (const [who, account] of Object.entries(ACCOUNTS) as [
+    AccountShape,
+    SeatFields,
+  ][]) {
+    const targetable = inviteeAccountTarget(account);
 
     const namesAnOrg =
       targetable.ok &&
@@ -268,8 +394,8 @@ test("every role an existing account can be targeted through is an answerer", ()
 
     assert.equal(
       namesAnOrg,
-      answerers.has(role),
-      `${role}: targetable=${namesAnOrg}, has an answering surface=${answerers.has(role)}`
+      answerers.has(who),
+      `${who}: targetable=${namesAnOrg}, has an answering surface=${answerers.has(who)}`
     );
   }
 });
@@ -282,7 +408,7 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
   OrganizationInvitationType,
   (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
 ][]) {
-  test(`${type}: exactly one role may answer it, server-side`, () => {
+  test(`${type}: exactly one account may answer it, server-side`, () => {
     assert.equal(
       mayAnswer(type, contract.answerer),
       true,
@@ -303,17 +429,18 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
   OrganizationInvitationType,
   (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
 ][]) {
-  test(`${type}: the role that answers it has an in-app surface`, () => {
-    // The association area reads a pending list for this role…
+  test(`${type}: the account that answers it has an in-app surface`, () => {
+    // The association area reads a pending list for this account…
     assert.ok(
       ASSOCIATION_PAGE.includes(contract.surfaceRead),
       `/settings/association performs no ${contract.surfaceRead}`
     );
 
-    // …the page admits that role…
+    // …the page admits it, on the (seat, tenancy) pair rather than on a role
+    // name…
     assert.ok(
-      ASSOCIATION_PAGE.includes(`user.role === "${contract.answeredBy}"`),
-      `/settings/association does not admit a ${contract.answeredBy}`
+      ASSOCIATION_PAGE.includes(contract.pageGate),
+      `/settings/association does not admit ${contract.answeredBy} (${contract.pageGate})`
     );
 
     // …and `/settings` links the screen for it. A surface nobody can navigate
@@ -324,16 +451,16 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
     );
     assert.ok(
       SETTINGS_PAGE.includes("canManageAssociation"),
-      "the association link is gated on the union of the answering roles"
+      "the association link is gated on the union of the answering accounts"
     );
   });
 }
 
 test("both answering views hand the same two actions an invitation id", () => {
-  // ONE pair of endpoints for both roles, so the two surfaces cannot disagree
+  // ONE pair of endpoints for both views, so the two surfaces cannot disagree
   // about who may answer what: authority is decided per invitation TYPE inside
-  // `verifyInvitationAuthority`, which is the rule tested above. A second,
-  // role-specific pair would be a second place to get it wrong.
+  // `verifyInvitationAuthority`, which is the rule tested above. A second pair
+  // per answering account would be a second place to get it wrong.
   const answer = readFileSync(
     path.join(APP, "settings", "association", "invitation-answer.tsx"),
     "utf8"
@@ -348,14 +475,14 @@ test("both answering views hand the same two actions an invitation id", () => {
   assert.equal(uses.length, 1, "one answer component, rendered from one place");
 });
 
-test("the dashboard reminder stays the planter's, and says so", () => {
-  // A sending-church admin has no dashboard of this kind — the reminder is a
-  // plant surface (OV-005) and its read takes a church id. WS3 deliberately did
-  // not widen it; the settings view is the sending church's whole surface, and
-  // this pins that the gate was not loosened by accident.
+test("the dashboard reminder stays the plant Owner's, and says so", () => {
+  // A sending church's account has no dashboard of this kind — the reminder is
+  // a plant surface (OV-005) and its read takes a church id. WS3 deliberately
+  // did not widen it; the settings view is the sending church's whole surface,
+  // and this pins that the gate was not loosened by accident.
   assert.match(
     DASHBOARD_PAGE,
-    /role === "planter"\s*\?\s*getPendingInvitationsForPlant\(churchId\)/
+    /isPlantOwner\(viewer\)\s*\?\s*getPendingInvitationsForPlant\(churchId\)/
   );
   assert.ok(!DASHBOARD_PAGE.includes("getPendingInvitationsForSendingChurch"));
 });
@@ -370,7 +497,7 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
   OrganizationInvitationType,
   (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
 ][]) {
-  test(`${type}: the role that answers it can also leave, behind a type-to-confirm`, () => {
+  test(`${type}: the account that answers it can also leave, behind a type-to-confirm`, () => {
     // The answering surface renders the control…
     assert.ok(
       ASSOCIATION_PAGE.includes(`<${contract.leave.component}`),

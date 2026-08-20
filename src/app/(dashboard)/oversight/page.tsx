@@ -37,7 +37,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import {
   LAUNCHED_CAPTION,
   PRE_LAUNCH_CAPTION,
@@ -50,9 +50,10 @@ import { requireOversightUser } from "@/lib/oversight/session";
 
 export default async function OversightDashboardPage() {
   // One guard, shared by every /oversight route (`@/lib/oversight/session`) —
-  // this page used to carry its own copy of the role pair, as did the other
-  // five.
-  const user = await requireOversightUser();
+  // this page used to carry its own copy of the oversight test, as did the
+  // other five. It hands back the caller's org as well as their row, so the
+  // two lines below name it instead of re-deriving it.
+  const { user, org } = await requireOversightUser();
 
   // Tenant scope and projection both belong to the read layer
   // (`@/lib/oversight/read`), which is where every other oversight surface asks
@@ -64,8 +65,8 @@ export default async function OversightDashboardPage() {
     plants.map((plant) => plant.currentPhase)
   );
 
-  const isNetwork = user.role === "network_admin";
-  const scopeLabel = scopeLabelForRole(user.role);
+  const isNetwork = org.type === "network";
+  const scopeLabel = scopeLabelForOrgType(org.type);
   const title = isNetwork ? "Network Overview" : "Sending Church Portfolio";
   const description = isNetwork
     ? "Aggregate view across all church plants in your network"
@@ -77,7 +78,7 @@ export default async function OversightDashboardPage() {
         Same fix as /oversight/health (#261): without a declared trail the shell
         falls back to naming a different page ("Dashboard"). One crumb, because
         this IS the oversight index — nothing above it in the sidebar — and it
-        carries the same role-derived `title` as the <h1> below, so the header
+        carries the same org-derived `title` as the <h1> below, so the header
         and the page can never name different things. Renders nothing, so it
         does not participate in `space-y-6`.
       */}

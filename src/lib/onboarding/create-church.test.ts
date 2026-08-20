@@ -80,8 +80,21 @@ function harness(options: { linked?: boolean; commitFails?: boolean } = {}) {
   };
 }
 
+/**
+ * The Owner seat with no plant yet — the account this path exists for. All
+ * three tenancy FKs are named because `OnboardingActor` is `SeatFields`: a
+ * fixture that omitted one would be asserting about a shape
+ * `isChurchLevelOwner` never sees.
+ */
 function planter(overrides: Partial<OnboardingActor> = {}): OnboardingActor {
-  return { id: USER_ID, role: "planter", churchId: null, ...overrides };
+  return {
+    id: USER_ID,
+    seat: "owner",
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...overrides,
+  };
 }
 
 function basics(entries: Record<string, string> = { name: "Grace Church" }) {
@@ -97,11 +110,7 @@ function basics(entries: Record<string, string> = { name: "Grace Church" }) {
 test("a non-planter is refused before anything is written", async () => {
   const { deps, calls } = harness();
 
-  const result = await runCreateChurch(
-    deps,
-    planter({ role: "coach" }),
-    basics()
-  );
+  const result = await runCreateChurch(deps, planter({ seat: null }), basics());
 
   assert.deepEqual(result, { status: "error", error: NOT_A_PLANTER_MESSAGE });
   assert.deepEqual(calls, []);

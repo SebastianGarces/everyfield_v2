@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { NoPlantEmptyState } from "./no-plant-empty-state";
 import { OnboardingDashboard } from "./onboarding-dashboard";
 import { PlantDashboard } from "./plant-dashboard";
+import { isOversightUser } from "@/lib/auth/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,8 @@ export default async function DashboardPage({
   ]);
   const { churchCreated, step } = resolvedSearchParams;
 
-  // Redirect oversight users to their dedicated dashboard
-  if (user?.role === "sending_church_admin" || user?.role === "network_admin") {
+  // Redirect an oversight tenancy to its dedicated dashboard
+  if (user && isOversightUser(user)) {
     redirect("/oversight");
   }
 
@@ -59,8 +60,10 @@ export default async function DashboardPage({
 
   if (
     shouldShowOnboarding({
-      role: user.role,
+      seat: user.seat,
       churchId: user.churchId,
+      sendingChurchId: user.sendingChurchId,
+      sendingNetworkId: user.sendingNetworkId,
       onboardingCompletedAt: church?.onboardingCompletedAt,
     })
   ) {
@@ -84,8 +87,8 @@ export default async function DashboardPage({
     redirect("/dashboard");
   }
 
-  // Ruled 2026-08-12 (408-2B): a viewer with no church — a coach, or a team
-  // member whose plant link is gone — is told so explicitly and kept here.
+  // Ruled 2026-08-12 (408-2B): a viewer with no church — a coach, or a Member
+  // whose plant link is gone — is told so explicitly and kept here.
   // The guard sits BEFORE the finished dashboard so none of its church-scoped
   // reads run, and `PlantDashboard` takes a proven non-null `churchId`.
   if (!user.churchId) {
@@ -94,7 +97,13 @@ export default async function DashboardPage({
 
   return (
     <PlantDashboard
-      viewer={{ id: user.id, role: user.role, churchId: user.churchId }}
+      viewer={{
+        id: user.id,
+        seat: user.seat,
+        churchId: user.churchId,
+        sendingChurchId: user.sendingChurchId,
+        sendingNetworkId: user.sendingNetworkId,
+      }}
       church={church}
       wantsLeadershipStep={stepRequest.outcome === "leadership"}
       showConfetti={churchCreated === "true"}

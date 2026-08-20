@@ -5,9 +5,9 @@ import { test } from "node:test";
 
 import { db } from "@/db";
 import { churches } from "@/db/schema";
+import type { TenancyFields } from "@/lib/auth/tenancy";
 
 import {
-  NO_ORG_TO_REMOVE_FROM_MESSAGE,
   ORG_ADMIN_ONLY_SEVER_MESSAGE,
   PLANT_NOT_IN_ORG_MESSAGE,
   oversightOrgOfUser,
@@ -24,13 +24,13 @@ import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 // The mirror of `association.test.ts`, which covers the planter's side. Four
 // things are worth a test here and they fail in four different ways:
 //
-//   1. THE AUTHORITY RULE. An admin of the org, and nobody else — refused in the
-//      logic layer so a forged call meets it. Executed: a planter, a team member
-//      and a coach are real actors here, refused BEFORE any read, so these tests
-//      need no database.
-//   2. WHICH ORG A ROLE SPEAKS FOR. `oversightOrgOfUser` is what makes the org
-//      and its KIND session-derived rather than arguments; inverting its two arms
-//      would let each admin aim at the OTHER of a plant's two independent
+//   1. THE AUTHORITY RULE. An account whose own tenancy IS the org, and nobody
+//      else — refused in the logic layer so a forged call meets it. Executed:
+//      a plant's Owner, a plant Member and a coach are real actors here,
+//      refused BEFORE any read, so these tests need no database.
+//   2. WHICH ORG A TENANCY SPEAKS FOR. `oversightOrgOfUser` is what makes the
+//      org and its KIND session-derived rather than arguments; inverting its two
+//      arms would let each admin aim at the OTHER of a plant's two independent
 //      associations, and nothing on the page would look different.
 //   3. THE TENANCY ASSERTION, read off generated SQL. The scoped read and the
 //      history read both have to name the caller's own org, and the sever's own
@@ -77,7 +77,7 @@ const USER = "44444444-4444-4444-8444-444444444444";
 function actor(overrides: Partial<InvitationActor> = {}): InvitationActor {
   return {
     id: USER,
-    role: "sending_church_admin",
+    seat: "owner",
     churchId: null,
     sendingChurchId: SENDING_CHURCH,
     sendingNetworkId: null,
@@ -98,44 +98,67 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
 // 1. Authority — an admin of the org, server-side
 // ----------------------------------------------------------------------------
 
-test("no church-level role can remove a plant from an organization", async () => {
-  // The mirror of OV-010's planter-only rule: the org side is the ORG's
-  // decision. A planter cannot reach into the org's directory and remove
-  // themselves through this path — they have their own, `leaveOversightOrgAs`,
-  // which audits and notifies the other way round.
+test("no church-level account can remove a plant from an organization", async () => {
+  // The mirror of OV-010's Owner-only rule: the org side is the ORG's decision.
+  // A plant's Owner cannot reach into the org's directory and remove themselves
+  // through this path — they have their own, `leaveOversightOrgAs`, which
+  // audits and notifies the other way round.
   //
-  // The refusal is the FIRST statement, so none of these calls reads a row.
-  for (const role of ["planter", "team_member", "coach"] as const) {
+  // The refusal is the FIRST statement, so none of these calls reads a row. The
+  // last row is the one the role used to settle: a plant tenancy alongside an
+  // oversight FK names NO org now, so it is refused rather than admitted on
+  // whichever id happens to be set.
+  const churchLevel: [string, Partial<InvitationActor>][] = [
+    ["the plant's Owner", { seat: "owner", churchId: PLANT }],
+    ["a plant Member", { seat: "member", churchId: PLANT }],
+    ["a coach, who names no tenancy at all", { seat: null }],
+    [
+      "an account naming a plant AND a sending church",
+      { seat: "owner", churchId: PLANT, sendingChurchId: SENDING_CHURCH },
+    ],
+    // THE SEAT HALF, restored. `sending_church_admin` meant the Owner seat in
+    // a sending church, so no role ever mapped to either of these rows and the
+    // allowlist this replaced refused them. They are here because a migration
+    // that admitted them would be a widening wearing a rename's clothes.
+    [
+      "a MEMBER of the sending church",
+      { seat: "member", sendingChurchId: SENDING_CHURCH },
+    ],
+    [
+      "an ADMIN of the sending church",
+      { seat: "admin", sendingChurchId: SENDING_CHURCH },
+    ],
+    [
+      "a seatless account carrying the org FK",
+      { seat: null, sendingChurchId: SENDING_CHURCH },
+    ],
+  ];
+
+  for (const [who, fields] of churchLevel) {
     assert.equal(
       await refusal(
-        removePlantFromOrgAs(actor({ role, churchId: PLANT }), PLANT)
+        removePlantFromOrgAs(
+          actor({ sendingChurchId: null, sendingNetworkId: null, ...fields }),
+          PLANT
+        )
       ),
       ORG_ADMIN_ONLY_SEVER_MESSAGE,
-      role
+      who
     );
   }
 });
 
-test("an oversight admin with no organization has nothing to remove a plant from", async () => {
+test("an account with no organization has nothing to remove a plant from", async () => {
+  // ONE refusal, because there is now one guard. Under the role model these
+  // were independent — a `sending_church_admin` with a null FK passed "is this
+  // an oversight role" and failed "which org" — and both now come from the
+  // same `isOrgOwner`/`oversightOrgOf` resolution, so the second was
+  // unreachable and has been deleted along with its message.
   assert.equal(
     await refusal(
       removePlantFromOrgAs(actor({ sendingChurchId: null }), PLANT)
     ),
-    NO_ORG_TO_REMOVE_FROM_MESSAGE
-  );
-
-  assert.equal(
-    await refusal(
-      removePlantFromOrgAs(
-        actor({
-          role: "network_admin",
-          sendingChurchId: null,
-          sendingNetworkId: null,
-        }),
-        PLANT
-      )
-    ),
-    NO_ORG_TO_REMOVE_FROM_MESSAGE
+    ORG_ADMIN_ONLY_SEVER_MESSAGE
   );
 });
 
@@ -152,12 +175,8 @@ test("a church id that is not a uuid is refused before anything is read", async 
   }
 });
 
-test("the three refusals an admin can read say different things", () => {
-  const messages = [
-    ORG_ADMIN_ONLY_SEVER_MESSAGE,
-    NO_ORG_TO_REMOVE_FROM_MESSAGE,
-    PLANT_NOT_IN_ORG_MESSAGE,
-  ];
+test("the two refusals an admin can read say different things", () => {
+  const messages = [ORG_ADMIN_ONLY_SEVER_MESSAGE, PLANT_NOT_IN_ORG_MESSAGE];
   assert.equal(new Set(messages).size, messages.length);
   for (const message of messages) {
     assert.ok(message.length > 20, message);
@@ -166,51 +185,59 @@ test("the three refusals an admin can read say different things", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 2. Which org a role speaks for — derived from the session, never an argument
+// 2. Which org a tenancy speaks for — derived from the session, never an argument
 // ----------------------------------------------------------------------------
 
-test("a role maps to exactly one of the plant's two independent associations", () => {
+/** A tenancy with all three FKs named, which is what `TenancyFields` requires. */
+function tenancy(fields: Partial<TenancyFields> = {}): TenancyFields {
+  return {
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...fields,
+  };
+}
+
+test("a tenancy maps to exactly one of the plant's two independent associations", () => {
   // The two oversight FKs are independent (`memory/invariants.md` →
   // Multi-Tenancy), so this mapping is the whole of "which association is this
-  // admin allowed to end". Both ids are set on every actor below, so an arm that
-  // read the wrong one would still return something — which is exactly how this
-  // inverts silently.
-  const both = {
-    sendingChurchId: SENDING_CHURCH,
-    sendingNetworkId: NETWORK,
-  };
-
+  // account allowed to end". The KIND is asserted beside the id, so an arm that
+  // read the wrong column answers with the other kind rather than returning
+  // something plausible — which is exactly how this inverts silently.
   assert.deepEqual(
-    oversightOrgOfUser({ role: "sending_church_admin", ...both }),
+    oversightOrgOfUser(tenancy({ sendingChurchId: SENDING_CHURCH })),
     { orgType: "sending_church", orgId: SENDING_CHURCH }
   );
-  assert.deepEqual(oversightOrgOfUser({ role: "network_admin", ...both }), {
+  assert.deepEqual(oversightOrgOfUser(tenancy({ sendingNetworkId: NETWORK })), {
     orgType: "network",
     orgId: NETWORK,
   });
 
-  // No church-level role speaks for an org, however its FK columns are filled.
-  for (const role of ["planter", "team_member", "coach"] as const) {
-    assert.equal(oversightOrgOfUser({ role, ...both }), null, role);
-  }
+  // BOTH FKs SET NAMES NEITHER, and that is what replaced the role. The role
+  // used to break the tie; a precedence order would break it wrongly, handing
+  // one org's reach to an account with a competing claim on the other. So the
+  // defect resolves to no org and reaches nothing.
+  const both = tenancy({
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  });
+  assert.equal(oversightOrgOfUser(both), null);
 
-  // An admin whose OWN org is missing names none — never "whichever id is set".
-  assert.equal(
-    oversightOrgOfUser({
-      role: "sending_church_admin",
-      sendingChurchId: null,
-      sendingNetworkId: NETWORK,
-    }),
-    null
-  );
-  assert.equal(
-    oversightOrgOfUser({
-      role: "network_admin",
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: null,
-    }),
-    null
-  );
+  // No church-level tenancy speaks for an org, however its FK columns are
+  // filled — and a plant FK alongside an oversight one is the same defect.
+  const churchLevel: [string, TenancyFields][] = [
+    ["a seat in a plant", tenancy({ churchId: PLANT })],
+    ["a coach, who names no tenancy at all", tenancy()],
+    ["a plant tenancy carrying a stray org FK", { ...both, churchId: PLANT }],
+    [
+      "a plant tenancy carrying a stray sending-church FK",
+      tenancy({ churchId: PLANT, sendingChurchId: SENDING_CHURCH }),
+    ],
+  ];
+
+  for (const [who, fields] of churchLevel) {
+    assert.equal(oversightOrgOfUser(fields), null, who);
+  }
 });
 
 // ----------------------------------------------------------------------------

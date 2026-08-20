@@ -1490,24 +1490,34 @@ test("a plant-wide milestone composed with an org anchor writes nothing", () => 
 // ----------------------------------------------------------------------------
 //
 // Both oversight FKs live on one `users` row and neither implies the other, so
-// a row can carry a sending church's id while holding `network_admin` — or hold
-// no oversight role at all. The pairing is right to exclude such a row. What
-// was wrong was that the exclusion happened inside a `WHERE`, where nothing
-// could count it: the defect was invisible to the product, which is why it went
-// unnoticed.
+// a row can carry a sending church's id while its own tenancy names a NETWORK —
+// or names no oversight org at all. The pairing is right to exclude such a row.
+// What was wrong was that the exclusion happened inside a `WHERE`, where
+// nothing could count it: the defect was invisible to the product, which is why
+// it went unnoticed.
 //
 // WHICH ROWS ARE CLASSIFIED WHICH WAY is `oversight-audience.test.ts`'s
-// question — it walks the pairing table over the whole role grid. What is
+// question — it walks the pairing table over the whole tenancy grid. What is
 // asserted here is what the fan-out DOES with the audience's second array: it
 // counts it and logs it, and enqueues for the first array only.
 
-/** The pairing, and the OTHER pairing's role — the cross of the two. */
-const CROSS_PAIRED: Omit<OversightMisprovisionedRow, "id"> = {
-  role: OVERSIGHT_ADMIN.network.role,
+/**
+ * A PRODUCIBLE defect: reached by the sending-church FK while ALSO naming a
+ * network, which is why its own tenancy resolves to neither.
+ *
+ * The shape matters. This fixture used to say `administers: { type: "network" }`
+ * — a row that both failed the pairing and cleanly administered something —
+ * which `classifyOversightCandidate` cannot produce: a row only lands in this
+ * array by naming more than one tenancy, and a row naming more than one
+ * administers nothing. `names` is the payload precisely because it is the part
+ * that varies.
+ */
+const CROSS_TENANTED: Omit<OversightMisprovisionedRow, "id"> = {
+  names: [OVERSIGHT_ADMIN.sending_church.fk, OVERSIGHT_ADMIN.network.fk],
   reachedBy: OVERSIGHT_ADMIN.sending_church.fk,
 };
 
-test("a cross-paired row is counted and logged, and gets no notification", async (t) => {
+test("a cross-tenanted row is counted and logged, and gets no notification", async (t) => {
   const logged: unknown[] = [];
   t.mock.method(console, "error", (...args: unknown[]) => {
     logged.push(...args);
@@ -1518,7 +1528,7 @@ test("a cross-paired row is counted and logged, and gets no notification", async
   // are still named, because the count that matters is that BOTH are enqueued
   // while the defect is not.
   const deps = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
-    misprovisioned: [{ id: ADMIN_OF_OTHER_ORG, ...CROSS_PAIRED }],
+    misprovisioned: [{ id: ADMIN_OF_OTHER_ORG, ...CROSS_TENANTED }],
   });
 
   const report = await fanOutToOversight(deps, CHURCH, (recipientId) =>
@@ -1553,8 +1563,17 @@ test("a cross-paired row is counted and logged, and gets no notification", async
   );
   assert.ok(context);
   assert.equal(context.recipientUserId, ADMIN_OF_OTHER_ORG);
-  assert.equal(context.role, CROSS_PAIRED.role);
-  assert.equal(context.reachedBy, CROSS_PAIRED.reachedBy);
+  assert.equal(context.reachedBy, CROSS_TENANTED.reachedBy);
+
+  // THE PAYLOAD NAMES BOTH COMPETING COLUMNS, which is the whole reason it
+  // replaced `administers`: that field could only ever print `null` here, and
+  // an operator cannot repair a row from a count. Naming the two FKs says which
+  // tenancies are fighting and therefore which one to clear.
+  assert.deepEqual(context.names, CROSS_TENANTED.names);
+  assert.ok(
+    Array.isArray(context.names) && context.names.length >= 2,
+    "a misprovisioned row names at least two tenancies — that IS the defect"
+  );
 });
 
 test("a clean fan-out reports zero, so the signal means something", async () => {

@@ -212,7 +212,7 @@ export async function handleMeetingAttendanceFinalized(
     .where(eq(churches.id, churchId))
     .limit(1);
 
-  // 2. Otherwise: infer the planter from the role, as before.
+  // 2. Otherwise: infer the planter from the OWNER seat, as before.
   const planter = churchHasNoPlanter({
     leadershipStatus: church?.leadershipStatus,
   })
@@ -220,7 +220,7 @@ export async function handleMeetingAttendanceFinalized(
     : await db
         .select({ id: users.id })
         .from(users)
-        .where(and(eq(users.churchId, churchId), eq(users.role, "planter")))
+        .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
         .limit(1);
 
   const planterId = planter[0]?.id;

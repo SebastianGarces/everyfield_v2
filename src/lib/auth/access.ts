@@ -5,44 +5,53 @@ import {
   coachAssignments,
   churchPrivacySettings,
   type User,
-  type UserRole,
   type ChurchPrivacySettings,
 } from "@/db/schema";
-// Imported for this module's OWN rules below, never re-served: `@/lib/auth/roles`
-// is the one place either symbol comes from, and a re-export from here — whose
-// first statement is `import { db } from "@/db"` — would give one authority
-// policy two import paths, the failure `@/lib/invitations/register-path` and
-// `@/lib/oversight/org-label` are both written to avoid.
-import { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES } from "@/lib/auth/roles";
+// Imported for this module's OWN rules below, never re-served:
+// `@/lib/auth/tenancy` is the one place these come from, and a re-export from
+// here — whose first statement is `import { db } from "@/db"` — would give one
+// authority policy two import paths, the failure
+// `@/lib/invitations/register-path` and `@/lib/oversight/org-label` are both
+// written to avoid.
+import {
+  isChurchLevelUser,
+  isPlantOwner,
+  oversightOrgOf,
+} from "@/lib/auth/tenancy";
 
 // ============================================================================
-// Role Helpers
+// Seat Guards
 // ============================================================================
+//
+// The two rules `requireRole` used to spell as role lists, re-pointed at the
+// pair (tenancy, seat). They are the SAME refusals — this track migrates the
+// readers of the old column and adds no enforcement. The single `requireSeat`
+// guard and the permissions module that states the Owner-only set as data are
+// #495's, and these two collapse into it when it lands.
+//
+// The message keeps its `Forbidden: ` prefix: `launch/actions.ts` documents
+// that prefix as what its actions turn into a user-facing refusal.
 
 /**
- * Check if a user has one of the specified roles.
- * @throws Error if the user does not have the required role.
+ * The Owner of a plant — the Owner-only actions (AS-003).
+ * @throws Error if the account is not its plant's Owner.
  */
-export function requireRole(user: User, ...allowedRoles: UserRole[]): void {
-  if (!hasRole(user, ...allowedRoles)) {
-    throw new Error(
-      `Forbidden: requires one of [${allowedRoles.join(", ")}], got "${user.role}"`
-    );
+export function requirePlantOwner(user: User): void {
+  if (!isPlantOwner(user)) {
+    throw new Error("Forbidden: requires the plant's owner seat");
   }
 }
 
 /**
- * Check if a user has a specific role (non-throwing).
+ * Any church-level account — a seat in a plant, or a coach with no tenancy.
+ * The refusal this states is oversight's: an org account may not tick a plant's
+ * own progress, whichever seat it holds.
+ * @throws Error if the account's tenancy is an oversight org.
  */
-export function hasRole(user: User, ...roles: UserRole[]): boolean {
-  return roles.includes(user.role);
-}
-
-/**
- * Check if a user is an oversight user (sending church admin or network admin).
- */
-export function isOversightUser(user: User): boolean {
-  return hasRole(user, ...OVERSIGHT_ROLES);
+export function requireChurchLevel(user: User): void {
+  if (!isChurchLevelUser(user)) {
+    throw new Error("Forbidden: requires a church-level account");
+  }
 }
 
 // ============================================================================
@@ -50,33 +59,46 @@ export function isOversightUser(user: User): boolean {
 // ============================================================================
 
 /**
- * Resolves all church IDs a user is authorized to access based on their role.
+ * Resolves all church IDs a user is authorized to access, from the pair the
+ * seat model is read as — the tenancy FK, and the seat held in it.
  *
- * - Planter/Team Member: [user.church_id]
- * - Coach: church IDs from active coach_assignments
- * - Sending Church Admin: church IDs where churches.sending_church_id matches
- * - Network Admin: church IDs where churches.sending_network_id matches
+ * - A seat in a plant (`church_id`): [user.church_id], whichever seat it is.
+ * - No seat at all: the church IDs of the account's active coach assignments.
+ *   A coach IS this case — coaching is an assignment, never a seat (ruling
+ *   185 (2)) — and so is an account whose seat was removed, which is why the
+ *   assignment lookup runs rather than an early `[]`.
+ * - A seat in a sending church: church IDs where churches.sending_church_id
+ *   matches. In a network: where churches.sending_network_id matches.
+ *
+ * THE SEAT IS NOT CONSULTED BEYOND "IS THERE ONE". Access is what the tenancy
+ * reaches; the seat decides what may be DONE there, and that is #495's guard.
+ * An org Member reads the same portfolio as its Owner (ruling 185 (3)), so
+ * branching on the seat here would be the wrong answer as well as a second
+ * copy of a rule.
+ *
+ * A ROW NAMING TWO TENANCIES REACHES NOTHING, and the plant arm asks
+ * `isChurchLevelUser` rather than `user.churchId` so that it does. `role` used
+ * to break that tie; with it gone the two halves of this function would
+ * otherwise disagree — the oversight arm refuses such a row (`oversightOrgOf`
+ * answers only for exactly one tenancy) while a bare `churchId` test would hand
+ * it the plant, and `canAccessFeatureData` would then privacy-gate an account
+ * on its own plant. One rule, applied both ways, failing closed.
  *
  * Returns an empty array if the user has no accessible churches.
  */
 export async function getAccessibleChurchIds(user: User): Promise<string[]> {
-  switch (user.role) {
-    case "planter":
-    case "team_member":
-      return user.churchId ? [user.churchId] : [];
-
-    case "coach":
-      return getCoachChurchIds(user.id);
-
-    case "sending_church_admin":
-      return getSendingChurchPlantIds(user.sendingChurchId);
-
-    case "network_admin":
-      return getNetworkChurchIds(user.sendingNetworkId);
-
-    default:
-      return [];
+  const org = oversightOrgOf(user);
+  if (org) {
+    return org.type === "network"
+      ? getNetworkChurchIds(org.id)
+      : getSendingChurchPlantIds(org.id);
   }
+
+  if (user.seat && user.churchId && isChurchLevelUser(user)) {
+    return [user.churchId];
+  }
+
+  return getCoachChurchIds(user.id);
 }
 
 /**
@@ -183,17 +205,19 @@ export async function getChurchPrivacySettings(
  * Check if an oversight user is allowed to see a specific feature's data
  * for a given church, based on the church's privacy settings.
  *
- * - Church-level users (planter, team_member, coach) always have access
- *   (coach access is gated by coach_assignments, not privacy settings).
- * - Oversight users (sending_church_admin, network_admin) are subject to privacy toggles.
+ * - Church-level accounts — a seat in a plant, or a coach with no tenancy —
+ *   always have access (coach access is gated by coach_assignments, not by
+ *   privacy settings).
+ * - Accounts whose tenancy is an oversight org are subject to privacy toggles,
+ *   whichever seat they hold in it.
  */
 export async function canAccessFeatureData(
   user: User,
   churchId: string,
   feature: PrivacyFeatureKey
 ): Promise<boolean> {
-  // Church-level roles are not subject to privacy toggles
-  if (hasRole(user, ...CHURCH_LEVEL_ROLES)) {
+  // Church-level accounts are not subject to privacy toggles
+  if (isChurchLevelUser(user)) {
     return true;
   }
 

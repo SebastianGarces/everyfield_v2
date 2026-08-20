@@ -3,11 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  preferenceIntents,
-  type NotificationPreference,
-  type UserRole,
-} from "@/db/schema";
+import { preferenceIntents, type NotificationPreference } from "@/db/schema";
+import type { TenancyFields } from "@/lib/auth/tenancy";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import {
@@ -21,7 +18,7 @@ import {
   OVERSIGHT_ELIGIBLE_CATEGORIES,
 } from "./categories";
 import {
-  audienceForRole,
+  audienceForTenancy,
   buildPreferenceMap,
   buildPreferenceMatrixView,
   DIGEST_CADENCE_CHANNEL,
@@ -62,6 +59,53 @@ import {
 // ----------------------------------------------------------------------------
 
 const USER_ID = "user-1";
+
+/**
+ * A tenancy, with all three FKs named — the shape `audienceForTenancy` reads.
+ *
+ * Every fixture below spells the nulls out because the type requires it: the
+ * audience is a property of WHICH tenancy a row names, and a projection that
+ * omitted an oversight FK would resolve an oversight reader to the church
+ * defaults, which is exactly the N-027 bug these tests exist for.
+ */
+function tenancy(fields: Partial<TenancyFields> = {}): TenancyFields {
+  return {
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...fields,
+  };
+}
+
+/** The tenancy shapes the five role names collapsed onto, with their audience. */
+const TENANCY_AUDIENCES = [
+  ["a seat in a plant", tenancy({ churchId: "church-1" }), "church"],
+  ["a coach, who names no tenancy at all", tenancy(), "church"],
+  [
+    "a sending church's account",
+    tenancy({ sendingChurchId: "sending-church-1" }),
+    "oversight",
+  ],
+  [
+    "a network's account",
+    tenancy({ sendingNetworkId: "network-1" }),
+    "oversight",
+  ],
+] as const satisfies readonly (readonly [
+  string,
+  TenancyFields,
+  "church" | "oversight",
+])[];
+
+/** The two tenancy shapes that read with the oversight defaults. */
+const OVERSIGHT_TENANCIES = TENANCY_AUDIENCES.filter(
+  ([, , audience]) => audience === "oversight"
+);
+
+/** The two that read with the church ones — a plant seat, and a coach. */
+const CHURCH_TENANCIES = TENANCY_AUDIENCES.filter(
+  ([, , audience]) => audience === "church"
+);
 
 /**
  * A stored row, defaulting to the BY-PRODUCT stamp.
@@ -921,12 +965,13 @@ test("a toggle the user really changed does reach the database", () => {
 // The audience only ever decides what an ABSENT row means (N-027)
 // ----------------------------------------------------------------------------
 
-test("audienceForRole maps the five roles onto the two audiences", () => {
-  assert.equal(audienceForRole("planter"), "church");
-  assert.equal(audienceForRole("coach"), "church");
-  assert.equal(audienceForRole("team_member"), "church");
-  assert.equal(audienceForRole("sending_church_admin"), "oversight");
-  assert.equal(audienceForRole("network_admin"), "oversight");
+test("audienceForTenancy maps every tenancy onto one of the two audiences", () => {
+  // The five role names were four tenancies: the three church roles differed
+  // only in seat, and the seat has nothing to say about which defaults an
+  // absent row falls back to.
+  for (const [who, fields, audience] of TENANCY_AUDIENCES) {
+    assert.equal(audienceForTenancy(fields), audience, who);
+  }
 });
 
 test("an oversight recipient's in-app allow-list includes the digest", () => {
@@ -1083,7 +1128,7 @@ test("the cadence itself still persists and is still honoured", () => {
 
 test("a cadence-only row does not pin EITHER audience's defaults", () => {
   // The N-019 guarantee stated as the property it protects: whichever coded
-  // default a user's role turns out to select, the row a cadence save left
+  // default a user's tenancy turns out to select, the row a cadence save left
   // behind is still inheritable, so the new default reaches them.
   const rows = [cadenceOnlyRow("daily")];
 
@@ -1362,34 +1407,34 @@ test("a stored value that DIFFERS from the default is still a choice", () => {
 // The cadence control an oversight recipient cannot use is not offered (#254)
 // ----------------------------------------------------------------------------
 
-test("oversight roles are given an explanation, not a cadence selector", () => {
-  // Both oversight role classes, and driven through `audienceForRole` rather
+test("oversight readers are given an explanation, not a cadence selector", () => {
+  // Both oversight org kinds, and driven through `audienceForTenancy` rather
   // than a hardcoded audience, so the divergence is asserted at the same seam
   // `/settings` builds the view through.
-  for (const role of ["sending_church_admin", "network_admin"] as const) {
-    const view = buildPreferenceMatrixView([], audienceForRole(role));
+  for (const [who, fields] of OVERSIGHT_TENANCIES) {
+    const view = buildPreferenceMatrixView([], audienceForTenancy(fields));
 
-    assert.equal(view.digest.kind, "fixed", role);
-    assert.equal(view.digest.category, "digest", role);
-    assert.ok(!("options" in view.digest), role);
-    assert.ok(!("cadence" in view.digest), role);
+    assert.equal(view.digest.kind, "fixed", who);
+    assert.equal(view.digest.category, "digest", who);
+    assert.ok(!("options" in view.digest), who);
+    assert.ok(!("cadence" in view.digest), who);
   }
 });
 
-test("the church roles' cadence selector is unchanged", () => {
-  // The planter's control is the one this must not touch. Coach and team member
-  // ride the same audience and are asserted with it.
-  for (const role of ["planter", "coach", "team_member"] as const) {
+test("the church readers' cadence selector is unchanged", () => {
+  // The plant's control is the one this must not touch. A coach rides the same
+  // audience and is asserted with it.
+  for (const [who, fields] of CHURCH_TENANCIES) {
     const digest = cadenceChoice(
-      buildPreferenceMatrixView([], audienceForRole(role))
+      buildPreferenceMatrixView([], audienceForTenancy(fields))
     );
 
-    assert.equal(digest.kind, "choice", role);
-    assert.equal(digest.cadence, DEFAULT_DIGEST_CADENCE, role);
+    assert.equal(digest.kind, "choice", who);
+    assert.equal(digest.cadence, DEFAULT_DIGEST_CADENCE, who);
     assert.deepEqual(
       digest.options.map((option) => option.value),
       [...digestCadences],
-      role
+      who
     );
   }
 });
@@ -1515,8 +1560,8 @@ test("both failure messages tell the user what to do next", () => {
 //
 // The view model carries the FACT — `eligible` per row, and one note for the
 // screen — and says nothing about what a screen should do with it. These tests
-// pin the fact for both audiences and both oversight roles, and pin that a
-// planter's screen is untouched.
+// pin the fact for both audiences and both oversight org kinds, and pin that a
+// plant reader's screen is untouched.
 // ----------------------------------------------------------------------------
 
 test("a church reader's rows are all eligible, and there is no note", () => {
@@ -1529,8 +1574,8 @@ test("a church reader's rows are all eligible, and there is no note", () => {
   assert.equal(view.ineligibleNote, null);
 
   // The default audience is the church one, so a caller that does not know the
-  // role still gets today's screen — the same promise `defaultChannelEnabled`
-  // makes about its own audience parameter.
+  // reader's tenancy still gets today's screen — the same promise
+  // `defaultChannelEnabled` makes about its own audience parameter.
   assert.deepEqual(
     buildPreferenceMatrixView([]).categories.map((row) => row.eligible),
     view.categories.map((row) => row.eligible)
@@ -1552,23 +1597,27 @@ test("an oversight reader's rows are eligible exactly where the allow-list says"
   assert.equal(view.ineligibleNote, OVERSIGHT_INELIGIBLE_CATEGORY_NOTE);
 });
 
-test("both oversight roles produce the same ineligible rows", () => {
-  // `audienceForRole` collapses `sending_church_admin` and `network_admin` onto
-  // one audience, so that seam — not the browser — is where the two roles are
-  // proved to agree. The dev seed has no `sending_church_admin`.
-  const rowsFor = (role: UserRole) =>
-    buildPreferenceMatrixView([], audienceForRole(role)).categories.map(
+test("both oversight org kinds produce the same ineligible rows", () => {
+  // `audienceForTenancy` collapses a sending church's account and a network's
+  // account onto one audience, so that seam — not the browser — is where the
+  // two are proved to agree. The dev seed has no sending-church account.
+  const rowsFor = (fields: TenancyFields) =>
+    buildPreferenceMatrixView([], audienceForTenancy(fields)).categories.map(
       (row) => [row.category, row.eligible] as const
     );
 
-  assert.deepEqual(rowsFor("sending_church_admin"), rowsFor("network_admin"));
-  assert.notDeepEqual(rowsFor("network_admin"), rowsFor("planter"));
+  const [[, sendingChurch], [, network]] = OVERSIGHT_TENANCIES;
+  assert.deepEqual(rowsFor(sendingChurch), rowsFor(network));
+  assert.notDeepEqual(
+    rowsFor(network),
+    rowsFor(tenancy({ churchId: "church-1" }))
+  );
 
-  for (const role of ["planter", "coach", "team_member"] as const) {
+  for (const [who, fields] of CHURCH_TENANCIES) {
     assert.deepEqual(
-      rowsFor(role).filter(([, eligible]) => !eligible),
+      rowsFor(fields).filter(([, eligible]) => !eligible),
       [],
-      `${role} lost a row they are served`
+      `${who} lost a row they are served`
     );
   }
 });

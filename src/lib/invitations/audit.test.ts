@@ -87,7 +87,7 @@ const SERVER_MODULES: string[] = (function collect(dir: string): string[] {
 const ACTOR: InvitationActor = invitationActorFromSession({
   user: {
     id: ACTOR_ID,
-    role: "planter",
+    seat: "owner",
     churchId: CHURCH,
     sendingChurchId: null,
     sendingNetworkId: null,
@@ -137,7 +137,7 @@ test("no caller can name the actor", () => {
   // branded, so the only way to obtain one is `invitationActorFromSession`.
   const forged = {
     id: FOREIGN_ID,
-    role: "planter" as const,
+    seat: "owner" as const,
     churchId: CHURCH,
     sendingChurchId: null,
     sendingNetworkId: null,

@@ -31,8 +31,9 @@ import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 //
 // What is asserted here, and in this order:
 //
-//   §1 AUTHORITY — admin only, and the sending church is the actor's OWN. No
-//      argument exists that could aim it at another organization.
+//   §1 AUTHORITY — the sending church's own account only, and the sending
+//      church is the actor's OWN. No argument exists that could aim it at
+//      another organization.
 //   §2 THE STATEMENT — the FK null and the audit row are ONE statement, the
 //      audit selects FROM the sever, and the WHERE asserts the network.
 //   §3 THE SUBJECT — the row carries a sending-church subject and a null
@@ -80,7 +81,7 @@ function actor(overrides: Partial<InvitationActor>): InvitationActor {
   return invitationActorFromSession({
     user: {
       id: USER,
-      role: "sending_church_admin",
+      seat: "owner",
       churchId: null,
       sendingChurchId: null,
       sendingNetworkId: null,
@@ -102,32 +103,61 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
 // 1. Authority — before any query runs
 // ----------------------------------------------------------------------------
 
-test("only a sending church ADMIN may leave a network", async () => {
-  // A member of the sending church who is not its admin is refused in the logic
-  // layer, so a forged POST straight at the action meets the same refusal the
-  // button does. Hiding the control is a courtesy, never the control.
-  for (const role of [
-    "team_member",
-    "coach",
-    "planter",
-    "network_admin",
-  ] as const) {
+test("only an account whose OWN tenancy is this sending church may leave a network", async () => {
+  // The refusal is in the logic layer, so a forged POST straight at the action
+  // meets the same refusal the button does. Hiding the control is a courtesy,
+  // never the control.
+  //
+  // THE QUESTION IS THE TENANCY *AND* THE SEAT — `isOrgOwner`.
+  // `sending_church_admin` meant the OWNER seat in a sending church, so both
+  // halves are the migrated allowlist rather than a new refusal. Two kinds of
+  // row are refused below: one naming a plant AND this sending church, which
+  // the role used to tell apart and which now resolves to NO org; and one
+  // naming this sending church with the wrong seat, which no role ever mapped
+  // to.
+  const refused: [string, Partial<InvitationActor>][] = [
+    ["the plant's Owner", { seat: "owner", churchId: PLANT }],
+    ["a coach, who names no tenancy at all", { seat: null }],
+    ["the network's own Owner", { seat: "owner", sendingNetworkId: NETWORK }],
+    [
+      "an account naming a plant AND this sending church",
+      { seat: "owner", churchId: PLANT, sendingChurchId: SENDING_CHURCH },
+    ],
+    // THE SEAT HALF, restored — `sending_church_admin` meant the Owner seat in
+    // a sending church, so the allowlist this replaced refused all three.
+    [
+      "a MEMBER of the sending church",
+      { seat: "member", sendingChurchId: SENDING_CHURCH },
+    ],
+    [
+      "an ADMIN of the sending church",
+      { seat: "admin", sendingChurchId: SENDING_CHURCH },
+    ],
+    [
+      "a seatless account carrying the org FK",
+      { seat: null, sendingChurchId: SENDING_CHURCH },
+    ],
+  ];
+
+  for (const [who, fields] of refused) {
     assert.equal(
-      await refusal(
-        leaveNetworkAsSendingChurchAdmin(
-          actor({ role, sendingChurchId: SENDING_CHURCH, churchId: PLANT })
-        )
-      ),
+      await refusal(leaveNetworkAsSendingChurchAdmin(actor(fields))),
       SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE,
-      role
+      who
     );
   }
 });
 
-test("an admin with no sending church has nothing to leave", async () => {
+test("an account with no sending church has nothing to leave", async () => {
+  // ONE refusal, because there is now one guard. `oversightOrgOf` answers
+  // `sending_church` only when `sending_church_id` is named, so the authority
+  // check fires first and the `if (!actor.sendingChurchId)` arm that used to
+  // sit behind it was unreachable — deleted, along with its message. Under the
+  // role model the two were independent: a `sending_church_admin` with a null
+  // FK passed the first and failed the second.
   assert.equal(
     await refusal(leaveNetworkAsSendingChurchAdmin(actor({}))),
-    "Set up your sending church first"
+    SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE
   );
 });
 

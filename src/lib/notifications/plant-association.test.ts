@@ -40,7 +40,7 @@ import {
 const CHURCH = "11111111-1111-4111-8111-111111111111";
 const ORG = "22222222-2222-4222-8222-222222222222";
 const PLANTER = "33333333-3333-4333-8333-333333333333";
-const SECOND_PLANTER = "44444444-4444-4444-8444-444444444444";
+const ANOTHER_RECIPIENT = "44444444-4444-4444-8444-444444444444";
 const EVENT = "55555555-5555-4555-8555-555555555555";
 
 const FACTS = {
@@ -64,8 +64,8 @@ function deps(
       sent.push(input);
       return recorded();
     },
-    async listPlanters() {
-      return [{ id: PLANTER }];
+    async plantOwner() {
+      return { id: PLANTER };
     },
     async resolveOrgName() {
       return "Grace Sending Church";
@@ -191,12 +191,15 @@ test("the dedupe key is per EVENT, so a plant removed twice is told twice", () =
   );
   assert.notEqual(first.dedupeKey, again.dedupeKey);
 
-  // …and the SAME key across recipients: the unique index carries
-  // `recipient_user_id`, so a second planter still gets their own row while a
-  // replay of the emitter writes nothing.
+  // …and the SAME key for a DIFFERENT recipient: the key is about the event,
+  // and `recipient_user_id` is what the unique index adds to it, so a replay of
+  // the emitter writes nothing while a genuinely different recipient still gets
+  // their own row. Composed for a second id here to assert that the key does
+  // not vary by recipient — not because a plant can have two Owners; since
+  // migration 0050 it cannot.
   const second = composeRemovedFromOrg(
     { ...FACTS, orgName: "Grace Sending Church" },
-    SECOND_PLANTER
+    ANOTHER_RECIPIENT
   );
   assert.equal(first.dedupeKey, second.dedupeKey);
 });
@@ -205,21 +208,26 @@ test("the dedupe key is per EVENT, so a plant removed twice is told twice", () =
 // 3. The fan-out never throws into a committed sever
 // ----------------------------------------------------------------------------
 
-test("every planter of the plant is told", async () => {
+test("the plant's Owner is told — and there is only ever one", async () => {
+  // THIS USED TO FAN OUT TO A LIST, with a second planter in the fixture.
+  // Since migration 0050 `users_church_owner_unique_idx` makes a second Owner
+  // unwritable, so that fixture described a row the database can no longer
+  // hold — and a loop over it was branch coverage for a state that cannot
+  // occur. One recipient, asserted as one.
   const fake = deps({
-    async listPlanters() {
-      return [{ id: PLANTER }, { id: SECOND_PLANTER }];
+    async plantOwner() {
+      return { id: PLANTER };
     },
   });
 
   const report = await announceRemovedFromOversightOrg(FACTS, fake);
 
-  assert.equal(report.considered, 2);
-  assert.equal(report.recorded, 2);
-  assert.equal(report.created, 2);
+  assert.equal(report.considered, 1);
+  assert.equal(report.recorded, 1);
+  assert.equal(report.created, 1);
   assert.deepEqual(
     fake.sent.map((input) => input.recipientUserId),
-    [PLANTER, SECOND_PLANTER]
+    [PLANTER]
   );
 });
 
@@ -238,10 +246,11 @@ test("an org whose name does not resolve announces nothing at all", async () => 
   assert.equal(report.recorded, 0);
 });
 
-test("a plant with no planter is not an error", async () => {
+test("a plant with no Owner is not an error", async () => {
+  // OB-004's `no_planter`, which is a real state and not a failure.
   const fake = deps({
-    async listPlanters() {
-      return [];
+    async plantOwner() {
+      return null;
     },
   });
 
@@ -282,7 +291,7 @@ test("nothing the notification does can fail the sever it follows", async () => 
   assert.equal(enqueueReport.failed, 1);
 
   const throwsOnRecipients = deps({
-    async listPlanters() {
+    async plantOwner() {
       throw new Error("database down");
     },
   });

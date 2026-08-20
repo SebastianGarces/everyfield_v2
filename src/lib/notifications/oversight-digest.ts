@@ -917,9 +917,20 @@ export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
         // this day's digest. `=` against a NULL FK yields NULL, so a plant with
         // only one of the two FKs matches recipients only on the one it has.
         //
-        // The audience is `owedDigestAudience` — see its docblock above for why
-        // it is the fan-out's own builder, why it is annotated `SQL`, and why
-        // no `inArray(role, OVERSIGHT_ROLES)` floor sits beside it.
+        // The audience is `owedDigestAudience` — see its docblock above for
+        // why it is the fan-out's own builder and why it is annotated `SQL`.
+        //
+        // WHAT SITS BESIDE EACH FK CHANGED WITH #494, and the old note here is
+        // no longer true of this SQL. There used to be no floor at all: each
+        // arm was `role = <the org's admin role> and <fk> = …`, and the note
+        // said a bare `inArray(role, OVERSIGHT_ROLES)` must not be added back
+        // because it would silently AND a mis-edited arm to zero. With the role
+        // column dropped each arm now carries the REST OF THE
+        // EXACTLY-ONE-TENANCY RULE instead — `church_id is null` and every
+        // other oversight FK null — derived from `OVERSIGHT_ADMIN_ROWS` rather
+        // than written here. That is not a floor over a role list; it is the
+        // SQL half of `oversightOrgOf`, and widening it back to the FK alone
+        // re-admits a row with a competing claim on another tenancy.
         //
         // The day match is a suffix `LIKE` on a key this module builds
         // (`YYYY-MM-DD`, no wildcard characters), narrowed by `church_id`,

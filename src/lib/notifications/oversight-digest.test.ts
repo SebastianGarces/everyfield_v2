@@ -1,3 +1,4 @@
+import { armFor, oversightSqlArms } from "@/lib/testing/oversight-sql-arms";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -981,8 +982,12 @@ test("the digest sweep's owed set is the SAME audience — a plant it cannot ser
   // head-of-line block `runOversightDigestSweep`'s header records as fixed.
   //
   // Clause 4's audience was `or(fk, fk) and role in OVERSIGHT_ROLES` while the
-  // per-recipient gate paired them, so a `network_admin` carrying a stray
-  // `sending_church_id` was one such recipient.
+  // per-recipient gate paired them, so an account carrying a stray
+  // `sending_church_id` was one such recipient. With `users.role` dropped
+  // (#494) the arm carries the rest of the exactly-one-tenancy rule instead —
+  // this FK correlated with the outer church, and every OTHER tenancy column
+  // null — which is the same decision `classifyOversightCandidate` makes in
+  // TypeScript.
   const { sql } = plantsOwedDigestQuery({
     dayKey: "2026-08-12",
     window: {
@@ -995,12 +1000,37 @@ test("the digest sweep's owed set is the SAME audience — a plant it cannot ser
 
   const normalised = sql.replace(/"/g, "");
 
-  assert.match(
-    normalised,
-    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_church_id = churches\.sending_church_id/
+  // ARM-SCOPED, AND ORDER-FREE — the same pair of properties, and the same
+  // trap, as `anchor.test.ts`. `church_id is null` appears in BOTH arms, so a
+  // whole-string match stays green when one arm loses its guard; the
+  // conjunction's ORDER, meanwhile, follows the pairing table and is not the
+  // rule. Split first, then match within one arm.
+  const arms = oversightSqlArms(normalised, "owed_digest_recipient");
+  assert.equal(
+    arms.length,
+    2,
+    `expected two owed-digest arms, got ${arms.length}`
   );
-  assert.match(
-    normalised,
-    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_network_id = churches\.sending_network_id/
-  );
+
+  for (const [correlated, alsoNull] of [
+    ["sending_church_id", ["church_id", "sending_network_id"]],
+    ["sending_network_id", ["church_id", "sending_church_id"]],
+  ] as const) {
+    const arm = armFor(arms, correlated);
+
+    assert.match(
+      arm.sql,
+      new RegExp(
+        `owed_digest_recipient\\.${correlated} = churches\\.${correlated}`
+      ),
+      `${correlated} is correlated with the outer church`
+    );
+    for (const column of alsoNull) {
+      assert.match(
+        arm.sql,
+        new RegExp(`owed_digest_recipient\\.${column} is null`),
+        `${correlated}'s OWN arm requires ${column} to be null`
+      );
+    }
+  }
 });

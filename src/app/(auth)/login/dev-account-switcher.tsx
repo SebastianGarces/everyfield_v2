@@ -37,15 +37,6 @@ import { devLoginAs, type DevLoginState } from "./dev-actions";
 
 const initialState: DevLoginState = {};
 
-/** Compact role label — the raw enum reads poorly in a list. */
-const ROLE_LABELS: Record<string, string> = {
-  planter: "Planter",
-  coach: "Coach",
-  team_member: "Team member",
-  sending_church_admin: "Sending church",
-  network_admin: "Network admin",
-};
-
 export function DevAccountSwitcher({
   accounts,
   redirectTo,
@@ -110,7 +101,7 @@ export function DevAccountSwitcher({
                 </span>
               ) : (
                 <span className="text-muted-foreground">
-                  Search accounts by name, email, church, or role…
+                  Search accounts by name, email, church, or seat…
                 </span>
               )}
               <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
@@ -135,12 +126,12 @@ export function DevAccountSwitcher({
                       <CommandItem
                         key={account.id}
                         // Everything searchable is folded into the value, so a
-                        // church name or role matches as readily as an email.
+                        // church name or a seat matches as readily as an email.
                         value={[
                           account.name,
                           account.email,
                           account.churchName ?? "",
-                          ROLE_LABELS[account.role] ?? account.role,
+                          account.standing,
                         ].join(" ")}
                         onSelect={() => {
                           setSelectedId(account.id);
@@ -168,7 +159,7 @@ export function DevAccountSwitcher({
                           </span>
                         </span>
                         <span className="text-muted-foreground ml-2 shrink-0 text-xs">
-                          {ROLE_LABELS[account.role] ?? account.role}
+                          {account.standing}
                         </span>
                       </CommandItem>
                     ))}

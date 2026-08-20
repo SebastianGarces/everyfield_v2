@@ -12,8 +12,8 @@ import {
   type NotificationDelivery,
   type NotificationPreference,
   type NotificationStatus,
-  type UserRole,
 } from "@/db/schema";
+import type { TenancyFields } from "@/lib/auth/tenancy";
 import { sendEmail as sendProviderEmail } from "@/lib/email/client";
 
 import {
@@ -31,7 +31,7 @@ import {
 import { composePlanterDigestEmail } from "./channels/digest-email";
 import { PLANTER_DIGEST_TYPE } from "./digest-content";
 import { PERMANENT_FAILURE_PREFIX } from "./permanent-failure";
-import { audienceForRole, isChannelEnabled } from "./preferences";
+import { audienceForTenancy, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported
 // here because the dispatcher is the seam every caller already knows about.
@@ -379,16 +379,20 @@ export function isPermanentEmailError(message: string): boolean {
 // email (template, unsubscribe link, List-Unsubscribe header)
 // ----------------------------------------------------------------------------
 
-export interface DispatchRecipient {
+/**
+ * A recipient, as addressing needs them.
+ *
+ * EXTENDS `TenancyFields` rather than re-listing the three columns: they are
+ * carried ONLY to pick which coded preference defaults apply
+ * (`audienceForTenancy`, N-027), that function takes exactly this type, and a
+ * hand-written copy of its shape is one column away from silently disagreeing
+ * with it. Not an authorisation input — whether this row should exist at all
+ * was settled by `enqueue` before it was written.
+ */
+export interface DispatchRecipient extends TenancyFields {
   id: string;
   email: string;
   name: string | null;
-  /**
-   * The recipient's role — carried ONLY to pick which coded preference defaults
-   * apply (`audienceForRole`, N-027). It is not an authorisation input: whether
-   * this row should exist at all was settled by `enqueue` before it was written.
-   */
-  role: UserRole;
 }
 
 /**
@@ -899,9 +903,7 @@ async function processGroup(
   // unknown recipient (deleted between claim and dispatch) falls back to the
   // church defaults — the conservative direction, and the delivery fails on the
   // missing address a few lines down anyway.
-  const audience = ctx.recipient
-    ? audienceForRole(ctx.recipient.role)
-    : "church";
+  const audience = ctx.recipient ? audienceForTenancy(ctx.recipient) : "church";
 
   const emailEnabled = isChannelEnabled(
     ctx.preferenceRows,
@@ -1199,10 +1201,12 @@ const recipientColumns = {
   id: users.id,
   email: users.email,
   name: users.name,
-  // Needed for `audienceForRole` — an oversight recipient's coded default for
-  // `digest`/`in_app` differs (N-027). Still a projection, not `select()`:
+  // Needed for `audienceForTenancy` — an oversight recipient's coded default
+  // for `digest`/`in_app` differs (N-027). Still a projection, not `select()`:
   // `password_hash` has no business in a dispatcher run.
-  role: users.role,
+  churchId: users.churchId,
+  sendingChurchId: users.sendingChurchId,
+  sendingNetworkId: users.sendingNetworkId,
 };
 
 export const dbDispatchDeps: DispatchDeps = {

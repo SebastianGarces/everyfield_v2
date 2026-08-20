@@ -13,11 +13,13 @@ import { getCurrentSession } from "@/lib/auth/session";
  * case-insensitive allowlist of user emails. The check is always performed
  * server-side.
  *
- * FUTURE UPGRADE PATH: introduce a `platform_admin` user role (see
- * `src/db/schema/user.ts` UserRole) and switch `isPlatformAdmin` to check
- * `user.role === "platform_admin"` (optionally keeping the env allowlist as a
- * bootstrap fallback). Callers of `isPlatformAdmin` / `requirePlatformAdmin`
- * would not need to change.
+ * FUTURE UPGRADE PATH, and the seat model does NOT provide it. `users.seat` is
+ * the seat held in ONE tenancy (see `src/db/schema/user.ts`), and a platform
+ * admin belongs to no tenancy at all — there is no fourth seat to add, and
+ * adding one would make `owner` mean something different in a fourth place.
+ * Whatever replaces this allowlist is a fact about the account rather than
+ * about a tenancy. Callers of `isPlatformAdmin` / `requirePlatformAdmin` would
+ * not need to change.
  */
 
 /**

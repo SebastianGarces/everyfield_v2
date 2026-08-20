@@ -21,7 +21,7 @@ import type { Metadata } from "next";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantsDirectory } from "@/components/oversight/plants-directory";
-import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { listOversightPlants } from "@/lib/oversight/read";
 import { requireOversightUser } from "@/lib/oversight/session";
 
@@ -30,9 +30,9 @@ export const metadata: Metadata = {
 };
 
 export default async function OversightPlantsPage() {
-  // Oversight-only surface. Church-level roles never reach the read — and
-  // `listOversightPlants` refuses them a second time by resolving no org.
-  const user = await requireOversightUser();
+  // Oversight-only surface. A church-level tenancy never reaches the read —
+  // and `listOversightPlants` refuses it a second time by resolving no org.
+  const { user, org } = await requireOversightUser();
 
   const plants = await listOversightPlants(user);
 
@@ -46,7 +46,7 @@ export default async function OversightPlantsPage() {
       <HeaderBreadcrumbs items={[{ label: "Church plants" }]} />
       <PlantsDirectory
         plants={plants}
-        scopeLabel={scopeLabelForRole(user.role)}
+        scopeLabel={scopeLabelForOrgType(org.type)}
       />
     </>
   );

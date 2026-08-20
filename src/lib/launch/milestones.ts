@@ -43,8 +43,7 @@ import {
 } from "@/db/schema";
 import type { LaunchMilestoneArea } from "@/db/schema/launch";
 import type { TaskStatus } from "@/db/schema/tasks";
-import { requireChurchAccess, requireRole } from "@/lib/auth/access";
-import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
+import { requireChurchAccess, requireChurchLevel } from "@/lib/auth/access";
 import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
 
 // ----------------------------------------------------------------------------
@@ -686,8 +685,8 @@ export type MilestoneWriteResult =
  * completion follows normal task rules" — so a team member who may complete a
  * task may also close the milestone that task belongs to.
  *
- * `CHURCH_LEVEL_ROLES` is what keeps that from becoming "anyone with access":
- * an oversight admin has church ACCESS to an associated plant and would sail
+ * `requireChurchLevel` is what keeps that from becoming "anyone with access":
+ * an oversight account has church ACCESS to an associated plant and would sail
  * past `requireChurchAccess` alone. Oversight watches a plant's readiness; it
  * does not tick it off.
  */
@@ -696,7 +695,7 @@ export async function completeLaunchMilestone(
   churchId: string,
   milestoneId: string
 ): Promise<MilestoneWriteResult> {
-  requireRole(user, ...CHURCH_LEVEL_ROLES);
+  requireChurchLevel(user);
   await requireChurchAccess(user, churchId);
 
   const result = await db.execute<{ id: string }>(
@@ -733,7 +732,7 @@ export async function reopenLaunchMilestone(
   churchId: string,
   milestoneId: string
 ): Promise<MilestoneWriteResult> {
-  requireRole(user, ...CHURCH_LEVEL_ROLES);
+  requireChurchLevel(user);
   await requireChurchAccess(user, churchId);
 
   const result = await db.execute<{ id: string }>(

@@ -187,7 +187,7 @@ export interface OversightFanOutReport {
    * It is a sub-count of `considered`, so
    * `considered === recorded + skipped + failed + misprovisioned` still holds.
    * A non-zero value is never normal and never the fan-out's fault: it says a
-   * `users` row was provisioned with an oversight FK its role cannot use.
+   * `users` row was provisioned with an oversight FK its own tenancy does not name.
    */
   misprovisioned: number;
 }
@@ -238,7 +238,7 @@ export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
  * defects are not in `recipients`, so there is no branch here to skip them with
  * and none to get wrong. What is left to do is REPORT them, which is the loop
  * below: `console.error`, not `warn`, because a row provisioned with an
- * oversight FK its role cannot use is a defect in stored data, and the whole
+ * oversight FK its own tenancy does not name is a defect in stored data, and the whole
  * point of the ruling is that it stops being something only a database query
  * could notice.
  */
@@ -254,10 +254,10 @@ async function fanOutTo(
   report.misprovisioned = audience.misprovisioned.length;
 
   for (const row of audience.misprovisioned) {
-    console.error("oversight fan-out reached a cross-paired admin", {
+    console.error("oversight fan-out reached a cross-tenanted account", {
       ...context,
       recipientUserId: row.id,
-      role: row.role,
+      names: row.names,
       reachedBy: row.reachedBy,
     });
   }

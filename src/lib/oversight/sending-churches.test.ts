@@ -58,26 +58,28 @@ function readCode(file: string): string {
 }
 
 // ----------------------------------------------------------------------------
-// Network admins only (OV-009)
+// A network tenancy only (OV-009)
 // ----------------------------------------------------------------------------
 
-test("the read refuses every role but network_admin before it queries", () => {
+test("the read refuses every tenancy but a network before it queries", () => {
   const source = readCode(READ_FILE);
 
-  const guardAt = source.indexOf('user.role !== "network_admin"');
+  const guardAt = source.indexOf('org?.type !== "network"');
   const firstQueryAt = source.indexOf(".select(");
-  assert.ok(guardAt > 0, "the read does not check the caller's role");
+  assert.ok(guardAt > 0, "the read does not resolve the caller's tenancy");
   assert.ok(
     firstQueryAt > 0,
     "the source scan found no select — this test has gone stale"
   );
   assert.ok(
     guardAt < firstQueryAt,
-    "a query runs before the caller's role is checked"
+    "a query runs before the caller's tenancy is resolved"
   );
-  // A role check alone is not enough: a network id must be present too, and the
-  // refusal is an empty roster rather than a partial one.
-  assert.match(source, /!user\.sendingNetworkId\) return \[\];/);
+  // ONE check, not two. `oversightOrgOf` answers only for a row naming exactly
+  // one tenancy and carries the id with the kind, so there is no second
+  // `!user.sendingNetworkId` arm left to forget — a network id on an account
+  // whose tenancy is something else was never a licence to read the network.
+  assert.doesNotMatch(source, /user\.sendingNetworkId/);
 });
 
 test("the route 404s a sending-church admin and never redirects them onward", () => {
@@ -107,10 +109,7 @@ test("the route 404s a sending-church admin and never redirects them onward", ()
     notFoundAt < readAt,
     "the roster is read before the network-only guard runs"
   );
-  assert.match(
-    source,
-    /user\.role !== "network_admin"\s*\)\s*\{\s*notFound\(\);/
-  );
+  assert.match(source, /org\.type !== "network"\s*\)\s*\{\s*notFound\(\);/);
 });
 
 test("the nav item and the guard agree about who may see the roster", () => {

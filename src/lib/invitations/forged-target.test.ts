@@ -82,7 +82,7 @@ function sendingChurchAdmin(): InvitationActor {
   return invitationActorFromSession({
     user: {
       id: "11111111-1111-4111-8111-111111111111",
-      role: "sending_church_admin",
+      seat: "owner",
       churchId: null,
       sendingChurchId: OWN_SENDING_CHURCH,
       sendingNetworkId: null,
@@ -94,7 +94,7 @@ function networkAdmin(): InvitationActor {
   return invitationActorFromSession({
     user: {
       id: "22222222-2222-4222-8222-222222222222",
-      role: "network_admin",
+      seat: "owner",
       churchId: null,
       sendingChurchId: null,
       sendingNetworkId: OWN_NETWORK,
@@ -142,11 +142,11 @@ test("a forged target with an accountless email resolves to null targets", () =>
       // …and the invitation it WOULD have written is an ordinary open one, of
       // the kind the actor is entitled to issue — the forged key does not get
       // to pick the `type` either.
+      // Which type that is comes off the actor's OWN tenancy, which is the
+      // whole point: the forged key cannot change whose org is inviting.
       assert.equal(
         result.values.type,
-        actor.role === "sending_church_admin"
-          ? "church_to_sending_church"
-          : "church_to_network"
+        actor.sendingChurchId ? "church_to_sending_church" : "church_to_network"
       );
     }
   }

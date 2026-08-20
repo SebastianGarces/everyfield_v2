@@ -136,7 +136,7 @@ async function seedInvitation(seed: InvitationSeed) {
 /** The actor a session would mint for this user. */
 function actorFor(user: {
   id: string;
-  role: (typeof users.$inferSelect)["role"];
+  seat: (typeof users.$inferSelect)["seat"];
   churchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
@@ -258,7 +258,7 @@ async function run(created: Created) {
     .values({
       email: `planter-${stamp}@example.test`,
       passwordHash: "x",
-      role: "planter",
+      seat: "owner",
       churchId: plant.id,
     })
     .returning();
@@ -270,13 +270,13 @@ async function run(created: Created) {
       {
         email: `admin-a-${stamp}@example.test`,
         passwordHash: "x",
-        role: "network_admin" as const,
+        seat: "owner" as const,
         sendingNetworkId: network.id,
       },
       {
         email: `admin-b-${stamp}@example.test`,
         passwordHash: "x",
-        role: "network_admin" as const,
+        seat: "owner" as const,
         sendingNetworkId: network.id,
       },
     ])
@@ -509,7 +509,7 @@ async function run(created: Created) {
     .values({
       email: `sc-admin-${stamp}@example.test`,
       passwordHash: "x",
-      role: "sending_church_admin" as const,
+      seat: "owner" as const,
       sendingChurchId: otherSendingChurch.id,
     })
     .returning();
@@ -706,7 +706,7 @@ async function run(created: Created) {
     .values({
       email: `race-inviter-${stamp}@example.test`,
       passwordHash: "x",
-      role: "sending_church_admin" as const,
+      seat: "owner" as const,
       sendingChurchId: raceSendingChurch.id,
     })
     .returning();
@@ -723,7 +723,7 @@ async function run(created: Created) {
     .values({
       email: `race-planter-${stamp}@example.test`,
       passwordHash: "x",
-      role: "planter" as const,
+      seat: "owner" as const,
       churchId: racePlant.id,
     })
     .returning();
@@ -1022,7 +1022,7 @@ async function run(created: Created) {
     .values({
       email: `rival-inviter-${stamp}@example.test`,
       passwordHash: "x",
-      role: "sending_church_admin" as const,
+      seat: "owner" as const,
       sendingChurchId: rivalSendingChurch.id,
     })
     .returning();

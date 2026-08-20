@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { groupFor } from "./dev-accounts";
+import type { SeatFields } from "@/lib/auth/tenancy";
+
+import { groupFor, standingLabel } from "./dev-accounts";
 
 // ----------------------------------------------------------------------------
 // Seeded dev logins (#326) — the domain retirement and the things that quote it.
@@ -213,11 +215,26 @@ test("no seed script touches wiki articles", () => {
 // The login picker groups what it finds
 // ----------------------------------------------------------------------------
 
+const PLANT = "11111111-1111-4111-8111-111111111111";
+
+/** An account with the given seat and tenancy, as the switcher projects it. */
+function account(overrides: Partial<SeatFields> = {}): SeatFields {
+  return {
+    seat: null,
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...overrides,
+  };
+}
+
+const PLANT_OWNER = account({ seat: "owner", churchId: PLANT });
+
 test("eval accounts group as eval whatever domain they were seeded on", () => {
   assert.equal(
     groupFor(
       `planter-dayspring@eval.phase-engine.${CURRENT_DOMAIN}`,
-      "planter"
+      PLANT_OWNER
     ),
     "Phase Engine eval"
   );
@@ -226,24 +243,59 @@ test("eval accounts group as eval whatever domain they were seeded on", () => {
   assert.equal(
     groupFor(
       `planter-dayspring@eval.phase-engine.${RETIRED_DOMAIN}`,
-      "planter"
+      PLANT_OWNER
     ),
     "Phase Engine eval"
   );
 });
 
-test("ordinary accounts group by role", () => {
+test("ordinary accounts group by tenancy, and by the Owner seat inside a plant", () => {
   assert.equal(
-    groupFor(`admin@${CURRENT_DOMAIN}`, "network_admin"),
+    groupFor(
+      `admin@${CURRENT_DOMAIN}`,
+      account({ seat: "owner", sendingNetworkId: "n-1" })
+    ),
     "Oversight"
   );
   assert.equal(
-    groupFor(`sender@${CURRENT_DOMAIN}`, "sending_church_admin"),
+    groupFor(
+      `sender@${CURRENT_DOMAIN}`,
+      account({ seat: "owner", sendingChurchId: "sc-1" })
+    ),
     "Oversight"
   );
-  assert.equal(groupFor(`planter1@${CURRENT_DOMAIN}`, "planter"), "Planters");
-  assert.equal(groupFor(`team1@${CURRENT_DOMAIN}`, "team_member"), "Other");
-  assert.equal(groupFor(`coach1@${CURRENT_DOMAIN}`, "coach"), "Other");
+  assert.equal(groupFor(`planter1@${CURRENT_DOMAIN}`, PLANT_OWNER), "Planters");
+  assert.equal(
+    groupFor(
+      `team1@${CURRENT_DOMAIN}`,
+      account({ seat: "member", churchId: PLANT })
+    ),
+    "Other"
+  );
+  assert.equal(
+    groupFor(`coach1@${CURRENT_DOMAIN}`, account({ churchId: PLANT })),
+    "Other"
+  );
+});
+
+test("the standing label names the tenancy AND the seat, never one alone", () => {
+  // `owner` of what? The switcher's right-hand column is the pair, because the
+  // seat alone means nothing across three tenancies.
+  assert.equal(standingLabel(PLANT_OWNER), "Plant owner");
+  assert.equal(
+    standingLabel(account({ seat: "member", churchId: PLANT })),
+    "Plant member"
+  );
+  assert.equal(
+    standingLabel(account({ seat: "owner", sendingNetworkId: "n-1" })),
+    "Network owner"
+  );
+  assert.equal(
+    standingLabel(account({ seat: "owner", sendingChurchId: "sc-1" })),
+    "Sending church owner"
+  );
+  assert.equal(standingLabel(account({ churchId: PLANT })), "Plant · no seat");
+  assert.equal(standingLabel(account()), "Coach / no seat");
 });
 
 // ----------------------------------------------------------------------------

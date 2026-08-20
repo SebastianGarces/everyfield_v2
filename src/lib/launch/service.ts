@@ -22,7 +22,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import type { User } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
-import { requireChurchAccess, requireRole } from "@/lib/auth/access";
+import { requireChurchAccess, requirePlantOwner } from "@/lib/auth/access";
 import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
 import { launchNoteSchema, launchTargetDateSchema } from "./validation";
 
@@ -253,12 +253,12 @@ interface WriteRow extends Record<string, unknown> {
 /**
  * Set, move, or postpone a plant's launch date.
  *
- * AUTHORISES ITSELF, and the rule is LS-007's: the PLANTER of THIS plant.
- * `requireRole` refuses a coach or an oversight admin — an oversight admin has
- * church ACCESS to an associated plant and would sail past `requireChurchAccess`
- * alone, which would let the milestone notification announce itself to the
- * person who caused it — and `requireChurchAccess` refuses a planter aimed at
- * somebody else's plant. Both THROW, so a caller cannot proceed by ignoring the
+ * AUTHORISES ITSELF, and the rule is LS-007's: the OWNER of THIS plant.
+ * `requirePlantOwner` refuses a coach, a plant Member and an oversight account
+ * — an oversight account has church ACCESS to an associated plant and would
+ * sail past `requireChurchAccess` alone, which would let the milestone
+ * notification announce itself to the person who caused it — and
+ * `requireChurchAccess` refuses an Owner aimed at somebody else's plant. Both THROW, so a caller cannot proceed by ignoring the
  * return value; the `error` status is reserved for a date the user typed wrong.
  *
  * The announcement is best-effort and happens AFTER the durable write: a
@@ -274,7 +274,7 @@ export async function setLaunchDate(
   targetDate: string,
   options: SetLaunchDateOptions = {}
 ): Promise<SetLaunchDateResult> {
-  requireRole(user, "planter");
+  requirePlantOwner(user);
   await requireChurchAccess(user, churchId);
 
   const parsed = launchTargetDateSchema.safeParse(targetDate);

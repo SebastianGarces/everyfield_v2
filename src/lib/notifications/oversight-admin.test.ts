@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
+import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 import { OVERSIGHT_ADMIN } from "./oversight-admin";
@@ -13,46 +13,57 @@ import { OVERSIGHT_ADMIN } from "./oversight-admin";
 //
 // The table itself (`./oversight-admin.ts`) is what stops the SQL audience, the
 // per-recipient gate and the recorded-relationship probe from answering "which
-// role administers which kind of oversight org?" three different ways; the drift
+// column carries which kind of oversight org?" three different ways; the drift
 // between them starved a plant of its daily digest. Its header says so once.
 //
 // Three things about the table are not visible to the compiler, so they are
 // asserted here:
 //
-//   1. THE ROLE SET IS NOT A SECOND OPINION. `@/lib/auth/access` owns
-//      `OVERSIGHT_ROLES`, the flat "roles with oversight access" list that
-//      `isOversightUser` and the preference gate read. That module belongs to a
-//      different workstream, so the pairing table cannot literally DERIVE the
-//      list — but the two may not disagree, in either direction, and a test is
-//      what makes the disagreement loud instead of latent.
+//   1. THE COLUMN SET IS NOT A SECOND OPINION. `@/lib/auth/tenancy` owns
+//      `oversightOrgOf`, the one answer to "which org does this row's tenancy
+//      name", which `isOversightUser` and the preference gate read. That module
+//      belongs to a different workstream, so the pairing table cannot literally
+//      DERIVE its columns — but the two may not disagree, in either direction,
+//      and a test is what makes the disagreement loud instead of latent.
 //
 //   2. THE LEAF STAYS A LEAF. Type imports only. `@/lib/auth/access` opens with
 //      `import { db } from "@/db"`, so hosting the pairing there made "which
-//      role administers a network?" cost a Neon connection and put a database
+//      column carries a network?" cost a Neon connection and put a database
 //      client one import away from anything that wanted the answer.
 //
 //   3. EVERY READER GOES THROUGH IT. The table's largest obligation is about
 //      its readers, so it is asserted here rather than in the suite of any one
 //      of them: no reader in this domain spells an oversight FK column or an
-//      oversight role literal for itself.
+//      org-kind literal for itself.
 // ============================================================================
 
-test("§1 the pairing names exactly the roles OVERSIGHT_ROLES names", () => {
-  const paired = Object.values(OVERSIGHT_ADMIN).map(({ role }) => role);
+test("§1 the pairing's columns are the columns oversightOrgOf resolves", () => {
+  const paired = Object.entries(OVERSIGHT_ADMIN);
 
-  // Both directions. A role added to the flat list without a pairing row has no
-  // org kind to administer and would be admitted by nothing; a pairing row
-  // whose role is missing from the flat list would build an audience that
-  // `isOversightUser` and the oversight preference default disown.
+  // Both directions, over a row that names EXACTLY the pairing's column. An
+  // org kind whose column `oversightOrgOf` does not resolve would build an
+  // audience the rest of the product disowns; a column that resolves to a kind
+  // with no pairing row has no FK for any builder to name.
+  const resolved = paired.map(([kind, { fk }]) => {
+    const row = {
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      [fk]: "11111111-1111-4111-8111-111111111111",
+    };
+    return [kind, oversightOrgOf(row)?.type] as const;
+  });
+
   assert.deepEqual(
-    [...paired].sort(),
-    [...OVERSIGHT_ROLES].sort(),
-    "OVERSIGHT_ADMIN and OVERSIGHT_ROLES must name the same roles"
+    resolved,
+    paired.map(([kind]) => [kind, kind]),
+    "OVERSIGHT_ADMIN and oversightOrgOf must agree on which column carries which kind"
   );
 
-  // No duplicates: two org kinds administered by one role would make the
-  // inverse lookup (`recipientOrgOf`) return whichever row it scanned last.
-  assert.equal(new Set(paired).size, paired.length);
+  // No duplicates: two org kinds carried by one column would make the inverse
+  // lookup (`recipientOrgOf`) return whichever row it scanned last.
+  const columns = paired.map(([, { fk }]) => fk);
+  assert.equal(new Set(columns).size, columns.length);
 
   // And the pairing is exhaustive over the anchor kinds by construction — the
   // `satisfies Record<AssociationOrgType, …>` in the table does that half — so
@@ -321,20 +332,19 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
     "export function recipientAdministersOrg(",
     "export const dbEnqueueDeps"
   );
-  assert.doesNotMatch(administersOrg, /anchor\.type === /);
-  assert.match(administersOrg, /OVERSIGHT_ADMIN\[anchor\.type\]/);
+  assert.doesNotMatch(administersOrg, /anchor\.type === "/);
+  assert.match(administersOrg, /oversightOrgOf\(recipient\)/);
 
-  // The pairing itself still says which role goes with which FK, in one place.
+  // The pairing itself still says which FK goes with which kind, in one place.
   assert.deepEqual(OVERSIGHT_ADMIN, {
-    sending_church: { role: "sending_church_admin", fk: "sendingChurchId" },
-    network: { role: "network_admin", fk: "sendingNetworkId" },
+    sending_church: { fk: "sendingChurchId" },
+    network: { fk: "sendingNetworkId" },
   });
 
   // The table's ORDER is load-bearing: the SQL arms render in it and the
   // bound-parameter assertions in `anchor.test.ts` read them positionally.
   assert.deepEqual(Object.keys(OVERSIGHT_ADMIN), ["sending_church", "network"]);
 
-  // The tie to `OVERSIGHT_ROLES` — the flat list `@/lib/auth/access` owns — is
-  // asserted in §1 above, in both directions.
-  assert.deepEqual(OVERSIGHT_ROLES, ["sending_church_admin", "network_admin"]);
+  // The tie to `oversightOrgOf` — the one tenancy answer `@/lib/auth/tenancy`
+  // owns — is asserted in §1 above, in both directions.
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { SeatFields, TenancyFields } from "@/lib/auth/tenancy";
 import { PHASES } from "@/lib/constants";
 import {
   JOURNEY_STAGE_NOT_SURE,
@@ -42,14 +43,31 @@ import {
 // ----------------------------------------------------------------------------
 
 const CHURCH_ID = "11111111-1111-4111-8111-111111111111";
+const SENDING_CHURCH_ID = "66666666-6666-4666-8666-666666666666";
+const NETWORK_ID = "77777777-7777-4777-8777-777777777777";
+
+/**
+ * A seat held in a tenancy. All three tenancy FKs are named on every one of
+ * them because `OnboardingViewer` is `SeatFields` and the type requires it: the
+ * seat alone does not say WHOSE owner, so a fixture that omitted an FK would be
+ * asserting about a shape `isChurchLevelOwner` never sees.
+ */
+function viewer(
+  seat: SeatFields["seat"],
+  tenancy: Partial<TenancyFields> = {}
+): SeatFields {
+  return {
+    seat,
+    churchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...tenancy,
+  };
+}
 
 test("a planter with no church sees the onboarding flow", () => {
   assert.equal(
-    shouldShowOnboarding({
-      role: "planter",
-      churchId: null,
-      onboardingCompletedAt: null,
-    }),
+    shouldShowOnboarding({ ...viewer("owner"), onboardingCompletedAt: null }),
     true
   );
 });
@@ -58,8 +76,7 @@ test("a planter who abandoned after step 1 still sees the flow", () => {
   // The church exists and is valid — the flow is simply not finished.
   assert.equal(
     shouldShowOnboarding({
-      role: "planter",
-      churchId: CHURCH_ID,
+      ...viewer("owner", { churchId: CHURCH_ID }),
       onboardingCompletedAt: null,
     }),
     true
@@ -69,31 +86,33 @@ test("a planter who abandoned after step 1 still sees the flow", () => {
 test("a planter who finished (or skipped out) gets their dashboard back", () => {
   assert.equal(
     shouldShowOnboarding({
-      role: "planter",
-      churchId: CHURCH_ID,
+      ...viewer("owner", { churchId: CHURCH_ID }),
       onboardingCompletedAt: new Date("2026-07-30T12:00:00Z"),
     }),
     false
   );
 });
 
-test("no other role is ever put through onboarding", () => {
-  for (const role of [
-    "coach",
-    "team_member",
-    "sending_church_admin",
-    "network_admin",
-    null,
-    undefined,
-  ]) {
+test("nobody but a plant's Owner is ever put through onboarding", () => {
+  // The four role names that never onboarded, restated as (seat, tenancy)
+  // pairs — plus the plant `admin` seat, which the five role names could not
+  // express and which the Owner-only rule refuses for the same reason.
+  const NEVER_ONBOARDS: [string, SeatFields][] = [
+    ["a coach", viewer(null)],
+    ["a plant Member", viewer("member", { churchId: CHURCH_ID })],
+    ["a plant Admin", viewer("admin", { churchId: CHURCH_ID })],
+    [
+      "a sending church's Owner",
+      viewer("owner", { sendingChurchId: SENDING_CHURCH_ID }),
+    ],
+    ["a network's Owner", viewer("owner", { sendingNetworkId: NETWORK_ID })],
+  ];
+
+  for (const [who, fields] of NEVER_ONBOARDS) {
     assert.equal(
-      shouldShowOnboarding({
-        role,
-        churchId: null,
-        onboardingCompletedAt: null,
-      }),
+      shouldShowOnboarding({ ...fields, onboardingCompletedAt: null }),
       false,
-      `role: ${role}`
+      `${who} does not onboard a plant`
     );
   }
 });
