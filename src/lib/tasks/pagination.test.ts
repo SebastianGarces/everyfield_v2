@@ -13,8 +13,11 @@ import { TASK_SORT_KEYS, type TaskSortableRow } from "./service";
 // ----------------------------------------------------------------------------
 // "LOAD MORE" ON /tasks CANNOT SKIP OR REPEAT A ROW (#320, P-006a).
 //
-// The button was a disabled placeholder — "Load more (Pagination coming soon)"
-// — and behind it sat a cursor that could not have worked. `listTasks` ordered
+// The button was a disabled placeholder apologising for pagination that had
+// not been wired, and behind it sat a cursor that could not have worked. The
+// placeholder string is deliberately not quoted here: #320 asks that it be
+// absent from `src/`, and a grep does not care that it found a comment.
+// `listTasks` ordered
 // by the SORT KEY (due date by default) and paged with a predicate over
 // `created_at`:
 //

@@ -15,7 +15,8 @@ import { buildPeopleConditions } from "./service";
 // ----------------------------------------------------------------------------
 // "LOAD MORE" ON /people (#320, P-006a).
 //
-// The button existed and was `disabled`: "Load more (Pagination coming soon)".
+// The button existed and was `disabled`, its label apologising for the
+// pagination that had not been wired.
 // The query behind it was already a sound `(created_at, id)` keyset walk, so
 // the work was wiring — and the risk in wiring is that the SECOND page is a
 // different query from the first. Two things had to hold, and each has a test:
