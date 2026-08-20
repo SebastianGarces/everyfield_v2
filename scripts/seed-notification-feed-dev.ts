@@ -376,21 +376,32 @@ async function seedClickRace() {
     throw new Error(`${CLICK_RACE_EMAIL} has no church in this database`);
   }
 
-  const people = await db
+  // Read off the row ONCE, here, where the check just happened. Reaching for
+  // `account.churchId` again inside the row builder below is what wanted a `!`:
+  // the narrowing does not survive into the closure, and the assertion would
+  // have outlived the check that earned it.
+  const { id: recipientUserId, churchId } = account;
+
+  const [firstPerson, ...morePeople] = await db
     .select({ id: persons.id })
     .from(persons)
-    .where(eq(persons.churchId, account.churchId))
+    .where(eq(persons.churchId, churchId))
     .limit(CLICK_RACE_ROWS);
 
-  if (people.length === 0) {
+  if (!firstPerson) {
     throw new Error(`${CLICK_RACE_EMAIL}'s church has no people to link to`);
   }
+
+  // Non-empty by construction — a head and a rest — so the round-robin below
+  // has a value to fall back to that the compiler can see, instead of a `!`
+  // asserting the modulo lands in range.
+  const linkTargets = [firstPerson, ...morePeople];
 
   await db
     .delete(notifications)
     .where(
       and(
-        eq(notifications.recipientUserId, account.id),
+        eq(notifications.recipientUserId, recipientUserId),
         like(notifications.dedupeKey, `${FIXTURE_KEY}%`)
       )
     );
@@ -400,12 +411,12 @@ async function seedClickRace() {
   await db.insert(notifications).values(
     Array.from({ length: CLICK_RACE_ROWS }, (_, index) => ({
       anchorType: "church" as const,
-      churchId: account.churchId!,
-      recipientUserId: account.id,
+      churchId,
+      recipientUserId,
       category: "milestones" as NotificationCategory,
       type: "person.first_timer.recorded",
       entityType: "person" as const,
-      entityId: people[index % people.length]!.id,
+      entityId: (linkTargets[index % linkTargets.length] ?? firstPerson).id,
       title: `Click-race row #${index + 1}`,
       body: "Seeded by scripts/seed-notification-feed-dev.ts --click-race (#228).",
       scheduledFor: new Date(now - (index + 1) * MINUTE),
@@ -417,7 +428,7 @@ async function seedClickRace() {
   );
 
   console.log(
-    `seeded ${CLICK_RACE_ROWS} linked unread rows for ${CLICK_RACE_EMAIL} (church ${account.churchId})`
+    `seeded ${CLICK_RACE_ROWS} linked unread rows for ${CLICK_RACE_EMAIL} (church ${churchId})`
   );
 }
 

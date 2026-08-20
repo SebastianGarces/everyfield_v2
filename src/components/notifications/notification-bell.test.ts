@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
 
 import { createElement } from "react";
@@ -9,32 +7,33 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseElements } from "@/lib/testing/rendered-markup";
 
 import {
-  LOADING_BELL_LABEL,
   NotificationBell,
+  UNCOUNTED_BELL_LABEL,
+  type UnreadCount,
   unreadBellLabel,
 } from "./notification-bell";
 
 // ----------------------------------------------------------------------------
-// The bell has THREE states, and loading is one of them (#308 WS2, from #232).
+// The bell has THREE states and only one of them is a count (#308 WS2, from
+// #232; #528).
 //
-// The defect these tests pin: the layout's Suspense fallback rendered the bell
-// with `DEGRADED_UNREAD_COUNT` — the value the count degrades to when the query
-// FAILS — so the first paint of every dashboard route announced "Notifications,
-// none unread" to a screen reader and then corrected itself to "1 unread" when
-// the real count arrived. One constant was standing for two different facts:
-// "we could not read it" and "we have not read it yet".
+// The defect these tests pin: both non-count states arrived as the number the
+// FAILURE path returned — `0` — so the first paint of every dashboard route,
+// and every render after a failed read, announced "Notifications, none unread"
+// to a screen reader. One number was standing for three different facts: "none
+// unread", "we could not read it" and "we have not read it yet".
+//
+// The fix is the TYPE, which is why there are no source-grep tests here any
+// more. `UnreadCount = number | "loading" | "unavailable"` makes the two
+// non-answers unspellable as counts, so the compiler refuses what a grep for a
+// constant name used to have to notice.
 //
 // `renderToStaticMarkup` gives the exact markup the browser parses, so what is
-// asserted here is the rendered element, not the JSX that produced it. The
-// source-shaped tests at the bottom are the other half: the render can only
-// stay honest while the layout keeps passing the loading value, and the failure
-// constant is one import away.
+// asserted here is the rendered element, not the JSX that produced it.
 // ----------------------------------------------------------------------------
 
-const DASHBOARD = path.join(process.cwd(), "src/app/(dashboard)");
-
 /** The bell's own anchor, read off the rendered markup. */
-function bellLink(unreadCount: number | "loading") {
+function bellLink(unreadCount: UnreadCount) {
   const html = renderToStaticMarkup(
     createElement(NotificationBell, { unreadCount })
   );
@@ -47,33 +46,41 @@ function bellLink(unreadCount: number | "loading") {
 }
 
 // ----------------------------------------------------------------------------
-// 1. Loading asserts nothing about the count
+// 1. Neither non-answer asserts anything about the count
 // ----------------------------------------------------------------------------
 
-test("the loading bell has a NEUTRAL name and is marked busy", () => {
-  const { link } = bellLink("loading");
+test("neither uncounted bell claims unread state, in the name or in data", () => {
+  for (const state of ["loading", "unavailable"] as const) {
+    const { link, html } = bellLink(state);
 
-  assert.equal(link.attrs["aria-label"], LOADING_BELL_LABEL);
-  assert.equal(link.attrs["aria-busy"], "true");
+    assert.equal(link.attrs["aria-label"], UNCOUNTED_BELL_LABEL);
+    // The specific string this replaced. It is an assertion about unread state,
+    // and the shell has no count to make it with.
+    assert.notEqual(
+      link.attrs["aria-label"],
+      unreadBellLabel(0),
+      `the ${state} bell told the reader they have nothing unread`
+    );
 
-  // The specific string this replaced. It is an assertion about unread state,
-  // and the shell has not read one yet.
-  assert.notEqual(link.attrs["aria-label"], unreadBellLabel(0));
+    assert.equal(
+      link.attrs["data-unread-count"],
+      undefined,
+      `the ${state} bell claimed a count a test could read as the answer`
+    );
+    assert.equal(link.attrs["data-unread-state"], state);
+    assert.ok(
+      !html.includes("notification-unread-badge"),
+      `the ${state} bell rendered a badge`
+    );
+  }
 });
 
-test("the loading bell publishes no count, in the DOM or in data", () => {
-  const { link, html } = bellLink("loading");
-
-  assert.equal(
-    link.attrs["data-unread-count"],
-    undefined,
-    "the loading bell claimed a count a test could read as the answer"
-  );
-  assert.equal(link.attrs["data-unread-state"], "loading");
-  assert.ok(
-    !html.includes("notification-unread-badge"),
-    "the loading bell rendered a badge"
-  );
+test("aria-busy is what separates the two — an answer is coming, or it is not", () => {
+  // `aria-busy` promises the value is about to change. On a read that has
+  // already finished failing, that promise is a second thing the shell has not
+  // earned; the render is otherwise identical.
+  assert.equal(bellLink("loading").link.attrs["aria-busy"], "true");
+  assert.equal(bellLink("unavailable").link.attrs["aria-busy"], undefined);
 });
 
 test("resolving to a real count replaces every one of those", () => {
@@ -90,60 +97,13 @@ test("resolving to a real count replaces every one of those", () => {
 });
 
 test("a real ZERO still says 'none unread' — it is an answer, not a placeholder", () => {
-  // Loading is not "zero by another name". A viewer who genuinely has nothing
-  // unread gets told so, which is the whole reason the two states could not
-  // share a representation.
+  // Neither non-answer is "zero by another name". A viewer who genuinely has
+  // nothing unread gets told so, which is the whole reason the three states
+  // could not share a representation.
   const { link, html } = bellLink(0);
 
   assert.equal(link.attrs["aria-label"], unreadBellLabel(0));
   assert.equal(link.attrs["data-unread-count"], "0");
   assert.equal(link.attrs["data-unread-state"], "ready");
   assert.ok(!html.includes("notification-unread-badge"));
-});
-
-// ----------------------------------------------------------------------------
-// 2. The failure constant is failure-only, and the layout does not reach for it
-// ----------------------------------------------------------------------------
-
-test("the Suspense fallback does not reference the failure constant", () => {
-  const layout = readFileSync(path.join(DASHBOARD, "layout.tsx"), "utf8");
-
-  // Comments stripped first: the fallback's own comment NAMES the constant to
-  // say why it is not used, and a naive substring search would read that
-  // explanation as the mistake it exists to prevent.
-  const code = layout
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
-
-  assert.ok(
-    !code.includes("DEGRADED_UNREAD_COUNT"),
-    "the dashboard layout is reaching for the failure constant again"
-  );
-  assert.match(
-    layout,
-    /<NotificationBell unreadCount="loading" \/>/,
-    "the fallback is no longer the bell's loading state"
-  );
-});
-
-test("DEGRADED_UNREAD_COUNT is still documented as the FAILURE value", () => {
-  const badge = readFileSync(
-    path.join(DASHBOARD, "notification-badge.ts"),
-    "utf8"
-  );
-
-  assert.match(
-    badge,
-    /What the badge shows when the count could not be read\./,
-    "the failure constant lost the docblock that says what it is for"
-  );
-  assert.match(
-    badge,
-    /FAILURE ONLY\./,
-    "the docblock no longer rules out reusing it as the loading state"
-  );
-  assert.ok(
-    badge.includes("export const DEGRADED_UNREAD_COUNT = 0;"),
-    "the failure value is no longer zero, or no longer declared here"
-  );
 });

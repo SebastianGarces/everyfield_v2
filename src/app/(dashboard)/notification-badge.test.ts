@@ -5,10 +5,7 @@ import { notFound, redirect } from "next/navigation";
 
 import type { NotificationViewer } from "@/lib/notifications/feed";
 
-import {
-  DEGRADED_UNREAD_COUNT,
-  loadUnreadBadgeCountSafely,
-} from "./notification-badge";
+import { loadUnreadBadgeCountSafely } from "./notification-badge";
 
 // ----------------------------------------------------------------------------
 // Failure isolation for the shell's unread badge (#227).
@@ -16,9 +13,14 @@ import {
 // The fault is injected at the loader, which is exactly where it appeared in
 // production: `loadUnreadBadgeCount` rejected (a missing table on dev Neon) and
 // the dashboard layout awaited it unguarded, so every dashboard route 500'd.
-// What these assert is that the same rejection now RESOLVES to a renderable
-// number — the layout can finish, so every route still renders — while Next.js
-// control-flow errors, which are thrown but are not failures, still escape.
+// What these assert is that the same rejection now RESOLVES to something the
+// shell can render — the layout can finish, so every route still renders —
+// while Next.js control-flow errors, which are thrown but are not failures,
+// still escape.
+//
+// What it resolves TO is `"unavailable"`, not a number (#528). A failure that
+// spelled itself `0` was indistinguishable from "none unread", so the shell
+// answered a question it had not read the answer to.
 //
 // The viewer is a cast rather than a real one on purpose: `notificationViewer`
 // needs a session and `PreferenceOwner` is branded so it cannot be assembled
@@ -44,32 +46,23 @@ class NotificationsUnavailable extends Error {
   }
 }
 
-test("a rejecting unread-count query degrades the badge to zero instead of throwing", async () => {
+test("a rejecting unread-count query reports 'unavailable' instead of throwing", async () => {
   const count = await loadUnreadBadgeCountSafely(VIEWER, async () => {
     throw new NotificationsUnavailable();
   });
 
-  assert.equal(count, DEGRADED_UNREAD_COUNT);
-  assert.equal(count, 0);
+  assert.equal(count, "unavailable");
+  // The specific value this replaced. Zero is what "none unread" looks like,
+  // and a failed read has not earned that sentence.
+  assert.notEqual(count, 0);
 });
 
-test("a loader that throws synchronously degrades the same way", async () => {
+test("a loader that throws synchronously reports the same way", async () => {
   const count = await loadUnreadBadgeCountSafely(VIEWER, () => {
     throw new NotificationsUnavailable();
   });
 
-  assert.equal(count, DEGRADED_UNREAD_COUNT);
-});
-
-test("the degraded count is a number the bell can render", async () => {
-  const count = await loadUnreadBadgeCountSafely(VIEWER, async () => {
-    throw new NotificationsUnavailable();
-  });
-
-  // The bell's contract is a finite, non-negative integer — anything else
-  // renders as "NaN" in the header, which is a broken shell by another name.
-  assert.equal(Number.isInteger(count), true);
-  assert.equal(count >= 0, true);
+  assert.equal(count, "unavailable");
 });
 
 test("the happy path is unchanged — the real count passes straight through", async () => {
@@ -86,16 +79,22 @@ test("the happy path is unchanged — the real count passes straight through", a
   assert.deepEqual(seen, [VIEWER]);
 });
 
-test("zero unread stays zero — degrading and 'all caught up' are the same render", async () => {
+test("zero unread stays zero — 'all caught up' is an answer, not a failure", async () => {
   assert.equal(await loadUnreadBadgeCountSafely(VIEWER, async () => 0), 0);
 });
 
-test("a nonsense count degrades rather than reaching the header", async () => {
-  assert.equal(await loadUnreadBadgeCountSafely(VIEWER, async () => NaN), 0);
-  assert.equal(await loadUnreadBadgeCountSafely(VIEWER, async () => -3), 0);
+test("a nonsense count is reported unavailable rather than reaching the header", async () => {
+  assert.equal(
+    await loadUnreadBadgeCountSafely(VIEWER, async () => NaN),
+    "unavailable"
+  );
+  assert.equal(
+    await loadUnreadBadgeCountSafely(VIEWER, async () => -3),
+    "unavailable"
+  );
   assert.equal(
     await loadUnreadBadgeCountSafely(VIEWER, async () => Infinity),
-    0
+    "unavailable"
   );
   assert.equal(await loadUnreadBadgeCountSafely(VIEWER, async () => 12.7), 12);
 });

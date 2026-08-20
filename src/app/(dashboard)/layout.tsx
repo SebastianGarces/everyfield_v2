@@ -25,10 +25,10 @@ import { loadUnreadBadgeCountSafely } from "./notification-badge";
  *
  * Two things follow from that, and both exist because this read runs on EVERY
  * dashboard route (#227). It cannot fail the shell — `loadUnreadBadgeCountSafely`
- * degrades a throwing count to zero — and it cannot delay the shell, because the
- * `await` happens below a `<Suspense>` boundary instead of above the whole tree.
- * Notifications being slow or broken is now a bell that says "none unread", not
- * a dashboard nobody can reach.
+ * turns a throwing count into `"unavailable"` — and it cannot delay the shell,
+ * because the `await` happens below a `<Suspense>` boundary instead of above the
+ * whole tree. Notifications being slow or broken is now a bell with no number on
+ * it, not a dashboard nobody can reach.
  */
 async function NotificationBellSlot({
   viewer,
@@ -147,13 +147,12 @@ export default async function DashboardLayout({
               // first byte while the count itself stays unclaimed until it
               // arrives.
               //
-              // It is NOT `DEGRADED_UNREAD_COUNT` (#308 WS2, from #232). That
-              // constant is what the count degrades to when the query FAILS,
-              // and reusing it here made "we could not read it" and "we have
-              // not read it yet" the same render — one that announces
+              // It is NOT a zero (#308 WS2, from #232; #528). A failed read
+              // and a not-yet-finished one both used to arrive here as the
+              // number the FAILURE path returned, which announces
               // "Notifications, none unread" to a screen reader and then
-              // corrects itself to "1 unread" a moment later. Two different
-              // facts need two different renders; see
+              // corrects itself to "1 unread" a moment later. Both are values
+              // of `UnreadCount` now, so neither can be spelled as a count; see
               // `notification-bell.tsx`'s header for the rest of the argument.
               <Suspense fallback={<NotificationBell unreadCount="loading" />}>
                 <NotificationBellSlot viewer={viewer} />

@@ -19,14 +19,7 @@ import {
 } from "./anchor";
 import { enqueueNotificationSchema, recipientAdministersOrg } from "./enqueue";
 import { oversightAudienceCondition } from "./oversight-audience";
-import {
-  notificationFeedQuery,
-  orgNotificationFeedQuery,
-  orgScopedWhere,
-  orgUnreadCountQuery,
-  scopedWhere,
-  unreadCountQuery,
-} from "./queries";
+import { notificationFeedQuery, unreadCountQuery } from "./queries";
 
 // ============================================================================
 // THE NOTIFICATION ANCHOR (#304 WS3, ruling #351, migration 0036).
@@ -248,33 +241,58 @@ test("the migration is expand-only and no row is rewritten", () => {
 // 2. The two tenancy spaces do not meet
 // ----------------------------------------------------------------------------
 
-test("every church-scoped read still names church_id, unchanged", () => {
-  const { sql, params } = orgUnreadCountQuery({
-    orgId: NETWORK,
-    recipientUserId: USER,
-  }).toSQL();
+/** The oversight viewer the org-anchored rows are actually read by (N-027). */
+const NETWORK_SCOPE = {
+  org: { type: "network", id: NETWORK },
+  recipientUserId: USER,
+} as const;
 
-  // The ORG read names the ORG column and never the church one…
-  assert.match(sql, /"anchor_org_id" = \$\d/);
-  assert.doesNotMatch(sql, /"church_id"/);
-  assert.ok(params.includes(NETWORK));
-  assert.ok(params.includes(USER));
-
-  // …and the CHURCH scope is untouched by this change: both required fields,
-  // both in the WHERE, and no mention of the org column.
-  const church = scopedWhere({
+test("the plant read names church_id and the org column NOWHERE", () => {
+  const { sql, params } = unreadCountQuery({
     churchId: CHURCH,
     recipientUserId: USER,
-  }).getSQL();
-  const churchSql = orgNotificationFeedQuery({
-    orgId: NETWORK,
-    recipientUserId: USER,
   }).toSQL();
-  assert.ok(church);
-  assert.doesNotMatch(churchSql.sql, /"church_id"/);
+
+  assert.match(sql, /"church_id" = \$\d/);
+  assert.match(sql, /"recipient_user_id" = \$\d/);
+  assert.doesNotMatch(
+    sql,
+    /"anchor_org_id"/,
+    "a plant's own feed reached into the org tenancy space"
+  );
+  assert.ok(params.includes(CHURCH));
+  assert.ok(params.includes(USER));
 });
 
-test("neither scope is a coalesce over the two anchor columns", () => {
+test("the org-anchored rows have exactly ONE door, and it is the oversight arm", () => {
+  // #304 WS3 shipped a parallel `org*` family — `OrgNotificationScope`,
+  // `orgScopedWhere`, `orgNotificationFeedQuery`, `orgUnreadCountQuery`,
+  // `listOrgNotifications`, `getOrgUnreadCount` — that reached these rows off a
+  // bare `string` org id, applied no consent subquery and never asked whether
+  // the recipient administers the org. It had zero callers: a second door that
+  // type-checked. It is deleted (#528) and this is the ratchet, because the
+  // shape is easy to re-add and impossible to see from a call site.
+  assert.doesNotMatch(
+    QUERIES_CODE,
+    /export (async )?function org|export (interface|type) Org/,
+    "queries.ts exports an org-scoped read path again — feedScopedWhere is the door"
+  );
+  assert.doesNotMatch(
+    QUERIES_CODE,
+    /export function scopedWhere/,
+    "the plant composer is exported again — it is reachable only through feedScopedWhere"
+  );
+
+  // The surviving read of the column is arm 3 of the oversight WHERE, which is
+  // bounded by the recipient and reached only through `feedScopedWhere`.
+  const { sql, params } = unreadCountQuery(NETWORK_SCOPE).toSQL();
+  assert.match(sql, /"anchor_org_id" = \$\d/);
+  assert.match(sql, /"recipient_user_id" = \$\d/);
+  assert.ok(params.includes(NETWORK));
+  assert.ok(params.includes(USER));
+});
+
+test("neither anchor column is a coalesce over the other", () => {
   // A coalesced predicate would make the two tenancy spaces one namespace, so a
   // plant's feed could contain an org's row. Each read names ONE column, and
   // the CHECK guarantees a row populates exactly one — so the two predicates
@@ -286,32 +304,25 @@ test("neither scope is a coalesce over the two anchor columns", () => {
   assert.doesNotMatch(queriesCode, /coalesce/i);
   assert.match(
     QUERIES_CODE,
-    /eq\(notifications\.anchorOrgId, scope\.orgId\)/,
-    "the org scope names anchor_org_id"
+    /eq\(notifications\.anchorOrgId, scope\.org\.id\)/,
+    "the oversight scope names anchor_org_id"
   );
   assert.match(
     QUERIES_CODE,
     /eq\(notifications\.churchId, scope\.churchId\)/,
-    "the church scope names church_id"
+    "the plant scope names church_id"
   );
-
-  // Both scopes require a recipient — an optional one fails OPEN precisely
-  // where it must fail closed.
-  const orgWhere = orgScopedWhere({
-    orgId: NETWORK,
-    recipientUserId: USER,
-  });
-  assert.ok(orgWhere);
 });
 
-test("the two anchors' reads differ in the BOUNDARY and in nothing else", () => {
+test("the two boundaries differ in the BOUNDARY and in nothing else", () => {
   // The other half of "partition the table": the two spaces must not meet, AND
   // the two reads must stay the same read. They were written out twice — same
   // projection, same visibility rules, same keyset predicate, same ordering,
-  // same limit clamp, copied — which is how a fix to the church feed silently
-  // skips the org one (memory/invariants.md: "the copy is always the one that
-  // misses the fix"). They now share one builder, and this pins that: swap the
-  // boundary predicate and the two statements are byte-identical.
+  // same limit clamp, copied — which is how a fix to the plant feed silently
+  // skips the oversight one (memory/invariants.md: "the copy is always the one
+  // that misses the fix"). They share one builder, and this pins that: replace
+  // the boundary predicate the composer emitted and the two statements are
+  // byte-identical.
   const now = new Date("2026-08-12T09:00:00.000Z");
   const options = {
     now,
@@ -319,38 +330,50 @@ test("the two anchors' reads differ in the BOUNDARY and in nothing else", () => 
     categories: ["milestones"],
   } as const;
 
-  const church = notificationFeedQuery(
+  const plant = notificationFeedQuery(
     { churchId: CHURCH, recipientUserId: USER },
     options
   ).toSQL();
-  const org = orgNotificationFeedQuery(
-    { orgId: NETWORK, recipientUserId: USER },
-    options
-  ).toSQL();
+  const oversight = notificationFeedQuery(NETWORK_SCOPE, options).toSQL();
 
+  // Only what `feedScopedWhere` chose is blanked out — the two composers bind
+  // different numbers of parameters, so the placeholders are normalised too.
+  // Everything after the boundary stays under comparison: the projection, every
+  // visibility clause, the keyset predicate, the ordering and the limit.
+  const exceptBoundary = (statement: string, firstExtra: string) => {
+    assert.ok(
+      statement.includes(firstExtra),
+      `the statement no longer contains ${firstExtra} — this comparison would be vacuous`
+    );
+    return statement
+      .replace(
+        new RegExp(
+          `where .*?${firstExtra.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+          "s"
+        ),
+        `where <boundary> and ${firstExtra}`
+      )
+      .replace(/\$\d+/g, "$?");
+  };
+
+  const VISIBILITY = '"notifications"."status" <>';
   assert.equal(
-    church.sql.replace(
-      '"notifications"."church_id" = $1',
-      '"notifications"."anchor_org_id" = $1'
-    ),
-    org.sql
+    exceptBoundary(plant.sql, VISIBILITY),
+    exceptBoundary(oversight.sql, VISIBILITY)
   );
+  assert.notEqual(plant.sql, oversight.sql);
 
-  const churchCount = unreadCountQuery(
+  // …and the same for the badge, which counts what the feed lists.
+  const plantCount = unreadCountQuery(
     { churchId: CHURCH, recipientUserId: USER },
     { now }
   ).toSQL();
-  const orgCount = orgUnreadCountQuery(
-    { orgId: NETWORK, recipientUserId: USER },
-    { now }
-  ).toSQL();
+  const oversightCount = unreadCountQuery(NETWORK_SCOPE, { now }).toSQL();
 
+  const UNREAD = '"notifications"."read_at" is null';
   assert.equal(
-    churchCount.sql.replace(
-      '"notifications"."church_id" = $1',
-      '"notifications"."anchor_org_id" = $1'
-    ),
-    orgCount.sql
+    exceptBoundary(plantCount.sql, UNREAD),
+    exceptBoundary(oversightCount.sql, UNREAD)
   );
 });
 
