@@ -180,3 +180,9 @@ not send one, so preserving `#notification-preferences` is a client-side job and
 is out of scope by ruling on #503. The one place a fragment could survive is the
 client: `(dashboard)/error.tsx` builds its sign-in link from `usePathname()`
 through the same `loginPathFor`.
+
+## A `"use server"` module re-exports nothing from another one (#495)
+
+`export type { ResendInvitationEmailState } from "…/oversight/invitations/actions"` typechecks, lints and passes the whole suite, and `next build` then refuses the page with *"The export ResendInvitationEmailState was not found"*. Next's server-action transform enumerates each reachable action module's exports into the page's action manifest by NAME; a name re-exported out of another `"use server"` module is registered as an action, the type is erased before the manifest resolves, and compilation stops.
+
+The ban is about the SOURCE module, not the keyword: `dashboard/actions.ts` re-exports three types from a directive-free module and builds fine. `server-action-surface.test.ts` resolves the specifier and fails only on the action-module case — which is also HOLE 2 of #265 (republishing somebody else's names as endpoints) with a different keyword in front of it.

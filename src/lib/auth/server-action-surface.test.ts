@@ -18,6 +18,7 @@ import {
   mintingNames,
   parsingServerActionExports,
   reachingNames,
+  resolveModule,
   rel,
   staticValueSpecifiers,
   valueExportStatements,
@@ -360,6 +361,72 @@ test('no "use server" module publishes an endpoint the walk cannot read', () => 
     offenders,
     [],
     "`functionBodies` reads `export (async) function NAME(…)` and nothing else, so an endpoint published any other way is not covered by the SESSION-FIRST scan. Write it as an `export async function`:\n  " +
+      offenders.join("\n  ")
+  );
+});
+
+/**
+ * Every re-export statement in the repository, TYPE ONES INCLUDED — which is
+ * the whole point, since `valueExportStatements` deliberately does not see
+ * them.
+ */
+const RE_EXPORT =
+  /^\s*export\s+(?:type\s+)?(?:\*|\{[^}]*\})[^;\n]*?\bfrom\s*["']([^"']+)["']/gm;
+
+test('one "use server" module never re-exports from another, not even a type', () => {
+  // FOUND BY A BUILD FAILURE (#495). `settings/team/actions.ts` carried
+  //
+  //     export type { ResendInvitationEmailState, RevokeInvitationState };
+  //
+  // so its two writes could answer in the shape the shared pending list reads.
+  // It typechecked, it linted, the whole suite was green — and `next build`
+  // refused the page:
+  //
+  //     The export ResendInvitationEmailState was not found in module
+  //     src/app/(dashboard)/settings/team/actions.ts
+  //
+  // WHY. Next's server-action transform builds a per-page action manifest by
+  // enumerating the exports of every `"use server"` module the page reaches,
+  // and it reads the NAMES, not their TypeScript-ness. A name re-exported out
+  // of another `"use server"` module is registered as an action; the type
+  // itself is erased before the manifest is resolved, so the manifest points at
+  // an export that no longer exists and compilation stops.
+  //
+  // WHY THE BAN IS "FROM ANOTHER ACTION MODULE" AND NOT "ANY TYPE RE-EXPORT".
+  // `dashboard/actions.ts` re-exports three types from
+  // `@/lib/onboarding/declare-journey` and builds fine, because that module has
+  // no directive and is not part of any manifest. The rule is about the SOURCE
+  // module, which is why this walk resolves the specifier rather than matching
+  // the statement.
+  //
+  // It is also the auth rule one level down: republishing another action
+  // module's names is HOLE 2 of #265 with a different keyword in front of it.
+  const offenders: string[] = [];
+  let scanned = 0;
+
+  for (const full of TS_FILES) {
+    if (!isUseServerModule(full)) continue;
+
+    for (const match of codeOf(full).matchAll(RE_EXPORT)) {
+      scanned += 1;
+      const resolved = resolveModule(full, match[1]);
+      if (resolved && isUseServerModule(resolved)) {
+        offenders.push(
+          `${rel(full)} → ${match[0].replace(/\s+/g, " ").trim()}`
+        );
+      }
+    }
+  }
+
+  // A scan that matched nothing would pass silently, which is how a guardrail
+  // becomes decoration. The repository has at least the one legitimate
+  // re-export this rule deliberately allows.
+  assert.ok(scanned > 0, "the re-export matcher saw no statements at all");
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'a `"use server"` module re-exports another one\'s names. `next build` registers them as actions and then cannot find them — import them from the module that DECLARES them instead:\n  ' +
       offenders.join("\n  ")
   );
 });

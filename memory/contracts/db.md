@@ -216,3 +216,9 @@ console.log({
 
 HR2 evidence is this section plus a fresh run of the snippet. A green "0 pending" is not "0
 orphans".
+
+## `user_invitations` — the two CHECKs, and the one that nearly was not
+
+- **`token_hash` is sha256 of the emailed token, never the token.** The unique index on it is what makes the registration lookup a point read; a resend rotates it, so a row cannot reproduce the link it already sent (`memory/invariants.md` → Multi-Tenancy).
+- **`user_invitations_seat_check` is a biconditional over non-null booleans, deliberately.** The obvious spelling — `(kind = 'seat' and seat in (…)) or (kind = 'coach' and seat is null)` — ACCEPTS `kind='seat', seat=NULL`: the first arm is `true and NULL` = `NULL`, and a CHECK rejects only `false`. It shipped, typechecked and passed every DDL regex; a scratch Postgres answered `INSERT 0 1`. Prove a new constraint by writing the row it forbids.
+- **Exactly-one tenancy is `num_nonnulls(...) = 1`**, the `association_events` 0036 precedent — NULL-safe by construction, because `num_nonnulls` counts nulls and never returns one.
