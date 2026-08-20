@@ -2,10 +2,10 @@
 
 **Every rule is stated below, one line each — these lines ARE the rules**, not a table of contents for them. Read only this file and you have still seen every rule.
 
-Rules bind at two strengths (`ops/agent-os/README.md` → Rules bind at two strengths):
+Rules bind at two strengths (`ops/process.md` → Rules bind at two strengths):
 
 - An **untagged line is an invariant** — a mechanical or security fact. Never break it; a change that needs to is wrong.
-- A line tagged **⚖ is a ruling** — a dated product decision. Never break it *silently*: build to it, and if it no longer fits, rule on it per `ops/agent-os/README.md` → Rulings and record why. A new ruling changes it; nothing else does.
+- A line tagged **⚖ is a ruling** — a dated product decision. Never break it *silently*: build to it, and if it no longer fits, rule on it per `ops/process.md` → Rulings and record why. A new ruling changes it; nothing else does.
 - A line starting **Accepted residual** is a known gap, carried deliberately until the named condition retires it.
 
 Each section links `invariants/<domain>.md` for the why, the pattern and the worked examples. Read the domain file for what you are touching; read all of them as the security lens.

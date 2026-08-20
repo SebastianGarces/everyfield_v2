@@ -1,6 +1,6 @@
 ---
 name: prototype
-description: Build two or three live, throwaway prototypes of competing directions so an owner-taste ruling becomes "try them, pick one" instead of "read prose and imagine". Use when a spec-question hold or a needs-spec issue is a UI DIRECTION question the owner's taste decides. UI variants live behind the prototype switcher on a preview deployment; behavior questions get a throwaway CLI outside the app.
+description: Build two or three live, throwaway prototypes of competing directions so an owner-taste ruling becomes "try them, pick one" instead of "read prose and imagine". Use when a question is a UI DIRECTION question the owner's taste decides. UI variants live behind the prototype switcher on a preview deployment; behavior questions get a throwaway CLI outside the app.
 ---
 
 # prototype — turn a direction question into a decision
@@ -10,9 +10,9 @@ each one. Use it when **experiencing the options is what decides**.
 
 **Narrow trigger.** Prototype an owner-taste **UI direction** question. Rule behavior and policy
 questions yourself from `product-docs/product-values.md`, `CONTEXT.md` and `memory/invariants.md`
-(see `ops/agent-os/README.md`) unless the call is irreversible. Reached from a spec-question hold
-(build into the held PR's branch) or a `needs-spec` issue at intake (branch `proto/<issue>-<slug>`,
-opened as a draft PR so the push creates a preview).
+(see `ops/process.md`). Build the variants into the branch you are already on, or onto
+`proto/<issue>-<slug>` opened as a draft PR so the push creates a preview. Post the options, then
+carry on with other work — never idle waiting for the ruling.
 
 ## Shared discipline
 
@@ -45,7 +45,7 @@ module is the spec for the real implementation, rewritten inside `src/` with rea
 
 ## The DECISION comment
 
-Post on the held PR or the `needs-spec` issue:
+Post on the PR or the issue:
 
 ```markdown
 ## DECISION: <the question, one line>
@@ -63,5 +63,5 @@ Post on the held PR or the `needs-spec` issue:
 around B) · or free-form.
 ```
 
-Then apply it: implement the ruled direction at production quality, strip everything else, and the
-track re-enters the normal gates.
+Then apply it: implement the ruled direction at production quality, strip everything else, and ship
+the branch the normal way.

@@ -18,16 +18,15 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 | Next.js APIs, components, config | `.next-docs/` |
 | Invariants, rulings, architectural intent, non-obvious semantics | `memory/` (TOC: `memory/index.md`) |
 | Before ANY mutation | `memory/invariants.md` (every rule, one line each) + the `memory/invariants/<domain>.md` files matching what you are touching |
-| Updating `memory/` after a change | `ops/agent-os/dod.md` § Memory |
+| Updating `memory/` after a change | `memory/index.md` (same-change maintenance rules) |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX work — implementation, polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |
 | Proving a UI change works in a browser | `.claude/skills/browser-validation/SKILL.md` |
 | A fuzzy ask, before writing a spec | `.claude/skills/grilling/SKILL.md` |
 | A direction question needing a ruling | `.claude/skills/prototype/SKILL.md` |
 | A merge/rebase conflict | `.claude/skills/resolving-merge-conflicts/SKILL.md` |
-| How work is delivered — the contract, the pass graph, rulings, invocation, what makes work delegable | `ops/agent-os/README.md` |
-| When work may become a PR — the four gates | `ops/agent-os/dod.md` |
-| The board — status labels and the frontier query | `ops/agent-os/labels.md` |
+| How we work — the whole process, one page | `ops/process.md` |
+| The engineering principles (auto-injected at session start) | `.agents/skills/principle-*/SKILL.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | The canonical word for a domain term — roles, plant, phase vs. stage, launch, oversight, association | `CONTEXT.md` at the repo root (the ubiquitous-language glossary; it names the deprecated synonyms too) |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |

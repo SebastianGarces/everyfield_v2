@@ -17,7 +17,7 @@ on:
   # not currently a PR head.
   #
   # `pull_request` alone can only ever anchor the PR's head commit. Gate 1
-  # (CI GREEN, ops/agent-os/dod.md) demands a green run at the PR head sha, but
+  # (CI GREEN, ops/process.md) demands a green run at the PR head sha, but
   # a fix round that lands on a side branch (`feature/X-fix`) leaves the PR head
   # behind on `feature/X`, and then no event names the sha under test:
   # `gh run list --commit <sha>` returns `[]` and gate 1 has no evidence at the
@@ -58,7 +58,7 @@ jobs:
       #
       # Anything that is not markdown — including .json, .yml, and this
       # workflow itself — takes the full path. memory/ no longer does: it was
-      # carved out only to keep ops/agent-os/tests/memory-budget.test.mjs live
+      # carved out only to keep ops/tests/memory-budget.test.mjs live
       # on the PRs it policed, and that test was deleted with its budget on
       # 2026-08-15. No test reads memory/ now, so its files are ordinary
       # markdown. Restore the carve-out the day one does again.

@@ -1,7 +1,7 @@
 # Mirrors the canonical issue state — `agent:*` / `needs-spec` labels, and closure — onto the
 # Project board's Status field.
 #
-# ONE WAY ONLY. Labels are the source of truth (ops/agent-os/labels.md): build-until-done writes
+# ONE WAY ONLY. Labels are the source of truth (ops/process.md): agents write
 # them, standup reads them, and agents never read the board. This workflow renders that state for a
 # human. Dragging a card in the UI changes nothing durable — the next label event overwrites it.
 #
@@ -86,7 +86,7 @@ jobs:
           # otherwise silently show whichever we checked last — warn instead of guessing.
           active=$(echo "$labels" | grep -c '^agent:' || true)
           if [ "$active" -gt 1 ]; then
-            echo "::warning::Issue #$ISSUE carries $active agent:* labels; ops/agent-os/labels.md requires exactly one. Board not updated."
+            echo "::warning::Issue #$ISSUE carries $active agent:* labels; ops/process.md requires exactly one. Board not updated."
             exit 0
           fi
 
@@ -101,12 +101,12 @@ jobs:
             *"agent:in-progress"*) status="In Progress";       option_id="2b12f8f4" ;;
             *"agent:in-review"*)   status="Pending PR review"; option_id="a2d0c924" ;;
             # Shares Todo with agent:queued — both are takeable. Applying this label is what
-            # puts reviewed work back on the frontier (ops/agent-os/labels.md).
+            # puts reviewed work back on the frontier (ops/process.md).
             *"agent:changes-requested"*) status="Todo";        option_id="8e532e11" ;;
             *"agent:blocked"*)     status="Blocked";           option_id="726047a5" ;;
             # Shares the Blocked column with agent:blocked — both mean "a human is needed", and the
             # project has no separate option. The board is derived and coarser; the LABEL is what
-            # says whether to fix the code or just retry the delivery (ops/agent-os/labels.md).
+            # says whether to fix the code or just retry the delivery (ops/process.md).
             *"agent:delivery-failed"*) status="Blocked";       option_id="726047a5" ;;
             *"needs-spec"*)        status="Backlog";           option_id="a6027ea1" ;;
           esac
@@ -123,7 +123,7 @@ jobs:
 
           # Closed overrides every label: a closed work item is Done no matter what stale agent:*
           # label it still carries (labels are deliberately not stripped on close — see
-          # ops/agent-os/labels.md), and a label event arriving after closure re-derives Done here
+          # ops/process.md), and a label event arriving after closure re-derives Done here
           # rather than dragging the card back into an active column.
           if [ "$state" = "CLOSED" ]; then
             status="Done"; option_id="3044f5d2"
