@@ -27,7 +27,7 @@ export function MembersRolesTab({
   people,
   teamCounts,
 }: MembersRolesTabProps) {
-  const showsBackgroundChecks = teamRequiresBackgroundCheck(team.name);
+  const showsBackgroundChecks = teamRequiresBackgroundCheck(team.templateKey);
 
   return (
     <div className="space-y-4">

@@ -160,16 +160,18 @@ test("a value the database could not hold reads as the floor, never as itself", 
 // ----------------------------------------------------------------------------
 
 test("the Children's Ministry roster requires it and no other predefined team does", () => {
-  assert.equal(teamRequiresBackgroundCheck("Children's Ministry"), true);
-  assert.equal(teamRequiresBackgroundCheck("children's ministry"), true);
-  assert.equal(teamRequiresBackgroundCheck("  Children's Ministry  "), true);
+  assert.equal(teamRequiresBackgroundCheck("childrens_ministry"), true);
 
-  for (const name of ["Worship Team", "Facilities", "Small Groups"]) {
-    assert.equal(teamRequiresBackgroundCheck(name), false, name);
+  for (const key of ["worship", "facilities", "small_groups"]) {
+    assert.equal(teamRequiresBackgroundCheck(key), false, key);
   }
 });
 
-test("a team name that matches no template requires nothing", () => {
-  assert.equal(teamRequiresBackgroundCheck("Kids Crew"), false);
+test("a CUSTOM team carries no template key, so it requires nothing", () => {
+  // The planter's own team, and the answer is the same for a predefined one
+  // they renamed — which used to be the bug: matched on NAME, a rename silently
+  // dropped the roster's status column (ruling 2026-08-12, #378).
+  assert.equal(teamRequiresBackgroundCheck(null), false);
+  assert.equal(teamRequiresBackgroundCheck("Children's Ministry"), false);
   assert.equal(teamRequiresBackgroundCheck(""), false);
 });

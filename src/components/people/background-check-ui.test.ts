@@ -108,11 +108,11 @@ test("the roster asks whether the team requires a check, once, by team", () => {
     roster.code,
     ROSTER_PATH,
     [
-      "const showsBackgroundChecks = teamRequiresBackgroundCheck(team.name)",
+      "const showsBackgroundChecks = teamRequiresBackgroundCheck(team.templateKey)",
       "{showsBackgroundChecks && (",
       "status={role.assignedPerson.backgroundCheckStatus}",
     ],
-    "one predicate decides, so a role-level flag later reaches this surface too"
+    "one predicate decides, keyed on the TEMPLATE (#378) — so a role-level flag later reaches this surface too"
   );
 
   // The roster never re-derives which teams require a check.

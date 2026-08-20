@@ -162,7 +162,7 @@ Applies to `src/lib/people/**` and the `/people` surfaces, plus the ministry-tea
 - The row is minted at `status = 'leader'` and carries NO `person_created` activity — it is not a contact anybody typed in. An adopted row (matched by address in 0052's backfill) keeps its own name and status; only a MINTED one gets those values.
 - Accepted residual: `people/person-user.ts`'s ADDRESS bridge is still how an audience read asks "does this person hold a login", because the FK covers only accounts that gained a church. The two answer different questions — identity vs discovery — and the bridge retires when every account-holding person carries the FK.
 - `peopleTextSearch` is the ONE people text predicate — list, search and export all call it. Never a second copy under any name.
-- ⚖ A background check is required PER TEAM, never per role, and the roster asks `teamRequiresBackgroundCheck(team.name)` (`ministry-teams/role-templates.ts`) — matched on the team's NAME, because a `ministry_teams` row stores no template key. RENAMING the Children's Ministry team therefore drops the roster's status column silently, and a custom team never shows one; `getTeam` selects `backgroundCheckStatus` for EVERY team, so only that predicate decides.
+- ⚖ A background check is required PER TEAM, never per role, and the roster asks `teamRequiresBackgroundCheck(team.templateKey)` (`ministry-teams/role-templates.ts`). A custom team carries no key and shows no column; `getTeam` selects `backgroundCheckStatus` for EVERY team, so only that predicate decides.
 - ⚖ `not_started` is the FLOOR, not a null, and the person profile HEADER hides it — every prospect a plant adds starts there, so that badge would sit beside every name saying nothing. The Overview row and the team roster show it like any other value.
 
 Status advances one hop at a time. `autoAdvanceStatus` (`people/events.ts`) moves a person only when their CURRENT status is exactly the `from` below, so an event-driven hop never demotes and never skips, and a failed advance is logged rather than thrown. Every other hop is unguarded; `getStatusWarnings` warns on backward, skipped and out-of-order moves without blocking.
@@ -178,6 +178,15 @@ Status advances one hop at a time. `autoAdvanceStatus` (`people/events.ts`) move
 | `team.leader.assigned` | `launch_team` | `leader` | `handleTeamLeaderAssigned` |
 
 Those two server actions write their hop through `changeStatus`, which enforces no `from`: recording an interview or a commitment for a later-stage person DEMOTES them.
+
+## Ministry Teams — which template a team came from
+
+Applies to `ministry_teams`, `src/lib/ministry-teams/**` and every surface that treats a predefined team as one of the ten.
+
+- ⚖ `ministry_teams.template_key` is a predefined team's IDENTITY and `name` is DISPLAY ONLY (ruled 2026-08-12). Four surfaces used to match on the name — the org-chart root, the responsibilities tab, the role-import map and `teamRequiresBackgroundCheck` — so a rename, ours or a planter's, silently broke them. NULL means a custom team, and every one of the four answers "not a template team" for it.
+- ⚖ The `senior_pastor` template's team is named **"Leadership"** (ruled 2026-08-09): a TEAM carries a ministry's name, a ROLE carries a person's. The key and both role names ("Senior Pastor", "Associate Pastor") are unchanged.
+- ⚖ `importRoleTemplates` APPLIES the plant's own leadership answer: on `planter_confirmed` the Owner's linked person is assigned to the Senior Pastor role through `assignMember` — never a raw insert, so the seat index, the role's status flip and both domain events all apply. `no_planter` and an unanswered plant leave the role open.
+- That auto-fill NEVER RAISES and never overwrites a filled role. The import is real and useful either way, and the planter can still assign themselves; migration 0053 §4 is the one-shot SQL twin for plants that initialized before it shipped.
 
 ## Migrations
 

@@ -14,14 +14,17 @@ interface OrgChartViewProps {
   teams: TeamWithStats[];
 }
 
+/**
+ * The template whose team roots the chart. Matched on `template_key`, not on
+ * the display name (ruling 2026-08-12, #378) — the team is called "Leadership"
+ * now, and a substring test against its name would have dropped the root the
+ * moment it was renamed, leaving a chart of ten peers.
+ */
+const ROOT_TEMPLATE_KEY = "senior_pastor";
+
 export function OrgChartView({ teams }: OrgChartViewProps) {
-  // Senior Pastor is the root node
-  const seniorPastor = teams.find((t) =>
-    t.name.toLowerCase().includes("senior pastor")
-  );
-  const otherTeams = teams.filter(
-    (t) => !t.name.toLowerCase().includes("senior pastor")
-  );
+  const rootTeam = teams.find((t) => t.templateKey === ROOT_TEMPLATE_KEY);
+  const otherTeams = teams.filter((t) => t.templateKey !== ROOT_TEMPLATE_KEY);
 
   return (
     <div className="space-y-6">
@@ -33,10 +36,10 @@ export function OrgChartView({ teams }: OrgChartViewProps) {
       </div>
 
       <div className="flex flex-col items-center gap-6">
-        {/* Root: Senior Pastor */}
-        {seniorPastor && (
+        {/* Root: the Leadership team */}
+        {rootTeam && (
           <>
-            <OrgNode team={seniorPastor} isRoot />
+            <OrgNode team={rootTeam} isRoot />
             {/* Connector line */}
             <div className="bg-border h-8 w-px" />
             {/* Horizontal connector */}
@@ -48,7 +51,7 @@ export function OrgChartView({ teams }: OrgChartViewProps) {
         <div className="grid w-full max-w-6xl gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {otherTeams.map((team) => (
             <div key={team.id} className="flex flex-col items-center gap-2">
-              {seniorPastor && <div className="bg-border h-4 w-px" />}
+              {rootTeam && <div className="bg-border h-4 w-px" />}
               <OrgNode team={team} />
             </div>
           ))}

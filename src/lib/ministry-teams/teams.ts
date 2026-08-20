@@ -389,6 +389,11 @@ export async function initializePredefinedTeams(
       ({
         churchId,
         name: template.teamName,
+        // THE IDENTITY, stored beside the display name (ruling 2026-08-12).
+        // Every lookup that used to match a predefined team by its name reads
+        // this instead, so renaming a template — or a planter renaming their
+        // own copy — is a display change and nothing more.
+        templateKey: template.teamKey,
         type: "predefined" as TeamType,
         description: template.description,
         icon: template.icon,

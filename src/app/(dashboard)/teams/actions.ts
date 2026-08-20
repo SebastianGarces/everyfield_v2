@@ -43,10 +43,7 @@ import type {
   TrainingProgram,
   TrainingCompletion,
 } from "@/db/schema";
-import {
-  TEAM_TEMPLATES,
-  type PredefinedTeamKey,
-} from "@/lib/ministry-teams/role-templates";
+import type { PredefinedTeamKey } from "@/lib/ministry-teams/role-templates";
 import { revalidatePath } from "next/cache";
 import { requireSeat } from "@/lib/auth/seats";
 import {
@@ -195,22 +192,18 @@ export async function initializeTeamsWithRolesAction(): Promise<
   const created = await initializeTeamsAction();
   if (!created.success) return created;
 
-  // The created rows carry the template's NAME, not its key — the join back to
-  // the role templates has to go through it. Both sides come from
-  // `TEAM_TEMPLATES` moments apart, so an unmatched name means the template
-  // list changed under us: skip that team's roles rather than guess at a key.
-  const keyByTeamName = new Map<string, PredefinedTeamKey>(
-    TEAM_TEMPLATES.map((template) => [
-      template.teamName,
-      template.teamKey as PredefinedTeamKey,
-    ])
-  );
-
+  // The created rows CARRY their template key (`ministry_teams.template_key`,
+  // ruling 2026-08-12), so the join back to the role templates is the column
+  // itself — no name map, and nothing here breaks when a template is renamed.
+  // A NULL key would mean a row this call did not create from a template, which
+  // `initializePredefinedTeams` cannot produce: skip it rather than guess.
   for (const team of created.data) {
-    const teamKey = keyByTeamName.get(team.name);
-    if (!teamKey) continue;
+    if (!team.templateKey) continue;
 
-    const roles = await importRoleTemplatesAction(team.id, teamKey);
+    const roles = await importRoleTemplatesAction(
+      team.id,
+      team.templateKey as PredefinedTeamKey
+    );
     if (!roles.success) {
       return { success: false, error: TEAM_ROLES_PARTIAL_MESSAGE };
     }

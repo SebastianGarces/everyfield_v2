@@ -24,5 +24,5 @@ export default async function TeamResponsibilitiesPage({
     notFound();
   }
 
-  return <ResponsibilitiesTab teamName={team.name} />;
+  return <ResponsibilitiesTab templateKey={team.templateKey} />;
 }

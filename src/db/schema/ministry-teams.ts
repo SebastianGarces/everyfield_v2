@@ -85,6 +85,21 @@ export const ministryTeams = pgTable(
       .references(() => churches.id)
       .notNull(),
     name: varchar("name", { length: 255 }).notNull(),
+    /**
+     * WHICH template this team came from — `TEAM_TEMPLATES[].teamKey` — or NULL
+     * for a team the planter made themselves (ruling 2026-08-12 on #378, from
+     * sweep #403 / PR #409 DECISION 2).
+     *
+     * IT EXISTS SO THE DISPLAY NAME CAN CHANGE. Four surfaces used to identify a
+     * predefined team by its NAME — the org-chart root, the responsibilities
+     * lookup, the name→template map behind the role import, and
+     * `teamRequiresBackgroundCheck` — so renaming "Senior Pastor" to
+     * "Leadership" would have silently broken all four for every plant that
+     * already had teams, and a planter renaming their Children's Ministry team
+     * already dropped the roster's background-check column. The key is the
+     * identity; `name` is now display and nothing else.
+     */
+    templateKey: varchar("template_key", { length: 50 }),
     type: varchar("type", { length: 20 })
       .$type<TeamType>()
       .notNull()
