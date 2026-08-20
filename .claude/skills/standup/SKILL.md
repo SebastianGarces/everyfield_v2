@@ -17,8 +17,9 @@ The morning board plus the morning's rulings. Never starts build work.
    ```
 
    `--limit 200` is mandatory — `gh` truncates silently at 30. Group by `agent:*` label. Old issues
-   may still carry retired labels (`agent:blocked`, `needs-spec`); report them as stalled work to
-   pick back up, and never apply either label yourself.
+   may still carry the retired `agent:blocked`; report those as stalled work to pick back up, and
+   never apply that label yourself. `needs-spec` is live: it marks work Sebastian and the agent
+   still need to talk through — report those as the discussion queue, not as buildable.
 
 2. **The frontier.** Which queued issues are takeable right now — use the canonical frontier query in
    `ops/process.md` § The loop. Queued with an open blocker is not runnable, and reporting it as

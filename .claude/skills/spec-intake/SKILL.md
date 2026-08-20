@@ -32,8 +32,10 @@ The front door of the factory. A loop is only as good as the target it is pointe
 7. **Rule any question that remains** from `product-docs/product-values.md`, `CONTEXT.md` and
    `memory/invariants.md`; record the ruling in the body and queue the work. Convene a short
    consulate (2–3 perspectives, one synthesis) for a hard call. A product ruling also goes in
-   `product-docs/decisions.md`. The one question you do not rule is owner taste on **UI
-   direction** — invoke the `prototype` skill and keep the work moving.
+   `product-docs/decisions.md`. Two questions you do not rule: owner taste on **UI direction**
+   (invoke the `prototype` skill and keep the work moving), and an item that is **not yet fleshed
+   out** as a product idea — label it `needs-spec` and bring it to Sebastian as a conversation
+   (`grilling`); the talk turns it into `agent:queued`.
 
 ## Issue template
 
