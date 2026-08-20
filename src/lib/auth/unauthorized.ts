@@ -14,7 +14,7 @@
  * answer, and it is a FUNCTION rather than a rule in prose because a rule in
  * prose is what the four modules were already breaking.
  *
- * IT IS AN IMPORT-FREE LEAF ON PURPOSE. `(dashboard)/error.tsx` is a client
+ * IT IS AN IMPORT-FREE LEAF ON PURPOSE. `@/components/app-error` is a client
  * component and has to read the marker; anything this module imported would be
  * pulled into that bundle behind it.
  */
@@ -88,7 +88,7 @@ export function rethrowUnauthorized(error: unknown): void {
 
 /**
  * Did this error boundary catch the sessionless refusal? The client half of the
- * marker, and the reason `(dashboard)/error.tsx` can say "your sign-in may have
+ * marker, and the reason `@/components/app-error` can say "your sign-in may have
  * expired" about the one case where that is true instead of about every 500 —
  * it told a reader that about a database failure during #498's validation.
  *

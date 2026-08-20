@@ -83,8 +83,18 @@ copying a line six times.
 
 ## The boundary says only what it knows
 
-`(dashboard)/error.tsx` used to tell every reader their sign-in had probably
-expired. During #498's validation it said that about a database schema drift and
+The panel is `src/components/app-error.tsx`, and it is MOUNTED TWICE.
+`error.tsx` wraps its segment's CHILDREN, never the layout beside it, so
+`(dashboard)/error.tsx` does not cover the dashboard layout — and the sidebar's
+Send Feedback button lives there. The moment `submitFeedbackAction` started
+rethrowing, that press fell past the nested boundary to `global-error.tsx` and
+rendered Next's bare "Application error", which is the blank page #498 added a
+boundary to end. `src/app/error.tsx` is the parent segment's boundary and does
+cover it; the nested one stays because it catches CLOSER and keeps the sidebar
+and chrome around the message. `global-error.tsx` still sits above both, for a
+throw in the ROOT layout.
+
+It used to tell every reader their sign-in had probably expired. During #498's validation it said that about a database schema drift and
 offered a Sign in button that could not have helped — a diagnosis the boundary
 had no evidence for.
 

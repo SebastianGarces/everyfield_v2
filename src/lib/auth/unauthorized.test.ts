@@ -17,7 +17,7 @@ import {
 //
 // The server end: `verifySession()` throws `UnauthorizedError`, every action
 // catch that can see it rethrows, and the throw leaves the request unhandled.
-// The client end: `(dashboard)/error.tsx` is handed `{ message, digest }` and
+// The client end: `@/components/app-error` is handed `{ message, digest }` and
 // nothing else — in production Next.js replaces the message with a generic
 // sentence, so the DIGEST is the only thing a boundary can classify on.
 //
@@ -84,7 +84,7 @@ test("the rethrow is a statement that throws, and it throws the SAME error", () 
 });
 
 test("the module is an import-free leaf, because the client bundle holds it", () => {
-  // `(dashboard)/error.tsx` is a `"use client"` component and imports
+  // `@/components/app-error` is a `"use client"` component and imports
   // `isSessionExpiry`. Anything this module imported would be dragged into that
   // bundle behind it — which is how `@/lib/auth/roles` and
   // `@/lib/oversight/org-label` earned the same rule

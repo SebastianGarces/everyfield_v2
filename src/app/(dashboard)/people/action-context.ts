@@ -102,7 +102,7 @@ export async function withChurchSession<T>(
     // gives an anonymous caller a well-formed answer from an endpoint that
     // should only ever have said no (`memory/invariants.md` → Authentication).
     //
-    // WHERE IT LANDS FOR A REAL PERSON: `src/app/(dashboard)/error.tsx`, which
+    // WHERE IT LANDS FOR A REAL PERSON: the `AppError` boundary panel, which
     // reads the `SESSION_EXPIRED_DIGEST` this throw carries and says the
     // sign-in probably expired. Before that boundary existed the only one in
     // the tree was `global-error.tsx`, which swaps in a bare document — so this

@@ -58,7 +58,7 @@ export async function withChurch<T>(
     // logged in" }` hands an anonymous caller a well-formed answer from an
     // endpoint that should only ever have said no
     // (`memory/invariants.md` → Authentication). It lands on
-    // `src/app/(dashboard)/error.tsx`, which offers a way back.
+    // the `AppError` boundary panel, which offers a way back.
     rethrowUnauthorized(error);
     // An `instanceof` and not a message prefix: `requireChurchAccess` throws
     // `Forbidden: …` too, so a prefix test quietly widens to every refusal that

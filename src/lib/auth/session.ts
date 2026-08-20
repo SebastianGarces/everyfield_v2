@@ -205,7 +205,7 @@ export const getCurrentSession = cache(
  *
  * It throws `UnauthorizedError`, whose only addition to `Error` is a `digest`
  * (`@/lib/auth/unauthorized`): the throw leaves every action unhandled by
- * design, and the digest is what lets `(dashboard)/error.tsx` tell THIS 500
+ * design, and the digest is what lets `@/components/app-error` tell THIS 500
  * from any other one — a client boundary is handed no message in production.
  * The message is still `"Unauthorized"`, so every reader of it is unaffected.
  *
