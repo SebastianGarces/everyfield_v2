@@ -2,6 +2,7 @@
 
 import { CheckCheck, Inbox, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -130,6 +131,7 @@ export function NotificationFeed({
   hasAny,
   unreadOnly,
 }: NotificationFeedProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isLoadingMore, startLoadingMore] = useTransition();
 
@@ -161,7 +163,9 @@ export function NotificationFeed({
 
   // An optimistic update lasts only as long as its transition: when the action
   // settles, the row falls back to whatever the underlying data now says. For
-  // page one that is the server's answer, arriving via the action's `refresh()`.
+  // page one that is the server's answer, arriving via the `router.refresh()`
+  // below — inside the transition, so the optimistic row holds until the real
+  // one is ready and there is no flash back to bold.
   // The appended pages are not part of that re-render, so a row marked read on
   // page two would visibly UN-read itself the moment the transition ended. The
   // confirmed result is written back to them here — after the action succeeded,
@@ -186,7 +190,49 @@ export function NotificationFeed({
               row.id === id ? { ...row, isRead: true } : row
             )
       );
+
+      // The badge lives in the dashboard layout, not on this page, so the
+      // re-read has to be of the whole tree. This press stays on the feed, so
+      // refreshing it is refreshing what the user is looking at.
+      router.refresh();
     });
+  };
+
+  // ------------------------------------------------------------------------
+  // The ROW-CLICK mark-read, which is a different thing from the button's
+  // (#228, measured on #308's preview)
+  // ------------------------------------------------------------------------
+  //
+  // A row click marks read AND navigates, and while it went through `markRead`
+  // above, the navigation was sometimes lost: the row was marked read, the URL
+  // never changed, and the user was left on the feed looking at a row that had
+  // just stopped being unread. #228 reported it as 1 in 5 and left it as
+  // possible noise. It is not noise. It reproduces on demand once the
+  // destination is not already prefetched — a second click on the row is enough
+  // — and the four measured arrangements say which parts of `markRead` cause it:
+  //
+  //   transition + refresh (what shipped) ....... 22 of 22 stranded
+  //   no transition + refresh ................... 20 of 22 stranded
+  //   transition + no refresh ................... 11 of 11 stranded
+  //   NEITHER (this) ............................ 22 of 22 navigated
+  //
+  // Both halves strand it, and for the same reason: each turns the click into
+  // work React owns on the route being LEFT. A transition entangles `Link`'s
+  // push behind an update that is suspended on a server round-trip, and the
+  // refresh re-renders the very route the push is trying to replace. Either is
+  // enough to supersede a push that has not committed yet. The control rules out
+  // everything else — the same double-click on a plain sidebar link, no action
+  // and no refresh behind it, navigated 10 times out of 10.
+  //
+  // So the click that leaves does neither. It refreshes nothing, because the
+  // unread count the user arrives with is server-rendered by the destination's
+  // own layout, which is a fresher read than a refresh of the screen being left.
+  // And it is a plain call rather than a transition, because there is no
+  // optimistic row to hold on a page nobody is looking at any more. A
+  // client-side navigation does not unload the document, so the request the
+  // click started finishes on the destination.
+  const markReadOnNavigate = (id: string) => {
+    void markNotificationReadAction(id);
   };
 
   const markAllRead = () => {
@@ -204,12 +250,15 @@ export function NotificationFeed({
         // empty, and there is no page after an empty list.
         setOlderRows([]);
         setCursor(null);
-        return;
+      } else {
+        setOlderRows((previous) =>
+          previous.map((row) => ({ ...row, isRead: true }))
+        );
       }
 
-      setOlderRows((previous) =>
-        previous.map((row) => ({ ...row, isRead: true }))
-      );
+      // Same reason as `markRead`: the badge is in the layout, and this press
+      // stays on the feed.
+      router.refresh();
     });
   };
 
@@ -245,6 +294,7 @@ export function NotificationFeed({
                 key={row.id}
                 row={row}
                 onMarkRead={() => markRead(row.id)}
+                onMarkReadAndNavigate={() => markReadOnNavigate(row.id)}
                 disabled={isPending}
               />
             ))}
@@ -293,10 +343,14 @@ export function NotificationFeed({
 function NotificationRow({
   row,
   onMarkRead,
+  onMarkReadAndNavigate,
   disabled,
 }: {
   row: NotificationFeedRow;
+  /** The explicit button: optimistic, in a transition, stays on this screen. */
   onMarkRead: () => void;
+  /** The row's link: marks read on the way out, starts no transition (#228). */
+  onMarkReadAndNavigate: () => void;
   disabled: boolean;
 }) {
   return (
@@ -343,7 +397,7 @@ function NotificationRow({
           // invalid HTML and unusable with a keyboard.
           <Link
             href={row.href}
-            onClick={onMarkRead}
+            onClick={onMarkReadAndNavigate}
             data-testid="notification-link"
             className={cn(
               "cursor-pointer text-sm after:absolute after:inset-0 hover:underline",
