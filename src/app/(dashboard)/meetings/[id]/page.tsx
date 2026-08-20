@@ -1,15 +1,10 @@
 import { redirect } from "next/navigation";
-import { refresh } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
-import {
-  getFollowUpCompletion,
-  getMeeting,
-  setMeetingAgenda,
-} from "@/lib/meetings/service";
+import { saveAgendaAction } from "../actions";
+import { getFollowUpCompletion, getMeeting } from "@/lib/meetings/service";
 import {
   defaultAgendaTemplatesForType,
   parseAgenda,
-  type AgendaSection,
 } from "@/lib/meetings/agenda";
 import {
   meetingLinkedTaskProgressCopy,
@@ -23,10 +18,7 @@ import { notFound } from "next/navigation";
 import { MeetingDetails } from "./meeting-details-client";
 import { ContextualTemplates } from "@/components/documents/contextual-templates";
 import { MeetingCommunicationStatus } from "@/components/meetings/meeting-communication-status";
-import {
-  AgendaBuilder,
-  type AgendaSaveResult,
-} from "@/components/meetings/agenda-builder";
+import { AgendaBuilder } from "@/components/meetings/agenda-builder";
 import { getMeetingContextualTemplates } from "@/lib/documents/contextual";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
@@ -36,39 +28,6 @@ export const dynamic = "force-dynamic";
 
 interface MeetingPageProps {
   params: Promise<{ id: string }>;
-}
-
-/**
- * Save this meeting's running order (VM-013).
- *
- * Inline because the agenda card is its only caller. It takes no actor — the
- * church comes from `verifySession()` and `setMeetingAgenda` puts it in the
- * `WHERE`, so a meeting id from another tenant matches nothing. `refresh()`,
- * not `revalidatePath` (memory/contracts/data-patterns.md).
- */
-async function saveAgendaAction(
-  meetingId: string,
-  sections: AgendaSection[]
-): Promise<AgendaSaveResult> {
-  "use server";
-
-  const { user } = await verifySession();
-
-  if (!user.churchId) {
-    return { success: false, error: "This account has no church yet." };
-  }
-
-  try {
-    await setMeetingAgenda(user.churchId, meetingId, sections);
-  } catch {
-    return {
-      success: false,
-      error: "The agenda could not be saved. Try again.",
-    };
-  }
-
-  refresh();
-  return { success: true };
 }
 
 export default async function MeetingPage({ params }: MeetingPageProps) {

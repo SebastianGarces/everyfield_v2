@@ -54,7 +54,6 @@ export async function createPersonAction(
     "createPersonAction",
     {
       noChurch: "You must be associated with a church to create people",
-      known: { Unauthorized: "You must be logged in to create people" },
       fallback: "An unexpected error occurred while creating the person",
     },
     async ({ user, churchId }) => {
@@ -95,7 +94,6 @@ export async function updatePersonAction(
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person",
@@ -165,7 +163,6 @@ export async function deletePersonAction(
     {
       noChurch: "You must be associated with a church to delete people",
       known: {
-        Unauthorized: "You must be logged in to delete people",
         "Person not found": "Person not found or has already been deleted",
       },
       fallback: "An unexpected error occurred while deleting the person",
@@ -196,7 +193,6 @@ export async function changeStatusAction(
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person status",
@@ -234,7 +230,6 @@ export async function changeStatusWithReasonAction(
     {
       noChurch: "You must be associated with a church to update people",
       known: {
-        Unauthorized: "You must be logged in to update people",
         "Person not found": "Person not found or has been deleted",
       },
       fallback: "An unexpected error occurred while updating the person status",

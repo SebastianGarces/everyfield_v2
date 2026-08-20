@@ -21,6 +21,8 @@ import {
   updateRsvpStatus,
 } from "@/lib/meetings/guest-list";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
+import type { AgendaSection } from "@/lib/meetings/agenda";
+import type { AgendaSaveResult } from "@/components/meetings/agenda-builder";
 import type {
   ChurchMeeting,
   Location,
@@ -30,6 +32,7 @@ import type {
 } from "@/db/schema";
 import type { ResponseStatus } from "@/db/schema/meetings";
 import { createPerson } from "@/lib/people/service";
+import { setMeetingAgenda } from "@/lib/meetings/service";
 import {
   attendanceCreateSchema,
   attendanceBatchSchema,
@@ -63,7 +66,7 @@ import {
   recordMeetingResponse,
 } from "@/lib/meetings/response-queries";
 import type { ActionResult } from "@/lib/meetings/types";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 /**
@@ -759,7 +762,7 @@ export async function updateRsvpStatusAction(
   status: string
 ): Promise<ActionResult<null>> {
   try {
-    const { user } = await requireSeat("meetings.rsvp");
+    const { user } = await requireSeat("meetings.write");
     if (!user.churchId) return { success: false, error: "No church" };
 
     if (!responseStatuses.includes(status as ResponseStatus)) {
@@ -1088,4 +1091,41 @@ export async function clearResponseCardAction(
     console.error("clearResponseCardAction error:", error);
     return { success: false, error: "Failed to clear the response card" };
   }
+}
+
+/**
+ * Save this meeting's running order (VM-013).
+ *
+ * IT WAS AN INLINE `"use server"` CLOSURE in `meetings/[id]/page.tsx` (#498
+ * review). A function-level directive publishes a POST endpoint just as a
+ * module-level one does, but it is invisible to the export-walk that enforces
+ * the seat guard — so this write sat outside the auth surface that walk claims
+ * to cover. Here it is an export like every other meetings write, guarded the
+ * same way.
+ *
+ * It takes no actor — the church comes from the guard and `setMeetingAgenda`
+ * puts it in the `WHERE`, so a meeting id from another tenant matches nothing.
+ * `refresh()`, not `revalidatePath` (memory/contracts/data-patterns.md).
+ */
+export async function saveAgendaAction(
+  meetingId: string,
+  sections: AgendaSection[]
+): Promise<AgendaSaveResult> {
+  const { user } = await requireSeat("meetings.write");
+
+  if (!user.churchId) {
+    return { success: false, error: "This account has no church yet." };
+  }
+
+  try {
+    await setMeetingAgenda(user.churchId, meetingId, sections);
+  } catch {
+    return {
+      success: false,
+      error: "The agenda could not be saved. Try again.",
+    };
+  }
+
+  refresh();
+  return { success: true };
 }

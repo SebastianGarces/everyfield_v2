@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { User } from "@/db/schema";
 import {
   MAX_BULK_TASKS,
   bulkCompleteTasks,
@@ -27,6 +28,23 @@ import { sourceReader } from "@/lib/testing/source-span";
 const CHURCH_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
 
+/**
+ * The presser, as an ACTOR rather than an id (#498).
+ *
+ * `bulkCompleteTasks` needs the seat as well as the id now: the own-duty rule
+ * (AS-006) admits a task the caller is assigned, and `tasks.write` for anybody
+ * else's. An Admin here keeps every case below about the bulk mechanics —
+ * partial writes and event fan-out — which is what this suite is for. The
+ * Member cases are in `own-duty.test.ts`.
+ */
+const ACTOR = {
+  id: USER_ID,
+  seat: "admin",
+  churchId: CHURCH_ID,
+  sendingChurchId: null,
+  sendingNetworkId: null,
+} as unknown as User;
+
 function candidate(
   id: string,
   overrides: Partial<BulkTaskCandidate> = {}
@@ -39,6 +57,7 @@ function candidate(
     category: null,
     relatedType: null,
     relatedId: null,
+    assignedToId: null,
     ...overrides,
   };
 }
@@ -146,7 +165,7 @@ test("bulkCompleteTasks completes every selected task and emits one event each",
   const result = await bulkCompleteTasks(
     CHURCH_ID,
     ["a", "b", "c"],
-    USER_ID,
+    ACTOR,
     deps
   );
 
@@ -167,7 +186,7 @@ test("bulkCompleteTasks reports the failing row instead of dropping it", async (
   const result = await bulkCompleteTasks(
     CHURCH_ID,
     ["a", "b", "c"],
-    USER_ID,
+    ACTOR,
     deps
   );
 
@@ -191,7 +210,7 @@ test("bulkCompleteTasks surfaces a whole-write failure against every actionable 
     writeError: new Error("connection lost"),
   });
 
-  const result = await bulkCompleteTasks(CHURCH_ID, ["a", "b"], USER_ID, deps);
+  const result = await bulkCompleteTasks(CHURCH_ID, ["a", "b"], ACTOR, deps);
 
   assert.deepEqual(result.succeeded, []);
   // The raw error ("connection lost") stays server-side; the user-facing
@@ -212,7 +231,7 @@ test("bulkCompleteTasks mixes not-found, already-complete and written rows", asy
   const result = await bulkCompleteTasks(
     CHURCH_ID,
     ["a", "b", "missing"],
-    USER_ID,
+    ACTOR,
     deps
   );
 
@@ -236,12 +255,7 @@ test("bulkCompleteTasks does not fail a task when its event emission throws", as
     },
   };
 
-  const result = await bulkCompleteTasks(
-    CHURCH_ID,
-    ["a", "b"],
-    USER_ID,
-    failing
-  );
+  const result = await bulkCompleteTasks(CHURCH_ID, ["a", "b"], ACTOR, failing);
 
   assert.deepEqual(result.succeeded, ["a", "b"]);
   assert.deepEqual(result.failed, []);
@@ -251,7 +265,7 @@ test("bulkCompleteTasks does not fail a task when its event emission throws", as
 test("bulkCompleteTasks is a no-op for an empty selection", async () => {
   const { deps, emitted } = makeDeps({ rows: [] });
 
-  const result = await bulkCompleteTasks(CHURCH_ID, [], USER_ID, deps);
+  const result = await bulkCompleteTasks(CHURCH_ID, [], ACTOR, deps);
 
   assert.deepEqual(result, {
     requested: 0,
@@ -267,7 +281,7 @@ test("bulkCompleteTasks refuses a selection larger than the cap", async () => {
   const { deps } = makeDeps({ rows: [] });
 
   await assert.rejects(
-    () => bulkCompleteTasks(CHURCH_ID, ids, USER_ID, deps),
+    () => bulkCompleteTasks(CHURCH_ID, ids, ACTOR, deps),
     /more than 100 tasks/
   );
 });

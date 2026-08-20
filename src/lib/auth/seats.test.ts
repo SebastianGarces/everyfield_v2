@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { SeatFields } from "./tenancy";
+import { CAPABILITY_BY_EXPORT } from "./capability-map";
 import { ADMIN_PLUS, OWNER_ONLY, holdsSeatFor, type Capability } from "./seats";
 
 // ============================================================================
@@ -164,17 +165,18 @@ test("the feature-data writes refuse a plant Member (AS-004)", () => {
 });
 
 test("a Member's own-duty writes still succeed (AS-006)", () => {
-  // Their meeting RSVP, their own task, their own team. The seat half is what
-  // this asserts; the SUBJECT half — that the task is theirs, that they lead
-  // that team — is asked in the export's body after the parse, and for two of
-  // the three it cannot be asked yet (see the residual in
-  // `memory/invariants/seats-and-tenancy.md`).
-  for (const capability of [
-    "tasks.own",
-    "teams.own",
-    "meetings.rsvp",
-    "launch.milestone",
-  ] as const) {
+  // THE SEAT HALF ONLY. `tasks.own`'s subject half is asked after the parse by
+  // `assertMayActOnTask`, which this cannot see; `own-duty.test.ts` drives the
+  // action for that.
+  //
+  // The other two own-duty writes AS-006 names — a Member's meeting RSVP and
+  // their own ministry team — are NOT here, and their absence is the point.
+  // `ministry_teams.leader_id` and the meeting guest list reference
+  // `persons.id`, and nothing links a person row to an account until AS-013, so
+  // a `SEATED` capability for them would be a floor with nothing above it:
+  // every Member reaching every team and every RSVP. They sit at
+  // `teams.write` / `meetings.write` until the link exists.
+  for (const capability of ["tasks.own", "launch.milestone"] as const) {
     only(capability, [plantOwner, plantAdmin, plantMember]);
   }
 });
@@ -255,10 +257,67 @@ const EVERY_STATE_CHANGING_CAPABILITY = [
   "communication.send",
   "phase.signal",
   "tasks.own",
-  "teams.own",
-  "meetings.rsvp",
   "launch.milestone",
 ] as const satisfies readonly Capability[];
+
+// ----------------------------------------------------------------------------
+// The named endpoints, by the capability they are actually guarded with
+// ----------------------------------------------------------------------------
+
+test("the endpoints #498's review re-pointed refuse a plant Member", () => {
+  // THE TWO HALVES, JOINED. `seat-guard.test.ts` pins which capability each
+  // endpoint is guarded with; the matrix above pins who each capability admits.
+  // Neither alone answers "may a Member assign a ministry-team member?" — the
+  // first is a string and the second is a set — so this reads the real mapping
+  // and asks the real predicate, endpoint by endpoint.
+  //
+  // These five are the ones the review moved. Each sat on a capability whose
+  // floor was `SEATED` with no subject check above it (`teams.own`,
+  // `meetings.rsvp`) or on `"read"` (`previewImportAction`, which parses an
+  // uploaded file), so a Member reached all of them.
+  for (const label of [
+    "src/app/(dashboard)/teams/actions.ts → assignMemberAction",
+    "src/app/(dashboard)/teams/actions.ts → removeMemberAction",
+    "src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
+    "src/app/(dashboard)/meetings/actions.ts → updateRsvpStatusAction",
+    "src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
+  ]) {
+    const capability = CAPABILITY_BY_EXPORT[label];
+
+    assert.ok(capability, `${label} is not in the checked-in mapping`);
+    assert.equal(
+      holdsSeatFor(plantMember, capability as Capability),
+      false,
+      `${label} is guarded with "${capability}", which a plant Member carries`
+    );
+    assert.equal(
+      holdsSeatFor(plantAdmin, capability as Capability),
+      true,
+      `${label} is guarded with "${capability}", which a plant Admin does not carry — that is narrower than AS-004`
+    );
+  }
+});
+
+test("the endpoints a Member must still reach admit one", () => {
+  // The other direction, so the fix above cannot have been "refuse everybody".
+  // A Member reads the directory, completes the task they were given, and ticks
+  // a launch milestone (LS-007).
+  for (const label of [
+    "src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+    "src/app/(dashboard)/tasks/actions.ts → reopenTaskAction",
+    "src/app/(dashboard)/launch/actions.ts → completeMilestoneAction",
+    "src/app/(dashboard)/people/actions.ts → checkForDuplicatesAction",
+  ]) {
+    const capability = CAPABILITY_BY_EXPORT[label];
+
+    assert.ok(capability, `${label} is not in the checked-in mapping`);
+    assert.equal(
+      holdsSeatFor(plantMember, capability as Capability),
+      true,
+      `${label} is guarded with "${capability}", which locks a Member out of their own duty (AS-006)`
+    );
+  }
+});
 
 test("the two sets are what the ruling says, and neither is empty", () => {
   assert.deepEqual([...OWNER_ONLY], ["owner"]);

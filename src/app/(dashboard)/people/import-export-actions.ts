@@ -115,7 +115,7 @@ export async function previewImportAction(
   formData: FormData
 ): Promise<ActionResult<ImportPreview>> {
   return withChurchSession(
-    "read",
+    "people.write",
     "previewImportAction",
     { fallback: "Failed to process CSV file" },
     async ({ churchId }) => {

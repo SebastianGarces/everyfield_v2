@@ -50,7 +50,7 @@ export const OWNER_ONLY = ["owner"] as const satisfies readonly UserSeat[];
 /**
  * The seats that may write across a tenancy's feature data — the people
  * directory, Meetings, Task Management, Ministry Teams, communication and the
- * church profile (AS-004), and an org's invitation queue (AS-005).
+ * church profile (AS-004).
  *
  * "Everything else an Admin may do" is the ruling's own wording, so this set is
  * the DEFAULT for a state-changing verb and `OWNER_ONLY` is the exception list.
@@ -110,7 +110,7 @@ type Authority = {
  *      row is keyed by the actor's own user id. A COACH AND AN ORG MEMBER REACH
  *      THESE, deliberately: a coach reads an assigned plant (AS-008) and an org
  *      Member reads everything its Owner reads (AS-007).
- *   3. The exempt exports in `SESSIONLESS_EXPORTS`, which call nothing here.
+ *   3. The exempt exports in `UNSEATED_EXPORTS`, which call nothing here.
  */
 const CAPABILITIES = {
   // ── Owner-only, ruling 185 (1) ─────────────────────────────────────────────
@@ -132,7 +132,17 @@ const CAPABILITIES = {
   "org.association.leave": { seats: OWNER_ONLY, tenancy: "oversight" },
   /** An org removing a plant it is associated with. */
   "org.association.sever": { seats: OWNER_ONLY, tenancy: "oversight" },
-  /** Creating, resending and revoking an org's association invitations. */
+  /**
+   * Creating, resending and revoking an org's ASSOCIATION invitations — the
+   * ones that bind a plant or a sending church into the org's portfolio.
+   *
+   * OWNER_ONLY BECAUSE THIS IS AN ASSOCIATION VERB, not because invitations are
+   * Owner-only. AS-005 gives an org Admin the org's own SEAT invitations, which
+   * is a different verb over a different table; it arrives with `/settings/team`
+   * (#500) as an `ADMIN_PLUS` row beside this one. Naming both here now would be
+   * a capability with no call site, which is the drift this table exists to
+   * prevent.
+   */
   "org.invitation.manage": { seats: OWNER_ONLY, tenancy: "oversight" },
   /** Setting, moving and recording the outcome of a launch date. */
   "launch.schedule": { seats: OWNER_ONLY, tenancy: "plant" },
@@ -183,12 +193,27 @@ const CAPABILITIES = {
   "phase.signal": { seats: ADMIN_PLUS, tenancy: "plant" },
 
   // ── Own duty: a seat, any seat; the subject is checked in the body ─────────
-  /** Completing, reopening or restatusing a task ASSIGNED TO THE CALLER. */
+  /**
+   * Completing, reopening or restatusing a task ASSIGNED TO THE CALLER.
+   *
+   * THE ONLY OWN-DUTY VERB THAT SHIPS, because it is the only one whose subject
+   * can be derived: `tasks.assigned_to_id` references `users.id`, so
+   * `assertMayActOnTask` (`@/lib/tasks/service`) can ask "is this yours?" after
+   * the row is loaded. `SEATED` is therefore a real floor here and not a
+   * fail-open one — the seat half refuses a coach and oversight, the subject
+   * half refuses a Member acting on somebody else's task.
+   *
+   * AS-006's other two own-duty writes — a Member's meeting RSVP and their own
+   * ministry team — have NO such column. `ministry_teams.leader_id` and the
+   * meeting guest list reference `persons.id`, and nothing links a person row
+   * to an account until AS-013's registration link lands. A `SEATED` capability
+   * for them would be a floor with nothing above it: every Member in the plant
+   * would reach every team and every RSVP, which is wider than today. So those
+   * writes sit at `teams.write` / `meetings.write` until the link exists —
+   * narrower than AS-006 describes, and the residual is recorded in
+   * `memory/invariants.md`.
+   */
   "tasks.own": { seats: SEATED, tenancy: "plant" },
-  /** A ministry-team write a team's leader may make. */
-  "teams.own": { seats: SEATED, tenancy: "plant" },
-  /** A caller's own RSVP on a meeting's guest list. */
-  "meetings.rsvp": { seats: SEATED, tenancy: "plant" },
   /**
    * Ticking a launch milestone or one of its tasks. LS-007 splits this from
    * `launch.schedule` on purpose: milestone completion follows normal task
@@ -226,34 +251,66 @@ const CAPABILITIES = {
 export type Capability = keyof typeof CAPABILITIES;
 
 /**
- * THE EXEMPT SET, NAMED AND TESTED.
+ * WHY AN EXPORT MAY REACH ITS WORK WITHOUT `requireSeat`.
  *
- * A `"use server"` export that calls no guard is either sessionless BY DESIGN
- * or a hole, and the difference cannot be read off the absence of a call. So
- * the exemptions are written down here with their reason, `seat-guard.test.ts`
- * asserts the set EXACTLY, and a new unguarded export fails the suite instead
- * of joining an unlisted group.
+ * TWO DIFFERENT REASONS, and collapsing them was the bug. The set used to be
+ * called `UNSEATED_EXPORTS`, which is true of six of these and false of two:
+ * `logout` reads a session and `updateFeedbackStatusAction` demands one. A name
+ * that mis-describes a third of its members is a name the next reader will
+ * widen — "sessionless" invites anything that does not need a seat.
  *
- * Keyed `<repo-relative path> → <export>`, the label form every assertion over
- * the auth surface already reports in.
+ * `kind` says which claim is being made, so the two cannot be confused:
+ *
+ *   - `sessionless` — reachable with no session AT ALL, by design. The auth
+ *     endpoints, the public forms, and the token-bearing unsubscribe pair.
+ *   - `non-seat-guard` — authenticated, but answering to something that is not
+ *     a seat in a tenancy.
+ *
+ * `seat-guard.test.ts` asserts this set EXACTLY, so a new unguarded export
+ * fails the suite instead of joining an unlisted group. Keyed
+ * `<repo-relative path> → <export>`, the label form every assertion over the
+ * auth surface already reports in.
  */
-export const SESSIONLESS_EXPORTS: Readonly<Record<string, string>> = {
-  "src/app/(auth)/login/actions.ts → login":
-    "signing in — there is no session to check yet",
-  "src/app/(auth)/login/dev-actions.ts → devLoginAs":
-    "the development sign-in shortcut, refused outright unless the dev flag is on",
-  "src/app/(auth)/register/actions.ts → register":
-    "creating the account — this is where the first seat is granted",
-  "src/app/(marketing)/actions.ts → requestInviteAction":
-    "the public waitlist form on the marketing site",
-  "src/app/unsubscribe/actions.ts → confirmUnsubscribeAction":
-    "authorised by the emailed unsubscribe token, which the recipient holds instead of a session",
-  "src/app/unsubscribe/actions.ts → undoUnsubscribeAction":
-    "the same token, undoing the same change",
-  "src/lib/auth/actions.ts → logout":
-    "ending a session must converge whether or not one is still valid",
+export const UNSEATED_EXPORTS: Readonly<
+  Record<string, { kind: "sessionless" | "non-seat-guard"; reason: string }>
+> = {
+  "src/app/(auth)/login/actions.ts → login": {
+    kind: "sessionless",
+    reason: "signing in — there is no session to check yet",
+  },
+  "src/app/(auth)/login/dev-actions.ts → devLoginAs": {
+    kind: "sessionless",
+    reason:
+      "the development sign-in shortcut, refused outright unless the dev flag is on",
+  },
+  "src/app/(auth)/register/actions.ts → register": {
+    kind: "sessionless",
+    reason: "creating the account — this is where the first seat is granted",
+  },
+  "src/app/(marketing)/actions.ts → requestInviteAction": {
+    kind: "sessionless",
+    reason: "the public waitlist form on the marketing site",
+  },
+  "src/app/unsubscribe/actions.ts → confirmUnsubscribeAction": {
+    kind: "sessionless",
+    reason:
+      "authorised by the emailed unsubscribe token, which the recipient holds instead of a session",
+  },
+  "src/app/unsubscribe/actions.ts → undoUnsubscribeAction": {
+    kind: "sessionless",
+    reason: "the same token, undoing the same change",
+  },
+  "src/lib/auth/actions.ts → logout": {
+    kind: "non-seat-guard",
+    reason:
+      "it READS the session cookie and ends it; the operation must converge whether or not one is still valid, so there is nothing to refuse",
+  },
   "src/app/(dashboard)/admin/feedback/actions.ts → updateFeedbackStatusAction":
-    "guarded by requirePlatformAdmin — an allowlist of platform operators, which is not a seat in any tenancy",
+    {
+      kind: "non-seat-guard",
+      reason:
+        "guarded by requirePlatformAdmin — an allowlist of platform operators, which demands a session but is not a seat in any tenancy",
+    },
 };
 
 /**
@@ -303,6 +360,30 @@ export function holdsSeatFor(
 }
 
 /**
+ * WHAT A SEAT REFUSAL IS, as a type rather than as a string prefix.
+ *
+ * The action shells have to tell three failures apart — no session, no
+ * authority, and everything else — and until #498's review they told the second
+ * one by `error.message.startsWith("Forbidden")`. That is a classification
+ * resting on prose: `requireChurchAccess` and the invitation layer throw
+ * `Forbidden: …` too, any future message that happens to open with the word
+ * joins the class silently, and rewording a refusal for a human reader changes
+ * control flow. An `instanceof` check asks the question the code actually means.
+ *
+ * The MESSAGE still names the capability, because that sentence is for the
+ * server log; what reaches a caller is the shell's one line of copy.
+ */
+export class SeatRefusalError extends Error {
+  readonly capability: Capability;
+
+  constructor(capability: Capability) {
+    super(`Forbidden: ${capability} is not carried by this account`);
+    this.name = "SeatRefusalError";
+    this.capability = capability;
+  }
+}
+
+/**
  * The throwing form, for a SERVICE that was handed an actor it cannot mint.
  *
  * The action layer's guard is the primary refusal; this is the service's own,
@@ -315,7 +396,7 @@ export function holdsSeatFor(
  */
 export function assertSeatFor(user: SeatFields, capability: Capability): void {
   if (!holdsSeatFor(user, capability)) {
-    throw new Error(`Forbidden: ${capability} is not carried by this account`);
+    throw new SeatRefusalError(capability);
   }
 }
 
@@ -344,7 +425,7 @@ export async function requireSeat(
   const result = await verifySession();
 
   if (!holdsSeatFor(result.user, capability)) {
-    throw new Error(`Forbidden: ${capability} is not carried by this account`);
+    throw new SeatRefusalError(capability);
   }
 
   return result;

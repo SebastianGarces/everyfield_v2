@@ -17,7 +17,6 @@ import { declareInitialPhase } from "@/lib/phase-engine/transitions";
 import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { isChurchLevelOwner } from "@/lib/auth/tenancy";
 
 import {
   confirmLeadershipDeps,
@@ -183,10 +182,6 @@ export type CompleteOnboardingState = { status: "error"; error: string };
  */
 export async function completeOnboarding(): Promise<CompleteOnboardingState | void> {
   const { user } = await requireSeat("church.create");
-
-  if (!isChurchLevelOwner(user)) {
-    return { status: "error", error: "Only church planters can onboard" };
-  }
 
   if (!user.churchId) {
     return {

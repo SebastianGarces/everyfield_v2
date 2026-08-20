@@ -124,14 +124,23 @@ is one declaration of each half and no second spelling of the pair.
 
 - `seats: SEATED` — an own-duty verb (AS-006). The seat half refuses a coach
   (NULL seat) and an oversight account; the SUBJECT half needs the argument, so
-  it belongs after the parse. For `tasks.own` it is writable —
-  `tasks.assigned_to_id` references `users.id`. For `teams.own` and
-  `meetings.rsvp` it is NOT: `ministry_teams.leader_id` and the meeting guest
-  list reference `persons.id`, and no column links a person row to an account
-  until AS-013's registration link lands. That is the residual in
-  [`../invariants.md`](../invariants.md), and it is why those two verbs ship
-  narrower than before (a coach and oversight are now refused) but not yet as
-  narrow as AS-006 describes.
+  it belongs after the parse. **`tasks.own` is the only one that ships**, and the
+  reason is a column: `tasks.assigned_to_id` references `users.id`, so
+  `assertMayActOnTask` can ask "is this yours?" once the row is loaded. It runs
+  in the SERVICE rather than in the six actions, so `/launch`'s milestone ticks
+  are covered too, and `planBulkTaskOperation` applies it PER ROW — a Member
+  ticking eight tasks writes the ones they own and gets the rest back named.
+
+  The first round shipped `teams.own` and `meetings.rsvp` the same way and that
+  was WRONG, in the direction a capability name hides: `ministry_teams.leader_id`
+  and the meeting guest list reference `persons.id`, nothing links a person row
+  to an account, and so those two had a floor with nothing above it — every
+  Member in the plant reaching every team and every RSVP, which is wider than
+  the `teams.write` it was replacing. They are `teams.write` / `meetings.write`
+  now: narrower than AS-006 describes, and a team leader holding only a Member
+  seat cannot yet make their team's writes. That is the residual in
+  [`../invariants.md`](../invariants.md), retired by AS-013's person link.
+
 - `seats: null` — a session is the whole rule. A read, or a write whose row is
   keyed by the caller's own user id. A coach and an org Member reach these ON
   PURPOSE (AS-007, AS-008), which is the answer a per-module matrix would have

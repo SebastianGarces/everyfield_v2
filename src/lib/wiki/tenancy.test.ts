@@ -512,8 +512,12 @@ const WIKI_READ_CALL_SITES = [
   "src/app/(dashboard)/wiki/[...slug]/page.tsx",
   "src/app/(dashboard)/wiki/actions.ts",
   "src/app/api/wiki/article/route.ts",
-  "src/lib/wiki/bookmarks.ts",
-  "src/lib/wiki/progress.ts",
+  // The per-reader reads. They lived in `bookmarks.ts` / `progress.ts` until
+  // #498's review moved them out: those two are `"use server"` modules, and a
+  // guard that throws on a session-less caller has no business on `/wiki`'s
+  // render path (`wiki-read-graph.test.ts`). The two writers left behind
+  // resolve no articles, so there is no church for them to drop.
+  "src/lib/wiki/reads.ts",
   "src/components/phase-engine/insight-card.tsx",
 ];
 

@@ -13,7 +13,11 @@
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
-import { requireSeat, type Capability } from "@/lib/auth/seats";
+import {
+  requireSeat,
+  SeatRefusalError,
+  type Capability,
+} from "@/lib/auth/seats";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
@@ -53,9 +57,10 @@ export async function withChurch<T>(
     if (error instanceof Error && error.message === "Unauthorized") {
       return { success: false, error: "You must be logged in" };
     }
-    // `requireSeat` throws `Forbidden: <capability> …`. The sentence names the
-    // rule that refused, which is a log line, not a response.
-    if (error instanceof Error && error.message.startsWith("Forbidden")) {
+    // An `instanceof` and not a message prefix: `requireChurchAccess` throws
+    // `Forbidden: …` too, so a prefix test quietly widens to every refusal that
+    // happens to open with the word, and a reword changes control flow.
+    if (error instanceof SeatRefusalError) {
       return {
         success: false,
         error: "You do not have permission to do that in this church.",

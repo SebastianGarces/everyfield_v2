@@ -7,7 +7,11 @@
  */
 
 import type { User } from "@/db/schema";
-import { requireSeat, type Capability } from "@/lib/auth/seats";
+import {
+  requireSeat,
+  SeatRefusalError,
+  type Capability,
+} from "@/lib/auth/seats";
 import type { ActionResult } from "@/lib/people/types";
 import { unstable_rethrow } from "next/navigation";
 import type { ZodError } from "zod";
@@ -41,9 +45,14 @@ export interface ActionMessages {
   noChurch?: string;
   /**
    * Thrown Error message → returned error string, merged over
-   * DEFAULT_KNOWN_ERRORS (an entry here wins). Only list strings that
-   * differ from the defaults, e.g. the "You must be logged in to …"
-   * mappings for "Unauthorized".
+   * DEFAULT_KNOWN_ERRORS (an entry here wins). Only list strings that differ
+   * from the defaults.
+   *
+   * `"Unauthorized"` is NOT one of them and cannot be: the catch below rethrows
+   * it before this table is consulted, so a sessionless call leaves as a throw
+   * (#498). Every action here used to carry a "You must be logged in to …"
+   * entry, and every one of them was the handled answer an anonymous caller
+   * should never have got.
    */
   known?: Record<string, string>;
   /**
@@ -89,11 +98,21 @@ export async function withChurchSession<T>(
 
     console.error(`${label} error:`, error);
 
+    // A SESSIONLESS CALL THROWS, and it has to leave through here rather than
+    // become a handled result. `verifySession` is what `requireSeat` opens on,
+    // and converting its `Unauthorized` into `{ success: false, … }` is what
+    // gives an anonymous caller a well-formed answer from an endpoint that
+    // should only ever have said no (`memory/invariants.md` → Authentication).
+    if (error instanceof Error && error.message === "Unauthorized") {
+      throw error;
+    }
+
     if (error instanceof Error) {
       // The seat refusal, turned into a sentence that does not name the guard.
-      // `requireSeat` throws `Forbidden: <capability> …`, which says which rule
-      // refused and belongs in the log above, not in a response.
-      if (error.message.startsWith("Forbidden")) {
+      // An `instanceof` and not a message prefix: `requireChurchAccess` and the
+      // invitation layer also throw `Forbidden: …`, so a prefix test is a
+      // classification resting on prose that a reword silently changes.
+      if (error instanceof SeatRefusalError) {
         return { success: false, error: NOT_PERMITTED_MESSAGE };
       }
 

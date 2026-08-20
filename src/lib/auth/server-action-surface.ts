@@ -550,6 +550,32 @@ export function isPublicRouteGroup(file: string): boolean {
 export const SEAT_GUARD = ["requireSeat"];
 
 /**
+ * A `"use server"` directive that is NOT this module's prologue — a FUNCTION
+ * -level directive, which publishes an endpoint the walks here cannot see.
+ *
+ * `isUseServerModule` asks about the prologue, and every walk in this file is
+ * built on it, so an inline `async function act() { "use server"; … }` is a live
+ * POST endpoint outside the auth surface those walks claim to cover. #498's
+ * review found three of them — `saveAgendaAction` in a meetings page and the two
+ * phase-template prompt actions in a component — one of which created 22–26
+ * tasks per press, none of them carrying a seat check.
+ *
+ * The `codeOf` pass strips string literals only where they are LITERALS, so the
+ * directive survives as one; a prologue directive is excluded by starting the
+ * search after it. Returns the byte offsets, so the caller can report them.
+ */
+export function inlineServerDirectives(code: string): number[] {
+  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
+  const found: number[] = [];
+
+  for (const match of code.matchAll(/["']use server["']/g)) {
+    if (match.index >= prologue.length) found.push(match.index);
+  }
+
+  return found;
+}
+
+/**
  * One exported endpoint of one `"use server"` module, with the two offsets the
  * SEAT-GUARD rule is stated in terms of.
  *
@@ -565,8 +591,55 @@ export type GuardedExport = {
   guard: number;
   /** Where it first parses an argument, or -1 if it parses none. */
   parse: number;
+  /**
+   * WHICH capability the guard was called with — the first string literal of
+   * the guarding call, which is the capability in every shape the product uses:
+   * `requireSeat("x")` directly, and `withChurchSession("x", …)`,
+   * `withChurch("x", …)`, `requireChurchSession("x")` and `currentViewer("x")`
+   * through the four session envelopes, each of which takes it FIRST.
+   *
+   * `null` when the export reaches no guard, or reaches one through a call
+   * whose first argument is not a literal — which the mapping assertion in
+   * `seat-guard.test.ts` treats as a failure, because a capability chosen at
+   * runtime is one no reviewer can read off the diff.
+   */
+  capability: string | null;
   label: string;
 };
+
+/** The capability a guarding call names, from the first string literal in it. */
+function capabilityAt(body: string, guard: number): string | null {
+  if (guard < 0) return null;
+
+  const open = body.indexOf("(", guard);
+  if (open < 0) return null;
+
+  // Only the FIRST argument counts, so the scan ends at the top-level comma
+  // that closes it OR at the call's own `)`, whichever comes first. Both
+  // terminators are needed: `withChurch(cap, "Failed to create team", …)` would
+  // otherwise report the fallback copy, and `requireSeat("read")` — which has no
+  // comma at all — would run to whatever comma turned up next in the body.
+  let depth = 0;
+  let end = -1;
+
+  for (let i = open + 1; i < body.length; i++) {
+    const char = body[i];
+    if (char === "(" || char === "[" || char === "{") depth++;
+    else if (char === ")" && depth === 0) {
+      end = i;
+      break;
+    } else if (char === ")" || char === "]" || char === "}") depth--;
+    else if (char === "," && depth === 0) {
+      end = i;
+      break;
+    }
+  }
+
+  if (end < 0) return null;
+  return (
+    /^\s*["']([^"']+)["']\s*$/.exec(body.slice(open + 1, end))?.[1] ?? null
+  );
+}
 
 /**
  * Every exported function of every `"use server"` module under `src/`, with the
@@ -591,11 +664,14 @@ export function guardedServerActionExports(): GuardedExport[] {
     for (const fn of functionBodies(code)) {
       if (!fn.exported) continue;
 
+      const guard = fn.body.search(guardPattern);
+
       found.push({
         file,
         name: fn.name,
-        guard: fn.body.search(guardPattern),
+        guard,
         parse: fn.body.indexOf(".safeParse("),
+        capability: capabilityAt(fn.body, guard),
         label: `${rel(file)} → ${fn.name}`,
       });
     }

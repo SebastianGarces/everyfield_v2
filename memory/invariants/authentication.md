@@ -49,3 +49,30 @@ survived lower down; only a walk that must RESOLVE an import saw it. A module
 could have hidden an unguarded export the same way. `codeOf` is now one
 left-to-right pass over comments and string literals, and
 `server-action-surface.test.ts` pins the case against the real file.
+
+
+## What this guard does NOT cover
+
+**Route handlers.** Everything above is about `"use server"` exports, because
+that is where the walk can see. `src/app/api/**` is a second surface with its
+own rules ([`../contracts/api.md`](../contracts/api.md) — cron bearer auth, the
+always-200 unsubscribe, the webhook signature checks), and no assertion in
+`seat-guard.test.ts` reaches it. A route handler that writes feature data needs
+its own `requireSeat` or `assertSeatFor` call, chosen on purpose; nothing will
+tell you if you leave it out.
+
+**A function-level directive was the third gap, and it is now closed.** An
+inline `async function act() { "use server"; … }` publishes a POST endpoint just
+as a module does, and `isUseServerModule` reads the PROLOGUE, so three live
+writes — a meeting agenda save and the two phase-template prompt actions, one of
+which creates 22–26 tasks per press — sat outside the surface the walk claims to
+cover. The comment beside them said so and concluded "the rule is the authority
+here, not the walk". The form is banned now (`inlineServerDirectives`), which
+also makes those actions callable from a test, which an inline closure never was.
+
+**And the capability itself is data, not a judgement.** The walk proves a guard
+is called and called first; it cannot prove it was called with the right verb,
+and `requireSeat("read")` on a write compiles and passes. So the mapping is
+checked in (`@/lib/auth/capability-map`) and asserted with `deepEqual`: a
+permission change is a one-line diff beside the endpoint, not something a
+reviewer reconstructs by opening thirty action modules.

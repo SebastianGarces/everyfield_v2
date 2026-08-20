@@ -17,7 +17,7 @@
  * including the test whose whole point is running without a request.
  */
 
-import { isChurchLevelOwner } from "@/lib/auth/tenancy";
+import { assertSeatFor } from "@/lib/auth/seats";
 import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import { launchTargetDateSchema } from "@/lib/launch/validation";
@@ -133,9 +133,11 @@ export async function runDeclareJourney(
   actor: OnboardingActor,
   input: DeclareJourneyInput
 ): Promise<DeclareJourneyState> {
-  if (!isChurchLevelOwner(actor)) {
-    return { status: "error", error: "Only church planters can onboard" };
-  }
+  // The one table (#498) — `church.create` is `isChurchLevelOwner` by
+  // construction. It throws for the reason `runCreateChurch`'s does: the action
+  // guard has already answered, so reaching here with the wrong seat means a
+  // caller arrived some other way.
+  assertSeatFor(actor, "church.create");
 
   if (!actor.churchId) {
     return {

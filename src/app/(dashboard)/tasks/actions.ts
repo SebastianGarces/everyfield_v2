@@ -1,6 +1,6 @@
 "use server";
 
-import { requireSeat } from "@/lib/auth/seats";
+import { requireSeat, SeatRefusalError } from "@/lib/auth/seats";
 import type { Task } from "@/db/schema";
 import {
   bulkCompleteTasks,
@@ -8,6 +8,7 @@ import {
   completeTask,
   createTask,
   deleteTask,
+  assertMayActOnTask,
   getTask,
   reopenTask,
   updateTask,
@@ -84,7 +85,17 @@ const USER_FACING_SERVICE_ERRORS = new Set<string>([
   DEPENDENCY_TASK_MISSING_ERROR,
 ]);
 
+/** What a Member is told when the task they aimed at is somebody else's. */
+const NOT_YOUR_TASK_MESSAGE =
+  "That task is assigned to somebody else, so you cannot change it.";
+
 function userFacingError(error: unknown): string | null {
+  // The own-duty refusal (AS-006) is a SENTENCE, not the generic "please try
+  // again" every other throw becomes: the press did not fail, it was refused,
+  // and a caller told to retry will retry. An `instanceof` and not a message
+  // prefix — the refusal's own text names the capability, which is a log line.
+  if (error instanceof SeatRefusalError) return NOT_YOUR_TASK_MESSAGE;
+
   if (!(error instanceof Error)) return null;
   return USER_FACING_SERVICE_ERRORS.has(error.message) ? error.message : null;
 }
@@ -344,7 +355,7 @@ export async function completeTaskAction(
       return { success: false, error: "No church association" };
     }
 
-    const { task } = await completeTask(user.churchId, taskId, user.id);
+    const { task } = await completeTask(user.churchId, taskId, user);
 
     // `refresh()` updates the page the planter is standing on — completing
     // the last prerequisite must clear the dependent's blocked badge without
@@ -356,6 +367,10 @@ export async function completeTaskAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("completeTaskAction error:", error);
+
+    if (error instanceof SeatRefusalError) {
+      return { success: false, error: NOT_YOUR_TASK_MESSAGE };
+    }
 
     if (error instanceof Error && error.message === "Task not found") {
       return { success: false, error: "Task not found" };
@@ -388,7 +403,7 @@ export async function reopenTaskAction(
       return { success: false, error: "No church association" };
     }
 
-    const task = await reopenTask(user.churchId, taskId);
+    const task = await reopenTask(user.churchId, taskId, user);
 
     refresh();
     revalidatePath("/tasks");
@@ -397,6 +412,10 @@ export async function reopenTaskAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("reopenTaskAction error:", error);
+
+    if (error instanceof SeatRefusalError) {
+      return { success: false, error: NOT_YOUR_TASK_MESSAGE };
+    }
 
     if (error instanceof Error && error.message === "Task is not complete") {
       return { success: false, error: "Task is not complete" };
@@ -468,12 +487,22 @@ export async function updateTaskStatusAction(
       return { success: false, error: "That is not a status a task can have" };
     }
 
-    // If marking complete, use completeTask for proper event emission
+    // If marking complete, use completeTask for proper event emission — and
+    // that path asks the own-duty question itself.
     if (parsed.data === "complete") {
-      const { task } = await completeTask(user.churchId, taskId, user.id);
+      const { task } = await completeTask(user.churchId, taskId, user);
       revalidatePath("/tasks");
       return { success: true, data: task };
     }
+
+    // Every OTHER status goes through the generic `updateTask`, which is a
+    // `tasks.write` door with no subject of its own — so the own-duty question
+    // is asked here, against the row this call is about (AS-006).
+    const existing = await getTask(user.churchId, taskId);
+    if (!existing) {
+      return { success: false, error: "Task not found" };
+    }
+    assertMayActOnTask(user, existing);
 
     const task = await updateTask(user.churchId, taskId, {
       status: parsed.data,
@@ -485,6 +514,11 @@ export async function updateTaskStatusAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("updateTaskStatusAction error:", error);
+
+    if (error instanceof SeatRefusalError) {
+      return { success: false, error: NOT_YOUR_TASK_MESSAGE };
+    }
+
     return {
       success: false,
       error: "Failed to update task status. Please try again.",
@@ -527,6 +561,16 @@ export async function addSubtaskAction(
         error: "You must be associated with a church to add subtasks",
       };
     }
+
+    // The parent IS the subject of this write, so it is the row the own-duty
+    // rule is asked about: a Member may add a step to a task assigned to them,
+    // and an Admin to anybody's. Loaded before the parse only because the parse
+    // needs nothing from it — the seat guard already ran on line one.
+    const parent = await getTask(user.churchId, parentTaskId);
+    if (!parent) {
+      return { success: false, error: "Task not found" };
+    }
+    assertMayActOnTask(user, parent);
 
     const parsed = taskCreateSchema.safeParse({
       ...formDataToObject(formData),
@@ -593,8 +637,8 @@ export async function setSubtaskCompletionAction(
     }
 
     const task = complete
-      ? (await completeTask(user.churchId, subtaskId, user.id)).task
-      : await reopenTask(user.churchId, subtaskId);
+      ? (await completeTask(user.churchId, subtaskId, user)).task
+      : await reopenTask(user.churchId, subtaskId, user);
 
     refresh();
     revalidatePath("/tasks");
@@ -603,6 +647,10 @@ export async function setSubtaskCompletionAction(
     return { success: true, data: task };
   } catch (error) {
     console.error("setSubtaskCompletionAction error:", error);
+
+    if (error instanceof SeatRefusalError) {
+      return { success: false, error: NOT_YOUR_TASK_MESSAGE };
+    }
 
     if (
       error instanceof Error &&
@@ -649,7 +697,7 @@ export async function bulkCompleteTasksAction(
       };
     }
 
-    const result = await bulkCompleteTasks(user.churchId, parsed.data, user.id);
+    const result = await bulkCompleteTasks(user.churchId, parsed.data, user);
 
     revalidatePath("/tasks");
 

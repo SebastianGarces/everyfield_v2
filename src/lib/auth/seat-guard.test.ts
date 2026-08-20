@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ADMIN_PLUS, OWNER_ONLY, SESSIONLESS_EXPORTS } from "./seats";
+import { CAPABILITY_BY_EXPORT } from "./capability-map";
+import { ADMIN_PLUS, OWNER_ONLY, UNSEATED_EXPORTS } from "./seats";
 import {
   SEAT_GUARD,
   SRC,
@@ -10,6 +11,7 @@ import {
   codeOf,
   functionBodies,
   guardedServerActionExports,
+  inlineServerDirectives,
   isUseServerModule,
   reachingNames,
   rel,
@@ -36,7 +38,7 @@ import {
 //      differently for a malformed argument than for a well-formed one.
 //   2. THE EXEMPT SET, EXACTLY. An export that reaches no guard is either
 //      sessionless by design or a hole, and the absence of a call cannot tell
-//      you which. `SESSIONLESS_EXPORTS` says which, with the reason, and is
+//      you which. `UNSEATED_EXPORTS` says which, with the reason, and is
 //      asserted with `deepEqual` so a new one fails here.
 //   3. ONE DECLARATION SITE for each set, and no hand-rolled seat comparison
 //      anywhere else — the drift the rejected matrix would have been made of.
@@ -85,8 +87,8 @@ test('every "use server" export reaches the seat guard before it parses', () => 
 
   assert.deepEqual(
     unguarded.toSorted(),
-    Object.keys(SESSIONLESS_EXPORTS).toSorted(),
-    'a `"use server"` export reaches its work without calling `requireSeat`. Every export of such a module is a POSTable endpoint (memory/invariants.md → Authentication), so it must state who may call it — pick the capability from `src/lib/auth/seats.ts`, or, if the endpoint is sessionless BY DESIGN, add it to SESSIONLESS_EXPORTS there with the reason'
+    Object.keys(UNSEATED_EXPORTS).toSorted(),
+    'a `"use server"` export reaches its work without calling `requireSeat`. Every export of such a module is a POSTable endpoint (memory/invariants.md → Authentication), so it must state who may call it — pick the capability from `src/lib/auth/seats.ts`, or, if the endpoint is sessionless BY DESIGN, add it to UNSEATED_EXPORTS there with the reason'
   );
 
   for (const expected of PREVIOUSLY_UNGUARDED) {
@@ -97,6 +99,97 @@ test('every "use server" export reaches the seat guard before it parses', () => 
   }
 });
 
+test('no "use server" directive sits anywhere but a module prologue', () => {
+  // THE HOLE THE EXPORT-WALK CANNOT SEE BY CONSTRUCTION. Every walk above asks
+  // `isUseServerModule`, which reads the PROLOGUE — so an inline
+  // `async function act() { "use server"; … }` publishes a POST endpoint that
+  // no assertion in this file is even looking at.
+  //
+  // #498's review found three, live and unguarded: `saveAgendaAction` inside
+  // `meetings/[id]/page.tsx`, and the two phase-template prompt actions inside
+  // a component — the import one creating 22–26 tasks per press. The comment
+  // beside them acknowledged the walk could not see them and concluded "the
+  // rule is the authority here, not the walk", which is the arrangement this
+  // whole issue exists to end.
+  //
+  // Banning the form is stronger than teaching the parser to find it: an inline
+  // closure cannot be called from a test either, so moving it to a module is
+  // what makes it both guardable and assertable.
+  // The detector itself names the directive in ordinary string literals — the
+  // regexes it matches with, and the argument to `declaresDirective`. There is
+  // exactly one such module and it is the one implementing this scan, so it is
+  // named here rather than pattern-matched around.
+  const DETECTOR = path.join(SRC, "lib", "auth", "server-action-surface.ts");
+
+  const offenders: string[] = [];
+
+  for (const file of TS_FILES) {
+    if (file === DETECTOR) continue;
+    if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+
+    for (const at of inlineServerDirectives(codeOf(file))) {
+      offenders.push(`${rel(file)} @ ${at}`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'a `"use server"` directive sits inside a function rather than in a module prologue. That publishes a POST endpoint the seat-guard walk cannot see — move it into an actions module and give it a capability:\n  ' +
+      offenders.join("\n  ")
+  );
+});
+
+test("the inline-directive scan tells a prologue from a closure", () => {
+  // The scanner's own fixture. A prologue directive must NOT be reported (every
+  // action module has one) and an inline one must be — including without its
+  // semicolon, which is the same ASI trap that hid a live endpoint in #265.
+  assert.deepEqual(
+    inlineServerDirectives('"use server";\nexport const a = 1;'),
+    []
+  );
+  assert.deepEqual(
+    inlineServerDirectives('"use server"\nexport const a = 1;'),
+    []
+  );
+
+  const inline = [
+    "export default function Page() {",
+    "  async function act() {",
+    '    "use server";',
+    "    return write();",
+    "  }",
+    "}",
+  ].join("\n");
+
+  assert.equal(inlineServerDirectives(inline).length, 1);
+
+  const noSemicolon = inline.replace('"use server";', '"use server"');
+  assert.equal(inlineServerDirectives(noSemicolon).length, 1);
+});
+
+test("every guarded export names the capability the map records", () => {
+  const actual: Record<string, string> = {};
+
+  for (const action of guardedServerActionExports()) {
+    if (action.guard < 0) continue;
+
+    assert.notEqual(
+      action.capability,
+      null,
+      `${action.label} reaches the guard, but not with a literal capability — a capability chosen at runtime is one no reviewer can read off the diff`
+    );
+
+    actual[action.label] = action.capability!;
+  }
+
+  assert.deepEqual(
+    actual,
+    CAPABILITY_BY_EXPORT,
+    "the capability an endpoint is guarded with changed, or an endpoint was added or removed. That is a permission change: check the new row says what you meant, then update `src/lib/auth/capability-map.ts`"
+  );
+});
+
 test("every exempt export still exists, and says why it is exempt", () => {
   // A stale entry is not harmless: the set above is asserted with `deepEqual`,
   // so an exemption naming a deleted export fails the suite until someone
@@ -104,12 +197,25 @@ test("every exempt export still exists, and says why it is exempt", () => {
   // guard is a licence nobody is using, which is worse.
   const live = new Set(guardedServerActionExports().map((e) => e.label));
 
-  for (const [label, reason] of Object.entries(SESSIONLESS_EXPORTS)) {
+  for (const [label, { kind, reason }] of Object.entries(UNSEATED_EXPORTS)) {
     assert.ok(live.has(label), `${label} is exempt but no longer exists`);
     assert.ok(
       reason.length > 20,
       `${label} is exempt without a reason anybody can act on`
     );
+
+    // The `kind` is the claim, and the two claims are not interchangeable: a
+    // `sessionless` entry says an anonymous POST is EXPECTED here, which is a
+    // security review. Six of these are; `logout` and the platform-admin action
+    // are not, and calling them sessionless is how the next reader widens the
+    // set. Only the public route groups may make the stronger claim.
+    if (kind === "sessionless") {
+      assert.match(
+        label,
+        /^src\/app\/\((?:auth|marketing)\)\/|^src\/app\/unsubscribe\//,
+        `${label} claims to be sessionless, but it is not in a public route group or the token-bearing unsubscribe pair`
+      );
+    }
   }
 });
 

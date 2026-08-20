@@ -48,6 +48,7 @@ import {
   type PredefinedTeamKey,
 } from "@/lib/ministry-teams/role-templates";
 import { revalidatePath } from "next/cache";
+import { requireSeat } from "@/lib/auth/seats";
 import {
   fieldErrorResult,
   formEntries,
@@ -180,6 +181,13 @@ const TEAM_ROLES_PARTIAL_MESSAGE =
 export async function initializeTeamsWithRolesAction(): Promise<
   ActionResult<MinistryTeam[]>
 > {
+  // ITS OWN CAPABILITY, not the one inherited from the first thing it calls.
+  // This export composes `listTeamsAction` (a `read`) with `initializeTeamsAction`
+  // and `importRoleTemplatesAction` (both `teams.write`), so the guard walk would
+  // otherwise report a WRITE endpoint whose stated authority is `read` — true of
+  // the first statement and false of the endpoint.
+  await requireSeat("teams.write");
+
   const existing = await listTeamsAction();
   if (!existing.success) return { success: false, error: existing.error };
   if (existing.data.length > 0) return { success: true, data: [] };
@@ -295,7 +303,7 @@ export async function assignMemberAction(
   data: { personId: string; startDate?: string }
 ): Promise<ActionResult<TeamMembership>> {
   return withChurch(
-    "teams.own",
+    "teams.write",
     "Failed to assign member",
     async ({ churchId, userId }) => {
       const parsed = memberAssignSchema.safeParse(data);
@@ -319,7 +327,7 @@ export async function removeMemberAction(
   membershipId: string
 ): Promise<ActionResult> {
   return withChurch(
-    "teams.own",
+    "teams.write",
     "Failed to remove member",
     async ({ churchId, userId }) => {
       await removeMember(churchId, membershipId, userId);
@@ -338,7 +346,7 @@ export async function createMeetingAction(
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
   return withChurch(
-    "teams.own",
+    "teams.write",
     "Failed to create meeting",
     async ({ churchId, userId }) => {
       const rawData: Record<string, unknown> = formEntries(formData);
@@ -371,7 +379,7 @@ export async function createTrainingProgramAction(
   formData: FormData
 ): Promise<ActionResult<TrainingProgram>> {
   return withChurch(
-    "teams.own",
+    "teams.write",
     "Failed to create program",
     async ({ churchId, userId }) => {
       const parsed = trainingProgramCreateSchema.safeParse(
@@ -395,7 +403,7 @@ export async function markTrainingCompleteAction(data: {
   programId: string;
 }): Promise<ActionResult<TrainingCompletion>> {
   return withChurch(
-    "teams.own",
+    "teams.write",
     "Failed to mark complete",
     async ({ churchId, userId }) => {
       const parsed = trainingCompleteSchema.safeParse(data);

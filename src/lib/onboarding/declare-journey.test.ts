@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+
+import { SeatRefusalError } from "@/lib/auth/seats";
 import { mock, test } from "node:test";
 
 import { runDeclareJourney, type DeclareJourneyDeps } from "./declare-journey";
@@ -84,14 +86,12 @@ function planter(overrides: Partial<OnboardingActor> = {}): OnboardingActor {
 test("a non-planter is refused before anything is written", async () => {
   const { deps, calls } = harness();
 
-  const result = await runDeclareJourney(deps, planter({ seat: null }), {
-    stage: "3",
-  });
+  // A throw, not a rendered outcome — see `create-church.test.ts` for why.
+  await assert.rejects(
+    () => runDeclareJourney(deps, planter({ seat: null }), { stage: "3" }),
+    (error: Error) => error instanceof SeatRefusalError
+  );
 
-  assert.deepEqual(result, {
-    status: "error",
-    error: "Only church planters can onboard",
-  });
   assert.deepEqual(calls, []);
 });
 

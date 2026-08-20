@@ -295,9 +295,9 @@ export async function setLaunchTaskCompleteAction(
     }
 
     if (complete) {
-      await completeTask(churchId, taskId, user.id);
+      await completeTask(churchId, taskId, user);
     } else {
-      await reopenTask(churchId, taskId);
+      await reopenTask(churchId, taskId, user);
     }
 
     revalidateLaunchSurfaces();
