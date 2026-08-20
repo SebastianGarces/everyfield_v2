@@ -1,8 +1,11 @@
 #!/bin/bash
-# SessionStart hook: inject the 21 engineering principles into every session.
+# SessionStart hook: regenerate ops/principles.md from the 21 engineering
+# principles so the CLAUDE.md @-import loads them in full. (Hook stdout is
+# capped at 10,000 chars, so the document cannot travel through the hook
+# itself — the import is the loader, this script is the generator.)
 # Source of truth: .agents/skills/principle-*/SKILL.md (verbatim copies from
 # github.com/cursor/plugins pstack, MIT). This script strips frontmatter and
-# prints each description line plus body. Grouped order below; any principle
+# emits each description line plus body. Grouped order below; any principle
 # directory not in the list is appended so a new copy is never silently dropped.
 
 cd "$(dirname "$0")/.." || exit 0
@@ -44,6 +47,8 @@ for d in "$DIR"/principle-*/; do
   [ "$found" = 0 ] && ORDER+=("$name")
 done
 
+OUT=ops/principles.md
+{
 cat <<'EOF'
 # Engineering principles
 
@@ -71,3 +76,6 @@ for name in "${ORDER[@]}"; do
   ' "$f"
   echo
 done
+} > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+
+echo "Engineering principles: regenerated $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes). The CLAUDE.md import @ops/principles.md loads them in full."
