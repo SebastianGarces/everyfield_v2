@@ -25,7 +25,13 @@ import {
   type DispatchDeps,
   type EmailSendOutcome,
 } from "../dispatch";
-import { batchSubject, composeBatchEmail, type OutboundEmail } from "./email";
+import {
+  batchSubject,
+  composeBatchEmail,
+  NOTIFICATION_PREFERENCES_HEADING_ID,
+  notificationPreferencesUrl,
+  type OutboundEmail,
+} from "./email";
 import { verifyUnsubscribeToken } from "./unsubscribe-token";
 
 // ============================================================================
@@ -333,7 +339,19 @@ test("the email links to the full preference screen as well as the one-category 
   const { deps, sent } = fakeDeps([notification()]);
   await runDispatch(deps, { now: NOW });
 
-  assert.ok(sent[0].html.includes(`${BASE_URL}/settings`));
+  // The WHOLE url, not a prefix: the old assertion passed just as happily
+  // when the link dropped the reader at the top of Settings instead of on the
+  // preference matrix (#467).
+  assert.ok(sent[0].html.includes(notificationPreferencesUrl(BASE_URL)));
+
+  // And the deep link's fragment, spelled out. The line above is composed from
+  // the same constant the renderer uses, so it follows that constant wherever
+  // it goes — including back to a bare `/settings`. This one goes red.
+  assert.ok(
+    sent[0].html.includes(
+      `${BASE_URL}/settings#${NOTIFICATION_PREFERENCES_HEADING_ID}`
+    )
+  );
 });
 
 test("an email cannot be composed without a working unsubscribe link", async (t) => {
