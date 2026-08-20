@@ -25,6 +25,9 @@ import { createAccountEntities } from "./account-entities";
 
 const USER_ID = "44444444-4444-4444-8444-444444444444";
 
+/** The registrant, for the `persons` row an invited planter's plant gets (#378). */
+const REGISTRANT = { name: "Ada Lovelace", email: "ada@example.test" };
+
 /**
  * Every account type, the seat it grants, and the tenancy that seat is held in.
  *
@@ -57,7 +60,12 @@ const ACCOUNT_TYPES: {
 
 for (const { accountType, orgName, seat, tenancy } of ACCOUNT_TYPES) {
   test(`registering as ${accountType} grants ${seat} in ${tenancy}`, () => {
-    const planned = createAccountEntities(accountType, orgName, USER_ID);
+    const planned = createAccountEntities(
+      accountType,
+      orgName,
+      USER_ID,
+      REGISTRANT
+    );
 
     assert.equal(planned.seat, seat, "the seat");
 
@@ -103,6 +111,7 @@ test("an INVITED planter is the Owner of the plant created with them", () => {
     "planter",
     "Scratch Plant",
     USER_ID,
+    REGISTRANT,
     true
   );
 

@@ -54,6 +54,8 @@ const BLANK = {
   householdId: null,
   householdRole: null,
   pipelineSortOrder: 0,
+  // Contacts, not accounts — nobody in this pipeline holds a login (#378).
+  userId: null,
   createdBy: CREATED_BY,
   deletedAt: null,
 } as const;

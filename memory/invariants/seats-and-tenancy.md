@@ -2,7 +2,7 @@
 
 Why and how, for the Seats & Tenancy rules in [`../invariants.md`](../invariants.md).
 
-**Source:** `src/db/schema/user.ts`, `src/lib/auth/tenancy.ts`, `src/lib/auth/access.ts`, `src/db/migrations/0050_user_seat.sql`, `0051_drop_user_role.sql`
+**Source:** `src/db/schema/user.ts`, `src/lib/auth/tenancy.ts`, `src/lib/auth/access.ts`, `src/db/migrations/0050_user_seat.sql`, `0051_drop_user_role.sql`, `0052_person_user_link.sql`, `src/lib/people/account-person.ts`
 
 Ruled 2026-08-20 (#185, rows 185 and 185 (4)); built by #494. The FRD is
 `product-docs/features/accounts-and-seats/frd.md`.
@@ -93,6 +93,54 @@ member}` and to nothing else. `admin` is a seat the role model could not
 express, so "any seat" is not its translation — the OB-010 claim names the pair
 explicitly, and letting a plant Admin claim the Owner seat is a product decision
 for the seat-management issue rather than a consequence of this rename.
+
+## The person a seat belongs to (AS-013, #378)
+
+`users.seat` answers what an account may DO. `persons.user_id` answers something
+the seat model deliberately does not: **which row in the plant's people IS this
+account.** The two are separate columns because they are separate questions, and
+conflating them is the mistake this section exists to prevent.
+
+**Why the link had to exist at all.** `ministry_teams.leader_id`, the meeting
+guest list and every team assignment reference `persons.id`, and the assignment
+dialog is fed by `listPeople`. Nothing tied a `persons` row to an account, so
+the planter was the one member of their own plant who could not be put on a
+team — they staffed everybody except themselves. It is also the missing half of
+AS-006's own-duty verbs: `tasks.own` shipped only because
+`tasks.assigned_to_id` references `users.id`, and `teams.own` / `meetings.rsvp`
+did not because their subjects are `persons.id`. The subject half now exists;
+the rewire is #495+'s and owes the widening argument again rather than
+inheriting it.
+
+**Written at CHURCH-GAIN and nowhere else.** `churchCreationStatements`
+(`src/lib/onboarding/create-church.ts`) is the one contract for "an account just
+gained a plant", and both paths that do it — onboarding step 1 and an invited
+planter's registration — spread that tuple whole (ruling 408-4B). Putting the
+insert there rather than in each caller is what makes "one spelling" true; a
+per-caller insert would be two, and the invited path is the one that would have
+silently lacked it.
+
+**It grants nothing, and that is a property to keep, not a coincidence.** A
+capability names a seat set and a tenancy requirement; nothing in
+`@/lib/auth/seats` reads `persons`, and the auto-fill that seats the planter in
+their own Senior Pastor role writes no `users` row at all. The temptation this
+guards against is real — "the planter's person record" looks like an identity
+claim — but a person row is a CRM record a plant Admin can create, so deriving
+authority from one would put seat-granting behind the people list.
+
+**The unique index is church-scoped, not per-account, on purpose.** The row is a
+person IN A PLANT, and the residual below says nothing holds an account to one
+tenancy — a per-account index would state a rule the rest of the schema does not
+keep. Partial on `user_id IS NOT NULL` for the reason the owner indexes are
+partial on the seat: a btree unique treats NULLs as distinct, so the plant's
+contacts would index separately anyway, and the predicate says so out loud.
+
+**One thing it did NOT replace.** `people/person-user.ts` bridges a person to an
+account by ADDRESS, and it stays. The FK is an identity written at church-gain
+and covers only accounts that gained a church; the bridge is discovery — "which
+people in this plant happen to hold a login" — and answers for everyone else. A
+reader who finds both should not collapse them; the bridge retires when every
+account-holding person carries the FK, which is a different issue.
 
 ## The residual
 

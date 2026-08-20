@@ -14,7 +14,7 @@ import {
   runCreateChurch,
   type ChurchCreationWrite,
   type CreateChurchDeps,
-  type OnboardingActor,
+  type ChurchCreatorActor,
 } from "./create-church";
 import { ONBOARDING_STEP_IDS, isSkippableOnboardingStep } from "./steps";
 
@@ -43,6 +43,8 @@ import { ONBOARDING_STEP_IDS, isSkippableOnboardingStep } from "./steps";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const CHURCH_ID = "22222222-2222-4222-8222-222222222222";
+const PLANTER_NAME = "Grace Planter";
+const PLANTER_EMAIL = "grace@example.test";
 
 type Call =
   | { kind: "commit"; write: ChurchCreationWrite }
@@ -83,13 +85,18 @@ function harness(options: { linked?: boolean; commitFails?: boolean } = {}) {
 
 /**
  * The Owner seat with no plant yet — the account this path exists for. All
- * three tenancy FKs are named because `OnboardingActor` is `SeatFields`: a
- * fixture that omitted one would be asserting about a shape
+ * three tenancy FKs are named because `ChurchCreatorActor` carries
+ * `SeatFields`: a fixture that omitted one would be asserting about a shape
  * `isChurchLevelOwner` never sees.
  */
-function planter(overrides: Partial<OnboardingActor> = {}): OnboardingActor {
+function planter(
+  overrides: Partial<ChurchCreatorActor> = {}
+): ChurchCreatorActor {
   return {
     id: USER_ID,
+    // Carried because the batch mints this planter's own `persons` row (#378).
+    name: PLANTER_NAME,
+    email: PLANTER_EMAIL,
     seat: "owner",
     churchId: null,
     sendingChurchId: null,
@@ -219,6 +226,10 @@ test("the happy path is exactly one commit, then a revalidate", async () => {
   assert.deepEqual(commit.kind === "commit" ? commit.write : null, {
     churchId: CHURCH_ID,
     plantedBy: USER_ID,
+    // From the ACTOR, not the form — the `persons` row this batch mints is the
+    // planter themselves (#378), so a form field could never name it.
+    plantedByName: PLANTER_NAME,
+    plantedByEmail: PLANTER_EMAIL,
     name: "Grace Church",
     city: "Austin",
     // Untouched optional fields reach the column as NULL, never "" — the
@@ -285,18 +296,36 @@ function render(statement: {
 const WRITE: ChurchCreationWrite = {
   churchId: CHURCH_ID,
   plantedBy: USER_ID,
+  plantedByName: PLANTER_NAME,
+  plantedByEmail: PLANTER_EMAIL,
   name: "Grace Church",
   city: null,
   stateRegion: null,
   country: null,
 };
 
-test("the batch is church, then link, then privacy — the only FK-legal order", () => {
-  const [church, link, privacy] = churchCreationStatements(WRITE).map(render);
+test("the batch is church, link, privacy, then the planter's person row", () => {
+  const [church, link, privacy, person] =
+    churchCreationStatements(WRITE).map(render);
 
   assert.match(church, /insert\s+into\s+"churches"/i);
   assert.match(link, /update\s+"users"\s+set/i);
   assert.match(privacy, /insert\s+into\s+"church_privacy_settings"/i);
+  assert.match(person, /insert\s+into\s+"persons"/i);
+});
+
+test("the planter's person row is idempotent against its own unique index", () => {
+  // AS-013 (#378). Re-sending this tuple — a retry, or an invited planter's
+  // registration racing itself — must be a no-op rather than a second copy of
+  // the planter in their own people list, and the arbiter is
+  // `persons_church_user_unique_idx`. The predicate is repeated byte for byte
+  // because Postgres matches an ON CONFLICT index_predicate literally.
+  const person = churchCreationStatements(WRITE).map(render)[3];
+
+  assert.match(person, /on\s+conflict/i);
+  assert.match(person, /"church_id","user_id"/);
+  assert.match(person, /"persons"\."user_id"\s+is\s+not\s+null/i);
+  assert.match(person, /do\s+nothing/i);
 });
 
 test("the link is #183's compare-and-set and reports whether it won", () => {
@@ -316,9 +345,14 @@ test("the privacy row cannot dead-end a retry on its unique index", () => {
 });
 
 test("cleanup deletes the privacy row first, then the church", () => {
-  const [privacy, church] = discardChurchStatements(CHURCH_ID).map(render);
+  const [privacy, person, church] =
+    discardChurchStatements(CHURCH_ID).map(render);
 
   assert.match(privacy, /delete\s+from\s+"church_privacy_settings"/i);
+  // The planter's person row carries `church_id` too (#378), so leaving it
+  // behind does not litter — it makes the `churches` delete fail on the FK and
+  // the loser's church survives, which is the orphan this sweep exists for.
+  assert.match(person, /delete\s+from\s+"persons"/i);
   assert.match(church, /delete\s+from\s+"churches"/i);
 });
 

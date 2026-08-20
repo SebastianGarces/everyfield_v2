@@ -103,6 +103,7 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
       photoUrl: persons.photoUrl,
       householdId: persons.householdId,
       householdRole: persons.householdRole,
+      userId: persons.userId,
       createdBy: persons.createdBy,
       createdAt: persons.createdAt,
       updatedAt: persons.updatedAt,

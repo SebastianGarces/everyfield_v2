@@ -28,6 +28,15 @@ import { users } from "@/db/schema/user";
 // and skips anyone who fails it. These helpers decide who to OFFER; they never
 // decide who is allowed.
 //
+// AND `persons.user_id` IS NOT THIS, so do not collapse the two (#378). That
+// column is an IDENTITY written at church-gain — "this person row IS that
+// account" — and it exists only for accounts that gained a plant, today the
+// Owner. This is DISCOVERY: "which people in this plant happen to hold a
+// login", for everyone the FK says nothing about, which is most of them. An
+// audience read that switched to the FK would silently shrink to one recipient
+// per plant. The bridge retires when every account-holding person carries the
+// FK, and that is a different issue (`memory/invariants/seats-and-tenancy.md`).
+//
 // Addresses are compared case-insensitively because `users.email` is stored
 // lowercased (`src/lib/invitations/core.ts`) while `persons.email` is typed by
 // hand and is not. A NULL person address matches nothing, which is the correct

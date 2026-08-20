@@ -41,14 +41,15 @@
  */
 
 import { db } from "@/db";
-import { churches, churchPrivacySettings, users } from "@/db/schema";
+import { churches, churchPrivacySettings, persons, users } from "@/db/schema";
 import { linkUserToChurchFilter } from "@/lib/churches/link-user";
+import { accountPersonValues } from "@/lib/people/account-person";
 import {
   parseChurchBasics,
   type ChurchBasicsFieldErrors,
   type ChurchBasicsInput,
 } from "@/lib/validations/onboarding";
-import { and, eq, notExists, type SQL } from "drizzle-orm";
+import { and, eq, notExists, sql, type SQL } from "drizzle-orm";
 
 import { assertSeatFor } from "@/lib/auth/seat-rules";
 import type { SeatFields } from "@/lib/auth/tenancy";
@@ -60,10 +61,34 @@ import type { SeatFields } from "@/lib/auth/tenancy";
  */
 export type OnboardingActor = { id: string } & SeatFields;
 
+/**
+ * The actor for the ONE path that creates a plant, which needs two fields more
+ * than the rest of onboarding: this batch mints the planter's own `persons` row
+ * (AS-013, #378), and that row's name and address come from the ACCOUNT, never
+ * from the form — the same rule that keeps the actor itself out of the action's
+ * arguments (`memory/invariants.md` → Authentication).
+ *
+ * A SEPARATE TYPE rather than two more fields on `OnboardingActor`, because
+ * `runDeclareJourney` shares that type and has no person to write: widening it
+ * would thread a value through a caller that never reads it.
+ */
+export type ChurchCreatorActor = OnboardingActor & {
+  name: string | null;
+  email: string;
+};
+
 /** Everything one church-creation batch writes, decided before it is sent. */
 export type ChurchCreationWrite = ChurchBasicsInput & {
   churchId: string;
   plantedBy: string;
+  /**
+   * The planter's own name and address, for the `persons` row this batch mints
+   * them (AS-013, #378). Required rather than optional: the row is part of the
+   * church-creation contract now, and a caller that forgets it should be a
+   * compile error rather than a plant whose Owner is missing from its people.
+   */
+  plantedByName: string | null;
+  plantedByEmail: string;
 };
 
 export type CreateChurchOutcome =
@@ -101,7 +126,7 @@ export const CHURCH_SAVE_FAILED_MESSAGE =
  */
 export async function runCreateChurch(
   deps: CreateChurchDeps,
-  actor: OnboardingActor,
+  actor: ChurchCreatorActor,
   formData: FormData
 ): Promise<CreateChurchOutcome> {
   // THE ONE TABLE, not a predicate spelled here. `church.create` is
@@ -135,6 +160,8 @@ export async function runCreateChurch(
     linked = await deps.commitChurch({
       churchId,
       plantedBy: actor.id,
+      plantedByName: actor.name,
+      plantedByEmail: actor.email,
       ...parsed.values,
     });
   } catch (error) {
@@ -170,10 +197,31 @@ export async function runCreateChurch(
 // ============================================================================
 
 /**
- * The three writes, in the only order the FK allows: the church exists before
- * anything points at it, the compare-and-set claims the planter, and the
- * privacy row lands last. Returned as a tuple so `db.batch` gets its
- * non-empty-tuple type and the unit tests can read the SQL without a database.
+ * The four writes, in the only order the FKs allow: the church exists before
+ * anything points at it, the compare-and-set claims the planter, the privacy
+ * row lands, and the planter's own `persons` row last. Returned as a tuple so
+ * `db.batch` gets its non-empty-tuple type and the unit tests can read the SQL
+ * without a database.
+ *
+ * WHY THE PERSON ROW IS HERE AND NOT IN A CALLER (AS-013, #378). This tuple is
+ * the ONE spelling of "an account just gained a plant" — onboarding step 1
+ * batches it and `createAccountEntities` spreads it whole for an invited
+ * planter (ruling 408-4B) — so a row added here reaches both church-gain paths
+ * with no edit at either. A per-caller insert would be two spellings of one
+ * rule, and the invited path would be the one that silently lacked it.
+ *
+ * IT IS THE LAST STATEMENT because it is the only one that can be skipped
+ * without leaving a half-built plant: the batch is all-or-nothing either way,
+ * and ordering it after the link keeps the FK order obvious.
+ *
+ * `ON CONFLICT DO NOTHING` AGAINST `persons_church_user_unique_idx`, for the
+ * same reason the privacy row carries one: a retry that races its own
+ * predecessor must not dead-end on the index, and re-sending this tuple against
+ * a plant that already has the row is a no-op rather than a second planter in
+ * the people list. The index predicate is repeated byte for byte — it renders
+ * as the ON CONFLICT index_predicate and Postgres matches it literally, so a
+ * mismatch is "there is no unique or exclusion constraint matching the ON
+ * CONFLICT specification" on every church creation.
  */
 export function churchCreationStatements(write: ChurchCreationWrite) {
   return [
@@ -193,6 +241,20 @@ export function churchCreationStatements(write: ChurchCreationWrite) {
       .insert(churchPrivacySettings)
       .values({ churchId: write.churchId, updatedBy: write.plantedBy })
       .onConflictDoNothing(),
+    db
+      .insert(persons)
+      .values(
+        accountPersonValues({
+          userId: write.plantedBy,
+          churchId: write.churchId,
+          name: write.plantedByName,
+          email: write.plantedByEmail,
+        })
+      )
+      .onConflictDoNothing({
+        target: [persons.churchId, persons.userId],
+        where: sql`${persons.userId} is not null`,
+      }),
   ] as const;
 }
 
@@ -218,7 +280,16 @@ function bothOf(left: SQL, right: SQL): SQL {
   return filter;
 }
 
-/** Privacy row first, then the church — the FK points that way. */
+/**
+ * Dependents first, then the church — the FKs point that way.
+ *
+ * THE PERSON ROW IS A DEPENDENT AND HAS TO BE SWEPT TOO. It carries
+ * `church_id`, so leaving it behind does not merely litter: the `churches`
+ * delete below fails on the FK and the loser's church survives forever, which
+ * is the exact orphan this sweep exists to prevent. It carries
+ * `noUserLinkedTo` like both of its siblings — the guard is what keeps a
+ * mis-called sweep from deleting a real plant's Owner out of its own people.
+ */
 export function discardChurchStatements(churchId: string) {
   return [
     db
@@ -229,6 +300,9 @@ export function discardChurchStatements(churchId: string) {
           noUserLinkedTo(churchId)
         )
       ),
+    db
+      .delete(persons)
+      .where(bothOf(eq(persons.churchId, churchId), noUserLinkedTo(churchId))),
     db
       .delete(churches)
       .where(bothOf(eq(churches.id, churchId), noUserLinkedTo(churchId))),
