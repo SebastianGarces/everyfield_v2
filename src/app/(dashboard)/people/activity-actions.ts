@@ -3,10 +3,14 @@
 import { requireSeat } from "@/lib/auth/seats";
 import { db } from "@/db";
 import { personActivities } from "@/db/schema";
-import { getActivities, logPersonActivity } from "@/lib/people/activity";
+import {
+  authoredNoteCondition,
+  getActivities,
+  logPersonActivity,
+} from "@/lib/people/activity";
 import { assertPersonInChurch } from "@/lib/people/service";
 import type { ActionResult } from "@/lib/people/types";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { withChurchSession } from "./action-context";
 
@@ -80,12 +84,7 @@ export async function editNoteAction(
       }
 
       const existing = await db.query.personActivities.findFirst({
-        where: and(
-          eq(personActivities.id, activityId),
-          eq(personActivities.churchId, churchId),
-          eq(personActivities.activityType, "note_added"),
-          eq(personActivities.performedBy, user.id)
-        ),
+        where: authoredNoteCondition(churchId, activityId, user.id),
       });
 
       if (!existing) {
@@ -133,12 +132,7 @@ export async function deleteNoteAction(
     async ({ user, churchId }) => {
       // Check if the activity exists and is a note created by the user
       const existing = await db.query.personActivities.findFirst({
-        where: and(
-          eq(personActivities.id, activityId),
-          eq(personActivities.churchId, churchId),
-          eq(personActivities.activityType, "note_added"),
-          eq(personActivities.performedBy, user.id)
-        ),
+        where: authoredNoteCondition(churchId, activityId, user.id),
       });
 
       if (!existing) {

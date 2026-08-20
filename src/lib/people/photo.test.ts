@@ -111,7 +111,8 @@ test("the photo src is the app route, never a key or a bucket URL", () => {
   const key = "people/church-1/person-1/abc-123.png";
   const src = personPhotoSrc("person-1", key);
 
-  assert.ok(src?.startsWith("/api/people/person-1/photo?v="));
+  assert.ok(src, "a stored key must resolve to a route");
+  assert.ok(src.startsWith("/api/people/person-1/photo?v="));
   assert.ok(
     !src.includes("church-1"),
     "the key must not ride to the browser — the route resolves it server-side"
