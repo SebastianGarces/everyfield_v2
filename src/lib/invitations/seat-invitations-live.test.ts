@@ -484,6 +484,88 @@ test(
   }
 );
 
+test(
+  "a refused resend leaves the live link working (#495 r1)",
+  { skip },
+  async () => {
+    const { actor } = await scratchPlant();
+    const mail = captureTransport();
+
+    const { invitation } = await createSeatInvitationAs(
+      actor,
+      { inviteeEmail: scratchEmail(), seat: "member" },
+      mail.deps
+    );
+    const live = mail.tokenFrom();
+
+    // The provider says no. The rotation has already committed by then, so
+    // without the restore the invitee's only link would be dead and nothing
+    // would have been delivered to replace it — and every retry would kill
+    // another one.
+    const refusing = {
+      ...mail.deps,
+      send: async () => ({ success: false, error: "scratch refusal" }),
+    };
+
+    await assert.rejects(
+      resendSeatInvitationEmailAs(actor, invitation.id, refusing),
+      InvitationError
+    );
+
+    const described = await describeSeatInvitationForRegistration(live);
+    assert.ok(described, "a refused resend destroyed the working link");
+    assert.equal(described.id, invitation.id);
+
+    const [row] = await db
+      .select({ tokenHash: userInvitations.tokenHash })
+      .from(userInvitations)
+      .where(eq(userInvitations.id, invitation.id));
+    assert.equal(row.tokenHash, hashSeatInvitationToken(live));
+
+    // …and a successful resend afterwards still rotates.
+    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps);
+    assert.equal(await describeSeatInvitationForRegistration(live), null);
+    assert.ok(await describeSeatInvitationForRegistration(mail.tokenFrom()));
+  }
+);
+
+test(
+  "two resends in one 60s bucket both deliver, with different keys (#495 r1)",
+  { skip },
+  async () => {
+    const { actor } = await scratchPlant();
+    const mail = captureTransport();
+
+    const { invitation } = await createSeatInvitationAs(
+      actor,
+      { inviteeEmail: scratchEmail(), seat: "member" },
+      mail.deps
+    );
+
+    // The same instant for both, which is what the org path's window suffix
+    // collapsed. Each one mints a NEW credential, so each one must be
+    // deliverable and each must present its own provider key.
+    const at = new Date("2026-08-20T12:00:10.000Z");
+    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps, at);
+    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps, at);
+
+    assert.equal(mail.sent.length, 3);
+    assert.equal(new Set(mail.sent.map((m) => m.idempotencyKey)).size, 3);
+
+    // The link in the LAST message is the one the database now holds; the two
+    // before it are dead.
+    const [row] = await db
+      .select({ tokenHash: userInvitations.tokenHash })
+      .from(userInvitations)
+      .where(eq(userInvitations.id, invitation.id));
+    assert.equal(row.tokenHash, hashSeatInvitationToken(mail.tokenFrom()));
+    assert.equal(
+      await describeSeatInvitationForRegistration(mail.tokenFrom(1)),
+      null
+    );
+  }
+);
+
 // ----------------------------------------------------------------------------
 // 6. CREATE → REGISTER (AS-012, AS-013)
 // ----------------------------------------------------------------------------

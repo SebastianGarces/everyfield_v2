@@ -41,12 +41,40 @@ import type {
   InvitationEmailMessage,
   InvitationEmailOutcome,
   InvitationEmailRefusal,
-  InvitationSendOccasion,
 } from "./email";
 // The `?invitation=` contract, from the import-free leaf that owns it — never
 // hand-built, and never re-exported from here (see `./register-path`).
 import { invitationRegisterPath } from "./register-path";
-import { resendDedupeWindowAt } from "./resend-window";
+
+/**
+ * WHICH SEND THIS IS — and a seat RESEND is identified by its ROTATION, never
+ * by a clock bucket (#495, review round 1).
+ *
+ * THE ORG PATH'S SUFFIX IS THE WINDOW INDEX, AND COPYING IT HERE BRICKED THE
+ * INVITATION. That key is safe next door because the credential is the row's
+ * own uuid and never changes, so two resends inside one 60-second bucket are
+ * genuinely the same message and collapsing them loses nothing. Here every
+ * resend MINTS A NEW TOKEN. Two resends in one bucket — a reload, a second
+ * Admin, the cooldown being per client session by ruling — presented one key
+ * twice: the provider returned the cached response for the first, `sent: true`
+ * came back, no second message left, and the database was left holding the
+ * digest of a link that had never been delivered. The invitee's only live link
+ * was dead, `/register` says nothing about an unknown token by Ruling C, and
+ * they would have registered as a cold planter with no plant — an address that
+ * AS-010 then refuses to re-invite.
+ *
+ * So the suffix is the rotation, which makes the key unique exactly when the
+ * message is. `resendDedupeWindowAt` still owns the CLIENT cooldown; it is no
+ * longer load-bearing for delivery, and this module no longer imports it.
+ *
+ * ACCEPTED RESIDUAL: two Admins pressing Resend seconds apart now send two
+ * emails rather than one. That is the honest outcome — two credentials were
+ * minted and only the newest works — and the message already tells the reader
+ * to use the most recent email.
+ */
+export type SeatInvitationSendOccasion =
+  | { kind: "create" }
+  | { kind: "resend"; rotationId: string };
 
 /**
  * Everything the message needs, already read by the caller. A plain record and
@@ -75,7 +103,7 @@ export interface SeatInvitationEmailDeps {
   /** Absolute base override. Tests pass one; production reads the env. */
   baseUrl?: string;
   /** Which send this is. Defaults to the automatic one at create time. */
-  occasion?: InvitationSendOccasion;
+  occasion?: SeatInvitationSendOccasion;
 }
 
 /**
@@ -88,11 +116,11 @@ export interface SeatInvitationEmailDeps {
  */
 export function seatInvitationEmailIdempotencyKey(
   invitationId: string,
-  occasion: InvitationSendOccasion = { kind: "create" }
+  occasion: SeatInvitationSendOccasion = { kind: "create" }
 ): string {
   const base = `seat-invitation-${invitationId}`;
   if (occasion.kind === "create") return base;
-  return `${base}-resend-${resendDedupeWindowAt(occasion.at).index}`;
+  return `${base}-resend-${occasion.rotationId}`;
 }
 
 /** The absolute, token-bound register URL — what the email actually links to. */
@@ -107,7 +135,7 @@ export function seatInvitationRegisterUrl(
 export async function buildSeatInvitationEmail(
   facts: SeatInvitationEmailFacts,
   baseUrl?: string,
-  occasion?: InvitationSendOccasion
+  occasion?: SeatInvitationSendOccasion
 ): Promise<
   | { ok: true; message: InvitationEmailMessage }
   | { ok: false; reason: InvitationEmailRefusal }

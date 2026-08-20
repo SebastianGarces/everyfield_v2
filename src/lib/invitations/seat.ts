@@ -57,8 +57,8 @@
 // one sentence, and it is the imported constant.
 // ============================================================================
 
-import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, sql } from "drizzle-orm";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { and, desc, eq, gt, gte, lt } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -77,11 +77,17 @@ import {
   INVITATION_EXPIRY_DAYS,
   INVITES_PER_INVITEE_PER_WINDOW,
   InvitationError,
+  isInvitableEmailAddress,
   isUuid,
   normalizeInviteeEmail,
+  rateLimitWindowStart,
   type InvitationActor,
 } from "./core";
-import { INVITATION_NOT_OURS_MESSAGE, resendRefusalMessage } from "./resend";
+import {
+  INVITATION_EXPIRED_MESSAGE,
+  INVITATION_NOT_OURS_MESSAGE,
+  resendRefusalMessage,
+} from "./resend";
 import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
 import {
   sendSeatInvitationEmail,
@@ -130,15 +136,10 @@ export function hashSeatInvitationToken(token: string): string {
  * Pure, and total over "is there a row", so the property AS-010 states is
  * executable across every kind of account without a database.
  */
-export function seatInviteeRefusal(existingAccount: unknown): string | null {
+export function seatInviteeRefusal(
+  existingAccount: { id: string } | null | undefined
+): string | null {
   return existingAccount ? ACCOUNT_NOT_INVITABLE_MESSAGE : null;
-}
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-/** The window every count in this file is taken inside — the SERVER's instant. */
-function rateLimitWindowStart(now: Date): Date {
-  return new Date(now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 }
 
 /**
@@ -239,7 +240,7 @@ export async function createSeatInvitationAs(
   const churchId = invitingChurchId(actor);
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
 
-  if (!EMAIL_RE.test(inviteeEmail)) {
+  if (!isInvitableEmailAddress(inviteeEmail)) {
     throw new InvitationError(INVALID_EMAIL_MESSAGE);
   }
 
@@ -406,6 +407,8 @@ function oursFilter(actor: InvitationActor) {
 export async function listSeatInvitationsFor(
   actor: InvitationActor
 ): Promise<UserInvitation[]> {
+  assertSeatFor(actor, "seat.invitation.manage");
+
   return db
     .select()
     .from(userInvitations)
@@ -460,9 +463,6 @@ export async function revokeSeatInvitationAs(
   }
 }
 
-export const SEAT_INVITATION_EXPIRED_MESSAGE =
-  "That invitation has expired — invite them again to send a new link";
-
 /**
  * Send the invitation email again — AND MINT A NEW TOKEN WHILE DOING IT.
  *
@@ -477,6 +477,15 @@ export const SEAT_INVITATION_EXPIRED_MESSAGE =
  * A FAILED RESEND IS A FAILED ACTION, exactly as on the org path — the send is
  * the entire product of this action, so a refusal throws with the words
  * `resendRefusalMessage` already owns.
+ *
+ * …AND A FAILED ONE PUTS THE OLD DIGEST BACK (#495, review round 1). On the org
+ * path a refused resend costs nothing, because the link is the row's uuid and
+ * was never at risk. Here the rotation commits before the send is proven, so a
+ * provider outage would otherwise KILL THE LINK THE INVITEE ALREADY HOLDS and
+ * deliver nothing to replace it — every retry destroying another one. The
+ * restore is a compare-and-set on the digest this call wrote, so it cannot
+ * clobber a rotation that raced past it, and it makes "a failed resend is a
+ * failed action" true rather than merely stated.
  */
 export async function resendSeatInvitationEmailAs(
   actor: InvitationActor,
@@ -508,15 +517,16 @@ export async function resendSeatInvitationEmailAs(
           eq(userInvitations.status, "pending")
         )
       );
-    throw new InvitationError(SEAT_INVITATION_EXPIRED_MESSAGE);
+    throw new InvitationError(INVITATION_EXPIRED_MESSAGE);
   }
 
   // THE ROTATION, as a compare-and-set on `pending`: a revoke that lands first
   // wins, and this path then finds no row to email.
   const token = newSeatInvitationToken();
+  const rotatedHash = hashSeatInvitationToken(token);
   const rotated = await db
     .update(userInvitations)
-    .set({ tokenHash: hashSeatInvitationToken(token) })
+    .set({ tokenHash: rotatedHash })
     .where(
       and(
         eq(userInvitations.id, invitationId),
@@ -531,17 +541,32 @@ export async function resendSeatInvitationEmailAs(
 
   const outcome = await seatInviteeEmailOutcome(rotated[0], token, {
     ...deps,
-    // A DELIBERATE resend, which is what keeps the provider from deduping it
-    // against the key the create already presented for this same invitation.
-    occasion: { kind: "resend", at: now },
+    // A DELIBERATE resend, keyed by THIS ROTATION rather than by a clock bucket:
+    // every resend here carries a different credential, so a key two of them
+    // could share would let the provider swallow the only message that named
+    // the token now in the database. See `./seat-email` →
+    // `SeatInvitationSendOccasion` for what that cost.
+    occasion: { kind: "resend", rotationId: randomUUID() },
   });
 
   if (!outcome.sent) {
+    // PUT THE OLD DIGEST BACK, guarded on the one this call wrote, so the link
+    // the invitee already holds survives a refused send.
+    await db
+      .update(userInvitations)
+      .set({ tokenHash: invitation.tokenHash })
+      .where(
+        and(
+          eq(userInvitations.id, invitationId),
+          eq(userInvitations.tokenHash, rotatedHash)
+        )
+      );
+
     throw new InvitationError(resendRefusalMessage(outcome.reason));
   }
 
-  // `now` — the instant the occasion above was keyed with, not a second reading
-  // of the clock.
+  // The client cooldown, and ONLY the client cooldown: the provider key above
+  // no longer rides on this arithmetic (see the note on the occasion).
   return { emailSent: true, resendWindow: resendDedupeWindowAt(now) };
 }
 
@@ -570,6 +595,16 @@ export type SeatRegistrationInvitation = {
  * There is no branch here that varies on whether an ACCOUNT exists, because a
  * seat invitation is only ever created for an address that had none.
  *
+ * IT THROWS ON A DATABASE FAILURE, and that is a correction (#495, review round
+ * 1). This had a blanket `catch { return null }`, which cannot catch anything
+ * else — hashing a string does not throw — so its only effect was to turn a
+ * transient database blip into a SILENT WRONG WRITE: `register` reads the null
+ * as "no invitation" and takes the cold-planter branch, creating an account with
+ * `seat: "owner"` and no plant, no person link and the invitation still pending.
+ * `users_email_unique` then holds that address, so the visitor cannot retry and
+ * AS-010 refuses a fresh invitation to them — support is the only exit. A
+ * registration that fails loudly is repeatable; a wrong one is not.
+ *
  * Runs with NO session, by construction: there is no account yet.
  */
 export async function describeSeatInvitationForRegistration(
@@ -579,39 +614,35 @@ export async function describeSeatInvitationForRegistration(
   const candidate = (token ?? "").trim();
   if (candidate.length === 0) return null;
 
-  try {
-    const [row] = await db
-      .select({
-        id: userInvitations.id,
-        inviteeEmail: userInvitations.inviteeEmail,
-        churchId: userInvitations.churchId,
-        churchName: churches.name,
-        seat: userInvitations.seat,
-      })
-      .from(userInvitations)
-      .innerJoin(churches, eq(churches.id, userInvitations.churchId))
-      .where(
-        and(
-          eq(userInvitations.tokenHash, hashSeatInvitationToken(candidate)),
-          eq(userInvitations.kind, "seat"),
-          eq(userInvitations.status, "pending"),
-          gt(userInvitations.expiresAt, now)
-        )
+  const [row] = await db
+    .select({
+      id: userInvitations.id,
+      inviteeEmail: userInvitations.inviteeEmail,
+      churchId: userInvitations.churchId,
+      churchName: churches.name,
+      seat: userInvitations.seat,
+    })
+    .from(userInvitations)
+    .innerJoin(churches, eq(churches.id, userInvitations.churchId))
+    .where(
+      and(
+        eq(userInvitations.tokenHash, hashSeatInvitationToken(candidate)),
+        eq(userInvitations.kind, "seat"),
+        eq(userInvitations.status, "pending"),
+        gt(userInvitations.expiresAt, now)
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    if (!row || !row.churchId || !row.seat) return null;
+  if (!row || !row.churchId || !row.seat) return null;
 
-    return {
-      id: row.id,
-      inviteeEmail: row.inviteeEmail,
-      churchId: row.churchId,
-      churchName: row.churchName,
-      seat: row.seat,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    id: row.id,
+    inviteeEmail: row.inviteeEmail,
+    churchId: row.churchId,
+    churchName: row.churchName,
+    seat: row.seat,
+  };
 }
 
 /**
@@ -682,6 +713,8 @@ export async function expireLapsedSeatInvitations(
   actor: InvitationActor,
   now: Date = new Date()
 ): Promise<void> {
+  assertSeatFor(actor, "seat.invitation.manage");
+
   await db
     .update(userInvitations)
     .set({ status: "expired" })
@@ -689,7 +722,12 @@ export async function expireLapsedSeatInvitations(
       and(
         oursFilter(actor),
         eq(userInvitations.status, "pending"),
-        sql`${userInvitations.expiresAt} < ${now}`
+        // `lt`, not a `sql` template: `expires_at` is `timestamp` WITHOUT time
+        // zone, and a `Date` interpolated into a template bypasses the column's
+        // driver mapping — the offset is serialised and then discarded by the
+        // cast, so the sweep is wrong by that offset on any non-UTC host. The
+        // other two comparisons in this file already use the typed helper.
+        lt(userInvitations.expiresAt, now)
       )
     );
 }

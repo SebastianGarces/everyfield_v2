@@ -329,6 +329,23 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const INVALID_EMAIL_MESSAGE = "Enter a valid email address";
 
 /**
+ * Is this an address we will address an invitation to?
+ *
+ * EXPORTED AS A PREDICATE RATHER THAN AS THE REGEX, because the answer travels
+ * with `INVALID_EMAIL_MESSAGE` and a caller holding the pattern would compose
+ * its own sentence. The seat surface (`./seat.ts`, #495) is the second caller
+ * and AS-010 forbids it a second copy — which it had, byte-identical, until the
+ * review of #495 found it.
+ *
+ * Deliberately permissive: the real test of an address is whether the
+ * invitation arrives, and a stricter pattern only ever refuses somebody's
+ * legitimate mailbox.
+ */
+export function isInvitableEmailAddress(email: string): boolean {
+  return EMAIL_RE.test(email);
+}
+
+/**
  * The ONE refusal an admin ever reads about an address they typed — whatever
  * the actual reason was.
  *
@@ -1113,8 +1130,14 @@ export async function assertInviteRateLimit(
   }
 }
 
-/** The window both passes count inside — the SERVER's instant, never a request's. */
-function rateLimitWindowStart(now: Date): Date {
+/**
+ * The window every invitation cap counts inside — the SERVER's instant, never a
+ * request's.
+ *
+ * Exported since #495: the seat cap counts over the same window by the same
+ * ruling, and it had its own copy of this arithmetic until the review found it.
+ */
+export function rateLimitWindowStart(now: Date): Date {
   return new Date(now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 }
 

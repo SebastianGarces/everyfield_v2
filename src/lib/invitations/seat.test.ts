@@ -30,6 +30,7 @@ import {
 } from "./core";
 import { RESEND_DEDUPE_WINDOW_MS, resendDedupeWindowAt } from "./resend-window";
 import { INVITED_SEAT_COPY, invitedSeatWithArticle } from "./seat-copy";
+import { seatInvitationEmailIdempotencyKey } from "./seat-email";
 import {
   claimSeatInvitationStatement,
   hashSeatInvitationToken,
@@ -148,37 +149,66 @@ const actorFor = (user: SeatFields) =>
 // 1. ONE IMPLEMENTATION, NOT A SECOND COPY (AS-010, ruling 185 (5))
 // ----------------------------------------------------------------------------
 
-test("the seat surface declares none of the shared invitation constants", () => {
-  // The ruling's exact words: "the same constants, one implementation". A
-  // re-declaration is how the expiry the email prints stops being the expiry
-  // the row carries — it costs nothing to write and there is no behaviour that
-  // shows it until somebody compares two screens.
-  const shared = [
-    "INVITATION_EXPIRY_DAYS",
-    "INVITES_PER_INVITEE_PER_WINDOW",
-    "ACCOUNT_NOT_INVITABLE_MESSAGE",
-    "INVALID_EMAIL_MESSAGE",
-    "RESEND_DEDUPE_WINDOW_MS",
-  ];
+/** Every top-level `const`/`function` a module declares, by name. */
+function declaredNames(code: string): string[] {
+  return [
+    ...code.matchAll(/^export\s+(?:async\s+)?function\s+(\w+)/gm),
+    ...code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm),
+    ...code.matchAll(/^(?:export\s+)?const\s+(\w+)/gm),
+  ].map((match) => match[1]);
+}
 
+test("the seat surface declares nothing the org surface already owns", () => {
+  // A NAME DIFF, NOT A HAND-WRITTEN LIST. The first version of this test named
+  // five constants and passed while `seat.ts` held THREE verbatim copies —
+  // `INVITATION_EXPIRED_MESSAGE`'s sentence, the address regex and the
+  // rate-limit window arithmetic. A guardrail with a list in it only ever
+  // catches what somebody already thought of, which is the failure mode this
+  // file's own §8 narrates about `kindLabel`.
+  //
+  // So the claim is now the general one AS-010 actually makes: no top-level
+  // declaration in the seat surface shares a name with anything the org surface
+  // exports. Adding a copy fails here without anybody remembering to list it.
+  const owned = new Set([
+    ...declaredNames(read("lib", "invitations", "core.ts")),
+    ...declaredNames(read("lib", "invitations", "resend.ts")),
+    ...declaredNames(read("lib", "invitations", "resend-window.ts")),
+    ...declaredNames(read("lib", "invitations", "create-notice.ts")),
+    ...declaredNames(read("lib", "invitations", "register-path.ts")),
+  ]);
+
+  const copies: string[] = [];
   for (const [where, code] of [
     ["seat.ts", SEAT.code],
     ["seat-email.ts", SEAT_EMAIL],
+    ["seat-copy.ts", stripComments(read("lib", "invitations", "seat-copy.ts"))],
     ["settings/team/actions.ts", TEAM_ACTIONS.code],
   ] as const) {
-    for (const name of shared) {
-      assert.doesNotMatch(
-        code,
-        new RegExp(`\\b(?:const|let|var|enum)\\s+${name}\\b`),
-        `${where} re-declares ${name} — AS-010 says one implementation shared with the org invitation surface, not a second copy`
-      );
+    for (const name of declaredNames(code)) {
+      if (owned.has(name)) copies.push(`${where} → ${name}`);
     }
   }
 
-  // …and it takes them from the module that owns them.
+  assert.deepEqual(
+    copies,
+    [],
+    "AS-010 says one implementation shared with the org invitation surface, not a second copy — import these instead of re-declaring them:\n  " +
+      copies.join("\n  ")
+  );
+
+  // A scan that resolved nothing would pass silently.
+  assert.ok(
+    owned.size > 20,
+    `the org surface exports only ${owned.size} names`
+  );
+
+  // …and the seat surface really does take the vocabulary from those modules.
   assert.match(SEAT.code, /from "\.\/core"/);
   assert.match(SEAT.code, /INVITES_PER_INVITEE_PER_WINDOW/);
   assert.match(SEAT.code, /ACCOUNT_NOT_INVITABLE_MESSAGE/);
+  assert.match(SEAT.code, /isInvitableEmailAddress/);
+  assert.match(SEAT.code, /rateLimitWindowStart/);
+  assert.match(SEAT.code, /INVITATION_EXPIRED_MESSAGE/);
   assert.match(SEAT.code, /from "\.\/resend-window"/);
   assert.match(SEAT.code, /resendRefusalMessage/);
 });
@@ -358,7 +388,7 @@ test("every legible refusal runs ABOVE the address lookup", () => {
     [
       'assertSeatFor(actor, "seat.invitation.manage")',
       "normalizeInviteeEmail(request.inviteeEmail)",
-      "EMAIL_RE.test(inviteeEmail)",
+      "isInvitableEmailAddress(inviteeEmail)",
       'eq(userInvitations.status, "pending")',
       "seatInvitesFromChurchToAddressQuery(",
       ".from(users)",
@@ -423,9 +453,11 @@ test("the fourth invitation inside the window is the one that is refused", () =>
   // the limit: three rows come back and the fourth attempt is the refusal.
   assert.match(CREATE, /recent\.length >= INVITES_PER_INVITEE_PER_WINDOW/);
   assert.match(CREATE, /rateLimitWindowStart\(now\)/);
+  // …and the window itself is the org surface's arithmetic, imported. The seat
+  // path had a byte-identical copy of it until review round 1.
   assert.match(
-    SEAT.code,
-    /now\.getTime\(\) - INVITATION_EXPIRY_DAYS \* 24 \* 60 \* 60 \* 1000/
+    stripComments(read("lib", "invitations", "core.ts")),
+    /export function rateLimitWindowStart\(now: Date\): Date \{\s*return new Date\(\s*now\.getTime\(\) - INVITATION_EXPIRY_DAYS \* 24 \* 60 \* 60 \* 1000\s*\);/
   );
 });
 
@@ -475,11 +507,16 @@ test("the logic layer refuses a Member itself, not only the action", () => {
     assertSeatFor(actorFor(PLANT_ADMIN), "seat.invitation.manage")
   );
 
-  // …and all three writes assert it, before anything else they do.
+  // …and EVERY export that takes an actor asserts it, before anything else it
+  // does. The reads were missing it at review round 1, and one of them
+  // (`expireLapsedSeatInvitations`) is an UPDATE whose only authority was the
+  // page's redirect — which holds for a browser and for nothing else.
   for (const write of [
     "export async function createSeatInvitationAs",
+    "export async function listSeatInvitationsFor",
     "export async function revokeSeatInvitationAs",
     "export async function resendSeatInvitationEmailAs",
+    "export async function expireLapsedSeatInvitations",
   ]) {
     const body = SEAT.after(write).slice(0, 400);
     assert.match(
@@ -631,8 +668,8 @@ test("the grant and the claim go into the SAME batch as the account", () => {
 // 8. THE PERSON LINK — matched, or minted (AS-013)
 // ----------------------------------------------------------------------------
 
-test("a matching person is CLAIMED, and only while it is unclaimed", () => {
-  const [statement] = accountPersonLinkStatements({
+test("a matching person is CLAIMED, and the mint behind it makes that total", () => {
+  const statements = accountPersonLinkStatements({
     userId: USER,
     churchId: PLANT,
     name: "Sam Stranger",
@@ -640,24 +677,39 @@ test("a matching person is CLAIMED, and only while it is unclaimed", () => {
     matchedPersonId: "77777777-7777-4777-8777-777777777777",
   });
 
-  const { sql, params } = asQuery(statement).toSQL();
-  assert.match(sql, /^update "persons" set "user_id" = \$/);
+  // TWO STATEMENTS, and the second is why AS-013 is total: the UPDATE is
+  // guarded on `user_id IS NULL`, so a row claimed between the read and the
+  // batch would leave the account with NO person record at all. The INSERT
+  // converges either way and is a no-op when the claim worked.
+  assert.equal(statements.length, 2);
+
+  const claim = asQuery(statements[0]).toSQL();
+  assert.match(claim.sql, /^update "persons" set "user_id" = \$/);
   // The two guards that cost nothing: it can never steal a row another account
   // already holds, and it cannot revive a deleted contact.
-  assert.match(sql, /"persons"\."user_id" is null/);
-  assert.match(sql, /"persons"\."deleted_at" is null/);
-  assert.ok(params.includes(USER));
-  assert.ok(params.includes("77777777-7777-4777-8777-777777777777"));
+  assert.match(claim.sql, /"persons"\."user_id" is null/);
+  assert.match(claim.sql, /"persons"\."deleted_at" is null/);
+  assert.ok(claim.params.includes(USER));
+  assert.ok(claim.params.includes("77777777-7777-4777-8777-777777777777"));
+
+  const fallback = asQuery(statements[1]).toSQL();
+  assert.match(fallback.sql, /^insert into "persons"/);
+  assert.match(
+    fallback.sql,
+    /on conflict \("church_id","user_id"\) where "persons"\."user_id" is not null do nothing/
+  );
 });
 
-test("no matching person means one is minted, idempotently", () => {
-  const [statement] = accountPersonLinkStatements({
+test("no matching person means ONE statement, and it mints, idempotently", () => {
+  const [statement, ...rest] = accountPersonLinkStatements({
     userId: USER,
     churchId: PLANT,
     name: "Sam Stranger",
     email: "stranger@example.com",
     matchedPersonId: null,
   });
+
+  assert.deepEqual(rest, [], "an unmatched account needs no claim statement");
 
   const { sql, params } = asQuery(statement).toSQL();
   assert.match(sql, /^insert into "persons"/);
@@ -741,6 +793,94 @@ test("the cooldown the seat surface reports is the org surface's arithmetic", ()
   );
 });
 
+test("two rotations inside one bucket present two provider keys (#495 r1)", () => {
+  // THE BLOCKER THIS TEST EXISTS FOR. The org path suffixes a resend key with
+  // the 60-second window index, which is safe there because the credential is
+  // the row's uuid and never changes. Copied here it BRICKED the invitation:
+  // two resends inside one bucket presented one key, the provider returned the
+  // cached response for the first, `sent: true` came back, no second message
+  // left — and the database was left holding the digest of a link nobody had.
+  //
+  // The suffix is the ROTATION now, so the key is unique exactly when the
+  // message is.
+  const invitation = INVITATION;
+  const first = seatInvitationEmailIdempotencyKey(invitation, {
+    kind: "resend",
+    rotationId: "rotation-a",
+  });
+  const second = seatInvitationEmailIdempotencyKey(invitation, {
+    kind: "resend",
+    rotationId: "rotation-b",
+  });
+
+  assert.notEqual(first, second);
+  // Still invitation-scoped, so a re-invitation after a revoke is a different
+  // row, a different id and a different key.
+  assert.ok(first.startsWith(`seat-invitation-${invitation}-resend-`));
+  // A retried CREATE still collapses — that one really is the same message.
+  assert.equal(
+    seatInvitationEmailIdempotencyKey(invitation),
+    seatInvitationEmailIdempotencyKey(invitation, { kind: "create" })
+  );
+  assert.notEqual(seatInvitationEmailIdempotencyKey(invitation), first);
+
+  // And the clock plays no part in it: the occasion has no `at` to read.
+  assert.doesNotMatch(SEAT_EMAIL, /resendDedupeWindowAt/);
+  assert.match(
+    SEAT.code,
+    /occasion: \{ kind: "resend", rotationId: randomUUID\(\) \}/
+  );
+});
+
+test("a refused resend puts the old digest back, so the live link survives", () => {
+  const resend = SEAT.after(
+    "export async function resendSeatInvitationEmailAs"
+  );
+
+  // The restore is a compare-and-set on the digest THIS call wrote, so it
+  // cannot clobber a rotation that raced past it.
+  assertInOrder(
+    resend,
+    "resendSeatInvitationEmailAs",
+    [
+      "const rotatedHash = hashSeatInvitationToken(token)",
+      "if (!outcome.sent)",
+      "set({ tokenHash: invitation.tokenHash })",
+      "eq(userInvitations.tokenHash, rotatedHash)",
+      "throw new InvitationError(resendRefusalMessage(outcome.reason))",
+    ],
+    "the rotation commits before the send is proven, so a refused send would otherwise kill the link the invitee already holds and deliver nothing to replace it"
+  );
+});
+
+test("the register lookup does not swallow a database failure (#495 r1)", () => {
+  // A blanket `catch { return null }` here cannot catch anything but a database
+  // error — hashing a string does not throw — and `register` reads that null as
+  // "no invitation", creating a cold-planter account with `seat: "owner"` and no
+  // plant. `users_email_unique` then holds the address and AS-010 refuses to
+  // re-invite it, so a transient blip becomes a permanent wrong outcome.
+  const lookup = SEAT.span(
+    "export async function describeSeatInvitationForRegistration",
+    "export function seatInvitationActedOnAtRegistration"
+  );
+
+  assert.doesNotMatch(lookup, /catch/);
+  assert.match(
+    lookup,
+    /eq\(\s*userInvitations\.tokenHash,\s*hashSeatInvitationToken\(candidate\)\s*\)/
+  );
+});
+
+test("the expiry sweep compares through the typed helper, not a template", () => {
+  // `expires_at` is `timestamp` WITHOUT time zone. A `Date` interpolated into a
+  // `sql` template bypasses the column's driver mapping: the offset is
+  // serialised and then discarded by the cast, so on any non-UTC host the sweep
+  // is wrong by that offset.
+  const sweep = SEAT.after("export async function expireLapsedSeatInvitations");
+  assert.match(sweep, /lt\(userInvitations\.expiresAt, now\)/);
+  assert.doesNotMatch(sweep, /sql`/);
+});
+
 test("a failed resend is a failed action, in the org path's own words", () => {
   const resend = SEAT.after(
     "export async function resendSeatInvitationEmailAs"
@@ -764,7 +904,7 @@ test('"no such invitation" and "not yours" are ONE message', () => {
   // account into a reader of which invitation ids exist.
   const revoke = SEAT.span(
     "export async function revokeSeatInvitationAs",
-    "export const SEAT_INVITATION_EXPIRED_MESSAGE"
+    "export async function resendSeatInvitationEmailAs"
   );
   const refusals = [
     ...revoke.matchAll(/throw new InvitationError\(([^)]*)\)/g),

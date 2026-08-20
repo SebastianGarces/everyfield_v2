@@ -83,12 +83,25 @@ export async function findLinkablePersonId(
 }
 
 /**
- * The ONE statement that links this account to a person record — matched or
- * minted — for the caller's batch.
+ * The statements that link this account to a person record — matched or minted
+ * — for the caller's batch.
  *
  * Returned as an array so a caller spreads it, exactly as the church-creation
- * tuple is spread: this contract can grow a second statement without an edit at
- * either call site.
+ * tuple is spread: this contract can grow a statement without an edit at either
+ * call site.
+ *
+ * A MATCH ISSUES BOTH, AND THE PAIR IS WHAT MAKES AS-013 TOTAL (#495, review
+ * round 1). The UPDATE is guarded on `user_id IS NULL`, so it matches nothing if
+ * the row it chose was claimed between `findLinkablePersonId` and this batch —
+ * and the batch would then commit an account with NO person record at all,
+ * which is the one outcome AS-013 forbids. The competing writer is not a second
+ * registration (`users_email_unique` serialises those); it is anything else
+ * that links a person to a login (#378).
+ *
+ * The INSERT behind it converges either way, and costs nothing when it is not
+ * needed: the two statements share one transaction, so the UPDATE is already
+ * visible, and `persons_church_user_unique_idx` turns the INSERT into a no-op
+ * exactly when the claim worked.
  */
 export function accountPersonLinkStatements(account: {
   userId: string;
@@ -98,37 +111,36 @@ export function accountPersonLinkStatements(account: {
   /** From `findLinkablePersonId`. `null` mints a new record. */
   matchedPersonId: string | null;
 }): BatchItem<"pg">[] {
-  if (account.matchedPersonId) {
-    return [
-      db
-        .update(persons)
-        .set({ userId: account.userId, updatedAt: new Date() })
-        .where(
-          and(
-            eq(persons.id, account.matchedPersonId),
-            isNull(persons.userId),
-            isNull(persons.deletedAt)
-          )
-        )
-        .returning({ id: persons.id }),
-    ];
-  }
+  const mint = db
+    .insert(persons)
+    .values(
+      accountPersonValues({
+        userId: account.userId,
+        churchId: account.churchId,
+        name: account.name,
+        email: account.email,
+      })
+    )
+    .onConflictDoNothing({
+      target: [persons.churchId, persons.userId],
+      where: sql`${persons.userId} is not null`,
+    })
+    .returning({ id: persons.id });
+
+  if (!account.matchedPersonId) return [mint];
 
   return [
     db
-      .insert(persons)
-      .values(
-        accountPersonValues({
-          userId: account.userId,
-          churchId: account.churchId,
-          name: account.name,
-          email: account.email,
-        })
+      .update(persons)
+      .set({ userId: account.userId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(persons.id, account.matchedPersonId),
+          isNull(persons.userId),
+          isNull(persons.deletedAt)
+        )
       )
-      .onConflictDoNothing({
-        target: [persons.churchId, persons.userId],
-        where: sql`${persons.userId} is not null`,
-      })
       .returning({ id: persons.id }),
+    mint,
   ];
 }
