@@ -34,6 +34,7 @@ export interface FeedbackListItem {
   pageUrl: string | null;
   status: FeedbackStatus;
   createdAt: Date;
+  githubIssueNumber: number | null;
   userName: string | null;
   userEmail: string;
   churchName: string | null;
@@ -83,6 +84,7 @@ export async function listFeedback(
       pageUrl: feedback.pageUrl,
       status: feedback.status,
       createdAt: feedback.createdAt,
+      githubIssueNumber: feedback.githubIssueNumber,
       userName: users.name,
       userEmail: users.email,
       churchName: churches.name,
@@ -122,6 +124,22 @@ export async function createFeedback(
   };
 
   const [row] = await db.insert(feedback).values(values).returning();
+  return row;
+}
+
+/**
+ * Record the GitHub issue the bridge opened for this feedback row.
+ *
+ * Write-once in practice — one submission opens one issue — but the update is
+ * unconditional so a manual re-run repairs a row the bridge failed to stamp.
+ */
+export async function setFeedbackGithubIssue(id: string, issueNumber: number) {
+  const [row] = await db
+    .update(feedback)
+    .set({ githubIssueNumber: issueNumber, updatedAt: new Date() })
+    .where(eq(feedback.id, id))
+    .returning();
+
   return row;
 }
 
