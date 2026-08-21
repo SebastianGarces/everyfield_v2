@@ -18,6 +18,7 @@ import {
   invitedAsWithArticle,
   type InvitedAs,
 } from "@/lib/invitations/seat-copy";
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
@@ -89,7 +90,14 @@ export type SeatInvitationForForm = {
   /** The raw `?invitation=` value — the wire the action re-resolves from. */
   token: string;
   inviteeEmail: string;
-  churchName: string;
+  /** The inviting tenancy's own name — a plant, a sending church or a network. */
+  orgName: string;
+  /**
+   * Which kind of thing that name is (#500). The banner needs it for the same
+   * reason the email does: "join them as an Admin" means different powers in a
+   * church plant and in a network, and `invitedAsWithArticle` reads the pair.
+   */
+  orgType: SeatTenancyType;
   /**
    * The invitation's own vocabulary, never a second spelling of it — the union,
    * so a coach invitation redeemed at sign-up (#496) cannot be described with a
@@ -187,11 +195,15 @@ export function RegisterForm({
               className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
             >
               <p className="font-medium">
-                {seatInvitation.churchName} invited you to EveryField
+                {seatInvitation.orgName} invited you to EveryField
               </p>
               <p className="text-muted-foreground mt-1">
                 Finish signing up and you will join them as{" "}
-                {invitedAsWithArticle(seatInvitation.invitedAs)}.
+                {invitedAsWithArticle(
+                  seatInvitation.invitedAs,
+                  seatInvitation.orgType
+                )}
+                .
               </p>
             </div>
           )}

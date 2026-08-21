@@ -72,6 +72,7 @@ import type {
 import type { AssociationOrgType } from "@/db/schema";
 import {
   isOrgOwner,
+  isOversightUser,
   isPlantOwner,
   oversightOrgOf,
   type SeatFields,
@@ -2887,20 +2888,23 @@ function invitingOrgFilter(
 }
 
 /**
- * "The invitations OUR org issued", as one predicate built from the session.
+ * "The invitations OUR org issued" — the READ scope, and the ORG half of the
+ * write one below.
  *
- * The single definition of the scope, shared by the list (`invitationsForOrgQuery`)
- * and the revoke (`revokeInvitationQuery`) — a screen that shows an admin a
- * pending invitation and then refuses their Revoke is exactly what two
- * definitions of "ours" produce. Only an oversight org's OWNER issues
- * invitations, so a plant, a coach and an org Member match NOTHING here rather
- * than falling through to a missing predicate, and so does an account whose FKs
- * name no org — or name two (`isOrgOwner`/`oversightOrgOf` → null, then
- * `invitingOrgFilter(null, null)` → `false`). The seat half is the role
- * allowlist migrated, not a new refusal — see `isOrgOwner`.
+ * THE FK ALONE, NO SEAT (AS-007, ruling 185 (3), #500). An org Member reads
+ * everything its Owner reads, and this list is one of those reads: it is the
+ * org's own pending queue, on the same footing as the plants directory and the
+ * health portfolio. The seat used to be in here because a sending church had
+ * exactly one account, so "belongs to this org" and "is its Owner" were the
+ * same row — and while that held, the read and the write could share one
+ * predicate.
+ *
+ * An account whose FKs name no org — or name TWO — still matches nothing:
+ * `oversightOrgOf` answers only for exactly one FK, and
+ * `invitingOrgFilter(null, null)` is `false`.
  */
-function invitingOrgOf(actor: InvitationActor): SQL {
-  const org = isOrgOwner(actor) ? oversightOrgOf(actor) : null;
+function readableOrgOf(actor: InvitationActor): SQL {
+  const org = oversightOrgOf(actor);
 
   if (org?.type === "sending_church") {
     return invitingOrgFilter(org.id, null);
@@ -2912,16 +2916,35 @@ function invitingOrgOf(actor: InvitationActor): SQL {
 }
 
 /**
+ * The same scope, plus the seat — the predicate every WRITE over this table
+ * carries (the revoke and the resend).
+ *
+ * IT IS THE READ SCOPE AND-ED WITH THE OWNER CHECK, never a second derivation,
+ * so the two can only ever differ by that one clause. The 2026-08-04 rule the
+ * shared predicate protected — "a screen that shows an admin a pending
+ * invitation and then refuses their Revoke" — is now kept on the OTHER side:
+ * `/oversight/invitations` renders the Revoke and Resend controls only when the
+ * caller holds `org.invitation.manage`, so what a reader is offered and what
+ * this predicate admits still cannot disagree. The list is wider than the verbs
+ * on purpose, which is what an org Member's read parity means.
+ */
+function invitingOrgOf(actor: InvitationActor): SQL {
+  if (!isOrgOwner(actor)) return sql`false`;
+  return readableOrgOf(actor);
+}
+
+/**
  * The list statement. Exported alongside `revokeInvitationQuery` so a test can
- * read both WHERE clauses and assert they carry the SAME org predicate — that
+ * read both WHERE clauses and assert they carry the same ORG predicate — that
  * is the property the 2026-08-04 revoke ruling turns on, and prose cannot hold
- * it.
+ * it. Since #500 the revoke's carries one clause more (the Owner check); the
+ * org half is still one derivation, `readableOrgOf`.
  */
 export function invitationsForOrgQuery(actor: InvitationActor) {
   return db
     .select()
     .from(organizationInvitations)
-    .where(invitingOrgOf(actor))
+    .where(readableOrgOf(actor))
     .orderBy(desc(organizationInvitations.createdAt));
 }
 
@@ -2943,11 +2966,12 @@ export function invitationsForOrgQuery(actor: InvitationActor) {
 export async function getInvitationsForOrg(
   actor: InvitationActor
 ): Promise<OrganizationInvitation[]> {
-  // Nobody else issues invitations, so nobody else has any to list. The
-  // predicate would match nothing anyway; this saves the round trip, and it is
-  // the SAME question `invitingOrgOf` asks so the two cannot disagree about
-  // whose queue this is.
-  if (!isOrgOwner(actor)) {
+  // Nobody outside an oversight org has a queue to read, so the round trip is
+  // skipped rather than made — and it is the SAME question `readableOrgOf`
+  // asks, so the two cannot disagree about whose queue this is. It is
+  // `isOversightUser` and not `isOrgOwner` since #500: an org MEMBER reads this
+  // list in full and may change none of it (AS-007).
+  if (!isOversightUser(actor)) {
     return [];
   }
 

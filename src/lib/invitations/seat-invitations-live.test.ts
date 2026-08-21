@@ -6,7 +6,15 @@ import { and, eq, like, sql } from "drizzle-orm";
 
 import { createAccountEntities } from "@/app/(auth)/register/account-entities";
 import { db } from "@/db";
-import { churches, persons, userInvitations, users } from "@/db/schema";
+import {
+  churches,
+  persons,
+  sendingChurches,
+  sendingNetworks,
+  userInvitations,
+  users,
+} from "@/db/schema";
+import { tenancyColumns } from "@/lib/auth/tenancy";
 import { findLinkablePersonId } from "@/lib/people/account-person-link";
 
 import {
@@ -97,6 +105,14 @@ async function sweep(): Promise<void> {
   `);
   await db.delete(users).where(like(users.name, SCRATCH_NAME));
   await db.delete(churches).where(like(churches.name, SCRATCH_NAME));
+  // The two org tables an org seat invitation writes into (#500). They come
+  // AFTER `users`, whose FKs point at them.
+  await db
+    .delete(sendingChurches)
+    .where(like(sendingChurches.name, SCRATCH_NAME));
+  await db
+    .delete(sendingNetworks)
+    .where(like(sendingNetworks.name, SCRATCH_NAME));
 }
 
 after(async () => {
@@ -147,6 +163,54 @@ async function scratchPlant() {
         sendingChurchId: null,
         sendingNetworkId: null,
       },
+    }),
+  };
+}
+
+/**
+ * One scratch ORG with an Owner, and an actor minted from that Owner (#500).
+ *
+ * The sibling of `scratchPlant`, and deliberately the same shape: an org staffs
+ * itself with the same two seats over the same table through the same three
+ * actions, so a fixture that needed a different shape would be the first sign
+ * the implementation had grown a second copy.
+ */
+async function scratchOrg(kind: "sending_church" | "network") {
+  const orgId =
+    kind === "network"
+      ? (
+          await db
+            .insert(sendingNetworks)
+            .values({ name: SCRATCH_NAME })
+            .returning({ id: sendingNetworks.id })
+        )[0].id
+      : (
+          await db
+            .insert(sendingChurches)
+            .values({ name: SCRATCH_NAME })
+            .returning({ id: sendingChurches.id })
+        )[0].id;
+
+  const tenancy = { type: kind, id: orgId } as const;
+  const columns = tenancyColumns(tenancy);
+
+  const [owner] = await db
+    .insert(users)
+    .values({
+      email: scratchEmail(),
+      passwordHash: "scratch",
+      name: SCRATCH_NAME,
+      seat: "owner",
+      ...columns,
+    })
+    .returning({ id: users.id });
+
+  return {
+    orgId,
+    tenancy,
+    ownerId: owner.id,
+    actor: invitationActorFromSession({
+      user: { id: owner.id, seat: "owner" as const, ...columns },
     }),
   };
 }
@@ -589,9 +653,16 @@ async function registerThrough(token: string, email: string, name: string) {
     { name, email },
     false,
     {
-      churchId: described.churchId,
+      tenancy: described.tenancy,
       invitedAs: described.invitedAs,
-      matchedPersonId: await findLinkablePersonId(described.churchId, email),
+      // GATED ON THE TENANCY BEING A PLANT, exactly as the action gates it
+      // (#500). AS-013's match-or-create asks a plant's directory about an
+      // address; a sending church and a network have no directory to ask.
+      matchedPersonId:
+        described.invitedAs.kind === "seat" &&
+        described.tenancy.type === "church"
+          ? await findLinkablePersonId(described.tenancy.id, email)
+          : null,
     }
   );
 
@@ -666,6 +737,201 @@ test(
     assert.equal(
       await describeUserInvitationForRegistration(mail.tokenFrom()),
       null
+    );
+  }
+);
+
+// ----------------------------------------------------------------------------
+// 6b. THE SAME WALK, INTO AN ORG — #500 / AS-005, AS-007, AS-012
+// ----------------------------------------------------------------------------
+
+test(
+  "an org invitee registers into the ORG with the invited seat (AC 1)",
+  { skip },
+  async () => {
+    // AC 1, end to end, for BOTH org kinds: the Owner creates the invitation,
+    // the emailed token is redeemed, and the account lands holding the org's own
+    // FK and the invited seat — written by the same statement that created it.
+    for (const [kind, seat] of [
+      ["sending_church", "admin"],
+      ["network", "member"],
+    ] as const) {
+      const { actor, orgId } = await scratchOrg(kind);
+      const mail = captureTransport();
+      const invitee = scratchEmail();
+
+      await createUserInvitationAs(
+        actor,
+        { kind: "seat", inviteeEmail: invitee, seat },
+        mail.deps
+      );
+
+      // AC 2 — THE ROW TARGETS EXACTLY ONE ORG AND NEVER A PLANT. Asserted on
+      // the stored row rather than on the value passed in, so the CHECK
+      // `user_invitations_tenancy_check` has actually accepted it.
+      const [invitation] = await db
+        .select({
+          churchId: userInvitations.churchId,
+          sendingChurchId: userInvitations.sendingChurchId,
+          sendingNetworkId: userInvitations.sendingNetworkId,
+        })
+        .from(userInvitations)
+        .where(eq(userInvitations.inviteeEmail, invitee));
+
+      assert.equal(invitation.churchId, null, `${kind}: no plant is targeted`);
+      assert.equal(
+        kind === "network"
+          ? invitation.sendingNetworkId
+          : invitation.sendingChurchId,
+        orgId,
+        `${kind}: the inviting org is the target`
+      );
+      assert.equal(
+        kind === "network"
+          ? invitation.sendingChurchId
+          : invitation.sendingNetworkId,
+        null,
+        `${kind}: the other oversight FK is NULL`
+      );
+
+      const { userId, invitationId } = await registerThrough(
+        mail.tokenFrom(),
+        invitee,
+        SCRATCH_NAME
+      );
+
+      const [account] = await db
+        .select({
+          seat: users.seat,
+          churchId: users.churchId,
+          sendingChurchId: users.sendingChurchId,
+          sendingNetworkId: users.sendingNetworkId,
+        })
+        .from(users)
+        .where(eq(users.id, userId));
+
+      // AS-012: the tenancy FK and the seat, in the write that made the account.
+      assert.equal(account.seat, seat, `${kind}: the invited seat is granted`);
+      assert.equal(account.churchId, null, `${kind}: no plant is granted`);
+      assert.equal(
+        kind === "network" ? account.sendingNetworkId : account.sendingChurchId,
+        orgId,
+        `${kind}: the account holds the org's own FK`
+      );
+      assert.equal(
+        kind === "network" ? account.sendingChurchId : account.sendingNetworkId,
+        null,
+        `${kind}: and names no second tenancy`
+      );
+
+      // The invitation is closed by the same batch, and its link is spent.
+      const [row] = await db
+        .select({
+          status: userInvitations.status,
+          respondedBy: userInvitations.respondedBy,
+        })
+        .from(userInvitations)
+        .where(eq(userInvitations.id, invitationId));
+
+      assert.equal(row.status, "accepted");
+      assert.equal(row.respondedBy, userId);
+      assert.equal(
+        await describeUserInvitationForRegistration(mail.tokenFrom()),
+        null,
+        `${kind}: the link is single use`
+      );
+    }
+  }
+);
+
+test(
+  "an org registration leaves `persons` completely unchanged (AC 3)",
+  { skip },
+  async () => {
+    // AC 3. The plant-side match-or-create must NOT fire here: an org Member is
+    // an account and never a person record inside anybody's plant (ruling
+    // 185 (9)).
+    //
+    // SCOPED TO THIS REGISTRATION, NOT COUNTED ACROSS THE TABLE. A whole-table
+    // count was the first spelling and CI refused it: the live suites run as
+    // separate processes against ONE database, so a sibling file writing a
+    // `persons` row between the two counts failed this for a reason that has
+    // nothing to do with the org path. The two reads below name the account and
+    // the address this test created, so no other suite can move them — and they
+    // are the rows the match-or-create would actually have written.
+    const { actor } = await scratchOrg("network");
+    const mail = captureTransport();
+    const invitee = scratchEmail();
+
+    await createUserInvitationAs(
+      actor,
+      { kind: "seat", inviteeEmail: invitee, seat: "member" },
+      mail.deps
+    );
+    const { userId } = await registerThrough(
+      mail.tokenFrom(),
+      invitee,
+      SCRATCH_NAME
+    );
+
+    // THE MINT ARM: a `persons` row carrying this account's id. This is what
+    // `accountPersonLinkStatements` writes when it finds no match, and it is
+    // the row an org seat must never produce.
+    const linked = await db
+      .select({ id: persons.id })
+      .from(persons)
+      .where(eq(persons.userId, userId));
+    assert.deepEqual(
+      linked,
+      [],
+      "no person record anywhere may be linked to an org seat"
+    );
+
+    // THE CLAIM ARM: a `persons` row at the invited address. Scoped by email
+    // rather than by church, because the failure worth catching is a row
+    // appearing in a plant the org does not own.
+    const byAddress = await db
+      .select({ id: persons.id })
+      .from(persons)
+      .where(eq(persons.email, invitee));
+    assert.deepEqual(
+      byAddress,
+      [],
+      "an org registration must mint no person record at the invited address"
+    );
+  }
+);
+
+test(
+  "an org may not invite an address that already holds an account (AC 4)",
+  { skip },
+  async () => {
+    // The register-only rule is the KIND's and not the tenancy's, so an org's
+    // invitation is refused with the same imported constant a plant's is — and
+    // the refusal is proven against a real `users` row rather than a stub.
+    const { actor } = await scratchOrg("sending_church");
+    const mail = captureTransport();
+    const taken = scratchEmail();
+
+    await db.insert(users).values({
+      email: taken,
+      passwordHash: "scratch",
+      name: SCRATCH_NAME,
+      seat: "owner",
+    });
+
+    await assert.rejects(
+      () =>
+        createUserInvitationAs(
+          actor,
+          { kind: "seat", inviteeEmail: taken, seat: "member" },
+          mail.deps
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof InvitationError);
+        assert.equal(error.message, ACCOUNT_NOT_INVITABLE_MESSAGE);
+        return true;
+      }
     );
   }
 );

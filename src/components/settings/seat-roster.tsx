@@ -57,8 +57,43 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { UserSeat } from "@/db/schema";
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
+import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
 
 import type { SeatActionOutcome } from "./seat-action-outcome";
+
+/**
+ * WHAT THE TWO WORKING SEATS DO HERE, for the Owner reading the roster.
+ *
+ * The two org kinds share a sentence: a sending church's team and a network's
+ * team hold the same two seats over the same kind of reach.
+ */
+const SEAT_SUMMARY = {
+  church:
+    "Admins run the day-to-day work; Members read the plant and act on their own duties.",
+  sending_church:
+    "Admins can invite others onto the team; Members read the portfolio and change nothing.",
+  network:
+    "Admins can invite others onto the team; Members read the portfolio and change nothing.",
+} as const satisfies Record<SeatTenancyType, string>;
+
+/**
+ * WHAT REMOVING A SEAT ACTUALLY DOES, per tenancy — the sentence the
+ * confirmation dialog is accountable to.
+ *
+ * It mirrors `removeSeat`'s own batch: a plant gets the sessions delete, the
+ * task reassignment, the leader-slot clear and the marker; an org gets the
+ * sessions delete and the marker. A copy table that promised the plant's
+ * cascade to an org would be describing statements that are not in that batch.
+ */
+const REMOVAL_CONSEQUENCES = {
+  church:
+    "They lose access straight away and are signed out everywhere. Their open tasks come to you, and any ministry team they lead is left with an open leader slot. Their record in the people directory stays exactly as it is — to bring them back, invite them again.",
+  sending_church:
+    "They lose access straight away and are signed out everywhere. Nothing else changes — to bring them back, invite them again.",
+  network:
+    "They lose access straight away and are signed out everywhere. Nothing else changes — to bring them back, invite them again.",
+} as const satisfies Record<SeatTenancyType, string>;
 
 /** What one roster row looks like to the browser. No ids beyond the subject. */
 export type SeatRosterViewRow = {
@@ -133,19 +168,31 @@ export function SeatRoster({
   rows,
   canManageSeats,
   actions,
+  tenancyType,
 }: {
   rows: SeatRosterViewRow[];
   canManageSeats: boolean;
   actions: SeatRosterActions;
+  /**
+   * WHICH KIND OF TEAM THIS IS (#500). It decides copy only — every scope lives
+   * in the actor's own `WHERE` one layer down — but the copy is not cosmetic:
+   * the removal dialog names the CASCADE, and a sending church has no tasks and
+   * no ministry teams for a removal to touch.
+   */
+  tenancyType: SeatTenancyType;
 }) {
+  const noun = TENANCY_NOUN[tenancyType];
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Seats</CardTitle>
         <CardDescription>
-          {canManageSeats
-            ? "Everyone with a login on this plant. Admins run the day-to-day work; Members read the plant and act on their own duties."
-            : "Everyone with a login on this plant. Only the Owner can change what a seat may do."}
+          {`Everyone with a login on this ${noun}. ${
+            canManageSeats
+              ? SEAT_SUMMARY[tenancyType]
+              : "Only the Owner can change what a seat may do."
+          }`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -170,6 +217,7 @@ export function SeatRoster({
                   row={row}
                   canManageSeats={canManageSeats}
                   actions={actions}
+                  tenancyType={tenancyType}
                 />
               ))}
             </TableBody>
@@ -184,11 +232,14 @@ function SeatRow({
   row,
   canManageSeats,
   actions,
+  tenancyType,
 }: {
   row: SeatRosterViewRow;
   canManageSeats: boolean;
   actions: SeatRosterActions;
+  tenancyType: SeatTenancyType;
 }) {
+  const noun = TENANCY_NOUN[tenancyType];
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
@@ -261,7 +312,7 @@ function SeatRow({
                 size="sm"
                 disabled={pending}
                 className="text-destructive hover:text-destructive"
-                aria-label={`Remove ${name} from this plant`}
+                aria-label={`Remove ${name} from this ${noun}`}
                 onClick={() => setConfirmingRemoval(true)}
               >
                 Remove
@@ -294,14 +345,17 @@ function SeatRow({
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>
-                  Remove {name} from this plant?
+                  Remove {name} from this {noun}?
                 </AlertDialogTitle>
+                {/* THE DIALOG NAMES THE CASCADE, so it has to name the RIGHT
+                    one. A plant's removal reassigns open tasks and empties a
+                    ministry-team leader slot; a sending church and a network
+                    have neither table, so their removal is the access and
+                    nothing else (`removeSeat` batches exactly that). Promising
+                    effects that will not happen is the same defect as hiding
+                    ones that will. */}
                 <AlertDialogDescription>
-                  They lose access straight away and are signed out everywhere.
-                  Their open tasks come to you, and any ministry team they lead
-                  is left with an open leader slot. Their record in the people
-                  directory stays exactly as it is — to bring them back, invite
-                  them again.
+                  {REMOVAL_CONSEQUENCES[tenancyType]}
                 </AlertDialogDescription>
               </AlertDialogHeader>
 
@@ -322,7 +376,7 @@ function SeatRow({
                   disabled={pending}
                   onClick={() => run(() => actions.remove(row.userId))}
                 >
-                  {pending ? "Removing…" : "Remove from plant"}
+                  {pending ? "Removing…" : `Remove from ${noun}`}
                 </Button>
               </AlertDialogFooter>
             </AlertDialogContent>

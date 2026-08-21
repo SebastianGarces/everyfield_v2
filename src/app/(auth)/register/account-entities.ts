@@ -19,6 +19,7 @@
 import { db } from "@/db";
 import type { UserSeat } from "@/db/schema";
 import { sendingChurches, sendingNetworks } from "@/db/schema";
+import { tenancyColumns, type SeatTenancy } from "@/lib/auth/tenancy";
 import type { InvitedAs } from "@/lib/invitations/seat-copy";
 import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { accountPersonLinkStatements } from "@/lib/people/account-person-link";
@@ -39,8 +40,19 @@ import type { BatchItem } from "drizzle-orm/batch";
  * seat arm of the union rather than sitting beside it.
  */
 export type RedeemedUserInvitation = {
-  churchId: string;
+  /**
+   * THE TENANCY THE INVITATION GRANTS — a church plant, a sending church or a
+   * network (#500). It is read straight off the invitation row, so registration
+   * writes back the FK the inviter chose and has no way to write another.
+   */
+  tenancy: SeatTenancy;
   invitedAs: InvitedAs;
+  /**
+   * SEAT-INTO-A-PLANT ONLY, and null everywhere else. AS-013's match-or-create
+   * is about somebody joining a PLANT's directory; a sending church and a
+   * network have no `persons` table of their own, and an org seat is an account
+   * and never a person record inside anybody's plant (ruling 185 (9)).
+   */
   matchedPersonId: string | null;
 };
 
@@ -137,25 +149,39 @@ export function createAccountEntities(
       };
     }
 
-    // A SEAT joins the plant. Creating a second organization for them would
-    // leave the account naming two tenancies, which `holdsSeatFor` refuses
-    // outright and no product path can repair. The ONLY writes are the account's
-    // own — the seat and its tenancy go into the users insert, and the person
-    // record AS-013 asks for is minted or claimed after it.
+    // A SEAT JOINS THE TENANCY THE INVITATION NAMES — a plant, a sending church
+    // or a network (AS-005 / AS-012, #500). Creating a second organization for
+    // them would leave the account naming two tenancies, which `holdsSeatFor`
+    // refuses outright and no product path can repair. The ONLY writes are the
+    // account's own: the seat and its tenancy go into the users insert.
+    //
+    // `tenancyColumns` SPREADS ALL THREE FKs, so the two the invitation did not
+    // name are explicitly NULL rather than merely omitted — the same statement
+    // of the exactly-one rule the invitation row itself was written with.
+    const tenancy = userInvitation.tenancy;
+    const columns = tenancyColumns(tenancy);
+
     return {
       seat: userInvitation.invitedAs.seat,
-      churchId: userInvitation.churchId,
-      sendingChurchId: null,
-      sendingNetworkId: null,
-      userChurchId: userInvitation.churchId,
+      ...columns,
+      userChurchId: columns.churchId,
       statements: [],
-      linkStatements: accountPersonLinkStatements({
-        userId,
-        churchId: userInvitation.churchId,
-        name: account.name,
-        email: account.email,
-        matchedPersonId: userInvitation.matchedPersonId,
-      }),
+      // THE PERSON RECORD IS THE PLANT'S ALONE (ruling 185 (9)). An org seat
+      // writes NOTHING to `persons` — an org Member is an account, never a
+      // person record inside a plant, and there is no directory on an org for
+      // one to live in. So the AS-013 link is the church arm's and nobody
+      // else's, and the empty tuple here is what makes "`persons` is unchanged
+      // after an org registration" true rather than merely intended.
+      linkStatements:
+        tenancy.type === "church"
+          ? accountPersonLinkStatements({
+              userId,
+              churchId: tenancy.id,
+              name: account.name,
+              email: account.email,
+              matchedPersonId: userInvitation.matchedPersonId,
+            })
+          : [],
     };
   }
 

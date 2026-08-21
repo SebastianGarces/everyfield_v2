@@ -1,9 +1,10 @@
 "use server";
 
 // ============================================================================
-// `/settings/team`'s three writes — AS-010 / AS-014 (#495).
+// `/settings/team`'s three writes — AS-005 / AS-010 / AS-014 (#495, widened to
+// the org side by #500).
 //
-// The plant's side of the invitation surface, and deliberately the same shape
+// The tenancy's side of the invitation surface, and deliberately the same shape
 // as `/oversight/invitations/actions.ts`: parse a form, hand off to the logic
 // layer, turn the result into something `useActionState` can render. Every
 // authority decision lives one layer down; nothing here re-decides any of it,
@@ -66,8 +67,8 @@ import {
 /**
  * What the invite form asks for: an address and a seat. There is no expiry
  * field — `INVITATION_EXPIRY_DAYS` is server-fixed by the 2026-08-03 ruling and
- * this schema has no key for one to arrive in — and no church field, because the
- * plant is the actor's own.
+ * this schema has no key for one to arrive in — and no tenancy field, because
+ * the plant, sending church or network being staffed is the actor's own.
  */
 const createSchema = z.object({
   inviteeEmail: z
@@ -75,7 +76,8 @@ const createSchema = z.object({
     .transform((v) => v.trim().toLowerCase())
     .pipe(z.email("Enter a valid email address")),
   // `owner` is deliberately not in the union: the Owner seat is the account
-  // that created the plant, and `users_church_owner_unique_idx` would refuse a
+  // that created the tenancy, and the three partial unique indexes
+  // (`users_church_owner_unique_idx` and its two org siblings) would refuse a
   // second one anyway.
   seat: z.enum(["admin", "member"]),
 });
@@ -121,8 +123,10 @@ export async function createSeatInvitationAction(
   formData: FormData
 ): Promise<CreateSeatInvitationState> {
   // SESSION FIRST, AND THE SEAT WITH IT. `seat.invitation.manage` is ADMIN_PLUS
-  // on a plant tenancy, so a Member — and a coach, and every oversight account —
-  // is refused here, before a single field is read (AS-010).
+  // on ANY tenancy since #500, so what it refuses here — before a single field
+  // is read — is a Member of either kind, a coach (no seat at all) and the
+  // registered Owner whose plant does not exist yet (AS-005 / AS-010). WHICH
+  // tenancy the row lands in is the actor's own, resolved one layer down.
   const session = await requireSeat("seat.invitation.manage");
 
   const parsed = createSchema.safeParse({
@@ -283,10 +287,11 @@ export async function revokeSeatInvitationAction(
 // `@/lib/seats/roster`'s; nothing here re-decides either.
 //
 // THE TARGET IS A BARE ID AND THAT IS SAFE, because it is never trusted as a
-// SCOPE. Every query one layer down puts the ACTOR's own `church_id` in its
-// `WHERE`, so a forged id naming an account on another plant matches no row and
-// is refused with the same sentence a stale one gets. There is no church field
-// on this surface for a forged POST to re-aim.
+// SCOPE. Every query one layer down puts the ACTOR's own TENANCY in its `WHERE`
+// (`inTenancy`, off the one `tenancyOf` resolution), so a forged id naming an
+// account in another plant, sending church or network matches no row and is
+// refused with the same sentence a stale one gets. There is no tenancy field on
+// this surface for a forged POST to re-aim.
 //
 // `refresh()` on success only — `runSeatAction` owns it — so a refused call
 // leaves the row mounted with its message readable, exactly as the resend above
@@ -305,9 +310,11 @@ const assignmentIdSchema = z.uuid("That is not an assignment we can act on");
  * One place where a seat mutation becomes a result.
  *
  * IT MINTS THE ACTOR RATHER THAN TAKING ONE, and inside the `try` on purpose:
- * `seatActorFromSession` throws `SeatManagementError` for an account with no
- * plant — the oversight Owner who passes `seat.manage`'s `tenancy: "any"` — and
- * that refusal is a sentence the caller should read, not an unhandled 500. The
+ * `seatActorFromSession` throws `SeatManagementError` for an account naming NO
+ * tenancy — the registered Owner whose plant does not exist yet, who passes
+ * `seat.manage`'s `tenancy: "any"` — and that refusal is a sentence the caller
+ * should read, not an unhandled 500. An ORG Owner is no longer in that set:
+ * they staff their own org through the same four verbs (#500). The
  * SESSION is still minted by `requireSeat` at the top of each export, above the
  * `try`, so the session-first rule holds and the tenancy check is the only thing
  * that happens in here.
@@ -334,7 +341,7 @@ async function runSeatAction(
   }
 }
 
-/** Appoint a Member to Admin (AS-015). Owner-only, refused for an Admin. */
+/** Appoint a Member to Admin (AS-015). Owner-only, in any tenancy. */
 export async function appointAdminAction(
   targetUserId: string
 ): Promise<SeatActionResult> {
@@ -350,7 +357,7 @@ export async function appointAdminAction(
   );
 }
 
-/** Demote an Admin to Member (AS-015). Owner-only, refused for an Admin. */
+/** Demote an Admin to Member (AS-015). Owner-only, in any tenancy. */
 export async function demoteToMemberAction(
   targetUserId: string
 ): Promise<SeatActionResult> {
@@ -367,12 +374,14 @@ export async function demoteToMemberAction(
 }
 
 /**
- * Remove a seat and run the five effects (AS-016, AS-017).
+ * Remove a seat and run its effects (AS-016, AS-017).
  *
  * The confirmation in front of this is a deliberateness control, not an
  * authorization one: the Owner-only rule, the self-removal refusal and the
- * plant scoping all live in `removeSeat`, where a request that never opened the
- * dialog meets them too.
+ * tenancy scoping all live in `removeSeat`, where a request that never opened
+ * the dialog meets them too. WHICH effects run is the tenancy's — a plant's
+ * cascade reassigns tasks and clears a leader slot, an org's is the access and
+ * nothing else (#500).
  */
 export async function removeSeatAction(
   targetUserId: string

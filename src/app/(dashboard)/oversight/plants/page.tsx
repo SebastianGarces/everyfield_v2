@@ -23,6 +23,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantsDirectory } from "@/components/oversight/plants-directory";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { listOversightPlants } from "@/lib/oversight/read";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata: Metadata = {
@@ -47,6 +48,7 @@ export default async function OversightPlantsPage() {
       <PlantsDirectory
         plants={plants}
         scopeLabel={scopeLabelForOrgType(org.type)}
+        canInvite={holdsSeatFor(user, "org.invitation.manage")}
       />
     </>
   );

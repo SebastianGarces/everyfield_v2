@@ -1915,6 +1915,56 @@ test("nobody outside an inviting org can revoke anything", () => {
   }
 });
 
+test("an org MEMBER reads the queue and can write nothing in it (#500)", () => {
+  // THE ASYMMETRY IS THE POINT, and it is the one this file previously could not
+  // have. While an org had exactly one account, "belongs to this org" and "is
+  // its Owner" were the same row, so ONE predicate served the list and the
+  // revoke. AS-007 gives an org Member the Owner's whole read and none of its
+  // verbs (ruling 185 (3)), so the two predicates now differ by exactly the
+  // Owner check — and that difference has to be asserted in SQL, because a
+  // reconciliation back to one predicate would look like a tidy-up and would
+  // either blind the Member or hand them the revoke.
+  for (const [what, member, orgId] of [
+    [
+      "a sending church's Member",
+      actor({ seat: "member", sendingChurchId: SENDING_CHURCH }),
+      SENDING_CHURCH,
+    ],
+    [
+      "a network's Member",
+      actor({ seat: "member", sendingNetworkId: NETWORK }),
+      NETWORK,
+    ],
+  ] as [string, InvitationActor, string][]) {
+    // THE READ NAMES THEIR ORG. A `false` here is the defect this test exists
+    // for: the page would render "every invitation your org has sent" above a
+    // list that is empty for ever.
+    const listed = invitationsForOrgQuery(member).toSQL();
+
+    assert.match(
+      whereOf(listed.sql),
+      /"(sending_church_id|sending_network_id)" = \$\d+/,
+      `${what} must read the org's own queue`
+    );
+    assert.ok(
+      listed.params.includes(orgId),
+      `${what}: the read must bind their own org id`
+    );
+
+    // …AND THE WRITE NAMES NOTHING. Same org, same actor, no verb.
+    const revoked = revokeInvitationQuery(
+      member,
+      "66666666-6666-4666-8666-666666666666"
+    ).toSQL();
+
+    assert.match(revoked.sql, /false/, `${what} must not revoke`);
+    assert.ok(
+      !revoked.params.includes(orgId),
+      `${what}: the revoke must bind no org id at all`
+    );
+  }
+});
+
 test("the list and the revoke agree on what 'our invitations' means", () => {
   // The property the ruling turns on, asserted rather than promised: the org
   // predicate the pending list is read with is the SAME predicate the revoke
