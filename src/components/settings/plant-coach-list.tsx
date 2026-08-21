@@ -125,7 +125,7 @@ function CoachRow({
       <div className="min-w-0">
         <p className="truncate font-medium">{name}</p>
         <p className="text-muted-foreground truncate text-sm">
-          {row.email} &middot; coaching since {row.assignedLabel}
+          {row.email} · coaching since {row.assignedLabel}
         </p>
         {/* Only while the dialog is CLOSED. Radix's AlertDialog is modal — it
             portals over a `fixed inset-0` overlay and `aria-hidden`s everything

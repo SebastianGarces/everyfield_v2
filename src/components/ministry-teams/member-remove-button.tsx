@@ -75,18 +75,9 @@ export function MemberRemoveButton({
         <AlertDialogHeader>
           <AlertDialogTitle>Remove from role?</AlertDialogTitle>
           <AlertDialogDescription>
-            {/* Spaces in string expressions, not JSX text beside a tag — the
-                literal form loses the space when the word wraps, which this
-                dialog has been doing since it shipped ("…{roleName}role?").
-                Found while validating #311, whose two new dialogs copied the
-                shape from here. */}
-            {"Remove "}
-            <span className="font-medium">{personName}</span>
-            {" from the "}
-            <span className="font-medium">{roleName}</span>
-            {
-              " role? The role will become open and they can be re-assigned later."
-            }
+            Remove <span className="font-medium">{personName}</span> from the{" "}
+            <span className="font-medium">{roleName}</span> role? The role will
+            become open and they can be re-assigned later.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
