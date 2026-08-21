@@ -83,6 +83,24 @@ tenant scope; `created_at`/`updated_at` default now.
   Read only through `buildResponseBreakdown` (`lib/meetings/response-card.ts`), which reports
   `notRecordedCount` separately. One upserted row per (meeting, person),
   `meeting_responses_meeting_person_unique`, so a double submit cannot double-count.
+- **`ministry_teams.responsibilities_seeded_at` is a CLAIM, not a timestamp anybody reads**
+  (`ministry-teams.ts`, #311): NULL = this team has never been offered its Launch Playbook
+  checklist, and stamping it is what makes the offer once-ever. Written by ONE compare-and-set in
+  `seedPlaybookResponsibilities`, whose `WHERE` also demands a `template_key` — so a custom team is
+  never claimed and its stamp is NULL forever, saying something true. `team_responsibilities` rows
+  carry no seed key on purpose: an arbiter on the rows only sees rows that still exist, so a
+  deleted playbook item would return on the next page load. Full rule: `../invariants.md` →
+  Ministry Teams.
+- **`team_responsibilities.completed_at` is the ONLY completion field** (`ministry-teams.ts`,
+  #311): `completed_at IS NOT NULL` is the whole answer, asked through `isResponsibilityComplete`.
+  There is no `completed` boolean beside it, so the contradictory pair cannot be written; the
+  action takes a `complete` flag and the service derives the timestamp, so no caller names a
+  completion time of its own.
+- **`ministry_teams.leader_id` has an EXPLICIT writer and a DERIVED one** (`ministry-teams.ts`,
+  #311). `assignTeamLeader` sets it unconditionally; `leader-sync.ts` sets it only
+  `WHERE leader_id IS NULL` and clears it only `WHERE leader_id = $person`, off a filled leadership
+  role. Nothing records which door wrote it. Full rule and its accepted residual:
+  `../invariants.md` → Ministry Teams.
 - **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation** — the
   invitee had no account when the admin typed `invitee_email`. `bindOpenInvitationTarget`
   (`src/lib/invitations/core.ts`) fills it in at registration, and its compare-and-set is what
@@ -243,6 +261,45 @@ not at a second orphan.
 **Scope.** Exactly one database was ever affected. The old file never reached `main`, so every fresh
 clone, every restore predating 2026-08-21 and production all take EXIT A in that header's reconcile
 block and apply 0058 cleanly.
+
+### Finding (2026-08-21, #577) — the apply is one transaction, so the ledger cannot name the failure
+
+The reconcile block in `0058_church_digest_send_time.sql` says the operator will not be shown the
+error: `drizzle-kit migrate` swallows it and exits 1 with an unfinished spinner and nothing on
+stdout or stderr. `pnpm db:migrate` is now `scripts/db-migrate.ts`, which diagnoses that exit.
+
+Two facts about `drizzle-orm`'s migrator were established on scratch databases while building it,
+because the first design got the second one wrong:
+
+1. **The ledger's maximum `created_at` is read ONCE, before the loop.** Every entry above it is a
+   candidate, journal order — this is the rule the ⚖ renumbering invariant already states.
+2. **The whole batch runs inside a single `begin`/`commit`.** Proven directly: with two pending
+   migrations and a collision in the SECOND, the FIRST one's table was absent afterwards and the
+   ledger was byte-identical to before the run. So a failure rolls back the ledger rows it inserted,
+   the maximum does not move, and every attempted migration is still pending.
+
+The consequence is the one worth remembering: **the ledger cannot tell you which migration failed.**
+"The first pending one is the culprit" is wrong whenever the collider is not first, and it is wrong
+in the direction that hurts — it reads the wrong file, finds none of its objects present, and
+confidently rules out the renumbering diagnosis that is true. The pending list is the search space;
+what identifies the culprit is catalog evidence, so the script asks which objects the batch would
+create that are already there, and reports the migrations that own them.
+
+Two traps it has to avoid, both real in this repo:
+
+- **A migration that drops an object and recreates it under the same name** is not a collision.
+  `0025_notification_dedupe_liveness.sql` drops `notifications_dedupe_key_unique_idx` before
+  creating it, and 0018, 0029 and 0055 do the same for theirs. On any database that ran 0023 and not
+  0025 that index is present, so without subtracting a migration's own `DROP`s the report accuses a
+  migration that cannot collide — and points a human at an attended ledger write. Verified against a
+  scratch database left at 0024.
+- **`does not exist` is not a missing ledger.** Postgres says it for an unknown database (3D000) and
+  an unknown role (28000) too, so the "ledger not created yet" branch keys on SQLSTATE `42P01` and
+  everything else falls through to "could not reach the database".
+
+The diagnosis is SELECTs only and never replays the batch, not even inside a transaction it means to
+roll back: that ships DDL at the de-facto prod DB to produce a log line. The operator gets a
+`BEGIN` … `ROLLBACK` they can read and run themselves.
 
 ### Reusable snippet
 

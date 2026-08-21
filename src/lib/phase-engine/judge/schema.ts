@@ -20,6 +20,14 @@
 
 import { z } from "zod";
 
+// The register's vocabulary and its two pure checks. The back-edge is
+// TYPE-ONLY (`network-register.ts` imports `Insight` from here), so it is
+// erased at build time and no runtime cycle exists.
+import {
+  findNetworkRegisterViolations,
+  findUnpairedNetworkCategories,
+} from "./network-register";
+
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 
 /** Who the insight is phrased for (rubric-v0: planter coaching vs. network health). */
@@ -127,6 +135,31 @@ export const judgeOutputSchema = z
         code: "custom",
         path: ["insights"],
         message: `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.`,
+      });
+    }
+
+    // THE NETWORK REGISTER (#482). Both rules are stated in the rubric, which
+    // is what teaches the model; these are what stop a bad response being
+    // STORED. A violation fails the parse and `runPacedCall` retries the
+    // generation, so an insight breaking either rule never reaches a database.
+    const verdicts = findNetworkRegisterViolations(output.insights);
+    if (verdicts.length > 0) {
+      const found = verdicts
+        .map((violation) => `"${violation.phrase}" in "${violation.title}"`)
+        .join("; ");
+      ctx.addIssue({
+        code: "custom",
+        path: ["insights"],
+        message: `Network-audience language must coach, never deliver a verdict. Found ${found}. Name the measured pattern and point at a coaching conversation — "Core-group momentum has slowed. This may be worth a coaching conversation" — never an organisational judgement.`,
+      });
+    }
+
+    const unpaired = findUnpairedNetworkCategories(output.insights);
+    if (unpaired.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["insights"],
+        message: `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Different wording for each audience is expected; a concern the planter was never shown is not.`,
       });
     }
   });

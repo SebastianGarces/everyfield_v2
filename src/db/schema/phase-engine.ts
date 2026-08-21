@@ -242,6 +242,25 @@ export const plantAssessments = pgTable(
       .$type<AssessmentStatus>()
       .notNull()
       .default("pending"),
+    /**
+     * WHEN THE PLANTER FIRST OPENED THIS ASSESSMENT (#482, C16/C25).
+     *
+     * Bryan: "The planter should never discover the diagnosis through his
+     * overseer. If the network is being told, 'Core-group momentum has
+     * stalled,' the planter should already have been told, 'Your core-group
+     * momentum has stalled.'"
+     *
+     * The rubric asks the judge to pair every network concern with a planter
+     * one, which fixes the WORDING. This column fixes the ORDER: an assessment
+     * is released to oversight once the planter has seen it — or once 72 hours
+     * have passed, so the org that pays per plant is never blocked
+     * indefinitely (ledger row 187).
+     *
+     * NULL means "not opened yet", which is not the same as "not released":
+     * release is computed at read time from this column OR the age of
+     * `generated_at`, so there is no scheduler and nothing to backfill.
+     */
+    planterSeenAt: timestamp("planter_seen_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
