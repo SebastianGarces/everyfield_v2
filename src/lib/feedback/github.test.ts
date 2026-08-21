@@ -4,7 +4,6 @@ import { test } from "node:test";
 import {
   DEFAULT_FEEDBACK_REPO,
   FEEDBACK_LABEL,
-  bridgeFeedbackToGithub,
   buildFeedbackIssue,
   createFeedbackIssue,
   feedbackIssueUrl,
@@ -14,9 +13,9 @@ import {
 // ----------------------------------------------------------------------------
 // Feedback → GitHub bridge (#190)
 //
-// The bridge is fire-and-forget over a public board, so two things are pinned
-// here: the payload GitHub receives (title, labels, and the absence of any
-// person's name or address in the body), and the refusal path when the token is
+// The bridge is fire-and-forget over a PUBLIC board, so three things are pinned
+// here: the payload GitHub receives (title, labels, ids), the redaction of the
+// one route that carries authored text, and the refusal path when the token is
 // unset — which must return rather than throw, because a submission may never
 // fail on the bridge.
 // ----------------------------------------------------------------------------
@@ -131,13 +130,53 @@ test("the body says the issue is one-way", () => {
 });
 
 // ----------------------------------------------------------------------------
+// The page path, which the SYSTEM attaches — not the submitter
+// ----------------------------------------------------------------------------
+
+test("a wiki slug never reaches the public body — it is authored text", () => {
+  const { body } = buildFeedbackIssue(
+    input({ pageUrl: "/wiki/leadership/pastor-john-smith-succession" })
+  );
+
+  assert.ok(!body.includes("pastor-john-smith-succession"));
+  assert.ok(!body.includes("leadership"));
+  assert.ok(body.includes("**Page:** /wiki/…/…"));
+});
+
+test("a uuid segment survives — it names a row, not a person", () => {
+  const { body } = buildFeedbackIssue(
+    input({ pageUrl: `/people/${CHURCH_ID}` })
+  );
+  assert.ok(body.includes(`**Page:** /people/${CHURCH_ID}`));
+});
+
+test("a top-level route is published whole", () => {
+  const { body } = buildFeedbackIssue(input({ pageUrl: "/launch" }));
+  assert.ok(body.includes("**Page:** /launch"));
+});
+
+test("a route added later is redacted without anyone remembering to", () => {
+  const { body } = buildFeedbackIssue(
+    input({ pageUrl: "/some-new-route/whatever-a-church-typed" })
+  );
+  assert.ok(!body.includes("whatever-a-church-typed"));
+  assert.ok(body.includes("**Page:** /some-new-route/…"));
+});
+
+// ----------------------------------------------------------------------------
 // Issue URL
 // ----------------------------------------------------------------------------
 
-test("the issue url points at the configured repo", () => {
+test("the issue url points at the configured repo", (t) => {
+  if (process.env.GITHUB_FEEDBACK_REPO) {
+    t.skip("GITHUB_FEEDBACK_REPO overrides the default this asserts");
+    return;
+  }
+
+  assert.equal(DEFAULT_FEEDBACK_REPO, "SebastianGarces/everyfield_v2");
   assert.equal(
     feedbackIssueUrl(190),
-    `https://github.com/${process.env.GITHUB_FEEDBACK_REPO ?? DEFAULT_FEEDBACK_REPO}/issues/190`
+    "https://github.com/SebastianGarces/everyfield_v2/issues/190"
   );
 });
 
@@ -147,9 +186,11 @@ test("the issue url points at the configured repo", () => {
 
 test("the POST carries the token, the API version and the payload", async () => {
   const realFetch = globalThis.fetch;
+  const realToken = process.env.GITHUB_FEEDBACK_TOKEN;
   let url: string | undefined;
   let init: RequestInit | undefined;
 
+  process.env.GITHUB_FEEDBACK_TOKEN = "ghp_test_token";
   globalThis.fetch = (async (requestUrl: string, requestInit: RequestInit) => {
     url = requestUrl;
     init = requestInit;
@@ -157,10 +198,11 @@ test("the POST carries the token, the API version and the payload", async () => 
   }) as unknown as typeof fetch;
 
   try {
-    const number = await createFeedbackIssue(input(), "ghp_test_token");
+    const number = await createFeedbackIssue(input());
     assert.equal(number, 4242);
   } finally {
     globalThis.fetch = realFetch;
+    restoreToken(realToken);
   }
 
   assert.ok(url?.endsWith("/issues"), url);
@@ -182,6 +224,9 @@ test("the POST carries the token, the API version and the payload", async () => 
 
 test("a refused POST throws with GitHub's own status and body", async () => {
   const realFetch = globalThis.fetch;
+  const realToken = process.env.GITHUB_FEEDBACK_TOKEN;
+
+  process.env.GITHUB_FEEDBACK_TOKEN = "ghp_bad";
   globalThis.fetch = (async () =>
     new Response('{"message":"Bad credentials"}', {
       status: 401,
@@ -190,16 +235,20 @@ test("a refused POST throws with GitHub's own status and body", async () => {
 
   try {
     await assert.rejects(
-      () => createFeedbackIssue(input(), "ghp_bad"),
+      () => createFeedbackIssue(input()),
       /401 Unauthorized[\s\S]*Bad credentials/
     );
   } finally {
     globalThis.fetch = realFetch;
+    restoreToken(realToken);
   }
 });
 
 // ----------------------------------------------------------------------------
 // Graceful failure (G3: the token unset)
+//
+// `null`, not a throw: an environment without the PAT is one that does not
+// bridge, which must read differently from a GitHub outage.
 // ----------------------------------------------------------------------------
 
 test("with no token the bridge returns null, hits no network and never throws", async () => {
@@ -216,11 +265,16 @@ test("with no token the bridge returns null, hits no network and never throws", 
   console.warn = () => {};
 
   try {
-    assert.equal(await bridgeFeedbackToGithub(input()), null);
+    assert.equal(await createFeedbackIssue(input()), null);
     assert.equal(called, false);
   } finally {
     globalThis.fetch = realFetch;
     console.warn = realWarn;
-    if (realToken !== undefined) process.env.GITHUB_FEEDBACK_TOKEN = realToken;
+    restoreToken(realToken);
   }
 });
+
+function restoreToken(value: string | undefined) {
+  if (value === undefined) delete process.env.GITHUB_FEEDBACK_TOKEN;
+  else process.env.GITHUB_FEEDBACK_TOKEN = value;
+}

@@ -21,7 +21,7 @@ import {
   type FeedbackStatus,
 } from "@/db/schema";
 import { requirePlatformAdmin } from "@/lib/auth/admin";
-import { feedbackIssueUrl } from "@/lib/feedback/github";
+import { FEEDBACK_REPO, feedbackIssueUrl } from "@/lib/feedback/github";
 import { listFeedback } from "@/lib/feedback/service";
 
 export const dynamic = "force-dynamic";
@@ -170,6 +170,10 @@ export default async function AdminFeedbackPage({
                         href={feedbackIssueUrl(item.githubIssueNumber)}
                         target="_blank"
                         rel="noreferrer"
+                        // The number was stamped under whatever repo the bridge
+                        // was pointed at; the link resolves against the current
+                        // one. Naming the repo makes a mismatch legible.
+                        title={`Opened on ${FEEDBACK_REPO}`}
                         className="cursor-pointer font-medium underline-offset-4 hover:underline"
                       >
                         #{item.githubIssueNumber}

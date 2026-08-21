@@ -1,6 +1,11 @@
+// ============================================================================
+// The GitHub side of the feedback bridge (#190), and NOTHING else.
+//
+// Deliberately dependency-free — no database, no `next/*` — so the payload
+// builder is importable by a test with neither a token nor a connection string.
+// The row that links back is stamped by `./notify`, which owns both notifiers.
+// ============================================================================
 import type { FeedbackCategory } from "@/db/schema";
-
-import { setFeedbackGithubIssue } from "./service";
 
 // ============================================================================
 // Configuration
@@ -74,11 +79,12 @@ export interface FeedbackIssuePayload {
  * issue is created. The context ships as opaque uuids instead: they resolve for
  * anyone holding database access, and say nothing to anyone who does not. The
  * human route is the backlink to `/admin/feedback`, which already joins the
- * submitter and the church.
+ * submitter and the church — and holds the untouched `page_url`.
  *
  * The description itself is the submitter's own words and ships verbatim —
  * without it the issue is not actionable. The feedback widget's copy is what
- * tells them where it goes.
+ * tells them where it goes. Everything the SYSTEM attaches on their behalf is
+ * the platform's disclosure rather than theirs, and stays off the board.
  */
 export function buildFeedbackIssue(
   input: FeedbackIssueInput
@@ -102,7 +108,7 @@ export function buildFeedbackIssue(
     "---",
     "",
     `- **Category:** ${input.category}`,
-    `- **Page:** ${input.pageUrl ?? "—"}`,
+    `- **Page:** ${publishablePath(input.pageUrl)}`,
     `- **Feedback id:** \`${input.feedbackId}\``,
     `- **Church id:** \`${input.churchId ?? "—"}\``,
     `- **User id:** \`${input.userId}\``,
@@ -121,28 +127,53 @@ export function buildFeedbackIssue(
   };
 }
 
+const UUID_SEGMENT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The ROUTE, never the authored tail.
+ *
+ * One route embeds text a church wrote: `/wiki/[...slug]` slugs are authored
+ * content, not sanitised identifiers (`@/lib/wiki/href`), so a planter who
+ * opens the widget while reading an article they titled after a person would
+ * publish that person's name on a public board — the one leak the no-person
+ * rule above could not see, because the widget attaches the path, not the user.
+ *
+ * Redacted by CONSTRUCTION rather than by a `/wiki/` denylist: the first
+ * segment and any uuid survive, everything else becomes `…`. A route added next
+ * year is safe without anyone remembering this. The full path is on the
+ * `feedback` row, one backlink away.
+ */
+function publishablePath(pageUrl: string | null): string {
+  if (!pageUrl) return "—";
+
+  const [first, ...rest] = pageUrl.split("/").filter(Boolean);
+  if (!first) return "/";
+
+  return `/${[first, ...rest.map((s) => (UUID_SEGMENT.test(s) ? s : "…"))].join("/")}`;
+}
+
 /** Where a bridged issue lives, for the admin triage view. */
 export function feedbackIssueUrl(issueNumber: number): string {
   return `https://github.com/${FEEDBACK_REPO}/issues/${issueNumber}`;
 }
 
 // ============================================================================
-// Bridge
+// The network boundary
 // ============================================================================
 
 /**
- * Mirror one feedback submission onto the board and record the issue number on
- * the row.
+ * Open the issue, and answer `null` when the bridge is not configured.
  *
- * Fire-and-forget by contract: the caller schedules this and logs the failure.
- * The `feedback` row is written first and stays the source of truth, so a
- * missing token, a GitHub outage or a rejected payload costs the board an issue
- * and costs the submitter nothing.
+ * `null` vs a throw is the whole contract: an unset token is an ENVIRONMENT
+ * that does not bridge (local dev, a preview, any deploy without the PAT), not
+ * a failure, and it must read differently from a GitHub outage. Every other
+ * refusal throws, carrying the status and body GitHub returned — a bad token
+ * and a missing label fail differently, and the message is the only way to tell.
  *
- * One-way for alpha: nothing reads GitHub back. The status lifecycle stays in
- * `/admin/feedback`.
+ * One-way for alpha: nothing here reads GitHub back.
  */
-export async function bridgeFeedbackToGithub(
+export async function createFeedbackIssue(
   input: FeedbackIssueInput
 ): Promise<number | null> {
   const token = process.env.GITHUB_FEEDBACK_TOKEN;
@@ -154,25 +185,6 @@ export async function bridgeFeedbackToGithub(
     return null;
   }
 
-  const issueNumber = await createFeedbackIssue(input, token);
-  await setFeedbackGithubIssue(input.feedbackId, issueNumber);
-
-  return issueNumber;
-}
-
-/**
- * POST the issue. Throws on any non-2xx so the caller's `.catch` logs a body
- * GitHub actually returned — a bad token and a missing label fail differently
- * and the message is the only way to tell.
- *
- * Exported as the network boundary: the token never reaches the payload builder
- * and the DB write never reaches this, so a test can pin the request GitHub
- * receives without a database.
- */
-export async function createFeedbackIssue(
-  input: FeedbackIssueInput,
-  token: string
-): Promise<number> {
   const payload = buildFeedbackIssue(input);
 
   const response = await fetch(

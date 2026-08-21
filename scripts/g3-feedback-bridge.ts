@@ -26,12 +26,15 @@
  *     `not_planned` with a comment saying what opened it (GitHub has no delete
  *     over the API).
  *
- *   GITHUB_FEEDBACK_TOKEN=$(gh auth token) pnpm g3:feedback
- *   GITHUB_FEEDBACK_TOKEN=$(gh auth token) pnpm g3:feedback --keep
+ *   GITHUB_FEEDBACK_REPO=<you>/scratch GITHUB_FEEDBACK_TOKEN=$(gh auth token) \
+ *     pnpm g3:feedback
+ *   GITHUB_FEEDBACK_TOKEN=$(gh auth token) pnpm g3:feedback --live-board
  *   pnpm g3:feedback                      # token unset — proves the skip path
  *
- * `--keep` leaves the issue open and the rows in place for a verifier.
- * Point `GITHUB_FEEDBACK_REPO` at a scratch repo to keep the real board clean.
+ * A run that would open an issue on the REAL board is REFUSED unless
+ * `--live-board` says so: cleanup lives in `finally`, and a killed process
+ * leaves a stray issue on a public tracker. `--keep` leaves the issue open and
+ * the rows in place for a verifier. It silences the feedback email either way.
  */
 import assert from "node:assert/strict";
 
@@ -40,13 +43,18 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { churches, feedback, users } from "@/db/schema";
 import {
+  DEFAULT_FEEDBACK_REPO,
   FEEDBACK_REPO,
-  bridgeFeedbackToGithub,
   feedbackIssueUrl,
 } from "@/lib/feedback/github";
+import { notifyNewFeedback } from "@/lib/feedback/notify";
 import { createFeedback } from "@/lib/feedback/service";
 
 const KEEP = process.argv.includes("--keep");
+const LIVE_BOARD = process.argv.includes("--live-board");
+
+/** The slug half of the page path — authored text, which must not be published. */
+const AUTHORED_SLUG = "g3-190-pastor-john-smith-succession";
 
 function step(title: string) {
   console.log(`\n── ${title} ${"─".repeat(Math.max(0, 68 - title.length))}`);
@@ -59,6 +67,15 @@ function id(label: string, value: string | number) {
 async function main() {
   const stamp = Date.now();
   const token = process.env.GITHUB_FEEDBACK_TOKEN;
+
+  assert.ok(
+    FEEDBACK_REPO !== DEFAULT_FEEDBACK_REPO || LIVE_BOARD || !token,
+    "this would open an issue on the REAL board. Set GITHUB_FEEDBACK_REPO to a scratch repo, or pass --live-board to mean it."
+  );
+
+  // The email half is the pre-existing notifier and is not what this proves;
+  // silencing it keeps a harness run from mailing the team every time.
+  delete process.env.FEEDBACK_EMAIL_TO;
 
   step("Fixtures");
   const [plant] = await db
@@ -88,34 +105,30 @@ async function main() {
     const row = await createFeedback(planter.id, plant.id, {
       category: "bug",
       description: `G3 #190 harness ${stamp} — the launch countdown is off by a day.\n\nSecond paragraph, so the title truncation has something to ignore.`,
-      pageUrl: "/launch",
+      pageUrl: `/wiki/leadership/${AUTHORED_SLUG}`,
     });
     id("feedback row", row.id);
+    id("page url on the row", row.pageUrl ?? "—");
     assert.equal(row.githubIssueNumber, null, "the row starts unstamped");
 
-    step("2. The bridge opens the issue");
+    step("2. The product path notifies — the same call the action schedules");
+    id("repo", FEEDBACK_REPO);
+    await notifyNewFeedback(row, { name: planter.name, email: planter.email });
+
+    const [afterNotify] = await db
+      .select()
+      .from(feedback)
+      .where(eq(feedback.id, row.id));
+
     if (!token) {
       console.log(
         "   GITHUB_FEEDBACK_TOKEN unset — asserting the SKIP path instead."
       );
       assert.equal(
-        await bridgeFeedbackToGithub({
-          feedbackId: row.id,
-          category: row.category,
-          description: row.description,
-          pageUrl: row.pageUrl,
-          churchId: row.churchId,
-          userId: row.userId,
-        }),
+        afterNotify.githubIssueNumber,
         null,
-        "no token must return null, not throw"
+        "no token must leave the row unstamped"
       );
-
-      const [unstamped] = await db
-        .select()
-        .from(feedback)
-        .where(eq(feedback.id, row.id));
-      assert.equal(unstamped.githubIssueNumber, null);
       console.log("   ✓ skipped cleanly; the row is untouched and still holds");
       console.log(
         "     the submission. Re-run with a token for the full path."
@@ -123,27 +136,13 @@ async function main() {
       return;
     }
 
-    id("repo", FEEDBACK_REPO);
-    issueNumber = await bridgeFeedbackToGithub({
-      feedbackId: row.id,
-      category: row.category,
-      description: row.description,
-      pageUrl: row.pageUrl,
-      churchId: row.churchId,
-      userId: row.userId,
-    });
-    assert.ok(issueNumber, "the bridge returned no issue number");
-    id("issue", feedbackIssueUrl(issueNumber));
-
     step("3. The row carries the issue number");
-    const [stamped] = await db
-      .select()
-      .from(feedback)
-      .where(eq(feedback.id, row.id));
-    assert.equal(stamped.githubIssueNumber, issueNumber);
+    issueNumber = afterNotify.githubIssueNumber;
+    assert.ok(issueNumber, "the bridge stamped no issue number");
+    id("issue", feedbackIssueUrl(issueNumber));
     console.log(`   ✓ feedback.github_issue_number = ${issueNumber}`);
 
-    step("4. GitHub holds what we sent");
+    step("4. GitHub holds what we sent, and nothing we owed the submitter");
     const issue = await fetchIssue(issueNumber, token);
     id("title", issue.title);
     id("labels", issue.labels.map((l) => l.name).join(", "));
@@ -160,7 +159,10 @@ async function main() {
     assert.ok(issue.body.includes(row.id), "the body backlinks the row");
     assert.ok(issue.body.includes(plant.id), "the body carries the church id");
     assert.ok(issue.body.includes(planter.id), "the body carries the user id");
-    assert.ok(issue.body.includes("/launch"), "the body carries the page");
+
+    // The no-PII rule, on a PUBLIC board. The page path is the subtle half: it
+    // is attached by the widget, not typed by the submitter, and `/wiki/**`
+    // slugs are church-authored text.
     assert.ok(
       !issue.body.includes(planter.email),
       "THE BODY MUST NAME NO PERSON — this repo is public"
@@ -168,6 +170,14 @@ async function main() {
     assert.ok(
       !issue.body.includes(plant.name),
       "THE BODY MUST NAME NO CHURCH — this repo is public"
+    );
+    assert.ok(
+      !issue.body.includes(AUTHORED_SLUG),
+      "THE BODY MUST NOT CARRY AN AUTHORED SLUG — this repo is public"
+    );
+    assert.ok(
+      issue.body.includes("**Page:** /wiki/…/…"),
+      "the route still reaches the triager, redacted"
     );
     console.log("   ✓ payload, labels and the no-PII rule all hold");
   } finally {
