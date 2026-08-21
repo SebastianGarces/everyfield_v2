@@ -93,7 +93,7 @@ const REDEMPTION_HILL_INSIGHTS = [
     title: "Strong Foundation for Launch",
     body: "The financial base is confirmed, a critical step towards readiness. Leadership roles are largely filled, showing strong foundational support.",
     citedFacts: [
-      "manual.byKey.financial_base=true",
+      "manual.byKey.financial_base_established=true",
       "ministryRoles.filledCount=7",
     ],
     relatedArticleSlugs: [],

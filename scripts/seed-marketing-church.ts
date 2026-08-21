@@ -90,6 +90,13 @@ import {
   wikiProgress,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+// THE ONE ATTESTATION VOCABULARY. Seed scripts insert into `plant_signals`
+// directly, so they bypass `setManualSignalSchema` — the `z.enum` that makes a
+// misspelled key impossible for every real write. `satisfies` is what puts the
+// same gate in front of a raw insert: this script wrote `financial_base` for
+// months, a key no reader matches, so the demo church's financial gate and its
+// Generosity lens both read "unknown" while the rows looked correct.
+import type { ManualSignalKey } from "../src/lib/phase-engine/manual-signals";
 
 // ============================================================================
 // Bootstrapping — load DATABASE_URL BEFORE anything that evaluates `@/db`.
@@ -2289,7 +2296,7 @@ async function seedRedemptionHill(
     },
     {
       churchId,
-      signalKey: "financial_base",
+      signalKey: "financial_base_established" satisfies ManualSignalKey,
       value: true,
       attestedById: planterId,
       attestedAt: daysAgo(15),
@@ -2597,15 +2604,19 @@ async function seedTrinityGrove(
   ]);
 
   await db.insert(plantSignals).values(
-    ["values_documented", "financial_base", "systems_tested"].map(
-      (signalKey) => ({
-        churchId,
-        signalKey,
-        value: true,
-        attestedById: planterId,
-        attestedAt: daysAgo(60),
-      })
-    )
+    (
+      [
+        "values_documented",
+        "financial_base_established",
+        "systems_tested",
+      ] as const satisfies readonly ManualSignalKey[]
+    ).map((signalKey) => ({
+      churchId,
+      signalKey,
+      value: true,
+      attestedById: planterId,
+      attestedAt: daysAgo(60),
+    }))
   );
   await db.insert(churchPrivacySettings).values({
     churchId,
