@@ -48,7 +48,14 @@
 //    not passing and not failing, and must never be shown as either.
 // ============================================================================
 
-import { CircleCheck, Eye, Info, Minus, TriangleAlert } from "lucide-react";
+import {
+  CircleCheck,
+  CircleHelp,
+  Eye,
+  Info,
+  Minus,
+  TriangleAlert,
+} from "lucide-react";
 
 import {
   Card,
@@ -66,6 +73,7 @@ import type {
 // (components/phase-engine/insight-card.tsx): a planter reads the evidence in
 // English, never in the judge's fact-ledger syntax.
 import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
+import { insufficientEvidenceLine } from "@/lib/phase-engine/signals/evidence";
 import { cn } from "@/lib/utils";
 
 // ----------------------------------------------------------------------------
@@ -171,6 +179,45 @@ const STANDING_STYLES: Record<CsfStanding, StandingStyle> = {
   },
 };
 
+/**
+ * THE NINTH TILE STATE, and the reason it is not a standing (#483, C17).
+ *
+ * Bryan: "I would rather EveryField say, 'We do not currently have enough
+ * information to assess prayer health' than leave a blank that could be
+ * interpreted as healthy."
+ *
+ * A `CsfStanding` is a relabelling of a judge SEVERITY — it answers "what did
+ * the assessment say about this?". "The engine cannot see this lens" answers a
+ * different question and has no severity behind it, so it is a separate style
+ * rather than a ninth member of that union.
+ *
+ * VISUALLY DISTINCT FROM BOTH NEIGHBOURS. Not the dashed placeholder of
+ * `not_raised`, which reads as "nothing to report", and not a tint, which would
+ * read as a verdict. A solid muted panel and a question mark: something is
+ * missing here, and it is information rather than health.
+ */
+const INSUFFICIENT_EVIDENCE_STYLE: StandingStyle = {
+  label: "Insufficient evidence",
+  Icon: CircleHelp,
+  container: "border-border bg-muted/40",
+  ink: "text-muted-foreground",
+  meta: "text-muted-foreground",
+};
+
+/**
+ * A tile shows the insufficient-evidence state when the engine knows nothing
+ * about the lens AND the assessment raised nothing on it.
+ *
+ * BOTH HALVES MATTER. If the judge raised something, it had something to say —
+ * saying "insufficient evidence" over the top of a real observation would be a
+ * worse blank than the one this replaces.
+ */
+function isInsufficientEvidence(factor: CsfFactorStanding): boolean {
+  return (
+    factor.standing === "not_raised" && factor.evidence.quality === "unknown"
+  );
+}
+
 const AS_OF_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "long",
   day: "numeric",
@@ -193,7 +240,10 @@ const MAX_TILE_FACTS = 2;
  * raised tiles off them. Neither attribute changes what this renders.
  */
 export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
-  const style = STANDING_STYLES[factor.standing];
+  const insufficient = isInsufficientEvidence(factor);
+  const style = insufficient
+    ? INSUFFICIENT_EVIDENCE_STYLE
+    : STANDING_STYLES[factor.standing];
   const [lead, ...rest] = factor.insights;
   // The signals ride on the insight, resolved by the projection that built this
   // scorecard against the assessment's own snapshot (ruled 2026-08-12 on #319):
@@ -206,7 +256,8 @@ export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
 
   return (
     <li
-      data-standing={factor.standing}
+      data-standing={insufficient ? "insufficient_evidence" : factor.standing}
+      data-evidence={factor.evidence.quality}
       className={cn("rounded-lg border p-3.5", style.container)}
     >
       <div className="flex items-start justify-between gap-3">
@@ -258,10 +309,32 @@ export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
             </p>
           )}
         </>
+      ) : insufficient ? (
+        <>
+          {/* Bryan's sentence, from the one place it is written (#483). */}
+          <p className="text-muted-foreground mt-2 max-w-[60ch] text-sm leading-relaxed text-pretty">
+            {insufficientEvidenceLine(factor.name)}
+          </p>
+          <p className={cn("mt-1 text-xs", style.meta)}>{factor.summary}</p>
+        </>
       ) : (
-        <p className="text-muted-foreground mt-2 max-w-[60ch] text-sm leading-relaxed text-pretty">
-          {factor.summary}
-        </p>
+        <>
+          <p className="text-muted-foreground mt-2 max-w-[60ch] text-sm leading-relaxed text-pretty">
+            {factor.summary}
+          </p>
+          {/* An ATTESTED lens says whose word it is on, and how old that word
+              is (#474/#475). Staleness degrades the phrasing, never the
+              category — a rhythm attested 45 days ago is still attested. */}
+          {factor.evidence.quality === "attested" && (
+            <p className={cn("mt-1 text-xs", style.meta)}>
+              {factor.evidence.attestedDaysAgo === null
+                ? "Your own answer, not measured."
+                : factor.evidence.attestedDaysAgo === 0
+                  ? "Your own answer, confirmed today."
+                  : `Your own answer, confirmed ${factor.evidence.attestedDaysAgo} days ago.`}
+            </p>
+          )}
+        </>
       )}
     </li>
   );

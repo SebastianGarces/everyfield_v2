@@ -39,6 +39,7 @@ recorded rulings, and the recommended v1 delta.
 | Unshared plants read Limited visibility, never On track | C11 | [#480](https://github.com/SebastianGarces/everyfield_v2/issues/480) | The network posture becomes four-valued. Silence cannot forge "On track"; escalations still win; the label is neutral, not a warning. The v0 "please confirm" on the privacy trade is answered. |
 | Unfilled roles are a coverage gap, not "no emerging leaders" | C14 | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) | Lens 7 coverage copy talks about assignment only; inferring the absence of leaders from role-fill data is banned. The two pipelines — people and coverage — are named as separate. Appendix B's sample replaced with Bryan's wording. |
 | The network register coaches, and the planter sees it first | C15, C16, C24, C25 | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) | §7 gains a verdict ban-list, a same-concern pairing rule and pattern-not-cause — all three enforced on judge output. An assessment releases to oversight when the planter opens it, or after 72 hours. Appendix B's network samples rewritten. |
+| Every lens has an evidence quality, including unknown | C17 | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) | New §5b: measured / attested / unknown per lens, derived from the snapshot and handed to the judge. Unknown is never healthy; the scorecard renders an insufficient-evidence tile. Appendix C question 2 resolved. |
 
 ---
 
@@ -386,6 +387,34 @@ The readiness marks only shape what the engine *says*.
 
 ---
 
+## 5b. Every lens knows what it knows
+
+**Each of the eight lenses carries an evidence quality, and the engine may never
+claim stronger evidence than the lens holds.** ✅
+
+| Quality | Meaning |
+|---|---|
+| **measured** | The database counted something for this lens. |
+| **attested** | Nothing is measured; the planter has answered for it. |
+| **unknown** | Nothing measured and nothing answered. |
+
+- **Unknown is not healthy.** A lens with no evidence produces at most an
+  insufficient-evidence statement — "We don't have enough information to assess prayer
+  yet" — and never a quiet blank that a reader can take for a pass. This is the whole
+  point: the two lenses the engine is blindest about are the two a scorecard would
+  otherwise render most calmly.
+- **Staleness degrades the phrasing, not the quality.** A prayer rhythm attested 45 days
+  ago is still *attested*; what has expired is the confirmation, so the copy says so and
+  the lens does not silently fall back to unknown. Throwing away an answer the planter
+  gave would be its own dishonesty.
+- **Inference is not an evidence quality**, because a *fact* is never inferred — only a
+  *conclusion* can be. Inference is permitted only where this rubric explicitly allows
+  it, and the copy must name the inference and its weakness. Lens 2 is the worked
+  example: it may claim who carries follow-up only from the measured owner facts, and
+  says so in as many words.
+- **The profile is derived, never stored.** It is recomputed from the same facts it
+  describes, so there is nothing that can drift away from them.
+
 ## 6. How observations are labeled
 
 Every observation carries an urgency and an audience.
@@ -659,10 +688,12 @@ it asks.
    supplements, work items only. Positives are a separate surface and never crowd out a
    focus slot — which also answers the second half of the question. See §6 and #478.)*
 
-2. **Prayer and Generosity.** These two lenses are nearly invisible to software. Options:
-   accept thin coverage; lean on planter self-attestation; or add data capture. What
-   would a planter plausibly record that would make prayer health visible without
-   turning it into a compliance exercise?
+2. ~~**Prayer and Generosity.**~~ *(Ruled, in three parts. Prayer is fed by two rhythm
+   attestations rather than a title (#474); generosity is split from financial readiness
+   and gets its own (#475); and thin coverage is now SHOWN as thin rather than left
+   blank — every lens carries an evidence quality, and unknown reads as insufficient
+   evidence (§5b, #483). The answer to "accept thin coverage or lean on attestation" is
+   both, honestly labelled.)*
 
 3. **Every ⚠️ threshold in this document.** Collected: 21 days for a cadence slip ·
    28-day growth comparison window · ~~3 weeks flat to call growth stalled~~ *(ruled:

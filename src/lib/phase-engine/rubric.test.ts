@@ -195,6 +195,21 @@ test("v1 puts the network in a coaching register (#482)", () => {
   assert.match(RUBRICS.v1.body, /"critical mass" is the name of CSF-3/);
 });
 
+test("v1 gives every lens an evidence quality, and unknown is not healthy (#483)", () => {
+  assert.match(RUBRICS.v1.body, /UNKNOWN IS NOT HEALTHY/);
+  assert.match(
+    RUBRICS.v1.body,
+    /YOU MAY NEVER CLAIM STRONGER EVIDENCE THAN THE LENS HOLDS/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /STALENESS DEGRADES THE PHRASING, NOT THE QUALITY/
+  );
+  // A fact is never inferred — only a conclusion is. The distinction is the
+  // reason `inferred` is not one of the three qualities.
+  assert.match(RUBRICS.v1.body, /INFERENCE IS NOT AN EVIDENCE QUALITY/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

@@ -67,6 +67,7 @@ import {
   type TrainingSignals,
   type VisionMeetingSignals,
 } from "./types";
+import { buildEvidenceProfile } from "./evidence";
 import {
   countFollowUpOwnership,
   listOpenFollowUpTasks,
@@ -728,7 +729,7 @@ export function assembleFactSnapshot(
     leadership.isEmpty &&
     training.isEmpty;
 
-  return {
+  const snapshot: PlantFactSnapshot = {
     snapshotVersion: SNAPSHOT_VERSION,
     churchId,
     currentPhase: inputs.church.currentPhase,
@@ -743,6 +744,12 @@ export function assembleFactSnapshot(
     launch,
     manual,
   };
+
+  // Computed LAST, from the blocks above rather than from the inputs, so the
+  // profile can never describe evidence the snapshot does not actually contain
+  // (#483). It is derived, so a reader holding an older snapshot recomputes the
+  // same answer with the same function.
+  return { ...snapshot, evidence: buildEvidenceProfile(snapshot) };
 }
 
 // ----------------------------------------------------------------------------

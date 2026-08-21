@@ -46,6 +46,17 @@ import type {
   SnapshotDeltaField,
 } from "@/lib/phase-engine/assessment";
 import type { PlantAssessment } from "@/db/schema";
+import {
+  buildEvidenceProfile,
+  EVIDENCE_LENSES,
+  type EvidenceLens,
+} from "@/lib/phase-engine/signals/evidence";
+import type { PlantFactSnapshot } from "@/lib/phase-engine/signals/types";
+
+/** Is this insight category one of the eight lenses? Cross-cutting ones are not. */
+function isEvidenceLens(category: string): category is EvidenceLens {
+  return (EVIDENCE_LENSES as readonly string[]).includes(category);
+}
 
 // ----------------------------------------------------------------------------
 // What-changed presentation (PE-016).
@@ -187,6 +198,18 @@ export function FocusPanel({
   // "going well" block cannot disagree about which insight is which.
   const focus = allocateFocus(insights);
 
+  // #483 — derived here, from the assessment's own snapshot, so a card's badge
+  // and the scorecard tile behind it can never disagree about what a lens knows.
+  // Recomputed rather than read off `snapshot.evidence`, so an older persisted
+  // assessment gets a real profile too.
+  const evidence = buildEvidenceProfile(
+    assessment.factSnapshot as PlantFactSnapshot
+  );
+  const evidenceFor = (insight: AssessedInsight) =>
+    isEvidenceLens(insight.category)
+      ? evidence[insight.category].quality
+      : undefined;
+
   const card = (insight: AssessedInsight) =>
     articleRefs ? (
       <InsightCardView
@@ -194,12 +217,14 @@ export function FocusPanel({
         key={insight.id}
         insight={insight}
         articleRefs={articleRefs}
+        evidence={evidenceFor(insight)}
       />
     ) : (
       <InsightCard
         key={insight.id}
         insight={insight}
         feedback={feedbackByInsightId[insight.id]}
+        evidence={evidenceFor(insight)}
       />
     );
 
