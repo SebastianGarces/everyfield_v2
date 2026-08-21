@@ -291,8 +291,10 @@ test("buildSystemPrompt embeds the whole rubric and the grounding constraints", 
   const prompt = buildSystemPrompt(ACTIVE_RUBRIC);
   // Whole rubric is embedded.
   assert.ok(prompt.includes(ACTIVE_RUBRIC.body));
-  // Version is referenced (AC-PE-4 audit linkage).
-  assert.match(prompt, /version v0/);
+  // Version is referenced (AC-PE-4 audit linkage). Read from the constant, not
+  // typed in: what this asserts is that the ACTIVE version reaches the prompt,
+  // and a literal would fail on every flip while proving nothing more.
+  assert.ok(prompt.includes(`version ${ACTIVE_RUBRIC_VERSION}`));
   // Hard constraints are present.
   assert.match(prompt, /NEVER invent/i);
   assert.match(prompt, /citedFacts/);

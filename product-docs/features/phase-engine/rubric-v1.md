@@ -1,11 +1,14 @@
-# Plant Intelligence Rubric — v1 (DRAFT)
+# Plant Intelligence Rubric — v1
 
-**Not in force.** The engine still runs on v0. This document is the v1 draft that
-Bryan's review of v0 produced. `RUBRIC_V1_BODY` is registered in
-`src/lib/phase-engine/rubric.ts` but `ACTIVE_RUBRIC_VERSION` stays `"v0"` until the
-activation issue ([#538](https://github.com/SebastianGarces/everyfield_v2/issues/538))
-flips it, after every [#469](https://github.com/SebastianGarces/everyfield_v2/issues/469)
-sub-issue has landed. Nothing here reaches a planter yet.
+**In force since 2026-08-21.** Every assessment generated from that date records
+`rubric_version: v1` and was produced by the framework this document describes.
+`ACTIVE_RUBRIC_VERSION` in `src/lib/phase-engine/rubric.ts` is `"v1"`, flipped by
+[#538](https://github.com/SebastianGarces/everyfield_v2/issues/538) once all 18
+[#469](https://github.com/SebastianGarces/everyfield_v2/issues/469) sub-issues had landed.
+
+`rubric-v0.md` is the historical record, not a superseded draft: assessments written
+before the flip recorded `v0` and are re-explained against v0's text, so both versions
+stay registered and resolvable.
 
 ---
 
@@ -26,16 +29,18 @@ the question they were mined from, and it is the only question this document ans
 
 ## How to read this document
 
-v1 starts as a copy of v0 and accumulates one ruled change at a time. Each sub-issue of
-#469 edits the section it owns and adds its row to the change log below, so the whole v1
-delta is auditable from this file. A section with no change-log row is still the v0 text.
+v1 started as a copy of v0 and accumulated one ruled change at a time. Each sub-issue of
+#469 edited the section it owned and added its row to the change log below, so the whole
+v1 delta stays auditable from this file. A section with no change-log row carries the v0
+text unchanged — those are the places Bryan's review had nothing to correct.
 
-The classification v0 used stays: ✅ means the number comes from the Launch Playbook or
-the wiki; ⚠️ means it was a placeholder awaiting a practitioner ruling. A ⚠️ that has
-since been ruled on is re-marked ✅ with the ruling recorded in the change log.
+✅ means the number comes from the Launch Playbook or the wiki. v0 also used ⚠️ for a
+placeholder awaiting a practitioner ruling; **no threshold in this document carries one
+any more** — every ⚠️ v0 raised was ruled by the series and is recorded in the change log
+and in Appendix C question 3.
 
 The source review is `bryan-comments-review.md` — Bryan's comments (C01–C26), the
-recorded rulings, and the recommended v1 delta.
+recorded rulings, and the disposition of every one of them.
 
 ### Change log
 
@@ -59,6 +64,7 @@ recorded rulings, and the recommended v1 delta.
 | We assess launch health, not church health | C20 | [#485](https://github.com/SebastianGarces/everyfield_v2/issues/485) | The document opens with the scope statement and names what is out of it. The judge is banned from church-health verdicts in either direction; the same sentence ships on `/phase`, on the oversight portfolio and in the FRD. |
 | Growth composition — transfer vs new believers | C26 | [#487](https://github.com/SebastianGarces/everyfield_v2/issues/487) | Lens 3 gains a light composition note counted from the existing `persons.source` field. Planter-audience only; conversion claims and cross-plant ranking are both banned; the post-alpha upgrade path is named. |
 | The remaining ⚠️ thresholds are ruled | C22, C23 | [#486](https://github.com/SebastianGarces/everyfield_v2/issues/486) | Two-level cadence (21 watch / 28 direct), percentage-based disengagement (20%, min 3), warmth-split follow-up staleness (7 warm / 14 cold), and a compound readiness trigger — time alone never escalates. Appendix C question 3 is now a record rather than a question. |
+| Assembly, coherence pass, and the flip | C12 | [#538](https://github.com/SebastianGarces/everyfield_v2/issues/538) | No new rubric content. Seams from 18 independent edits fixed (two verbatim duplications removed, CSF-2 and the network sections reordered, the network ban-list derived from the code that enforces it). C12 deferred: the vision-meeting **target** stays biweekly and is stated as an open Playbook parameter. `ACTIVE_RUBRIC_VERSION` → `"v1"`. |
 
 ---
 
@@ -105,7 +111,7 @@ on this list, I either add the data capture or the rule waits.
 
 | Area | What is measured |
 |---|---|
-| **Core group** | Number of people with a signed core-group commitment; number with a launch-team commitment; net change over the last 28 days versus the 28 days before |
+| **Core group** | Number of people with a signed core-group commitment; number with a launch-team commitment; net change over the last 28 days versus the 28 days before; **days since the most recent person's *first* core-group commitment** (the stall clock, which any new adult resets); **the mix of recorded sources** across committed members, and how many have none |
 | **Vision meetings** | Total completed; date of the most recent; days since; average gap between recent meetings; attendance at the last two and the direction between them |
 | **Follow-up** | How many contacts are in an active follow-up stage; how many days since the most neglected one was touched; how many are past the staleness threshold, **split by warmth — whether they came to a vision meeting in the last two weeks**; **who owns each open follow-up task** — how many have no live owner, how many stale ones have no live owner, how many distinct people own one, and how many the planter owns |
 | **Ministry roles** | Which of the eight roles (Worship, Children's, Assimilation, Small Groups, Admin/Finance, Facilities, Promotion, Technology) have a leader assigned |
@@ -127,7 +133,7 @@ software product should claim about prayer. See Appendix C, question 2.
 These are evaluated for every plant in every phase. Each lens defines what feeds it,
 what healthy looks like, and what the engine should say when it is not.
 
-**Legend:** ✅ from the Playbook or wiki · ⚠️ my placeholder, needs your ruling
+**Legend:** ✅ from the Playbook or wiki, or ruled by the review. No unruled placeholders remain.
 
 ### Lens 1 · Vision Casting
 
@@ -143,6 +149,14 @@ what healthy looks like, and what the engine should say when it is not.
 - **Healthy: meetings on cadence *and on a predictable rhythm*** ✅ — consistency, not
   only frequency. Inconsistency makes it hard for even committed team members to know
   when meetings happen, and that costs more than the occasional missed week.
+- **The target itself is an open Playbook parameter, and v1 does not move it.** Every two
+  weeks is what the Launch Playbook states, and it is what the engine assesses against.
+  Bryan (C12) ran weekly and consistently — which the review read as a vote for
+  *consistency* in the healthy definition, shipped above, and **not** as a vote to change
+  14 days to 7. Whether the Playbook target moves toward weekly is unruled and stays open:
+  it is a question for the Playbook's authors, not a rubric edit. Until it is ruled, the
+  engine never presents biweekly as the only defensible rhythm, and never tells a planter
+  meeting weekly that they are over-meeting.
 - **What it says:** cadence slipping, at the level the gap earns; attendance plateauing;
   strong conversion worth reinforcing.
 
@@ -155,20 +169,11 @@ what healthy looks like, and what the engine should say when it is not.
   how many the planter owns.
 - **Healthy:** invitations and follow-up spread across the core group — several distinct
   owners, and few follow-ups sitting without one.
-- **What it says, when ownership is measured:** "You own 6 of the 9 open follow-ups.
-  Handing some to committed members spreads ownership of growth — the second Critical
-  Success Factor."
-- **What it says, when ownership is not measured:** "8 follow-ups are currently stale. Make
-  sure each one has a clear owner and reconnect with them this week." Staleness alone is
-  the finding; it names no cause.
 - **The rule this lens exists to enforce:** stale follow-ups do not prove the planter is
   carrying them. They may mean ownership was distributed badly, or that people did not do
   what they agreed to. **The engine may claim who carries follow-up only from the owner
   facts.** The v0 line "you are carrying all the follow-up yourself" is deleted from v1 and
   may not be reconstructed from volume or staleness.
-- **Network wording:** "Several follow-ups have been waiting longer than the follow-up
-  window. This may be worth a coaching conversation." Never an owner's name, never a cause.
-
 - **Staleness depends on the contact** ✅ — a universal 14 days was wrong in both
   directions at once: a week late for somebody who came on Tuesday, and fussy about
   somebody who has been on the list since spring.
@@ -177,16 +182,25 @@ what healthy looks like, and what the engine should say when it is not.
   - **Colder contacts:** 14 days stands.
   - Warmth is a fact, not a status and not a guess: the thing that makes a contact warm
     is that they just turned up.
-
-**Ownership is task ownership, not relationship ownership.** The assignee owns the open
-follow-up task, not the relationship with the contact; the person record is untouched. A
-task assigned to somebody who has since been removed or demoted out of the committed set
-counts as unowned, so an owner who leaves surfaces the follow-up again instead of hiding it.
+- **Ownership is task ownership, not relationship ownership.** The assignee owns the open
+  follow-up task, not the relationship with the contact; the person record is untouched. A
+  task assigned to somebody who has since been removed or demoted out of the committed set
+  counts as unowned, so an owner who leaves surfaces the follow-up again instead of hiding
+  it.
+- **What it says, when ownership is measured:** "You own 6 of the 9 open follow-ups.
+  Handing some to committed members spreads ownership of growth — the second Critical
+  Success Factor."
+- **What it says, when ownership is not measured:** "8 follow-ups are currently stale. Make
+  sure each one has a clear owner and reconnect with them this week." Staleness alone is
+  the finding; it names no cause.
+- **Network wording:** "Several follow-ups have been waiting longer than the follow-up
+  window. This may be worth a coaching conversation." Never an owner's name, never a cause.
 
 ### Lens 3 · Critical Mass
 
 - **What feeds it:** committed core-group adult count, growth over the trailing 28 days,
-  distance to goal, projected trajectory against the launch date.
+  days since the last new committed adult, distance to goal, projected trajectory against
+  the launch date, and the source recorded on each committed member's person record.
 - **These are this methodology's benchmarks, not a definition of a healthy plant.** ✅
   50 committed adults is the lower end of the benchmark range and 100 is the target,
   both drawn from the Launch Playbook. Different contexts and models reasonably launch
@@ -284,8 +298,9 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
   into gatherings.
 - **An unanswered prayer attestation is UNKNOWN, never healthy.** The engine says "we do
   not have enough information to assess prayer health" rather than leaving a blank that
-  reads as a pass. *(The full evidence-quality vocabulary — measured / attested /
-  inferred / unknown — is a separate change; Lens 5 states the local rule now.)*
+  reads as a pass. *(This is the local case of the rule in §5b, which gives every lens an
+  evidence quality — measured, attested, or unknown. Prayer is the lens that rule was
+  written for.)*
 
 ### Lens 6 · Generosity & Financial Readiness
 
@@ -318,9 +333,11 @@ and they call for opposite coaching, so the engine reports them apart.
 
 ### Lens 7 · Emerging Leadership
 
-- **What feeds it:** how many of the eight ministry roles are filled; per-person
-  readiness signals (sustained attendance, volunteering, tenure); coverage gaps as
-  launch approaches.
+- **What feeds it:** how many of the eight ministry roles are filled; per-person candidate
+  signals (sustained attendance, volunteering, tenure); the human judgments already
+  recorded about each candidate (interviews, 4 C's); coverage gaps as launch approaches.
+  *(v0 called the per-person half "readiness signals" — the word this lens exists to stop
+  using.)*
 - **Healthy:** leaders emerging from within the core group to own the eight
   responsibilities; no critical role unfilled close to launch.
 - **What it says — two distinct kinds:**
@@ -554,8 +571,12 @@ Three rules govern it:
    sounds like church planting, not like a quarterly review of an underperforming
    business unit.
    - **Banned for the network audience:** *intervention*, *failing*, *critical*,
-     *lack of*, and "needs to be addressed" framings. *(The phrase "critical mass" is
-     the name of Lens 3 and is always allowed.)*
+     *lack of*, *needs to be addressed*, *must be addressed*, *underperform*,
+     *at risk of failure*, *is behind*. *(The phrase "critical mass" is the name of Lens 3
+     and is always allowed — the check matches on word boundaries.)* The list has one
+     spelling: `NETWORK_VERDICT_PHRASES` in `src/lib/phase-engine/judge/network-register.ts`
+     both fails the judge's output and is interpolated into the rubric text the judge
+     reads, so the rule it is told and the rule it is held to cannot drift apart.
    - **Pattern, not cause.** Name the measured pattern and point at a conversation:
      "Core-group momentum has slowed. This may be worth a coaching conversation around
      vision cadence, invitations, and follow-up." Say *why* only when the cause is
@@ -809,9 +830,20 @@ it asks.
    judge output rather than requested in prose, and the planter-first order is a release
    gate rather than an intention. See §7 and #482.)*
 
-5. **Anything absent.** The eight lenses came from the Playbook's Critical Success
-   Factors. If there is something you assess in a plant that has no lens here, that is
-   the most valuable thing you can tell me.
+5. ~~**Anything absent.**~~ *(Answered, and it produced the two largest additions in v1:
+   planter sustainability (C19 → §5c, #484) and growth composition (C26 → Lens 3, #487).
+   The question stays open as a standing invitation rather than a blocker — a lens nobody
+   has named yet is still the most valuable thing a practitioner can report.)*
+
+6. **The vision-meeting target: every two weeks, or weekly?** *(C12 — the one comment in
+   the review with no ruling, and deliberately still open.)* Bryan met weekly and
+   consistently. v1 took the half of that comment the data supports — **consistency**
+   belongs in Lens 1's healthy definition, and it shipped there — and did **not** move the
+   target from 14 days to 7. The target is a **Launch Playbook parameter**, so changing it
+   is a methodology decision rather than a rubric edit, and one practitioner's practice is
+   not the evidence for it. Until it is ruled, Lens 1 assesses against every two weeks and
+   is explicitly barred from treating biweekly as the only defensible rhythm. Ruling this
+   needs a second practitioner (Brett) or the Playbook's authors.
 
 ---
 
@@ -826,5 +858,5 @@ it asks.
 | **Attestation** | Something the planter confirms by hand because software cannot see it. |
 | **Phase** | Which of the seven stages (0–6) the plant is in. Planter-controlled; never changed automatically. |
 | **Readiness marks** | What "ready for the next phase" looks like. Advisory only — never blocking. |
-| **Rubric version** | Which version of this document produced a given assessment. This document is v1, and it is not yet in force. |
+| **Rubric version** | Which version of this document produced a given assessment. This document is v1, in force since 2026-08-21. Assessments recorded before then carry v0 and are explained against `rubric-v0.md`. |
 | **Follow-up owner** | The assignee of an open follow-up task. Task ownership only — it says nothing about who owns the relationship with the contact. |
