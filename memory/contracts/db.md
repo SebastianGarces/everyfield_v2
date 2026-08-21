@@ -221,6 +221,25 @@ file in git, which is more than either orphan above can claim, and a second unat
 "tidy" it would repeat the original error. `pnpm db:migrate` is a clean no-op against it, verified
 2026-08-21.
 
+**How to recognise it in the ledger, without taking this account on trust.** The write left a
+fingerprint that a read-only query still shows: `id` is a sequence, so insertion order and stamp
+order agree everywhere except at the row that was updated.
+
+```
+ id  71  1787257458645  fafa0c0a0c6f   0054_user_invitations
+ id  72  1787293039967  75f550408de6   0055_task_followup_indexes
+ id  74  1787379439967  54756455312f   0056_insight_category_cohesion
+ id  75  1787465839967  840b2bc27970   0057_feedback_github_issue_number
+ id  73  1787465840967  9924e2188390   0058_church_digest_send_time   <- inserted 3rd, stamped 5th
+```
+
+`id 73` was INSERTED third, when this migration was still `0056_church_digest_send_time` and carried
+`created_at = 1787295616718`; the `UPDATE` moved its stamp above 0057's without moving its id. So the
+row is self-consistent today — its `created_at` matches the journal and its hash matched the
+committed file at the time — while the id ordering is the only surviving trace of how it got there.
+An auditor who finds `id` out of step with `created_at` at exactly one row is looking at this, and
+not at a second orphan.
+
 **Scope.** Exactly one database was ever affected. The old file never reached `main`, so every fresh
 clone, every restore predating 2026-08-21 and production all take EXIT A in that header's reconcile
 block and apply 0058 cleanly.
