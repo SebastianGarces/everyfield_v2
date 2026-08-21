@@ -50,6 +50,7 @@ import {
   perRow,
   SELF_REPORTS,
   toBoolean,
+  toNumber,
   toReadableDate,
   toWords,
   type Phrase,
@@ -83,7 +84,11 @@ const MANUAL_ATTESTATION_TEMPLATE_PREFIX = `${MANUAL_ATTESTATIONS_PREFIX}#.`;
 // ----------------------------------------------------------------------------
 
 /** Every leaf `manual.attestations.#.<leaf>` is allowed to be. */
-export type AttestationLeafName = "value" | "signalKey" | "attestedAt";
+export type AttestationLeafName =
+  | "value"
+  | "signalKey"
+  | "attestedAt"
+  | "attestedDaysAgo";
 
 /**
  * Everything one attestation leaf has to answer. All three, or it does not
@@ -210,7 +215,34 @@ export const ATTESTATION_LEAVES: Record<AttestationLeafName, AttestationLeaf> =
           : null;
       },
     },
+
+    // `…attestedDaysAgo` carries HOW LONG AGO, which is the whole of Bryan's
+    // second prayer question (#474, C21): a rhythm attested four months ago is
+    // not evidence that the plant prays now. It reads as an AGE rather than a
+    // date because that is the shape of the doubt — "45 days ago" prompts the
+    // question, "on 7 July" leaves the reader to do the arithmetic.
+    attestedDaysAgo: {
+      groupKey: () => "attestation:attestedDaysAgo",
+      counted: (asserted) => {
+        const days = toNumber(asserted);
+        return specificAtOne(SELF_REPORTS, (report) =>
+          days === null ? null : `${report} last confirmed ${daysAgo(days)}`
+        );
+      },
+      specific: (signal, asserted) => {
+        const days = toNumber(asserted);
+        return days === null
+          ? null
+          : `${manualSignalClause(signal)}, last confirmed ${daysAgo(days)}`;
+      },
+    },
   };
+
+/** `today` / `1 day ago` / `45 days ago` — a full phrase per branch. */
+function daysAgo(days: number): string {
+  if (days <= 0) return "today";
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
 
 /** The `attestedAt` value as a readable day, or `null` when it is not a date. */
 function readableAttestedAt(asserted: string | null): string | null {

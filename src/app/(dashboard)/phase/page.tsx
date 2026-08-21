@@ -24,6 +24,7 @@ import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
 import { FocusPanel } from "@/components/phase-engine/focus-panel";
 import {
+  readAttestationAges,
   readBooleanSignals,
   readDelta,
 } from "@/components/phase-engine/focus-presentation";
@@ -142,6 +143,9 @@ export default async function PhasePage() {
 
   const delta = latest ? readDelta(latest.assessment.factSnapshot) : null;
   const booleanSignals = readBooleanSignals(manualSignals);
+  // ONE clock read for the ages the card renders (#474 D2). Two ages computed
+  // a millisecond apart can straddle a day boundary and disagree.
+  const attestationAges = readAttestationAges(manualSignals, new Date());
 
   // The CSF scorecard (PE-023) is a pure projection of the SAME snapshot the
   // Focus panel renders — built here rather than re-read, so the two halves of
@@ -221,7 +225,10 @@ export default async function PhasePage() {
               leaves the focus list — the only part of the page a planter acts
               on — directly under the evidence for it. */}
           <MilestoneTimeline timeline={timeline} />
-          <SignalToggles initialValues={booleanSignals} />
+          <SignalToggles
+            initialValues={booleanSignals}
+            attestedDaysAgo={attestationAges}
+          />
         </div>
       </div>
     </div>

@@ -102,7 +102,12 @@ function makeSnapshot(
       isPastDue: false,
       isEmpty: false,
     },
-    manual: { attestations: [], byKey: {}, isEmpty: true },
+    manual: {
+      attestations: [],
+      byKey: {},
+      reaffirmWindowDays: 30,
+      isEmpty: true,
+    },
     ...overrides,
   };
 }

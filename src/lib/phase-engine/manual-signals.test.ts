@@ -100,3 +100,63 @@ test("the toggle card declares no vocabulary of its own", () => {
     );
   }
 });
+
+// ----------------------------------------------------------------------------
+// Prayer is rhythms, not a title (#474, C05/C21)
+// ----------------------------------------------------------------------------
+
+test("the two prayer-rhythm attestations carry the approved copy", () => {
+  const byKey = new Map(MANUAL_SIGNALS.map((s) => [s.key, s]));
+
+  const rhythm = byKey.get("prayer_rhythm_established");
+  assert.equal(rhythm?.label, "Corporate prayer rhythm established");
+  assert.equal(
+    rhythm?.description,
+    "Your core group has a regular, recurring rhythm of praying together."
+  );
+  assert.equal(
+    rhythm?.clause,
+    "your core group has an established corporate prayer rhythm"
+  );
+
+  const gatherings = byKey.get("prayer_in_gatherings");
+  assert.equal(gatherings?.label, "Prayer woven into gatherings");
+  assert.equal(
+    gatherings?.description,
+    "Prayer is a regular part of core-group and leadership gatherings."
+  );
+  assert.equal(
+    gatherings?.clause,
+    "prayer is regularly part of your gatherings"
+  );
+});
+
+test("only the rhythm attestations perish", () => {
+  // A claim about the present tense goes stale; a thing that happened does not.
+  // The card reads this flag rather than the keys, which is what keeps the
+  // vocabulary in one place (see the source scan above).
+  assert.deepEqual(
+    MANUAL_SIGNALS.filter((s) => s.reaffirms).map((s) => s.key),
+    ["prayer_rhythm_established", "prayer_in_gatherings"]
+  );
+});
+
+test("the Prayer Leader toggle survives, as coverage", () => {
+  // #474 demoted it out of CSF-5; it did not delete it. An unfilled role is
+  // still worth knowing — it is just not evidence that a plant prays.
+  const leader = MANUAL_SIGNALS.find((s) => s.key === "prayer_leader_assigned");
+  assert.ok(leader, "the prayer-leader attestation was removed, not demoted");
+  assert.equal(leader.reaffirms, false);
+});
+
+test("the reaffirm chip is driven by the flag, not by a key", () => {
+  const source = readFileSync(
+    join(process.cwd(), "src/components/phase-engine/signal-toggles.tsx"),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /signal\.reaffirms/,
+    "the card must ask the vocabulary which signals perish"
+  );
+});

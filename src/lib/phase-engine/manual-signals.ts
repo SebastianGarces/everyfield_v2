@@ -56,7 +56,35 @@ export interface ManualSignalDefinition {
    * use the same words as the control that produced it.
    */
   clause: string;
+  /**
+   * This attestation GOES STALE, so the card asks again once the reaffirm
+   * window has passed (#474 D2).
+   *
+   * A DECLARED PROPERTY RATHER THAN A KEY CHECK IN THE CARD. Bryan's second
+   * prayer question — "has that gathering actually happened in the last 30
+   * days?" — is not a third toggle; it is the age of an answer the planter
+   * already gave. But the card may not learn which signals those are by
+   * spelling their keys (`manual-signals.test.ts` fails if it does, and the
+   * whole point of this module is that the vocabulary has one home). So the
+   * signal declares its own perishability and the card reads it.
+   *
+   * `values_documented` and `systems_tested` do NOT perish: documenting values
+   * once is documenting them, and a dry run that happened, happened. A rhythm
+   * is a claim about the present tense.
+   */
+  reaffirms: boolean;
 }
+
+/**
+ * How long a perishable answer stays fresh, in days (#474 D2).
+ *
+ * Here rather than beside the snapshot's other thresholds because it is a
+ * property of the VOCABULARY, not of a signal computation — and because this
+ * module is import-free, so the `"use client"` toggle card can read the same
+ * number the judge is handed without dragging the DB client into a browser
+ * chunk. `build-fact-snapshot` imports it from here.
+ */
+export const ATTESTATION_REAFFIRM_WINDOW_DAYS = 30;
 
 /**
  * The curated signals, in the order the toggle card renders them.
@@ -70,24 +98,54 @@ export const MANUAL_SIGNALS = [
     label: "Core values documented",
     description: "Your plant's vision and values are written down and shared.",
     clause: "your core values are documented",
+    // Documenting values once is documenting them. Nothing expires.
+    reaffirms: false,
   },
   {
     key: "financial_base_established",
     label: "Financial base in place",
     description: "Initial funding and a giving plan are established.",
     clause: "your financial base is in place",
+    reaffirms: false,
   },
   {
+    // COVERAGE, NOT HEALTH, since #474 (C05). Bryan: "I would be careful not to
+    // equate having a Prayer Leader with being a praying plant… I don't think
+    // 'Do you have a Prayer Leader?' tells you very much about whether prayer
+    // is actually central." The toggle stays — an unfilled role is still worth
+    // knowing — but rubric v1 cites it under CSF-7 role coverage, and CSF-5
+    // reads the two rhythm attestations below instead.
     key: "prayer_leader_assigned",
     label: "Prayer leader assigned",
     description: "Someone owns the prayer covering for the plant.",
     clause: "a prayer leader is assigned",
+    // A title does not perish; whether it means anything is what CSF-5 stopped
+    // asking it.
+    reaffirms: false,
+  },
+  {
+    key: "prayer_rhythm_established",
+    label: "Corporate prayer rhythm established",
+    description:
+      "Your core group has a regular, recurring rhythm of praying together.",
+    clause: "your core group has an established corporate prayer rhythm",
+    reaffirms: true,
+  },
+  {
+    key: "prayer_in_gatherings",
+    label: "Prayer woven into gatherings",
+    description:
+      "Prayer is a regular part of core-group and leadership gatherings.",
+    clause: "prayer is regularly part of your gatherings",
+    reaffirms: true,
   },
   {
     key: "systems_tested",
     label: "Launch systems tested",
     description: "Check-in, giving, and gathering logistics have a dry run.",
     clause: "your launch systems have been tested",
+    // A dry run that happened, happened.
+    reaffirms: false,
   },
 ] as const satisfies readonly ManualSignalDefinition[];
 

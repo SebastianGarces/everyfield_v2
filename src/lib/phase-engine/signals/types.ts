@@ -281,6 +281,17 @@ export interface ManualAttestation {
   signalKey: string;
   value: unknown;
   attestedAt: string;
+  /**
+   * Whole days since the planter last answered this (#474, C21).
+   *
+   * FRESHNESS IS METADATA, NOT A THIRD QUESTION. Bryan asked whether the prayer
+   * rhythm "has actually happened in the last 30 days"; `plant_signals` already
+   * stamps `attested_at` on every write, including a reaffirm of the same
+   * value, so the answer was already in the row. Asking it as a second toggle
+   * would have turned `/phase` into a questionnaire to learn something the
+   * database knew.
+   */
+  attestedDaysAgo: number;
 }
 
 /**
@@ -291,6 +302,12 @@ export interface ManualSignals {
   attestations: ManualAttestation[];
   /** Lookup by signal key for convenience. */
   byKey: Record<string, unknown>;
+  /**
+   * How long a perishable attestation stays fresh, in days (#474 D2). A fact
+   * rather than a number in the prompt text, for the same reason every other
+   * threshold is: a threshold the judge cites has to be one it was handed.
+   */
+  reaffirmWindowDays: number;
   /** No manual attestations recorded yet. */
   isEmpty: boolean;
 }

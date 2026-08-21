@@ -30,6 +30,7 @@ recorded rulings, and the recommended v1 delta.
 | Stalled growth is 28 days, and any +1 resets it | C02, C22 | [#471](https://github.com/SebastianGarces/everyfield_v2/issues/471) | Lens 3's single "3 weeks flat" ⚠️ becomes two ruled levels: slowed at 21 days, stalled at 28. The 28-day comparison window is kept. |
 | 50/100 are methodology benchmarks, not universal health | C03 | [#472](https://github.com/SebastianGarces/everyfield_v2/issues/472) | The numbers stay; the grammar around them changes, in Lens 3, in Phase 1, in the app copy and across the global wiki corpus. Undershoot is never an unhealthy verdict. |
 | Lens 4 is Cohesion, not Unity | C04 | [#473](https://github.com/SebastianGarces/everyfield_v2/issues/473) | Renamed heading, slug (`cohesion`) and scorecard label. Signals unchanged. Unity is named as a relational judgment the engine does not attempt; the "unity is fragile" sample is deleted. |
+| Prayer is rhythms, with a lighter attestation cycle | C05, C21 | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) | Lens 5 is fed by two rhythm attestations and their age; the Prayer Leader title moves to Lens 7 coverage. "Has it happened in the last 30 days?" ships as freshness metadata plus a reaffirm chip, not as a third question. Unanswered is unknown. |
 
 ---
 
@@ -83,11 +84,12 @@ on this list, I either add the data capture or the rule waits.
 | **Individuals** | Per person: how long they have been in the system, how many vision meetings attended, how many teams they serve on, whether they hold a commitment, whether they lead a team |
 | **Training** | Programs defined, how many are required, completion rate across committed people |
 | **Launch** | Target launch date and days remaining (or days elapsed if past) |
-| **Planter attestations** | Things software cannot observe, which the planter confirms with a toggle: values documented, financial base in place, systems tested, and similar |
+| **Planter attestations** | Things software cannot observe, which the planter confirms with a toggle: values documented, financial base in place, systems tested, corporate prayer rhythm established, prayer woven into gatherings — **and, for every one of them, how many days ago it was confirmed** |
 
-**Known weak spots.** Prayer and Generosity (lenses 5 and 6) have almost no
-measurable representation today — they rest almost entirely on planter self-attestation.
-See Appendix C, question 2.
+**Known weak spots.** Generosity (lens 6) has almost no measurable representation today.
+Prayer (lens 5) rests on planter self-attestation too, but on attestations about
+*rhythms* rather than about a title, carrying their own age — which is the most a
+software product should claim about prayer. See Appendix C, question 2.
 
 ---
 
@@ -189,15 +191,26 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
 
 ### Lens 5 · Prayer
 
-- **What feeds it:** whether a Prayer Leader has been identified; prayer rhythms, if
-  attested by the planter.
-- **Healthy:** prayer leadership identified and rhythms established.
-- **What it says:** "no Prayer Leader identified yet — Prayer is the fifth Critical
-  Success Factor and one of the eight roles to fill before launch."
-- **⚠️ This lens is nearly blind.** Almost nothing about prayer is observable in
-  software. I would rather say little than say something hollow — but if prayer health
-  is genuinely central to your assessment of a plant, tell me what a planter could
-  reasonably record that would make it visible.
+- **What feeds it:** two planter attestations about actual rhythms, **and how recently
+  they were confirmed** ✅
+  - *Corporate prayer rhythm established* — the core group has a regular, recurring
+    rhythm of praying together.
+  - *Prayer woven into gatherings* — prayer is a regular part of core-group and
+    leadership gatherings.
+- **The Prayer Leader title no longer feeds this lens.** ✅ A title does not mean the
+  plant prays. The toggle stays, and is cited under Lens 7 as **role coverage** — one of
+  the eight roles to fill — never as a Lens 5 health pass.
+- **Freshness is part of the fact, not a third question.** Every attestation records
+  when it was answered. An attestation confirmed longer ago than the **30-day reaffirm
+  window** ⚠️ is reported with its age — "you confirmed a prayer rhythm, 45 days ago —
+  is it still happening?" — and the toggle card offers a one-click *Still true*. A stale
+  answer is never silently treated as false, and never silently treated as current.
+- **Healthy:** a rhythm established and reaffirmed inside the window, with prayer woven
+  into gatherings.
+- **An unanswered prayer attestation is UNKNOWN, never healthy.** The engine says "we do
+  not have enough information to assess prayer health" rather than leaving a blank that
+  reads as a pass. *(The full evidence-quality vocabulary — measured / attested /
+  inferred / unknown — is a separate change; Lens 5 states the local rule now.)*
 
 ### Lens 6 · Generosity
 
@@ -397,8 +410,14 @@ They double as my test cases.
     "Several core members' attendance has dropped this month — worth checking in."
     *(v0 continued "Unity is fragile in this season". The engine does not know that;
     it knows attendance dropped.)*
-12. *Missing role* — no Prayer Leader by mid-Phase 2 → "No Prayer Leader identified.
-    Prayer is the fifth Critical Success Factor and one of the eight launch roles."
+12. *Missing role* — no Prayer Leader by mid-Phase 2 → "No Prayer Leader assigned yet —
+    one of the eight launch roles still to cover." *(A coverage observation under Lens 7.
+    It says nothing about whether the plant prays.)*
+12b. *Prayer unknown* — neither prayer attestation answered → "We do not have enough
+    information to assess prayer health yet. Two questions on your phase page would
+    change that."
+12c. *Prayer stale* — rhythm attested 45 days ago, window is 30 → "You confirmed a
+    corporate prayer rhythm 45 days ago — is it still happening?"
 
 **Network-facing** (conservative framing)
 13. *On track* — "Plant is tracking to plan — core group growing steadily, launch date
