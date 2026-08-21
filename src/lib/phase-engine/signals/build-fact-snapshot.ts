@@ -29,6 +29,7 @@ import {
   getOpenFollowUpContacts,
   getPlantSignals,
   getAssessmentsByPerson,
+  getAttendanceSince,
   getInterviewsByPerson,
   getTeamLeaderPersonIds,
   getTrainingCompletions,
@@ -42,6 +43,7 @@ import {
   type FollowUpRow,
   type LeadershipPersonRow,
   type MinistryTeamRow,
+  type AttendanceRow,
   type PersonAssessmentRow,
   type PersonCountRow,
   type PersonInterviewRow,
@@ -54,6 +56,7 @@ import { ATTESTATION_REAFFIRM_WINDOW_DAYS } from "@/lib/phase-engine/manual-sign
 import {
   MINISTRY_ROLE_KEYS,
   type BuildFactSnapshotOptions,
+  type CohesionSignals,
   type CoreGroupSignals,
   type FollowUpSignals,
   type LaunchSignals,
@@ -106,6 +109,32 @@ export const FOLLOW_UP_STALE_THRESHOLD_DAYS = 14;
  * the review; the claim it used to carry does not.
  */
 const LEADERSHIP_CANDIDATE_THRESHOLD_DAYS = 60;
+
+/**
+ * The two levels of a cadence slip (#486, C22). Bryan kept 21 days and asked
+ * for it to sound like a watch rather than a crisis; 28 is where the language
+ * is allowed to get direct.
+ */
+const CADENCE_WATCH_DAYS = 21;
+const CADENCE_DIRECT_DAYS = 28;
+
+/**
+ * COHESION, AS A SHARE (#486, D1/D2). 20% of the active committed group, never
+ * fewer than three people, measured over 28 days. Four of twelve is a crisis;
+ * four of seventy may be a holiday, and the absolute rule was blind to the
+ * difference.
+ */
+const DISENGAGED_SHARE_THRESHOLD = 0.2;
+const DISENGAGED_MINIMUM_COUNT = 3;
+const COHESION_WINDOW_DAYS = 28;
+
+/**
+ * A follow-up contact is WARM for this long after a vision meeting, and goes
+ * stale faster while they are (#486, C22): flagged at 7 days rather than 14.
+ * The 48–72 hour ideal is rubric language — nothing here measures hours.
+ */
+const FOLLOW_UP_WARM_WINDOW_DAYS = 14;
+const FOLLOW_UP_WARM_STALE_THRESHOLD_DAYS = 7;
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -285,6 +314,8 @@ function buildVisionMeetingSignals(
       latestAttendance: null,
       previousAttendance: null,
       attendanceTrend: null,
+      cadenceWatchDays: CADENCE_WATCH_DAYS,
+      cadenceDirectDays: CADENCE_DIRECT_DAYS,
       isEmpty: true,
     };
   }
@@ -323,7 +354,57 @@ function buildVisionMeetingSignals(
     latestAttendance,
     previousAttendance,
     attendanceTrend,
+    cadenceWatchDays: CADENCE_WATCH_DAYS,
+    cadenceDirectDays: CADENCE_DIRECT_DAYS,
     isEmpty: false,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Cohesion (CSF-4) — who has gone quiet, as a share (#486, C22)
+// ----------------------------------------------------------------------------
+//
+// ONE SENTENCE, ON PURPOSE (D2). "Disengaging" is: a committed member who
+// attended NO meeting in the last 28 days after attending at least one in the
+// 28 before that. Anything richer — a scoring curve, a weighted decay — would
+// produce a number nobody could explain back to a planter about a real person.
+//
+// THE DENOMINATOR IS THE ACTIVE GROUP, not everyone who ever signed. A plant
+// carrying forty dormant commitments would otherwise make any share look tiny,
+// which is the opposite of what a percentage was asked for.
+
+function buildCohesionSignals(
+  attendance: AttendanceRow[],
+  committedPeople: Set<string>,
+  teamLeaderIds: string[],
+  asOf: Date
+): CohesionSignals {
+  const windowMs = COHESION_WINDOW_DAYS * MS_PER_DAY;
+  const recentStart = new Date(asOf.getTime() - windowMs);
+  const priorStart = new Date(asOf.getTime() - 2 * windowMs);
+
+  const recent = new Set<string>();
+  const prior = new Set<string>();
+  for (const row of attendance) {
+    if (!committedPeople.has(row.personId)) continue;
+    if (row.datetime > recentStart) recent.add(row.personId);
+    else if (row.datetime > priorStart) prior.add(row.personId);
+  }
+
+  const active = new Set([...recent, ...prior]);
+  // Attended before, absent since. The order of the two windows IS the rule.
+  const disengaged = [...prior].filter((personId) => !recent.has(personId));
+  const leaders = new Set(teamLeaderIds);
+
+  return {
+    activeCommittedCount: active.size,
+    disengagedCount: disengaged.length,
+    disengagedShare: active.size === 0 ? null : disengaged.length / active.size,
+    disengagedIncludesLeader: disengaged.some((id) => leaders.has(id)),
+    disengagedShareThreshold: DISENGAGED_SHARE_THRESHOLD,
+    disengagedMinimumCount: DISENGAGED_MINIMUM_COUNT,
+    windowDays: COHESION_WINDOW_DAYS,
+    isEmpty: active.size === 0,
   };
 }
 
@@ -360,11 +441,47 @@ function buildVisionMeetingSignals(
 // carries follow-up. `countFollowUpOwnership` is shared with `/tasks`, which
 // groups the same rows by the same definition of "owned".
 
+// WARMTH SPLITS THE STALENESS RULE (#486, C22). A universal 14 days was wrong
+// in both directions at once: a week late for somebody who came on Tuesday, and
+// fussy about somebody who has been on the list since spring. Warm means they
+// just turned up — attended a vision meeting inside the warm window — which is
+// a fact rather than a status or a guess.
+
 function buildFollowUpSignals(
   rows: FollowUpRow[],
   openTasks: OpenFollowUpTask[],
+  attendance: AttendanceRow[],
   asOf: Date
 ): FollowUpSignals {
+  const warmSince = new Date(
+    asOf.getTime() - FOLLOW_UP_WARM_WINDOW_DAYS * MS_PER_DAY
+  );
+  const warmPeople = new Set(
+    attendance
+      .filter(
+        (row) =>
+          row.meetingType === "vision_meeting" && row.datetime > warmSince
+      )
+      .map((row) => row.personId)
+  );
+
+  let warmCount = 0;
+  let staleWarmCount = 0;
+  let seriouslyStaleWarmCount = 0;
+  let staleColdCount = 0;
+  for (const row of rows) {
+    const idleDays = diffInDays(row.updatedAt, asOf);
+    if (warmPeople.has(row.id)) {
+      warmCount += 1;
+      if (idleDays >= FOLLOW_UP_WARM_STALE_THRESHOLD_DAYS) staleWarmCount += 1;
+      if (idleDays >= FOLLOW_UP_STALE_THRESHOLD_DAYS) {
+        seriouslyStaleWarmCount += 1;
+      }
+    } else if (idleDays >= FOLLOW_UP_STALE_THRESHOLD_DAYS) {
+      staleColdCount += 1;
+    }
+  }
+
   const ownership = countFollowUpOwnership(
     rows.map((row) => ({
       id: row.id,
@@ -381,6 +498,12 @@ function buildFollowUpSignals(
       staleCount: 0,
       staleThresholdDays: FOLLOW_UP_STALE_THRESHOLD_DAYS,
       ...ownership,
+      warmCount: 0,
+      staleWarmCount: 0,
+      seriouslyStaleWarmCount: 0,
+      staleColdCount: 0,
+      warmWindowDays: FOLLOW_UP_WARM_WINDOW_DAYS,
+      warmStaleThresholdDays: FOLLOW_UP_WARM_STALE_THRESHOLD_DAYS,
       isEmpty: true,
     };
   }
@@ -399,6 +522,12 @@ function buildFollowUpSignals(
     staleCount,
     staleThresholdDays: FOLLOW_UP_STALE_THRESHOLD_DAYS,
     ...ownership,
+    warmCount,
+    staleWarmCount,
+    seriouslyStaleWarmCount,
+    staleColdCount,
+    warmWindowDays: FOLLOW_UP_WARM_WINDOW_DAYS,
+    warmStaleThresholdDays: FOLLOW_UP_WARM_STALE_THRESHOLD_DAYS,
     isEmpty: false,
   };
 }
@@ -672,6 +801,13 @@ export interface SnapshotInputs {
    */
   interviewsByPerson: PersonInterviewRow[];
   assessmentsByPerson: PersonAssessmentRow[];
+  /**
+   * Attendance at completed meetings over the last two cohesion windows
+   * (#486). Two rules read it — who has gone quiet, and which follow-up
+   * contacts are warm — so it is read once and bucketed against the snapshot's
+   * single `asOf`.
+   */
+  attendance: AttendanceRow[];
   trainingPrograms: TrainingProgramRow[];
   trainingCompletions: TrainingCompletionRow[];
   plantSignals: PlantSignalRow[];
@@ -694,6 +830,7 @@ export function assembleFactSnapshot(
   const followUp = buildFollowUpSignals(
     inputs.followUp,
     inputs.followUpTasks,
+    inputs.attendance,
     asOf
   );
   const ministryRoles = buildMinistryRoleSignals(inputs.ministryTeams);
@@ -716,6 +853,12 @@ export function assembleFactSnapshot(
   const launch = buildLaunchSignals(
     inputs.launch ?? null,
     inputs.launchMilestones,
+    asOf
+  );
+  const cohesion = buildCohesionSignals(
+    inputs.attendance,
+    committedPeople,
+    inputs.teamLeaderPersonIds,
     asOf
   );
   const manual = buildManualSignals(inputs.plantSignals, asOf);
@@ -742,6 +885,7 @@ export function assembleFactSnapshot(
     leadership,
     training,
     launch,
+    cohesion,
     manual,
   };
 
@@ -795,6 +939,7 @@ export async function buildFactSnapshot(
     teamLeaderPersonIds,
     interviewsByPerson,
     assessmentsByPerson,
+    attendance,
     trainingPrograms,
     trainingCompletions,
     plantSignals,
@@ -812,6 +957,10 @@ export async function buildFactSnapshot(
     getTeamLeaderPersonIds(churchId),
     getInterviewsByPerson(churchId),
     getAssessmentsByPerson(churchId),
+    getAttendanceSince(
+      churchId,
+      new Date(asOf.getTime() - 2 * COHESION_WINDOW_DAYS * MS_PER_DAY)
+    ),
     getTrainingPrograms(churchId),
     getTrainingCompletions(churchId),
     getPlantSignals(churchId),
@@ -834,6 +983,7 @@ export async function buildFactSnapshot(
       teamLeaderPersonIds,
       interviewsByPerson,
       assessmentsByPerson,
+      attendance,
       trainingPrograms,
       trainingCompletions,
       plantSignals,

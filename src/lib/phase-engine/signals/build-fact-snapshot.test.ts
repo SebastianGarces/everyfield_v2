@@ -124,6 +124,7 @@ function richInputs(): SnapshotInputs {
     teamLeaderPersonIds: ["A", "B"],
     interviewsByPerson: [],
     assessmentsByPerson: [],
+    attendance: [],
     trainingPrograms: [
       { id: "tp1", isRequired: true },
       { id: "tp2", isRequired: false },
@@ -165,6 +166,7 @@ function coldStartInputs(): SnapshotInputs {
     teamLeaderPersonIds: [],
     interviewsByPerson: [],
     assessmentsByPerson: [],
+    attendance: [],
     trainingPrograms: [],
     trainingCompletions: [],
     plantSignals: [],
@@ -943,4 +945,159 @@ test("the evidence profile reaches the judge's fact ledger (#483)", () => {
   assert.equal(ledger.get("evidence.prayer.attestedDaysAgo"), "45");
   assert.equal(ledger.get("evidence.generosity.quality"), "unknown");
   assert.equal(ledger.get("evidence.critical_mass.quality"), "unknown");
+});
+
+// ----------------------------------------------------------------------------
+// The threshold pack (#486, C22/C23)
+// ----------------------------------------------------------------------------
+
+function attended(personId: string, daysAgo: number, type = "team_meeting") {
+  return { personId, meetingType: type, datetime: daysBefore(AS_OF, daysAgo) };
+}
+
+test("the cadence slip has two levels, both handed to the judge", () => {
+  const snap = assembleFactSnapshot(CHURCH_ID, richInputs(), AS_OF);
+  assert.equal(snap.visionMeetings.cadenceWatchDays, 21);
+  assert.equal(snap.visionMeetings.cadenceDirectDays, 28);
+
+  const ledger = new Map(
+    flattenFacts(snap).map((line) => [line.key, line.value])
+  );
+  assert.equal(ledger.get("visionMeetings.cadenceWatchDays"), "21");
+  assert.equal(ledger.get("visionMeetings.cadenceDirectDays"), "28");
+});
+
+test("disengagement is a share of the ACTIVE committed group", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = ["a", "b", "c", "d", "e"].map((personId) => ({
+    personId,
+    commitmentType: "core_group",
+    signedDate: "2026-01-01",
+  }));
+  inputs.attendance = [
+    // Everybody came in the PRIOR window…
+    ...["a", "b", "c", "d", "e"].map((id) => attended(id, 40)),
+    // …only two came in the RECENT one.
+    attended("a", 5),
+    attended("b", 5),
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.cohesion.activeCommittedCount, 5);
+  assert.equal(snap.cohesion.disengagedCount, 3);
+  assert.equal(snap.cohesion.disengagedShare, 0.6);
+  assert.equal(snap.cohesion.disengagedIncludesLeader, false);
+});
+
+test("somebody who never came is not 'disengaging'", () => {
+  // The definition is ATTENDED THEN STOPPED. Never having come is a different
+  // fact and belongs to a different lens.
+  const inputs = coldStartInputs();
+  inputs.commitments = ["a", "b"].map((personId) => ({
+    personId,
+    commitmentType: "core_group",
+    signedDate: "2026-01-01",
+  }));
+  inputs.attendance = [attended("a", 40), attended("a", 5)];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  // `b` never appears, so they are not active and not disengaged.
+  assert.equal(snap.cohesion.activeCommittedCount, 1);
+  assert.equal(snap.cohesion.disengagedCount, 0);
+});
+
+test("a leader among the disengaged is flagged, not weighted", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = ["a", "b"].map((personId) => ({
+    personId,
+    commitmentType: "core_group",
+    signedDate: "2026-01-01",
+  }));
+  inputs.attendance = [attended("a", 40), attended("b", 40), attended("b", 5)];
+  inputs.teamLeaderPersonIds = ["a"];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.cohesion.disengagedCount, 1);
+  assert.equal(snap.cohesion.disengagedIncludesLeader, true);
+  // The share is untouched by who they are — the flag is qualitative.
+  assert.equal(snap.cohesion.disengagedShare, 0.5);
+});
+
+test("follow-up staleness splits by warmth", () => {
+  const inputs = coldStartInputs();
+  inputs.followUp = [
+    // Warm (came to a vision meeting 3 days ago), untouched 9 days: past the
+    // 7-day warm window but not seriously stale.
+    { id: "warm-flagged", status: "attendee", updatedAt: daysBefore(AS_OF, 9) },
+    // Warm and untouched for 20 days: seriously stale.
+    { id: "warm-bad", status: "attendee", updatedAt: daysBefore(AS_OF, 20) },
+    // Warm and touched yesterday: fine.
+    { id: "warm-ok", status: "attendee", updatedAt: daysBefore(AS_OF, 1) },
+    // Cold and untouched 20 days: stale on the 14-day rule.
+    {
+      id: "cold-bad",
+      status: "following_up",
+      updatedAt: daysBefore(AS_OF, 20),
+    },
+    // Cold and untouched 9 days: NOT stale — this is the case the universal
+    // 14-day rule got wrong in the other direction.
+    { id: "cold-ok", status: "following_up", updatedAt: daysBefore(AS_OF, 9) },
+  ];
+  inputs.attendance = ["warm-flagged", "warm-bad", "warm-ok"].map((id) =>
+    attended(id, 3, "vision_meeting")
+  );
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.followUp.warmCount, 3);
+  assert.equal(snap.followUp.staleWarmCount, 2);
+  assert.equal(snap.followUp.seriouslyStaleWarmCount, 1);
+  assert.equal(snap.followUp.staleColdCount, 1);
+  assert.equal(snap.followUp.warmWindowDays, 14);
+  assert.equal(snap.followUp.warmStaleThresholdDays, 7);
+});
+
+test("a team meeting does not make a contact warm", () => {
+  // Warmth is "they just came to a VISION MEETING" — the event that creates a
+  // follow-up in the first place.
+  const inputs = coldStartInputs();
+  inputs.followUp = [
+    { id: "p1", status: "attendee", updatedAt: daysBefore(AS_OF, 9) },
+  ];
+  inputs.attendance = [attended("p1", 3, "team_meeting")];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.followUp.warmCount, 0);
+  assert.equal(snap.followUp.staleColdCount, 0);
+});
+
+test("the cohesion and warmth facts reach the judge's ledger", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = ["a", "b"].map((personId) => ({
+    personId,
+    commitmentType: "core_group",
+    signedDate: "2026-01-01",
+  }));
+  inputs.attendance = [attended("a", 40), attended("b", 40), attended("b", 5)];
+
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, inputs, AS_OF)).map((line) => [
+      line.key,
+      line.value,
+    ])
+  );
+
+  assert.equal(ledger.get("cohesion.disengagedCount"), "1");
+  assert.equal(ledger.get("cohesion.disengagedShareThreshold"), "0.2");
+  assert.equal(ledger.get("cohesion.disengagedMinimumCount"), "3");
+  assert.equal(ledger.get("followUp.warmStaleThresholdDays"), "7");
+
+  for (const key of [
+    "cohesion.disengagedShare",
+    "cohesion.disengagedIncludesLeader",
+    "followUp.staleWarmCount",
+    "followUp.staleColdCount",
+    "visionMeetings.cadenceWatchDays",
+  ]) {
+    assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
+  }
 });

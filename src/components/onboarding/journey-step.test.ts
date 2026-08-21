@@ -507,6 +507,7 @@ function onboardedInputs(launch: SnapshotInputs["launch"]): SnapshotInputs {
     teamLeaderPersonIds: [],
     interviewsByPerson: [],
     assessmentsByPerson: [],
+    attendance: [],
     trainingPrograms: [],
     trainingCompletions: [],
     plantSignals: [],

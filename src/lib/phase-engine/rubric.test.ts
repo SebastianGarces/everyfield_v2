@@ -240,6 +240,31 @@ test("v1 opens by saying what it does NOT assess (#485)", () => {
   assert.doesNotMatch(RUBRICS.v0.body, /church-health/i);
 });
 
+test("v1 rules the last of the placeholder thresholds (#486)", () => {
+  // Cadence: two levels, and the watch level must not sound like the direct one.
+  assert.match(
+    RUBRICS.v1.body,
+    /A CADENCE SLIP HAS TWO LEVELS AND THEY DO NOT SHARE A VOICE/
+  );
+  assert.match(RUBRICS.v1.body, /three weeks is not one/);
+
+  // Disengagement: a share, with a floor, and the leader flag is not a weight.
+  assert.match(
+    RUBRICS.v1.body,
+    /NAME CLUSTER DISENGAGEMENT AS A SHARE, NOT A COUNT/
+  );
+  assert.match(RUBRICS.v1.body, /qualitative rule, not a weighting/);
+  assert.doesNotMatch(RUBRICS.v1.body, /4 or more members/);
+
+  // Follow-up: warmth splits it.
+  assert.match(RUBRICS.v1.body, /STALENESS DEPENDS ON THE CONTACT/);
+  assert.match(RUBRICS.v1.body, /48–72 hours/);
+
+  // Readiness: time alone never escalates.
+  assert.match(RUBRICS.v1.body, /TIME IS NEVER SUFFICIENT/);
+  assert.match(RUBRICS.v1.body, /is NOTHING TO ESCALATE/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
