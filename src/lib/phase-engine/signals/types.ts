@@ -165,10 +165,21 @@ export interface MinistryRoleSignals {
 }
 
 /**
- * Per-person leadership-readiness signal. Purely countable inputs — the judge
- * interprets them; it never invents the underlying numbers.
+ * Per-person LEADERSHIP CANDIDATE signal (#476, C07) — renamed from
+ * `LeadershipReadinessSignal`, because the old name was the claim.
+ *
+ * Bryan: "Attendance and volunteering can identify a potential leader, but
+ * character, doctrine, gifting, relational maturity, teachability, etc. still
+ * require human judgment. Maybe call this a Leadership Candidate Signal rather
+ * than readiness." The facts below are unchanged — what changed is that the
+ * type no longer promises they add up to readiness.
+ *
+ * Purely countable inputs; the judge interprets them and never invents the
+ * numbers. Two of them are RECORDED HUMAN JUDGMENTS rather than behaviour, and
+ * they are the reason this signal can now say more than "they turn up": the
+ * judge may cite what an interviewer concluded, and may never conclude it.
  */
-export interface LeadershipReadinessSignal {
+export interface LeadershipCandidateSignal {
   personId: string;
   /** Current pipeline status (PersonStatus). */
   status: string;
@@ -182,11 +193,41 @@ export interface LeadershipReadinessSignal {
   hasCommitment: boolean;
   /** Person leads at least one ministry team. */
   leadsTeam: boolean;
+  /** 5-criteria interviews recorded for this person. */
+  interviewCount: number;
+  /**
+   * The `overall_result` of the most recent interview, or `null` when there has
+   * been none. A HUMAN'S recorded verdict — the judge cites it, never makes it.
+   */
+  lastInterviewResult: string | null;
+  /** ISO date of that interview, or `null`. */
+  lastInterviewDate: string | null;
+  /** 4 C's assessments recorded for this person. */
+  assessmentCount: number;
+  /** `total_score` of the most recent 4 C's assessment, or `null`. */
+  lastAssessmentTotal: number | null;
+  /** ISO date of that assessment, or `null`. */
+  lastAssessmentDate: string | null;
 }
+
+/**
+ * @deprecated Renamed to {@link LeadershipCandidateSignal} in #476. The alias
+ * stays for one release so a stored snapshot's type can still be named by
+ * anything reading history; new code uses the candidate name.
+ */
+export type LeadershipReadinessSignal = LeadershipCandidateSignal;
 
 export interface LeadershipSignals {
   /** Readiness rows for committed / core-group / launch-team / leader people. */
-  candidates: LeadershipReadinessSignal[];
+  candidates: LeadershipCandidateSignal[];
+  /**
+   * The behavioural pattern that OPENS a leadership conversation, in days
+   * (#476, C07 + C22). It never closes one: 60 days of unbroken attendance and
+   * serving is "have you considered more for this person?", not "this person is
+   * ready to lead". A fact rather than a number in the prompt text, so the
+   * judge cites a threshold it was handed.
+   */
+  candidateThresholdDays: number;
   /** No leadership candidates yet. */
   isEmpty: boolean;
 }

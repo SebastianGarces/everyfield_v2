@@ -27,9 +27,11 @@
 
 import { db } from "@/db";
 import {
+  assessments,
   churches,
   churchMeetings,
   commitments,
+  interviews,
   launches,
   launchMilestones,
   meetingAttendance,
@@ -329,6 +331,99 @@ export async function getLeadershipCandidates(
 export interface PersonCountRow {
   personId: string;
   count: number;
+}
+
+// ----------------------------------------------------------------------------
+// Recorded human judgments about a candidate (#476, C07)
+//
+// The 60-day behavioural pattern says somebody keeps turning up. It cannot say
+// whether they are ready to lead, because character, doctrine, gifting,
+// relational maturity and teachability are human territory. Those judgments
+// already exist in this product — the 5-criteria interview and the 4 C's
+// assessment — and until now the phase engine could not see them, so its only
+// vocabulary for a person was behaviour.
+//
+// These two reads give the judge the human's RECORDED CONCLUSION and its date.
+// It may cite one. It may never make one.
+// ----------------------------------------------------------------------------
+
+/** One person's interview history, reduced to a count and the latest verdict. */
+export interface PersonInterviewRow {
+  personId: string;
+  count: number;
+  lastResult: string;
+  lastDate: string;
+}
+
+/**
+ * Interview counts plus the most recent `overall_result` per person.
+ *
+ * `DISTINCT ON` rather than a window function or a self-join: one pass, one
+ * row per person, and the ORDER BY inside it is what defines "most recent" —
+ * interview date first, then `created_at` to break a same-day tie
+ * deterministically (AC-PE-2 wants the same snapshot from the same rows).
+ */
+export async function getInterviewsByPerson(
+  churchId: string
+): Promise<PersonInterviewRow[]> {
+  const rows = await db.execute<{
+    person_id: string;
+    count: number;
+    last_result: string;
+    last_date: string;
+  }>(sql`
+    select distinct on (${interviews.personId})
+      ${interviews.personId} as person_id,
+      count(*) over (partition by ${interviews.personId})::int as count,
+      ${interviews.overallResult} as last_result,
+      ${interviews.interviewDate} as last_date
+    from ${interviews}
+    where ${interviews.churchId} = ${churchId}
+    order by ${interviews.personId}, ${interviews.interviewDate} desc, ${interviews.createdAt} desc
+  `);
+
+  return rows.rows.map((row) => ({
+    personId: row.person_id,
+    count: row.count,
+    lastResult: row.last_result,
+    lastDate: row.last_date,
+  }));
+}
+
+/** One person's 4 C's history, reduced to a count and the latest total. */
+export interface PersonAssessmentRow {
+  personId: string;
+  count: number;
+  lastTotal: number;
+  lastDate: string;
+}
+
+/** 4 C's counts plus the most recent `total_score` per person. */
+export async function getAssessmentsByPerson(
+  churchId: string
+): Promise<PersonAssessmentRow[]> {
+  const rows = await db.execute<{
+    person_id: string;
+    count: number;
+    last_total: number;
+    last_date: string;
+  }>(sql`
+    select distinct on (${assessments.personId})
+      ${assessments.personId} as person_id,
+      count(*) over (partition by ${assessments.personId})::int as count,
+      ${assessments.totalScore} as last_total,
+      ${assessments.assessmentDate} as last_date
+    from ${assessments}
+    where ${assessments.churchId} = ${churchId}
+    order by ${assessments.personId}, ${assessments.assessmentDate} desc, ${assessments.createdAt} desc
+  `);
+
+  return rows.rows.map((row) => ({
+    personId: row.person_id,
+    count: row.count,
+    lastTotal: row.last_total,
+    lastDate: row.last_date,
+  }));
 }
 
 /** Completed-vision-meeting attendance counts per person, church-scoped. */

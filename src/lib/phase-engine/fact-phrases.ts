@@ -424,6 +424,54 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
       (who, n) => `${who} not yet leading ${n === 1 ? "a team" : "teams"}`
     )
   ),
+  // The RECORDED HUMAN JUDGMENTS (#476). These read as what somebody wrote down,
+  // never as a conclusion the engine reached: "an interview on record", not
+  // "assessed as suitable". A candidate with none is a next step, not a mark.
+  "leadership.candidates.#.interviewCount": numeric((n) =>
+    n === 0
+      ? perRow(CANDIDATES, (who) => `${who} with no interview on record`)
+      : perRow(
+          CANDIDATES,
+          (who, rows) =>
+            `${who}${rows === 1 ? "" : " each"} with ${count(n, "interview", "interviews")} on record`
+        )
+  ),
+  "leadership.candidates.#.lastInterviewResult": (value) =>
+    value
+      ? perRow(
+          CANDIDATES,
+          (who) => `${who} whose last interview was recorded ${toWords(value)}`
+        )
+      : null,
+  "leadership.candidates.#.lastInterviewDate": (value) =>
+    value && ISO_DATE_PATTERN.test(value)
+      ? perRow(
+          CANDIDATES,
+          (who) => `${who} interviewed on ${toReadableDate(value)}`
+        )
+      : null,
+  "leadership.candidates.#.assessmentCount": numeric((n) =>
+    n === 0
+      ? perRow(CANDIDATES, (who) => `${who} with no 4 C's assessment on record`)
+      : perRow(
+          CANDIDATES,
+          (who, rows) =>
+            `${who}${rows === 1 ? "" : " each"} with ${count(n, "4 C's assessment", "4 C's assessments")} on record`
+        )
+  ),
+  "leadership.candidates.#.lastAssessmentTotal": numeric((total) =>
+    perRow(CANDIDATES, (who) => `${who} scoring ${total} on their last 4 C's`)
+  ),
+  "leadership.candidates.#.lastAssessmentDate": (value) =>
+    value && ISO_DATE_PATTERN.test(value)
+      ? perRow(
+          CANDIDATES,
+          (who) => `${who} assessed on ${toReadableDate(value)}`
+        )
+      : null,
+  "leadership.candidateThresholdDays": numeric(
+    (n) => `${n} days of attendance and serving before a candidate signal fires`
+  ),
   "leadership.isEmpty": boolean(
     "no leadership candidates yet",
     "leadership candidates on your list"
