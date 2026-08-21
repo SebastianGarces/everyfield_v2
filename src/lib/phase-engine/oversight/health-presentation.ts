@@ -23,19 +23,27 @@ import type {
 // ----------------------------------------------------------------------------
 
 /**
- * Scan order for the three postures. Lower sorts first: the operator lands on
+ * Scan order for the four postures. Lower sorts first: the operator lands on
  * the plants that warrant a conversation before the ones that don't.
+ *
+ * `limited-visibility` sits ABOVE `on-track` (#480 D1). It is not a fault — a
+ * planter is entitled to share nothing — but it is the group where the
+ * overseer's next move is a conversation rather than nothing, and putting it
+ * below "On track" would bury the one section whose whole purpose is to stop
+ * silence being read as health.
  */
 const CLASSIFICATION_ORDER: Record<PlantHealthClassification, number> = {
   readiness: 0,
   watch: 1,
-  "on-track": 2,
+  "limited-visibility": 2,
+  "on-track": 3,
 };
 
 /** Groups render in this order, top to bottom. */
 export const CLASSIFICATION_SCAN_ORDER = [
   "readiness",
   "watch",
+  "limited-visibility",
   "on-track",
 ] as const;
 
@@ -63,12 +71,31 @@ export const CLASSIFICATION_META: Record<
     description: "One or more medium-urgency observations this cycle.",
     anchor: "worth-a-look",
   },
+  // NEUTRAL, NOT A WARNING (#480, C11). Bryan asked only that absence of
+  // warning signs not read as an on-track signal — not that privacy be
+  // presented as a problem. The label states a fact about the OVERSEER'S VIEW
+  // ("limited visibility"), never a judgement about the plant, and the detail
+  // wording is his: "Plant has chosen not to share assessment data."
+  "limited-visibility": {
+    label: "Limited visibility",
+    description:
+      "This plant has chosen not to share assessment data, so there is nothing here to read as health either way.",
+    anchor: "limited-visibility",
+  },
   "on-track": {
     label: "On track",
     description: "No elevated observations this cycle.",
     anchor: "on-track",
   },
 };
+
+/**
+ * The one sentence a plant-detail surface shows when the overseer cannot see.
+ * Bryan's own wording (C11), kept in the presentation vocabulary so the
+ * portfolio badge and the detail line cannot drift into two explanations.
+ */
+export const LIMITED_VISIBILITY_DETAIL =
+  "Plant has chosen not to share assessment data.";
 
 // ----------------------------------------------------------------------------
 // Plant ordering.
