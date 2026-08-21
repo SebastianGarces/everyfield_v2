@@ -9,17 +9,15 @@ that fits the task and keep moving.
 
 1. **Pick work.** An open, unblocked, unassigned issue on the board, or whatever Sebastian asked
    for. No issue yet? Write a two-line one with an observable outcome, then build. The canonical
-   frontier query (always `--paginate` — a bare `gh issue list` caps at 30 and lies; the REST
-   endpoint returns PRs too, hence the filter):
+   frontier query is a script, so there is one of it:
    ```bash
-   R=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   for label in agent:queued agent:changes-requested; do
-     gh api --paginate "repos/$R/issues?labels=$label&state=open&per_page=100" \
-       --jq '.[] | select(.pull_request == null)
-             | select(.issue_dependencies_summary.blocked_by == 0 and (.assignees | length) == 0)
-             | .number'
-   done
+   ops/board.sh frontier   # open, unblocked, unassigned, agent:queued or agent:changes-requested
    ```
+   **Never re-derive it with `gh issue list --label` or `?labels=`.** A server-side label filter
+   lags about three seconds behind the write, so an issue another pass claimed moments ago still
+   reads as queued — the script fetches the issues and matches labels itself. The reason, measured:
+   the header of `ops/board.sh`.
+
    Claim by swapping the label for `agent:in-progress`; two parallel sessions on one issue is the
    only collision worth guarding.
 2. **Decide, don't ask.** Rule from `product-docs/product-values.md`, `CONTEXT.md` and `memory/`.
