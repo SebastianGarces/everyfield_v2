@@ -195,9 +195,12 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Wiki: "Core Group Meeting Format", "Core Group Commitments Explained".
 
 ### CSF-5 · Prayer
-- Signals: Prayer Leader role assigned? (manual-attestation today — weak system representation).
-- Healthy: prayer leadership identified; prayer rhythms established.
-- Insight types: "no Prayer Leader identified yet — Prayer is CSF #5 and one of the 8 launch roles."
+- Signals: TWO ATTESTATIONS ABOUT RHYTHMS, plus how recently each was confirmed — \`manual.byKey.prayer_rhythm_established\` (the core group has a regular, recurring rhythm of praying together) and \`manual.byKey.prayer_in_gatherings\` (prayer is a regular part of core-group and leadership gatherings). Each attestation carries \`attestedDaysAgo\`, against \`manual.reaffirmWindowDays\` (30).
+- THE PRAYER LEADER TITLE DOES NOT FEED THIS LENS. A title does not mean the plant prays. \`prayer_leader_assigned\` is cited under CSF-7 as ROLE COVERAGE — one of the eight roles to fill — and never as a CSF-5 health pass.
+- Healthy: a rhythm established and confirmed within the window, with prayer woven into gatherings.
+- UNANSWERED IS UNKNOWN, NEVER HEALTHY. With neither attestation answered, say "we do not have enough information to assess prayer health yet" — never a blank, and never a pass.
+- STALE IS CITED WITH ITS AGE, not silently treated as current or as false: "you confirmed a corporate prayer rhythm 45 days ago — is it still happening?"
+- Insight types: prayer unknown; prayer rhythm going stale; rhythm established and fresh (worth reinforcing); Prayer Leader role uncovered (CSF-7).
 - Wiki: "The Prayer Leader Role".
 
 ### CSF-6 · Generosity

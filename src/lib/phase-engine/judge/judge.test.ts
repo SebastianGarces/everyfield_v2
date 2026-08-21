@@ -115,6 +115,7 @@ function makeSnapshot(
     manual: {
       attestations: [],
       byKey: {},
+      reaffirmWindowDays: 30,
       isEmpty: true,
     },
     ...overrides,

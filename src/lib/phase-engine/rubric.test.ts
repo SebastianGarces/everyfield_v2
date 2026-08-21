@@ -67,6 +67,19 @@ test("v1 renames Lens 4 to Cohesion and says why (#473)", () => {
   );
 });
 
+test("v1 feeds Lens 5 from rhythms, not from a title (#474)", () => {
+  assert.match(RUBRICS.v0.body, /Prayer Leader role assigned\?/);
+  assert.match(
+    RUBRICS.v1.body,
+    /THE PRAYER LEADER TITLE DOES NOT FEED THIS LENS/
+  );
+  assert.match(RUBRICS.v1.body, /prayer_rhythm_established/);
+  assert.match(RUBRICS.v1.body, /prayer_in_gatherings/);
+  // The half that stops a blank reading as a pass.
+  assert.match(RUBRICS.v1.body, /UNANSWERED IS UNKNOWN, NEVER HEALTHY/);
+  assert.match(RUBRICS.v1.body, /STALE IS CITED WITH ITS AGE/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

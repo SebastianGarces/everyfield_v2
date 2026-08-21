@@ -731,3 +731,79 @@ test("AC-4: the streak and both thresholds reach the judge's fact ledger", () =>
     assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
   }
 });
+
+// ----------------------------------------------------------------------------
+// Attestation freshness (#474, C21)
+//
+// Bryan asked three prayer questions. The second — "has that gathering/rhythm
+// actually happened in the last 30 days?" — is not a third toggle: every
+// attestation already records WHEN it was answered, so the answer was in the
+// row. These tests pin that the age is computed and handed to the judge, since
+// an age the judge never sees is a question still unanswered.
+// ----------------------------------------------------------------------------
+
+test("every attestation carries how many days ago it was answered", () => {
+  const inputs = coldStartInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "prayer_rhythm_established",
+      value: true,
+      attestedAt: daysBefore(AS_OF, 45),
+    },
+    {
+      signalKey: "prayer_in_gatherings",
+      value: true,
+      attestedAt: AS_OF,
+    },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  const ages = Object.fromEntries(
+    snap.manual.attestations.map((a) => [a.signalKey, a.attestedDaysAgo])
+  );
+
+  assert.equal(ages.prayer_rhythm_established, 45);
+  assert.equal(ages.prayer_in_gatherings, 0);
+  assert.equal(snap.manual.reaffirmWindowDays, 30);
+});
+
+test("a future attestation reads as 0 days ago, never as a negative age", () => {
+  // Clock skew, or a hand-written row. "-3 days ago" is a sentence the judge
+  // would say out loud.
+  const inputs = coldStartInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "prayer_rhythm_established",
+      value: true,
+      attestedAt: new Date(AS_OF.getTime() + 3 * 24 * 60 * 60 * 1000),
+    },
+  ];
+
+  assert.equal(
+    assembleFactSnapshot(CHURCH_ID, inputs, AS_OF).manual.attestations[0]
+      .attestedDaysAgo,
+    0
+  );
+});
+
+test("the age and the window reach the judge's fact ledger", () => {
+  const inputs = coldStartInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "prayer_rhythm_established",
+      value: true,
+      attestedAt: daysBefore(AS_OF, 45),
+    },
+  ];
+
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, inputs, AS_OF)).map((line) => [
+      line.key,
+      line.value,
+    ])
+  );
+
+  assert.equal(ledger.get("manual.attestations.0.attestedDaysAgo"), "45");
+  assert.equal(ledger.get("manual.attestations.0.value"), "true");
+  assert.equal(ledger.get("manual.reaffirmWindowDays"), "30");
+});

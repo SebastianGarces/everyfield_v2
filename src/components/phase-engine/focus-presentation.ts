@@ -56,6 +56,31 @@ export function readBooleanSignals(
   return values;
 }
 
+/**
+ * Whole days since each attestation was last answered, keyed by signal key
+ * (#474 D2) — what the toggle card needs to know which answers have gone stale.
+ *
+ * Measured against ONE `asOf` the caller supplies, for the same reason `/tasks`
+ * takes one clock read for its whole render: two ages computed a millisecond
+ * apart can straddle a day boundary and disagree (`memory/invariants.md` → Date
+ * & Time Rendering).
+ *
+ * Clamped at 0 — a clock skew must not render "confirmed -3 days ago".
+ */
+export function readAttestationAges(
+  signals: { signalKey: string; attestedAt: Date }[],
+  asOf: Date
+): Record<string, number> {
+  const ages: Record<string, number> = {};
+  for (const signal of signals) {
+    ages[signal.signalKey] = Math.max(
+      0,
+      Math.floor((asOf.getTime() - signal.attestedAt.getTime()) / 86_400_000)
+    );
+  }
+  return ages;
+}
+
 // ----------------------------------------------------------------------------
 // Severity presentation — plain language, never a raw enum (PE-009).
 // ----------------------------------------------------------------------------

@@ -899,6 +899,7 @@ const LEAF_SAMPLES: Record<AttestationLeafName, readonly [string, string]> = {
   value: ["values_documented", "financial_base_established"],
   signalKey: ["values_documented", "financial_base_established"],
   attestedAt: ["2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z"],
+  attestedDaysAgo: ["45", "12"],
 };
 
 for (const leaf of ATTESTATION_LEAF_NAMES) {

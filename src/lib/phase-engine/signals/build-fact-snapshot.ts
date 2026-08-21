@@ -46,6 +46,7 @@ import {
   type TrainingProgramRow,
   type VisionMeetingRow,
 } from "./queries";
+import { ATTESTATION_REAFFIRM_WINDOW_DAYS } from "@/lib/phase-engine/manual-signals";
 import {
   MINISTRY_ROLE_KEYS,
   type BuildFactSnapshotOptions,
@@ -555,7 +556,10 @@ function buildLaunchSignals(
 // Manual attestations (PE-005)
 // ----------------------------------------------------------------------------
 
-function buildManualSignals(rows: PlantSignalRow[]): ManualSignals {
+function buildManualSignals(
+  rows: PlantSignalRow[],
+  asOf: Date
+): ManualSignals {
   // PROTOTYPE-FREE, because `row.signalKey` is a stored string and this is the
   // WRITE half of the untrusted-key rule (memory/invariants.md → Phase Engine —
   // Cited Facts & Attestation Citations). On a plain `{}`, `byKey["__proto__"]`
@@ -569,12 +573,17 @@ function buildManualSignals(rows: PlantSignalRow[]): ManualSignals {
       signalKey: row.signalKey,
       value: row.value,
       attestedAt: row.attestedAt.toISOString(),
+      // Clamped at 0: `attested_at` is stamped server-side, but a clock skew or
+      // a hand-written row must not produce a negative age the judge would then
+      // read out loud as "-3 days ago".
+      attestedDaysAgo: Math.max(0, diffInDays(row.attestedAt, asOf)),
     };
   });
 
   return {
     attestations,
     byKey,
+    reaffirmWindowDays: ATTESTATION_REAFFIRM_WINDOW_DAYS,
     isEmpty: attestations.length === 0,
   };
 }
@@ -657,7 +666,7 @@ export function assembleFactSnapshot(
     inputs.launchMilestones,
     asOf
   );
-  const manual = buildManualSignals(inputs.plantSignals);
+  const manual = buildManualSignals(inputs.plantSignals, asOf);
 
   // Cold-start (PE-018): no meaningful activity anywhere in the system.
   const isColdStart =
