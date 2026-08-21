@@ -21,12 +21,12 @@ The morning board plus the morning's rulings. Never starts build work.
    never apply that label yourself. `needs-spec` is live: it marks work Sebastian and the agent
    still need to talk through — report those as the discussion queue, not as buildable.
 
-2. **The frontier.** Which queued issues are takeable right now — use the canonical frontier query in
-   `ops/process.md` § The loop. Queued with an open blocker is not runnable, and reporting it as
-   available is the main way a standup misleads.
+2. **The frontier.** Which queued issues are takeable right now — `ops/board.sh frontier`. Queued
+   with an open blocker is not runnable, and reporting it as available is the main way a standup
+   misleads.
 
-3. **Live work.** `TaskList` for running agents, plus anything holding `agent:in-progress`; for each
-   stalled issue, its latest comment, so what failed is in the report.
+3. **Live work.** `TaskList` for running agents, plus `ops/board.sh claims`; for each stalled issue,
+   its latest comment, so what failed is in the report.
 
 4. **Features.** `gh issue list --limit 200 --label feature --state open`, plus
    `gh api repos/{owner}/{repo}/issues/<parent> --jq '.sub_issues_summary'` for the roll-up.

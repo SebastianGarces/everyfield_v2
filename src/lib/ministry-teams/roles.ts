@@ -7,8 +7,13 @@ import {
   type TimeCommitment,
 } from "@/db/schema";
 import { and, eq, asc } from "drizzle-orm";
-import { emitTeamStaffingChanged } from "./events";
+import { emitTeamLeaderAssigned, emitTeamStaffingChanged } from "./events";
 import { ExpectedError } from "./expected-error";
+import {
+  activeRoleHolder,
+  syncLeaderOnFill,
+  syncLeaderOnVacate,
+} from "./leader-sync";
 import { fillLeadershipRole } from "./leadership-fill";
 import { getRoleTemplates, type PredefinedTeamKey } from "./role-templates";
 import { getTeamStaffingCounts, verifyTeamOwnership } from "./shared";
@@ -77,20 +82,54 @@ export async function createRole(
 }
 
 /**
- * Update a role
+ * Update a role.
+ *
+ * THE LEADERSHIP FLAG IS THE ONE FIELD WITH A CONSEQUENCE OUTSIDE THIS ROW
+ * (#311 WS2): a FILLED role that becomes a leadership role names its occupant
+ * as the team's leader, and one that stops being a leadership role gives that
+ * back — both through `leader-sync.ts`, whose `WHERE` clauses carry the "only
+ * when the team has none" and "only when it points at them" halves.
+ *
+ * THE GATE IS THE TRANSITION, NOT THE FLAG'S NEW VALUE, and the difference is a
+ * bug that shipped in review. "The caller mentioned the flag and it is now
+ * false" reads like the same thing and is not: the edit dialog mentions the
+ * flag on EVERY submit by design — an unticked checkbox is absent from
+ * `FormData`, so `LeadershipRoleField` posts the boolean through a hidden input
+ * to make unticking expressible at all. So every save on an ordinary FILLED
+ * role posted `false` and reached the vacate, and changing a role's time
+ * commitment cleared a leader that pointed at its occupant. Two ways that bit:
+ * an explicitly named leader erased by a rename, and — because the seat index
+ * is per ROLE, so one person may hold two roles in a team — a derived leader
+ * cleared by an edit to their OTHER, ordinary role while the leadership seat
+ * they lead from is still filled.
+ *
+ * So the before-value is read, and only a real flip does anything. That also
+ * puts `emitTeamLeaderAssigned` where it belongs: a rename no longer announces
+ * that somebody became the leader they already were.
  */
 export async function updateRole(
   churchId: string,
   roleId: string,
+  userId: string,
   data: {
     name?: string;
-    description?: string;
+    /** `null` CLEARS it — the edit dialog can empty a description. */
+    description?: string | null;
     isLeadershipRole?: boolean;
     timeCommitment?: TimeCommitment;
     desiredSkills?: string;
     sortOrder?: number;
   }
 ): Promise<TeamRole> {
+  // BEFORE the write, because afterwards the old value is gone and the
+  // transition is what decides. Church-scoped, so a foreign id reads nothing
+  // and the UPDATE below refuses it anyway.
+  const [before] = await db
+    .select({ isLeadershipRole: teamRoles.isLeadershipRole })
+    .from(teamRoles)
+    .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)))
+    .limit(1);
+
   const updateData: Partial<NewTeamRole> = { updatedAt: new Date() };
 
   if (data.name !== undefined) updateData.name = data.name;
@@ -109,12 +148,47 @@ export async function updateRole(
     .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)))
     .returning();
 
-  if (!updated) throw new Error("Role not found");
+  // ExpectedError: user copy — surfaced to the planter verbatim (409-6C). An
+  // id from another church matches nothing, so the tenancy check and the
+  // refusal are the same statement.
+  if (!updated) throw new ExpectedError("Role not found");
+
+  const flipped =
+    before !== undefined &&
+    before.isLeadershipRole !== updated.isLeadershipRole;
+
+  if (flipped) {
+    const holder = await activeRoleHolder(churchId, roleId);
+    if (holder) {
+      if (updated.isLeadershipRole) {
+        await syncLeaderOnFill(churchId, updated.teamId, holder);
+        // The same event `assignMember` emits when somebody lands in a
+        // leadership seat, on the other door into that state — and only on a
+        // real flip, so it never announces a change a rename did not make.
+        await emitTeamLeaderAssigned(updated.teamId, holder, churchId, userId);
+      } else {
+        await syncLeaderOnVacate(churchId, updated.teamId, holder);
+      }
+    }
+  }
+
   return updated;
 }
 
 /**
- * Delete a role
+ * Delete a role, and with it whoever was sitting in it.
+ *
+ * THE MEMBERSHIPS GO WITH THE ROLE IN THE SAME STATEMENT, not by the caller
+ * deleting them first: `team_memberships.role_id` is `ON DELETE CASCADE`
+ * (migration 0008), so one DELETE takes the seat and its history together and
+ * there is no ordering for a UI to get wrong. They are HARD-deleted rather than
+ * deactivated the way `removeMember` does it — an inactive membership is a
+ * record of a role somebody used to hold, and this role is about to stop
+ * existing.
+ *
+ * SO THE HOLDER IS READ BEFORE THE DELETE, because afterwards nothing can say
+ * who it was, and a leadership seat owes the team's leader a clear on the way
+ * out (#311 WS2 amendment).
  */
 export async function deleteRole(
   churchId: string,
@@ -130,9 +204,19 @@ export async function deleteRole(
   // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
   if (!role) throw new ExpectedError("Role not found");
 
+  const holder = role.isLeadershipRole
+    ? await activeRoleHolder(churchId, roleId)
+    : null;
+
   await db
     .delete(teamRoles)
     .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)));
+
+  // Derived after the fact, for the reason `removeMember` states: a leader that
+  // lags the seat is repairable, one that leads it is a lie about a live row.
+  if (holder) {
+    await syncLeaderOnVacate(churchId, role.teamId, holder);
+  }
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, role.teamId);

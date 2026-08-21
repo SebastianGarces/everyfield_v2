@@ -628,6 +628,41 @@ export function getTotalRoleTemplateCount(): number {
 }
 
 // ============================================================================
+// Responsibilities — the Launch Playbook items a predefined team starts with
+// ============================================================================
+
+/**
+ * The playbook responsibilities a predefined team is seeded with (#311 WS1).
+ *
+ * THE TEAM DESCRIPTION *IS* THE LIST. Every `TEAM_TEMPLATES` entry states its
+ * team's remit as a comma-separated phrase — "Overall leadership, vision
+ * casting, preaching calendar, shepherding, leader development" — which is
+ * already the Launch Playbook's checklist for that team, written as prose. The
+ * responsibilities tab has split it on commas since it existed; this function
+ * is that split, moved to the module that OWNS the data and given a caller that
+ * persists the result instead of re-deriving it on every render.
+ *
+ * IT RUNS ONCE PER TEAM, EVER. After the seed the rows are the truth: editing a
+ * description here changes what the NEXT plant is seeded with and nothing about
+ * the plants that already have their rows. That is what makes the items the
+ * planter's to edit and delete rather than a view of our copy.
+ *
+ * The first letter is capitalised because a stored title is read as written —
+ * the tab used to lean on a `capitalize` CSS class, which is a lie the moment
+ * the planter edits the row.
+ */
+export function playbookResponsibilities(teamKey: PredefinedTeamKey): string[] {
+  const template = getTeamTemplate(teamKey);
+  if (!template) return [];
+
+  return template.description
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.charAt(0).toUpperCase() + item.slice(1));
+}
+
+// ============================================================================
 // Background checks — which rosters show a member's status
 // ============================================================================
 
