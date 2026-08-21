@@ -52,9 +52,31 @@ interface InsightRow {
   church: string;
   audience: "planter" | "network";
   category: string;
-  severity: "positive" | "info" | "watch" | "urgent";
+  /** The PERSISTED vocabulary, not the judge's — see `judgeSeverity`. */
+  severity: "info" | "low" | "medium" | "high" | "critical";
   title: string;
   body: string;
+}
+
+/**
+ * Recover what the judge actually said from what the database stored.
+ *
+ * `persist.ts` maps the judge's `positive|info|watch|urgent` onto the column's
+ * `info|low|medium|high`, and the mapping is lossy-looking but invertible:
+ * `positive → info` and `info → low` land on different values. Reading the
+ * stored column as if it were the judge's vocabulary is what made this audit
+ * first report a budget breach on a plant that was inside its budget — the
+ * "positive" the exemption exists for was sitting in the column as `info`.
+ */
+const JUDGE_SEVERITY: Record<string, string> = {
+  info: "positive",
+  low: "info",
+  medium: "watch",
+  high: "urgent",
+  critical: "urgent",
+};
+function judgeSeverity(stored: string): string {
+  return JUDGE_SEVERITY[stored] ?? stored;
 }
 
 interface Violation {
@@ -171,10 +193,10 @@ async function audit(): Promise<void> {
       if (hits.length === 0) return pad("·", 8);
       const p = hits
         .filter((i) => i.audience === "planter")
-        .map((i) => SEV[i.severity] ?? "?");
+        .map((i) => SEV[judgeSeverity(i.severity)] ?? "?");
       const n = hits
         .filter((i) => i.audience === "network")
-        .map((i) => SEV[i.severity] ?? "?");
+        .map((i) => SEV[judgeSeverity(i.severity)] ?? "?");
       return pad(`${p.join("") || "-"}/${n.join("") || "-"}`, 8);
     });
     console.log(
@@ -201,7 +223,9 @@ async function audit(): Promise<void> {
   for (const [church, insights] of byChurch) {
     const planter = insights.filter((i) => i.audience === "planter");
     const network = insights.filter((i) => i.audience === "network");
-    const workItems = planter.filter((i) => i.severity !== "positive");
+    const workItems = planter.filter(
+      (i) => judgeSeverity(i.severity) !== "positive"
+    );
 
     // The observation budget. Schema-enforced, so a breach here would mean the
     // constraint is not doing what #478 claims.
@@ -215,7 +239,7 @@ async function audit(): Promise<void> {
 
     // The pairing rule: no negative conclusion the planter was never shown.
     for (const n of network) {
-      if (n.severity === "positive") continue;
+      if (judgeSeverity(n.severity) === "positive") continue;
       if (!planter.some((p) => p.category === n.category)) {
         violations.push({
           church,
