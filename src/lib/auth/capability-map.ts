@@ -211,8 +211,16 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "association.leave",
   "src/app/(dashboard)/settings/sharing/actions.ts → setOversightSharingAction":
     "sharing.toggle",
+  "src/app/(dashboard)/settings/team/actions.ts → appointAdminAction":
+    "seat.manage",
   "src/app/(dashboard)/settings/team/actions.ts → createSeatInvitationAction":
     "seat.invitation.manage",
+  "src/app/(dashboard)/settings/team/actions.ts → demoteToMemberAction":
+    "seat.manage",
+  "src/app/(dashboard)/settings/team/actions.ts → endCoachAssignmentAction":
+    "coach.assignment.manage",
+  "src/app/(dashboard)/settings/team/actions.ts → removeSeatAction":
+    "seat.manage",
   "src/app/(dashboard)/settings/team/actions.ts → resendSeatInvitationEmailAction":
     "seat.invitation.manage",
   "src/app/(dashboard)/settings/team/actions.ts → revokeSeatInvitationAction":
