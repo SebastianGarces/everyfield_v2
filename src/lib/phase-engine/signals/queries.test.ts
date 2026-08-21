@@ -159,6 +159,7 @@ test("every trend's declared fact paths resolve in a real assembled snapshot", (
     commitments: [
       { personId: "A", commitmentType: "core_group", signedDate: "2026-01-10" },
     ],
+    personSources: [],
     visionMeetings: [
       {
         id: "m1",

@@ -174,6 +174,41 @@ export async function getLaunchMilestoneRows(
 // Commitments (core group / launch team)
 // ----------------------------------------------------------------------------
 
+/** One committed person and how they reached the plant (#487, C26). */
+export interface PersonSourceRow {
+  personId: string;
+  /** `persons.source`, or null when nobody recorded one. */
+  source: string | null;
+}
+
+/**
+ * The source recorded against every non-deleted person in the plant.
+ *
+ * NOT FILTERED TO THE COMMITTED, deliberately: the builder already holds the
+ * committed set (it computes it from `commitments`), and pushing that filter
+ * into SQL would mean two definitions of "committed" — one here and one there
+ * — for a table this size.
+ *
+ * `isRecruitedContact()` excludes the planter's own auto-created row, for the
+ * same reason every other read that measures RECRUITING does: the planter did
+ * not reach the plant from anywhere (`people/person-user.ts`).
+ */
+export async function getPersonSources(
+  churchId: string
+): Promise<PersonSourceRow[]> {
+  return db
+    .select({ personId: persons.id, source: persons.source })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        isNull(persons.deletedAt),
+        isRecruitedContact()
+      )
+    )
+    .orderBy(persons.id);
+}
+
 export interface CommitmentRow {
   personId: string;
   commitmentType: string;

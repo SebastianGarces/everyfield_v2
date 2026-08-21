@@ -22,6 +22,7 @@ import {
   getActiveMembershipsByPerson,
   getChurch,
   getCommitments,
+  getPersonSources,
   getCompletedVisionMeetings,
   getLeadershipCandidates,
   getMeetingsAttendedByPerson,
@@ -38,6 +39,7 @@ import {
   getTrainingPrograms,
   type ChurchRow,
   type CommitmentRow,
+  type PersonSourceRow,
   type LaunchRow,
   type LaunchMilestoneRow,
   type FollowUpRow,
@@ -233,6 +235,7 @@ function buildMinistryRoleSignals(
 
 function buildCoreGroupSignals(
   commitmentRows: CommitmentRow[],
+  personSources: PersonSourceRow[],
   asOf: Date
 ): CoreGroupSignals {
   // First (earliest) commitment per person per type — order is signed_date asc.
@@ -280,6 +283,21 @@ function buildCoreGroupSignals(
     }
   }
 
+  // WHERE THE COMMITTED CAME FROM (#487). Counted over the committed set only:
+  // the question is about growth of the core group, and a prospect's source
+  // says nothing about that yet.
+  const sourceComposition: Record<string, number> = {};
+  let unknownSourceCount = 0;
+  for (const person of personSources) {
+    if (!firstCoreByPerson.has(person.personId)) continue;
+    if (person.source === null) {
+      unknownSourceCount += 1;
+      continue;
+    }
+    sourceComposition[person.source] =
+      (sourceComposition[person.source] ?? 0) + 1;
+  }
+
   const isEmpty = commitmentRows.length === 0;
 
   return {
@@ -293,6 +311,8 @@ function buildCoreGroupSignals(
         : Math.max(0, diffInDays(lastNewCommitment, asOf)),
     slowedThresholdDays: GROWTH_SLOWED_THRESHOLD_DAYS,
     stalledThresholdDays: GROWTH_STALLED_THRESHOLD_DAYS,
+    sourceComposition,
+    unknownSourceCount,
     isEmpty,
   };
 }
@@ -781,6 +801,8 @@ export interface SnapshotInputs {
    */
   launchMilestones: LaunchMilestoneRow[];
   commitments: CommitmentRow[];
+  /** How each person reached the plant (#487); the builder keeps the committed. */
+  personSources: PersonSourceRow[];
   visionMeetings: VisionMeetingRow[];
   followUp: FollowUpRow[];
   /**
@@ -825,7 +847,11 @@ export function assembleFactSnapshot(
 ): PlantFactSnapshot {
   const committedPeople = new Set(inputs.commitments.map((r) => r.personId));
 
-  const coreGroup = buildCoreGroupSignals(inputs.commitments, asOf);
+  const coreGroup = buildCoreGroupSignals(
+    inputs.commitments,
+    inputs.personSources,
+    asOf
+  );
   const visionMeetings = buildVisionMeetingSignals(inputs.visionMeetings, asOf);
   const followUp = buildFollowUpSignals(
     inputs.followUp,
@@ -929,6 +955,7 @@ export async function buildFactSnapshot(
     launch,
     launchMilestones,
     commitments,
+    personSources,
     visionMeetings,
     followUp,
     followUpTasks,
@@ -947,6 +974,7 @@ export async function buildFactSnapshot(
     getLaunch(churchId),
     getLaunchMilestoneRows(churchId),
     getCommitments(churchId),
+    getPersonSources(churchId),
     getCompletedVisionMeetings(churchId),
     getOpenFollowUpContacts(churchId),
     listOpenFollowUpTasks(churchId),
@@ -973,6 +1001,7 @@ export async function buildFactSnapshot(
       launch,
       launchMilestones,
       commitments,
+      personSources,
       visionMeetings,
       followUp,
       followUpTasks,

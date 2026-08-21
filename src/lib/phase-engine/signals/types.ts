@@ -86,6 +86,30 @@ export interface CoreGroupSignals {
    */
   slowedThresholdDays: number;
   stalledThresholdDays: number;
+  /**
+   * WHERE THE COMMITTED CAME FROM (#487, C26), counted by the existing
+   * `persons.source` vocabulary.
+   *
+   * Bryan: "A plant could grow from 20 to 60 entirely by attracting Christians
+   * from neighboring churches. From a launch standpoint, that's growth. From a
+   * Great Commission standpoint, that's telling me something very different."
+   *
+   * SOURCE RECORDS HOW A CONTACT REACHED THE PLANT AND NOTHING MORE. It is not
+   * a spiritual background, not a conversion, and not evidence about anybody's
+   * faith — the rubric bans all three readings. What it can honestly support is
+   * "most of your growth came through a partner church", which is a
+   * conversation worth having and one the engine could not previously start.
+   *
+   * PLANTER-AUDIENCE ONLY (D1). A network comparing plants on where their
+   * growth comes from is precisely the gamification Bryan warned against.
+   */
+  sourceComposition: Record<string, number>;
+  /**
+   * Committed members with no source recorded. Counted rather than dropped:
+   * per the evidence rule, an unseen thing is SAID — "we cannot see where
+   * growth is coming from yet" — never left as a quiet gap.
+   */
+  unknownSourceCount: number;
   /** No commitments recorded yet. */
   isEmpty: boolean;
 }

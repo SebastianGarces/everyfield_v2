@@ -252,6 +252,21 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
   "coreGroup.stalledThresholdDays": numeric(
     (n) => `${n} days flat before growth counts as stalled`
   ),
+  // WHERE THE COMMITTED CAME FROM (#487). Every phrase here reports HOW SOMEBODY
+  // REACHED THE PLANT and nothing else — never a conversion, never a spiritual
+  // background, never a claim about anybody's faith.
+  "coreGroup.sourceComposition.#": numeric((n) =>
+    count(
+      n,
+      "committed member from this source",
+      "committed members from this source"
+    )
+  ),
+  "coreGroup.unknownSourceCount": numeric((n) =>
+    n === 1
+      ? "1 committed member with no recorded source"
+      : `${n} committed members with no recorded source`
+  ),
   "coreGroup.isEmpty": boolean(
     "no core-group commitments recorded yet",
     "core-group commitments on record"

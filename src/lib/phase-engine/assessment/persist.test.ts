@@ -64,6 +64,8 @@ function makeSnapshot(
       daysSinceLastNewCommitment: 30,
       slowedThresholdDays: 21,
       stalledThresholdDays: 28,
+      sourceComposition: {},
+      unknownSourceCount: 0,
       isEmpty: false,
     },
     visionMeetings: {
