@@ -263,7 +263,62 @@ const EVERY_STATE_CHANGING_CAPABILITY = [
   "phase.signal",
   "tasks.own",
   "launch.milestone",
+  "seat.invitation.manage",
+  "coach.assignment.manage",
 ] as const satisfies readonly Capability[];
+
+// ----------------------------------------------------------------------------
+// #497 — the seat roster's verbs
+// ----------------------------------------------------------------------------
+
+test("each of the roster's three endpoints refuses a plant Admin", () => {
+  // AS-015's "posting each action as an Admin is refused", ONE ASSERTION PER
+  // VERB and read off the real mapping rather than restated. `seat-guard.test.ts`
+  // pins which capability each export is guarded with; the matrix above pins who
+  // that capability admits. Neither alone answers "may an Admin demote
+  // somebody?" — the first is a string and the second is a set — so this joins
+  // them, endpoint by endpoint, the way the #498 review's own test does.
+  const TEAM = "src/app/(dashboard)/settings/team/actions.ts";
+
+  for (const label of [
+    `${TEAM} → appointAdminAction`,
+    `${TEAM} → demoteToMemberAction`,
+    `${TEAM} → removeSeatAction`,
+  ]) {
+    const capability = CAPABILITY_BY_EXPORT[label];
+
+    assert.ok(capability, `${label} is not in the checked-in mapping`);
+    assert.equal(
+      holdsSeatFor(plantAdmin, capability as Capability),
+      false,
+      `${label} is guarded with "${capability}", which a plant Admin carries — the control is hidden for them, so the refusal has to be server-side`
+    );
+    assert.equal(
+      holdsSeatFor(plantMember, capability as Capability),
+      false,
+      `${label} must refuse a plant Member too`
+    );
+    assert.equal(
+      holdsSeatFor(coach, capability as Capability),
+      false,
+      `${label} must refuse a coach — coaching is read-only (AS-008)`
+    );
+    assert.equal(
+      holdsSeatFor(plantOwner, capability as Capability),
+      true,
+      `${label} must admit the plant's Owner`
+    );
+  }
+});
+
+test("ending a coach assignment is an Admin's verb, and a plant's only", () => {
+  // AS-004 gives an Admin the power to INVITE a coach, so ending one is the
+  // symmetric verb at the same level (AS-018, ruled in the capability's own
+  // docblock). A MEMBER is refused, and so is the coach themselves — a coach
+  // holds no seat, so they cannot end their own assignment, which is the
+  // planter's decision to make.
+  only("coach.assignment.manage", [plantOwner, plantAdmin]);
+});
 
 // ----------------------------------------------------------------------------
 // The named endpoints, by the capability they are actually guarded with

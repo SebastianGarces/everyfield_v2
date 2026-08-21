@@ -143,10 +143,13 @@ const CAPABILITIES = {
   /**
    * Appointing, demoting and removing a seat (AS-015 / AS-016 / AS-017).
    *
-   * DECLARED WITH NO CALL SITE YET. The Owner-only set is fixed by the ruling
-   * and this module is where the ruling is encoded, so the verb is stated here
-   * rather than invented by whoever builds `/settings/team` (#500) — which is
-   * the drift this table exists to prevent.
+   * `any` BECAUSE THE RULING GIVES THE VERB TO AN OWNER IN ALL THREE TENANCIES,
+   * and #497 ships the plant side of it. The tenancy half is therefore asked one
+   * layer down, where `seatActorFromSession` (`@/lib/seats/roster`) refuses an
+   * account with no plant — so an oversight Owner passes here and is refused
+   * there, fail-closed and in ONE place rather than per verb. Narrowing this row
+   * to `plant` instead would have to be undone by the org surface, which is the
+   * same decision made twice.
    */
   "seat.manage": { seats: OWNER_ONLY, tenancy: "any" },
   /** An oversight org's own settings and billing. Declared, not yet wired. */
@@ -195,6 +198,27 @@ const CAPABILITIES = {
    * same decision about the same row shape.
    */
   "seat.invitation.manage": { seats: ADMIN_PLUS, tenancy: "plant" },
+  /**
+   * Ending a coach assignment — the `coach_assignments` row going inactive
+   * (AS-018, #497).
+   *
+   * NOT `seat.manage`, BECAUSE COACHING IS NOT A SEAT (ruling 185 (2)). Ending
+   * an assignment moves no tenancy and no seat; it withdraws a read. Filing it
+   * under the seat verb would make the two look like one decision and invite
+   * the next reader to "reconcile" them.
+   *
+   * `ADMIN_PLUS` AND NOT NARROWER, ruled here for #497. AS-018 says "the Owner,
+   * and the Admin who created it" — but `coach_assignments` records no author:
+   * its columns are the coach, the plant, the date and the status. Adding an
+   * `assigned_by` column now would write NULL on every row, because the coach
+   * INVITATION surface that would populate it has not shipped, so "the Admin who
+   * created it" would still be unidentifiable. AS-004 already gives an Admin the
+   * power to INVITE a coach, so ending one is the symmetric verb at the same
+   * level. The residual — any plant Admin may end an assignment, not only the
+   * one who created it — is recorded in `memory/invariants.md` and retires when
+   * the coach invitation surface lands with an author column.
+   */
+  "coach.assignment.manage": { seats: ADMIN_PLUS, tenancy: "plant" },
   /**
    * Setting a manual phase signal. The DECLARATION is the planter's
    * (`phase.declare`); the signals that feed the recommendation are an ordinary
