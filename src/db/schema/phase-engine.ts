@@ -381,3 +381,92 @@ export const insightFeedback = pgTable(
 
 export type InsightFeedback = typeof insightFeedback.$inferSelect;
 export type NewInsightFeedback = typeof insightFeedback.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// PlanterCheckin — the planter's own sustainability, weekly (#484, C19).
+//
+// Bryan: "A plant can hit every launch metric while the planter himself is
+// falling apart. Is the planter spiritually healthy? Is his marriage/family
+// surviving the process? Is he financially sustainable? Is he building at a
+// pace he can actually maintain?"
+//
+// THIS TABLE IS DELIBERATELY OUTSIDE THE ENGINE. It feeds no signal, no fact
+// snapshot, no judge prompt, no insight and no oversight read — and that is a
+// structural claim, not a convention: `planter-checkin-privacy.test.ts` sweeps
+// the phase-engine and oversight source for any reference to it and fails if
+// one appears. The four questions are the most sensitive things this product
+// will ever hold, and the answer to "who else sees this" has to be nobody
+// rather than nobody-so-far.
+//
+// PLANTER-ONLY IN V1 (#484 D3). Coach and org sharing is a separate discovery
+// issue (#535) with its own consent design. There is no `share_*` toggle for
+// this and no oversight column, so there is nothing to turn on by accident.
+// ----------------------------------------------------------------------------
+
+/**
+ * How a planter is doing on one dimension. Three levels, one tap each (D1) —
+ * a five-point scale invites deliberation, and this is a question somebody
+ * answers honestly in four seconds or not at all.
+ */
+export const planterCheckinLevels = [
+  "steady",
+  "strained",
+  "struggling",
+] as const;
+export type PlanterCheckinLevel = (typeof planterCheckinLevels)[number];
+
+export const planterCheckins = pgTable(
+  "planter_checkins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    /** Monday of the week being answered for, as a date. */
+    weekStart: timestamp("week_start", { mode: "string" }).notNull(),
+    /** Bryan's four, verbatim and in his order. */
+    spiritually: varchar("spiritually", { length: 20 })
+      .$type<PlanterCheckinLevel>()
+      .notNull(),
+    marriageFamily: varchar("marriage_family", { length: 20 })
+      .$type<PlanterCheckinLevel>()
+      .notNull(),
+    financially: varchar("financially", { length: 20 })
+      .$type<PlanterCheckinLevel>()
+      .notNull(),
+    pace: varchar("pace", { length: 20 })
+      .$type<PlanterCheckinLevel>()
+      .notNull(),
+    /** The planter's own words, for the planter's own eyes. */
+    note: text("note"),
+    answeredById: uuid("answered_by_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // ONE ROW PER WEEK, which is what makes answering idempotent: a second tap
+    // on the same week updates rather than appending, so a planter changing
+    // their mind on Thursday does not produce two contradictory weeks.
+    uniqueIndex("planter_checkins_church_week_idx").on(
+      table.churchId,
+      table.weekStart
+    ),
+    index("planter_checkins_church_id_idx").on(table.churchId),
+    // The vocabulary, in the data — same reasoning as
+    // `plant_assessments_status_check`: a `$type<>()` brand is compile-time
+    // only, so the levels a row can hold are closed here rather than by
+    // convention.
+    check(
+      "planter_checkins_levels_check",
+      sql`${table.spiritually} in (${inList(planterCheckinLevels)})
+        and ${table.marriageFamily} in (${inList(planterCheckinLevels)})
+        and ${table.financially} in (${inList(planterCheckinLevels)})
+        and ${table.pace} in (${inList(planterCheckinLevels)})`
+    ),
+  ]
+);
+
+export type PlanterCheckin = typeof planterCheckins.$inferSelect;
+export type NewPlanterCheckin = typeof planterCheckins.$inferInsert;

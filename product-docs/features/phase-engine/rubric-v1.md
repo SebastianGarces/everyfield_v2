@@ -40,6 +40,7 @@ recorded rulings, and the recommended v1 delta.
 | Unfilled roles are a coverage gap, not "no emerging leaders" | C14 | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) | Lens 7 coverage copy talks about assignment only; inferring the absence of leaders from role-fill data is banned. The two pipelines — people and coverage — are named as separate. Appendix B's sample replaced with Bryan's wording. |
 | The network register coaches, and the planter sees it first | C15, C16, C24, C25 | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) | §7 gains a verdict ban-list, a same-concern pairing rule and pattern-not-cause — all three enforced on judge output. An assessment releases to oversight when the planter opens it, or after 72 hours. Appendix B's network samples rewritten. |
 | Every lens has an evidence quality, including unknown | C17 | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) | New §5b: measured / attested / unknown per lens, derived from the snapshot and handed to the judge. Unknown is never healthy; the scorecard renders an insufficient-evidence tile. Appendix C question 2 resolved. |
+| Planter sustainability is captured, never inferred | C19 | [#484](https://github.com/SebastianGarces/everyfield_v2/issues/484) | New §5c: the engine may not claim planter wellbeing from any activity fact. A private weekly check-in captures it directly, outside the pipeline, and renders beside the assessment so launch-green cannot wash planter-red. |
 
 ---
 
@@ -414,6 +415,29 @@ claim stronger evidence than the lens holds.** ✅
   says so in as many words.
 - **The profile is derived, never stored.** It is recomputed from the same facts it
   describes, so there is nothing that can drift away from them.
+
+## 5c. What we cannot see
+
+**Plant Intelligence assesses progress toward a launch. It does not assess the planter.** ✅
+
+A plant can hit every launch metric while the planter is falling apart — and every fact
+this engine holds is about the plant. Attendance, commitments, roles filled, training
+completed: none of them says whether the person carrying it is spiritually healthy,
+whether their marriage is surviving the process, whether they are financially
+sustainable, or whether they are building at a pace they can keep.
+
+- **The engine may never claim planter wellbeing, burnout, or capacity from any activity
+  fact.** A quiet week is not a tired planter. A busy month is not a thriving one. There
+  is no fact in the snapshot that licenses either sentence, to either audience.
+- **Planter sustainability is captured directly, weekly, and privately.** Four questions —
+  spiritually, marriage & family, financially, pace — three levels each, answered by the
+  planter for the planter. It is **not** a ninth lens, not an attestation, and not a
+  signal: it lives outside the assessment pipeline entirely and reaches no judge prompt,
+  no insight, and no oversight view.
+- **Launch-green may not wash planter-red.** The private check-in strip renders beside the
+  assessment, so a green scorecard is never shown without the planter's own state next to
+  it. The readings on that strip are computed deterministically from the planter's own
+  answers — no model reads them, writes about them, or paraphrases them back to anybody.
 
 ## 6. How observations are labeled
 

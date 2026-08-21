@@ -210,6 +210,19 @@ test("v1 gives every lens an evidence quality, and unknown is not healthy (#483)
   assert.match(RUBRICS.v1.body, /INFERENCE IS NOT AN EVIDENCE QUALITY/);
 });
 
+test("v1 forbids inferring the planter's own state (#484)", () => {
+  assert.match(
+    RUBRICS.v1.body,
+    /YOU ASSESS PROGRESS TOWARD A LAUNCH\. YOU DO NOT ASSESS THE PLANTER/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /NEVER CLAIM PLANTER WELLBEING, BURNOUT OR CAPACITY FROM ANY ACTIVITY FACT/
+  );
+  // The captured answers exist, and the judge must not go looking for them.
+  assert.match(RUBRICS.v1.body, /never appears in your fact snapshot/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
