@@ -44,9 +44,16 @@ if [ -z "$mine" ]; then
 fi
 
 # The holders that are not you, as "#<n> <title>" lines. Empty means clear.
+#
+# READ THE PULLS ENDPOINT, NOT `gh pr list --label`. That flag queries the
+# SEARCH index, which lags: measured 2026-08-21, a label was invisible to
+# search for ~3s after `gh pr edit --add-label` returned, while this endpoint
+# had it on the next request. Three seconds is the same order as the race this
+# script exists to close, so a hold applied moments ago must not read as clear.
+# `--paginate` because the default page caps and says nothing about it.
 holders() {
-  gh pr list --state open --label "$LABEL" --json number,title \
-    --jq ".[] | select(.number != ${mine}) | \"#\(.number) \(.title)\""
+  gh api --paginate "repos/{owner}/{repo}/pulls?state=open&per_page=100" \
+    --jq ".[] | select(any(.labels[]?; .name == \"${LABEL}\")) | select(.number != ${mine}) | \"#\(.number) \(.title)\""
 }
 
 report() {
