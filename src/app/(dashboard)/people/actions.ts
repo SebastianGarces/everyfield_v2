@@ -26,7 +26,6 @@ import type {
   StatusTransition,
 } from "@/lib/people/types";
 import {
-  deleteFile,
   getExtensionFromMimeType,
   personPhotoStorageKey,
   uploadFile,
@@ -212,11 +211,10 @@ export async function loadMorePeopleAction(
 /**
  * Upload (or replace) a person's photo (P-024a).
  *
- * The object goes up BEFORE the row points at it, and the OLD object is deleted
- * only AFTER the row stops pointing at it — the same asymmetry the generated
- * documents path argues (`memory/invariants.md` → Generated Documents). An
- * orphaned object is garbage a sweep collects; a row naming an object that is
- * not there is a broken avatar nothing inside the app can repair.
+ * The object goes up BEFORE the row points at it — the same asymmetry the
+ * generated documents path argues (`memory/invariants.md` → Generated
+ * Documents). The other half, dropping the object the row has stopped pointing
+ * at, belongs to `setPersonPhoto` and is not this function's to remember.
  *
  * The church scope is checked before a byte is written: `personId` arrives from
  * the client, so an id from another tenant must fail here rather than land a
@@ -276,46 +274,22 @@ export async function uploadPersonPhotoAction(
         };
       }
 
-      await discardUnreferencedPhoto(updated.previousKey, key);
-
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
 
-      return { success: true, data: updated.person };
+      return { success: true, data: updated };
     }
   );
 }
 
 /**
- * Drop the object the row has stopped naming (P-024a, P-024b).
- *
- * Called only AFTER `setPersonPhoto` has returned, which is the whole rule:
- * a failure here leaves an orphaned object a sweep collects, while deleting
- * first would leave the row naming a file that is not there — an avatar the
- * route answers 404 for and nothing inside the app can repair. So it never
- * fails the write the planter just watched succeed.
- */
-async function discardUnreferencedPhoto(
-  previousKey: string | null,
-  currentKey: string | null
-): Promise<void> {
-  if (!previousKey || previousKey === currentKey) return;
-
-  try {
-    await deleteFile(previousKey);
-  } catch (error) {
-    console.error("person photo stale object:", error);
-  }
-}
-
-/**
  * Remove a person's photo (P-024b).
  *
- * The row stops naming the object first, then the object goes — the same
- * asymmetry the upload argues, and the reason removal is `setPersonPhoto` with
- * a null key rather than a writer of its own. Church scope is checked inside
- * `setPersonPhoto`'s own lookup, so a `personId` from another tenant reads as
- * missing and no object of theirs is ever deleted.
+ * The same writer as the upload with a null key, which is what makes the
+ * ordering the invariant demands impossible to get wrong from here:
+ * `setPersonPhoto` drops the object the row has stopped naming itself. Church
+ * scope is checked inside its own lookup, so a `personId` from another tenant
+ * reads as missing and no object of theirs is ever deleted.
  */
 export async function removePersonPhotoAction(
   personId: string
@@ -339,12 +313,10 @@ export async function removePersonPhotoAction(
         };
       }
 
-      await discardUnreferencedPhoto(updated.previousKey, null);
-
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
 
-      return { success: true, data: updated.person };
+      return { success: true, data: updated };
     }
   );
 }

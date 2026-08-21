@@ -60,12 +60,14 @@ type PendingPhoto =
 export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPhoto | null>(null);
+  const [inFlight, setInFlight] = useState<"upload" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
   const initials =
     `${person.firstName.charAt(0)}${person.lastName.charAt(0)}`.toUpperCase();
   const fullName = `${person.firstName} ${person.lastName}`;
+  const isBusy = inFlight !== null;
 
   // The pending action outranks the stored row until the revalidation lands,
   // which is what makes a removal show initials at once rather than the face it
@@ -76,6 +78,20 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
       : pending.kind === "uploaded"
         ? pending.objectUrl
         : undefined;
+
+  /**
+   * The ONE way `pending` moves, because an object URL that is dropped without
+   * being revoked strands its bytes for the life of the document — and every
+   * transition off an `uploaded` value drops one.
+   */
+  const settle = (next: PendingPhoto | null) => {
+    setPending((current) => {
+      if (current?.kind === "uploaded" && current !== next) {
+        URL.revokeObjectURL(current.objectUrl);
+      }
+      return next;
+    });
+  };
 
   const handleFile = (file: File) => {
     setError(null);
@@ -95,39 +111,49 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
     const formData = new FormData();
     formData.append("photo", file);
 
+    setInFlight("upload");
     startTransition(async () => {
-      const result = await uploadPersonPhotoAction(person.id, formData);
+      try {
+        const result = await uploadPersonPhotoAction(person.id, formData);
 
-      if (!result.success) {
-        // The server is the gate — the picker's `accept` is a convenience, and
-        // a POST never saw it. A refusal drops the pending state so the avatar
-        // goes back to what is actually stored.
-        setPending(null);
-        setError(result.error);
-        toast.error(result.error);
-        return;
+        if (!result.success) {
+          // The server is the gate — the picker's `accept` is a convenience,
+          // and a POST never saw it. A refusal drops the pending state so the
+          // avatar goes back to what is actually stored.
+          settle(null);
+          setError(result.error);
+          toast.error(result.error);
+          return;
+        }
+
+        settle({ kind: "uploaded", objectUrl: URL.createObjectURL(file) });
+        toast.success("Photo updated");
+      } finally {
+        setInFlight(null);
       }
-
-      setPending({ kind: "uploaded", objectUrl: URL.createObjectURL(file) });
-      toast.success("Photo updated");
     });
   };
 
   const handleRemove = () => {
     setError(null);
 
+    setInFlight("remove");
     startTransition(async () => {
-      const result = await removePersonPhotoAction(person.id);
+      try {
+        const result = await removePersonPhotoAction(person.id);
 
-      if (!result.success) {
-        setPending(null);
-        setError(result.error);
-        toast.error(result.error);
-        return;
+        if (!result.success) {
+          settle(null);
+          setError(result.error);
+          toast.error(result.error);
+          return;
+        }
+
+        settle({ kind: "removed" });
+        toast.success("Photo removed");
+      } finally {
+        setInFlight(null);
       }
-
-      setPending({ kind: "removed" });
-      toast.success("Photo removed");
     });
   };
 
@@ -148,7 +174,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
           accept={PERSON_PHOTO_MIME_TYPES.join(",")}
           className="sr-only"
           data-testid="person-photo-input"
-          disabled={isPending}
+          disabled={isBusy}
           onChange={(event) => {
             const file = event.target.files?.[0];
             // Reset the input so re-choosing the same file fires `change` again.
@@ -163,10 +189,12 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
             size="sm"
             className="cursor-pointer"
             data-testid="person-photo-upload"
-            disabled={isPending}
+            disabled={isBusy}
             onClick={() => inputRef.current?.click()}
           >
-            {isPending ? (
+            {/* The spinner belongs to the control that owns the work, not to
+                whichever one happens to be first in the row. */}
+            {inFlight === "upload" ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Upload className="mr-2 h-4 w-4" />
@@ -183,9 +211,13 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
                   size="sm"
                   className="text-destructive hover:text-destructive cursor-pointer"
                   data-testid="person-photo-remove"
-                  disabled={isPending}
+                  disabled={isBusy}
                 >
-                  <Trash className="mr-2 h-4 w-4" />
+                  {inFlight === "remove" ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash className="mr-2 h-4 w-4" />
+                  )}
                   Remove
                 </Button>
               </AlertDialogTrigger>
