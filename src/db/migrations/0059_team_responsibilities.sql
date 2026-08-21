@@ -1,16 +1,27 @@
 -- #311 WS1 (MT-002b) — the team responsibilities checklist becomes rows, and
 -- `ministry_teams` gains the CLAIM that makes the playbook seed once-ever.
 --
--- ORDERING. `when` was raised above 0058's by hand. drizzle-kit stamped this
--- file with a `when` BELOW the migration before it, which `drizzle-kit migrate`
--- reads as already-past: it applies a migration only while the ledger's maximum
--- `created_at` is under its `when`, so the file would have been SILENTLY
--- SKIPPED on every database that already ran 0058 — exit 0, nothing applied
--- (`memory/invariants.md` → Migrations). This migration was first generated as
--- 0058 and REGENERATED as 0059 after #560 landed and took that number, so it is
--- a fresh generate on top of the merged sibling rather than a renamed file: the
--- snapshot chains from 0058's and no operator reconcile is owed, because no
--- database ever applied the earlier number under this tag.
+-- ORDERING. `when` was raised above 0058's by hand, to 1787552240967.
+-- drizzle-kit stamped this file BELOW the migration before it, which
+-- `drizzle-kit migrate` reads as already-past: it applies an entry only while
+-- the ledger's maximum `created_at` is under its `when`, so the file would have
+-- been SILENTLY SKIPPED on every database that already ran 0058 — exit 0,
+-- nothing applied (`memory/invariants.md` → Migrations). This migration was
+-- first generated as 0058 and REGENERATED as 0059 after #560 landed and took
+-- that number: a fresh generate on top of the merged sibling rather than a
+-- renamed file, so the snapshot chains from 0058's and no operator reconcile is
+-- owed — no database ever applied this DDL under the earlier tag.
+--
+-- IT KEEPS ITS +24h STAMP, and #566's `scripts/restamp-migration.ts` MUST NOT
+-- be pointed at it. That script landed on main while this branch was in
+-- review and rules that a re-stamp adds ONE SECOND, which is the right rule and
+-- the one every migration minted after this gets for free from `db:generate`.
+-- This stamp is not a candidate for it: the row is ALREADY IN the shared
+-- development database at this exact `created_at` (applied 2026-08-21 so the
+-- preview could read the table). Moving it would orphan that ledger row, and
+-- the re-stamped entry would re-run the DDL and abort on "already exists" —
+-- the failure the script's own header names. The +24h gap closes on its own,
+-- because the next generate stamps `max(Date.now(), floor + 1s)`.
 --
 -- PURELY ADDITIVE: one new table, one new nullable column, three FKs and two
 -- lookup indexes. No backfill, and none is needed — a NULL
