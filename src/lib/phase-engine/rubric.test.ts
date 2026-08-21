@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  ACTIVE_RUBRIC,
+  ACTIVE_RUBRIC_VERSION,
+  RUBRICS,
+  getRubric,
+} from "./rubric";
+
+// ----------------------------------------------------------------------------
+// The draft-then-flip guard (#469 series).
+//
+// v1 lands one ruled change at a time across ~18 PRs. Every one of them edits
+// RUBRIC_V1_BODY, and every one of them is one keystroke away from flipping the
+// version planters actually receive. #538 is the single issue allowed to do
+// that, so the constraint lives here as a test instead of as a sentence in a
+// spec: v1 is registered, and v0 is what runs.
+// ----------------------------------------------------------------------------
+
+test("v1 is registered so it can be reviewed and looked up", () => {
+  assert.equal(getRubric("v1")?.version, "v1");
+  assert.ok(RUBRICS.v1.body.startsWith("# Plant Intelligence Rubric — v1"));
+});
+
+test("v1 is NOT the active rubric — only #538 flips it", () => {
+  assert.equal(ACTIVE_RUBRIC_VERSION, "v0");
+  assert.equal(ACTIVE_RUBRIC.version, "v0");
+});
+
+test("v0 is frozen — its Lens 2 keeps the bottleneck line v1 deletes", () => {
+  assert.match(RUBRICS.v0.body, /you're carrying all the follow-up yourself/);
+});
+
+test("v1 may not claim the planter carries follow-up", () => {
+  assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
+  assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
+  assert.match(RUBRICS.v1.body, /You own 6 of the 9 open follow-ups/);
+});
