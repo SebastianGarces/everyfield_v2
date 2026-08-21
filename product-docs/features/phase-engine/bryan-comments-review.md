@@ -498,7 +498,7 @@ Anchors are the highlighted Doc text. Comments are quoted in full.
 
 Closed by [#538](https://github.com/SebastianGarces/everyfield_v2/issues/538), which assembled the 18 landed sub-issues into rubric v1 and flipped `ACTIVE_RUBRIC_VERSION`. Every comment below reached the shipped rubric or was explicitly deferred; none was silently dropped.
 
-25 comments are ruled and implemented. **One — C12 — is deferred**, and it is deferred as a *question*, not as a gap: the rubric states the vision-meeting target as an open Playbook parameter rather than inventing a ruling for it.
+All 26 comments are now ruled. C12 was deferred at the flip and ruled later the same day (2026-08-21): the vision-meeting target stays biweekly — see the C12 section below.
 
 | # | Subject | Ruling | Landed in |
 |---|---|---|---|
@@ -513,7 +513,7 @@ Closed by [#538](https://github.com/SebastianGarces/everyfield_v2/issues/538), w
 | C09 | Observation budget: 1 primary + 2 supplements | Accept | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) |
 | C10 | Sharing agreement vs forever-optional toggles | Tweak | [#479](https://github.com/SebastianGarces/everyfield_v2/issues/479) |
 | C11 | Private plants must not read "on track" | Accept | [#480](https://github.com/SebastianGarces/everyfield_v2/issues/480) |
-| **C12** | **Vision cadence — he met weekly and consistently** | **DEFERRED** | **Half shipped ([#486](https://github.com/SebastianGarces/everyfield_v2/issues/486)); target open — see below** |
+| **C12** | **Vision cadence — he met weekly and consistently** | **RULED (2026-08-21): target stays biweekly** | **Consistency shipped ([#486](https://github.com/SebastianGarces/everyfield_v2/issues/486)); target ruled — see below** |
 | C13 | Appendix B follow-up sample (duplicate of C01) | Tweak | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) |
 | C14 | Unfilled roles are a coverage gap, not absent leaders | Accept | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) |
 | C15 | Network tone too clinical | Tweak | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) |
@@ -541,4 +541,6 @@ C12 is two claims, and only one of them is a rubric question.
 2. **One practitioner's practice is not the evidence for it.** Bryan reported what he did, and read literally he was affirming the diagnosis, not voting on the target. Ruling a methodology parameter off one data point is the failure mode C03 exists to prevent.
 3. **Nothing is blocked by leaving it open.** Lens 1 assesses against 14 days and is barred from presenting biweekly as the only defensible rhythm, or from telling a weekly planter they are over-meeting. A wrong ruling would cost more than the open question does.
 
-Recorded in the rubric at Lens 1 and Appendix C question 6, and in `product-docs/decisions.md` (2026-08-21). It is the standing question for Brett's review.
+Recorded in the rubric at Lens 1 and Appendix C question 6, and in `product-docs/decisions.md` (2026-08-21).
+
+**Ruled, later the same day.** Sebastian: keep biweekly — it is the Playbook's suggestion, and Bryan's weekly rhythm came *once he had a core team*. Weekly is a rhythm a team grows into, not the Phase 1 floor. The target stays 14 days; both judge bans stay; 26 of 26 comments are now closed. The dated record is in `product-docs/decisions.md` (2026-08-21, C12). Whether Brett's review corroborates the grow-into-weekly pattern is still worth asking — as color for coaching copy, no longer as a blocker on a number.

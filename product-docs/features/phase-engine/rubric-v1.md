@@ -149,14 +149,14 @@ what healthy looks like, and what the engine should say when it is not.
 - **Healthy: meetings on cadence *and on a predictable rhythm*** ✅ — consistency, not
   only frequency. Inconsistency makes it hard for even committed team members to know
   when meetings happen, and that costs more than the occasional missed week.
-- **The target itself is an open Playbook parameter, and v1 does not move it.** Every two
-  weeks is what the Launch Playbook states, and it is what the engine assesses against.
-  Bryan (C12) ran weekly and consistently — which the review read as a vote for
-  *consistency* in the healthy definition, shipped above, and **not** as a vote to change
-  14 days to 7. Whether the Playbook target moves toward weekly is unruled and stays open:
-  it is a question for the Playbook's authors, not a rubric edit. Until it is ruled, the
-  engine never presents biweekly as the only defensible rhythm, and never tells a planter
-  meeting weekly that they are over-meeting.
+- **The target is every two weeks, ruled (C12, 2026-08-21).** That is what the Launch
+  Playbook states, and it is what the engine assesses against. Bryan (C12) ran weekly and
+  consistently — *once he had a core team*. The review read that as a vote for
+  *consistency* in the healthy definition, shipped above, and the ruling reads the weekly
+  rhythm as something a team grows into rather than the Phase 1 floor: measuring every
+  plant against 7 days would nag exactly the early-stage plants this lens exists to serve.
+  The engine never presents biweekly as the only defensible rhythm, and never tells a
+  planter meeting weekly that they are over-meeting.
 - **What it says:** cadence slipping, at the level the gap earns; attendance plateauing;
   strong conversion worth reinforcing.
 
@@ -835,15 +835,14 @@ it asks.
    The question stays open as a standing invitation rather than a blocker — a lens nobody
    has named yet is still the most valuable thing a practitioner can report.)*
 
-6. **The vision-meeting target: every two weeks, or weekly?** *(C12 — the one comment in
-   the review with no ruling, and deliberately still open.)* Bryan met weekly and
-   consistently. v1 took the half of that comment the data supports — **consistency**
-   belongs in Lens 1's healthy definition, and it shipped there — and did **not** move the
-   target from 14 days to 7. The target is a **Launch Playbook parameter**, so changing it
-   is a methodology decision rather than a rubric edit, and one practitioner's practice is
-   not the evidence for it. Until it is ruled, Lens 1 assesses against every two weeks and
-   is explicitly barred from treating biweekly as the only defensible rhythm. Ruling this
-   needs a second practitioner (Brett) or the Playbook's authors.
+6. **The vision-meeting target: every two weeks, or weekly?** *(C12 — ruled 2026-08-21:
+   the target stays every two weeks.)* Bryan met weekly and consistently — once he had a
+   core team. v1 took the half of that comment the data supports — **consistency** belongs
+   in Lens 1's healthy definition, and it shipped there — and the ruling keeps the target
+   at 14 days: weekly is a rhythm a team grows into, not the Phase 1 floor. Lens 1
+   assesses against every two weeks and remains barred from treating biweekly as the only
+   defensible rhythm or telling a weekly planter they are over-meeting. The record is in
+   `product-docs/decisions.md` (2026-08-21, C12).
 
 ---
 
