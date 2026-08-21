@@ -35,10 +35,12 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-004 | Source tracking | Record how each person was reached (referral, social media, etc.) |
 | P-005 | Search and filter | Search by name, email, phone; filter by status, tags, source |
 | P-006 | List view | Display all contacts in a searchable, filterable list |
+| P-006a | Paged list loading | "Load more" pages the list by keyset cursor, and may neither skip nor repeat a row at a page boundary |
 | P-007 | Pipeline view | Visual kanban-style view of contacts by status |
 | P-008 | Person detail view | Full profile page with all contact information |
 | P-009 | Activity timeline | Chronological log of all interactions per person |
 | P-010 | Note adding | Add timestamped notes to person records |
+| P-010e | Note editing | Rewrite the body of a note, restricted to the person who wrote it |
 | P-011 | Tagging | Apply and filter by custom tags |
 | P-012 | Status progression | Move people through pipeline stages with validation |
 
@@ -62,7 +64,9 @@ People / CRM Management tracks all individuals from initial contact through comm
 | ID | Requirement | Description |
 |----|-------------|-------------|
 | P-023 | Household grouping | Link family members together |
-| P-024 | Photo support | Profile photos for contacts (avatars in lists, larger on profile) |
+| P-024 | Photo support | Profile photos for contacts (avatars in lists, larger on profile). Delivered in the two slices below, which is the spelling the code cites |
+| P-024a | Photo upload & replace | Upload a profile photo, or replace one already set. The bucket is private and the stored value is a key, never a URL — the browser's only address is a session-checked route |
+| P-024b | Photo removal | Remove a photo outright: the stored object is deleted and the row cleared in one action, and every surface falls back to initials |
 | P-025 | Potential duplicates view | Dedicated section showing potential duplicate records for user review |
 | P-027 | Bulk export | Export contacts to CSV (honors current search/filters) |
 
