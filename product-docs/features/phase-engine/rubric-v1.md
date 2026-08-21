@@ -35,6 +35,7 @@ recorded rulings, and the recommended v1 delta.
 | 60 days is a Leadership Candidate Signal, not readiness | C07, C22 | [#476](https://github.com/SebastianGarces/everyfield_v2/issues/476) | The number stays and the claim goes. Interview and 4 C's records join the signal as recorded human judgments the engine may cite and may never make. "leadership-ready" and "the profile of an emerging leader" are banned as claims about a person. |
 | The Phase 1 gate is a cluster, not a headcount | C08, C23 | [#477](https://github.com/SebastianGarces/everyfield_v2/issues/477) | 30–40 kept. A fifth indicator — trajectory — joins the four, and the gate is scored as a conjunction with a "N of 5 hold" readout. No single mark clears it; unanswered blocks without failing. |
 | The planter gets 1 primary + 2 supplements | C09, C18 | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) | §6 caps the planter's actionable list at three, enforced in the judge schema rather than asked for in the prompt. Positives are exempt and get their own surface; the drill-downs carry the rest. |
+| Sharing language matches the sending-invite spec | C10 | [#479](https://github.com/SebastianGarces/everyfield_v2/issues/479) | §7's universal "off by default" splits into the two real cases — self-started plants share nothing, invited plants start with sharing on and consent at the acceptance screen. Doc text only; the behaviour was already ruled (ledger row 187). |
 
 ---
 
@@ -407,10 +408,27 @@ Three rules govern it:
 2. **Observations, never verdicts.** Network-facing language is deliberately
    conservative: "may be worth a coaching touchpoint," not "this plant is failing."
    The network view is a prompt for a conversation, not a score.
-3. **The planter controls what is shared, and it is off by default.** Each plant
-   chooses which categories of data to share with oversight. Nothing is shared unless
-   the planter turns it on. When a category is off, the corresponding observations
-   disappear from the network view entirely.
+3. **The planter controls what is shared. What it starts as depends on how the plant
+   got here.** ✅ There is no universal default, and the engine must not claim one.
+   *(Source: `product-docs/decisions.md` ledger row 187, 2026-08-15.)*
+   - **A self-started plant shares nothing** until the planter turns something on.
+   - **A plant that accepted a sending-church or network invitation starts with all
+     sharing on** — the six pull toggles and the push toggle alike. The consent is not
+     a toggle the planter has to find later; it is the **acceptance screen**, which
+     states in plain language what the overseer will see *before* the planter accepts.
+     That is the "sharing agreement established up front" Bryan asked about, and it is
+     why the org paying for a plant is not looking at nothing.
+   - **Either way the planter can turn any toggle off at any time**, and the overseer is
+     notified in **coarse** wording — "changed what it shares with you", never
+     per-toggle. Per-toggle wording maximises social pressure on the planter and poisons
+     the relationship the product exists to serve.
+   - When a category is off, the corresponding observations disappear from the network
+     view entirely — the gating is `share_*` per feature (oversight FRD, OV-002), not a
+     filter applied to finished text.
+   - **The engine never editorializes about a plant's sharing choices**, to either
+     audience. It does not tell the network that a plant turned something off, does not
+     tell the planter that sharing more would look better, and never describes sharing as
+     "off by default" as though it were a universal fact.
 
 **Individual people are never named to the network.** A planter may see "Sara looks
 like an emerging leader." The network sees, at most, that leadership development is
@@ -422,9 +440,12 @@ The network also receives a coarse per-plant posture for portfolio views:
 
 **⚠️ The engine escalates to "readiness focus" when launch is within 30 days** — a
 placeholder.
-And a plant that shares nothing shows only its phase, which means a healthy private
-plant and a struggling private plant look identical to a network director. I think
-that is the correct trade. Please confirm.
+
+A plant that shares nothing shows only its phase, so a healthy private plant and a
+struggling private plant carry the same information. That trade is confirmed, with one
+condition: such a plant reads **Limited visibility** and never one of the three health
+postures — absence of warnings must not be readable as "on track". The rule and its
+wording belong to the posture section rather than being restated here.
 
 ---
 

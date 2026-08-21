@@ -143,6 +143,22 @@ test("v1 caps the planter's list at 1 primary + 2 supplements (#478)", () => {
   assert.doesNotMatch(RUBRICS.v0.body, /observation budget/i);
 });
 
+test("v1 stops claiming a universal sharing default (#479)", () => {
+  // v0 stated it as a fact of the product. It is a fact of ONE of the two ways
+  // a plant arrives (ledger row 187): self-started plants share nothing,
+  // invited plants start with sharing on and consent at the acceptance screen.
+  assert.match(
+    RUBRICS.v0.body,
+    /Never expose individual person records to the network audience/
+  );
+  assert.match(RUBRICS.v1.body, /THERE IS NO UNIVERSAL SHARING DEFAULT/);
+  assert.match(RUBRICS.v1.body, /Never say "sharing is off by default"/);
+  assert.match(
+    RUBRICS.v1.body,
+    /NEVER EDITORIALIZE ABOUT A PLANT'S SHARING CHOICES/
+  );
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
