@@ -40,30 +40,49 @@ import { and, eq, inArray, sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
 import {
+  assessments,
   associationEvents,
   churches,
   churchMeetings,
   churchPrivacySettings,
+  generatedDocuments,
   commitments,
   insightFeedback,
+  interviews,
   launches,
   meetingAttendance,
   ministryTeams,
   organizationInvitations,
   persons,
   phaseTransitions,
+  planterCheckins,
   plantAssessments,
   plantInsights,
   plantSignals,
   sendingChurches,
   sendingNetworks,
+  tasks,
   teamMemberships,
   teamRoles,
   trainingCompletions,
   trainingPrograms,
   users,
+  type InterviewResult,
+  type PersonSource,
+  type PlanterCheckinLevel,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+// THE ATTESTATION VOCABULARY, BOUND AT COMPILE TIME (#474, `manual-signals.ts`).
+//
+// Import-free by design, so naming it here cannot drag `@/db` in front of the
+// `config()` call below. It is imported for the TYPE, and that type is what
+// retires the bug this seeder shipped with: every profile wrote
+// `financial_base`, a key NO reader matches (the gate and the citation both
+// read `financial_base_established`), so Generosity read `unknown` across the
+// whole corpus while the rows sat in `plant_signals` looking correct. A
+// `Partial<Record<ManualSignalKey, …>>` makes the misspelling a type error
+// instead of a silent hole in the eval.
+import type { ManualSignalKey } from "../src/lib/phase-engine/manual-signals";
 
 // ============================================================================
 // Bootstrapping
@@ -84,6 +103,13 @@ const cleanOnly = process.argv.includes("--clean");
  * this flag exists to opt an existing corpus into oversight sharing in place.
  */
 const privacyOnly = process.argv.includes("--privacy-only");
+/**
+ * Re-run the v1 signal assertions against the corpus already in the database,
+ * touching nothing. Separate from a full run because a default run CLEANS
+ * first, which would discard any assessments generated against the corpus —
+ * and re-checking after an assessment pass is exactly when you want this.
+ */
+const verifyOnly = process.argv.includes("--verify-v1");
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -194,6 +220,109 @@ const ROLE_TEAM_NAMES: { key: string; teamName: string }[] = [
   { key: "technology", teamName: "Technology & AV" },
 ];
 
+// ----------------------------------------------------------------------------
+// The v1 lens vocabulary — one declarative shape per signal rubric v1 added.
+//
+// EVERY NEW LENS IS DATA, NOT A BRANCH. The seeding functions below read these
+// shapes and write rows; the verifier (`scripts/verify-eval-v1-signals.ts`)
+// reads the SAME shapes through the `expected*` derivations at the bottom of
+// this section and asserts the Signal layer computed them. That is the whole
+// design: a matrix with two spellings is a matrix that can lie, and the
+// `financial_base` bug is what that looks like in practice.
+// ----------------------------------------------------------------------------
+
+/**
+ * One manual attestation: the planter's answer AND how old it is (#474 D2).
+ *
+ * The age is per-signal per-church rather than a uniform stamp because the
+ * 30-day reaffirm window is the whole point of the prayer lens — an answer
+ * given six weeks ago is a different fact from the same answer given on Monday,
+ * and a corpus that stamps them all at 10 days can never exercise the
+ * difference.
+ */
+interface AttestationSpec {
+  value: boolean;
+  attestedDaysAgo: number;
+}
+
+/** `count` committed people recorded with this source. `null` = nobody said. */
+interface SourceSlice {
+  source: PersonSource | null;
+  count: number;
+}
+
+/**
+ * How the open follow-up TASKS are held (#470).
+ *
+ * `null` means ownership is NOT MEASURED in this plant — no follow-up task
+ * exists at all — which is a different instruction to the judge from "nobody
+ * owns them": it may name no cause.
+ */
+interface FollowUpOwnershipSpec {
+  /** Open follow-up tasks. Each names one contact, taken from the front. */
+  taskCount: number;
+  /** …of which this many are held by the planter's own account. */
+  planterOwnedTaskCount: number;
+  /** Distinct member accounts sharing the rest, round-robin. */
+  memberOwnerCount: number;
+  /**
+   * The LAST member owner is demoted out of the committed set, so every task
+   * they hold reads as unowned. `isOwned` resolves the owner's CURRENT status,
+   * and this is the only way to exercise that.
+   */
+  demoteOneOwner: boolean;
+}
+
+/** `count` follow-up contacts, this warm, untouched for this many days. */
+interface FollowUpSlice {
+  /** Attended a vision meeting inside the warm window (the newest, 7d ago). */
+  warm: boolean;
+  /** Whole days since `persons.updated_at` — what staleness is measured from. */
+  idleDays: number;
+  count: number;
+}
+
+/** Who has gone quiet (#486, C22). */
+interface DisengagementSpec {
+  /**
+   * Committed people who attended in the 28–56d band and nothing since. They
+   * are taken from the TAIL of the committed list, and the vision-meeting
+   * attendee count is capped so the tail never turns up at a recent meeting.
+   */
+  disengagedCount: number;
+  /** One of them leads a ministry team → `disengagedIncludesLeader`. */
+  includesLeader: boolean;
+}
+
+/** One recorded 5-criteria interview (#476). */
+interface InterviewSpec {
+  result: InterviewResult;
+  daysAgo: number;
+}
+
+/** One recorded 4 C's assessment: committed, compelled, contagious, courageous. */
+interface FourCsSpec {
+  /** Each 1–5 (`assessmentCreateSchema`); `total_score` is their sum. */
+  scores: [number, number, number, number];
+  daysAgo: number;
+}
+
+/**
+ * One weekly planter check-in (#484, C19).
+ *
+ * SEEDED ONLY TO PROVE A NEGATIVE. Nothing in the engine reads
+ * `planter_checkins` and nothing may: the verifier asserts these rows exist AND
+ * that no trace of them reaches the fact snapshot (rubric §5c). A fixture that
+ * only ever asserts presence cannot prove an absence.
+ */
+interface CheckinSpec {
+  weeksAgo: number;
+  spiritually: PlanterCheckinLevel;
+  marriageFamily: PlanterCheckinLevel;
+  financially: PlanterCheckinLevel;
+  pace: PlanterCheckinLevel;
+}
+
 interface ChurchProfile {
   /** Stable key used in identifiers / emails. */
   key: string;
@@ -215,6 +344,23 @@ interface ChurchProfile {
    * and `base` in the prior window to realize the signed delta.
    */
   growthDelta: number;
+  /**
+   * THE STALL CLOCK (#471): whole days since the newest FIRST core-group
+   * commitment. `null` only when nobody has committed.
+   *
+   * IT CONSTRAINS `growthDelta`, and the seeder asserts the pair is coherent.
+   * A value of 28 or more puts the newest first-commitment inside the PRIOR
+   * window, which empties the trailing one by construction — so the delta is
+   * exactly minus the prior count and cannot be zero or positive. The three
+   * stalled profiles carry a negative delta for that reason, not by taste.
+   */
+  daysSinceLastCommitment: number | null;
+  /**
+   * WHERE THE COMMITTED CAME FROM (#487, C26). Counts MUST sum to
+   * `coreGroupCount` — asserted at seed time, because a mix that does not is a
+   * `sourceComposition` nobody can predict and therefore nobody can verify.
+   */
+  sourceMix: SourceSlice[];
 
   // ---- vision meetings ----
   /**
@@ -228,8 +374,18 @@ interface ChurchProfile {
 
   // ---- follow-up contacts ----
   followUpCount: number;
-  /** true → all follow-ups backdated past the 14d stale threshold. */
-  followUpsStale: boolean;
+  /**
+   * The follow-up cohort split by WARMTH and idle age (#486, C22). Counts MUST
+   * sum to `followUpCount`.
+   *
+   * This replaced a single `followUpsStale` boolean, which could only ever
+   * produce one of two fleet-wide shapes and left `warmCount` at zero
+   * everywhere: warmth is attendance at a recent vision meeting, and the old
+   * seeder attached attendance to committed people only.
+   */
+  followUpMix: FollowUpSlice[];
+  /** Who holds the open follow-up tasks (#470). `null` = not measured at all. */
+  followUpOwnership: FollowUpOwnershipSpec | null;
 
   // ---- ministry roles ----
   /** How many of the 8 canonical roles should read as "filled" (leader set). */
@@ -248,11 +404,123 @@ interface ChurchProfile {
   /** Number of "strong" leadership candidates (long tenure, leads a team). */
   strongLeaders: number;
 
+  // ---- cohesion ----
+  disengagement: DisengagementSpec;
+
+  // ---- recorded human judgments (#476) ----
+  /** One per person, applied to the head of the committed list. */
+  interviews: InterviewSpec[];
+  /** Ditto — a person may hold both, and several profiles do. */
+  fourCs: FourCsSpec[];
+
   // ---- manual attestations ----
-  signals: Record<string, boolean>;
+  /** Keyed by the ONE vocabulary, so a misspelled key cannot compile. */
+  signals: Partial<Record<ManualSignalKey, AttestationSpec>>;
+
+  // ---- planter check-ins (#484) — seeded to be PROVEN ABSENT downstream ----
+  checkins: CheckinSpec[];
 
   /** Human note explaining the spectrum point (for the summary). */
   note: string;
+}
+
+/**
+ * The profile's `sourceMix` flattened to one entry per committed person, in
+ * insert order. `null` entries are people nobody recorded a source for.
+ */
+function expandSourceMix(profile: ChurchProfile): (PersonSource | null)[] {
+  return profile.sourceMix.flatMap((slice) =>
+    Array.from({ length: slice.count }, () => slice.source)
+  );
+}
+
+/** The Monday (UTC) of the week `weeksAgo` before NOW — the check-in's key. */
+function mondayOfWeeksAgo(weeksAgo: number): string {
+  const d = new Date(NOW.getTime() - weeksAgo * 7 * MS_PER_DAY);
+  // getUTCDay(): 0 = Sunday, so Monday is 1 and Sunday walks back 6 days.
+  const shift = (d.getUTCDay() + 6) % 7;
+  const monday = new Date(d.getTime() - shift * MS_PER_DAY);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday.toISOString();
+}
+
+/**
+ * Refuse a profile whose parts cannot all be true at once.
+ *
+ * Every check here is a fixture that would otherwise seed cleanly and then
+ * assert something the Signal layer never computed — the failure mode this
+ * whole pass exists to close, and the one `financial_base` shipped in.
+ */
+function assertProfileCoherence(profile: ChurchProfile): void {
+  const fail = (why: string) => {
+    throw new Error(`Profile "${profile.key}": ${why}`);
+  };
+
+  const sourceTotal = profile.sourceMix.reduce((n, s) => n + s.count, 0);
+  if (sourceTotal !== profile.coreGroupCount) {
+    fail(
+      `sourceMix sums to ${sourceTotal} but coreGroupCount is ${profile.coreGroupCount} — sourceComposition would be unpredictable.`
+    );
+  }
+
+  const followUpTotal = profile.followUpMix.reduce((n, s) => n + s.count, 0);
+  if (followUpTotal !== profile.followUpCount) {
+    fail(
+      `followUpMix sums to ${followUpTotal} but followUpCount is ${profile.followUpCount}.`
+    );
+  }
+
+  // The stall clock is the age of the newest FIRST commitment, so it and the
+  // sign of the delta are one fact seen twice.
+  const stall = profile.daysSinceLastCommitment;
+  if (stall === null) {
+    if (profile.coreGroupCount > 0) {
+      fail(
+        "daysSinceLastCommitment is null but the plant has committed people."
+      );
+    }
+  } else {
+    const priorBase = Math.max(2, -profile.growthDelta);
+    const inWindow = priorBase + profile.growthDelta;
+    if (stall >= 28 && inWindow !== 0) {
+      fail(
+        `daysSinceLastCommitment ${stall} puts the newest commitment outside the trailing window, so growthDelta must be −${priorBase}, not ${profile.growthDelta}.`
+      );
+    }
+    if (stall < 28 && inWindow === 0) {
+      fail(
+        `daysSinceLastCommitment ${stall} needs a trailing-window commitment, but growthDelta ${profile.growthDelta} empties that window.`
+      );
+    }
+    if (stall >= 56) {
+      fail(
+        `daysSinceLastCommitment ${stall} falls outside the 56-day horizon.`
+      );
+    }
+  }
+
+  if (profile.disengagement.disengagedCount > profile.coreGroupCount) {
+    fail("more disengaged people than committed people.");
+  }
+  if (
+    profile.disengagement.includesLeader &&
+    profile.disengagement.disengagedCount === 0
+  ) {
+    fail("includesLeader is true but nobody is disengaged.");
+  }
+
+  const ownership = profile.followUpOwnership;
+  if (ownership) {
+    if (ownership.planterOwnedTaskCount > ownership.taskCount) {
+      fail("more planter-owned tasks than tasks.");
+    }
+    if (ownership.demoteOneOwner && ownership.memberOwnerCount === 0) {
+      fail("demoteOneOwner is true but there are no member owners to demote.");
+    }
+    if (profile.followUpCount === 0) {
+      fail("follow-up ownership specified with no follow-up contacts.");
+    }
+  }
 }
 
 const PROFILES: ChurchProfile[] = [
@@ -266,16 +534,23 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 0,
     launchTeamCount: 0,
     growthDelta: 0,
+    daysSinceLastCommitment: null,
+    sourceMix: [],
     attendanceSeries: [],
     meetingCadenceDays: 0,
     followUpCount: 0,
-    followUpsStale: false,
+    followUpMix: [],
+    followUpOwnership: null,
     rolesFilled: 0,
     rolesPresentUnfilled: 0,
     trainingRate: null,
     strongLeaders: 0,
+    disengagement: { disengagedCount: 0, includesLeader: false },
+    interviews: [],
+    fourCs: [],
     signals: {},
-    note: "PE-018 cold-start: only the planter exists, no activity anywhere.",
+    checkins: [],
+    note: "PE-018 cold-start: only the planter exists, no activity anywhere. The fleet's UNKNOWN pole for every v1 lens at once.",
   },
 
   // ----- Phase 1 — Core Group Development -----
@@ -288,16 +563,52 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 14,
     launchTeamCount: 0,
     growthDelta: 5,
+    daysSinceLastCommitment: 6,
+    sourceMix: [
+      { source: "vision_meeting", count: 5 },
+      { source: "personal_referral", count: 3 },
+      { source: "social_media", count: 2 },
+      { source: "website", count: 1 },
+      { source: "event", count: 1 },
+      { source: null, count: 2 },
+    ],
     attendanceSeries: [8, 12, 15, 18],
     meetingCadenceDays: 21,
     followUpCount: 12,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: true, idleDays: 2, count: 6 },
+      { warm: false, idleDays: 4, count: 6 },
+    ],
+    followUpOwnership: {
+      taskCount: 9,
+      planterOwnedTaskCount: 2,
+      memberOwnerCount: 3,
+      demoteOneOwner: false,
+    },
     rolesFilled: 1,
     rolesPresentUnfilled: 0,
     trainingRate: 0.15,
     strongLeaders: 1,
-    signals: { values_documented: true },
-    note: "Healthy early growth, rising attendance, fresh follow-ups, dirty.",
+    disengagement: { disengagedCount: 0, includesLeader: false },
+    interviews: [{ result: "qualified", daysAgo: 30 }],
+    fourCs: [],
+    signals: {
+      values_documented: { value: true, attestedDaysAgo: 12 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 5 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 5 },
+      // Giving answered, solvency NOT — the split's first direction.
+      core_group_giving: { value: true, attestedDaysAgo: 5 },
+    },
+    checkins: [
+      {
+        weeksAgo: 1,
+        spiritually: "steady",
+        marriageFamily: "steady",
+        financially: "steady",
+        pace: "strained",
+      },
+    ],
+    note: "Healthy early growth. Ownership spread across 3 members, prayer fresh, giving attested while solvency is unanswered.",
   },
   {
     key: "wanderer",
@@ -307,17 +618,41 @@ const PROFILES: ChurchProfile[] = [
     lastMaterialEventDaysAgo: 45,
     coreGroupCount: 7,
     launchTeamCount: 0,
-    growthDelta: 0,
+    // STALLED: the newest first-commitment sits in the PRIOR window, so the
+    // trailing window is empty by construction and the delta is exactly
+    // −PRIOR_BASE. See `daysSinceLastCommitment` on ChurchProfile.
+    growthDelta: -2,
+    daysSinceLastCommitment: 31,
+    sourceMix: [
+      { source: "vision_meeting", count: 2 },
+      { source: null, count: 5 },
+    ],
     attendanceSeries: [20, 11],
     meetingCadenceDays: 30,
     followUpCount: 8,
-    followUpsStale: true,
+    followUpMix: [
+      // Warm AND stale — attended a vision meeting inside the 14d window, then
+      // nobody touched the record for 9 days. The case the warmth split exists
+      // for, and the one a universal 14-day rule was a week late on.
+      { warm: true, idleDays: 9, count: 3 },
+      { warm: true, idleDays: 16, count: 2 },
+      { warm: false, idleDays: 30, count: 3 },
+    ],
+    followUpOwnership: null,
     rolesFilled: 0,
     rolesPresentUnfilled: 0,
     trainingRate: null,
     strongLeaders: 0,
-    signals: {},
-    note: "Watch case: flat growth, attendance crash, all follow-ups stale, quiet.",
+    disengagement: { disengagedCount: 3, includesLeader: true },
+    interviews: [],
+    fourCs: [],
+    signals: {
+      // Answered once, six weeks ago. Stale is cited with its age, never
+      // silently read as current and never as false.
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 45 },
+    },
+    checkins: [],
+    note: "Watch case: growth STALLED at 31d, attendance crash, ownership NOT MEASURED, warm follow-ups going cold, cluster disengagement including a team leader, prayer attestation stale.",
   },
 
   // ----- Phase 2 — Launch Team Formation -----
@@ -330,16 +665,49 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 28,
     launchTeamCount: 6,
     growthDelta: 3,
+    daysSinceLastCommitment: 9,
+    sourceMix: [
+      { source: "vision_meeting", count: 11 },
+      { source: "personal_referral", count: 8 },
+      { source: "event", count: 5 },
+      { source: "website", count: 3 },
+      { source: null, count: 1 },
+    ],
     attendanceSeries: [34, 35, 35, 36],
     meetingCadenceDays: 21,
     followUpCount: 10,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: false, idleDays: 20, count: 4 },
+      { warm: false, idleDays: 3, count: 6 },
+    ],
+    followUpOwnership: {
+      // Planter-heavy: the measured version of the line v0 used to GUESS.
+      taskCount: 9,
+      planterOwnedTaskCount: 6,
+      memberOwnerCount: 2,
+      demoteOneOwner: false,
+    },
     rolesFilled: 5,
     rolesPresentUnfilled: 0,
     trainingRate: 0.4,
     strongLeaders: 4,
-    signals: { financial_base: true, values_documented: true },
-    note: "On-track: steady cadence, flat-high attendance, 5/8 roles, dirty.",
+    // Below the minimum of 3 — present, and deliberately NOT nameable.
+    disengagement: { disengagedCount: 1, includesLeader: false },
+    interviews: [
+      { result: "qualified", daysAgo: 45 },
+      { result: "qualified_with_notes", daysAgo: 20 },
+    ],
+    fourCs: [{ scores: [4, 4, 3, 4], daysAgo: 25 }],
+    signals: {
+      values_documented: { value: true, attestedDaysAgo: 15 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 8 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 8 },
+      // Solvent, with the giving question unanswered — the split's OTHER
+      // direction from Cornerstone, and neither may be read from the other.
+      financial_base_established: { value: true, attestedDaysAgo: 14 },
+    },
+    checkins: [],
+    note: "On-track. Planter carries 6 of 9 follow-ups (MEASURED, not inferred); disengagement present but below the 3-person floor; solvent with giving unanswered.",
   },
   {
     key: "drift",
@@ -350,16 +718,51 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 22,
     launchTeamCount: 3,
     growthDelta: 0,
+    // SLOWED but not stalled — the 21–27 band the two-level rule exists to
+    // separate, and the one v0 would have called "stalled".
+    daysSinceLastCommitment: 23,
+    sourceMix: [
+      // Predominantly a partner church: the exact conversation C26 asked for,
+      // and one the engine could not previously start.
+      { source: "partner_church", count: 13 },
+      { source: "vision_meeting", count: 5 },
+      { source: "personal_referral", count: 2 },
+      { source: null, count: 2 },
+    ],
     attendanceSeries: [30, 28, 25, 22],
     meetingCadenceDays: 24,
     followUpCount: 9,
-    followUpsStale: true,
+    followUpMix: [
+      { warm: true, idleDays: 8, count: 3 },
+      { warm: false, idleDays: 18, count: 3 },
+      { warm: false, idleDays: 2, count: 3 },
+    ],
+    followUpOwnership: {
+      taskCount: 9,
+      planterOwnedTaskCount: 3,
+      memberOwnerCount: 2,
+      demoteOneOwner: false,
+    },
     rolesFilled: 4,
     rolesPresentUnfilled: 0,
     trainingRate: 0.2,
     strongLeaders: 2,
-    signals: { values_documented: true },
-    note: "Mixed: flat growth, attendance sliding, moderate follow-up staleness.",
+    // Over the 20% share AND over the 3-person floor, with no leader among
+    // them — so the language must NOT take the leader escalation.
+    disengagement: { disengagedCount: 5, includesLeader: false },
+    interviews: [{ result: "follow_up", daysAgo: 12 }],
+    fourCs: [],
+    signals: {
+      values_documented: { value: true, attestedDaysAgo: 20 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 6 },
+      prayer_rhythm_established: { value: false, attestedDaysAgo: 6 },
+      // Solvent while the core does NOT give. Bryan's year-two case inverted,
+      // and the pair that must never collapse into one verdict.
+      financial_base_established: { value: true, attestedDaysAgo: 11 },
+      core_group_giving: { value: false, attestedDaysAgo: 11 },
+    },
+    checkins: [],
+    note: "Mixed. Growth SLOWED (23d, not stalled); growth is predominantly partner-church transfer; solvent but the core is not giving; cluster disengagement over threshold WITHOUT a leader.",
   },
 
   // ----- Phase 3 — Training & Preparation -----
@@ -372,16 +775,49 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 42,
     launchTeamCount: 14,
     growthDelta: 4,
+    daysSinceLastCommitment: 5,
+    sourceMix: [
+      { source: "vision_meeting", count: 14 },
+      { source: "personal_referral", count: 10 },
+      { source: "event", count: 7 },
+      { source: "social_media", count: 5 },
+      { source: "website", count: 4 },
+      { source: "partner_church", count: 2 },
+    ],
     attendanceSeries: [48, 50, 52, 55],
     meetingCadenceDays: 18,
     followUpCount: 8,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: true, idleDays: 1, count: 4 },
+      { warm: false, idleDays: 5, count: 4 },
+    ],
+    followUpOwnership: {
+      taskCount: 8,
+      planterOwnedTaskCount: 1,
+      memberOwnerCount: 4,
+      demoteOneOwner: false,
+    },
     rolesFilled: 7,
     rolesPresentUnfilled: 0,
     trainingRate: 0.78,
     strongLeaders: 6,
-    signals: { financial_base: true, systems_tested: false },
-    note: "Strong: 7/8 roles, training ~78%, good cadence, low staleness.",
+    disengagement: { disengagedCount: 0, includesLeader: false },
+    interviews: [],
+    fourCs: [
+      { scores: [5, 5, 4, 5], daysAgo: 18 },
+      { scores: [4, 5, 5, 4], daysAgo: 22 },
+      { scores: [5, 4, 4, 5], daysAgo: 40 },
+    ],
+    signals: {
+      values_documented: { value: true, attestedDaysAgo: 9 },
+      financial_base_established: { value: true, attestedDaysAgo: 7 },
+      core_group_giving: { value: true, attestedDaysAgo: 4 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 4 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 4 },
+      systems_tested: { value: false, attestedDaysAgo: 9 },
+    },
+    checkins: [],
+    note: "Strong across the board: 7/8 roles, ownership spread over 4 members, the broadest source mix in the fleet, 4 C's recorded, every attestation fresh.",
   },
   {
     key: "hollow",
@@ -391,17 +827,28 @@ const PROFILES: ChurchProfile[] = [
     lastMaterialEventDaysAgo: 20,
     coreGroupCount: 11,
     launchTeamCount: 1,
-    growthDelta: 0,
+    growthDelta: -2,
+    daysSinceLastCommitment: 40,
+    sourceMix: [
+      // Nobody recorded a source for anyone. "We cannot see where your growth
+      // is coming from yet" — never a quiet gap.
+      { source: null, count: 11 },
+    ],
     attendanceSeries: [14, 12],
     meetingCadenceDays: 40,
     followUpCount: 5,
-    followUpsStale: true,
+    followUpMix: [{ warm: false, idleDays: 25, count: 5 }],
+    followUpOwnership: null,
     rolesFilled: 2,
     rolesPresentUnfilled: 0,
     trainingRate: 0.1,
     strongLeaders: 1,
+    disengagement: { disengagedCount: 3, includesLeader: false },
+    interviews: [],
+    fourCs: [],
     signals: {},
-    note: "Phase-vs-reality mismatch: phase 3 but thin data the judge should flag.",
+    checkins: [],
+    note: "Phase-vs-reality mismatch, and the fleet's second UNKNOWN pole: Phase 3 with prayer and generosity unanswered, no recorded sources at all, growth stalled at 40d, ownership not measured.",
   },
 
   // ----- Phase 4 — Pre-Launch -----
@@ -414,20 +861,52 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 64,
     launchTeamCount: 40,
     growthDelta: 6,
+    daysSinceLastCommitment: 3,
+    sourceMix: [
+      { source: "vision_meeting", count: 24 },
+      { source: "personal_referral", count: 16 },
+      { source: "event", count: 10 },
+      { source: "social_media", count: 8 },
+      { source: "website", count: 6 },
+    ],
     attendanceSeries: [70, 74, 78, 82],
     meetingCadenceDays: 14,
     followUpCount: 7,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: true, idleDays: 1, count: 4 },
+      { warm: false, idleDays: 3, count: 3 },
+    ],
+    followUpOwnership: {
+      taskCount: 7,
+      planterOwnedTaskCount: 1,
+      memberOwnerCount: 5,
+      demoteOneOwner: false,
+    },
     rolesFilled: 8,
     rolesPresentUnfilled: 0,
     trainingRate: 0.95,
     strongLeaders: 8,
+    disengagement: { disengagedCount: 0, includesLeader: false },
+    interviews: [
+      { result: "qualified", daysAgo: 60 },
+      { result: "qualified", daysAgo: 35 },
+      { result: "qualified_with_notes", daysAgo: 10 },
+    ],
+    fourCs: [
+      { scores: [5, 5, 5, 5], daysAgo: 30 },
+      { scores: [4, 5, 4, 5], daysAgo: 28 },
+      { scores: [5, 4, 5, 4], daysAgo: 15 },
+    ],
     signals: {
-      values_documented: true,
-      financial_base: true,
-      systems_tested: true,
+      values_documented: { value: true, attestedDaysAgo: 10 },
+      financial_base_established: { value: true, attestedDaysAgo: 6 },
+      core_group_giving: { value: true, attestedDaysAgo: 3 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 3 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 3 },
+      systems_tested: { value: true, attestedDaysAgo: 6 },
     },
-    note: "Exemplar: 8/8 roles, training ~95%, tight 18d countdown, all signals true.",
+    checkins: [],
+    note: "Exemplar: 8/8 roles, 18d countdown with NOTHING unresolved — the case that must NOT escalate, because time alone is never sufficient.",
   },
   {
     key: "freefall",
@@ -438,16 +917,58 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 19,
     launchTeamCount: 4,
     growthDelta: -2,
+    daysSinceLastCommitment: 29,
+    sourceMix: [
+      { source: "vision_meeting", count: 7 },
+      { source: "partner_church", count: 5 },
+      { source: "personal_referral", count: 3 },
+      { source: null, count: 4 },
+    ],
     attendanceSeries: [40, 34, 28, 22],
     meetingCadenceDays: 28,
     followUpCount: 11,
-    followUpsStale: true,
+    followUpMix: [
+      { warm: true, idleDays: 10, count: 4 },
+      { warm: false, idleDays: 22, count: 7 },
+    ],
+    followUpOwnership: {
+      // Every open follow-up on the planter. Now a measured fact rather than
+      // the inference v0 made from staleness alone.
+      taskCount: 8,
+      planterOwnedTaskCount: 8,
+      memberOwnerCount: 0,
+      demoteOneOwner: false,
+    },
     rolesFilled: 3,
     rolesPresentUnfilled: 0,
     trainingRate: 0.35,
     strongLeaders: 2,
-    signals: { financial_base: false },
-    note: "CRITICAL readiness gap: 12d out but thin core, 3/8 roles, attendance dropping.",
+    disengagement: { disengagedCount: 4, includesLeader: true },
+    interviews: [{ result: "not_qualified", daysAgo: 50 }],
+    fourCs: [],
+    signals: {
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 38 },
+      prayer_in_gatherings: { value: false, attestedDaysAgo: 38 },
+      financial_base_established: { value: false, attestedDaysAgo: 16 },
+      core_group_giving: { value: false, attestedDaysAgo: 16 },
+    },
+    checkins: [
+      {
+        weeksAgo: 1,
+        spiritually: "struggling",
+        marriageFamily: "strained",
+        financially: "struggling",
+        pace: "struggling",
+      },
+      {
+        weeksAgo: 2,
+        spiritually: "strained",
+        marriageFamily: "strained",
+        financially: "struggling",
+        pace: "struggling",
+      },
+    ],
+    note: "The compound escalation: 12d out AND roles unfilled AND training incomplete. Growth stalled, planter owns every follow-up, disengagement includes a leader, both money questions answered NO. Carries the fleet's most concerning check-ins — which the engine must never see.",
   },
 
   // ----- Phase 5 — Launch Sunday -----
@@ -460,20 +981,47 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 82,
     launchTeamCount: 50,
     growthDelta: 4,
+    daysSinceLastCommitment: 4,
+    sourceMix: [
+      { source: "vision_meeting", count: 30 },
+      { source: "personal_referral", count: 20 },
+      { source: "event", count: 14 },
+      { source: "social_media", count: 10 },
+      { source: "website", count: 8 },
+    ],
     attendanceSeries: [88, 90, 92, 95],
     meetingCadenceDays: 14,
     followUpCount: 9,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: true, idleDays: 2, count: 5 },
+      { warm: false, idleDays: 4, count: 4 },
+    ],
+    followUpOwnership: {
+      taskCount: 9,
+      planterOwnedTaskCount: 1,
+      memberOwnerCount: 4,
+      demoteOneOwner: false,
+    },
     rolesFilled: 8,
     rolesPresentUnfilled: 0,
     trainingRate: 1.0,
     strongLeaders: 8,
+    disengagement: { disengagedCount: 0, includesLeader: false },
+    interviews: [
+      { result: "qualified_with_notes", daysAgo: 25 },
+      { result: "qualified_with_notes", daysAgo: 14 },
+    ],
+    fourCs: [{ scores: [5, 4, 5, 5], daysAgo: 20 }],
     signals: {
-      values_documented: true,
-      financial_base: true,
-      systems_tested: true,
+      values_documented: { value: true, attestedDaysAgo: 8 },
+      financial_base_established: { value: true, attestedDaysAgo: 5 },
+      core_group_giving: { value: true, attestedDaysAgo: 2 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 2 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 2 },
+      systems_tested: { value: true, attestedDaysAgo: 5 },
     },
-    note: "Just launched (launchDate -5d): full roles, training 100%.",
+    checkins: [],
+    note: "Just launched (launchDate −5d): full roles, training 100%, everything fresh.",
   },
 
   // ----- Phase 6 — Post-Launch -----
@@ -486,20 +1034,49 @@ const PROFILES: ChurchProfile[] = [
     coreGroupCount: 70,
     launchTeamCount: 40,
     growthDelta: 3,
+    daysSinceLastCommitment: 8,
+    sourceMix: [
+      { source: "vision_meeting", count: 22 },
+      { source: "personal_referral", count: 16 },
+      { source: "event", count: 12 },
+      { source: "social_media", count: 9 },
+      { source: "website", count: 6 },
+      { source: "partner_church", count: 5 },
+    ],
     attendanceSeries: [82, 86, 88, 90],
     meetingCadenceDays: 14,
     followUpCount: 10,
-    followUpsStale: false,
+    followUpMix: [
+      { warm: true, idleDays: 2, count: 5 },
+      { warm: false, idleDays: 6, count: 5 },
+    ],
+    followUpOwnership: {
+      taskCount: 10,
+      planterOwnedTaskCount: 2,
+      memberOwnerCount: 5,
+      demoteOneOwner: false,
+    },
     rolesFilled: 8,
     rolesPresentUnfilled: 0,
     trainingRate: 0.85,
     strongLeaders: 8,
+    disengagement: { disengagedCount: 2, includesLeader: false },
+    interviews: [],
+    fourCs: [
+      { scores: [5, 5, 4, 5], daysAgo: 45 },
+      { scores: [4, 4, 5, 4], daysAgo: 33 },
+    ],
     signals: {
-      values_documented: true,
-      financial_base: true,
-      systems_tested: true,
+      values_documented: { value: true, attestedDaysAgo: 20 },
+      financial_base_established: { value: true, attestedDaysAgo: 4 },
+      // Attested, and PERISHED — a giving culture is a claim about the present
+      // tense, so 35 days is reported with its age rather than as a pass.
+      core_group_giving: { value: true, attestedDaysAgo: 35 },
+      prayer_rhythm_established: { value: true, attestedDaysAgo: 9 },
+      prayer_in_gatherings: { value: true, attestedDaysAgo: 32 },
     },
-    note: "Thriving post-launch (launched 120d ago): sustained high attendance.",
+    checkins: [],
+    note: "Thriving post-launch. Carries the fleet's split-freshness case: solvency fresh while the GIVING attestation has gone stale, and one prayer attestation stale beside a fresh one.",
   },
   {
     key: "ember",
@@ -509,19 +1086,61 @@ const PROFILES: ChurchProfile[] = [
     lastMaterialEventDaysAgo: 25,
     coreGroupCount: 60,
     launchTeamCount: 30,
-    growthDelta: -3,
+    // −1, not −3: SLOWED means the newest commitment is still inside the
+    // trailing window, and a delta of −3 would empty that window entirely and
+    // put the plant in STALLED territory instead. The two facts are one row.
+    growthDelta: -1,
+    daysSinceLastCommitment: 26,
+    sourceMix: [
+      { source: "vision_meeting", count: 20 },
+      { source: "personal_referral", count: 14 },
+      { source: "partner_church", count: 12 },
+      { source: "event", count: 6 },
+      { source: null, count: 8 },
+    ],
     attendanceSeries: [90, 55, 40],
     meetingCadenceDays: 21,
     followUpCount: 9,
-    followUpsStale: true,
+    followUpMix: [
+      { warm: false, idleDays: 26, count: 5 },
+      { warm: false, idleDays: 4, count: 4 },
+    ],
+    followUpOwnership: {
+      // An owner who left the committed set. Their tasks read UNOWNED again
+      // instead of hiding behind a name — the only way to exercise that the
+      // owner's CURRENT status is what counts.
+      taskCount: 9,
+      planterOwnedTaskCount: 2,
+      memberOwnerCount: 3,
+      demoteOneOwner: true,
+    },
     // 2 of the would-be-filled roles are vacated (leaderId nulled), so the
     // intended filled count is reduced by 2 from a 6-role baseline → 4.
     rolesFilled: 4,
     rolesPresentUnfilled: 2,
     trainingRate: 0.6,
     strongLeaders: 4,
-    signals: { financial_base: true },
-    note: "Post-launch decline: attendance crash, 2 vacated leaders, stale follow-ups.",
+    disengagement: { disengagedCount: 6, includesLeader: true },
+    interviews: [
+      { result: "qualified", daysAgo: 70 },
+      { result: "not_qualified", daysAgo: 21 },
+    ],
+    fourCs: [{ scores: [3, 3, 2, 3], daysAgo: 26 }],
+    signals: {
+      financial_base_established: { value: true, attestedDaysAgo: 13 },
+      core_group_giving: { value: false, attestedDaysAgo: 13 },
+      prayer_in_gatherings: { value: false, attestedDaysAgo: 18 },
+    },
+    checkins: [
+      {
+        weeksAgo: 1,
+        spiritually: "strained",
+        marriageFamily: "steady",
+        financially: "strained",
+        pace: "struggling",
+      },
+    ],
+    note: "Post-launch decline: attendance crash, 2 vacated leaders, growth SLOWED at 26d, a demoted follow-up owner, disengagement including a leader, prayer unanswered on one key and false on the other.",
   },
 ];
 
@@ -537,6 +1156,60 @@ async function findEvalNetworkId(): Promise<string | null> {
     .where(eq(sendingNetworks.name, EVAL_NETWORK_NAME))
     .limit(1);
   return rows[0]?.id ?? null;
+}
+
+/**
+ * Delete every eval-scoped row from every table carrying a `church_id`, in
+ * whatever order the foreign keys turn out to allow.
+ *
+ * The tables are read from `information_schema` rather than listed, and a
+ * delete that trips a foreign key is retried on the next lap once its children
+ * are gone. The loop ends when a full lap deletes nothing new — either because
+ * everything is clear, or because something genuinely cannot be removed, which
+ * is then reported rather than swallowed.
+ *
+ * `users` is excluded: it is scoped by eval email domain and by `church_id`
+ * separately, and sweeping it here would delete accounts this script did not
+ * create.
+ */
+async function sweepChurchScopedRows(churchIds: string[]): Promise<void> {
+  const tables = (await sql`
+    SELECT DISTINCT table_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND column_name = 'church_id'
+      AND table_name NOT IN ('churches', 'users')
+    ORDER BY table_name
+  `) as { table_name: string }[];
+
+  let remaining = tables.map((t) => t.table_name);
+  const idList = churchIds;
+
+  while (remaining.length > 0) {
+    const stillBlocked: string[] = [];
+    for (const table of remaining) {
+      try {
+        await sql.query(
+          `DELETE FROM "${table}" WHERE church_id = ANY($1::uuid[])`,
+          [idList]
+        );
+      } catch (error) {
+        // 23503 = foreign_key_violation: a child in another table still points
+        // here. It may be deletable on the next lap.
+        if ((error as { code?: string }).code === "23503") {
+          stillBlocked.push(table);
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (stillBlocked.length === remaining.length) {
+      throw new Error(
+        `Eval cleanup stalled — these tables still hold blocked rows: ${stillBlocked.join(", ")}`
+      );
+    }
+    remaining = stillBlocked;
+  }
 }
 
 async function cleanEvalData(): Promise<void> {
@@ -592,6 +1265,17 @@ async function cleanEvalData(): Promise<void> {
     // links cascade from it; the launch itself must go before `users` (its
     // journal names an actor) and before `churches`.
     await db.delete(launches).where(inArray(launches.churchId, churchIds));
+
+    // The v1 signal tables. All four hold person or user FKs, so they go before
+    // `persons` and before the eval users are removed below.
+    await db.delete(tasks).where(inArray(tasks.churchId, churchIds));
+    await db.delete(interviews).where(inArray(interviews.churchId, churchIds));
+    await db
+      .delete(assessments)
+      .where(inArray(assessments.churchId, churchIds));
+    await db
+      .delete(planterCheckins)
+      .where(inArray(planterCheckins.churchId, churchIds));
 
     await db
       .delete(meetingAttendance)
@@ -663,17 +1347,58 @@ async function cleanEvalData(): Promise<void> {
     await db
       .delete(associationEvents)
       .where(inArray(associationEvents.actorUserId, evalUserIds));
+    // Documents generated by USING the product against the eval corpus. Same
+    // shape as the invitations below: never seeded, FK into eval users, and
+    // `generated_documents_user_id_users_id_fk` does not cascade.
     await db
-      .delete(organizationInvitations)
-      .where(inArray(organizationInvitations.inviterUserId, evalUserIds));
-    await db
-      .delete(organizationInvitations)
-      .where(inArray(organizationInvitations.respondedBy, evalUserIds));
+      .delete(generatedDocuments)
+      .where(inArray(generatedDocuments.userId, evalUserIds));
   }
   if (churchIds.length > 0) {
     await db
-      .delete(organizationInvitations)
-      .where(inArray(organizationInvitations.targetChurchId, churchIds));
+      .delete(generatedDocuments)
+      .where(inArray(generatedDocuments.churchId, churchIds));
+  }
+
+  // THE AUDIT ROW IS CLEARED BY THE INVITATION IT NAMES, not by the church or
+  // actor it happens to carry. Deleting `association_events` by `church_id` and
+  // `actor_user_id` alone leaves any event whose OWN church is outside the eval
+  // set while `source_invitation_id` points into it — and the invitation delete
+  // then fails on `association_events_source_invitation_id_organization_
+  // invitation`, which is what made a plain re-run of this seeder impossible.
+  // Resolve the invitations in scope first, then sweep their audit rows.
+  {
+    const scoped: { id: string }[] = [];
+    if (evalUserIds.length > 0) {
+      scoped.push(
+        ...(await db
+          .select({ id: organizationInvitations.id })
+          .from(organizationInvitations)
+          .where(inArray(organizationInvitations.inviterUserId, evalUserIds))),
+        ...(await db
+          .select({ id: organizationInvitations.id })
+          .from(organizationInvitations)
+          .where(inArray(organizationInvitations.respondedBy, evalUserIds)))
+      );
+    }
+    if (churchIds.length > 0) {
+      scoped.push(
+        ...(await db
+          .select({ id: organizationInvitations.id })
+          .from(organizationInvitations)
+          .where(inArray(organizationInvitations.targetChurchId, churchIds)))
+      );
+    }
+
+    const invitationIds = [...new Set(scoped.map((r) => r.id))];
+    if (invitationIds.length > 0) {
+      await db
+        .delete(associationEvents)
+        .where(inArray(associationEvents.sourceInvitationId, invitationIds));
+      await db
+        .delete(organizationInvitations)
+        .where(inArray(organizationInvitations.id, invitationIds));
+    }
   }
   await db
     .delete(organizationInvitations)
@@ -684,6 +1409,22 @@ async function cleanEvalData(): Promise<void> {
   }
 
   if (churchIds.length > 0) {
+    // THE SWEEP THAT DOES NOT NEED MAINTAINING.
+    //
+    // Everything above deletes the tables this script SEEDS, in a hand-written
+    // order. What kept breaking the re-run is the other kind of row: the ones
+    // created by USING the product against the corpus — a location, a
+    // notification, a generated document, a wiki bookmark — each of which FKs
+    // into an eval church and none of which this script has ever heard of. Two
+    // of those were found the hard way today, and the schema will keep growing.
+    //
+    // So the tail is generic: find every table carrying a `church_id`, delete
+    // the eval rows, and retry the ones that fail on a foreign key until the
+    // set stops shrinking. Deleting a child unblocks its parent on the next
+    // lap, so a dependency chain of any depth drains without anybody encoding
+    // its order — and a table added next month is swept without a code change.
+    await sweepChurchScopedRows(churchIds);
+
     // A user pointing INTO an eval church but not carrying an eval email —
     // anyone who registered against the corpus — blocks the church delete on
     // `users_church_id_churches_id_fk`. The email-domain scope above cannot see
@@ -768,8 +1509,15 @@ async function seedChurch(
   // bucket so the signed delta is exactly `growthDelta`. Remaining committed
   // people get older commitments (outside both windows) so they count toward
   // committedCount without disturbing the delta.
+  //
+  // THE STALL CLOCK RIDES THE SAME ROWS (#471). It is the age of the NEWEST
+  // first commitment, so it is not a free parameter beside `growthDelta` — the
+  // newest row is either inside the trailing window or it is not, and that is
+  // the sign of the delta. `assertProfileCoherence` refuses the pair rather
+  // than letting the seeder quietly produce a fixture nobody predicted.
   // ------------------------------------------------------------------
   const committedPersonIds: string[] = [];
+  const committedSources = expandSourceMix(profile);
   if (profile.coreGroupCount > 0) {
     // PRIOR_BASE is the count of first-commitments landing in the prior 28d
     // window. It must be large enough that `inWindow = PRIOR_BASE + delta` is
@@ -778,6 +1526,13 @@ async function seedChurch(
     const PRIOR_BASE = Math.max(2, -profile.growthDelta);
     const inWindow = PRIOR_BASE + profile.growthDelta; // ≥ 0 by construction
     const total = profile.coreGroupCount;
+
+    // Where the newest first-commitment lands. Below 28 days it is the
+    // trailing-window cohort's date; at or above it, the trailing window is
+    // empty and the PRIOR cohort carries the newest date instead.
+    const stall = profile.daysSinceLastCommitment ?? 42;
+    const recentDaysAgo = inWindow > 0 ? stall : 10;
+    const priorDaysAgo = inWindow > 0 ? 42 : stall;
 
     // Windowed commitments must fit inside the total; the rest are older
     // (outside both windows) and only affect committedCount, not the delta.
@@ -795,7 +1550,10 @@ async function seedChurch(
         firstName: "Core",
         lastName: `${profile.key}-${i}`,
         status: "core_group",
-        source: "vision_meeting",
+        // WHERE THIS PERSON CAME FROM (#487). One draw from the profile's mix,
+        // `null` included — a plant whose sources are mostly unrecorded is a
+        // fixture the corpus needs, not an oversight.
+        source: committedSources[i] ?? null,
         createdBy: ownerUserId,
         createdAt: daysAgo(signedDaysAgo + 30),
         updatedAt: daysAgo(signedDaysAgo),
@@ -803,10 +1561,10 @@ async function seedChurch(
       // person id assigned after insert; we re-link below via index.
     };
 
-    // Prior-window first-commitments (≈ 42 days ago: inside [28,56)).
-    for (let i = 0; i < PRIOR_BASE; i++) addCommitted(42);
-    // In-window first-commitments (≈ 10 days ago: inside (0,28]).
-    for (let i = 0; i < inWindow; i++) addCommitted(10);
+    // Prior-window first-commitments (inside [28,56)).
+    for (let i = 0; i < PRIOR_BASE; i++) addCommitted(priorDaysAgo);
+    // In-window first-commitments (inside (0,28]).
+    for (let i = 0; i < inWindow; i++) addCommitted(recentDaysAgo);
     // Older commitments (≈ 90 days ago: outside both windows).
     for (let i = 0; i < older; i++) addCommitted(90);
 
@@ -820,8 +1578,8 @@ async function seedChurch(
       // Re-derive the signedDate per row in the same order we built personRows.
       let j = 0;
       const signedFor: number[] = [
-        ...Array(PRIOR_BASE).fill(42),
-        ...Array(inWindow).fill(10),
+        ...Array(PRIOR_BASE).fill(priorDaysAgo),
+        ...Array(inWindow).fill(recentDaysAgo),
         ...Array(older).fill(90),
       ];
       for (const personId of committedPersonIds) {
@@ -865,6 +1623,10 @@ async function seedChurch(
   //    Staleness is driven by persons.updatedAt vs NOW (14d threshold).
   // ------------------------------------------------------------------
   const followUpPersonIds: string[] = [];
+  // Parallel to `followUpPersonIds`: whether that contact should read WARM,
+  // i.e. be sat in the newest vision meeting's attendance below. Warmth is not
+  // a column — it is "they turned up recently" — so it is realized in step 4.
+  const followUpIsWarm: boolean[] = [];
   if (profile.followUpCount > 0) {
     const FOLLOW_STATUSES = [
       "attendee",
@@ -872,8 +1634,16 @@ async function seedChurch(
       "interviewed",
     ] as const;
     const rows: (typeof persons.$inferInsert)[] = [];
-    for (let i = 0; i < profile.followUpCount; i++) {
-      const updatedDaysAgo = profile.followUpsStale ? 30 + i : 3;
+    // The cohort, flattened from the profile's warmth/idle slices. Idle age is
+    // `persons.updated_at`, which is INDEPENDENT of warmth: the pair that
+    // matters most is warm AND idle — somebody who came to a vision meeting on
+    // Tuesday and has been untouched for nine days — and it is only
+    // representable because the two are separate facts.
+    const cohort = profile.followUpMix.flatMap((slice) =>
+      Array.from({ length: slice.count }, () => slice)
+    );
+    for (let i = 0; i < cohort.length; i++) {
+      const { warm, idleDays } = cohort[i];
       rows.push({
         churchId,
         firstName: "Lead",
@@ -881,9 +1651,10 @@ async function seedChurch(
         status: FOLLOW_STATUSES[i % FOLLOW_STATUSES.length],
         source: "personal_referral",
         createdBy: ownerUserId,
-        createdAt: daysAgo(updatedDaysAgo + 20),
-        updatedAt: daysAgo(updatedDaysAgo),
+        createdAt: daysAgo(idleDays + 20),
+        updatedAt: daysAgo(idleDays),
       });
+      followUpIsWarm.push(warm);
     }
     const inserted = await db
       .insert(persons)
@@ -965,24 +1736,116 @@ async function seedChurch(
         .returning({ id: churchMeetings.id });
 
       // Mark a handful of committed people as attended (capped at attendance).
+      //
+      // THE DISENGAGED TAIL IS HELD OUT (#486, C22). `disengaged` is
+      // `prior \ recent`, so anybody seated here is disqualified from ever
+      // reading as disengaged — the old seeder sat the same six people at every
+      // meeting, which is why the whole corpus reported zero. The tail attends
+      // one older gathering instead, seeded below.
+      const eligible = committedPersonIds.slice(
+        0,
+        Math.max(
+          0,
+          committedPersonIds.length - profile.disengagement.disengagedCount
+        )
+      );
       const attendeeCount = Math.min(
-        committedPersonIds.length,
+        eligible.length,
         Math.max(0, Math.min(profile.attendanceSeries[m], 6))
       );
-      if (attendeeCount > 0) {
-        const attendanceRows: (typeof meetingAttendance.$inferInsert)[] = [];
-        for (let a = 0; a < attendeeCount; a++) {
+      const attendanceRows: (typeof meetingAttendance.$inferInsert)[] = [];
+      for (let a = 0; a < attendeeCount; a++) {
+        attendanceRows.push({
+          churchId,
+          meetingId: meeting.id,
+          personId: eligible[a],
+          attendanceType: "core_group",
+          status: "attended",
+          createdBy: ownerUserId,
+        });
+      }
+
+      // WARMTH IS ATTENDANCE AT THE NEWEST VISION MEETING (#486). It sits 7
+      // days back, inside the 14-day warm window, so seating a follow-up
+      // contact here is what makes them warm. The old seeder attached
+      // attendance to committed people only, so `warmCount` was 0 fleet-wide
+      // and the warm/cold split could never fire.
+      if (m === n - 1) {
+        for (let f = 0; f < followUpPersonIds.length; f++) {
+          if (!followUpIsWarm[f]) continue;
           attendanceRows.push({
             churchId,
             meetingId: meeting.id,
-            personId: committedPersonIds[a],
-            attendanceType: "core_group",
+            personId: followUpPersonIds[f],
+            attendanceType: "first_time",
             status: "attended",
             createdBy: ownerUserId,
           });
         }
+      }
+
+      if (attendanceRows.length > 0) {
         await db.insert(meetingAttendance).values(attendanceRows);
       }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 4b. The disengaged: one gathering in the 28–56d band and nothing since.
+  //
+  // A DEDICATED MEETING, not a reused vision meeting, because the band has to
+  // hold whatever each profile's cadence happens to be — Wanderer's meetings
+  // are 30 days apart and Lighthouse's are 14, and a fixture that depends on
+  // that arithmetic breaks the first time somebody retunes a cadence. Cohesion
+  // counts ANY completed meeting type, so a core-group gathering qualifies.
+  // ------------------------------------------------------------------
+  const disengagedPersonIds = committedPersonIds.slice(
+    Math.max(
+      0,
+      committedPersonIds.length - profile.disengagement.disengagedCount
+    )
+  );
+  if (disengagedPersonIds.length > 0) {
+    const [gathering] = await db
+      .insert(churchMeetings)
+      .values({
+        churchId,
+        // `team_meeting`, not `vision_meeting`: cohesion counts any completed
+        // meeting, while warmth and cadence read vision meetings only — so this
+        // gathering moves the disengagement facts and touches nothing else.
+        type: "team_meeting",
+        title: "Core Group Gathering",
+        datetime: daysAgo(35),
+        status: "completed",
+        createdBy: ownerUserId,
+      })
+      .returning({ id: churchMeetings.id });
+
+    await db.insert(meetingAttendance).values(
+      disengagedPersonIds.map((personId) => ({
+        churchId,
+        meetingId: gathering.id,
+        personId,
+        attendanceType: "core_group" as const,
+        status: "attended" as const,
+        createdBy: ownerUserId,
+      }))
+    );
+
+    // A MINISTRY-TEAM LEADER AMONG THE QUIET IS A DIFFERENT FACT, and it takes
+    // one level more directness in the copy. The team is deliberately
+    // custom-named: role coverage is matched by canonical team NAME, so a
+    // canonical name here would silently move `rolesFilled` and change what the
+    // profile is testing.
+    if (profile.disengagement.includesLeader) {
+      await db.insert(ministryTeams).values({
+        churchId,
+        name: "Hospitality Crew",
+        type: "custom",
+        leaderId: disengagedPersonIds[disengagedPersonIds.length - 1],
+        status: "active",
+        createdBy: ownerUserId,
+      });
     }
   }
 
@@ -1090,15 +1953,185 @@ async function seedChurch(
   // ------------------------------------------------------------------
   // 7. Manual attestations (plant_signals).
   // ------------------------------------------------------------------
-  const signalEntries = Object.entries(profile.signals);
+  // EACH ANSWER CARRIES ITS OWN AGE (#474 D2). The old seeder stamped every
+  // attestation at a uniform 10 days, which put the whole corpus on the same
+  // side of the 30-day reaffirm window — so "you confirmed this 45 days ago,
+  // is it still happening?" was a rule no fixture could ever exercise.
+  const signalEntries = Object.entries(profile.signals) as [
+    ManualSignalKey,
+    AttestationSpec,
+  ][];
   if (signalEntries.length > 0) {
     await db.insert(plantSignals).values(
-      signalEntries.map(([signalKey, value]) => ({
+      signalEntries.map(([signalKey, spec]) => ({
         churchId,
         signalKey,
-        value,
+        value: spec.value,
         attestedById: ownerUserId,
-        attestedAt: daysAgo(10),
+        attestedAt: daysAgo(spec.attestedDaysAgo),
+      }))
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // 7b. Follow-up task ownership (#470).
+  //
+  // The lens Bryan objected to hardest, and the one the corpus could not
+  // exercise at all: the seeder wrote no `tasks` rows, so `distinctOwnerCount`
+  // and `planterOwnedCount` were 0 everywhere and "who carries follow-up" had
+  // no measured answer to give — exactly the state in which v0 guessed.
+  //
+  // An owner counts only if their user has a linked person row whose CURRENT
+  // status is committed. So each owner needs a person, and that person must be
+  // a SEPARATE row from the core group: linking `persons.user_id` excludes
+  // somebody from `getPersonSources` and `getLeadershipCandidates`, both of
+  // which read recruited contacts only.
+  // ------------------------------------------------------------------
+  if (profile.followUpOwnership && followUpPersonIds.length > 0) {
+    const spec = profile.followUpOwnership;
+
+    // The planter's own account needs a committed person to be a valid owner —
+    // the planter PERSON row seeded in step 8 is a `prospect` on purpose and
+    // must stay one, or Genesis stops being a cold start.
+    await db.insert(persons).values({
+      churchId,
+      firstName: "Planter",
+      lastName: `${profile.key}-account`,
+      status: "core_group",
+      userId: ownerUserId,
+      createdBy: ownerUserId,
+      createdAt: daysAgo(365),
+      updatedAt: daysAgo(2),
+    });
+
+    const memberOwnerIds: string[] = [];
+    for (let i = 0; i < spec.memberOwnerCount; i++) {
+      const [member] = await db
+        .insert(users)
+        .values({
+          email: `member-${i}-${profile.key}@${EVAL_EMAIL_DOMAIN}`,
+          name: `EVAL Member ${i + 1} (${profile.key})`,
+          seat: "member",
+          passwordHash: await hashPassword(EVAL_PASSWORD),
+          churchId,
+        })
+        .returning({ id: users.id });
+
+      // The LAST member is demoted out of the committed set when the profile
+      // asks for it, so the tasks they hold read unowned again.
+      const demoted = spec.demoteOneOwner && i === spec.memberOwnerCount - 1;
+      await db.insert(persons).values({
+        churchId,
+        firstName: "Member",
+        lastName: `${profile.key}-${i}`,
+        status: demoted ? "attendee" : "core_group",
+        userId: member.id,
+        createdBy: ownerUserId,
+        createdAt: daysAgo(180),
+        updatedAt: daysAgo(4),
+      });
+      memberOwnerIds.push(member.id);
+    }
+
+    const taskRows: (typeof tasks.$inferInsert)[] = [];
+    for (let t = 0; t < spec.taskCount; t++) {
+      const contactId = followUpPersonIds[t % followUpPersonIds.length];
+      const assignedToId =
+        t < spec.planterOwnedTaskCount
+          ? ownerUserId
+          : memberOwnerIds.length > 0
+            ? memberOwnerIds[
+                (t - spec.planterOwnedTaskCount) % memberOwnerIds.length
+              ]
+            : null;
+      taskRows.push({
+        churchId,
+        title: `Follow up with lead ${t + 1}`,
+        status: "not_started",
+        category: "follow_up",
+        relatedType: "person",
+        relatedId: contactId,
+        assignedToId,
+        createdById: ownerUserId,
+      });
+    }
+    if (taskRows.length > 0) {
+      await db.insert(tasks).values(taskRows);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 7c. Recorded human judgments — interviews and 4 C's (#476).
+  //
+  // The engine may CITE these and may never make one. With none recorded the
+  // only honest line is "no interview recorded yet — the next step", so the
+  // corpus needs both states, and it had only the empty one.
+  // ------------------------------------------------------------------
+  if (committedPersonIds.length > 0) {
+    if (profile.interviews.length > 0) {
+      await db.insert(interviews).values(
+        profile.interviews.map((spec, i) => ({
+          churchId,
+          personId: committedPersonIds[i % committedPersonIds.length],
+          interviewedBy: ownerUserId,
+          interviewDate: dateOnlyAgo(spec.daysAgo),
+          maturityStatus: "pass" as const,
+          giftedStatus: "pass" as const,
+          chemistryStatus: "pass" as const,
+          rightReasonsStatus:
+            spec.result === "not_qualified"
+              ? ("fail" as const)
+              : ("pass" as const),
+          seasonStatus:
+            spec.result === "follow_up"
+              ? ("concern" as const)
+              : ("pass" as const),
+          overallResult: spec.result,
+        }))
+      );
+    }
+
+    if (profile.fourCs.length > 0) {
+      await db.insert(assessments).values(
+        profile.fourCs.map((spec, i) => {
+          const [committedScore, compelled, contagious, courageous] =
+            spec.scores;
+          return {
+            churchId,
+            personId: committedPersonIds[i % committedPersonIds.length],
+            assessedBy: ownerUserId,
+            committedScore,
+            compelledScore: compelled,
+            contagiousScore: contagious,
+            courageousScore: courageous,
+            totalScore: spec.scores.reduce((a, b) => a + b, 0),
+            assessmentDate: dateOnlyAgo(spec.daysAgo),
+          };
+        })
+      );
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 7d. Weekly planter check-ins (#484) — SEEDED TO BE PROVEN ABSENT.
+  //
+  // Nothing in the assessment pipeline reads `planter_checkins` and nothing
+  // may: a plant can hit every launch metric while the planter is falling
+  // apart, and the engine is barred from claiming either direction. Freefall
+  // deliberately carries the fleet's most concerning answers WHILE reading as
+  // a launch-readiness problem, so the verifier's negative assertion has
+  // something real to fail on.
+  // ------------------------------------------------------------------
+  if (profile.checkins.length > 0) {
+    await db.insert(planterCheckins).values(
+      profile.checkins.map((spec) => ({
+        churchId,
+        weekStart: mondayOfWeeksAgo(spec.weeksAgo),
+        spiritually: spec.spiritually,
+        marriageFamily: spec.marriageFamily,
+        financially: spec.financially,
+        pace: spec.pace,
+        answeredById: ownerUserId,
       }))
     );
   }
@@ -1286,6 +2319,10 @@ async function seedAll(): Promise<SeededChurch[]> {
 
   const seeded: SeededChurch[] = [];
 
+  // Refuse an incoherent fixture BEFORE writing a row, so a bad profile is a
+  // startup error rather than a corpus that seeds green and lies afterwards.
+  PROFILES.forEach(assertProfileCoherence);
+
   for (const profile of PROFILES) {
     // A planter/owner user per church (church_id set after church insert).
     // We create the church first inside seedChurch, then its owner — but the
@@ -1299,8 +2336,13 @@ async function seedAll(): Promise<SeededChurch[]> {
         name: `EVAL Planter (${profile.key})`,
         seat: "owner",
         passwordHash,
-        sendingNetworkId: network.id,
-        sendingChurchId: sendingChurch.id,
+        // NO TENANCY FKs BUT THE CHURCH'S (#185). A planter owns their PLANT;
+        // they are not an owner of the sending network or the sending church.
+        // Carrying `sending_network_id` here made all 12 planters owners of one
+        // network, which `users_sending_network_owner_unique_idx` — the DB's
+        // one-Owner-per-tenancy rule — refuses outright, so the corpus could
+        // not be reseeded at all. The ASSOCIATION lives on `churches`, which is
+        // what every oversight read actually follows.
       })
       .returning({ id: users.id });
 
@@ -1328,6 +2370,362 @@ async function seedAll(): Promise<SeededChurch[]> {
 function pad(value: string | number, width: number): string {
   const s = String(value);
   return s.length >= width ? s : s + " ".repeat(width - s.length);
+}
+
+// ============================================================================
+// The v1 signal verifier (#538)
+//
+// WHY THIS EXISTS, in one sentence: a seeded row no reader sees is invisible,
+// and the corpus shipped for months with `financial_base` written into
+// `plant_signals` while every reader looked for `financial_base_established` —
+// so Generosity read "unknown" fleet-wide and the summary table above said
+// nothing was wrong, because it never asked.
+//
+// Every expectation below is DERIVED FROM THE PROFILE, never restated, so the
+// matrix has one spelling. And the fleet-level pass at the end is the part that
+// catches the subtler failure: a signal that is uniformly non-trivial, or
+// uniformly zero, is a signal the corpus cannot actually exercise.
+// ============================================================================
+
+interface Failure {
+  church: string;
+  what: string;
+  expected: string;
+  actual: string;
+}
+
+async function verifyV1Signals(seeded: SeededChurch[]): Promise<void> {
+  console.log(
+    "🔬 v1 signal verification — every new lens, against buildFactSnapshot(NOW):\n"
+  );
+
+  const { buildFactSnapshot } = await import("../src/lib/phase-engine/signals");
+  const failures: Failure[] = [];
+  const rows: string[] = [];
+
+  // Fleet-level tallies: each signal must have BOTH a non-trivial church and a
+  // trivial/unknown one, or the corpus has no gradient to test against.
+  const nonTrivial: Record<string, string[]> = {};
+  const trivial: Record<string, string[]> = {};
+  const note = (bucket: Record<string, string[]>, key: string, who: string) => {
+    (bucket[key] ??= []).push(who);
+  };
+
+  for (const { profile, churchId } of seeded) {
+    const snap = await buildFactSnapshot(churchId, { asOf: NOW });
+    // Key order is not part of the value: `sourceComposition` is a count per
+    // source, and the order Postgres happens to return them in is not a fact
+    // about the plant. Sorting before comparing keeps the check about counts.
+    const stable = (v: unknown): string =>
+      JSON.stringify(v, (_k, value) =>
+        value && typeof value === "object" && !Array.isArray(value)
+          ? Object.fromEntries(
+              Object.entries(value as Record<string, unknown>).sort(
+                ([a], [b]) => a.localeCompare(b)
+              )
+            )
+          : value
+      );
+    const check = (what: string, expected: unknown, actual: unknown) => {
+      if (stable(expected) !== stable(actual)) {
+        failures.push({
+          church: profile.key,
+          what,
+          expected: stable(expected),
+          actual: stable(actual),
+        });
+      }
+    };
+
+    // ---- 1. The stall clock (#471) --------------------------------------
+    check(
+      "coreGroup.daysSinceLastNewCommitment",
+      profile.daysSinceLastCommitment,
+      snap.coreGroup.daysSinceLastNewCommitment
+    );
+    const stall = snap.coreGroup.daysSinceLastNewCommitment;
+    note(
+      stall !== null && stall >= 21 ? nonTrivial : trivial,
+      "stall clock ≥21d",
+      profile.key
+    );
+
+    // ---- 2. Source composition (#487) -----------------------------------
+    const expectedComposition: Record<string, number> = {};
+    let expectedUnknownSources = 0;
+    for (const slice of profile.sourceMix) {
+      if (slice.source === null) expectedUnknownSources += slice.count;
+      else
+        expectedComposition[slice.source] =
+          (expectedComposition[slice.source] ?? 0) + slice.count;
+    }
+    check(
+      "coreGroup.sourceComposition",
+      expectedComposition,
+      snap.coreGroup.sourceComposition
+    );
+    check(
+      "coreGroup.unknownSourceCount",
+      expectedUnknownSources,
+      snap.coreGroup.unknownSourceCount
+    );
+    note(
+      Object.keys(expectedComposition).length > 1 ? nonTrivial : trivial,
+      "source mix >1 value",
+      profile.key
+    );
+    note(
+      expectedUnknownSources > 0 ? nonTrivial : trivial,
+      "unrecorded sources",
+      profile.key
+    );
+
+    // ---- 3. Follow-up warmth split (#486) -------------------------------
+    const expectedWarm = profile.followUpMix
+      .filter((s) => s.warm)
+      .reduce((n, s) => n + s.count, 0);
+    check("followUp.warmCount", expectedWarm, snap.followUp.warmCount);
+    const expectedStaleWarm = profile.followUpMix
+      .filter((s) => s.warm && s.idleDays >= 7)
+      .reduce((n, s) => n + s.count, 0);
+    check(
+      "followUp.staleWarmCount",
+      expectedStaleWarm,
+      snap.followUp.staleWarmCount
+    );
+    const expectedStaleCold = profile.followUpMix
+      .filter((s) => !s.warm && s.idleDays >= 14)
+      .reduce((n, s) => n + s.count, 0);
+    check(
+      "followUp.staleColdCount",
+      expectedStaleCold,
+      snap.followUp.staleColdCount
+    );
+    note(
+      expectedStaleWarm > 0 ? nonTrivial : trivial,
+      "stale WARM",
+      profile.key
+    );
+    note(
+      expectedStaleCold > 0 ? nonTrivial : trivial,
+      "stale COLD",
+      profile.key
+    );
+
+    // ---- 4. Follow-up ownership (#470) ----------------------------------
+    const own = profile.followUpOwnership;
+    const expectedDistinctOwners = own
+      ? (own.planterOwnedTaskCount > 0 ? 1 : 0) +
+        Math.max(0, own.memberOwnerCount - (own.demoteOneOwner ? 1 : 0))
+      : 0;
+    check(
+      "followUp.distinctOwnerCount",
+      expectedDistinctOwners,
+      snap.followUp.distinctOwnerCount
+    );
+    check(
+      "followUp.planterOwnedCount",
+      own?.planterOwnedTaskCount ?? 0,
+      snap.followUp.planterOwnedCount
+    );
+    note(
+      expectedDistinctOwners > 0 ? nonTrivial : trivial,
+      "ownership measured",
+      profile.key
+    );
+
+    // ---- 5. Cohesion / disengagement (#486) -----------------------------
+    check(
+      "cohesion.disengagedCount",
+      profile.disengagement.disengagedCount,
+      snap.cohesion.disengagedCount
+    );
+    check(
+      "cohesion.disengagedIncludesLeader",
+      profile.disengagement.includesLeader,
+      snap.cohesion.disengagedIncludesLeader
+    );
+    note(
+      profile.disengagement.disengagedCount > 0 ? nonTrivial : trivial,
+      "disengagement",
+      profile.key
+    );
+    note(
+      profile.disengagement.includesLeader ? nonTrivial : trivial,
+      "disengaged leader",
+      profile.key
+    );
+
+    // ---- 6. Attestations, values AND ages (#474 / #475) -----------------
+    for (const [key, spec] of Object.entries(profile.signals) as [
+      ManualSignalKey,
+      AttestationSpec,
+    ][]) {
+      check(`manual.byKey.${key}`, spec.value, snap.manual.byKey[key]);
+      const attestation = snap.manual.attestations.find(
+        (a) => a.signalKey === key
+      );
+      check(
+        `manual.${key}.attestedDaysAgo`,
+        spec.attestedDaysAgo,
+        attestation?.attestedDaysAgo
+      );
+    }
+    const staleAttestations = Object.values(profile.signals).filter(
+      (s) => s.attestedDaysAgo > 30
+    ).length;
+    note(
+      staleAttestations > 0 ? nonTrivial : trivial,
+      "stale attestation",
+      profile.key
+    );
+
+    // ---- 7. Evidence quality, incl. the unknown pole (#483) -------------
+    const prayerAnswered =
+      profile.signals.prayer_rhythm_established !== undefined ||
+      profile.signals.prayer_in_gatherings !== undefined;
+    check(
+      "evidence.prayer.quality",
+      prayerAnswered ? "attested" : "unknown",
+      snap.evidence?.prayer.quality
+    );
+    const givingAnswered =
+      profile.signals.core_group_giving !== undefined ||
+      profile.signals.financial_base_established !== undefined;
+    check(
+      "evidence.generosity.quality",
+      givingAnswered ? "attested" : "unknown",
+      snap.evidence?.generosity.quality
+    );
+    note(prayerAnswered ? nonTrivial : trivial, "prayer attested", profile.key);
+    note(givingAnswered ? nonTrivial : trivial, "giving attested", profile.key);
+
+    // ---- 8. Recorded human judgments (#476) -----------------------------
+    const candidatesWithInterview = snap.leadership.candidates.filter(
+      (c) => c.interviewCount > 0
+    ).length;
+    const candidatesWithFourCs = snap.leadership.candidates.filter(
+      (c) => c.assessmentCount > 0
+    ).length;
+    if (profile.interviews.length > 0 && candidatesWithInterview === 0) {
+      failures.push({
+        church: profile.key,
+        what: "leadership interviews reach a candidate",
+        expected: `${profile.interviews.length} recorded`,
+        actual: "no candidate carries an interview",
+      });
+    }
+    note(
+      candidatesWithInterview > 0 ? nonTrivial : trivial,
+      "interview recorded",
+      profile.key
+    );
+    note(
+      candidatesWithFourCs > 0 ? nonTrivial : trivial,
+      "4 C's recorded",
+      profile.key
+    );
+
+    // ---- 9. THE NEGATIVE: check-ins never reach the snapshot (§5c) ------
+    // Freefall carries the fleet's most concerning answers. If any of this
+    // leaks into the fact snapshot, the judge can read the planter's own state
+    // off it — the one thing #484 exists to make impossible.
+    const snapshotText = JSON.stringify(snap).toLowerCase();
+    for (const needle of [
+      "checkin",
+      "check_in",
+      "spiritually",
+      "marriage",
+      "struggling",
+      "strained",
+    ]) {
+      if (snapshotText.includes(needle)) {
+        failures.push({
+          church: profile.key,
+          what: `planter check-in leaked into the fact snapshot ("${needle}")`,
+          expected: "absent",
+          actual: "present",
+        });
+      }
+    }
+
+    rows.push(
+      [
+        pad(profile.key, 12),
+        pad(snap.coreGroup.daysSinceLastNewCommitment ?? "—", 6),
+        pad(
+          `${Object.keys(snap.coreGroup.sourceComposition).length}src/${snap.coreGroup.unknownSourceCount}?`,
+          10
+        ),
+        pad(
+          `${snap.followUp.warmCount}w/${snap.followUp.staleWarmCount}sw/${snap.followUp.staleColdCount}sc`,
+          14
+        ),
+        pad(
+          `${snap.followUp.distinctOwnerCount}own/${snap.followUp.planterOwnedCount}pl`,
+          12
+        ),
+        pad(
+          `${snap.cohesion.disengagedCount}${snap.cohesion.disengagedIncludesLeader ? "+L" : ""}`,
+          6
+        ),
+        pad(snap.evidence?.prayer.quality ?? "—", 10),
+        pad(snap.evidence?.generosity.quality ?? "—", 10),
+      ].join(" ")
+    );
+  }
+
+  const header = [
+    pad("Church", 12),
+    pad("Stall", 6),
+    pad("Sources", 10),
+    pad("FollowUp", 14),
+    pad("Ownership", 12),
+    pad("Diseng", 6),
+    pad("Prayer", 10),
+    pad("Giving", 10),
+  ].join(" ");
+  console.log(header);
+  console.log("─".repeat(header.length));
+  rows.forEach((r) => console.log(r));
+  console.log(
+    "\nStall=days since last new commitment  Sources=distinct/unrecorded  " +
+      "FollowUp=warm/staleWarm/staleCold\nOwnership=distinctOwners/planterOwned  " +
+      "Diseng=disengaged(+L = includes a leader)  Prayer,Giving=evidence quality\n"
+  );
+
+  // ---- Fleet coverage: both poles must exist for every signal ------------
+  console.log("Fleet coverage — each signal needs a plant at BOTH poles:\n");
+  let coverageGaps = 0;
+  for (const key of Object.keys({ ...nonTrivial, ...trivial }).sort()) {
+    const hot = nonTrivial[key] ?? [];
+    const cold = trivial[key] ?? [];
+    const ok = hot.length > 0 && cold.length > 0;
+    if (!ok) coverageGaps++;
+    console.log(
+      `  ${ok ? "✓" : "✗"} ${pad(key, 22)} exercised by ${pad(hot.length, 3)} · absent in ${pad(cold.length, 3)}` +
+        (ok
+          ? ""
+          : `   ← NO GRADIENT (${hot.length ? "never absent" : "never exercised"})`)
+    );
+  }
+
+  if (failures.length > 0) {
+    console.log(`\n❌ ${failures.length} signal mismatch(es):\n`);
+    for (const f of failures) {
+      console.log(`  ${f.church} · ${f.what}`);
+      console.log(`      expected ${f.expected}`);
+      console.log(`      actual   ${f.actual}`);
+    }
+  }
+
+  if (failures.length > 0 || coverageGaps > 0) {
+    console.log(
+      `\n❌ v1 signal verification FAILED — ${failures.length} mismatch(es), ${coverageGaps} coverage gap(s).\n`
+    );
+    process.exit(1);
+  }
+  console.log("\n✅ v1 signal verification passed for all 12 churches.\n");
 }
 
 async function verify(seeded: SeededChurch[]): Promise<void> {
@@ -1428,6 +2826,35 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
+    if (verifyOnly) {
+      // Re-attach the in-memory profiles to the churches already on disk, by
+      // name, so the assertions read the same matrix without a reseed.
+      const existing = await db
+        .select({ id: churches.id, name: churches.name })
+        .from(churches)
+        .where(
+          inArray(
+            churches.name,
+            PROFILES.map((p) => p.name)
+          )
+        );
+      const byName = new Map(existing.map((c) => [c.name, c.id]));
+      const missing = PROFILES.filter((p) => !byName.has(p.name));
+      if (missing.length > 0) {
+        console.error(
+          `❌ ${missing.length} eval church(es) are not in the database — seed first.`
+        );
+        process.exit(1);
+      }
+      await verifyV1Signals(
+        PROFILES.map((profile) => ({
+          profile,
+          churchId: byName.get(profile.name)!,
+        }))
+      );
+      process.exit(0);
+    }
+
     await cleanEvalData();
 
     if (cleanOnly) {
@@ -1437,6 +2864,7 @@ async function main(): Promise<void> {
 
     const seeded = await seedAll();
     await verify(seeded);
+    await verifyV1Signals(seeded);
 
     console.log("✅ Phase Engine eval seed finished.");
     process.exit(0);
