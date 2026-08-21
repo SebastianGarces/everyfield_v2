@@ -432,7 +432,7 @@ export function CsfScorecard({ scorecard }: CsfScorecardProps) {
           </div>
           {/* Freshness and provenance sit next to the claim they qualify. */}
           <p className="text-muted-foreground text-xs whitespace-nowrap tabular-nums">
-            As of {asOf} &middot; rubric {scorecard.rubricVersion}
+            As of {asOf} · rubric {scorecard.rubricVersion}
           </p>
         </div>
       </CardHeader>

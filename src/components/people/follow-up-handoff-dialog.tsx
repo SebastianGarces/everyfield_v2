@@ -88,7 +88,7 @@ export function FollowUpHandoffDialog({
             {handoff.personName} owns{" "}
             {count === 1 ? "1 open follow-up" : `${count} open follow-ups`} and
             is no longer a committed member. Pick someone to take all of them,
-            or skip — they will wait under &ldquo;Needs owner&rdquo; on Tasks.
+            or skip — they will wait under “Needs owner” on Tasks.
           </DialogDescription>
         </DialogHeader>
 
