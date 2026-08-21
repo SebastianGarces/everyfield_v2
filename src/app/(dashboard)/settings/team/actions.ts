@@ -43,6 +43,7 @@ import type {
   RevokeInvitationState,
 } from "@/app/(dashboard)/oversight/invitations/actions";
 import { requireSeat } from "@/lib/auth/seats";
+import type { SessionValidationResult } from "@/lib/auth/session";
 import {
   InvitationError,
   invitationActorFromSession,
@@ -52,6 +53,15 @@ import {
   resendSeatInvitationEmailAs,
   revokeSeatInvitationAs,
 } from "@/lib/invitations/seat";
+import {
+  appointAdmin,
+  demoteToMember,
+  endCoachAssignment,
+  removeSeat,
+  seatActorFromSession,
+  SeatManagementError,
+  type SeatManagementActor,
+} from "@/lib/seats/roster";
 
 /**
  * What the invite form asks for: an address and a seat. There is no expiry
@@ -203,4 +213,141 @@ export async function revokeSeatInvitationAction(
   refresh();
 
   return {};
+}
+
+// ============================================================================
+// THE SEAT ROSTER'S FOUR WRITES — AS-015 / AS-016 / AS-017 / AS-018 (#497).
+//
+// Same shape as the three above: guard, parse, hand off, narrow the result. The
+// authority decision is `requireSeat`'s and the business rules are
+// `@/lib/seats/roster`'s; nothing here re-decides either.
+//
+// THE TARGET IS A BARE ID AND THAT IS SAFE, because it is never trusted as a
+// SCOPE. Every query one layer down puts the ACTOR's own `church_id` in its
+// `WHERE`, so a forged id naming an account on another plant matches no row and
+// is refused with the same sentence a stale one gets. There is no church field
+// on this surface for a forged POST to re-aim.
+//
+// `refresh()` on success only — `runSeatAction` owns it — so a refused call
+// leaves the row mounted with its message readable, exactly as the resend above
+// does.
+// ============================================================================
+
+/** What every roster control gets back. Success carries nothing to render. */
+export type SeatActionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+const userIdSchema = z.uuid("That is not a person we can act on");
+const assignmentIdSchema = z.uuid("That is not an assignment we can act on");
+
+/**
+ * One place where a seat mutation becomes a result.
+ *
+ * IT MINTS THE ACTOR RATHER THAN TAKING ONE, and inside the `try` on purpose:
+ * `seatActorFromSession` throws `SeatManagementError` for an account with no
+ * plant — the oversight Owner who passes `seat.manage`'s `tenancy: "any"` — and
+ * that refusal is a sentence the caller should read, not an unhandled 500. The
+ * SESSION is still minted by `requireSeat` at the top of each export, above the
+ * `try`, so the session-first rule holds and the tenancy check is the only thing
+ * that happens in here.
+ *
+ * A `SeatManagementError` is user copy and is rendered verbatim; anything else
+ * is a real failure, logged with its detail and reported as one neutral
+ * sentence.
+ */
+async function runSeatAction(
+  session: SessionValidationResult,
+  label: string,
+  mutate: (actor: SeatManagementActor) => Promise<void>
+): Promise<SeatActionResult> {
+  try {
+    await mutate(seatActorFromSession(session));
+    refresh();
+    return { success: true };
+  } catch (error) {
+    if (error instanceof SeatManagementError) {
+      return { success: false, error: error.message };
+    }
+    console.error(`${label} failed`, error);
+    return { success: false, error: GENERIC_FAILURE };
+  }
+}
+
+/** Appoint a Member to Admin (AS-015). Owner-only, refused for an Admin. */
+export async function appointAdminAction(
+  targetUserId: string
+): Promise<SeatActionResult> {
+  const session = await requireSeat("seat.manage");
+
+  const parsed = userIdSchema.safeParse(targetUserId);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a person we can appoint" };
+  }
+
+  return runSeatAction(session, "appointAdminAction", (actor) =>
+    appointAdmin(actor, parsed.data)
+  );
+}
+
+/** Demote an Admin to Member (AS-015). Owner-only, refused for an Admin. */
+export async function demoteToMemberAction(
+  targetUserId: string
+): Promise<SeatActionResult> {
+  const session = await requireSeat("seat.manage");
+
+  const parsed = userIdSchema.safeParse(targetUserId);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a person we can demote" };
+  }
+
+  return runSeatAction(session, "demoteToMemberAction", (actor) =>
+    demoteToMember(actor, parsed.data)
+  );
+}
+
+/**
+ * Remove a seat and run the five effects (AS-016, AS-017).
+ *
+ * The confirmation in front of this is a deliberateness control, not an
+ * authorization one: the Owner-only rule, the self-removal refusal and the
+ * plant scoping all live in `removeSeat`, where a request that never opened the
+ * dialog meets them too.
+ */
+export async function removeSeatAction(
+  targetUserId: string
+): Promise<SeatActionResult> {
+  const session = await requireSeat("seat.manage");
+
+  const parsed = userIdSchema.safeParse(targetUserId);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a person we can remove" };
+  }
+
+  return runSeatAction(session, "removeSeatAction", (actor) =>
+    removeSeat(actor, parsed.data)
+  );
+}
+
+/**
+ * End a coach assignment (AS-018).
+ *
+ * `coach.assignment.manage` and NOT `seat.manage`: coaching is an assignment,
+ * never a seat, so an Admin — who may invite a coach under AS-004 — may end one
+ * too. The capability's own docblock records the residual that this is any plant
+ * Admin rather than only the one who created the assignment.
+ */
+export async function endCoachAssignmentAction(
+  assignmentId: string
+): Promise<SeatActionResult> {
+  const session = await requireSeat("coach.assignment.manage");
+
+  const parsed = assignmentIdSchema.safeParse(assignmentId);
+  if (!parsed.success) {
+    return { success: false, error: "That is not an assignment we can end" };
+  }
+
+  return runSeatAction(session, "endCoachAssignmentAction", (actor) =>
+    endCoachAssignment(actor, parsed.data)
+  );
 }
