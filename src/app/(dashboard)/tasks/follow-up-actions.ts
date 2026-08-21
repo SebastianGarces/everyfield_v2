@@ -57,7 +57,9 @@ export async function assignFollowUpAction(
  *
  * The title names the contact rather than repeating a template, because this
  * task is created from a list where the contact's name is what the planter just
- * clicked. Due today: the point of the row is that this person has been waiting.
+ * clicked. NO DUE DATE: the row already says how long this person has been
+ * waiting, and a date invented here would be a deadline nobody agreed to — the
+ * planter can set one on the task if they want to be reminded.
  */
 export async function createAndAssignFollowUpAction(
   personId: string,
