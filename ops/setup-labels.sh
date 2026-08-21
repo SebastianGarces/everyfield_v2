@@ -11,6 +11,8 @@ gh label create "needs-spec"        --color 5319E7 --description "Not yet fleshe
 gh label create "feature"           --color 0052CC --description "Feature parent issue — the FRD's home on the board" --force
 gh label create "decision"          --color 8B5CF6 --description "An open ruling that gates work; resolution lands in the decision ledger" --force
 gh label create "deferred"          --color BFDADC --description "Off the active roadmap — cut or post-beta" --force
+# Applied to a PR, never an issue. `ops/merge-hold.sh` reads it at the moment of merging.
+gh label create "merge-priority"    --color D93F0B --description "Starved PR — every other track holds its merge until this one lands" --force
 gh label create "feedback"          --color D4C5F9 --description "Opened by the in-app feedback bridge — a real user said this" --force
 
 # The bridge (#190) also applies one category label per issue: bug, enhancement
