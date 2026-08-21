@@ -34,7 +34,7 @@ import {
   buildUserPrompt,
 } from "./prompt";
 import {
-  buildJudgeOutputSchema,
+  judgeOutputSchema,
   hasBothAudiences,
   type AssessmentResult,
 } from "./schema";
@@ -126,17 +126,7 @@ export async function runAssessment(
       async () => {
         const generated = await generateObject({
           model: getJudgeModel(),
-          // The fact-aware schema: everything `judgeOutputSchema` enforces,
-          // plus the growth-vocabulary floor checked against THIS plant's stall
-          // clock (#538). A response that calls three-day-old growth "stalled"
-          // fails the parse and is regenerated.
-          schema: buildJudgeOutputSchema({
-            daysSinceLastNewCommitment:
-              snapshot.coreGroup?.daysSinceLastNewCommitment ?? null,
-            slowedThresholdDays: snapshot.coreGroup?.slowedThresholdDays ?? 21,
-            stalledThresholdDays:
-              snapshot.coreGroup?.stalledThresholdDays ?? 28,
-          }),
+          schema: judgeOutputSchema,
           system,
           prompt: user,
           // The retry policy lives in `runPacedCall`, not in the SDK. The SDK's

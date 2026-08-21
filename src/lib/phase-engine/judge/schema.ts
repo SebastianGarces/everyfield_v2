@@ -23,7 +23,6 @@ import { z } from "zod";
 // The register's vocabulary and its two pure checks. The back-edge is
 // TYPE-ONLY (`network-register.ts` imports `Insight` from here), so it is
 // erased at build time and no runtime cycle exists.
-import { findGrowthVocabularyViolations } from "./growth-vocabulary";
 import {
   findNetworkRegisterViolations,
   findUnpairedNetworkCategories,
@@ -165,56 +164,6 @@ export const judgeOutputSchema = z
     }
   });
 export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
-
-/**
- * The facts the growth-vocabulary floor is checked against (#538).
- *
- * Carried separately because the refinements above are PURE over the output,
- * while this one has to compare what was said against what the plant's clock
- * actually reads. Both numbers come from the snapshot the judge was handed, so
- * the floor enforced here is the same floor stated in its fact ledger.
- */
-export interface GrowthFacts {
-  daysSinceLastNewCommitment: number | null;
-  slowedThresholdDays: number;
-  stalledThresholdDays: number;
-}
-
-/**
- * The output schema, plus the one rule that needs the plant's own facts.
- *
- * `judgeOutputSchema` stays the fact-free base — it is what the prompt tests
- * and any caller without a snapshot use. This wraps it for the real pipeline,
- * where the growth vocabulary can finally be checked against the clock.
- *
- * WHY THIS IS NOT PROSE ANY MORE: the twelve-plant fleet pass in #538 found
- * eight assessments calling growth "stalled" below the 28-day floor the rubric
- * states, on plants including a launch-ready exemplar three days after a new
- * commitment. Every other rule with structure behind it held; this one, which
- * had only the rubric text, did not.
- */
-export function buildJudgeOutputSchema(facts: GrowthFacts) {
-  return judgeOutputSchema.superRefine((output, ctx) => {
-    const breaches = findGrowthVocabularyViolations(
-      output.insights,
-      facts.daysSinceLastNewCommitment,
-      facts
-    );
-    if (breaches.length === 0) return;
-
-    const found = breaches
-      .map(
-        (b) =>
-          `"${b.phrase}" in "${b.title}" (needs ${b.requiredDays} days, the plant has ${b.actualDays ?? "no core-group commitment at all"})`
-      )
-      .join("; ");
-    ctx.addIssue({
-      code: "custom",
-      path: ["insights"],
-      message: `Growth vocabulary is gated on the stall clock, and coreGroup.daysSinceLastNewCommitment does not reach the level claimed: ${found}. Below the slowed threshold neither word is available — one vision-meeting cycle can change the picture inside three weeks, so name what the facts show ("no new committed adults in the last two weeks") rather than the level.`,
-    });
-  });
-}
 
 /**
  * The pipeline's public return type: the validated model output plus the audit
