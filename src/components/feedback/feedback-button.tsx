@@ -90,8 +90,9 @@ export function FeedbackButton() {
             <DialogHeader>
               <DialogTitle>Send Feedback</DialogTitle>
               <DialogDescription>
-                Help us improve EveryField. Your feedback goes directly to the
-                team.
+                Help us improve EveryField. What you write here is posted to our
+                public issue tracker so the team can work on it. Your name,
+                email, and church are not.
               </DialogDescription>
             </DialogHeader>
 

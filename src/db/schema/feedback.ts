@@ -1,5 +1,6 @@
 import {
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -54,6 +55,11 @@ export const feedback = pgTable(
       .$type<FeedbackStatus>()
       .notNull()
       .default("new"),
+    // The issue the GitHub bridge opened for this row, null until it succeeds —
+    // and null forever when the token is unset or GitHub refused. The bridge is
+    // fire-and-forget, so this column is a convenience link, never a claim that
+    // the submission was recorded (this row is that record).
+    githubIssueNumber: integer("github_issue_number"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

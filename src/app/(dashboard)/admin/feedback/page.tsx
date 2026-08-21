@@ -21,6 +21,7 @@ import {
   type FeedbackStatus,
 } from "@/db/schema";
 import { requirePlatformAdmin } from "@/lib/auth/admin";
+import { FEEDBACK_REPO, feedbackIssueUrl } from "@/lib/feedback/github";
 import { listFeedback } from "@/lib/feedback/service";
 
 export const dynamic = "force-dynamic";
@@ -112,6 +113,7 @@ export default async function AdminFeedbackPage({
               <TableHead>Category</TableHead>
               <TableHead>Page</TableHead>
               <TableHead className="min-w-72">Description</TableHead>
+              <TableHead className="w-24">Issue</TableHead>
               <TableHead className="w-44">Status</TableHead>
             </TableRow>
           </TableHeader>
@@ -119,7 +121,7 @@ export default async function AdminFeedbackPage({
             {items.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-muted-foreground py-10 text-center"
                 >
                   No feedback found.
@@ -161,6 +163,24 @@ export default async function AdminFeedbackPage({
                     <p className="max-w-md break-words whitespace-pre-wrap">
                       {item.description}
                     </p>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {item.githubIssueNumber ? (
+                      <a
+                        href={feedbackIssueUrl(item.githubIssueNumber)}
+                        target="_blank"
+                        rel="noreferrer"
+                        // The number was stamped under whatever repo the bridge
+                        // was pointed at; the link resolves against the current
+                        // one. Naming the repo makes a mismatch legible.
+                        title={`Opened on ${FEEDBACK_REPO}`}
+                        className="cursor-pointer font-medium underline-offset-4 hover:underline"
+                      >
+                        #{item.githubIssueNumber}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <FeedbackStatusSelect id={item.id} status={item.status} />
