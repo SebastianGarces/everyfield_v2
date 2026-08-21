@@ -165,11 +165,24 @@ const ORG_INVITATION_ACTIONS: InvitationRowActions = {
 
 export function InvitationsList({
   rows,
+  canAct = true,
   actions = ORG_INVITATION_ACTIONS,
   pendingDescription = "Waiting on an answer. Anyone who can invite for your organization can resend the email or revoke the invitation — revoking closes it immediately, and the invitation stops working.",
   answeredDescription = "Every invitation your organization has sent that is no longer open.",
 }: {
   rows: InvitationListRow[];
+  /**
+   * WHETHER THIS READER MAY RESEND OR REVOKE (#500).
+   *
+   * An org MEMBER reads the same invitation list its Owner does and may change
+   * none of it (ruling 185 (3)), so the two controls are ABSENT for them rather
+   * than present-and-refused. It is copy and layout only — `requireSeat` in each
+   * action module is the refusal that holds for a POST that never saw this page
+   * — but a control beside an action guaranteed to refuse it is the visible half
+   * of a permission drift, and this list is the one place both surfaces render
+   * it.
+   */
+  canAct?: boolean;
   actions?: InvitationRowActions;
   pendingDescription?: string;
   answeredDescription?: string;
@@ -192,7 +205,12 @@ export function InvitationsList({
           ) : (
             <ul className="divide-border divide-y">
               {pending.map((row) => (
-                <InvitationRow key={row.id} row={row} actions={actions} />
+                <InvitationRow
+                  key={row.id}
+                  row={row}
+                  canAct={canAct}
+                  actions={actions}
+                />
               ))}
             </ul>
           )}
@@ -212,7 +230,12 @@ export function InvitationsList({
           ) : (
             <ul className="divide-border divide-y">
               {answered.map((row) => (
-                <InvitationRow key={row.id} row={row} actions={actions} />
+                <InvitationRow
+                  key={row.id}
+                  row={row}
+                  canAct={canAct}
+                  actions={actions}
+                />
               ))}
             </ul>
           )}
@@ -224,9 +247,11 @@ export function InvitationsList({
 
 function InvitationRow({
   row,
+  canAct,
   actions,
 }: {
   row: InvitationListRow;
+  canAct: boolean;
   actions: InvitationRowActions;
 }) {
   const status = STATUS_STYLE[row.status];
@@ -254,14 +279,14 @@ function InvitationRow({
         {/* Pending only, and the same rule as Revoke: a resend of an answered
             invitation is refused by the guard inside `sendInvitationEmail`
             anyway, but offering it would be a lie. */}
-        {row.status === "pending" && (
+        {canAct && row.status === "pending" && (
           <ResendEmailButton
             invitationId={row.id}
             email={row.inviteeEmail}
             resend={actions.resend}
           />
         )}
-        {row.status === "pending" && (
+        {canAct && row.status === "pending" && (
           <RevokeButton
             invitationId={row.id}
             email={row.inviteeEmail}

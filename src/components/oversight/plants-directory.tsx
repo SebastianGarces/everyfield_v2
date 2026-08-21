@@ -39,10 +39,20 @@ import type { OversightPlantSummary } from "@/lib/oversight/types";
 export function PlantsDirectory({
   plants,
   scopeLabel,
+  canInvite,
 }: {
   plants: OversightPlantSummary[];
   /** "network" or "sending church" — the caller's own org, in their words. */
   scopeLabel: string;
+  /**
+   * WHETHER THIS READER MAY ACTUALLY SEND THAT INVITATION (#500).
+   *
+   * The empty state's call to action is a promise, and an org MEMBER cannot
+   * keep it — `org.invitation.manage` is Owner-only, so the form behind the
+   * link is not rendered for them. Without this the emptiest screen in the
+   * product would hand a Member the one control they may not use.
+   */
+  canInvite: boolean;
 }) {
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -64,7 +74,7 @@ export function PlantsDirectory({
       </header>
 
       {plants.length === 0 ? (
-        <EmptyDirectory scopeLabel={scopeLabel} />
+        <EmptyDirectory scopeLabel={scopeLabel} canInvite={canInvite} />
       ) : (
         <ul className="grid gap-4">
           {plants.map((plant) => (
@@ -116,7 +126,13 @@ function PlantRow({ plant }: { plant: OversightPlantSummary }) {
   );
 }
 
-function EmptyDirectory({ scopeLabel }: { scopeLabel: string }) {
+function EmptyDirectory({
+  scopeLabel,
+  canInvite,
+}: {
+  scopeLabel: string;
+  canInvite: boolean;
+}) {
   return (
     <div className="bg-card rounded-xl border border-dashed p-10 text-center">
       <h2 className="font-semibold">No plants yet</h2>
@@ -124,14 +140,18 @@ function EmptyDirectory({ scopeLabel }: { scopeLabel: string }) {
         A plant appears here once its planter accepts an invitation from your{" "}
         {scopeLabel}.
       </p>
-      <p className="mt-4 text-sm">
-        <Link
-          href="/oversight/invitations"
-          className="text-primary cursor-pointer font-medium underline underline-offset-4"
-        >
-          Invite a planter
-        </Link>
-      </p>
+      {/* The sentence above is true for everyone; the call to action is only
+          offered to whoever can answer it. */}
+      {canInvite && (
+        <p className="mt-4 text-sm">
+          <Link
+            href="/oversight/invitations"
+            className="text-primary cursor-pointer font-medium underline underline-offset-4"
+          >
+            Invite a planter
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

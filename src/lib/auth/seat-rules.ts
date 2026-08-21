@@ -28,6 +28,7 @@ import type { UserSeat } from "@/db/schema";
 import {
   isChurchLevelUser,
   isOversightUser,
+  tenancyOf,
   type SeatFields,
 } from "@/lib/auth/tenancy";
 
@@ -75,10 +76,20 @@ const SEATED = [...ADMIN_PLUS, "member"] as const satisfies readonly UserSeat[];
  *   Owner with `church_id` null who creates the plant afterwards, so the
  *   onboarding verbs have to admit that account (see `isChurchLevelOwner`).
  * - `oversight` — a seat in a sending church or a network.
+ * - `tenancy` — a seat in ANY tenancy that EXISTS: a plant, a sending church or
+ *   a network. The union of `plant` and `oversight`, and NOT the same as `any`
+ *   — it refuses the registered Owner whose plant does not exist yet, who has a
+ *   seat and names no tenancy for the verb to act on. Asked through
+ *   `tenancyOf`, so it is the same exactly-one rule the FK writers read.
  * - `any` — the verb is answered from the actor alone, or reaches BOTH sides of
  *   an association and the side is matched downstream (`association.answer`).
  */
-type TenancyRequirement = "plant" | "church-level" | "oversight" | "any";
+type TenancyRequirement =
+  | "plant"
+  | "church-level"
+  | "oversight"
+  | "tenancy"
+  | "any";
 
 /** A seat set and a tenancy — the pair every authority rule reads. */
 type Authority = {
@@ -192,12 +203,19 @@ const CAPABILITIES = {
    * because association is an Owner decision; this one staffs a tenancy, which
    * AS-005 gives an Admin.
    *
-   * `plant` because this track ships the plant side only. The org side is the
-   * sibling issue over the same table, and it widens the tenancy here rather
-   * than declaring a second verb — an org Admin inviting an org Member is the
-   * same decision about the same row shape.
+   * `tenancy` SINCE #500, WHICH IS THE WIDENING THIS ROW PREDICTED. The org
+   * side is the sibling issue over the same table, and it widens the tenancy
+   * here rather than declaring a second verb — an org Admin inviting an org
+   * Member is the same decision about the same row shape (AS-005).
+   *
+   * `tenancy` AND NOT `any`, which is the distinction that matters. `any` would
+   * admit the registered Owner whose plant does not exist yet: they hold the
+   * Owner seat and name no tenancy, so `/settings/team`'s gate would let them
+   * onto a screen whose every query has no subject. `tenancy` is the union of
+   * the two tenancies that can HOLD a seat, so the page gate and the actions
+   * refuse that account in the same place they always did.
    */
-  "seat.invitation.manage": { seats: ADMIN_PLUS, tenancy: "plant" },
+  "seat.invitation.manage": { seats: ADMIN_PLUS, tenancy: "tenancy" },
   /**
    * Ending a coach assignment — the `coach_assignments` row going inactive
    * (AS-018, #497).
@@ -405,6 +423,9 @@ export function holdsSeatFor(
       break;
     case "oversight":
       if (!isOversightUser(user)) return false;
+      break;
+    case "tenancy":
+      if (tenancyOf(user) === null) return false;
       break;
     case "any":
       break;

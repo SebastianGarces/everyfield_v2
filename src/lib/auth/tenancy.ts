@@ -41,6 +41,41 @@ export type TenancyFields = Pick<
 >;
 
 /**
+ * The three kinds of tenancy a seat can be held in.
+ *
+ * DERIVED FROM `AssociationOrgType`, NOT RESTATED BESIDE IT. The two oversight
+ * kinds are the same two words `associationEvents.org_type` and the
+ * notification anchor already use, so writing them out again here would be a
+ * second vocabulary that drifts the day a third org kind is added. Stating it
+ * as "the association org types, plus the plant" makes `oversightOrgOf` below a
+ * narrowing that holds by construction rather than by a cast.
+ *
+ * A bare union rather than the `as const` tuple this file's neighbours use,
+ * because nothing needs the values at runtime: the exhaustiveness that matters
+ * is carried by `satisfies Record<SeatTenancyType, …>` at each lookup table and
+ * by the switch in `tenancyDisplayName`.
+ */
+export type SeatTenancyType = AssociationOrgType | "church";
+
+/**
+ * WHICH TENANCY A ROW NAMES — the kind and the id together, and the shape every
+ * seat-scoped query, invitation and roster reads.
+ *
+ * ONE VALUE RATHER THAN THREE NULLABLE FKs THREADED SEPARATELY. `users` and
+ * `user_invitations` both carry the same three columns under the same
+ * exactly-one rule, so "which tenancy" is one question with one answer, and a
+ * caller holding this pair cannot forget which column it came out of or write
+ * to a second one. #500 is what made that load-bearing: the seat invitation
+ * flow was written with `churchId: string` threaded through fifteen call sites,
+ * and widening it to an org would otherwise have been fifteen nullable fields
+ * and a switch at each.
+ */
+export type SeatTenancy = {
+  readonly type: SeatTenancyType;
+  readonly id: string;
+};
+
+/**
  * The oversight org an account administers — its KIND and its id together.
  *
  * Keyed on `AssociationOrgType`, the same two-valued union
@@ -90,12 +125,55 @@ function tenanciesNamed(user: TenancyFields): number {
  * logged instead of silently dropped inside a `WHERE`.
  */
 export function oversightOrgOf(user: TenancyFields): OversightOrg | null {
+  const tenancy = tenancyOf(user);
+  if (!tenancy || tenancy.type === "church") return null;
+  return { type: tenancy.type, id: tenancy.id };
+}
+
+/**
+ * THE TENANCY THIS ROW NAMES, all three kinds — the one resolution
+ * {@link oversightOrgOf} narrows and every seat-scoped writer reads.
+ *
+ * Same rule, stated once: EXACTLY ONE FK, or nothing. A row naming two
+ * tenancies resolves to `null` here for the reason it resolves to no org above
+ * — there is nothing left to break the tie with, and a precedence order would
+ * hand one tenancy's reach to an account with a live claim on another.
+ *
+ * IT TAKES `TenancyFields`, SO IT ANSWERS FOR AN INVITATION ROW TOO.
+ * `user_invitations` carries the same three columns under the same
+ * exactly-one CHECK, so its projection is structurally this argument and
+ * `describeUserInvitationForRegistration` resolves the invited tenancy with the
+ * same function that resolves the caller's own.
+ */
+export function tenancyOf(user: TenancyFields): SeatTenancy | null {
   if (tenanciesNamed(user) !== 1) return null;
   if (user.sendingNetworkId)
     return { type: "network", id: user.sendingNetworkId };
   if (user.sendingChurchId)
     return { type: "sending_church", id: user.sendingChurchId };
+  if (user.churchId) return { type: "church", id: user.churchId };
   return null;
+}
+
+/**
+ * The three FK columns a tenancy sets — the inverse of {@link tenancyOf}, and
+ * the ONE place a tenancy becomes columns again.
+ *
+ * Every writer that stores a tenancy (the seat-invitation insert, the users
+ * insert at registration) spreads this rather than naming a column, so the
+ * exactly-one CHECK is satisfied by construction and the other two are
+ * explicitly NULL rather than merely omitted.
+ */
+export function tenancyColumns(tenancy: SeatTenancy): {
+  churchId: string | null;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+} {
+  return {
+    churchId: tenancy.type === "church" ? tenancy.id : null,
+    sendingChurchId: tenancy.type === "sending_church" ? tenancy.id : null,
+    sendingNetworkId: tenancy.type === "network" ? tenancy.id : null,
+  };
 }
 
 /** Whether this account's tenancy is an oversight org. */

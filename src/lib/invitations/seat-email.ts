@@ -30,6 +30,7 @@
 // ============================================================================
 
 import type { UserInvitationStatus } from "@/db/schema/user-invitation";
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
 import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
 import { redactForLog } from "@/lib/email/redact";
@@ -89,7 +90,18 @@ export interface SeatInvitationEmailFacts {
   token: string;
   inviteeEmail: string;
   status: UserInvitationStatus;
-  churchName: string | null;
+  /**
+   * THE INVITING TENANCY'S NAME AND KIND — a church plant, a sending church or
+   * a network (#500). Both nullable and both refused together: a row whose
+   * tenancy will not resolve produces `no_inviting_org`, because an email that
+   * misnames who invited you is indistinguishable from a phishing attempt.
+   *
+   * The KIND is here and not only the name because the copy turns on it — what
+   * an Admin may do in a plant and what one may do in a network are different
+   * sentences (`./seat-copy`).
+   */
+  orgName: string | null;
+  orgType: SeatTenancyType | null;
   inviterName: string | null;
   /**
    * What the invitation makes them — the union, not a seat, so a coach cannot
@@ -164,16 +176,19 @@ export async function buildSeatInvitationEmail(
   const to = facts.inviteeEmail.trim();
   if (to.length === 0) return { ok: false, reason: "no_address" };
 
-  const churchName = (facts.churchName ?? "").trim();
-  if (churchName.length === 0) {
+  const orgName = (facts.orgName ?? "").trim();
+  if (orgName.length === 0 || facts.orgType === null) {
     // The same refusal the org path gives a row whose inviting org will not
     // resolve, and for the same reason: an email that misnames who invited you
-    // is indistinguishable from a phishing attempt, so nothing is sent.
+    // is indistinguishable from a phishing attempt, so nothing is sent. The
+    // KIND is refused on the same footing as the name — without it the copy
+    // would have to guess which powers it is describing.
     return { ok: false, reason: "no_inviting_org" };
   }
 
   const { subject, html, text } = await seatInvitationEmail({
-    churchName,
+    orgName,
+    orgType: facts.orgType,
     inviterName: facts.inviterName?.trim() || null,
     invitedAs: facts.invitedAs,
     inviteeEmail: to,

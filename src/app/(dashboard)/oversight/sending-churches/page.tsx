@@ -29,6 +29,7 @@ import { notFound } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { SendingChurchesRoster } from "@/components/oversight/sending-churches-roster";
 import { listNetworkSendingChurches } from "@/lib/oversight/sending-churches";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata: Metadata = {
@@ -58,7 +59,10 @@ export default async function OversightSendingChurchesPage() {
         item and the page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Sending churches" }]} />
-      <SendingChurchesRoster sendingChurches={sendingChurches} />
+      <SendingChurchesRoster
+        sendingChurches={sendingChurches}
+        canInvite={holdsSeatFor(user, "org.invitation.manage")}
+      />
     </>
   );
 }

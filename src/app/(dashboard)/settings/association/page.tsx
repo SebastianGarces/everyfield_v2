@@ -10,7 +10,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { verifySession } from "@/lib/auth/session";
-import { isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
+import { isOrgOwner, isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
 
 import { InvitationAnswer } from "./invitation-answer";
@@ -102,8 +102,14 @@ export default async function AssociationSettingsPage() {
     return <PlantAssociation churchId={user.churchId} />;
   }
 
+  // BOTH HALVES, LIKE `isPlantOwner` ABOVE (#500). This asked the tenancy alone
+  // while a sending church had exactly one account, so "has a sending church"
+  // and "is its Owner" were the same row. An org now has Admins and Members
+  // (AS-005), and every write on this screen — accept, decline, leave — is
+  // Owner-only by ruling 185 (1), so the tenancy alone would render three
+  // controls whose own guards are guaranteed to refuse the reader.
   const org = oversightOrgOf(user);
-  if (org?.type === "sending_church") {
+  if (org?.type === "sending_church" && isOrgOwner(user)) {
     return <SendingChurchAssociation sendingChurchId={org.id} />;
   }
 

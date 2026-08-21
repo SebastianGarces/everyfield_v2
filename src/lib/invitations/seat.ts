@@ -1,5 +1,6 @@
 // ============================================================================
-// SEAT INVITATIONS — the logic layer (AS-010 / AS-012 / AS-013, #495).
+// SEAT INVITATIONS — the logic layer (AS-005 / AS-010 / AS-012 / AS-013, #495,
+// widened to the org side by #500).
 //
 // NO `"use server"` DIRECTIVE, and that absence is the point. Every export of a
 // `"use server"` module is a POSTable endpoint reachable with no session and no
@@ -14,8 +15,8 @@
 //
 // `./core.ts` invites an ORGANIZATION into an association. This invites a
 // PERSON into a tenancy: they register through the emailed link and land with
-// the plant's `church_id` and the invited seat, in the same write that creates
-// the account (AS-012). So:
+// that tenancy's FK and the invited seat, in the same write that creates the
+// account (AS-012). So:
 //
 //   * IT IS REGISTER-ONLY. An address that already holds an account is refused
 //     with `ACCOUNT_NOT_INVITABLE_MESSAGE` — the ONE neutral message, imported
@@ -31,6 +32,33 @@
 //     exists only in transit, so the send that fails cannot be repeated
 //     verbatim. `resendUserInvitationEmailAs` rotates `token_hash` and the email
 //     says plainly that earlier links stop working.
+//
+// ----------------------------------------------------------------------------
+// ALL THREE TENANCIES, ONE FLOW (#500)
+// ----------------------------------------------------------------------------
+//
+// The tenancy is a CHURCH PLANT, a SENDING CHURCH or a NETWORK, and it is one
+// value — `SeatTenancy`, from `tenancyOf` — rather than three nullable FKs
+// threaded through every query. `user_invitations` already carried all three
+// columns under an exactly-one CHECK, so the org side set them rather than
+// adding a table, and `seat.invitation.manage` widened from `tenancy: "plant"`
+// to `tenancy: "tenancy"` rather than a second verb being declared: an org
+// Admin inviting an org Member is the same decision about the same row shape
+// (AS-005).
+//
+// THE TENANCY IS ALWAYS THE ACTOR'S OWN. `invitingTenancy(actor)` resolves it
+// from the session; `UserInvitationRequest` has no field for one, and
+// `TENANCY_COLUMN` is the single lookup every scoped `WHERE` is built from. So
+// "an org's invitation never targets a plant" is a property of the surface
+// rather than of a validator — there is nothing for a forged POST to re-aim.
+//
+// TWO THINGS STAY PLANT-ONLY, and both are the same fact: coaching is a
+// relationship with a church plant. `coach.assignment.manage` is
+// `tenancy: "plant"`, so `assertSeatFor` refuses an org actor before the
+// already-coaching check is reached, and AS-013's person link is written only
+// when the granted tenancy is a plant — an org has no directory for a `persons`
+// row to live in, and an org Member is an account rather than a person record
+// inside anybody's plant (ruling 185 (9)).
 //
 // ----------------------------------------------------------------------------
 // EVERY CONSTANT IS IMPORTED. One implementation, never a second copy.
@@ -55,6 +83,10 @@
 // tenancy's rows for an address the caller itself typed, and answer identically
 // whether or not an account exists behind it. Below the lookup there is exactly
 // one sentence, and it is the imported constant.
+//
+// THAT IS UNCHANGED BY THE WIDENING, and deliberately so: nothing below the
+// lookup branches on which tenancy is inviting, because a second fact about a
+// stranger is a second fact whichever org asked for it.
 // ============================================================================
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -64,6 +96,8 @@ import { db } from "@/db";
 import {
   churches,
   coachAssignments,
+  sendingChurches,
+  sendingNetworks,
   userInvitations,
   users,
   type InvitableSeat,
@@ -72,6 +106,12 @@ import {
   type UserInvitationKind,
 } from "@/db/schema";
 import { assertSeatFor, type Capability } from "@/lib/auth/seat-rules";
+import {
+  tenancyColumns,
+  tenancyOf,
+  type SeatTenancy,
+  type SeatTenancyType,
+} from "@/lib/auth/tenancy";
 
 import {
   ACCOUNT_NOT_INVITABLE_MESSAGE,
@@ -214,19 +254,63 @@ export const USER_INVITE_DUPLICATE_MESSAGE =
 export const ALREADY_COACHING_MESSAGE =
   "That person already coaches this plant — end the current assignment first";
 
+// ----------------------------------------------------------------------------
+// The inviting tenancy
+// ----------------------------------------------------------------------------
+
+/**
+ * WHICH COLUMN A TENANCY IS, for the three predicates that scope this table.
+ *
+ * A LOOKUP AND NOT A SWITCH, so the list, the revoke, the resend, the duplicate
+ * check, the cap and the auto-expire sweep all name the same column for the
+ * same tenancy by construction. A `Record` over `SeatTenancyType` means a
+ * fourth tenancy kind is a compile error here rather than a `WHERE` that
+ * silently matches nothing.
+ */
+const TENANCY_COLUMN = {
+  church: userInvitations.churchId,
+  sending_church: userInvitations.sendingChurchId,
+  network: userInvitations.sendingNetworkId,
+} as const satisfies Record<SeatTenancyType, unknown>;
+
+/** `<the tenancy's column> = <its id>` — the scope every read and write shares. */
+function tenancyMatches(tenancy: SeatTenancy) {
+  return eq(TENANCY_COLUMN[tenancy.type], tenancy.id);
+}
+
+/**
+ * The tenancy this actor invites INTO — their plant, their sending church or
+ * their network (AS-005 / AS-010).
+ *
+ * `assertSeatFor` has already refused every account whose seat cannot invite,
+ * and `seat.invitation.manage` is `tenancy: "tenancy"`, so a null here is the
+ * one account that verb admits with nothing to act on: a registered Owner whose
+ * plant does not exist yet. The copy names what is missing without naming
+ * another tenancy.
+ */
+function invitingTenancy(actor: InvitationActor): SeatTenancy {
+  const tenancy = tenancyOf(actor);
+  if (!tenancy) {
+    throw new InvitationError(
+      "Create your church plant before inviting anyone to it"
+    );
+  }
+  return tenancy;
+}
+
 /**
  * The cap's statement. Exported so a test can read its bound parameters: the
- * scope is this PLANT's own rows and the window is the SERVER's instant, neither
- * of which a request can influence.
+ * scope is this TENANCY's own rows and the window is the SERVER's instant,
+ * neither of which a request can influence.
  *
  * NO `status` PREDICATE, and that is the rule AS-010 states — "counting every
  * status". A revoke–reinvite loop is exactly what the cap exists to stop, so
  * counting only the pending ones would count only the invitations that are not
  * the problem.
  */
-export function invitesFromChurchToAddressQuery(
+export function invitesFromTenancyToAddressQuery(
   kind: UserInvitationKind,
-  churchId: string,
+  tenancy: SeatTenancy,
   inviteeEmail: string,
   since: Date
 ) {
@@ -236,7 +320,7 @@ export function invitesFromChurchToAddressQuery(
     .where(
       and(
         eq(userInvitations.kind, kind),
-        eq(userInvitations.churchId, churchId),
+        tenancyMatches(tenancy),
         eq(userInvitations.inviteeEmail, inviteeEmail),
         gte(userInvitations.createdAt, since)
       )
@@ -299,20 +383,6 @@ export interface CreatedUserInvitation {
 }
 
 /**
- * The plant this actor invites for. `null` for anybody who does not hold a seat
- * that may invite, which `assertSeatFor` has already refused — so a null here
- * is a defect, not an outcome.
- */
-function invitingChurchId(actor: InvitationActor): string {
-  if (!actor.churchId) {
-    throw new InvitationError(
-      "Create your church plant before inviting anyone to it"
-    );
-  }
-  return actor.churchId;
-}
-
-/**
  * Resolve + guard + insert + send. The path the action layer takes.
  *
  * THE ORDER IS THE SECURITY PROPERTY, not the wording — see the module header.
@@ -335,24 +405,24 @@ export async function createUserInvitationAs(
   // as at the action's own `requireSeat` (AS-004 / AS-010).
   assertSeatFor(actor, rules.capability);
 
-  const churchId = invitingChurchId(actor);
+  const tenancy = invitingTenancy(actor);
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
 
   if (!isInvitableEmailAddress(inviteeEmail)) {
     throw new InvitationError(INVALID_EMAIL_MESSAGE);
   }
 
-  // THIS PLANT'S OWN ROWS, for an address this plant typed. Legible, and
-  // deliberately above the lookup so it cannot become a statement about the
-  // person behind the address. Scoped to the KIND: a pending coach invitation is
-  // not a reason to refuse a seat invitation, and the two answer separately.
+  // THIS TENANCY'S OWN ROWS, for an address it typed. Legible, and deliberately
+  // above the lookup so it cannot become a statement about the person behind the
+  // address. Scoped to the KIND: a pending coach invitation is not a reason to
+  // refuse a seat invitation, and the two answer separately.
   const [duplicate] = await db
     .select({ id: userInvitations.id })
     .from(userInvitations)
     .where(
       and(
         eq(userInvitations.kind, request.kind),
-        eq(userInvitations.churchId, churchId),
+        tenancyMatches(tenancy),
         eq(userInvitations.inviteeEmail, inviteeEmail),
         eq(userInvitations.status, "pending"),
         gt(userInvitations.expiresAt, now)
@@ -373,14 +443,20 @@ export async function createUserInvitationAs(
   // roster by name on the same screen (`PlantCoachList`, #497). So the only fact
   // it can state is one the caller was already looking at — unlike the general
   // account lookup below, which speaks about the whole product.
-  if (request.kind === "coach") {
+  //
+  // IT IS PLANT-ONLY AND STAYS SO. `coach.assignment.manage` is
+  // `tenancy: "plant"`, so `assertSeatFor` above has already refused every org
+  // actor — a coach coaches a church plant, and there is no org-side coaching
+  // to widen this to. The narrowing on `tenancy.type` is what lets the query
+  // keep naming `coach_assignments.church_id`.
+  if (request.kind === "coach" && tenancy.type === "church") {
     const [assigned] = await db
       .select({ id: coachAssignments.id })
       .from(coachAssignments)
       .innerJoin(users, eq(users.id, coachAssignments.coachUserId))
       .where(
         and(
-          eq(coachAssignments.churchId, churchId),
+          eq(coachAssignments.churchId, tenancy.id),
           eq(coachAssignments.status, "active"),
           eq(users.email, inviteeEmail)
         )
@@ -395,9 +471,9 @@ export async function createUserInvitationAs(
   // THE CAP, counting EVERY status (AS-010). Also above the lookup, and for the
   // same reason: a cap that applied only to invitable addresses would itself be
   // a probe.
-  const recent = await invitesFromChurchToAddressQuery(
+  const recent = await invitesFromTenancyToAddressQuery(
     request.kind,
-    churchId,
+    tenancy,
     inviteeEmail,
     rateLimitWindowStart(now)
   );
@@ -427,7 +503,10 @@ export async function createUserInvitationAs(
   const row: NewUserInvitation = {
     kind: request.kind,
     inviteeEmail,
-    churchId,
+    // SPREAD, NEVER NAMED. `tenancyColumns` sets the one FK this tenancy is and
+    // NULLs the other two explicitly, so `user_invitations_tenancy_check` is
+    // satisfied by construction rather than by this call site remembering it.
+    ...tenancyColumns(tenancy),
     seat: seatColumnFor(request),
     tokenHash: hashUserInvitationToken(token),
     inviterUserId: actor.id,
@@ -468,13 +547,18 @@ async function seatInviteeEmailOutcome(
   token: string,
   deps: SeatInvitationEmailDeps
 ) {
-  let churchName: string | null = null;
+  let orgName: string | null = null;
   let inviterName: string | null = null;
   let invitedAs: InvitedAs;
 
+  // Resolved OUTSIDE the try because it reaches no database — it is a read of
+  // the three FKs already on the row — and `null` here is a refusal the send
+  // reports (`no_inviting_org`), not a throw.
+  const orgType = tenancyOf(invitation)?.type ?? null;
+
   try {
     const facts = await lookupSeatInvitationSender(invitation);
-    churchName = facts.churchName;
+    orgName = facts.orgName;
     inviterName = facts.inviterName;
     // INSIDE THE TRY, so a row that contradicts its own CHECK becomes a refusal
     // with a reason rather than an unhandled throw out of a best-effort send.
@@ -493,7 +577,8 @@ async function seatInviteeEmailOutcome(
       token,
       inviteeEmail: invitation.inviteeEmail,
       status: invitation.status,
-      churchName,
+      orgName,
+      orgType,
       inviterName,
       invitedAs,
       expiresAt: invitation.expiresAt,
@@ -502,21 +587,76 @@ async function seatInviteeEmailOutcome(
   );
 }
 
-/** Who the email says it is from: the plant, and the person who pressed Send. */
+/**
+ * THE INVITING TENANCY'S OWN NAME — the words the email and the register banner
+ * both put in front of the invitee.
+ *
+ * A SWITCH RATHER THAN THE `TENANCY_COLUMN` LOOKUP, because the three names
+ * live in three different TABLES: `churches`, `sending_churches` and
+ * `sending_networks` are separate relations, so there is no one column a map
+ * could point at. It is exhaustive over `SeatTenancyType`, so a fourth kind
+ * fails to compile here rather than resolving to `null` and refusing every
+ * send with `no_inviting_org`.
+ *
+ * `null` for a tenancy row that has been deleted. The send refuses on it — an
+ * email that misnames who invited you is indistinguishable from a phishing
+ * attempt (`./seat-email` → `no_inviting_org`).
+ */
+async function tenancyDisplayName(
+  tenancy: SeatTenancy
+): Promise<string | null> {
+  switch (tenancy.type) {
+    case "church": {
+      const [row] = await db
+        .select({ name: churches.name })
+        .from(churches)
+        .where(eq(churches.id, tenancy.id))
+        .limit(1);
+      return row?.name ?? null;
+    }
+    case "sending_church": {
+      const [row] = await db
+        .select({ name: sendingChurches.name })
+        .from(sendingChurches)
+        .where(eq(sendingChurches.id, tenancy.id))
+        .limit(1);
+      return row?.name ?? null;
+    }
+    case "network": {
+      const [row] = await db
+        .select({ name: sendingNetworks.name })
+        .from(sendingNetworks)
+        .where(eq(sendingNetworks.id, tenancy.id))
+        .limit(1);
+      return row?.name ?? null;
+    }
+  }
+}
+
+/**
+ * Who the email says it is from: the inviting tenancy, and the person who
+ * pressed Send.
+ *
+ * THE TENANCY COMES OFF THE ROW IN HAND, through the same `tenancyOf` a session
+ * goes through — `user_invitations` carries the same three FKs under the same
+ * exactly-one CHECK, so the invitation projection IS `TenancyFields`. A row that
+ * contradicts its own CHECK resolves to no tenancy and the send refuses, which
+ * is the same answer a deleted org gets.
+ */
 async function lookupSeatInvitationSender(
   invitation: UserInvitation
-): Promise<{ churchName: string | null; inviterName: string | null }> {
-  const [row] = await db
-    .select({ churchName: churches.name, inviterName: users.name })
-    .from(userInvitations)
-    .innerJoin(churches, eq(churches.id, userInvitations.churchId))
-    .innerJoin(users, eq(users.id, userInvitations.inviterUserId))
-    .where(eq(userInvitations.id, invitation.id))
+): Promise<{ orgName: string | null; inviterName: string | null }> {
+  const tenancy = tenancyOf(invitation);
+
+  const [inviter] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, invitation.inviterUserId))
     .limit(1);
 
   return {
-    churchName: row?.churchName ?? null,
-    inviterName: row?.inviterName ?? null,
+    orgName: tenancy ? await tenancyDisplayName(tenancy) : null,
+    inviterName: inviter?.name ?? null,
   };
 }
 
@@ -543,10 +683,10 @@ async function lookupSeatInvitationSender(
  * bearing.
  */
 function oursFilter(actor: InvitationActor) {
-  return eq(userInvitations.churchId, invitingChurchId(actor));
+  return tenancyMatches(invitingTenancy(actor));
 }
 
-/** Every seat invitation this plant has issued, newest first. */
+/** Every seat invitation this tenancy has issued, newest first. */
 export async function listUserInvitationsFor(
   actor: InvitationActor
 ): Promise<UserInvitation[]> {
@@ -729,8 +869,14 @@ export async function resendUserInvitationEmailAs(
 export type UserRegistrationInvitation = {
   id: string;
   inviteeEmail: string;
-  churchId: string;
-  churchName: string;
+  /**
+   * THE TENANCY THE SEAT IS GRANTED IN — a plant, a sending church or a network
+   * (#500). It is the same value the invitation row was written with, so
+   * registration writes back the FK the inviter chose and can write no other.
+   */
+  tenancy: SeatTenancy;
+  /** That tenancy's own name, for the banner and the email. */
+  tenancyName: string;
   invitedAs: InvitedAs;
 };
 
@@ -765,17 +911,21 @@ export async function describeUserInvitationForRegistration(
   const candidate = (token ?? "").trim();
   if (candidate.length === 0) return null;
 
+  // NO JOIN ANY MORE, because there is no ONE table to join: the inviting
+  // tenancy is one of three relations (#500). The three FKs are selected
+  // instead and resolved by `tenancyOf` — the same function the session goes
+  // through — and the name is then a point read on whichever table it named.
   const [row] = await db
     .select({
       id: userInvitations.id,
       kind: userInvitations.kind,
       inviteeEmail: userInvitations.inviteeEmail,
       churchId: userInvitations.churchId,
-      churchName: churches.name,
+      sendingChurchId: userInvitations.sendingChurchId,
+      sendingNetworkId: userInvitations.sendingNetworkId,
       seat: userInvitations.seat,
     })
     .from(userInvitations)
-    .innerJoin(churches, eq(churches.id, userInvitations.churchId))
     .where(
       and(
         eq(userInvitations.tokenHash, hashUserInvitationToken(candidate)),
@@ -785,7 +935,10 @@ export async function describeUserInvitationForRegistration(
     )
     .limit(1);
 
-  if (!row || !row.churchId) return null;
+  if (!row) return null;
+
+  const tenancy = tenancyOf(row);
+  if (!tenancy) return null;
 
   // Narrowed rather than cast: a `seat` row with no seat contradicts
   // `user_invitations_seat_check`, and it is read as no invitation at all — the
@@ -800,11 +953,17 @@ export async function describeUserInvitationForRegistration(
 
   if (!invitedAs) return null;
 
+  // The tenancy row itself is gone — the same `null` an unknown token gets. The
+  // join this replaced was an INNER one, so a missing org already produced
+  // exactly this answer.
+  const tenancyName = await tenancyDisplayName(tenancy);
+  if (!tenancyName) return null;
+
   return {
     id: row.id,
     inviteeEmail: row.inviteeEmail,
-    churchId: row.churchId,
-    churchName: row.churchName,
+    tenancy,
+    tenancyName,
     invitedAs,
   };
 }

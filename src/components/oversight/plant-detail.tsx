@@ -62,10 +62,24 @@ export function PlantDetail({
   detail,
   scopeLabel,
   history,
+  canSever,
 }: {
   detail: OversightPlantDetail;
   /** "network" or "sending church" — the caller's own org, in their words. */
   scopeLabel: string;
+  /**
+   * WHETHER THIS READER MAY REMOVE THE PLANT FROM THE PORTFOLIO (#500).
+   *
+   * The page used to render the dialog unconditionally, and its own comment
+   * said why that was safe: an oversight admin reached a plant only through
+   * their org's own FK, so the button appeared exactly when the caller's org
+   * held the plant. That argument was about the PLANT and is still true. What
+   * changed is the READER — an org now has Members, who reach this page in full
+   * and may sever nothing (`org.association.sever` is Owner-only) — so the
+   * question is no longer "is this plant yours" but "may you do this", and the
+   * caller asks the capability table.
+   */
+  canSever: boolean;
   /**
    * This plant's association events WITH THE CALLER'S OWN ORG (OV-011), already
    * scoped by the read. Never another org's history.
@@ -131,12 +145,14 @@ export function PlantDetail({
               (`getAccessibleChurchIds`). Hiding it is never the control; the
               authority rule and the tenancy assertion are server-side.
             */}
-            <RemovePlantDialog
-              churchId={plant.churchId}
-              plantName={plant.name}
-              orgType={plant.provenance.orgType}
-              orgName={plant.provenance.orgName}
-            />
+            {canSever && (
+              <RemovePlantDialog
+                churchId={plant.churchId}
+                plantName={plant.name}
+                orgType={plant.provenance.orgType}
+                orgName={plant.provenance.orgName}
+              />
+            )}
           </div>
         </div>
         <div className="p-6">

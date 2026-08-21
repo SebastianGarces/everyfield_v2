@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import { namedButtons } from "@/lib/testing/rendered-markup";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
@@ -93,11 +94,22 @@ function roster(selfId: string): SeatRosterViewRow[] {
   ];
 }
 
-function render(selfId: string, canManageSeats: boolean): string {
+/**
+ * `tenancyType` defaults to the plant, which is what every assertion in this
+ * file is about. The ORG rendering — its noun, its controls and the different
+ * cascade its removal dialog may promise — is asserted in
+ * `@/lib/invitations/org-seat-invitations.test.ts`, beside the rest of #500.
+ */
+function render(
+  selfId: string,
+  canManageSeats: boolean,
+  tenancyType: SeatTenancyType = "church"
+): string {
   return renderToStaticMarkup(
     createElement(SeatRoster, {
       rows: roster(selfId),
       canManageSeats,
+      tenancyType,
       actions: STUB_ACTIONS,
     })
   );
@@ -160,8 +172,8 @@ test("the Owner is offered appoint, demote and remove on the right rows", () => 
     [
       "Make a Member — Aaron Admin",
       "Make an Admin — mel@plant.test",
-      "Remove Aaron Admin from this plant",
-      "Remove mel@plant.test from this plant",
+      "Remove Aaron Admin from this church plant",
+      "Remove mel@plant.test from this church plant",
     ].sort(),
     "the Member is offered promotion, the Admin demotion, and both removal — and the Owner's own row offers nothing"
   );
@@ -172,7 +184,9 @@ test("a nameless person is addressed by their email, not by an empty name", () =
   // buttons to a screen reader, so a null name must fall back rather than
   // render "Remove  from this plant".
   assert.ok(
-    controlLabels(asOwner()).includes("Remove mel@plant.test from this plant"),
+    controlLabels(asOwner()).includes(
+      "Remove mel@plant.test from this church plant"
+    ),
     "a row with no name must name the person by their address in every control"
   );
 });

@@ -251,13 +251,22 @@ export async function register(
     // join it. Skipping the read is also the honest thing — it asks the plant's
     // directory about an address, and a coach's address is not the plant's to
     // look up.
+    // A COACH NEEDS NO PERSON LOOKUP, and NEITHER DOES AN ORG SEAT (#500):
+    // AS-013's match-or-create asks a PLANT's directory about an address, and
+    // a sending church and a network have no directory to ask. So the read runs
+    // for exactly one shape — a seat into a church plant — and every other
+    // invitation carries `null` into a planner that writes no `persons` row.
     seatInvitation
       ? {
-          churchId: seatInvitation.churchId,
+          tenancy: seatInvitation.tenancy,
           invitedAs: seatInvitation.invitedAs,
           matchedPersonId:
-            seatInvitation.invitedAs.kind === "seat"
-              ? await findLinkablePersonId(seatInvitation.churchId, identifier)
+            seatInvitation.invitedAs.kind === "seat" &&
+            seatInvitation.tenancy.type === "church"
+              ? await findLinkablePersonId(
+                  seatInvitation.tenancy.id,
+                  identifier
+                )
               : null,
         }
       : null

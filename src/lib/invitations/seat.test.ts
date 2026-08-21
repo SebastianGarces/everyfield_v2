@@ -38,7 +38,7 @@ import {
   USER_INVITE_RATE_LIMITED_MESSAGE,
   userInvitationActedOnAtRegistration,
   inviteeRefusalFor,
-  invitesFromChurchToAddressQuery,
+  invitesFromTenancyToAddressQuery,
   type UserRegistrationInvitation,
 } from "./seat";
 
@@ -436,7 +436,7 @@ test("every legible refusal runs ABOVE the address lookup", () => {
       "normalizeInviteeEmail(request.inviteeEmail)",
       "isInvitableEmailAddress(inviteeEmail)",
       'eq(userInvitations.status, "pending")',
-      "invitesFromChurchToAddressQuery(",
+      "invitesFromTenancyToAddressQuery(",
       ".from(users)",
       "inviteeRefusalFor(request.kind, existingAccount)",
       "db.insert(userInvitations)",
@@ -462,11 +462,11 @@ test("nothing below the lookup composes a sentence of its own", () => {
 // 5. THE CAP — this plant's rows, every status, the server's window
 // ----------------------------------------------------------------------------
 
-test("the cap counts EVERY status, scoped to this plant and this address", () => {
+test("the cap counts EVERY status, scoped to this tenancy and this address", () => {
   const since = new Date("2026-07-21T12:00:00.000Z");
-  const { sql, params } = invitesFromChurchToAddressQuery(
+  const { sql, params } = invitesFromTenancyToAddressQuery(
     "seat",
-    PLANT,
+    { type: "church", id: PLANT },
     "stranger@example.com",
     since
   ).toSQL();
@@ -523,24 +523,60 @@ test("the cap's refusal names the plant's own behaviour, never an account", () =
 // 6. A MEMBER CANNOT CREATE ONE (AS-010's own acceptance criterion)
 // ----------------------------------------------------------------------------
 
-test("seat.invitation.manage is the plant's Owner and Admin, and nobody else", () => {
-  for (const who of [PLANT_OWNER, PLANT_ADMIN]) {
-    assert.equal(holdsSeatFor(who, "seat.invitation.manage"), true);
+test("seat.invitation.manage is the Owner and Admin of ANY tenancy (#500)", () => {
+  // AS-005 gives an org's Owner and Admin the org's own seat invitations, and
+  // the verb was widened from `tenancy: "plant"` to `tenancy: "tenancy"` rather
+  // than a second verb being declared — an org Admin inviting an org Member is
+  // the same decision about the same row shape. WHICH tenancy the row lands in
+  // is the actor's own, resolved by `tenancyOf` one layer down, so there is no
+  // question here of a plant Admin reaching an org's rows.
+  for (const [what, who] of [
+    ["a plant Owner", PLANT_OWNER],
+    ["a plant Admin", PLANT_ADMIN],
+    ["a network Owner", NETWORK_OWNER],
+    ["a network Admin", NETWORK_ADMIN],
+  ] as const) {
+    assert.equal(
+      holdsSeatFor(who, "seat.invitation.manage"),
+      true,
+      `${what} may not staff their own tenancy`
+    );
   }
 
+  // AND THE THREE THAT STILL MAY NOT. A Member of either kind holds no
+  // ADMIN_PLUS seat, and a coach holds no seat at all.
   for (const [what, who] of [
     ["a plant Member", PLANT_MEMBER],
     ["a coach", COACH],
-    ["a network Owner", NETWORK_OWNER],
-    ["a network Admin", NETWORK_ADMIN],
     ["a sending-church Member", SC_MEMBER],
   ] as const) {
     assert.equal(
       holdsSeatFor(who, "seat.invitation.manage"),
       false,
-      `${what} may create a seat invitation on a plant`
+      `${what} may create a seat invitation`
     );
   }
+});
+
+test("…and NOT the registered Owner whose plant does not exist yet", () => {
+  // THE REASON THE VERB IS `tenancy` AND NOT `any`. Registration mints a plant
+  // Owner with every tenancy FK null; they create the plant afterwards. `any`
+  // would let them past `/settings/team`'s gate onto a screen whose every query
+  // has no subject, and `invitingTenancy` would then throw where a redirect
+  // belongs.
+  assert.equal(
+    holdsSeatFor(
+      {
+        seat: "owner",
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
+      "seat.invitation.manage"
+    ),
+    false,
+    "an account that names no tenancy has no team to staff"
+  );
 });
 
 test("the logic layer refuses a Member itself, not only the action", () => {
@@ -667,8 +703,8 @@ test("the three endpoints are checked in against that capability", () => {
 const described: UserRegistrationInvitation = {
   id: INVITATION,
   inviteeEmail: "stranger@example.com",
-  churchId: PLANT,
-  churchName: "Redemption Hill",
+  tenancy: { type: "church", id: PLANT },
+  tenancyName: "Redemption Hill",
   invitedAs: { kind: "seat", seat: "admin" },
 };
 
@@ -713,7 +749,7 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
     { name: "Sam Stranger", email: "stranger@example.com" },
     false,
     {
-      churchId: PLANT,
+      tenancy: { type: "church", id: PLANT },
       invitedAs: { kind: "seat", seat: "admin" },
       matchedPersonId: null,
     }
@@ -730,6 +766,76 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
   assert.equal(plan.linkStatements.length, 1);
 });
 
+// ----------------------------------------------------------------------------
+// #500 — THE SAME PLAN, INTO AN ORG
+// ----------------------------------------------------------------------------
+
+test("an org seat invitation grants the ORG's FK and writes no person row", () => {
+  // AC 1 and AC 3 of #500, read off the planner: the seat lands in the tenancy
+  // the invitation named, the other two FKs stay NULL (which is what the
+  // exactly-one rule means on the users row), and `persons` is untouched —
+  // an org Member is an account and never a person record inside a plant
+  // (ruling 185 (9)).
+  for (const [what, tenancy, expected] of [
+    [
+      "a sending church",
+      { type: "sending_church", id: SENDING_CHURCH } as const,
+      {
+        churchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      },
+    ],
+    [
+      "a network",
+      { type: "network", id: NETWORK } as const,
+      { churchId: null, sendingChurchId: null, sendingNetworkId: NETWORK },
+    ],
+  ] as const) {
+    const plan = createAccountEntities(
+      // The plant-creating account type this time, to prove it is ignored in
+      // the other direction too.
+      "planter",
+      "A Plant They Typed",
+      USER,
+      { name: "Ola Overseer", email: "ola@example.com" },
+      true,
+      {
+        tenancy,
+        invitedAs: { kind: "seat", seat: "member" },
+        matchedPersonId: null,
+      }
+    );
+
+    assert.equal(plan.seat, "member", `${what}: the invited seat is granted`);
+    assert.equal(plan.churchId, expected.churchId, `${what}: church_id`);
+    assert.equal(
+      plan.sendingChurchId,
+      expected.sendingChurchId,
+      `${what}: sending_church_id`
+    );
+    assert.equal(
+      plan.sendingNetworkId,
+      expected.sendingNetworkId,
+      `${what}: sending_network_id`
+    );
+
+    // NO PLANT ON THE USERS INSERT, and no plant created either. The
+    // `createChurchForPlanter` argument above is true and the account type is
+    // `planter`; the invitation overrides both.
+    assert.equal(plan.userChurchId, null, `${what}: no church on the insert`);
+    assert.deepEqual(plan.statements, [], `${what}: no org is created`);
+
+    // AC 3 — `persons` IS UNCHANGED. The plant-side match-or-create must not
+    // fire here: there is no directory on an org for a person row to live in.
+    assert.deepEqual(
+      plan.linkStatements,
+      [],
+      `${what}: an org seat writes no persons row`
+    );
+  }
+});
+
 test("a redeemed COACH invitation writes no tenancy, no seat and no person", () => {
   // AC 1 of #496, read off the planner rather than inferred from an INSERT:
   // a coach's whole grant is the `coach_assignments` row the ACTION batches
@@ -741,7 +847,11 @@ test("a redeemed COACH invitation writes no tenancy, no seat and no person", () 
     USER,
     { name: "Casey Coach", email: "coach@example.com" },
     false,
-    { churchId: PLANT, invitedAs: { kind: "coach" }, matchedPersonId: null }
+    {
+      tenancy: { type: "church", id: PLANT },
+      invitedAs: { kind: "coach" },
+      matchedPersonId: null,
+    }
   );
 
   assert.equal(plan.seat, null, "a coach holds no seat");
@@ -876,11 +986,21 @@ test("the match is case-insensitive, unclaimed, undeleted and deterministic", ()
   assert.match(ACCOUNT_PERSON_LINK, /eq\(persons\.churchId, churchId\)/);
   assert.match(ACCOUNT_PERSON_LINK, /orderBy\(persons\.createdAt\)/);
 
-  // And the register action resolves it for the invitation's plant, never for
-  // an address or a church a client named.
+  // And the register action resolves it for the invitation's own plant, never
+  // for an address or a church a client named.
   assert.match(
     REGISTER_ACTIONS.code,
-    /findLinkablePersonId\(\s*seatInvitation\.churchId,\s*identifier\s*\)/
+    /findLinkablePersonId\(\s*seatInvitation\.tenancy\.id,\s*identifier\s*\)/
+  );
+
+  // …AND ONLY WHEN THAT TENANCY IS A PLANT (#500). AS-013's match-or-create
+  // asks a plant's directory about an address; a sending church and a network
+  // have no directory to ask, so the read is not merely unused for them — it is
+  // a question about somebody else's plant that must not be asked at all.
+  assert.match(
+    REGISTER_ACTIONS.code,
+    /seatInvitation\.tenancy\.type === "church"/,
+    "the person lookup must be gated on the invitation naming a church plant"
   );
 });
 
@@ -1162,22 +1282,59 @@ test("the journal never regresses, and 0054 sits where it says it does", () => {
 // ----------------------------------------------------------------------------
 
 test("every invitable seat has copy, and nothing branches to get it", () => {
+  // FIVE KEYS SINCE #500, and the two new ones are the PAIR: what they are
+  // invited to be, and where. An Admin in a church plant and an Admin in a
+  // network do different things, so the table forks on the tenancy rather than
+  // picking one of the two sentences and being wrong for the other half of the
+  // product.
   assert.deepEqual(Object.keys(INVITED_AS_COPY).sort(), [
     "admin",
     "coach",
     "member",
+    "org_admin",
+    "org_member",
   ]);
   assert.equal(
-    invitedAsWithArticle({ kind: "seat", seat: "admin" }),
+    invitedAsWithArticle({ kind: "seat", seat: "admin" }, "church"),
     "an Admin"
   );
   assert.equal(
-    invitedAsWithArticle({ kind: "seat", seat: "member" }),
+    invitedAsWithArticle({ kind: "seat", seat: "member" }, "church"),
     "a Member"
   );
-  // Coach is a third KEY and not a third seat: the union's coach arm carries no
-  // seat, so nothing can read one off it (#496).
-  assert.equal(invitedAsWithArticle({ kind: "coach" }), "a Coach");
+
+  // THE LABEL IS THE SEAT'S EITHER WAY — an org Admin is still "an Admin". What
+  // the org keys change is what accepting MEANS, not what the seat is called,
+  // so an invitee reads one vocabulary across the product.
+  for (const tenancyType of ["sending_church", "network"] as const) {
+    assert.equal(
+      invitedAsWithArticle({ kind: "seat", seat: "admin" }, tenancyType),
+      "an Admin"
+    );
+    assert.equal(
+      invitedAsWithArticle({ kind: "seat", seat: "member" }, tenancyType),
+      "a Member"
+    );
+  }
+
+  // …AND WHAT ACCEPTING MEANS IS DIFFERENT, which is the whole reason for the
+  // fork. A plant seat is described in terms of the plant's own work; an org
+  // seat in terms of the plants it oversees.
+  assert.notEqual(
+    INVITED_AS_COPY.member.accepting,
+    INVITED_AS_COPY.org_member.accepting
+  );
+  assert.match(
+    INVITED_AS_COPY.org_member.accepting,
+    /read-only/,
+    "an org Member's sentence has to state the limit — every read, no writes (ruling 185 (3))"
+  );
+
+  // Coach is a key and not a seat: the union's coach arm carries no seat, so
+  // nothing can read one off it (#496). The tenancy is not consulted for one —
+  // `coach.assignment.manage` is plant-only, so an org coach cannot exist.
+  assert.equal(invitedAsWithArticle({ kind: "coach" }, "church"), "a Coach");
+  assert.equal(invitedAsWithArticle({ kind: "coach" }, "network"), "a Coach");
 
   // The reason it is a table: `seat-guard.test.ts` bans a hand-written seat
   // comparison outside the permissions module, and it bans it even where the

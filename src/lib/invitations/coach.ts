@@ -85,9 +85,16 @@ export async function describeCoachInvitationForViewer(
   const described = await describeUserInvitationForRegistration(token, now);
   if (!described || described.invitedAs.kind !== "coach") return null;
 
+  // A COACH INVITATION IS ALWAYS A PLANT'S, so the tenancy's name IS the church
+  // name. The narrowing is asserted rather than assumed: `coach.assignment.manage`
+  // is `tenancy: "plant"`, so no org can create one (#500) — and a row that
+  // somehow named an org would be answered as no invitation at all, which is the
+  // only answer this route may distinguish.
+  if (described.tenancy.type !== "church") return null;
+
   return {
     inviteeEmail: described.inviteeEmail,
-    churchName: described.churchName,
+    churchName: described.tenancyName,
   };
 }
 
@@ -162,5 +169,15 @@ export async function acceptCoachInvitationAs(
     }
   }
 
-  return { churchName: described.churchName };
+  // THE SAME NARROWING ITS SIBLING ASSERTS (#500). A coach invitation is always
+  // a plant's — `coach.assignment.manage` is `tenancy: "plant"`, so no org can
+  // create one — and `describeCoachInvitationForViewer` refuses a row that says
+  // otherwise. Two readers of one row must not disagree about whether that is
+  // assumed or checked: an org-targeted coach row would otherwise be accepted
+  // here and named with an org's name.
+  if (described.tenancy.type !== "church") {
+    throw new InvitationError(COACH_INVITATION_NOT_ANSWERABLE_MESSAGE);
+  }
+
+  return { churchName: described.tenancyName };
 }

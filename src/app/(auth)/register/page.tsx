@@ -58,7 +58,8 @@ export default async function RegisterPage({
               // anywhere it could be read from.
               token: token ?? "",
               inviteeEmail: seatInvite.inviteeEmail,
-              churchName: seatInvite.churchName,
+              orgName: seatInvite.tenancyName,
+              orgType: seatInvite.tenancy.type,
               invitedAs: seatInvite.invitedAs,
             }
           : null
