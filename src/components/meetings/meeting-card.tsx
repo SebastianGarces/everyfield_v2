@@ -67,7 +67,7 @@ export function MeetingCard({
               )}
             </div>
             <p className="text-muted-foreground text-sm">
-              {formatDate(meeting.datetime, "short")} &bull;{" "}
+              {formatDate(meeting.datetime, "short")} •{" "}
               {formatTime(meeting.datetime)}
             </p>
             <h3 className="text-lg leading-tight font-semibold">

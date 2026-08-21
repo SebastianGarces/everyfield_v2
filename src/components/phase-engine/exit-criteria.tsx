@@ -521,7 +521,7 @@ export function ExitCriteria({ progress }: ExitCriteriaProps) {
           </div>
           {/* Freshness and provenance sit next to the claim they qualify. */}
           <p className="text-muted-foreground text-xs whitespace-nowrap tabular-nums">
-            As of {asOf} &middot; rubric {progress.rubricVersion}
+            As of {asOf} · rubric {progress.rubricVersion}
           </p>
         </div>
       </CardHeader>

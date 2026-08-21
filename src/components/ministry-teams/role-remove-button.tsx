@@ -75,24 +75,17 @@ export function RoleRemoveButton({
         <AlertDialogHeader>
           <AlertDialogTitle>Remove the {roleName} role?</AlertDialogTitle>
           <AlertDialogDescription>
-            {/* THE SPACES ARE INSIDE STRING EXPRESSIONS, not JSX text next to a
-                tag. A literal space between `</span>` and a word that wraps to
-                the next line is dropped by the build — the preview rendered
-                "Curriculumwill be removed" — and Prettier rewrites `{" "}` back
-                into exactly that losing shape, so this is the form that stays
-                fixed. */}
             {assigneeName ? (
               <>
-                <span className="font-medium">{assigneeName}</span>
-                {" will be unassigned and the "}
-                <span className="font-medium">{roleName}</span>
-                {" role will be removed from this team. This cannot be undone."}
+                <span className="font-medium">{assigneeName}</span> will be
+                unassigned and the{" "}
+                <span className="font-medium">{roleName}</span> role will be
+                removed from this team. This cannot be undone.
               </>
             ) : (
               <>
-                {"The "}
-                <span className="font-medium">{roleName}</span>
-                {" role will be removed from this team. This cannot be undone."}
+                The <span className="font-medium">{roleName}</span> role will be
+                removed from this team. This cannot be undone.
               </>
             )}
           </AlertDialogDescription>

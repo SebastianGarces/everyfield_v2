@@ -187,18 +187,13 @@ export function ResponsibilityItem({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this responsibility?</AlertDialogTitle>
             <AlertDialogDescription>
-              {/* THE SPACE IS INSIDE A STRING EXPRESSION, not JSX text sitting
-                  next to a tag. A literal space between `</span>` and a word
-                  that wraps to the next line is dropped by the build — the
-                  preview rendered "Curriculumwill be removed" — and Prettier
-                  rewrites `{" "}` straight back into that losing shape, so this
-                  is the form that stays fixed. Caught in the browser; no test
-                  sees it, and an accessible-name assertion would not either,
-                  because that algorithm joins without separators anyway. */}
-              <span className="font-medium">{responsibility.title}</span>
-              {
-                " will be removed from this team's checklist. This cannot be undone."
-              }
+              {/* The apostrophe is the CHARACTER, never `&apos;`. An HTML
+                  entity anywhere in a JSX text node makes SWC drop that node's
+                  leading space, so the entity form rendered
+                  "Curriculumwill be removed" (#593). Guarded by
+                  `src/components/jsx-entity-whitespace.test.ts`. */}
+              <span className="font-medium">{responsibility.title}</span> will
+              be removed from this team’s checklist. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
