@@ -850,11 +850,15 @@ test(
   async () => {
     // AC 3. The plant-side match-or-create must NOT fire here: an org Member is
     // an account and never a person record inside anybody's plant (ruling
-    // 185 (9)). Counted across the WHOLE table rather than scoped to one plant,
-    // because the failure this guards against is a row appearing somewhere the
-    // org does not own.
-    const before = await db.select({ id: persons.id }).from(persons);
-
+    // 185 (9)).
+    //
+    // SCOPED TO THIS REGISTRATION, NOT COUNTED ACROSS THE TABLE. A whole-table
+    // count was the first spelling and CI refused it: the live suites run as
+    // separate processes against ONE database, so a sibling file writing a
+    // `persons` row between the two counts failed this for a reason that has
+    // nothing to do with the org path. The two reads below name the account and
+    // the address this test created, so no other suite can move them — and they
+    // are the rows the match-or-create would actually have written.
     const { actor } = await scratchOrg("network");
     const mail = captureTransport();
     const invitee = scratchEmail();
@@ -870,13 +874,9 @@ test(
       SCRATCH_NAME
     );
 
-    const after = await db.select({ id: persons.id }).from(persons);
-    assert.equal(
-      after.length,
-      before.length,
-      "an org registration wrote a persons row"
-    );
-
+    // THE MINT ARM: a `persons` row carrying this account's id. This is what
+    // `accountPersonLinkStatements` writes when it finds no match, and it is
+    // the row an org seat must never produce.
     const linked = await db
       .select({ id: persons.id })
       .from(persons)
@@ -885,6 +885,19 @@ test(
       linked,
       [],
       "no person record anywhere may be linked to an org seat"
+    );
+
+    // THE CLAIM ARM: a `persons` row at the invited address. Scoped by email
+    // rather than by church, because the failure worth catching is a row
+    // appearing in a plant the org does not own.
+    const byAddress = await db
+      .select({ id: persons.id })
+      .from(persons)
+      .where(eq(persons.email, invitee));
+    assert.deepEqual(
+      byAddress,
+      [],
+      "an org registration must mint no person record at the invited address"
     );
   }
 );

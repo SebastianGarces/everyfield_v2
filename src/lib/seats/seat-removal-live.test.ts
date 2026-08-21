@@ -127,11 +127,24 @@ after(async () => {
  * `seatActorFromSession` takes the shape `verifySession()` returns, so the
  * fixture builds that shape rather than casting into the brand — the mint is
  * part of what these tests exercise.
+ *
+ * ALL THREE TENANCY FKs, EXPLICITLY (#500). This used to pass `{ id, churchId }`
+ * behind an `as never`, and the mint read `user.churchId` directly, so the two
+ * missing keys cost nothing. The mint now goes through `tenancyOf`, which counts
+ * the FKs a row NAMES — and an absent key is not a null one, so a partial object
+ * read as a row naming three tenancies and resolved to nothing. A real `users`
+ * row always carries all three; the cast was what let this fixture claim to be
+ * one while not being one.
  */
 function actorFor(userId: string, churchId: string): SeatManagementActor {
   return seatActorFromSession({
     session: {} as never,
-    user: { id: userId, churchId } as never,
+    user: {
+      id: userId,
+      churchId,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    } as never,
   });
 }
 
@@ -778,18 +791,67 @@ test("ending an assignment on another plant is refused", { skip }, async () => {
 // The mint
 // ----------------------------------------------------------------------------
 
-test("an account with no plant mints no actor", { skip }, async () => {
+/** A `users` row's five fields, so the mint is asked a shape it really receives. */
+function sessionUser(fields: {
+  churchId?: string | null;
+  sendingChurchId?: string | null;
+  sendingNetworkId?: string | null;
+}) {
+  return {
+    session: {} as never,
+    user: {
+      id: randomUUID(),
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      ...fields,
+    } as never,
+  };
+}
+
+test("an account naming NO tenancy mints no actor", { skip }, async () => {
   // THE TENANCY HALF OF `seat.manage`, which the capability declares as `any`
-  // so the org side can share the verb. An oversight Owner passes `requireSeat`
-  // and is refused HERE — fail-closed, in one place rather than per verb.
+  // so all three tenancies can share the verb. What is left for the mint to
+  // refuse is the account that names nothing: the registered Owner whose plant
+  // does not exist yet. Fail-closed, in one place rather than per verb.
+  assert.throws(
+    () => seatActorFromSession(sessionUser({})),
+    SeatManagementError,
+    "there is no team here to manage"
+  );
+});
+
+test(
+  "an ORG Owner mints one, and it carries the org (#500)",
+  { skip },
+  async () => {
+    // WHAT CHANGED. This mint used to refuse an oversight Owner outright, because
+    // #497 shipped the plant side only. AS-005 gives an org's Owner the same four
+    // verbs over its own team, so the refusal is now the no-tenancy case above and
+    // an org resolves like any other tenancy.
+    const sendingChurchId = randomUUID();
+    const actor = seatActorFromSession(sessionUser({ sendingChurchId }));
+
+    assert.deepEqual(actor.tenancy, {
+      type: "sending_church",
+      id: sendingChurchId,
+    });
+  }
+);
+
+test("a row naming TWO tenancies mints no actor", { skip }, async () => {
+  // The accepted residual (`memory/invariants.md` → Seats & Tenancy): nothing in
+  // the schema holds an account to one tenancy, so the state is representable
+  // and every reader fails closed on it. `tenancyOf` answers only for exactly
+  // one FK, so such a row gets no `WHERE` and reaches no team in either
+  // direction — rather than being handed whichever FK a precedence order picked.
   assert.throws(
     () =>
-      seatActorFromSession({
-        session: {} as never,
-        user: { id: randomUUID(), churchId: null } as never,
-      }),
+      seatActorFromSession(
+        sessionUser({ churchId: randomUUID(), sendingNetworkId: randomUUID() })
+      ),
     SeatManagementError,
-    "seat management is a plant's own team, and there is no plant here"
+    "a row with a competing claim on two tenancies manages neither"
   );
 });
 
