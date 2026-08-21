@@ -25,6 +25,7 @@
 // ============================================================================
 
 import assert from "node:assert/strict";
+import { clusterVerdict } from "@/lib/phase-engine/assessment/exit-criteria";
 import { test } from "node:test";
 
 import { createElement } from "react";
@@ -156,6 +157,9 @@ function makeProgress(
     measuredCount: criteria.length,
     addressedCount: criteria.filter((c) => c.standing !== "not_addressed")
       .length,
+    // Derived rather than hand-written, so a fixture can never disagree with
+    // the conjunction the real builder computes (#477).
+    cluster: clusterVerdict(criteria),
     ...overrides,
   };
 }
@@ -468,4 +472,49 @@ test("PE-022: the terminal phase says there is no gate rather than rendering non
 
   assert.equal(rows(html).length, 0);
   assert.match(html, /no gate past it/);
+});
+
+// ----------------------------------------------------------------------------
+// The cluster readout (#477, C08/C23)
+// ----------------------------------------------------------------------------
+
+test("the panel says the combination out loud, and only says ready at 5 of 5", () => {
+  const met = (key: string): ExitCriterionProgress => ({
+    ...makeCriterion(),
+    key,
+    measurement: "met",
+  });
+
+  const allFive = render(
+    makeProgress([met("a"), met("b"), met("c"), met("d"), met("e")])
+  );
+  assert.match(allFive, /All 5 hold — ready to begin/);
+
+  const fourOfFive = render(
+    makeProgress([
+      met("a"),
+      met("b"),
+      met("c"),
+      met("d"),
+      { ...makeCriterion(), key: "e", measurement: "not_met" },
+    ])
+  );
+  assert.match(fourOfFive, /4 of 5 indicators hold/);
+  assert.doesNotMatch(
+    fourOfFive,
+    /ready to begin/,
+    "one missing indicator must not read as ready"
+  );
+  assert.match(fourOfFive, /No single mark clears the gate/);
+});
+
+test("an unanswered indicator is named as unanswered, not as a miss", () => {
+  const html = render(
+    makeProgress([
+      { ...makeCriterion(), key: "a", measurement: "met" },
+      { ...makeCriterion(), key: "b", measurement: "unknown" },
+    ])
+  );
+
+  assert.match(html, /1 of 2 indicators hold; 1 is unanswered/);
 });

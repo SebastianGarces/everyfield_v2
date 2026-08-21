@@ -114,6 +114,35 @@ test("v1 calls 60 days a candidate signal, not readiness (#476)", () => {
   );
 });
 
+test("v1 makes the Phase 1 gate a cluster, not a headcount (#477)", () => {
+  assert.match(RUBRICS.v1.body, /CLUSTER OF FIVE, read as a CONJUNCTION/);
+  assert.match(
+    RUBRICS.v1.body,
+    /Hitting 30 with no worship leader and no financial base is NOT the gate/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /AN UNANSWERED INDICATOR BLOCKS BUT DOES NOT FAIL/
+  );
+  // The number itself is kept (C23), so v0 and v1 agree on it.
+  assert.match(RUBRICS.v0.body, /30–40 committed adults/);
+  assert.match(RUBRICS.v1.body, /30–40 committed adults/);
+});
+
+test("v1 caps the planter's list at 1 primary + 2 supplements (#478)", () => {
+  assert.match(
+    RUBRICS.v1.body,
+    /ONE PRIMARY FOCUS AND AT MOST TWO SUPPLEMENTS/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /POSITIVE OBSERVATIONS ARE EXEMPT AND ARE REPORTED SEPARATELY/
+  );
+  // The budget must not read as an instruction to say less overall.
+  assert.match(RUBRICS.v1.body, /FORCES PRIORITIZATION, NOT SILENCE/);
+  assert.doesNotMatch(RUBRICS.v0.body, /observation budget/i);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

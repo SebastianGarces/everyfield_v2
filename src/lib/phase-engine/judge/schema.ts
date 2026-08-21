@@ -56,6 +56,23 @@ export const insightSeveritySchema = z.enum([
 ]);
 export type InsightSeverity = z.infer<typeof insightSeveritySchema>;
 
+/**
+ * THE OBSERVATION BUDGET (#478, C09/C18): one primary focus + two supplements.
+ *
+ * Bryan: "I already have 25 things competing for my attention. The value of
+ * this tool would be telling me, 'Of everything going on, these are the 1–3
+ * things that matter most right now.'" A cap in the PROMPT is a request; a cap
+ * in the SCHEMA is a refusal, and an over-budget response is retried rather
+ * than stored — which is the difference between a rule and a preference.
+ *
+ * POSITIVES ARE EXEMPT (D1). The budget is things to do; encouragement is not
+ * one of them, and it lands on its own surface. So a model may return three
+ * work items and as many positives as the plant has earned.
+ *
+ * NETWORK INSIGHTS ARE UNCAPPED HERE — that audience's rules are #482's.
+ */
+export const PLANTER_FOCUS_BUDGET = 3;
+
 /** A single grounded assessment finding. */
 export const insightSchema = z.object({
   /** Planter-facing coaching vs. conservative network-facing health read. */
@@ -92,12 +109,27 @@ export type Insight = z.infer<typeof insightSchema>;
  * so a missing audience fails loudly with a clear, actionable error rather than
  * a generic Zod parse failure.
  */
-export const judgeOutputSchema = z.object({
-  /** A single conservative, plain-language read of overall plant health. */
-  summary: z.string().min(10).max(600),
-  /** The grounded findings. At least one is required. */
-  insights: z.array(insightSchema).min(1),
-});
+export const judgeOutputSchema = z
+  .object({
+    /** A single conservative, plain-language read of overall plant health. */
+    summary: z.string().min(10).max(600),
+    /** The grounded findings. At least one is required. */
+    insights: z.array(insightSchema).min(1),
+  })
+  .superRefine((output, ctx) => {
+    const work = output.insights.filter(
+      (insight) =>
+        insight.audience === "planter" && insight.severity !== "positive"
+    );
+
+    if (work.length > PLANTER_FOCUS_BUDGET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["insights"],
+        message: `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.`,
+      });
+    }
+  });
 export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
 
 /**

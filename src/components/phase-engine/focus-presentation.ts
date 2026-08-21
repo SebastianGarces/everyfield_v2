@@ -103,6 +103,82 @@ export function severityMeta(severity: InsightSeverity): SeverityMeta {
 }
 
 // ----------------------------------------------------------------------------
+// The observation budget: one primary focus + up to two supplements (#478).
+//
+// Bryan (C09): "As a planter, I already have 25 things competing for my
+// attention. The value of this tool would be telling me, 'Of everything going
+// on, these are the 1–3 things that matter most right now.'" And (C18), more
+// bluntly: "too many... 1 main 2 supplement." The panel was rendering every
+// planter insight, four to seven of them, each one looking as important as the
+// last.
+//
+// POSITIVES DO NOT COMPETE FOR THE SLOTS (D1, Sebastian 2026-08-20): "They
+// don't have to be tied together or presented together." The budget is "things
+// to focus on this week" — work items. Encouragement is still first-class and
+// still generated; it is simply not one of the three things a planter is being
+// asked to do.
+// ----------------------------------------------------------------------------
+
+/**
+ * The stored severity a judge `positive` lands on.
+ *
+ * The judge's vocabulary (positive|info|watch|urgent) is mapped onto the stored
+ * one (info|low|medium|high|critical) by `assessment/persist.ts`, and
+ * `positive → info` is the only thing that produces a stored `info`. So the
+ * stored value IS the positive marker — `SEVERITY_META.info` has read "Going
+ * well" since before this issue — and nothing new had to be persisted for the
+ * panel to tell encouragement from work.
+ */
+export const POSITIVE_SEVERITY: InsightSeverity = "info";
+
+/** Is this insight encouragement rather than a thing to do? */
+export function isPositive(insight: { severity: InsightSeverity }): boolean {
+  return insight.severity === POSITIVE_SEVERITY;
+}
+
+/** One primary focus plus at most two supplements. */
+export const FOCUS_BUDGET = 3;
+
+/** How the planter's insights divide across the surfaces that show them. */
+export interface FocusAllocation<T> {
+  /** The one thing to do first. `null` only when there is no work at all. */
+  primary: T | null;
+  /** At most two more, in the order the assessment ranked them. */
+  supplements: T[];
+  /**
+   * Work items past the budget. Only a LEGACY assessment produces these — the
+   * judge schema now refuses more than three — and they go behind a disclosure
+   * rather than being dropped, because an assessment that already exists said
+   * them and hiding them outright would be a silent edit of the record.
+   */
+  overflow: T[];
+  /** Encouragement, on its own surface. Never counted against the budget. */
+  positives: T[];
+}
+
+/**
+ * Split planter insights into the focus budget and the positives beside it.
+ *
+ * ORDER IS THE CALLER'S. The insights arrive ranked (`persist.ts` sorts by
+ * urgency and stamps `rank`), so this takes the first work item as primary
+ * rather than re-deciding urgency — two modules ranking the same list is how
+ * the hero and the drill-down come to disagree about what matters most.
+ */
+export function allocateFocus<T extends { severity: InsightSeverity }>(
+  insights: readonly T[]
+): FocusAllocation<T> {
+  const work = insights.filter((insight) => !isPositive(insight));
+  const positives = insights.filter(isPositive);
+
+  return {
+    primary: work[0] ?? null,
+    supplements: work.slice(1, FOCUS_BUDGET),
+    overflow: work.slice(FOCUS_BUDGET),
+    positives,
+  };
+}
+
+// ----------------------------------------------------------------------------
 // Readiness presentation (PE-015) — advisory only.
 // ----------------------------------------------------------------------------
 
