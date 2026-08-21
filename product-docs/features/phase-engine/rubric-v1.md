@@ -37,6 +37,7 @@ recorded rulings, and the recommended v1 delta.
 | The planter gets 1 primary + 2 supplements | C09, C18 | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) | §6 caps the planter's actionable list at three, enforced in the judge schema rather than asked for in the prompt. Positives are exempt and get their own surface; the drill-downs carry the rest. |
 | Sharing language matches the sending-invite spec | C10 | [#479](https://github.com/SebastianGarces/everyfield_v2/issues/479) | §7's universal "off by default" splits into the two real cases — self-started plants share nothing, invited plants start with sharing on and consent at the acceptance screen. Doc text only; the behaviour was already ruled (ledger row 187). |
 | Unshared plants read Limited visibility, never On track | C11 | [#480](https://github.com/SebastianGarces/everyfield_v2/issues/480) | The network posture becomes four-valued. Silence cannot forge "On track"; escalations still win; the label is neutral, not a warning. The v0 "please confirm" on the privacy trade is answered. |
+| Unfilled roles are a coverage gap, not "no emerging leaders" | C14 | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) | Lens 7 coverage copy talks about assignment only; inferring the absence of leaders from role-fill data is banned. The two pipelines — people and coverage — are named as separate. Appendix B's sample replaced with Bryan's wording. |
 
 ---
 
@@ -282,6 +283,23 @@ and they call for opposite coaching, so the engine reports them apart.
 - **Individual candidate signals are planter-audience only.** The network sees leadership
   development in aggregate and never an individual, which is the standing rule restated
   here because this is the lens most likely to break it.
+- **Coverage insights are about ASSIGNMENT, never about the absence of leaders as
+  people.** ✅ Zero assigned ministry roles does not mean there are no emerging leaders;
+  there may be several people ready who simply have not been assigned yet. The engine may
+  say what the data says — "No ministry roles have been assigned yet, so leadership
+  coverage needs attention" — and no more.
+  - **Banned as inferences from role-fill data:** "a lack of emerging leadership", "no
+    emerging leaders", "leadership development needs attention" *as a conclusion about
+    people*. Role fill is a fact about the org chart, not about the congregation.
+- **Two pipelines, and they are not the same pipeline.**
+  - The **people pipeline** — who might lead. Fed by the Leadership Candidate Signal
+    above, and it is planter-audience only.
+  - The **coverage pipeline** — what is assigned. Fed by role fill, and it is the only
+    one the network hears about.
+  - When both facts are in hand the engine may connect them honestly, and only for the
+    planter: "No roles assigned yet — and 3 people are showing candidate signals.
+    Coverage needs attention, and you may already have the people." That is the useful
+    sentence, and it is only available because the two are counted separately.
 
 ### Lens 8 · Comprehensive Training
 
@@ -505,7 +523,10 @@ They double as my test cases.
    five core members last week — good — but still no Worship Leader with launch about
    three months out. Of the eight roles, this is the one to focus on now."
 7. *Role progress* — six of eight filled in Phase 2 → "Six of eight launch roles are
-   filled. Remaining: Children's Ministry, Promotion."
+   assigned. Remaining: Children's Ministry, Promotion."
+7b. *Coverage with candidates* — no roles assigned, three candidate signals, planter
+   audience → "No roles assigned yet — and 3 people are showing candidate signals.
+   Coverage needs attention, and you may already have the people."
 
 **Follow-up**
 8. *Cold contacts* — vision-meeting attendees with no contact in 14 days → "Seven people
@@ -587,10 +608,14 @@ situation produces the measured line instead: "You own 6 of the 9 open follow-up
 > the target needed for healthy phase progression. Intervention to boost growth is
 > needed to reach the critical mass target of at least 50 adults.
 
-> **No Ministry Roles Filled Yet**
-> None of the 8 key ministry roles are filled, indicating a lack of emerging leadership.
-> This is critical for future readiness and indicates that leadership development needs
-> attention.
+> **Ministry Roles Not Yet Assigned**
+> No ministry roles have been assigned yet, so leadership coverage needs attention.
+
+*(v0 read "None of the 8 key ministry roles are filled, indicating a lack of emerging
+leadership… leadership development needs attention." The engine knows the org chart is
+empty. It does not know whether the plant has leaders — it may have several nobody has
+assigned yet — and telling a network director otherwise is a judgement about people made
+from a fact about assignments.)*
 
 Every number above was computed from the database, not written by the model. Each
 observation links back to the relevant wiki articles — in this case "What is a Core
