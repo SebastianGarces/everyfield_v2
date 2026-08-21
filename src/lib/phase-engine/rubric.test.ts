@@ -223,6 +223,23 @@ test("v1 forbids inferring the planter's own state (#484)", () => {
   assert.match(RUBRICS.v1.body, /never appears in your fact snapshot/);
 });
 
+test("v1 opens by saying what it does NOT assess (#485)", () => {
+  // The scope statement is the first thing in the body, not a footnote: a
+  // reader who stops after the heading has still been told.
+  assert.match(
+    RUBRICS.v1.body.slice(0, 900),
+    /You assess PROGRESS TOWARD A HEALTHY LAUNCH/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /NEVER ISSUE A CHURCH-HEALTH VERDICT, POSITIVE OR NEGATIVE/
+  );
+  // Both directions, and the positive one named explicitly — it is the one a
+  // reader would find harder to argue with.
+  assert.match(RUBRICS.v1.body, /"A healthy church is forming here"/);
+  assert.doesNotMatch(RUBRICS.v0.body, /church-health/i);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

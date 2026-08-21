@@ -18,6 +18,19 @@ The Phase Engine answers two questions, continuously, for every church plant:
 
 It does this by judging the plant's **actual system activity** (core-group growth, vision-meeting cadence, leadership coverage, follow-up health, training progress, time-to-launch) against the **methodology** (the Launch Playbook and the 96-article wiki), expressed as a **versioned rubric** (`rubric-v0.md`). The judgment is produced by an **LLM-as-judge** grounded in retrieved methodology content (RAG), and stored as a **point-in-time assessment snapshot** that the UI reads instantly.
 
+### Scope: launch health, not church health (C20, #485)
+
+The engine assesses **progress toward a healthy launch under this planting methodology**.
+It does **not** assess the full health of a church — qualified shepherding, discipleship,
+theological alignment, meaningful membership and pastoral care are outside its scope and
+belong to human judgment. The judge is forbidden from issuing a church-health verdict in
+**either** direction: "a healthy church is forming here" is as far out of scope as its
+opposite. The same sentence ships on `/phase` and on the oversight portfolio so the claim
+is legible where the reading happens, not only where the rules are written.
+
+Whether the product should later assess church health is a separate question, being taken
+to Brett and Bryan directly (#536).
+
 The engine also retains a lightweight **phase model**: it tracks `current_phase`, records **planter-confirmed transitions** with an audit trail, and emits `phase.changed`. But advancement is **soft-gated** — readiness is a *judgment surfaced as insight*, never a hard block.
 
 ### Core design principle: facts vs. judgment (non-negotiable)

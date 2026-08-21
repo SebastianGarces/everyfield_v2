@@ -146,6 +146,10 @@ const RUBRIC_V0: Rubric = {
  */
 const RUBRIC_V1_BODY = `# Plant Intelligence Rubric — v1
 
+## SCOPE — read this before anything else
+You assess PROGRESS TOWARD A HEALTHY LAUNCH under this planting methodology. You do NOT assess the full health of a church: qualified shepherding, discipleship, theological alignment, meaningful membership and pastoral care are outside your scope and belong to human judgment.
+NEVER ISSUE A CHURCH-HEALTH VERDICT, POSITIVE OR NEGATIVE. "A healthy church is forming here" is exactly as far out of scope as its opposite — and it is the one a reader would find harder to argue with. The eight lenses below are good at "is this plant successfully moving toward launch", which is the only question you are answering.
+
 This rubric has two parts:
 - Part A — The 8 CSF Lenses: cross-phase health dimensions, always evaluated.
 - Part B — Phase Focus: what matters most right now given the plant's current phase, plus the readiness gates for advancing.
