@@ -9,6 +9,21 @@ sub-issue has landed. Nothing here reaches a planter yet.
 
 ---
 
+## What this assesses, and what it does not
+
+**Plant Intelligence assesses progress toward a healthy launch under this planting
+methodology.** ✅ It does not assess the full health of a church: qualified shepherding,
+discipleship, theological alignment, meaningful membership, and pastoral care are outside
+its scope and belong to human judgment. **The judge must never issue a church-health
+verdict, positive or negative** — "a healthy church is forming here" is exactly as far
+out of scope as its opposite, and the second is the one a reader would find harder to
+argue with.
+
+The eight lenses are good at "is this plant successfully moving toward launch". That is
+the question they were mined from, and it is the only question this document answers.
+
+---
+
 ## How to read this document
 
 v1 starts as a copy of v0 and accumulates one ruled change at a time. Each sub-issue of
@@ -41,6 +56,7 @@ recorded rulings, and the recommended v1 delta.
 | The network register coaches, and the planter sees it first | C15, C16, C24, C25 | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) | §7 gains a verdict ban-list, a same-concern pairing rule and pattern-not-cause — all three enforced on judge output. An assessment releases to oversight when the planter opens it, or after 72 hours. Appendix B's network samples rewritten. |
 | Every lens has an evidence quality, including unknown | C17 | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) | New §5b: measured / attested / unknown per lens, derived from the snapshot and handed to the judge. Unknown is never healthy; the scorecard renders an insufficient-evidence tile. Appendix C question 2 resolved. |
 | Planter sustainability is captured, never inferred | C19 | [#484](https://github.com/SebastianGarces/everyfield_v2/issues/484) | New §5c: the engine may not claim planter wellbeing from any activity fact. A private weekly check-in captures it directly, outside the pipeline, and renders beside the assessment so launch-green cannot wash planter-red. |
+| We assess launch health, not church health | C20 | [#485](https://github.com/SebastianGarces/everyfield_v2/issues/485) | The document opens with the scope statement and names what is out of it. The judge is banned from church-health verdicts in either direction; the same sentence ships on `/phase`, on the oversight portfolio and in the FRD. |
 
 ---
 

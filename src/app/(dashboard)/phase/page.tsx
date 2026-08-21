@@ -235,6 +235,13 @@ export default async function PhasePage() {
           Your prioritized focus, phase control, and self-attestations — read
           from the latest assessment.
         </p>
+        {/* #485 (C20) — the scope, said out loud on the surface rather than
+            only in the rubric. Bryan: "the product should be really clear
+            about which of those two things it is claiming to assess." */}
+        <p className="text-muted-foreground mt-1 max-w-[70ch] text-sm text-pretty">
+          Plant Intelligence assesses your progress toward a healthy launch —
+          not the full health of a church.
+        </p>
       </header>
 
       {coldStart && (

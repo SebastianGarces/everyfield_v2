@@ -45,6 +45,13 @@ export function PlantHealthPortfolio({
           Plants are ordered by how much attention they warrant, and each one
           shows your {scopeLabel} only what its planter has chosen to share.
         </p>
+        {/* #485 (C20). The scope belongs where the verdict-shaped reading
+            happens: a portfolio of eight-factor standings is exactly the
+            surface somebody would mistake for a church-health scoreboard. */}
+        <p className="text-muted-foreground mt-1 max-w-2xl text-sm text-pretty">
+          Assessments describe launch progress under the Playbook methodology,
+          not church health.
+        </p>
       </header>
 
       {plants.length === 0 ? (
