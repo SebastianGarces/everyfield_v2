@@ -50,6 +50,15 @@ jobs:
       # does not read product-docs. Running the pipeline for them costs ~1m45s
       # to prove nothing.
       #
+      # `product-docs/` AND `memory/` ARE THE EXCEPTION, and pay the ~1m45s
+      # (#549). `ops/tests/requirement-ids.test.mjs` asserts that every
+      # requirement id cited in the code resolves to an FRD row, and it reads
+      # both trees: the FRD rows in one, and citations in the other. The defect
+      # lands from two directions — code mints a new id, or an FRD edit drops a
+      # row something still cites — and the second direction arrives on exactly
+      # the markdown-only PR this shortcut would wave through. A guard that
+      # skips the change it guards against is not a guard.
+      #
       # The job still runs and still reports its result — deliberately. The
       # `main protection` ruleset requires this check *by name*, so a
       # `paths-ignore:` trigger would leave a docs PR waiting forever on a
@@ -57,11 +66,11 @@ jobs:
       # skipping the workflow would silently block the merge.
       #
       # Anything that is not markdown — including .json, .yml, and this
-      # workflow itself — takes the full path. memory/ no longer does: it was
-      # carved out only to keep ops/tests/memory-budget.test.mjs live
-      # on the PRs it policed, and that test was deleted with its budget on
-      # 2026-08-15. No test reads memory/ now, so its files are ordinary
-      # markdown. Restore the carve-out the day one does again.
+      # workflow itself — takes the full path. memory/ was carved out before
+      # for ops/tests/memory-budget.test.mjs, uncarved when that test was
+      # deleted with its budget on 2026-08-15, and carved out again above the
+      # day a test read it once more. The rule behind all three moves: a
+      # markdown tree takes the full path exactly while some suite reads it.
       #
       # This shortcut is defined by a PR's file list, so it only applies to a
       # `pull_request` event. A manual run has no `github.event.pull_request`,
@@ -85,7 +94,8 @@ jobs:
           echo "Changed files:"
           printf '%s\n' "$files"
           non_docs=$(printf '%s\n' "$files" | grep -vE '\.md$' || true)
-          if [ -n "$files" ] && [ -z "$non_docs" ]; then
+          frd=$(printf '%s\n' "$files" | grep -E '^(product-docs|memory)/' || true)
+          if [ -n "$files" ] && [ -z "$non_docs" ] && [ -z "$frd" ]; then
             echo "Markdown only — skipping install, format, lint, typecheck and build."
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           else

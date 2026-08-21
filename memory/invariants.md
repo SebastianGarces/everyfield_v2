@@ -307,3 +307,11 @@ Applies to `src/app/globals.css` and every stylesheet under `src/app/`; colour m
 - ⚖ `--destructive` is DESIGN.md's ruled `danger` #B4432F, NOT a red chosen to clear 4.5:1 — the app shares the palette. If danger has to move, it moves in DESIGN.md FIRST and `globals.css` follows.
 - Accepted residual (DECISION): `bg-destructive/10 text-destructive` — twelve call sites — measures 4.07:1 light and 3.89:1 at `dark:bg-destructive/20`. NO token value fixes it; the remedy is a solid ground or a text-on-tint role token.
 - ⚖ The person-status badges are the TINTED EDITORIAL scale: each status that carries colour paints ONE hue three ways in `people/status-colors.ts` — pale ground, deep ink, hairline border — mirrored in dark, so every entry spells six classes. `prospect` stays NEUTRAL; `attendee`/`launch_team` share ONE hue at different TINT LEVELS. All fourteen pairs must clear AA and there is NO deferral list.
+
+## Requirement Ids
+
+The guard is `ops/tests/requirement-ids.test.mjs`. Applies to every requirement id cited in `src/` or `memory/`, and to the FRD tables under `product-docs/features/*/frd.md`.
+
+- Every requirement id cited in `src/` or `memory/` RESOLVES to an FRD row, and the test fails a PR that mints one that does not. When code cites a slice id (`OV-007a`, `VM-016c`) no FRD row defines, the ROW comes to the FRD — never rename the citation onto a neighbouring row unless it truly means the same requirement, and never write a row for an id nothing cites.
+- `product-docs/` and `memory/` are carved OUT of the docs-only shortcut in `pull-request-checks.yml` because that test reads both. Removing the carve-out disarms the guard against the change it most needs to catch: the markdown-only FRD edit that drops a row something still cites.
+- `AES-256` and `SHA-256` match the id pattern and are NOT requirement ids; the test's `NON_IDS` excludes them, and a prefix is added there only once it actually appears.
