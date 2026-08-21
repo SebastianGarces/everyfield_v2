@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { namedButtons } from "@/lib/testing/rendered-markup";
+import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 import type { SeatActionOutcome } from "./seat-action-outcome";
 import {
@@ -239,4 +242,92 @@ test("an Admin still reads the whole roster", () => {
       `an Admin must still see ${shown} on the roster`
     );
   }
+});
+
+// ----------------------------------------------------------------------------
+// The two gates are independent — #555, pinning a #544 review fix
+// ----------------------------------------------------------------------------
+
+// WHY THIS ONE IS SOURCE-SHAPED AND THE REST ARE NOT.
+//
+// `manageable` used to gate BOTH controls on `rule.removable`, so a seat
+// declared movable-but-not-removable would silently lose its appoint control —
+// with no diff anywhere near the line that decided it. #544's review caught it
+// and it was fixed; nothing pinned the fix.
+//
+// It cannot be pinned by rendering, and that is the point: the coupling is
+// invisible for exactly as long as no seat has `move !== null` with
+// `removable: false`. All three seats today are movable-and-removable or
+// neither, so a render test passes identically on the broken version. The
+// property is real but only observable in the source until a fourth seat
+// exists — so the source is what this reads, through `sourceReader`, whose
+// anchors throw when they move instead of silently widening the span.
+//
+// Comments are stripped first. The prose above names `removable` several
+// times, and a scan that fed on its own documentation would be green without
+// being true.
+
+const COMPONENT = sourceReader(
+  stripComments(
+    readFileSync(
+      path.join(process.cwd(), "src/components/settings/seat-roster.tsx"),
+      "utf8"
+    )
+  ),
+  "src/components/settings/seat-roster.tsx"
+);
+
+test("the appoint/demote control does not read `removable`", () => {
+  const moveControl = COMPONENT.span(
+    "{mayAct && move ?",
+    "{mayAct && rule.removable ?"
+  );
+
+  assert.doesNotMatch(
+    moveControl,
+    /removable/,
+    "whether a seat may MOVE is `move`, and whether it may be REMOVED is `removable` — gating the move button on the removal rule is how a movable-but-not-removable seat silently loses its appoint control"
+  );
+});
+
+test("each control gates on its own rule, and both on `mayAct`", () => {
+  assert.match(
+    COMPONENT.code,
+    /\{mayAct && move \?/,
+    "the move control gates on `mayAct` and the seat's own `move` rule"
+  );
+  assert.match(
+    COMPONENT.code,
+    /\{mayAct && rule\.removable \?/,
+    "the remove control gates on `mayAct` and the seat's own `removable` rule"
+  );
+});
+
+test("the shared gate is exactly the two clauses it is allowed to be", () => {
+  // THE PROPERTY, NOT THE SPELLING — and this is the assertion that does the
+  // work. The test above pins the two JSX conditions, and both stay green if
+  // the coupling moves UP into `mayAct`. Two spellings do that, and a scan
+  // written against either one lets the other through:
+  //
+  //   const mayAct = canManageSeats && !row.isSelf && rule.removable;
+  //   const manageable = canManageSeats && !row.isSelf && rule.removable;
+  //   const mayAct = manageable;
+  //
+  // So this pins the declaration POSITIVELY rather than listing forbidden
+  // words. `mayAct` answers WHO may act — an Admin manages nothing (AS-015),
+  // nobody manages their own row (AS-017) — and neither clause is about which
+  // seat the row holds. Anything else in it re-couples the two controls no
+  // matter how the JSX below is written.
+  //
+  // `after` and not `span`: `span` resolves BOTH anchors as the first match in
+  // the whole file, so a `";"` end-anchor lands on an import statement. The
+  // declaration is one statement, so its own terminator ends it.
+  const rest = COMPONENT.after("const mayAct =");
+  const declaration = rest.slice(0, rest.indexOf(";") + 1);
+
+  assert.equal(
+    declaration,
+    "const mayAct = canManageSeats && !row.isSelf;",
+    "`mayAct` is the shared half and nothing else. Reading a per-seat rule here — directly, or through a boolean that read one — is the coupling #544's review removed; give each control its own gate in the JSX instead"
+  );
 });
