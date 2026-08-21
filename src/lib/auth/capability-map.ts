@@ -233,6 +233,12 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "tasks.own",
   "src/app/(dashboard)/tasks/actions.ts → updateTaskAction": "tasks.write",
   "src/app/(dashboard)/tasks/actions.ts → updateTaskStatusAction": "tasks.own",
+  "src/app/(dashboard)/tasks/follow-up-actions.ts → assignFollowUpAction":
+    "tasks.write",
+  "src/app/(dashboard)/tasks/follow-up-actions.ts → createAndAssignFollowUpAction":
+    "tasks.write",
+  "src/app/(dashboard)/tasks/follow-up-actions.ts → handOffFollowUpsAction":
+    "tasks.write",
   "src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction":
     "phase.signal",
   "src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction":

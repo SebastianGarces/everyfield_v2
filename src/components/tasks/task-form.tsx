@@ -35,6 +35,7 @@ import {
 // migration — `toRichTextHtml` is the one door, and it converts them on the way
 // into the editor exactly as it does for message templates.
 import { toRichTextHtml } from "@/lib/rich-text/format";
+import { OWNED_TASK_CATEGORY as FOLLOW_UP_CATEGORY } from "@/lib/tasks/follow-up-ownership.shared";
 import { toast } from "sonner";
 
 // ============================================================================
@@ -233,6 +234,13 @@ export function TaskPrerequisitesField({
 interface TaskFormProps {
   task?: Task; // If provided, we're editing
   users?: { id: string; name: string | null; email: string }[];
+  /**
+   * The accounts a FOLLOW-UP may be assigned to — committed members only
+   * (#470 D2). A subset of `users`, resolved on the server by the same query
+   * the write-path guard uses, so the select cannot offer somebody the save
+   * will refuse.
+   */
+  followUpAssignees?: { id: string; name: string | null; email: string }[];
   prerequisiteCandidates?: PrerequisiteCandidate[];
   prerequisiteIds?: string[];
 }
@@ -240,6 +248,7 @@ interface TaskFormProps {
 export function TaskForm({
   task,
   users = [],
+  followUpAssignees = [],
   prerequisiteCandidates = [],
   prerequisiteIds = [],
 }: TaskFormProps) {
@@ -268,6 +277,36 @@ export function TaskForm({
   const [description, setDescription] = useState(() =>
     toRichTextHtml(task?.description)
   );
+
+  // CATEGORY AND ASSIGNEE ARE CONTROLLED, and only these two (#470 AC-2).
+  // Every other field here is uncontrolled and travels in FormData, which is
+  // still the right default — but these two are not independent: only a
+  // committed member may own a follow-up, so the category decides which names
+  // the assignee select is allowed to offer.
+  const [category, setCategory] = useState<string>(task?.category ?? "");
+  const [assignedToId, setAssignedToId] = useState<string>(
+    task?.assignedToId ?? ""
+  );
+
+  const isFollowUp = category === FOLLOW_UP_CATEGORY;
+  const assigneeOptions = isFollowUp ? followUpAssignees : users;
+
+  /**
+   * Re-categorising to Follow-up while an ineligible member is selected CLEARS
+   * the selection rather than leaving a name the save would refuse. Silence
+   * would be worse than the clear: the planter would press Save, be told no,
+   * and have to work out which of eight fields the refusal was about.
+   */
+  function chooseCategory(next: string) {
+    setCategory(next);
+    if (
+      next === FOLLOW_UP_CATEGORY &&
+      assignedToId &&
+      !followUpAssignees.some((u) => u.id === assignedToId)
+    ) {
+      setAssignedToId("");
+    }
+  }
 
   // --------------------------------------------------------------------------
   // A SUBMIT THAT LEAVES OWNS NO TRANSITION AND NO REFRESH (#228, #526, #529)
@@ -399,7 +438,11 @@ export function TaskForm({
 
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
-          <Select name="category" defaultValue={task?.category ?? ""}>
+          <Select
+            name="category"
+            value={category}
+            onValueChange={chooseCategory}
+          >
             <SelectTrigger className="cursor-pointer">
               <SelectValue placeholder="Select category..." />
             </SelectTrigger>
@@ -418,18 +461,29 @@ export function TaskForm({
       {users.length > 0 && (
         <div className="space-y-2">
           <Label htmlFor="assignedToId">Assigned To</Label>
-          <Select name="assignedToId" defaultValue={task?.assignedToId ?? ""}>
+          <Select
+            name="assignedToId"
+            value={assignedToId}
+            onValueChange={setAssignedToId}
+          >
             <SelectTrigger className="cursor-pointer">
               <SelectValue placeholder="Select assignee..." />
             </SelectTrigger>
             <SelectContent>
-              {users.map((u) => (
+              {assigneeOptions.map((u) => (
                 <SelectItem key={u.id} value={u.id} className="cursor-pointer">
                   {u.name ?? u.email}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {isFollowUp && (
+            <p className="text-muted-foreground text-xs">
+              {assigneeOptions.length === 0
+                ? "Nobody has a committed status yet, so no one can own a follow-up."
+                : "Follow-ups can only be owned by Core Group, Launch Team or Leader members."}
+            </p>
+          )}
         </div>
       )}
 

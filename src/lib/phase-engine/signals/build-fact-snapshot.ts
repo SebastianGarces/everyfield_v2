@@ -62,6 +62,11 @@ import {
   type TrainingSignals,
   type VisionMeetingSignals,
 } from "./types";
+import {
+  countFollowUpOwnership,
+  listOpenFollowUpTasks,
+  type OpenFollowUpTask,
+} from "@/lib/tasks/follow-up-ownership";
 
 /** Snapshot shape version — bump when the structure changes. */
 export const SNAPSHOT_VERSION = "v1";
@@ -69,8 +74,13 @@ export const SNAPSHOT_VERSION = "v1";
 /** Trailing window for the committed-core-group growth delta. */
 const GROWTH_WINDOW_DAYS = 28;
 
-/** A follow-up contact is "stale" once untouched beyond this many days. */
-const FOLLOW_UP_STALE_THRESHOLD_DAYS = 14;
+/**
+ * A follow-up contact is "stale" once untouched beyond this many days.
+ * Exported since #470: `/tasks`' assignments view labels the same contacts, and
+ * a second copy of the number would let the page and the snapshot disagree
+ * about who is waiting. (⚠️ in rubric v0 — #486 splits it by contact warmth.)
+ */
+export const FOLLOW_UP_STALE_THRESHOLD_DAYS = 14;
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -300,16 +310,35 @@ function buildVisionMeetingSignals(
 // FOLLOW_UP_STALE_THRESHOLD_DAYS counts against the rate. It measures the
 // person row's `updated_at`, not whether the generated task was ticked.
 
+// OWNERSHIP IS MEASURED, NEVER INFERRED (#470, C01/C13). Rubric v0's Lens 2
+// read "8 stale follow-ups" and told the planter they were carrying all of it.
+// They may equally have distributed it badly, or handed it to people who did
+// not do it. So the four owner facts below are counted from the follow-up
+// TASKS' assignees, and rubric v1 gives the judge no other licence to say who
+// carries follow-up. `countFollowUpOwnership` is shared with `/tasks`, which
+// groups the same rows by the same definition of "owned".
+
 function buildFollowUpSignals(
   rows: FollowUpRow[],
+  openTasks: OpenFollowUpTask[],
   asOf: Date
 ): FollowUpSignals {
+  const ownership = countFollowUpOwnership(
+    rows.map((row) => ({
+      id: row.id,
+      isStale:
+        diffInDays(row.updatedAt, asOf) >= FOLLOW_UP_STALE_THRESHOLD_DAYS,
+    })),
+    openTasks
+  );
+
   if (rows.length === 0) {
     return {
       openCount: 0,
       stalestDays: null,
       staleCount: 0,
       staleThresholdDays: FOLLOW_UP_STALE_THRESHOLD_DAYS,
+      ...ownership,
       isEmpty: true,
     };
   }
@@ -327,6 +356,7 @@ function buildFollowUpSignals(
     stalestDays,
     staleCount,
     staleThresholdDays: FOLLOW_UP_STALE_THRESHOLD_DAYS,
+    ...ownership,
     isEmpty: false,
   };
 }
@@ -546,6 +576,12 @@ export interface SnapshotInputs {
   commitments: CommitmentRow[];
   visionMeetings: VisionMeetingRow[];
   followUp: FollowUpRow[];
+  /**
+   * The open follow-up TASKS, owners already resolved to their current status
+   * (#470). Separate from `followUp` because they answer a different question:
+   * that cohort is who is waiting, this one is who is on it.
+   */
+  followUpTasks: OpenFollowUpTask[];
   ministryTeams: MinistryTeamRow[];
   leadershipCandidates: LeadershipPersonRow[];
   meetingsAttendedByPerson: PersonCountRow[];
@@ -570,7 +606,11 @@ export function assembleFactSnapshot(
 
   const coreGroup = buildCoreGroupSignals(inputs.commitments, asOf);
   const visionMeetings = buildVisionMeetingSignals(inputs.visionMeetings, asOf);
-  const followUp = buildFollowUpSignals(inputs.followUp, asOf);
+  const followUp = buildFollowUpSignals(
+    inputs.followUp,
+    inputs.followUpTasks,
+    asOf
+  );
   const ministryRoles = buildMinistryRoleSignals(inputs.ministryTeams);
   const leadership = buildLeadershipSignals(
     inputs.leadershipCandidates,
@@ -654,6 +694,7 @@ export async function buildFactSnapshot(
     commitments,
     visionMeetings,
     followUp,
+    followUpTasks,
     ministryTeams,
     leadershipCandidates,
     meetingsAttendedByPerson,
@@ -668,6 +709,7 @@ export async function buildFactSnapshot(
     getCommitments(churchId),
     getCompletedVisionMeetings(churchId),
     getOpenFollowUpContacts(churchId),
+    listOpenFollowUpTasks(churchId),
     getMinistryTeams(churchId),
     getLeadershipCandidates(churchId),
     getMeetingsAttendedByPerson(churchId),
@@ -687,6 +729,7 @@ export async function buildFactSnapshot(
       commitments,
       visionMeetings,
       followUp,
+      followUpTasks,
       ministryTeams,
       leadershipCandidates,
       meetingsAttendedByPerson,

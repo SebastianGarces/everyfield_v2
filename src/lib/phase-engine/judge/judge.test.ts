@@ -62,6 +62,10 @@ function makeSnapshot(
       stalestDays: 20,
       staleCount: 7,
       staleThresholdDays: 14,
+      unownedCount: 0,
+      staleUnownedCount: 0,
+      distinctOwnerCount: 0,
+      planterOwnedCount: 0,
       isEmpty: false,
     },
     ministryRoles: {

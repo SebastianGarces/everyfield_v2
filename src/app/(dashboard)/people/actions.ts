@@ -18,6 +18,11 @@ import {
   type ListPeopleResult,
 } from "@/lib/people/service";
 import { changeStatus, recordStatusChange } from "@/lib/people/status";
+import { isCommittedStatus } from "@/lib/people/status.shared";
+import {
+  planFollowUpHandoff,
+  type FollowUpHandoff,
+} from "@/lib/tasks/follow-up-ownership";
 import type {
   ActionResult,
   DuplicateCheck,
@@ -394,7 +399,17 @@ export async function changeStatusWithReasonAction(
   newStatus: PersonStatus,
   reason?: string
 ): Promise<
-  ActionResult<{ person: PersonForClient; transition: StatusTransition }>
+  ActionResult<{
+    person: PersonForClient;
+    transition: StatusTransition;
+    /**
+     * What this change left ownerless (#470 Q2). Non-null only when the person
+     * just LEFT the committed set while holding open follow-ups — the caller
+     * opens the handoff dialog on it. `null` is the overwhelming case and means
+     * there is nothing to offer.
+     */
+    followUpHandoff: FollowUpHandoff | null;
+  }>
 > {
   return withChurchSession(
     "people.write",
@@ -427,7 +442,23 @@ export async function changeStatusWithReasonAction(
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
 
-      return { success: true, data: result };
+      // LEAVING the committed set is the only direction that matters here:
+      // only committed members may own a follow-up (#470 D2), so a demotion is
+      // what makes work ownerless. Arriving into it, or moving within it,
+      // costs no extra read.
+      const leftCommittedSet =
+        isCommittedStatus(result.transition.from) &&
+        !isCommittedStatus(result.transition.to);
+
+      return {
+        success: true,
+        data: {
+          ...result,
+          followUpHandoff: leftCommittedSet
+            ? await planFollowUpHandoff(churchId, personId)
+            : null,
+        },
+      };
     }
   );
 }

@@ -27,6 +27,9 @@ import type {
   LaunchRow,
 } from "@/lib/phase-engine/signals/queries";
 import { MINISTRY_ROLE_KEYS } from "@/lib/phase-engine/signals/types";
+import { flattenFacts } from "@/lib/phase-engine/judge/prompt";
+import { FACT_PHRASES } from "@/lib/phase-engine/fact-phrases";
+import type { OpenFollowUpTask } from "@/lib/tasks/follow-up-ownership.shared";
 
 const CHURCH_ID = "11111111-1111-1111-1111-111111111111";
 const AS_OF = new Date("2026-06-22T00:00:00.000Z");
@@ -103,6 +106,7 @@ function richInputs(): SnapshotInputs {
       { id: "p2", status: "following_up", updatedAt: daysBefore(AS_OF, 20) },
       { id: "p3", status: "interviewed", updatedAt: daysBefore(AS_OF, 40) },
     ],
+    followUpTasks: [],
     ministryTeams: [
       { id: "t1", name: "Worship Team", leaderId: "A" }, // filled
       { id: "t2", name: "Kids Ministry", leaderId: null }, // present, unfilled
@@ -151,6 +155,7 @@ function coldStartInputs(): SnapshotInputs {
     commitments: [],
     visionMeetings: [],
     followUp: [],
+    followUpTasks: [],
     ministryTeams: [],
     leadershipCandidates: [],
     meetingsAttendedByPerson: [],
@@ -538,4 +543,86 @@ test("training rate is null when there are required programs but no committed pe
   const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
   assert.equal(snap.training.requiredCompletionRate, null);
   assert.equal(snap.training.isEmpty, false);
+});
+
+// ----------------------------------------------------------------------------
+// Measured follow-up ownership (#470, C01/C13)
+//
+// Rubric v1's Lens 2 may say who carries follow-up ONLY from these four facts.
+// So two things have to hold: the assembler counts them from the follow-up
+// TASKS, and they survive the flattening into the judge's fact ledger — a fact
+// the judge is never shown is a fact the rubric cannot licence.
+// ----------------------------------------------------------------------------
+
+function followUpTask(over: Partial<OpenFollowUpTask> = {}): OpenFollowUpTask {
+  return {
+    taskId: "ft1",
+    title: "Follow up",
+    dueDate: null,
+    contactId: "p1",
+    assignedToId: "u1",
+    ownerName: "Ada",
+    ownerEmail: "ada@example.com",
+    ownerIsCommitted: true,
+    ownerIsPlanter: false,
+    ...over,
+  };
+}
+
+test("with no follow-up tasks, every open contact is unowned", () => {
+  const snap = assembleFactSnapshot(CHURCH_ID, richInputs(), AS_OF);
+
+  // The three contacts of `baseInputs`, two of them stale (20 and 40 days).
+  assert.equal(snap.followUp.unownedCount, 3);
+  assert.equal(snap.followUp.staleUnownedCount, 2);
+  assert.equal(snap.followUp.distinctOwnerCount, 0);
+  assert.equal(snap.followUp.planterOwnedCount, 0);
+});
+
+test("an owned contact leaves the unowned count, a demoted owner's does not", () => {
+  const inputs = richInputs();
+  inputs.followUpTasks = [
+    followUpTask({ taskId: "ft1", contactId: "p3", ownerIsPlanter: true }),
+    followUpTask({ taskId: "ft2", contactId: "p2", ownerIsCommitted: false }),
+    followUpTask({ taskId: "ft3", contactId: "p1", assignedToId: "u2" }),
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+
+  // p3 (stale) and p1 are covered; p2 is stale and its owner was demoted.
+  assert.equal(snap.followUp.unownedCount, 1);
+  assert.equal(snap.followUp.staleUnownedCount, 1);
+  assert.equal(snap.followUp.distinctOwnerCount, 2);
+  assert.equal(snap.followUp.planterOwnedCount, 1);
+});
+
+test("the four owner facts reach the judge's fact ledger", () => {
+  const inputs = richInputs();
+  inputs.followUpTasks = [
+    followUpTask({ contactId: "p1", ownerIsPlanter: true }),
+  ];
+
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, inputs, AS_OF)).map((line) => [
+      line.key,
+      line.value,
+    ])
+  );
+
+  assert.equal(ledger.get("followUp.unownedCount"), "2");
+  assert.equal(ledger.get("followUp.staleUnownedCount"), "2");
+  assert.equal(ledger.get("followUp.distinctOwnerCount"), "1");
+  assert.equal(ledger.get("followUp.planterOwnedCount"), "1");
+});
+
+test("every owner fact has a phrase, so a citation of one can be read back", () => {
+  for (const key of [
+    "followUp.unownedCount",
+    "followUp.staleUnownedCount",
+    "followUp.distinctOwnerCount",
+    "followUp.planterOwnedCount",
+  ]) {
+    assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
+    assert.equal(typeof FACT_PHRASES.get(key)!("2"), "string");
+  }
 });

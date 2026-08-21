@@ -173,6 +173,7 @@ test("every trend's declared fact paths resolve in a real assembled snapshot", (
         updatedAt: new Date("2026-06-19T00:00:00.000Z"),
       },
     ],
+    followUpTasks: [],
     ministryTeams: [{ id: "t1", name: "Worship Team", leaderId: "A" }],
     leadershipCandidates: [],
     meetingsAttendedByPerson: [],

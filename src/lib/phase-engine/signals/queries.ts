@@ -43,13 +43,14 @@ import {
 import type { LaunchStatus } from "@/db/schema/launch";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { isRecruitedContact } from "@/lib/people/person-user";
+import { FOLLOW_UP_STATUSES } from "@/lib/people/status.shared";
 
-/** Statuses that count as "open" follow-up (warm, pre-commitment) contacts. */
-export const FOLLOW_UP_STATUSES = [
-  "attendee",
-  "following_up",
-  "interviewed",
-] as const;
+/**
+ * Statuses that count as "open" follow-up (warm, pre-commitment) contacts.
+ * Re-exported from the people domain, which owns the pipeline vocabulary — the
+ * assignments view on `/tasks` reads the same cohort (#470).
+ */
+export { FOLLOW_UP_STATUSES } from "@/lib/people/status.shared";
 
 /** Statuses that make a person a leadership-readiness candidate. */
 export const LEADERSHIP_CANDIDATE_STATUSES = [

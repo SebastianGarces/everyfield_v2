@@ -295,6 +295,26 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
       : `${n} contacts waiting longer than your follow-up window`
   ),
   "followUp.staleThresholdDays": numeric((n) => `a ${n}-day follow-up window`),
+  // Measured ownership (#470). Every phrase here reports an ASSIGNMENT — none
+  // of them says who is at fault, because the count does not know.
+  "followUp.unownedCount": numeric((n) =>
+    n === 1
+      ? "1 follow-up with no clear owner"
+      : `${n} follow-ups with no clear owner`
+  ),
+  "followUp.staleUnownedCount": numeric((n) =>
+    n === 1
+      ? "1 follow-up past the window with no clear owner"
+      : `${n} follow-ups past the window with no clear owner`
+  ),
+  "followUp.distinctOwnerCount": numeric((n) =>
+    n === 1
+      ? "1 person owning follow-ups"
+      : `${n} people owning follow-ups between them`
+  ),
+  "followUp.planterOwnedCount": numeric((n) =>
+    count(n, "follow-up you own", "follow-ups you own")
+  ),
   "followUp.isEmpty": boolean(
     "no open follow-ups",
     "open follow-ups on your list"

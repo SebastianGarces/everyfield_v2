@@ -109,6 +109,22 @@ export interface FollowUpSignals {
   staleCount: number;
   /** Threshold (days) used to classify a contact as "stale". */
   staleThresholdDays: number;
+  /**
+   * MEASURED OWNERSHIP (#470, C01/C13) — the only facts rubric v1's Lens 2 may
+   * speak from about who carries follow-up. Staleness does not imply the
+   * planter is carrying it; these four say what is actually known.
+   *
+   * `unownedCount` and `staleUnownedCount` are per CONTACT, so they cover both
+   * "the task is unassigned" and "there is no task at all". The other two are
+   * per TASK, because they describe how the work is spread. All four treat an
+   * assignee who has been demoted out of the committed set, or removed, as no
+   * owner at all. Counted by `countFollowUpOwnership` in
+   * `lib/tasks/follow-up-ownership.ts`, which is also what `/tasks` groups by.
+   */
+  unownedCount: number;
+  staleUnownedCount: number;
+  distinctOwnerCount: number;
+  planterOwnedCount: number;
   /** No open follow-up contacts. */
   isEmpty: boolean;
 }

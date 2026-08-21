@@ -26,6 +26,7 @@ import {
   DEPENDENCY_TASK_MISSING_ERROR,
   setTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
+import { FOLLOW_UP_ASSIGNEE_ERROR } from "@/lib/tasks/follow-up-ownership";
 import type { SearchParamValue } from "@/lib/tasks/list-params";
 import { readTaskListPage, type TaskListPage } from "@/lib/tasks/list-page";
 import { parseRecurrenceForm } from "@/lib/tasks/recurrence";
@@ -86,6 +87,9 @@ const USER_FACING_SERVICE_ERRORS = new Set<string>([
   DEPENDENCY_CROSS_CHURCH_ERROR,
   DEPENDENCY_SELF_ERROR,
   DEPENDENCY_TASK_MISSING_ERROR,
+  // #470 D2. "Only committed members … can own a follow-up" is ABOUT the
+  // request, and a planter told "please try again" would try again.
+  FOLLOW_UP_ASSIGNEE_ERROR,
 ]);
 
 /** What a Member is told when the task they aimed at is somebody else's. */
