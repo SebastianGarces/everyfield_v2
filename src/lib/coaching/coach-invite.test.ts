@@ -167,7 +167,7 @@ test("a coach registration writes no tenancy and no seat", () => {
     read("app", "(auth)", "register", "account-entities.ts")
   );
   const coachArm = planner.slice(
-    planner.indexOf('if (userInvitation.role.kind === "coach")'),
+    planner.indexOf('if (userInvitation.invitedAs.kind === "coach")'),
     planner.indexOf("const churchId = crypto.randomUUID()")
   );
 
@@ -373,7 +373,7 @@ test("inviting a coach and answering one are checked in against their verbs", ()
 test("a seat token cannot be answered at the coach surface, and vice versa", () => {
   // One query key carries both kinds, so each surface refuses the other's token
   // rather than acting on it — and refuses it with its own ordinary "no".
-  assert.match(ACCEPT.code, /described\.role\.kind !== "coach"/);
+  assert.match(ACCEPT.code, /described\.invitedAs\.kind !== "coach"/);
   assert.match(
     stripComments(read("lib", "invitations", "seat.ts")),
     /row\.kind === "coach"\s*\?\s*\{ kind: "coach" \}/
