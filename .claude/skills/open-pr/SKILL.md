@@ -28,12 +28,34 @@ both inline rather than calling this skill; anything opening a PR by hand follow
    does. The issues keep `agent:in-progress`; the merge closes them via `Closes #`, and a closed
    issue's labels are history (ruled 2026-08-19 — `agent:in-review` is retired with the review
    queue).
-3. Anchor on CI: `gh pr checks <number> --watch --fail-fast`, then enable auto-merge:
-   `gh pr merge <number> --squash --auto`.
+3. Anchor on CI: `gh pr checks <number> --watch --fail-fast`, then merge behind the hold check:
+   ```bash
+   ops/merge-hold.sh <number> --wait && gh pr merge <number> --squash
+   ```
+   **The check and the merge are one command, joined by `&&`** — see *The merge hold* below. Never
+   run the check at the top of the ship step and merge minutes later, and never arm `--auto` while
+   it exits 1.
 4. **Back-fill the body from the anchor**, then read it back: `gh pr edit <number> --body-file <path>`
    replaces the CI row with the conclusion GitHub reported and the sha it ran at, and
    `gh pr view <number> --json headRefOid` proves the body still describes the head.
 5. Return the PR URL.
+
+## The merge hold
+
+When one PR is starved — main keeps moving under it and it never becomes mergeable — the
+orchestrator puts **`merge-priority`** on it and every other track holds its merge until that PR
+lands. The hold lives on the board, so you read it; nobody sends it to you.
+
+`ops/merge-hold.sh <your-pr> [--wait]` is that read. Exit 0 is clear, exit 1 names the PR holding
+you. It considers only OPEN pull requests, so a label left behind on a merged one holds nobody.
+
+- **Call it in the same command as the merge**, `&&`-joined. The window a hold has to close is the
+  gap between deciding to merge and merging, and a check at the top of the ship step *is* that gap:
+  CI takes minutes and the hold lands inside them. This is not hypothetical — on 2026-08-21 a track
+  merged 13 seconds before its hold arrived and knocked the starved PR back to `BEHIND`.
+- **Arming auto-merge counts as merging.** `--auto` fires later without re-reading anything, so
+  never arm it while the check exits 1. Wait with `--wait`, then merge for real.
+- **Your own PR never holds you** — pass your number and it is excluded.
 
 ## The CI anchor, and the labels
 
