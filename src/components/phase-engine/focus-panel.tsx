@@ -21,7 +21,10 @@
 
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
-import { deltaFieldLabel } from "@/components/phase-engine/focus-presentation";
+import {
+  allocateFocus,
+  deltaFieldLabel,
+} from "@/components/phase-engine/focus-presentation";
 import {
   InsightCard,
   type InsightFeedbackState,
@@ -179,6 +182,27 @@ export function FocusPanel({
 
   const asOf = AS_OF_FORMAT.format(new Date(assessment.generatedAt));
 
+  // The budget is applied HERE and nowhere else, over insights the caller has
+  // already ranked (#478). One splitter, so the hero, the supplements and the
+  // "going well" block cannot disagree about which insight is which.
+  const focus = allocateFocus(insights);
+
+  const card = (insight: AssessedInsight) =>
+    articleRefs ? (
+      <InsightCardView
+        linkStatic={linkStatic}
+        key={insight.id}
+        insight={insight}
+        articleRefs={articleRefs}
+      />
+    ) : (
+      <InsightCard
+        key={insight.id}
+        insight={insight}
+        feedback={feedbackByInsightId[insight.id]}
+      />
+    );
+
   return (
     <Card>
       <CardHeader>
@@ -203,28 +227,68 @@ export function FocusPanel({
       </CardHeader>
 
       <CardContent>
-        {insights.length === 0 ? (
+        {focus.primary === null && focus.positives.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             No focus items from the latest assessment. You&apos;re in good shape
             — keep the momentum going.
           </p>
         ) : (
-          <div className="space-y-3">
-            {insights.map((insight) =>
-              articleRefs ? (
-                <InsightCardView
-                  linkStatic={linkStatic}
-                  key={insight.id}
-                  insight={insight}
-                  articleRefs={articleRefs}
-                />
-              ) : (
-                <InsightCard
-                  key={insight.id}
-                  insight={insight}
-                  feedback={feedbackByInsightId[insight.id]}
-                />
-              )
+          <div className="space-y-5">
+            {focus.primary && (
+              <div className="space-y-2">
+                <p
+                  data-testid="primary-focus-label"
+                  className="text-muted-foreground text-xs font-medium tracking-wide uppercase"
+                >
+                  Primary focus
+                </p>
+                {card(focus.primary)}
+              </div>
+            )}
+
+            {focus.supplements.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  {focus.supplements.length === 1 ? "Also" : "Also worth doing"}
+                </p>
+                <div className="space-y-3">{focus.supplements.map(card)}</div>
+              </div>
+            )}
+
+            {/*
+              LEGACY ONLY. The judge schema refuses more than three actionable
+              planter insights now, so this branch only ever renders for an
+              assessment written before #478. Those observations were made and
+              stored; collapsing them is honest, deleting them from the view
+              would be a silent edit of the record.
+            */}
+            {focus.overflow.length > 0 && (
+              <details className="group">
+                <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium">
+                  {focus.overflow.length === 1
+                    ? "1 more observation"
+                    : `${focus.overflow.length} more observations`}
+                </summary>
+                <div className="mt-3 space-y-3">{focus.overflow.map(card)}</div>
+              </details>
+            )}
+
+            {/*
+              #478 D1 — encouragement, on its own surface. It never occupies a
+              focus slot and never crowds one out. This block's final placement
+              is #533's call; what is settled here is that it is not one of the
+              three things the planter is being asked to do.
+            */}
+            {focus.positives.length > 0 && (
+              <div className="space-y-2 border-t pt-4">
+                <p
+                  data-testid="going-well-label"
+                  className="text-muted-foreground text-xs font-medium tracking-wide uppercase"
+                >
+                  Going well
+                </p>
+                <div className="space-y-3">{focus.positives.map(card)}</div>
+              </div>
             )}
           </div>
         )}

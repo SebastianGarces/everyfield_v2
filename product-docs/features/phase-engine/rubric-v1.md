@@ -34,6 +34,7 @@ recorded rulings, and the recommended v1 delta.
 | Generosity is split from Financial Readiness | C06, C21 | [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) | Lens 6 becomes two separately-scored signals under one heading. New `core_group_giving` attestation for giving culture; the existing funding key keeps its slug and narrows to solvency. Neither may be read as evidence for the other. |
 | 60 days is a Leadership Candidate Signal, not readiness | C07, C22 | [#476](https://github.com/SebastianGarces/everyfield_v2/issues/476) | The number stays and the claim goes. Interview and 4 C's records join the signal as recorded human judgments the engine may cite and may never make. "leadership-ready" and "the profile of an emerging leader" are banned as claims about a person. |
 | The Phase 1 gate is a cluster, not a headcount | C08, C23 | [#477](https://github.com/SebastianGarces/everyfield_v2/issues/477) | 30–40 kept. A fifth indicator — trajectory — joins the four, and the gate is scored as a conjunction with a "N of 5 hold" readout. No single mark clears it; unanswered blocks without failing. |
+| The planter gets 1 primary + 2 supplements | C09, C18 | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) | §6 caps the planter's actionable list at three, enforced in the judge schema rather than asked for in the prompt. Positives are exempt and get their own surface; the drill-downs carry the rest. |
 
 ---
 
@@ -374,9 +375,20 @@ Every observation carries an urgency and an audience.
 I deliberately kept *positive* as a first-class level. A tool that only ever reports
 problems becomes something planters avoid opening.
 
-**⚠️ Open question:** I have no rule for how many observations one assessment should
-contain. Today a plant typically receives four to seven. My instinct is that more than
-five stops being a priority list. See Appendix C, question 1.
+**The planter gets one primary focus and at most two supplements.** ✅ Three actionable
+observations, primary first — no more, whatever else is true of the plant. A planter
+already has twenty-five things competing for their attention; the value of this tool is
+telling them which one to do first, and a list of seven is not that list.
+
+**Positive observations are reported separately and never occupy a focus slot.** The
+budget is *things to focus on this week*. Encouragement stays first-class — the engine
+still produces it, and a tool that only ever reports problems becomes one planters avoid
+opening — but it lands on its own surface rather than competing with the work. A plant
+having a good week does not lose a focus slot to hearing about it.
+
+**The budget forces prioritization, not silence.** Everything else the assessment found
+stays reachable through the drill-downs: the CSF scorecard, the exit criteria, the facts
+behind each observation. Nothing is deleted; three things are chosen.
 
 **Audience** — every observation is written for either the **planter** or the
 **network**, never both. The same underlying fact produces differently-worded output
@@ -549,9 +561,9 @@ see the same headline?
 
 ## Appendix C — Decisions I need from you
 
-1. **How many observations per assessment?** Today a plant gets four to seven. Is there
-   a number past which a planter stops reading? Should urgent items crowd out everything
-   else, or should there always be at least one positive?
+1. ~~**How many observations per assessment?**~~ *(Ruled: one primary + up to two
+   supplements, work items only. Positives are a separate surface and never crowd out a
+   focus slot — which also answers the second half of the question. See §6 and #478.)*
 
 2. **Prayer and Generosity.** These two lenses are nearly invisible to software. Options:
    accept thin coverage; lean on planter self-attestation; or add data capture. What

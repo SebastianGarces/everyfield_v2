@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { InsightSeverity } from "@/db/schema";
+
 import {
+  allocateFocus,
   buildArticleLinks,
   deltaFieldLabel,
   readBooleanSignals,
@@ -246,4 +249,75 @@ test("buildArticleLinks keeps `slug` raw while `href` is encoded", () => {
 
   assert.equal(links[0].slug, "notes/draft #2");
   assert.equal(links[0].href, "/wiki/notes/draft%20%232");
+});
+
+// ----------------------------------------------------------------------------
+// The observation budget (#478, C09/C18)
+// ----------------------------------------------------------------------------
+
+function insight(severity: InsightSeverity, id: string) {
+  return { id, severity };
+}
+
+test("one primary, two supplements, and the rest overflow", () => {
+  const allocation = allocateFocus([
+    insight("high", "a"),
+    insight("medium", "b"),
+    insight("medium", "c"),
+    insight("low", "d"),
+    insight("low", "e"),
+  ]);
+
+  assert.equal(allocation.primary?.id, "a");
+  assert.deepEqual(
+    allocation.supplements.map((i) => i.id),
+    ["b", "c"]
+  );
+  assert.deepEqual(
+    allocation.overflow.map((i) => i.id),
+    ["d", "e"]
+  );
+});
+
+test("positives never take a focus slot", () => {
+  // The plant is doing two things well and has three things to do. v0 would
+  // have rendered five equal cards; the positives would have been competing
+  // with the work for the planter's attention.
+  const allocation = allocateFocus([
+    insight("info", "well-1"),
+    insight("high", "a"),
+    insight("info", "well-2"),
+    insight("medium", "b"),
+    insight("medium", "c"),
+  ]);
+
+  assert.equal(allocation.primary?.id, "a");
+  assert.deepEqual(
+    allocation.supplements.map((i) => i.id),
+    ["b", "c"]
+  );
+  assert.deepEqual(allocation.overflow, []);
+  assert.deepEqual(
+    allocation.positives.map((i) => i.id),
+    ["well-1", "well-2"]
+  );
+});
+
+test("a plant with nothing to do but something to celebrate has no primary", () => {
+  const allocation = allocateFocus([insight("info", "well-1")]);
+
+  assert.equal(allocation.primary, null);
+  assert.deepEqual(allocation.supplements, []);
+  assert.equal(allocation.positives.length, 1);
+});
+
+test("the caller's ranking is respected, not re-derived", () => {
+  // `persist.ts` already ordered these by urgency and stamped `rank`. A second
+  // opinion here is how the hero and the drill-down come to disagree.
+  const allocation = allocateFocus([
+    insight("low", "first-by-rank"),
+    insight("critical", "second-by-rank"),
+  ]);
+
+  assert.equal(allocation.primary?.id, "first-by-rank");
 });
