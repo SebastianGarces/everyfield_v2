@@ -350,7 +350,12 @@ export async function getOversightPlantHealth(
 
   const summaries = await Promise.all(
     plants.map(async (plant) => {
-      const latest = await getLatestAssessment(plant.id);
+      // THE PLANTER-FIRST GATE (#482, C16/C25). `"network"` asks for the
+      // newest RELEASED assessment, which may be an older one than the planter
+      // is looking at: an assessment reaches oversight when the planter has
+      // opened it, or after the 72-hour window. #480's classifier therefore
+      // reads released data only — one consistency rule for the whole surface.
+      const latest = await getLatestAssessment(plant.id, "network");
       const { insights, hasSharedContent, withheldCount } =
         await gateNetworkInsights(user, plant.id, latest);
 

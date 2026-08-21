@@ -1,0 +1,26 @@
+-- #482 (C16/C25): the planter sees the diagnosis before the sending org does.
+--
+-- Bryan: "The planter should never discover the diagnosis through his
+-- overseer." The rubric's same-concern pairing rule fixes the WORDING — every
+-- network observation has a planter observation about the same thing. This
+-- column fixes the ORDER.
+--
+-- RELEASE IS COMPUTED, NOT STORED. An assessment reaches oversight when
+-- `planter_seen_at IS NOT NULL OR generated_at < now() - interval '72 hours'`.
+-- That is deliberately a read-time predicate rather than a `released_at` column
+-- a job has to stamp: there is no scheduler to build, no backfill to run, and
+-- no window in which a crashed job leaves an assessment invisible to the org
+-- that pays for the plant (ledger row 187 — "paying and seeing nothing is the
+-- failure mode").
+--
+-- NULLABLE, AND EVERY EXISTING ROW STAYS NULL. That is correct rather than a
+-- gap: every assessment already in the table was generated more than 72 hours
+-- ago by the time this ships, so all of them are released by the age arm on the
+-- first read. Backfilling a fake "seen" timestamp would put a claim in the
+-- database that nobody made.
+--
+-- ORDERING: `main` carried 0057 and 0058 by the time this landed, so this took
+-- slot 0059 with a `when` above both. It has no sibling BELOW it left to
+-- reconcile forward (`memory/invariants.md` → Migrations). Additive and
+-- nullable, so it is safe to apply ahead of the code that reads it.
+ALTER TABLE "plant_assessments" ADD COLUMN "planter_seen_at" timestamp;

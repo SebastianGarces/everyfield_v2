@@ -91,6 +91,7 @@ export const FOCUS_ASSESSMENT = {
   factSnapshot: { _delta: FOCUS_DELTA },
   modelId: "gpt-4o",
   status: "complete",
+  planterSeenAt: null,
   createdAt: GENERATED_AT,
 } satisfies PlantAssessment;
 
