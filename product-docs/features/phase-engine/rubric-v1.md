@@ -33,6 +33,7 @@ recorded rulings, and the recommended v1 delta.
 | Prayer is rhythms, with a lighter attestation cycle | C05, C21 | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) | Lens 5 is fed by two rhythm attestations and their age; the Prayer Leader title moves to Lens 7 coverage. "Has it happened in the last 30 days?" ships as freshness metadata plus a reaffirm chip, not as a third question. Unanswered is unknown. |
 | Generosity is split from Financial Readiness | C06, C21 | [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) | Lens 6 becomes two separately-scored signals under one heading. New `core_group_giving` attestation for giving culture; the existing funding key keeps its slug and narrows to solvency. Neither may be read as evidence for the other. |
 | 60 days is a Leadership Candidate Signal, not readiness | C07, C22 | [#476](https://github.com/SebastianGarces/everyfield_v2/issues/476) | The number stays and the claim goes. Interview and 4 C's records join the signal as recorded human judgments the engine may cite and may never make. "leadership-ready" and "the profile of an emerging leader" are banned as claims about a person. |
+| The Phase 1 gate is a cluster, not a headcount | C08, C23 | [#477](https://github.com/SebastianGarces/everyfield_v2/issues/477) | 30–40 kept. A fifth indicator — trajectory — joins the four, and the gate is scored as a conjunction with a "N of 5 hold" readout. No single mark clears it; unanswered blocks without failing. |
 
 ---
 
@@ -310,9 +311,27 @@ The readiness marks only shape what the engine *says*.
   not a universal definition of a healthy plant — see Lens 3.
 - **Priority:** vision-meeting cadence, core-group growth, shared ownership of follow-up,
   and no warm contacts going cold.
-- **Ready to advance when:** 30–40 committed adults, financial base in place, worship
-  leader identified, geographic area set. ✅ *(Is 30–40 right, given the 50 minimum for
-  launch? This is the gate I am least sure of.)*
+- **Ready to begin Launch Team Formation when all five hold** ✅ — and this gate is
+  **ready to begin the next phase, not ready to launch**, which is why 30–40 is the
+  number and not 50:
+  1. **Size** — 30–40 committed adults. ✅ *(Kept; this methodology's benchmark, see
+     Lens 3.)*
+  2. **Trajectory** — growth still moving: fewer than 28 days since the last new
+     committed adult (the Lens 3 stall clock).
+  3. **Finances** — launch funding viable.
+  4. **Leadership** — a worship leader identified.
+  5. **Geography** — the area is set.
+- **It is a CLUSTER, and the engine reads it as a conjunction.** No single mark clears
+  the gate, and there are no weights: **hitting 30 with no worship leader and no
+  financial base is not the gate.** A big number in one column may not buy off an empty
+  one — which is exactly the arithmetic a blended score would allow.
+- **An unanswered indicator blocks; it does not fail.** The readout names it as
+  unanswered rather than folding it into either column, because "you have not told us"
+  and "no" are different facts.
+- **The engine may not say "ready to advance" from any single indicator.** It cites the
+  cluster state — "4 of 5 hold" — and reserves the ready sentence for 5 of 5.
+- **Advancing stays the planter's decision.** The cluster is a readout, never an
+  automation; the engine has never blocked a phase change and does not start here.
 
 ### Phase 2 · Launch Team Formation
 - **Objective:** transition core group into launch team; set the launch date; fill leadership.
@@ -445,9 +464,11 @@ They double as my test cases.
 9. *Gates open, clock running* — launch date set, two of eight roles filled, training not
    started, ten weeks out → "Launch is ten weeks away. Training has not started and six
    roles are unfilled — at this distance both should be in motion."
-10. *Ready to advance* — Phase 1, 38 committed, finances attested, worship leader
-    identified → "You have hit the marks for Launch Team Formation: 38 adults, finances
-    confirmed, worship leader identified. Ready to advance when you are."
+10. *Ready to advance* — Phase 1, all five indicators holding → "All 5 hold: 38 adults,
+    growth still moving, funding viable, worship leader identified, area set. Ready to
+    begin Launch Team Formation when you are."
+10b. *Not the gate* — 38 committed, no worship leader, funding unanswered → "3 of 5
+    indicators hold; 1 is unanswered. Hitting 30 is not the gate — the combination is."
 
 **Cohesion, prayer, generosity**
 11. *Cluster disengagement* — four or more members' attendance dropped this month →

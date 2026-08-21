@@ -426,6 +426,33 @@ function summaryLine(progress: ExitCriteriaProgress): string {
     : `${progress.metCount} of ${progress.measuredCount} measured criteria are met.`;
 }
 
+/**
+ * THE CLUSTER READOUT (#477, C08/C23) — the gates read TOGETHER.
+ *
+ * The rows above it are each a single indicator, and a planter at 38 committed
+ * adults with no worship leader could read the green one and stop. This line
+ * says the combination out loud, and it only says "ready" at 5 of 5, because
+ * the gate is a conjunction with no weights: a big number in one column may not
+ * buy off an empty one.
+ *
+ * Unknowns are named separately rather than folded into either column — an
+ * unanswered attestation is not a failed one.
+ */
+function clusterLine(
+  progress: ExitCriteriaProgress,
+  nextPhaseName: string
+): string {
+  const { holding, total, unknown, ready } = progress.cluster;
+
+  if (ready) return `All ${total} hold — ready to begin ${nextPhaseName}.`;
+
+  const held = `${holding} of ${total} indicators hold`;
+  if (unknown > 0) {
+    return `${held}; ${unknown} ${unknown === 1 ? "is" : "are"} unanswered. No single mark clears the gate — the combination does.`;
+  }
+  return `${held}. No single mark clears the gate — the combination does.`;
+}
+
 interface ExitCriteriaProps {
   /**
    * The gates projected from the latest persisted assessment, or null when the
@@ -474,6 +501,23 @@ export function ExitCriteria({ progress }: ExitCriteriaProps) {
                 ? `${phaseName(progress.phase)} is the last phase — there is no gate past it.`
                 : `What it takes to leave ${phaseName(progress.phase)}. ${summaryLine(progress)}`}
             </CardDescription>
+            {!progress.isTerminalPhase && progress.criteria.length > 0 && (
+              <p
+                data-testid="cluster-verdict"
+                className={`mt-1.5 max-w-[70ch] text-sm text-pretty ${
+                  progress.cluster.ready
+                    ? "font-medium text-green-700 dark:text-green-500"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {clusterLine(
+                  progress,
+                  progress.nextPhase === null
+                    ? "the next phase"
+                    : phaseName(progress.nextPhase)
+                )}
+              </p>
+            )}
           </div>
           {/* Freshness and provenance sit next to the claim they qualify. */}
           <p className="text-muted-foreground text-xs whitespace-nowrap tabular-nums">
