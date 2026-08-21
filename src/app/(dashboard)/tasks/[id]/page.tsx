@@ -271,7 +271,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
                     href={relatedUrl}
                     className="cursor-pointer text-sm text-blue-600 hover:underline"
                   >
-                    View {task.relatedType} &rarr;
+                    View {task.relatedType} →
                   </Link>
                 ) : (
                   <p className="text-muted-foreground text-sm">

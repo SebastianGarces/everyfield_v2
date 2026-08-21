@@ -25,7 +25,7 @@ export default function PrivacyPage() {
             <b>Your account.</b> Your name, your email address, a hashed
             password (we never hold the password itself), and your sign-in
             sessions — each one with its IP address, browser, and approximate
-            location, so you can recognise a session that isn&rsquo;t yours.
+            location, so you can recognise a session that isn’t yours.
           </li>
           <li>
             <b>Your plant&rsquo;s records.</b> The people you track and what you
