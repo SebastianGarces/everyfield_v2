@@ -264,7 +264,7 @@ test("PE-023: the projection is audience-scoped — planter insights never reach
   });
   const networkOne = makeInsight({
     audience: "network",
-    category: "unity",
+    category: "cohesion",
     severity: "medium",
     title: "Core-group cadence is uneven",
   });
@@ -281,7 +281,7 @@ test("PE-023: the projection is audience-scoped — planter insights never reach
     "a planter-only finding must not set a network standing"
   );
   assert.equal(
-    network.factors.find((f) => f.category === "unity")!.standing,
+    network.factors.find((f) => f.category === "cohesion")!.standing,
     "watch"
   );
 

@@ -97,9 +97,9 @@ export const CSF_FIXTURE = {
       insights: [],
     },
     {
-      category: "unity",
+      category: "cohesion",
       number: 4,
-      name: "Unity",
+      name: "Cohesion",
       summary: "Regular core-group gatherings with consistent attendance.",
       standing: "not_raised",
       insights: [],

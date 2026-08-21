@@ -186,9 +186,11 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Insight types: trajectory vs. launch; momentum slowed; growth stalled.
 - Wiki: "What is a Core Group?", "Building Your Core Group", "8 Critical Success Factors Overview".
 
-### CSF-4 · Unity
+### CSF-4 · Core Group Cohesion
 - Signals: core-group meeting cadence, attendance consistency, engagement breadth.
 - Healthy: regular core-group gatherings with consistent attendance.
+- THIS LENS IS NOT ABOUT UNITY, and was renamed because it was. Attendance can tell you whether the group is holding together; it cannot tell you whether it is UNIFIED. Four people missing may be conflict, vacation, sickness or a work rota, and the data does not say which. Actual unity is a relational judgment for the planter and their coach — never yours.
+- Name the MEASURED PATTERN and stop there: "attendance has dropped across several core members this month". Never a spiritual state, and never the v0 line "unity is fragile in this season".
 - Insight types: core-group meetings lapsing; a cluster of members disengaging at once.
 - Wiki: "Core Group Meeting Format", "Core Group Commitments Explained".
 

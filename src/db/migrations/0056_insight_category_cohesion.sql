@@ -1,0 +1,24 @@
+-- #473 (C04): Lens 4 is COHESION, not Unity.
+--
+-- Bryan: attendance can tell you whether the group is holding together; it
+-- cannot tell you whether the group is unified. Four people missing could be
+-- conflict, vacation, sickness or a work rota. The lens keeps its signals and
+-- loses the name.
+--
+-- `plant_insights.category` is a plain `varchar(100)` with no CHECK, so the
+-- vocabulary is enforced by `insightCategorySchema` (judge/schema.ts) on the
+-- way in and by `CSF_CATEGORIES` on the way out. Renaming the slug there leaves
+-- any persisted `'unity'` row addressable by nothing: it would not match a CSF
+-- tile, so it would vanish from the scorecard without being deleted.
+--
+-- DEFENSIVE, AND EXPECTED TO UPDATE ZERO ROWS. A live query on 2026-08-20 found
+-- no `'unity'` rows in any environment — the category never reached a real
+-- assessment. The statement ships anyway because "zero today" is a fact about
+-- one database at one moment, and this is a rename whose failure mode is
+-- silent.
+--
+-- ORDERING: this migration holds the only slot in its pass, so it has no
+-- sibling with a lower `when` to reconcile forward (`memory/invariants.md` →
+-- Migrations). It is data-only — no DDL — so re-running it is a no-op rather
+-- than a conflict, and there is nothing for a renumber to abort on.
+UPDATE "plant_insights" SET "category" = 'cohesion' WHERE "category" = 'unity';

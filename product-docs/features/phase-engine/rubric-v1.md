@@ -29,6 +29,7 @@ recorded rulings, and the recommended v1 delta.
 | Lens 2 stops inferring the planter is the bottleneck | C01, C13 | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) | Lens 2 may claim who carries follow-up only from measured task ownership. Appendix B's "Delegate Follow-Up Responsibilities" sample replaced. |
 | Stalled growth is 28 days, and any +1 resets it | C02, C22 | [#471](https://github.com/SebastianGarces/everyfield_v2/issues/471) | Lens 3's single "3 weeks flat" ⚠️ becomes two ruled levels: slowed at 21 days, stalled at 28. The 28-day comparison window is kept. |
 | 50/100 are methodology benchmarks, not universal health | C03 | [#472](https://github.com/SebastianGarces/everyfield_v2/issues/472) | The numbers stay; the grammar around them changes, in Lens 3, in Phase 1, in the app copy and across the global wiki corpus. Undershoot is never an unhealthy verdict. |
+| Lens 4 is Cohesion, not Unity | C04 | [#473](https://github.com/SebastianGarces/everyfield_v2/issues/473) | Renamed heading, slug (`cohesion`) and scorecard label. Signals unchanged. Unity is named as a relational judgment the engine does not attempt; the "unity is fragile" sample is deleted. |
 
 ---
 
@@ -170,13 +171,19 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
   your current pace of two per week you will reach about 54, just over the minimum;
   consider increasing vision-meeting frequency."
 
-### Lens 4 · Unity
+### Lens 4 · Core Group Cohesion
 
 - **What feeds it:** core-group meeting cadence, attendance consistency, breadth of
-  engagement.
+  engagement. *(Unchanged — the signals were never the problem.)*
 - **Healthy:** regular core-group gatherings with consistent attendance.
-- **What it says:** core-group meetings lapsing; a cluster of members disengaging at
-  once.
+- **This lens is not about unity, and used to be called that.** ✅ Attendance can tell
+  you whether the group is holding together. It cannot tell you whether the group is
+  *unified*: four people missing could be conflict, vacation, sickness, or work
+  schedules, and the data does not say which. **Actual unity stays a relational
+  judgment for the planter and their coach**, and the engine does not attempt it.
+- **What it says:** the measured pattern and nothing past it — core-group meetings
+  lapsing, or attendance dropping across several members this month. Never a spiritual
+  state. The v0 line "unity is fragile in this season" is deleted from v1.
 - **Flag cluster disengagement at:** **4 or more** members' attendance dropping within
   a month ⚠️
 
@@ -385,10 +392,11 @@ They double as my test cases.
     identified → "You have hit the marks for Launch Team Formation: 38 adults, finances
     confirmed, worship leader identified. Ready to advance when you are."
 
-**Unity, prayer, generosity**
+**Cohesion, prayer, generosity**
 11. *Cluster disengagement* — four or more members' attendance dropped this month →
-    "Several core members' attendance has dropped this month. Unity is fragile in this
-    season — worth checking in."
+    "Several core members' attendance has dropped this month — worth checking in."
+    *(v0 continued "Unity is fragile in this season". The engine does not know that;
+    it knows attendance dropped.)*
 12. *Missing role* — no Prayer Leader by mid-Phase 2 → "No Prayer Leader identified.
     Prayer is the fifth Critical Success Factor and one of the eight launch roles."
 

@@ -124,7 +124,7 @@ The primary landing page after login.
 │  │  Vision Casting    ████████████████████  4.5/5  ↑                      │ │
 │  │  Shared Ownership  ████████████░░░░░░░░  3.2/5  ↓                      │ │
 │  │  Critical Mass     ████████░░░░░░░░░░░░  38/100 →                      │ │
-│  │  Unity             ████████████████░░░░  4.0/5  ↑                      │ │
+│  │  Cohesion          ████████████████░░░░  4.0/5  ↑                      │ │
 │  │  Prayer            ██████████████░░░░░░  3.5/5  →                      │ │
 │  │  Giving            ████████████░░░░░░░░  3.0/5  ↑                      │ │
 │  │  Leadership        ██████░░░░░░░░░░░░░░  2/10 leaders                  │ │
@@ -384,7 +384,7 @@ Overview of all assigned planters.
 | Vision Casting | Composite of VM attendance trend, conversion rates, VM evaluation scores |
 | Shared Ownership | % members meeting invitation goal, avg invitations, % who brought someone |
 | Critical Mass | Core Group size / 100 (target) |
-| Unity | Average of 4 C's "Committed" scores across Core Group |
+| Cohesion | Average of 4 C's "Committed" scores across Core Group |
 | Prayer | Prayer meeting attendance %, prayer team participation |
 | Giving | Giving units / Core Group size, consistency metrics |
 | Leadership | Leaders identified / 10 ministry teams |
