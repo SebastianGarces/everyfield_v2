@@ -300,6 +300,8 @@ export const PHASE_EXIT_CRITERIA: Record<
       key: "committed_adults",
       label: `${CORE_GROUP_GATE} committed adults`,
       detail: `The rubric asks for ${CORE_GROUP_GATE}–40 committed adults before the launch team forms.`,
+      // The BROAD prefix stays: critical mass is what the whole `coreGroup`
+      // branch is about, and an insight anywhere in it speaks to this gate.
       factPaths: ["coreGroup"],
       categories: [],
       measure: (lens) => {
@@ -314,6 +316,61 @@ export const PHASE_EXIT_CRITERIA: Record<
         return {
           status: committed >= CORE_GROUP_GATE ? "met" : "not_met",
           reading: `${committed} of ${CORE_GROUP_GATE} committed core-group members`,
+        };
+      },
+    },
+    {
+      // THE ROW THAT STOPS 30 BEING THE ANSWER (#477, C08/C23). Bryan: "I would
+      // probably make sure the engine treats this as a cluster of indicators
+      // rather than 30–40 being a magic number. Size + trajectory + finances +
+      // leadership seems more meaningful than size alone." Size was measured;
+      // trajectory was not measured at all, so a plant that hit 30 and then
+      // stopped growing read exactly like one still climbing.
+      //
+      // It reads #471's flat streak rather than `growthDelta`, for the reason
+      // #471 exists: the delta compares two 28-day windows and can read flat
+      // while somebody joined yesterday.
+      key: "growth_trajectory",
+      label: "Growth still moving",
+      detail: "New committed adults are still arriving, not just counted.",
+      // NARROW, unlike the size row above it, and deliberately asymmetric.
+      // Both rows live in one branch of the snapshot, so a bare `coreGroup`
+      // prefix here would make every remark about core-group size address the
+      // trajectory row as well — and this module's own rule is that a measured
+      // gate is addressed when the judge cited THAT MEASUREMENT, not when it
+      // talked about the neighbourhood. The reverse direction is fine: an
+      // insight about the streak IS an insight about critical mass.
+      factPaths: [
+        "coreGroup.daysSinceLastNewCommitment",
+        "coreGroup.stalledThresholdDays",
+      ],
+      categories: [],
+      measure: (lens) => {
+        const streak = factNumber(
+          lens.read("coreGroup.daysSinceLastNewCommitment")
+        );
+        const stalled = factNumber(lens.read("coreGroup.stalledThresholdDays"));
+
+        if (streak === null || stalled === null) {
+          return {
+            status: "unknown",
+            reading: "no committed core-group members recorded yet",
+          };
+        }
+
+        if (streak >= stalled) {
+          return {
+            status: "not_met",
+            reading: `${streak} days since your last new committed adult`,
+          };
+        }
+
+        return {
+          status: "met",
+          reading:
+            streak === 0
+              ? "a new committed adult today"
+              : `${streak} days since your last new committed adult`,
         };
       },
     },
@@ -713,6 +770,61 @@ export interface ExitCriteriaProgress {
   measuredCount: number;
   /** How many the assessment spoke to. */
   addressedCount: number;
+  /** The conjunction across every gate — see {@link ClusterVerdict}. */
+  cluster: ClusterVerdict;
+}
+
+/**
+ * THE GATE IS A CLUSTER, NOT A HEADCOUNT (#477, C08/C23).
+ *
+ * Bryan on the Phase 1 gate: "I would make sure the system understands that
+ * it's the combination of indicators, not simply hitting 30." The gates were
+ * already independent advisory rows; what was missing was anything that read
+ * them TOGETHER, so nothing in the product ever said "four of these hold and
+ * one does not" — a planter at 38 committed adults with no worship leader saw
+ * a green row and a red row and no verdict.
+ *
+ * A CONJUNCTION, WITH NO WEIGHTS AND NO BLENDED SCORE (D1). Ready means every
+ * indicator holds. That is deliberately unforgiving, and it is the only scoring
+ * model that cannot be gamed by a big number in one column: a weighted score
+ * would let 60 committed adults buy off a missing financial base, which is
+ * precisely the arithmetic Bryan is objecting to.
+ *
+ * UNKNOWN BLOCKS BUT DOES NOT FAIL. An unanswered attestation is not a failed
+ * one, and the readout says so rather than folding it into either column —
+ * which is also why `holding + notMet + unknown` is the whole cluster and
+ * `ready` needs `holding === total`.
+ */
+export interface ClusterVerdict {
+  /** Indicators the snapshot measures as cleared. */
+  holding: number;
+  /** Indicators the snapshot measures as NOT cleared. */
+  notMet: number;
+  /** Indicators the snapshot cannot read, or does not track at all. */
+  unknown: number;
+  /** Every indicator in the gate. */
+  total: number;
+  /** True only when every single indicator holds. */
+  ready: boolean;
+}
+
+/**
+ * Read the gates together. Pure, and exported so the conjunction can be tested
+ * without an assessment.
+ */
+export function clusterVerdict(
+  criteria: readonly Pick<ExitCriterionProgress, "measurement">[]
+): ClusterVerdict {
+  const holding = criteria.filter((c) => c.measurement === "met").length;
+  const notMet = criteria.filter((c) => c.measurement === "not_met").length;
+
+  return {
+    holding,
+    notMet,
+    unknown: criteria.length - holding - notMet,
+    total: criteria.length,
+    ready: criteria.length > 0 && holding === criteria.length,
+  };
 }
 
 /** Does a citation belong to this criterion? Prefix match on the fact path. */
@@ -949,5 +1061,6 @@ export function buildExitCriteriaProgress(
     ).length,
     addressedCount: criteria.filter((c) => c.standing !== "not_addressed")
       .length,
+    cluster: clusterVerdict(criteria),
   };
 }

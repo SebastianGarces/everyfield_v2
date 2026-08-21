@@ -29,6 +29,7 @@ import {
 
 import {
   buildExitCriteriaProgress,
+  clusterVerdict,
   EXIT_CRITERION_STANDINGS,
   PHASE_EXIT_CRITERIA,
   type ExitCriteriaProgress,
@@ -62,6 +63,9 @@ function makeSnapshot(overrides: Record<string, unknown> = {}) {
       launchTeamCount: 0,
       growthDelta: 3,
       growthWindowDays: 30,
+      daysSinceLastNewCommitment: 4,
+      slowedThresholdDays: 21,
+      stalledThresholdDays: 28,
       isEmpty: false,
     },
     ministryRoles: {
@@ -1187,4 +1191,142 @@ test("#319: an unresolvable row keeps the generic phrasing on every surface", ()
   assert.deepEqual(formatCitedFacts(lead.citedFacts, lead.citedFactSignals), [
     "something you have not confirmed",
   ]);
+});
+
+// ----------------------------------------------------------------------------
+// The gate is a cluster, not a headcount (#477, C08/C23)
+//
+// Bryan: "I would make sure the system understands that it's the combination of
+// indicators, not simply hitting 30." The rows were already independent; what
+// was missing was anything that read them together, so a planter at 38
+// committed adults with no worship leader saw a green row and a red row and no
+// verdict. `clusterVerdict` is that verdict, and it is a conjunction with no
+// weights — which is the only scoring model a big number in one column cannot
+// buy off.
+// ----------------------------------------------------------------------------
+
+test("5 of 5 is ready; 4 of 5 is not, however good the fifth looks", () => {
+  const met = { measurement: "met" as const };
+
+  assert.deepEqual(clusterVerdict([met, met, met, met, met]), {
+    holding: 5,
+    notMet: 0,
+    unknown: 0,
+    total: 5,
+    ready: true,
+  });
+
+  const fourOfFive = clusterVerdict([
+    met,
+    met,
+    met,
+    met,
+    { measurement: "not_met" as const },
+  ]);
+  assert.equal(fourOfFive.holding, 4);
+  assert.equal(fourOfFive.ready, false);
+});
+
+test("an unanswered indicator blocks the gate without failing it", () => {
+  const verdict = clusterVerdict([
+    { measurement: "met" },
+    { measurement: "met" },
+    { measurement: "unknown" },
+  ]);
+
+  // Not counted as held, and not counted as missed either — "you have not told
+  // us" and "no" are different facts.
+  assert.equal(verdict.holding, 2);
+  assert.equal(verdict.notMet, 0);
+  assert.equal(verdict.unknown, 1);
+  assert.equal(verdict.ready, false);
+});
+
+test("an untracked indicator is part of the cluster, not excluded from it", () => {
+  // `geographic_area` has no deterministic measure at all. Dropping it from the
+  // denominator would let a plant read 4 of 4 while one of the five indicators
+  // had never been looked at.
+  const verdict = clusterVerdict([
+    { measurement: "met" },
+    { measurement: "not_tracked" },
+  ]);
+  assert.equal(verdict.total, 2);
+  assert.equal(verdict.unknown, 1);
+  assert.equal(verdict.ready, false);
+});
+
+test("an empty gate is never ready", () => {
+  assert.equal(clusterVerdict([]).ready, false);
+});
+
+test("the Phase 1 gate carries five indicators, trajectory among them", () => {
+  const keys = PHASE_EXIT_CRITERIA[1].map((criterion) => criterion.key);
+
+  assert.deepEqual(keys, [
+    "committed_adults",
+    "growth_trajectory",
+    "financial_base",
+    "worship_leader",
+    "geographic_area",
+  ]);
+});
+
+test("trajectory reads the stall clock, not the growth delta", () => {
+  // The delta compares two 28-day windows and can read flat while somebody
+  // joined yesterday, which is the whole reason #471 added the streak.
+  const stalled = criterion(
+    buildExitCriteriaProgress(
+      makeLatest([], {
+        factSnapshot: makeSnapshot({
+          coreGroup: {
+            committedCount: 38,
+            launchTeamCount: 0,
+            // Flat across both windows, and yet somebody joined 4 days ago in
+            // the row below — the delta cannot tell those apart.
+            growthDelta: 0,
+            growthWindowDays: 28,
+            daysSinceLastNewCommitment: 31,
+            slowedThresholdDays: 21,
+            stalledThresholdDays: 28,
+            isEmpty: false,
+          },
+        }),
+      })
+    )!,
+    "growth_trajectory"
+  );
+
+  assert.equal(stalled.measurement, "not_met");
+  assert.match(stalled.reading!, /31 days since your last new committed adult/);
+
+  // The default fixture is 4 days since the last new adult with the SAME zero
+  // delta shape available — it reads as moving.
+  const moving = criterion(
+    buildExitCriteriaProgress(makeLatest([]))!,
+    "growth_trajectory"
+  );
+  assert.equal(moving.measurement, "met");
+});
+
+test("an old snapshot with no stall clock reads unknown, never met", () => {
+  // Additive-optional: a snapshot persisted before #471 has no streak on it.
+  // "We cannot tell" must not render as "growth is moving".
+  const legacy = criterion(
+    buildExitCriteriaProgress(
+      makeLatest([], {
+        factSnapshot: makeSnapshot({
+          coreGroup: {
+            committedCount: 22,
+            launchTeamCount: 0,
+            growthDelta: 3,
+            growthWindowDays: 30,
+            isEmpty: false,
+          },
+        }),
+      })
+    )!,
+    "growth_trajectory"
+  );
+
+  assert.equal(legacy.measurement, "unknown");
 });

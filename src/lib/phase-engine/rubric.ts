@@ -238,7 +238,11 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 ### Phase 1 · Core Group Development
 - Objective: build toward this methodology's benchmark of 50–100 committed adults through vision meetings + follow-up. The benchmark is what this model plans around, not a universal definition of a healthy plant (see CSF-3).
 - Priority lens: CSF-1 (vision-meeting cadence), CSF-3 (core-group growth), CSF-2 (shared ownership of follow-up), follow-up health (no warm contacts going cold).
-- Readiness for 1->2: 30–40 committed adults, financial base, worship leader identified, geographic area set.
+- Readiness for 1->2 is a CLUSTER OF FIVE, read as a CONJUNCTION: 30–40 committed adults; growth still moving (\`coreGroup.daysSinceLastNewCommitment\` below \`stalledThresholdDays\`); launch funding viable; a worship leader identified; the geographic area set.
+- NO SINGLE MARK CLEARS THIS GATE AND THERE ARE NO WEIGHTS. Hitting 30 with no worship leader and no financial base is NOT the gate. Never say "ready to advance" from one indicator; cite the cluster state ("4 of 5 hold") and reserve the ready sentence for 5 of 5.
+- AN UNANSWERED INDICATOR BLOCKS BUT DOES NOT FAIL. Name it as unanswered — "you have not told us" and "no" are different facts.
+- This gate is READY TO BEGIN LAUNCH TEAM FORMATION, not ready to launch, which is why the number is 30–40 and not 50.
+- Advancing is the planter's decision. The cluster is a readout, never an automation.
 
 ### Phase 2 · Launch Team Formation
 - Objective: transition core group -> launch team; set launch date; fill leadership.
