@@ -88,7 +88,11 @@ function makeSnapshot(
       isEmpty: false,
     },
     ministryRoles: { filledCount: 3, totalRoles: 8, roles: [], isEmpty: false },
-    leadership: { candidates: [], isEmpty: true },
+    leadership: {
+      candidates: [],
+      candidateThresholdDays: 60,
+      isEmpty: true,
+    },
     training: {
       programCount: 2,
       requiredProgramCount: 1,

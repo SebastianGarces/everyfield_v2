@@ -97,6 +97,23 @@ test("v1 scores generosity and solvency apart (#475)", () => {
   );
 });
 
+test("v1 calls 60 days a candidate signal, not readiness (#476)", () => {
+  // v0 handed the judge the verdict in the example itself.
+  assert.match(RUBRICS.v0.body, /emerging leader/);
+  assert.doesNotMatch(RUBRICS.v1.body, /is the profile of an emerging leader/);
+
+  assert.match(RUBRICS.v1.body, /LEADERSHIP CANDIDATE SIGNAL, NOT READINESS/);
+  assert.match(RUBRICS.v1.body, /candidateThresholdDays/);
+  assert.match(
+    RUBRICS.v1.body,
+    /YOU MAY CITE A RECORDED HUMAN JUDGMENT; YOU MAY NEVER MAKE ONE/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /A MISSING RECORD IS A NEXT STEP, NEVER A MARK AGAINST THE PERSON/
+  );
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

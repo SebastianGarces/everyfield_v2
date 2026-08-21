@@ -28,6 +28,8 @@ import {
   getMinistryTeams,
   getOpenFollowUpContacts,
   getPlantSignals,
+  getAssessmentsByPerson,
+  getInterviewsByPerson,
   getTeamLeaderPersonIds,
   getTrainingCompletions,
   getLaunch,
@@ -40,7 +42,9 @@ import {
   type FollowUpRow,
   type LeadershipPersonRow,
   type MinistryTeamRow,
+  type PersonAssessmentRow,
   type PersonCountRow,
+  type PersonInterviewRow,
   type PlantSignalRow,
   type TrainingCompletionRow,
   type TrainingProgramRow,
@@ -53,7 +57,7 @@ import {
   type CoreGroupSignals,
   type FollowUpSignals,
   type LaunchSignals,
-  type LeadershipReadinessSignal,
+  type LeadershipCandidateSignal,
   type LeadershipSignals,
   type ManualSignals,
   type MinistryRoleCoverage,
@@ -91,6 +95,16 @@ const GROWTH_STALLED_THRESHOLD_DAYS = 28;
  * about who is waiting. (⚠️ in rubric v0 — #486 splits it by contact warmth.)
  */
 export const FOLLOW_UP_STALE_THRESHOLD_DAYS = 14;
+
+/**
+ * The behavioural pattern that OPENS a leadership conversation, in days
+ * (#476, C07; the number itself confirmed by C22).
+ *
+ * Bryan: "Sixty days feels reasonable as a 'pay attention to this person'
+ * signal, but I would not call it leadership readiness." The number survives
+ * the review; the claim it used to carry does not.
+ */
+const LEADERSHIP_CANDIDATE_THRESHOLD_DAYS = 60;
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -392,12 +406,25 @@ function buildFollowUpSignals(
 // Leadership readiness
 // ----------------------------------------------------------------------------
 
+// THE SIGNAL OPENS A CONVERSATION; IT NEVER CLOSES ONE (#476, C07). Bryan:
+// "Attendance and volunteering can identify a potential leader, but character,
+// doctrine, gifting, relational maturity, teachability, etc. still require human
+// judgment." So the behavioural facts sit beside the RECORDED HUMAN JUDGMENTS
+// this product already stores — the 5-criteria interview and the 4 C's
+// assessment — and the judge is told it may cite one and may never make one.
+//
+// A candidate with no interview is not a candidate with a bad interview. Both
+// arrive here as facts (`interviewCount: 0` vs a recorded result), and rubric
+// v1 says the first is a next step, never a mark against the person.
+
 function buildLeadershipSignals(
   candidateRows: LeadershipPersonRow[],
   meetingsAttended: PersonCountRow[],
   activeMemberships: PersonCountRow[],
   committedPeople: Set<string>,
   teamLeaderIds: string[],
+  interviewsByPerson: PersonInterviewRow[],
+  assessmentsByPerson: PersonAssessmentRow[],
   asOf: Date
 ): LeadershipSignals {
   const meetingsByPerson = new Map(
@@ -407,19 +434,37 @@ function buildLeadershipSignals(
     activeMemberships.map((r) => [r.personId, r.count])
   );
   const leaderPeople = new Set(teamLeaderIds);
+  const interviewByPerson = new Map(
+    interviewsByPerson.map((r) => [r.personId, r])
+  );
+  const assessmentByPerson = new Map(
+    assessmentsByPerson.map((r) => [r.personId, r])
+  );
 
-  const candidates: LeadershipReadinessSignal[] = candidateRows.map((p) => ({
-    personId: p.id,
-    status: p.status,
-    tenureDays: Math.max(0, diffInDays(p.createdAt, asOf)),
-    meetingsAttended: meetingsByPerson.get(p.id) ?? 0,
-    activeMemberships: membershipsByPerson.get(p.id) ?? 0,
-    hasCommitment: committedPeople.has(p.id),
-    leadsTeam: leaderPeople.has(p.id),
-  }));
+  const candidates: LeadershipCandidateSignal[] = candidateRows.map((p) => {
+    const interview = interviewByPerson.get(p.id);
+    const assessment = assessmentByPerson.get(p.id);
+
+    return {
+      personId: p.id,
+      status: p.status,
+      tenureDays: Math.max(0, diffInDays(p.createdAt, asOf)),
+      meetingsAttended: meetingsByPerson.get(p.id) ?? 0,
+      activeMemberships: membershipsByPerson.get(p.id) ?? 0,
+      hasCommitment: committedPeople.has(p.id),
+      leadsTeam: leaderPeople.has(p.id),
+      interviewCount: interview?.count ?? 0,
+      lastInterviewResult: interview?.lastResult ?? null,
+      lastInterviewDate: interview?.lastDate ?? null,
+      assessmentCount: assessment?.count ?? 0,
+      lastAssessmentTotal: assessment?.lastTotal ?? null,
+      lastAssessmentDate: assessment?.lastDate ?? null,
+    };
+  });
 
   return {
     candidates,
+    candidateThresholdDays: LEADERSHIP_CANDIDATE_THRESHOLD_DAYS,
     isEmpty: candidates.length === 0,
   };
 }
@@ -619,6 +664,13 @@ export interface SnapshotInputs {
   meetingsAttendedByPerson: PersonCountRow[];
   activeMembershipsByPerson: PersonCountRow[];
   teamLeaderPersonIds: string[];
+  /**
+   * The recorded human judgments about each candidate (#476). Empty arrays are
+   * the honest reading of "nobody has been interviewed", which is a next step
+   * rather than a finding about anyone.
+   */
+  interviewsByPerson: PersonInterviewRow[];
+  assessmentsByPerson: PersonAssessmentRow[];
   trainingPrograms: TrainingProgramRow[];
   trainingCompletions: TrainingCompletionRow[];
   plantSignals: PlantSignalRow[];
@@ -650,6 +702,8 @@ export function assembleFactSnapshot(
     inputs.activeMembershipsByPerson,
     committedPeople,
     inputs.teamLeaderPersonIds,
+    inputs.interviewsByPerson,
+    inputs.assessmentsByPerson,
     asOf
   );
   const training = buildTrainingSignals(
@@ -732,6 +786,8 @@ export async function buildFactSnapshot(
     meetingsAttendedByPerson,
     activeMembershipsByPerson,
     teamLeaderPersonIds,
+    interviewsByPerson,
+    assessmentsByPerson,
     trainingPrograms,
     trainingCompletions,
     plantSignals,
@@ -747,6 +803,8 @@ export async function buildFactSnapshot(
     getMeetingsAttendedByPerson(churchId),
     getActiveMembershipsByPerson(churchId),
     getTeamLeaderPersonIds(churchId),
+    getInterviewsByPerson(churchId),
+    getAssessmentsByPerson(churchId),
     getTrainingPrograms(churchId),
     getTrainingCompletions(churchId),
     getPlantSignals(churchId),
@@ -767,6 +825,8 @@ export async function buildFactSnapshot(
       meetingsAttendedByPerson,
       activeMembershipsByPerson,
       teamLeaderPersonIds,
+      interviewsByPerson,
+      assessmentsByPerson,
       trainingPrograms,
       trainingCompletions,
       plantSignals,

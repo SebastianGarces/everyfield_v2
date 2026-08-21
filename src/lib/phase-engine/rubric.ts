@@ -213,9 +213,13 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Wiki: "First Year Budget Planning", "Principles of Financial Accountability".
 
 ### CSF-7 · Emerging Leadership
-- Signals: how many of the 8 ministry roles are filled (Worship, Children's, Assimilation, Small Groups, Admin/Finance, Facilities, Promotion, Technology); per-person readiness (sustained attendance + volunteering + tenure); coverage gaps near launch.
+- Signals: how many of the 8 ministry roles are filled (Worship, Children's, Assimilation, Small Groups, Admin/Finance, Facilities, Promotion, Technology); per-candidate behaviour (sustained attendance + volunteering + tenure) against \`leadership.candidateThresholdDays\` (60); and the RECORDED HUMAN JUDGMENTS about each candidate — \`interviewCount\`, \`lastInterviewResult\`, \`lastInterviewDate\`, \`assessmentCount\`, \`lastAssessmentTotal\`, \`lastAssessmentDate\`.
 - Healthy: leaders emerging from within the core group; no critical role unfilled close to launch.
-- Insight types: individual pipeline ("Sara hasn't missed a meeting or volunteer slot in 2 months — emerging leader"); coverage gap ("no Worship Leader and 3 months from launch — this is the priority").
+- THE 60-DAY PATTERN IS A LEADERSHIP CANDIDATE SIGNAL, NOT READINESS. It OPENS a conversation and never closes one. Attendance and volunteering can identify a potential leader; character, doctrine, gifting, relational maturity and teachability cannot be read off them, and you may NOT infer any of those five from any fact you hold.
+- BANNED as claims about a person: "leadership-ready", "ready to lead", "the profile of an emerging leader". The register is: "it's been 60 days — have you considered more for this person?" and "worth a leadership conversation".
+- YOU MAY CITE A RECORDED HUMAN JUDGMENT; YOU MAY NEVER MAKE ONE. Where an interview or 4 C's exists, name what was recorded and when. Where none exists, say "no interview recorded yet — the 5-criteria interview is the next step". A MISSING RECORD IS A NEXT STEP, NEVER A MARK AGAINST THE PERSON.
+- Individual candidate signals are PLANTER-AUDIENCE ONLY. The network sees leadership development in aggregate and never an individual.
+- Insight types: candidate signal ("60 days — have you considered more for this person?"); interview recorded, worth reading; no interview yet, next step; coverage gap ("no Worship Leader and 3 months from launch — this is the priority").
 - Wiki: "Key Leadership Roles Overview" + the 8 role articles, "The 5 Interview Criteria".
 
 ### CSF-8 · Comprehensive Training

@@ -32,6 +32,7 @@ recorded rulings, and the recommended v1 delta.
 | Lens 4 is Cohesion, not Unity | C04 | [#473](https://github.com/SebastianGarces/everyfield_v2/issues/473) | Renamed heading, slug (`cohesion`) and scorecard label. Signals unchanged. Unity is named as a relational judgment the engine does not attempt; the "unity is fragile" sample is deleted. |
 | Prayer is rhythms, with a lighter attestation cycle | C05, C21 | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) | Lens 5 is fed by two rhythm attestations and their age; the Prayer Leader title moves to Lens 7 coverage. "Has it happened in the last 30 days?" ships as freshness metadata plus a reaffirm chip, not as a third question. Unanswered is unknown. |
 | Generosity is split from Financial Readiness | C06, C21 | [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) | Lens 6 becomes two separately-scored signals under one heading. New `core_group_giving` attestation for giving culture; the existing funding key keeps its slug and narrows to solvency. Neither may be read as evidence for the other. |
+| 60 days is a Leadership Candidate Signal, not readiness | C07, C22 | [#476](https://github.com/SebastianGarces/everyfield_v2/issues/476) | The number stays and the claim goes. Interview and 4 C's records join the signal as recorded human judgments the engine may cite and may never make. "leadership-ready" and "the profile of an emerging leader" are banned as claims about a person. |
 
 ---
 
@@ -82,7 +83,7 @@ on this list, I either add the data capture or the rule waits.
 | **Vision meetings** | Total completed; date of the most recent; days since; average gap between recent meetings; attendance at the last two and the direction between them |
 | **Follow-up** | How many contacts are in an active follow-up stage; how many days since the most neglected one was touched; how many are past the staleness threshold; **who owns each open follow-up task** — how many have no live owner, how many stale ones have no live owner, how many distinct people own one, and how many the planter owns |
 | **Ministry roles** | Which of the eight roles (Worship, Children's, Assimilation, Small Groups, Admin/Finance, Facilities, Promotion, Technology) have a leader assigned |
-| **Individuals** | Per person: how long they have been in the system, how many vision meetings attended, how many teams they serve on, whether they hold a commitment, whether they lead a team |
+| **Individuals** | Per person: how long they have been in the system, how many vision meetings attended, how many teams they serve on, whether they hold a commitment, whether they lead a team — **and the human judgments already recorded about them**: how many 5-criteria interviews and 4 C's assessments exist, the most recent interview's result, and the most recent 4 C's total, each with its date |
 | **Training** | Programs defined, how many are required, completion rate across committed people |
 | **Launch** | Target launch date and days remaining (or days elapsed if past) |
 | **Planter attestations** | Things software cannot observe, which the planter confirms with a toggle: values documented, launch funding viable, core group giving sacrificially, systems tested, corporate prayer rhythm established, prayer woven into gatherings — **and, for every one of them, how many days ago it was confirmed** |
@@ -251,14 +252,32 @@ and they call for opposite coaching, so the engine reports them apart.
 - **Healthy:** leaders emerging from within the core group to own the eight
   responsibilities; no critical role unfilled close to launch.
 - **What it says — two distinct kinds:**
-  - *Individual pipeline:* "Sara has not missed a core-group meeting or volunteer slot
-    in two months — that is the profile of an emerging leader; worth a leadership
-    conversation."
+  - *Leadership Candidate Signal (individual):* "It has been 60 days of steady
+    attendance and serving for Sara — have you considered more for this person?"
   - *Coverage gap:* "you added five core members last week but still have no Worship
     Leader with launch three months out — of the eight roles, this is the one to focus
     on now."
-- **⚠️ Individual-readiness threshold:** I currently treat roughly **60 days** of
-  unbroken attendance and volunteering as the signal. This is a guess.
+- **Leadership Candidate Signal: 60 days** of unbroken attendance and volunteering ✅
+  *(renamed from "individual-readiness threshold"; the number was confirmed, the claim
+  was not.)*
+  - **The pattern opens a conversation. It never closes one.** Attendance and
+    volunteering can identify a potential leader. Character, doctrine, gifting,
+    relational maturity and teachability cannot be read off them, and the engine may
+    not infer any of the five from any fact it holds.
+  - **Banned as claims about a person:** "leadership-ready", "ready to lead", "the
+    profile of an emerging leader". The register is Bryan's own: *"it's been 60 days,
+    have you considered more for this person?"* — and "worth a leadership conversation".
+- **Recorded human judgments deepen the prompt, and only a human makes them.** The
+  product already stores the 5-criteria interview and the 4 C's assessment. For each
+  candidate the engine sees how many of each exist, the most recent interview's recorded
+  result, and the most recent 4 C's total, each with its date.
+  - *Present:* cite what the interviewer concluded and when — "Sara's interview was
+    recorded as ready, back in April."
+  - *Absent:* "no interview recorded yet — the 5-criteria interview is the next step."
+    A missing record is a **next step, never a mark against the person.**
+- **Individual candidate signals are planter-audience only.** The network sees leadership
+  development in aggregate and never an individual, which is the standing rule restated
+  here because this is the lens most likely to break it.
 
 ### Lens 8 · Comprehensive Training
 
@@ -401,9 +420,11 @@ They double as my test cases.
    is steady but few *new* people are coming. Are your core members inviting?"
 
 **Leadership**
-5. *Individual readiness* — 60+ days of unbroken attendance and volunteering, not yet a
-   leader → "Sara has not missed a core-group meeting or volunteer slot in two months.
-   That is the profile of an emerging leader — worth a leadership conversation."
+5. *Leadership candidate signal* — 60+ days of unbroken attendance and volunteering, not
+   yet a leader → "Sara has not missed a core-group meeting or volunteer slot in two
+   months. It has been 60 days — have you considered more for this person? No interview
+   recorded yet; the 5-criteria interview is the next step." *(v0 called this "the
+   profile of an emerging leader", which is a verdict the data cannot reach.)*
 6. *Coverage gap near launch* — Worship Leader unfilled, launch in 90 days → "You added
    five core members last week — good — but still no Worship Leader with launch about
    three months out. Of the eight roles, this is the one to focus on now."

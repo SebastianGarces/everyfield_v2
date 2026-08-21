@@ -98,7 +98,11 @@ function makeSnapshot(churchId: string): PlantFactSnapshot {
       ],
       isEmpty: false,
     },
-    leadership: { candidates: [], isEmpty: true },
+    leadership: {
+      candidates: [],
+      candidateThresholdDays: 60,
+      isEmpty: true,
+    },
     training: {
       programCount: 0,
       requiredProgramCount: 0,

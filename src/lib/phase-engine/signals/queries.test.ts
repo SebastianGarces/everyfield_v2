@@ -179,6 +179,8 @@ test("every trend's declared fact paths resolve in a real assembled snapshot", (
     meetingsAttendedByPerson: [],
     activeMembershipsByPerson: [],
     teamLeaderPersonIds: ["A"],
+    interviewsByPerson: [],
+    assessmentsByPerson: [],
     trainingPrograms: [],
     trainingCompletions: [],
     plantSignals: [],

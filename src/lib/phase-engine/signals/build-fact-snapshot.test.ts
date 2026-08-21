@@ -122,6 +122,8 @@ function richInputs(): SnapshotInputs {
     ],
     activeMembershipsByPerson: [{ personId: "B", count: 1 }],
     teamLeaderPersonIds: ["A", "B"],
+    interviewsByPerson: [],
+    assessmentsByPerson: [],
     trainingPrograms: [
       { id: "tp1", isRequired: true },
       { id: "tp2", isRequired: false },
@@ -161,6 +163,8 @@ function coldStartInputs(): SnapshotInputs {
     meetingsAttendedByPerson: [],
     activeMembershipsByPerson: [],
     teamLeaderPersonIds: [],
+    interviewsByPerson: [],
+    assessmentsByPerson: [],
     trainingPrograms: [],
     trainingCompletions: [],
     plantSignals: [],
@@ -841,4 +845,77 @@ test("generosity and solvency reach the judge as two separate facts (#475)", () 
       ?.attestedDaysAgo,
     40
   );
+});
+
+// ----------------------------------------------------------------------------
+// The candidate signal, and the human judgments beside it (#476, C07)
+// ----------------------------------------------------------------------------
+
+test("a candidate with recorded judgments carries them; one without carries nulls", () => {
+  const inputs = coldStartInputs();
+  inputs.leadershipCandidates = [
+    { id: "A", status: "core_group", createdAt: daysBefore(AS_OF, 90) },
+    { id: "B", status: "core_group", createdAt: daysBefore(AS_OF, 70) },
+  ];
+  inputs.interviewsByPerson = [
+    {
+      personId: "A",
+      count: 2,
+      lastResult: "ready",
+      lastDate: "2026-04-11",
+    },
+  ];
+  inputs.assessmentsByPerson = [
+    { personId: "A", count: 1, lastTotal: 17, lastDate: "2026-04-12" },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  const [a, b] = snap.leadership.candidates;
+
+  assert.equal(a.interviewCount, 2);
+  assert.equal(a.lastInterviewResult, "ready");
+  assert.equal(a.lastInterviewDate, "2026-04-11");
+  assert.equal(a.assessmentCount, 1);
+  assert.equal(a.lastAssessmentTotal, 17);
+
+  // NOT a bad interview — no interview. The rubric turns this into a next step,
+  // and it can only do that if the fact says "none" rather than nothing.
+  assert.equal(b.interviewCount, 0);
+  assert.equal(b.lastInterviewResult, null);
+  assert.equal(b.lastAssessmentTotal, null);
+
+  assert.equal(snap.leadership.candidateThresholdDays, 60);
+});
+
+test("the candidate threshold and the recorded verdict reach the judge's ledger", () => {
+  const inputs = coldStartInputs();
+  inputs.leadershipCandidates = [
+    { id: "A", status: "core_group", createdAt: daysBefore(AS_OF, 90) },
+  ];
+  inputs.interviewsByPerson = [
+    { personId: "A", count: 1, lastResult: "ready", lastDate: "2026-04-11" },
+  ];
+
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, inputs, AS_OF)).map((line) => [
+      line.key,
+      line.value,
+    ])
+  );
+
+  assert.equal(ledger.get("leadership.candidateThresholdDays"), "60");
+  assert.equal(
+    ledger.get("leadership.candidates.0.lastInterviewResult"),
+    "ready"
+  );
+  assert.equal(ledger.get("leadership.candidates.0.interviewCount"), "1");
+
+  for (const key of [
+    "leadership.candidateThresholdDays",
+    "leadership.candidates.#.interviewCount",
+    "leadership.candidates.#.lastInterviewResult",
+    "leadership.candidates.#.lastAssessmentTotal",
+  ]) {
+    assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
+  }
 });
