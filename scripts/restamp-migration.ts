@@ -60,6 +60,13 @@ export type Journal = {
   entries: JournalEntry[];
 };
 
+/** The journal at `<dir>/meta/_journal.json`. */
+export function readJournal(dir: string): Journal {
+  return JSON.parse(
+    readFileSync(join(dir, "meta", "_journal.json"), "utf8")
+  ) as Journal;
+}
+
 /**
  * The stamp the newest entry must carry: its own, when that already clears
  * every sibling, otherwise one second above the HIGHEST of them.
@@ -124,7 +131,7 @@ export type Restamp = {
  */
 export function reconcileTail(dir: string): Restamp {
   const journalPath = join(dir, "meta", "_journal.json");
-  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as Journal;
+  const journal = readJournal(dir);
 
   const tail = journal.entries.at(-1);
   if (!tail) throw new Error(`${journalPath} has no entries`);
@@ -171,7 +178,11 @@ function main(argv: readonly string[]): void {
   );
 }
 
+// `process.argv[1] &&` is not decoration: `scripts/db-migrate.ts` imports
+// `readJournal` from here, and without the check an embedder with no entry
+// script makes `realpathSync(undefined)` throw ENOENT at import time.
 if (
+  process.argv[1] &&
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   main(process.argv.slice(2));
