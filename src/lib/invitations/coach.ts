@@ -39,7 +39,10 @@
 // same question the same way (Ruling C, 2026-08-12).
 // ============================================================================
 
+import { eq } from "drizzle-orm";
+
 import { db } from "@/db";
+import { userInvitations } from "@/db/schema";
 import { assignCoachOnAcceptStatement } from "@/lib/coaching/assignments";
 
 import { InvitationError } from "./core";
@@ -134,7 +137,29 @@ export async function acceptCoachInvitationAs(
   ]);
 
   if (claimed.length === 0) {
-    throw new InvitationError(COACH_INVITATION_NOT_ANSWERABLE_MESSAGE);
+    // AN EMPTY CLAIM IS NOT AUTOMATICALLY A REFUSAL, and the difference is a
+    // double-submit — two accepts of one token, a button pressed twice.
+    //
+    // The loser's compare-and-set matches nothing, but its `INSERT … SELECT`
+    // runs in a snapshot where the winner has already written `accepted`, so it
+    // fires and `ON CONFLICT DO UPDATE` re-affirms the row the winner wrote. The
+    // write converges — same person, same plant, read out of the same row — so
+    // the only defect was the SENTENCE: refusing somebody who is, at that
+    // moment, a coach.
+    //
+    // So ask who answered. `responded_by` naming this account means the token
+    // was spent by them, whichever request got there first, and the honest
+    // answer is the one the winner got. Anything else — revoked, expired,
+    // answered by somebody else — is the ordinary refusal.
+    const [answered] = await db
+      .select({ respondedBy: userInvitations.respondedBy })
+      .from(userInvitations)
+      .where(eq(userInvitations.id, described.id))
+      .limit(1);
+
+    if (answered?.respondedBy !== user.id) {
+      throw new InvitationError(COACH_INVITATION_NOT_ANSWERABLE_MESSAGE);
+    }
   }
 
   return { churchName: described.churchName };

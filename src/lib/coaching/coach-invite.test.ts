@@ -155,6 +155,40 @@ test("accepting from an existing account is ONE batch, claim first", () => {
   assert.match(ACCEPT.code, /if \(claimed\.length === 0\)/);
 });
 
+test("a double-submit is not reported as a failure to somebody who is now a coach", () => {
+  // Two accepts of one token: the loser's compare-and-set matches nothing, but
+  // its INSERT … SELECT runs in a snapshot where the winner already wrote
+  // `accepted`, so it fires and the ON CONFLICT re-affirms the winner's row. The
+  // write converges; only the SENTENCE was wrong. So an empty claim asks WHO
+  // answered before it refuses.
+  const branch = ACCEPT.after("if (claimed.length === 0)");
+
+  assert.match(branch, /respondedBy: userInvitations\.respondedBy/);
+  assert.match(branch, /answered\?\.respondedBy !== user\.id/);
+  assert.ok(
+    branch.indexOf("respondedBy: userInvitations.respondedBy") <
+      branch.indexOf("throw new InvitationError"),
+    "the refusal is thrown before the row is asked who answered"
+  );
+});
+
+test("a coach invitee who already has an account keeps their token through sign-in", () => {
+  // The population AS-009 exists for takes this exact path: the coach page's
+  // primary button sends them to /register, the address is refused as a
+  // duplicate, and the only exit on that screen is the sign-in link. A bare
+  // `/login` drops the token and lands them on /dashboard, so the only way back
+  // would be the original email.
+  const form = stripComments(
+    read("app", "(auth)", "register", "register-form.tsx")
+  );
+
+  assert.match(form, /seatInvitation\?\.invitedAs\.kind === "coach"/);
+  assert.match(
+    form,
+    /loginPathFor\(coachInvitationPath\(seatInvitation\.token\)\)/
+  );
+});
+
 // ----------------------------------------------------------------------------
 // 2. WHAT ACCEPTING CHANGES, AND WHAT IT MUST NOT (AC 1, AC 2)
 // ----------------------------------------------------------------------------
@@ -270,7 +304,7 @@ test("the two reaches read two different lists of church ids", () => {
   // access check delegates to rather than copying.
   assert.match(
     stripComments(read("lib", "auth", "access.ts")),
-    /return assignedChurchIds\(coachUserId\)/
+    /return assignedChurchIds\(user\.id\)/
   );
 });
 

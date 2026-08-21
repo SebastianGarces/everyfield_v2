@@ -137,9 +137,14 @@ export default async function TeamSettingsPage() {
 
         <SeatInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />
 
-        {canEndAssignments && (
-          <CoachInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />
-        )}
+        {/*
+          Unconditional, and that is not an oversight. The redirect above gates
+          this page on `seat.invitation.manage`, and `coach.assignment.manage`
+          carries the SAME seat set on the SAME tenancy — so a guard here could
+          never read false, and writing one would claim a distinction the
+          permissions table does not make.
+        */}
+        <CoachInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />
 
         <SeatRoster
           rows={roster.map((row) => ({

@@ -59,7 +59,11 @@ export async function getAccessibleChurchIds(user: User): Promise<string[]> {
     return [user.churchId];
   }
 
-  return getCoachChurchIds(user.id);
+  // DELEGATED, NOT DUPLICATED (#496). "Which plants does this coach reach" is
+  // one question with one answer, and `@/lib/coaching/assignments` owns it — the
+  // nav section, the coached-plant page and this check now read the same
+  // `WHERE`, so an assignment that is live for one of them is live for all three.
+  return assignedChurchIds(user.id);
 }
 
 /**
@@ -197,16 +201,6 @@ export async function canAccessFeatureData(
 // ============================================================================
 // Internal Helpers
 // ============================================================================
-
-/**
- * DELEGATED, NOT DUPLICATED (#496). "Which plants does this coach reach" is one
- * question with one answer, and `@/lib/coaching/assignments` owns it — the nav
- * section, the coached-plant page and this access check now read the same
- * `WHERE`, so an assignment that is live for one of them is live for all three.
- */
-async function getCoachChurchIds(coachUserId: string): Promise<string[]> {
-  return assignedChurchIds(coachUserId);
-}
 
 async function getSendingChurchPlantIds(
   sendingChurchId: string | null

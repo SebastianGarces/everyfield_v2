@@ -1,5 +1,5 @@
 // ============================================================================
-// HOW AN INVITED ROLE IS WRITTEN FOR A HUMAN — one table, every surface
+// WHAT AN INVITATION MAKES SOMEBODY, WRITTEN FOR A HUMAN — one table, every surface
 // (#495, widened for coach by #496).
 //
 // A LOOKUP TABLE AND NOT A COMPARISON, deliberately. Four places needed the
