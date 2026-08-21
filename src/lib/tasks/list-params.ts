@@ -36,8 +36,13 @@ import type { z } from "zod";
 export type SearchParamValue = string | string[] | undefined;
 
 export interface TaskListSearchParams {
-  /** `"my_tasks"` unless the URL says `all`. */
-  view: "all" | "my_tasks";
+  /**
+   * `"my_tasks"` unless the URL says otherwise. `"assignments"` is the
+   * group-by-owner view of the open follow-ups (#470 AC-3) — it reads the same
+   * unfiltered set as `"all"`, so every consumer that asks "whose tasks" gets
+   * the same answer for both.
+   */
+  view: "all" | "my_tasks" | "assignments";
   showCompleted: boolean;
   status?: TaskStatus[];
   priority?: TaskPriority[];
@@ -82,7 +87,10 @@ export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
   return {
-    view: params.view === "all" ? "all" : "my_tasks",
+    view:
+      params.view === "all" || params.view === "assignments"
+        ? params.view
+        : "my_tasks",
     showCompleted: params.completed === "true",
     status: parseEnumParam(params.status, taskStatusSchema),
     priority: parseEnumParam(params.priority, taskPrioritySchema),

@@ -25,6 +25,38 @@ export const STATUS_ORDER: PersonStatus[] = [
 ];
 
 /**
+ * THE COMMITTED SET — the three statuses that mean somebody has committed to
+ * this plant rather than being somewhere in the funnel toward it.
+ *
+ * It is the tail of `STATUS_ORDER`, and it is named rather than re-sliced at
+ * each call site because it is a DOMAIN fact, not an index arithmetic: the
+ * dashboard's core-group count, the pipeline's `core_group` group, meeting
+ * notifications and the follow-up-ownership guard (#470 D2) all ask the same
+ * question, and a fourth committed status added later has one place to be added.
+ */
+export const COMMITTED_STATUSES = [
+  "core_group",
+  "launch_team",
+  "leader",
+] as const;
+
+/** Does this status mean the person has committed to the plant? */
+export function isCommittedStatus(status: PersonStatus): boolean {
+  return (COMMITTED_STATUSES as readonly PersonStatus[]).includes(status);
+}
+
+/**
+ * THE OPEN FOLLOW-UP SET — warm, pre-commitment. The middle of `STATUS_ORDER`,
+ * and the cohort both the phase engine's follow-up signals and `/tasks`'
+ * assignments view are about, so it sits here rather than in either of them.
+ */
+export const FOLLOW_UP_STATUSES = [
+  "attendee",
+  "following_up",
+  "interviewed",
+] as const;
+
+/**
  * Human-readable labels for statuses
  */
 export const STATUS_LABELS: Record<PersonStatus, string> = {

@@ -370,6 +370,22 @@ export function holdsSeatFor(
 }
 
 /**
+ * "Is this account the plant's own Owner?" — the planter.
+ *
+ * AN IDENTITY READ, NOT AN AUTHORITY RULE, and it lives here for the same
+ * reason `holdsSeatFor` does: `seat-guard.test.ts` refuses a hand-rolled
+ * `seat === "owner"` anywhere outside this module, so the one place that can
+ * spell it is the place that owns the vocabulary. Nothing may gate a capability
+ * on this — that is `holdsSeatFor(user, capability)`, which reads the tenancy
+ * too. This answers a question about WHOSE row it is: the phase engine counts
+ * how many open follow-ups the planter personally owns (#470), and "the
+ * planter" is the Owner seat by definition.
+ */
+export function isOwnerSeat(seat: UserSeat | null): boolean {
+  return seat === "owner";
+}
+
+/**
  * WHAT A SEAT REFUSAL IS, as a type rather than as a string prefix.
  *
  * The action shells have to tell three failures apart — no session, no

@@ -28,6 +28,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { StatusTransitionFields } from "./status-transition-fields";
+import { FollowUpHandoffDialog } from "./follow-up-handoff-dialog";
+import type { FollowUpHandoff } from "@/lib/tasks/follow-up-ownership.shared";
 
 interface StatusChangeModalProps {
   person: PersonForClient;
@@ -50,6 +52,10 @@ export function StatusChangeModal({
   );
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
+  // #470 Q2 — set when the change just demoted somebody out of the committed
+  // set while they held open follow-ups. The dialog is skippable; declining
+  // leaves the tasks in "Needs owner", which is where the demotion put them.
+  const [handoff, setHandoff] = useState<FollowUpHandoff | null>(null);
 
   // Get validation result for the selected transition
   const transition = validateStatusTransition(person.status, selectedStatus);
@@ -85,6 +91,7 @@ export function StatusChangeModal({
           toast.success("Status updated", {
             description: `Changed to ${STATUS_LABELS[statusValue]}`,
           });
+          setHandoff(result.data.followUpHandoff);
           onSuccess?.();
         } else {
           // Show error toast
@@ -109,70 +116,80 @@ export function StatusChangeModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Change Status</DialogTitle>
-          <DialogDescription>
-            Update the pipeline status for {person.firstName} {person.lastName}.
-            Current status: <strong>{STATUS_LABELS[person.status]}</strong>
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <FollowUpHandoffDialog
+        handoff={handoff}
+        onClose={() => {
+          setHandoff(null);
+          router.refresh();
+        }}
+      />
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Status</DialogTitle>
+            <DialogDescription>
+              Update the pipeline status for {person.firstName}{" "}
+              {person.lastName}. Current status:{" "}
+              <strong>{STATUS_LABELS[person.status]}</strong>
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* Status Select */}
-          <div className="space-y-2">
-            <Label htmlFor="status">New Status</Label>
-            <Select
-              value={selectedStatus}
-              onValueChange={(value) =>
-                setSelectedStatus(value as PersonStatus)
-              }
-            >
-              <SelectTrigger id="status" className="w-full">
-                <SelectValue placeholder="Select a status" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableStatuses.map((status) => (
-                  <SelectItem key={status.value} value={status.value}>
-                    {status.label}
-                    {status.value === person.status && " (current)"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4 py-4">
+            {/* Status Select */}
+            <div className="space-y-2">
+              <Label htmlFor="status">New Status</Label>
+              <Select
+                value={selectedStatus}
+                onValueChange={(value) =>
+                  setSelectedStatus(value as PersonStatus)
+                }
+              >
+                <SelectTrigger id="status" className="w-full">
+                  <SelectValue placeholder="Select a status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableStatuses.map((status) => (
+                    <SelectItem key={status.value} value={status.value}>
+                      {status.label}
+                      {status.value === person.status && " (current)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Warnings + required reason — shared with the drag-drop modal */}
+            {hasChanges && (
+              <StatusTransitionFields
+                from={person.status}
+                to={selectedStatus}
+                transition={transition}
+                reason={reason}
+                onReasonChange={setReason}
+              />
+            )}
           </div>
 
-          {/* Warnings + required reason — shared with the drag-drop modal */}
-          {hasChanges && (
-            <StatusTransitionFields
-              from={person.status}
-              to={selectedStatus}
-              transition={transition}
-              reason={reason}
-              onReasonChange={setReason}
-            />
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleOpenChange(false)}
-            disabled={isPending}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!hasChanges || isPending || !reason.trim()}
-          >
-            {isPending ? "Updating..." : "Update Status"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!hasChanges || isPending || !reason.trim()}
+            >
+              {isPending ? "Updating..." : "Update Status"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

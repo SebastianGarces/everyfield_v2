@@ -14,6 +14,7 @@ import {
   formatDateWithoutWeekday,
 } from "@/lib/datetime";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
+import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
 import {
   listPrerequisiteCandidates,
   listTaskPrerequisites,
@@ -121,20 +122,29 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   }
 
   // Fetch church users for editing, plus this task's checklist (T-016).
-  const [churchUsers, subtasks, prerequisites, prerequisiteCandidates] =
-    await Promise.all([
-      db
-        .select({
-          id: users.id,
-          name: users.name,
-          email: users.email,
-        })
-        .from(users)
-        .where(eq(users.churchId, user.churchId)),
-      listSubtasks(user.churchId, id),
-      listTaskPrerequisites(user.churchId, id),
-      listPrerequisiteCandidates(user.churchId, id),
-    ]);
+  const [
+    churchUsers,
+    followUpAssignees,
+    subtasks,
+    prerequisites,
+    prerequisiteCandidates,
+  ] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(eq(users.churchId, user.churchId)),
+    // #470 D2 — the Follow-up category may only be owned by a committed
+    // member, so the select is fed the eligible set rather than filtering the
+    // full one in the browser.
+    listFollowUpAssignees(user.churchId),
+    listSubtasks(user.churchId, id),
+    listTaskPrerequisites(user.churchId, id),
+    listPrerequisiteCandidates(user.churchId, id),
+  ]);
 
   const statusConfig = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
   const priorityConfig =
@@ -328,6 +338,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             <TaskForm
               task={task}
               users={churchUsers}
+              followUpAssignees={followUpAssignees}
               prerequisiteCandidates={[...candidateById.values()]}
               prerequisiteIds={prerequisites.map(
                 (prerequisite) => prerequisite.id

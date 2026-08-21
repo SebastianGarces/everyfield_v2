@@ -52,6 +52,7 @@ import {
 } from "./notifications";
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
+import { assertMayOwnFollowUp } from "./follow-up-ownership";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -724,6 +725,11 @@ export async function createTask(
     ? resolveSubtaskAssignee(data.assignedToId, parent.assignedToId)
     : data.assignedToId || null;
 
+  // #470 D2 — only a committed member owns a follow-up. Checked on the RESOLVED
+  // assignee, so a subtask inheriting its parent's owner is checked too, and
+  // before the insert, so a refusal is a refusal rather than a row to undo.
+  await assertMayOwnFollowUp(churchId, data.category, assignedToId);
+
   const values: NewTask = applyRecurrence(
     {
       churchId,
@@ -778,6 +784,16 @@ export async function updateTask(
   if (data.parentTaskId) {
     await assertSubtaskNesting(churchId, data.parentTaskId, taskId);
   }
+
+  // The follow-up owner guard runs on the RESULTING task, not on the patch
+  // (#470 D2). Both halves can arrive alone: assigning an ineligible member to
+  // a follow-up, and re-categorising an already-assigned task INTO follow-up,
+  // are the same violation and an undefined field means "keep what is stored".
+  await assertMayOwnFollowUp(
+    churchId,
+    data.category !== undefined ? data.category : existing.category,
+    data.assignedToId !== undefined ? data.assignedToId : existing.assignedToId
+  );
 
   // Editing the schedule of an instance that is already mid-chain must not
   // orphan it from its series: a rule posted by the form carries no
