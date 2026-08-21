@@ -85,7 +85,7 @@ const PHASES: readonly Phase[] = [
     description:
       "The core group becomes a launch team — EveryField tracks commitments and starts the countdown.",
     points: [
-      "Commitment tracking against your 50-adult floor.",
+      "Commitment tracking against the Playbook's 50-adult benchmark.",
       "Launch-date timeline with task templates unlocked.",
     ],
     // live: LaunchTeamCommitted — PeopleList itself, which prints the

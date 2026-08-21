@@ -28,6 +28,7 @@ recorded rulings, and the recommended v1 delta.
 |---|---|---|---|
 | Lens 2 stops inferring the planter is the bottleneck | C01, C13 | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) | Lens 2 may claim who carries follow-up only from measured task ownership. Appendix B's "Delegate Follow-Up Responsibilities" sample replaced. |
 | Stalled growth is 28 days, and any +1 resets it | C02, C22 | [#471](https://github.com/SebastianGarces/everyfield_v2/issues/471) | Lens 3's single "3 weeks flat" ⚠️ becomes two ruled levels: slowed at 21 days, stalled at 28. The 28-day comparison window is kept. |
+| 50/100 are methodology benchmarks, not universal health | C03 | [#472](https://github.com/SebastianGarces/everyfield_v2/issues/472) | The numbers stay; the grammar around them changes, in Lens 3, in Phase 1, in the app copy and across the global wiki corpus. Undershoot is never an unhealthy verdict. |
 
 ---
 
@@ -140,7 +141,15 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
 
 - **What feeds it:** committed core-group adult count, growth over the trailing 28 days,
   distance to goal, projected trajectory against the launch date.
-- **Minimum:** **50** committed adults ✅ · **Target:** **100** ✅
+- **These are this methodology's benchmarks, not a definition of a healthy plant.** ✅
+  50 committed adults is the lower end of the benchmark range and 100 is the target,
+  both drawn from the Launch Playbook. Different contexts and models reasonably launch
+  at very different sizes — Bryan's own plant launched at 25. The engine reports
+  distance and trajectory **relative to the benchmark**. It may not call a plant
+  unhealthy, or its size a failure, for being under 50, and insight copy says "the
+  Playbook benchmark", never "the requirement" or "needed for a healthy launch".
+  *(Network-level configurability of these numbers is a later product decision, not a
+  v1 change.)*
 - **Growth comparison window:** **28 days** versus the prior 28 ✅ *(kept — weekly is
   noisy.)*
 - **Flat growth is two levels, not one** ✅
@@ -234,7 +243,9 @@ The readiness marks only shape what the engine *says*.
 - **Ready to advance when:** foundational modules complete, values documented, coach assigned. ✅
 
 ### Phase 1 · Core Group Development
-- **Objective:** build to 50–100 committed adults through vision meetings and follow-up.
+- **Objective:** build toward this methodology's benchmark of 50–100 committed adults
+  through vision meetings and follow-up. The benchmark is what this model plans around,
+  not a universal definition of a healthy plant — see Lens 3.
 - **Priority:** vision-meeting cadence, core-group growth, shared ownership of follow-up,
   and no warm contacts going cold.
 - **Ready to advance when:** 30–40 committed adults, financial base in place, worship

@@ -43,6 +43,17 @@ test("v1 will not call three weeks flat 'stalled' (#471)", () => {
   assert.match(RUBRICS.v1.body, /ANY NEW COMMITTED ADULT RESETS BOTH CLOCKS/);
 });
 
+test("v1 frames 50/100 as this methodology's benchmark (#472)", () => {
+  // The numbers do not change. What changes is that the judge is told whose
+  // numbers they are, and forbidden from reading undershoot as a verdict.
+  assert.match(RUBRICS.v1.body, /THIS METHODOLOGY'S BENCHMARKS/);
+  assert.match(
+    RUBRICS.v1.body,
+    /may not call a plant unhealthy, or call its size a failure, for being under 50/
+  );
+  assert.match(RUBRICS.v1.body, /benchmark of 50–100 committed adults/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
