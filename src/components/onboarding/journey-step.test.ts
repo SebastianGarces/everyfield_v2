@@ -499,6 +499,7 @@ function onboardedInputs(launch: SnapshotInputs["launch"]): SnapshotInputs {
     commitments: [],
     visionMeetings: [],
     followUp: [],
+    followUpTasks: [],
     ministryTeams: [],
     leadershipCandidates: [],
     meetingsAttendedByPerson: [],

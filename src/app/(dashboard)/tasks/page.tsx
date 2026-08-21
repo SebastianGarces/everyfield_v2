@@ -1,9 +1,10 @@
-import { ListChecks, Plus } from "lucide-react";
+import { AlertCircle, ListChecks, Plus } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskFilters, TaskList, TaskQuickAdd } from "@/components/tasks";
+import { FollowUpAssignments } from "@/components/tasks/follow-up-assignments";
 import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,14 @@ import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
 import { readTaskListPage } from "@/lib/tasks/list-page";
 import { getTaskCounts } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
+import { FOLLOW_UP_STALE_THRESHOLD_DAYS } from "@/lib/phase-engine/signals/build-fact-snapshot";
+import {
+  groupByOwner,
+  listFollowUpAssignees,
+  listFollowUpContacts,
+  listOpenFollowUpTasks,
+  selectUnownedContacts,
+} from "@/lib/tasks/follow-up-ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -41,10 +50,37 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // Fetch tasks and counts in parallel. The page read is the SAME one "Load
   // more" performs (`src/lib/tasks/list-page.ts`), so the appended rows are
   // the continuation of this query and not a second reading of the URL.
-  const [result, counts] = await Promise.all([
-    readTaskListPage(user.churchId, user.id, params),
-    getTaskCounts(user.churchId, view === "my_tasks" ? user.id : undefined),
-  ]);
+  // The ownership reads run on EVERY view, not only the assignments one: the
+  // banner is the thing that makes an unowned follow-up findable, and a banner
+  // that appears only where the planter already went is not a banner (#470
+  // AC-4). Three church-scoped indexed reads.
+  const [result, counts, openFollowUps, followUpContacts, assignees] =
+    await Promise.all([
+      readTaskListPage(user.churchId, user.id, params),
+      getTaskCounts(user.churchId, view === "my_tasks" ? user.id : undefined),
+      listOpenFollowUpTasks(user.churchId),
+      listFollowUpContacts(user.churchId),
+      listFollowUpAssignees(user.churchId),
+    ]);
+
+  const ownerGroups = groupByOwner(openFollowUps);
+  const uncovered = selectUnownedContacts(followUpContacts, openFollowUps).map(
+    (contact) => {
+      const idleDays = Math.floor(
+        (now.getTime() - contact.lastTouchedAt.getTime()) / 86_400_000
+      );
+      return {
+        personId: contact.personId,
+        name: contact.name,
+        status: contact.status,
+        idleDays,
+        isStale: idleDays >= FOLLOW_UP_STALE_THRESHOLD_DAYS,
+      };
+    }
+  );
+  // What the banner counts is what "Needs owner" holds: a follow-up whose task
+  // nobody live owns, plus a contact with no task at all.
+  const needsOwnerCount = ownerGroups[0].tasks.length + uncovered.length;
 
   return (
     <>
@@ -129,6 +165,29 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             )}
           </div>
 
+          {/*
+            AC-4. Renders only when something is actually uncovered, and says
+            only what is measured: how many follow-ups have no owner. It does
+            NOT say who is carrying the rest — that claim is what #470 exists to
+            delete (rubric v1, Lens 2).
+          */}
+          {needsOwnerCount > 0 && view !== "assignments" && (
+            <Link
+              href="/tasks?view=assignments#needs-owner"
+              className="border-destructive/30 bg-destructive/5 hover:bg-destructive/10 flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors"
+            >
+              <AlertCircle className="text-destructive h-4 w-4 shrink-0" />
+              <span>
+                <strong>
+                  {needsOwnerCount === 1
+                    ? "1 follow-up needs an owner"
+                    : `${needsOwnerCount} follow-ups need an owner`}
+                </strong>{" "}
+                — give each one a committed member.
+              </span>
+            </Link>
+          )}
+
           {/* Filters */}
           <TaskFilters currentView={view} showCompleted={showCompleted} />
         </div>
@@ -143,14 +202,22 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           */}
           <PhaseTemplatePrompt />
 
-          <TaskList
-            tasks={result.tasks}
-            total={result.total}
-            nextCursor={result.nextCursor}
-            personNotes={result.personNotes}
-            searchParams={params}
-            now={now}
-          />
+          {view === "assignments" ? (
+            <FollowUpAssignments
+              groups={ownerGroups}
+              uncovered={uncovered}
+              assignees={assignees}
+            />
+          ) : (
+            <TaskList
+              tasks={result.tasks}
+              total={result.total}
+              nextCursor={result.nextCursor}
+              personNotes={result.personNotes}
+              searchParams={params}
+              now={now}
+            />
+          )}
         </div>
       </div>
     </>

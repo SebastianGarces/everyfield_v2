@@ -103,6 +103,7 @@ function richInputs(): SnapshotInputs {
       { id: "p2", status: "following_up", updatedAt: daysBefore(AS_OF, 20) },
       { id: "p3", status: "interviewed", updatedAt: daysBefore(AS_OF, 40) },
     ],
+    followUpTasks: [],
     ministryTeams: [
       { id: "t1", name: "Worship Team", leaderId: "A" }, // filled
       { id: "t2", name: "Kids Ministry", leaderId: null }, // present, unfilled
@@ -151,6 +152,7 @@ function coldStartInputs(): SnapshotInputs {
     commitments: [],
     visionMeetings: [],
     followUp: [],
+    followUpTasks: [],
     ministryTeams: [],
     leadershipCandidates: [],
     meetingsAttendedByPerson: [],

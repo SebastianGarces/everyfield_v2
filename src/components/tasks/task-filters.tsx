@@ -50,7 +50,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 // ============================================================================
 
 interface TaskFiltersProps {
-  currentView: "all" | "my_tasks";
+  currentView: "all" | "my_tasks" | "assignments";
   showCompleted: boolean;
 }
 
@@ -113,6 +113,23 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           onClick={() => updateParam("view", "all")}
         >
           All Tasks
+        </button>
+        {/*
+          #470 AC-3. The third view answers a different question from the other
+          two — not "which tasks" but "who is on them" — so it sits in the same
+          toggle rather than behind a link: the planter deciding what to work on
+          and the planter deciding who should work on it are one moment.
+        */}
+        <button
+          className={cn(
+            "cursor-pointer px-3 py-1.5 text-xs font-medium transition-colors",
+            currentView === "assignments"
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-muted"
+          )}
+          onClick={() => updateParam("view", "assignments")}
+        >
+          Assignments
         </button>
       </div>
 
