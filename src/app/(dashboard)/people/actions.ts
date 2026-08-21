@@ -31,7 +31,6 @@ import type {
   StatusTransition,
 } from "@/lib/people/types";
 import {
-  deleteFile,
   getExtensionFromMimeType,
   personPhotoStorageKey,
   uploadFile,
@@ -217,11 +216,10 @@ export async function loadMorePeopleAction(
 /**
  * Upload (or replace) a person's photo (P-024a).
  *
- * The object goes up BEFORE the row points at it, and the OLD object is deleted
- * only AFTER the row stops pointing at it — the same asymmetry the generated
- * documents path argues (`memory/invariants.md` → Generated Documents). An
- * orphaned object is garbage a sweep collects; a row naming an object that is
- * not there is a broken avatar nothing inside the app can repair.
+ * The object goes up BEFORE the row points at it — the same asymmetry the
+ * generated documents path argues (`memory/invariants.md` → Generated
+ * Documents). The other half, dropping the object the row has stopped pointing
+ * at, belongs to `setPersonPhoto` and is not this function's to remember.
  *
  * The church scope is checked before a byte is written: `personId` arrives from
  * the client, so an id from another tenant must fail here rather than land a
@@ -281,21 +279,49 @@ export async function uploadPersonPhotoAction(
         };
       }
 
-      // The row no longer names the previous object, so it is safe to remove.
-      // A failure here leaves garbage, not a broken profile, so it never fails
-      // the upload the planter just watched succeed.
-      if (updated.previousKey && updated.previousKey !== key) {
-        try {
-          await deleteFile(updated.previousKey);
-        } catch (error) {
-          console.error("uploadPersonPhotoAction stale object:", error);
-        }
+      revalidatePath("/people");
+      revalidatePath(`/people/${personId}`);
+
+      return { success: true, data: updated };
+    }
+  );
+}
+
+/**
+ * Remove a person's photo (P-024b).
+ *
+ * The same writer as the upload with a null key, which is what makes the
+ * ordering the invariant demands impossible to get wrong from here:
+ * `setPersonPhoto` drops the object the row has stopped naming itself. Church
+ * scope is checked inside its own lookup, so a `personId` from another tenant
+ * reads as missing and no object of theirs is ever deleted.
+ */
+export async function removePersonPhotoAction(
+  personId: string
+): Promise<ActionResult<PersonForClient>> {
+  return withChurchSession(
+    "people.write",
+    "removePersonPhotoAction",
+    {
+      noChurch: "You must be associated with a church to update people",
+      known: {
+        "Person not found": "Person not found or has been deleted",
+      },
+      fallback: "An unexpected error occurred while removing the photo",
+    },
+    async ({ churchId }) => {
+      const updated = await setPersonPhoto(churchId, personId, null);
+      if (!updated) {
+        return {
+          success: false,
+          error: "Person not found or has been deleted",
+        };
       }
 
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
 
-      return { success: true, data: updated.person };
+      return { success: true, data: updated };
     }
   );
 }
