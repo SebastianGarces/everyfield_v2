@@ -237,6 +237,21 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
     return "0 change in committed members since the window before";
   }),
   "coreGroup.growthWindowDays": numeric((n) => `a ${n}-day growth window`),
+  // The flat streak and its two levels (#471). The phrases report the STREAK;
+  // which of "slowed" and "stalled" it earns is the rubric's call, not a phrase.
+  "coreGroup.daysSinceLastNewCommitment": numeric((n) =>
+    n === 0
+      ? "a new committed adult today"
+      : n === 1
+        ? "1 day since your last new committed adult"
+        : `${n} days since your last new committed adult`
+  ),
+  "coreGroup.slowedThresholdDays": numeric(
+    (n) => `${n} days flat before momentum counts as slowed`
+  ),
+  "coreGroup.stalledThresholdDays": numeric(
+    (n) => `${n} days flat before growth counts as stalled`
+  ),
   "coreGroup.isEmpty": boolean(
     "no core-group commitments recorded yet",
     "core-group commitments on record"

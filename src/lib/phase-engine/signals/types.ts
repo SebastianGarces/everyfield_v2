@@ -62,6 +62,29 @@ export interface CoreGroupSignals {
   growthDelta: number | null;
   /** Length of the comparison window, in days. */
   growthWindowDays: number;
+  /**
+   * THE FLAT-STREAK FACT (#471, C02/C22). Whole days since the most recent
+   * person's FIRST `core_group` commitment. `null` at cold start.
+   *
+   * The +1 RESET IS THE DEFINITION, not a rule the judge applies: one new
+   * committed adult makes this 0, so "any new adult resets the clock" needs no
+   * interpretation. A person's SECOND commitment — launch team, or a re-signed
+   * card — is not a new adult and does not touch it.
+   *
+   * Distinct from `growthDelta`, which compares two 28-day windows and can read
+   * "flat" while somebody joined yesterday. Bryan kept that window; this is the
+   * one the "stalled" word is allowed to rest on.
+   */
+  daysSinceLastNewCommitment: number | null;
+  /**
+   * The two-level threshold rubric v1's Lens 3 cites (#471). "Momentum has
+   * slowed" is allowed at `slowedThresholdDays`; the word STALLED is not
+   * allowed before `stalledThresholdDays`, because one vision-meeting cycle
+   * can change the picture inside three weeks. Facts rather than constants in
+   * the prompt text, so the judge cites a number it was handed.
+   */
+  slowedThresholdDays: number;
+  stalledThresholdDays: number;
   /** No commitments recorded yet. */
   isEmpty: boolean;
 }
