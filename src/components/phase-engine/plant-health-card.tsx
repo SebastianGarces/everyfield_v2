@@ -25,6 +25,7 @@ import {
   assessedAgoLabel,
   emphasisForSeverity,
   launchLabel,
+  LIMITED_VISIBILITY_DETAIL,
   sortInsightsByUrgency,
   type InsightEmphasis,
 } from "@/lib/phase-engine/oversight/health-presentation";
@@ -137,6 +138,15 @@ function PlantMeta({
 function emptyStateMessage(plant: PlantHealthSummary): string | null {
   if (plant.generatedAt === null) {
     return "Not assessed yet. Observations appear after this plant's first assessment.";
+  }
+  if (plant.classification === "limited-visibility") {
+    // Bryan's own wording (C11), from the one presentation vocabulary so the
+    // portfolio badge and this line cannot drift into two explanations. It
+    // states a fact about the OVERSEER'S VIEW, never a judgement about the
+    // plant — and it is what stops silence reading as "on track".
+    return plant.hasSharedContent
+      ? `${LIMITED_VISIBILITY_DETAIL} Some of what the latest assessment found is not visible here.`
+      : `${LIMITED_VISIBILITY_DETAIL} Only its phase is visible to oversight.`;
   }
   if (!plant.hasSharedContent) {
     return "This plant shares only its phase with oversight. Nothing else is visible here.";
@@ -278,6 +288,8 @@ export function PlantHealthRow({ plant }: { plant: PlantHealthSummary }) {
 /** Short reason a compact row has nothing to disclose. */
 function emptyStateHint(plant: PlantHealthSummary): string {
   if (plant.generatedAt === null) return "Not assessed yet";
-  if (!plant.hasSharedContent) return "Phase only";
+  if (plant.classification === "limited-visibility") {
+    return plant.hasSharedContent ? "Partly shared" : "Phase only";
+  }
   return "No observations";
 }

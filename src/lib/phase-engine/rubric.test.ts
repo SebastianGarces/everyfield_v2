@@ -159,6 +159,16 @@ test("v1 stops claiming a universal sharing default (#479)", () => {
   );
 });
 
+test("v1 will not let silence read as On track (#480)", () => {
+  assert.match(RUBRICS.v0.body, /observation, not verdict/);
+  assert.match(RUBRICS.v1.body, /FOUR VALUES, NOT THREE/);
+  assert.match(RUBRICS.v1.body, /NEVER ONE OF THE THREE HEALTH POSTURES/);
+  // Escalations must survive the new posture, or a gated plant with a real
+  // problem would be softened into "we cannot see".
+  assert.match(RUBRICS.v1.body, /ESCALATIONS STILL WIN/);
+  assert.match(RUBRICS.v1.body, /A NEUTRAL FACT, NOT A FAULT/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

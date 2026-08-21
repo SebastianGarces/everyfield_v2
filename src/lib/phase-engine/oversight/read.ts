@@ -45,10 +45,13 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
 /**
  * Coarse, "observation not verdict" posture for a plant in a portfolio view:
- *   - `on-track`   : no elevated network signals; steady.
- *   - `watch`      : at least one medium-urgency network observation.
- *   - `readiness`  : a high/critical network observation, OR launch is imminent
- *                    or past due — the plant warrants a readiness conversation.
+ *   - `on-track`           : no elevated network signals, and nothing withheld.
+ *   - `watch`              : at least one medium-urgency network observation.
+ *   - `readiness`          : a high/critical network observation, OR launch is
+ *                            imminent or past due.
+ *   - `limited-visibility` : the plant would have read on-track, but content was
+ *                            withheld by the privacy gate — so "nothing wrong"
+ *                            cannot be distinguished from "nothing visible".
  *
  * "Past due" is the SNAPSHOT's own `launch.isPastDue`, never a negative
  * countdown re-derived here. The two are not the same: `buildLaunchSignals`
@@ -57,8 +60,20 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
  * accrues an escalating warning for the rest of its life"), and reading the raw
  * countdown instead brought that warning back on the one surface a sending
  * church looks at.
+ *
+ * WHY THE FOURTH VALUE EXISTS (#480, C11). Bryan: "I would not want absence of
+ * warning signs to accidentally look like an 'on track' signal." That was the
+ * behaviour: this function is fed only the insights that survived privacy
+ * gating, so a fully-private plant arrived with an empty array and fell through
+ * to `on-track`. It could not tell silence from health because nothing told it
+ * anything had been withheld — which is why the gating outcome is now a
+ * PARAMETER rather than something a caller may forget to mention.
  */
-export type PlantHealthClassification = "on-track" | "watch" | "readiness";
+export type PlantHealthClassification =
+  | "on-track"
+  | "watch"
+  | "readiness"
+  | "limited-visibility";
 
 /** DB severities that escalate a plant to the `readiness` posture. */
 const READINESS_SEVERITIES = new Set<PlantInsight["severity"]>([
@@ -72,14 +87,42 @@ const WATCH_SEVERITIES = new Set<PlantInsight["severity"]>(["medium"]);
 export const READINESS_LAUNCH_WINDOW_DAYS = 30;
 
 /**
- * Classify a plant's health from its visible NETWORK insights plus the launch
- * countdown fact. Pure: no DB, no LLM. Callers must pass only the network
- * insights that survived privacy gating, so the classification can never be
- * driven by withheld content.
+ * What the privacy gate did to this plant's insights — the context that makes
+ * `on-track` an honest claim rather than an accident of silence (#480).
+ */
+export interface VisibilityContext {
+  /**
+   * The plant shares at least one assessment-bearing category with this
+   * overseer. False means the portfolio is looking at a plant that has opted
+   * nothing in — the strongest form of "we cannot see".
+   */
+  hasSharedContent: boolean;
+  /**
+   * How many network insights the gate removed. Non-zero means the plant is
+   * partially private: some of what the assessment found is not on this screen.
+   */
+  withheldCount: number;
+}
+
+/**
+ * Classify a plant's health from its visible NETWORK insights, the launch
+ * countdown fact, and what the privacy gate withheld. Pure: no DB, no LLM.
+ *
+ * Callers must pass only the network insights that survived privacy gating —
+ * the classification can never be driven by withheld CONTENT — but they must
+ * now also say that something WAS withheld, which is a different thing and the
+ * whole point of #480.
+ *
+ * ESCALATIONS WIN (D1). A visible high/critical still reads "Readiness focus"
+ * on a partially-private plant: what is on the screen is real, and hiding a
+ * genuine escalation behind "we cannot see everything" would be a worse lie
+ * than the one this issue fixes. `limited-visibility` replaces ONLY the
+ * on-track claim, which is the only one silence can forge.
  */
 export function classifyPlantHealth(
   visibleNetworkInsights: Pick<PlantInsight, "severity">[],
-  snapshot: PlantFactSnapshot | null
+  snapshot: PlantFactSnapshot | null,
+  visibility: VisibilityContext
 ): PlantHealthClassification {
   const hasReadinessSeverity = visibleNetworkInsights.some((i) =>
     READINESS_SEVERITIES.has(i.severity)
@@ -104,6 +147,12 @@ export function classifyPlantHealth(
     WATCH_SEVERITIES.has(i.severity)
   );
   if (hasWatchSeverity) return "watch";
+
+  // Nothing elevated is visible. Whether that means "nothing is wrong" or
+  // "we cannot see" is exactly what the gate knows and this function did not.
+  if (!visibility.hasSharedContent || visibility.withheldCount > 0) {
+    return "limited-visibility";
+  }
 
   return "on-track";
 }
@@ -216,8 +265,14 @@ async function gateNetworkInsights(
   user: User,
   churchId: string,
   latest: LatestAssessment | null
-): Promise<{ insights: PlantInsight[]; hasSharedContent: boolean }> {
-  if (!latest) return { insights: [], hasSharedContent: false };
+): Promise<{
+  insights: PlantInsight[];
+  hasSharedContent: boolean;
+  withheldCount: number;
+}> {
+  if (!latest) {
+    return { insights: [], hasSharedContent: false, withheldCount: 0 };
+  }
 
   const { canAccessFeatureData } = await import("@/lib/auth/access");
 
@@ -253,7 +308,13 @@ async function gateNetworkInsights(
     featureAllowed.values()
   );
 
-  return { insights: visible, hasSharedContent };
+  return {
+    insights: visible,
+    hasSharedContent,
+    // What the gate removed, not what the judge did not find. A plant with no
+    // network insights at all withholds nothing (#480).
+    withheldCount: networkInsights.length - visible.length,
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -290,14 +351,14 @@ export async function getOversightPlantHealth(
   const summaries = await Promise.all(
     plants.map(async (plant) => {
       const latest = await getLatestAssessment(plant.id);
-      const { insights, hasSharedContent } = await gateNetworkInsights(
-        user,
-        plant.id,
-        latest
-      );
+      const { insights, hasSharedContent, withheldCount } =
+        await gateNetworkInsights(user, plant.id, latest);
 
       const snapshot = snapshotOf(latest?.assessment ?? null);
-      const classification = classifyPlantHealth(insights, snapshot);
+      const classification = classifyPlantHealth(insights, snapshot, {
+        hasSharedContent,
+        withheldCount,
+      });
 
       return {
         churchId: plant.id,

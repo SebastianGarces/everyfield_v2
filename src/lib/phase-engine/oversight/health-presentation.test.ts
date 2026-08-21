@@ -6,10 +6,13 @@ import type { PlantHealthSummary } from "@/lib/phase-engine/oversight/read";
 
 import {
   assessedAgoLabel,
+  CLASSIFICATION_META,
+  CLASSIFICATION_SCAN_ORDER,
   comparePlantsByNeed,
   emphasisForSeverity,
   groupPlantsByNeed,
   launchLabel,
+  LIMITED_VISIBILITY_DETAIL,
   sortInsightsByUrgency,
 } from "./health-presentation";
 
@@ -243,4 +246,43 @@ test("launch copy handles today, tomorrow and past-due without odd phrasing", ()
   assert.equal(launchLabel(-1, 30)?.text, "Launched yesterday");
   assert.equal(launchLabel(-12, 30)?.text, "Launched 12 days ago");
   assert.equal(launchLabel(null, 30), null);
+});
+
+// ----------------------------------------------------------------------------
+// The fourth posture (#480, C11)
+// ----------------------------------------------------------------------------
+
+test("Limited visibility scans above On track, below the escalations", () => {
+  // Not a fault, but the one group where the overseer's next move is a
+  // conversation rather than nothing.
+  assert.deepEqual(CLASSIFICATION_SCAN_ORDER, [
+    "readiness",
+    "watch",
+    "limited-visibility",
+    "on-track",
+  ]);
+});
+
+test("the label names the overseer's view, not the plant", () => {
+  const meta = CLASSIFICATION_META["limited-visibility"];
+  assert.equal(meta.label, "Limited visibility");
+  // Nothing in the vocabulary may read as a verdict about the plant.
+  assert.doesNotMatch(meta.description, /risk|concern|problem|failing/i);
+});
+
+test("the group description asserts no CAUSE", () => {
+  // The group holds two different plants: one that shares nothing, and one
+  // that has never been assessed. Both are genuinely "we cannot see"; only the
+  // first has chosen anything. Saying "chosen not to share" at group level
+  // would tell an overseer a planter withheld something when the engine simply
+  // has not run yet.
+  const { description } = CLASSIFICATION_META["limited-visibility"];
+  assert.doesNotMatch(description, /chosen|withheld|declined/i);
+});
+
+test("the detail line is Bryan's own wording, in one place", () => {
+  assert.equal(
+    LIMITED_VISIBILITY_DETAIL,
+    "Plant has chosen not to share assessment data."
+  );
 });

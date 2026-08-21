@@ -74,6 +74,10 @@ export function PlantHealthPortfolio({
 const COUNT_TONE: Record<string, string> = {
   readiness: "text-attention-high-ink",
   watch: "text-attention-medium-ink",
+  // NEUTRAL, deliberately (#480). A plant sharing nothing is not a plant in
+  // trouble; a warning colour here would turn a planter's privacy into a red
+  // number on their overseer's dashboard, which is not what Bryan asked for.
+  "limited-visibility": "text-muted-foreground",
   "on-track": "text-foreground",
 };
 
