@@ -19,6 +19,7 @@ import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantDetail } from "@/components/oversight/plant-detail";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { getOversightPlantDetail } from "@/lib/oversight/read";
@@ -75,6 +76,11 @@ export default async function OversightPlantPage({
         detail={detail}
         scopeLabel={scopeLabelForOrgType(callerOrg.type)}
         history={history}
+        // THE SEVER IS OWNER-ONLY AND THE PAGE IS NOT (#500). Every seat in the
+        // org reads this plant; only the Owner may remove it from the portfolio
+        // (`org.association.sever`, ruling 185 (1)). Asked of the capability
+        // table so the button and `severAssociationAction` cannot disagree.
+        canSever={holdsSeatFor(user, "org.association.sever")}
       />
     </>
   );

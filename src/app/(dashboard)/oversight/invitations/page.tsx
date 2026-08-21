@@ -49,6 +49,7 @@ import {
 } from "@/lib/invitations/core";
 import { toInvitationListRow } from "@/lib/invitations/list-row";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata = {
@@ -61,6 +62,15 @@ export default async function OversightInvitationsPage() {
   // who POSTs to `createInvitation` directly is refused by
   // `resolveInvitationRequest`, not merely kept off this page.
   const { user, org } = await requireOversightUser();
+
+  // WHO MAY CHANGE ANYTHING ON THIS SCREEN (#500). The guard above admits every
+  // seat in the org, because an org MEMBER reads the same portfolio its Owner
+  // does (AS-007, ruling 185 (3)) — and changes none of it. Asking the
+  // capability table rather than comparing a seat is what keeps this page and
+  // `./actions.ts` reading one rule: `org.invitation.manage` is the verb both
+  // the create and the two row controls answer to, so a control can never
+  // appear beside an action that would refuse it.
+  const canManageInvitations = holdsSeatFor(user, "org.invitation.manage");
 
   const actor = invitationActorFromSession({ user });
   const invitations = await getInvitationsForOrg(actor);
@@ -77,17 +87,20 @@ export default async function OversightInvitationsPage() {
           the oversight surface; this sentence used to re-derive them inline.
         */}
         <p className="text-muted-foreground mt-1">
-          Invite church plants to associate with your{" "}
-          {scopeLabelForOrgType(org.type)}, and track what you have sent.
+          {canManageInvitations
+            ? `Invite church plants to associate with your ${scopeLabelForOrgType(org.type)}, and track what you have sent.`
+            : `Every invitation your ${scopeLabelForOrgType(org.type)} has sent, and where each one stands.`}
         </p>
       </div>
 
-      <InvitationCreateForm
-        canInviteSendingChurches={org.type === "network"}
-        expiryDays={INVITATION_EXPIRY_DAYS}
-      />
+      {canManageInvitations && (
+        <InvitationCreateForm
+          canInviteSendingChurches={org.type === "network"}
+          expiryDays={INVITATION_EXPIRY_DAYS}
+        />
+      )}
 
-      <InvitationsList rows={rows} />
+      <InvitationsList rows={rows} canAct={canManageInvitations} />
     </div>
   );
 }

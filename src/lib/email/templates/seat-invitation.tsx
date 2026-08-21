@@ -8,10 +8,12 @@ import {
   render,
 } from "@react-email/components";
 
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import {
   INVITED_AS_COPY,
   invitedAsKey,
   invitedAsWithArticle,
+  TENANCY_NOUN,
   type InvitedAs,
 } from "@/lib/invitations/seat-copy";
 
@@ -47,8 +49,16 @@ import { BaseLayout } from "../components/base-layout";
 // ============================================================================
 
 export interface SeatInvitationEmailProps {
-  /** The plant's own name — never an id. */
-  churchName: string;
+  /** The inviting tenancy's own name — never an id. */
+  orgName: string;
+  /**
+   * WHICH KIND OF THING THAT NAME IS — a church plant, a sending church or a
+   * network (#500). The template renders it as a noun ("join their sending
+   * church") and passes it to `invitedAsKey`, which is what makes the "what
+   * accepting means" paragraph describe an org seat's reach rather than a
+   * plant's.
+   */
+  orgType: SeatTenancyType;
   /** Who sent it, for the "were you expecting this?" question. May be null. */
   inviterName: string | null;
   /**
@@ -68,46 +78,60 @@ export interface SeatInvitationEmailProps {
   expiresLabel: string | null;
 }
 
-/** Names the plant first — in a crowded inbox that is the only word guaranteed to be read. */
+/** Names the org first — in a crowded inbox that is the only word guaranteed to be read. */
 export function seatInvitationSubject(
-  churchName: string,
-  invitedAs: InvitedAs
+  orgName: string,
+  invitedAs: InvitedAs,
+  orgType: SeatTenancyType
 ): string {
-  return `${churchName} invited you to ${INVITED_AS_COPY[invitedAsKey(invitedAs)].subjectTail}`;
+  return `${orgName} invited you to ${INVITED_AS_COPY[invitedAsKey(invitedAs, orgType)].subjectTail}`;
 }
 
 /** The preheader. Under 90 characters, which is all any client shows. */
-export function seatInvitationPreview(invitedAs: InvitedAs): string {
-  return `You are invited as ${invitedAsWithArticle(invitedAs)} — this link only works for this address.`;
+export function seatInvitationPreview(
+  invitedAs: InvitedAs,
+  orgType: SeatTenancyType
+): string {
+  return `You are invited as ${invitedAsWithArticle(invitedAs, orgType)} — this link only works for this address.`;
 }
 
 function SeatInvitationEmail({
-  churchName,
+  orgName,
+  orgType,
   inviterName,
   invitedAs,
   inviteeEmail,
   inviteUrl,
   expiresLabel,
 }: SeatInvitationEmailProps) {
-  const invitedAsCopy = INVITED_AS_COPY[invitedAsKey(invitedAs)];
+  const invitedAsCopy = INVITED_AS_COPY[invitedAsKey(invitedAs, orgType)];
+  const orgNoun = TENANCY_NOUN[orgType];
 
   return (
     <BaseLayout
-      preview={seatInvitationPreview(invitedAs)}
-      footerText={churchName}
+      preview={seatInvitationPreview(invitedAs, orgType)}
+      footerText={orgName}
     >
-      <Heading style={heading}>{churchName} invited you to EveryField</Heading>
+      <Heading style={heading}>{orgName} invited you to EveryField</Heading>
 
       <Text style={text}>
         {inviterName ? `${inviterName} at ` : ""}
-        <strong>{churchName}</strong> invited you to join their church plant on
+        <strong>{orgName}</strong> invited you to join their {orgNoun} on
         EveryField as {invitedAsCopy.article}{" "}
         <strong>{invitedAsCopy.label}</strong>.
       </Text>
 
+      {/*
+        WHAT EVERYFIELD IS, SAID FROM THE READER'S OWN SEAT. The plant sentence
+        describes the work a plant does; somebody joining a sending church or a
+        network is not doing that work, they are watching a portfolio of it, and
+        a paragraph that told them otherwise would misdescribe the product on
+        first contact.
+      */}
       <Text style={text}>
-        EveryField is where a church plant plans its launch, tracks the people
-        it is reaching, and keeps its team on the same page.
+        {orgType === "church"
+          ? "EveryField is where a church plant plans its launch, tracks the people it is reaching, and keeps its team on the same page."
+          : "EveryField is where a church plant plans its launch and tracks the people it is reaching — and where the churches and networks behind them see how every plant is doing."}
       </Text>
 
       <Section style={buttonRow}>
@@ -128,7 +152,7 @@ function SeatInvitationEmail({
 
       <Text style={sectionHeading}>What accepting means</Text>
       <Text style={text}>
-        {`As ${invitedAsWithArticle(invitedAs)} at ${churchName}, ${invitedAsCopy.accepting}.`}
+        {`As ${invitedAsWithArticle(invitedAs, orgType)} at ${orgName}, ${invitedAsCopy.accepting}.`}
       </Text>
 
       <Text style={sectionHeading}>This link belongs to this address</Text>
@@ -136,7 +160,7 @@ function SeatInvitationEmail({
         The invitation is issued to <strong>{inviteeEmail}</strong>, and it only
         works for that address. Please do not forward this email — a link that
         reaches anybody else cannot be used to sign up. If the address is wrong,
-        ask {churchName} to revoke this invitation and send a new one.
+        ask {orgName} to revoke this invitation and send a new one.
       </Text>
 
       <Text style={text}>
@@ -164,7 +188,11 @@ function SeatInvitationEmail({
 export async function seatInvitationEmail(
   props: SeatInvitationEmailProps
 ): Promise<{ subject: string; html: string; text: string }> {
-  const subject = seatInvitationSubject(props.churchName, props.invitedAs);
+  const subject = seatInvitationSubject(
+    props.orgName,
+    props.invitedAs,
+    props.orgType
+  );
   const html = await render(SeatInvitationEmail(props));
   const text = await render(SeatInvitationEmail(props), { plainText: true });
   return { subject, html, text };

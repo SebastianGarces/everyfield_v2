@@ -35,6 +35,7 @@
 // ============================================================================
 
 import type { InvitableSeat } from "@/db/schema/user-invitation";
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 
 /**
  * WHAT AN INVITATION MAKES SOMEBODY, as the two things it can be.
@@ -47,11 +48,37 @@ export type InvitedAs =
   | { kind: "seat"; seat: InvitableSeat }
   | { kind: "coach" };
 
-export type InvitedAsKey = InvitableSeat | "coach";
+/**
+ * THE KEY IS THE PAIR — what they are invited to be, AND where (#500).
+ *
+ * A flat five-entry union rather than a nested table, because only the seats
+ * fork: an Admin in a church plant works on people, meetings and tasks, and an
+ * Admin in a sending church or a network works on a PORTFOLIO and can staff the
+ * org. Those are different sentences, and a table keyed on the seat alone would
+ * have had to pick one of them and be wrong for the other half of the product.
+ *
+ * The two org kinds share one entry deliberately: a sending church's Admin and
+ * a network's Admin do the same things, over a different portfolio, and the
+ * org's own NAME is what tells the reader which they are joining.
+ */
+export type InvitedAsKey = InvitableSeat | "coach" | `org_${InvitableSeat}`;
 
-/** The table's key — the one place the union is flattened. */
-export function invitedAsKey(invitedAs: InvitedAs): InvitedAsKey {
-  return invitedAs.kind === "coach" ? "coach" : invitedAs.seat;
+/**
+ * The table's key — the one place the union and the tenancy are flattened into
+ * one word.
+ *
+ * A coach is a coach wherever the row came from: `coach.assignment.manage` is
+ * plant-only, so a coach invitation from an org cannot exist, and the tenancy
+ * is not consulted for one.
+ */
+export function invitedAsKey(
+  invitedAs: InvitedAs,
+  tenancyType: SeatTenancyType
+): InvitedAsKey {
+  if (invitedAs.kind === "coach") return "coach";
+  return tenancyType === "church"
+    ? invitedAs.seat
+    : (`org_${invitedAs.seat}` as const);
 }
 
 export const INVITED_AS_COPY = {
@@ -74,6 +101,30 @@ export const INVITED_AS_COPY = {
     subjectTail: "join them on EveryField",
     accepting:
       "you can see the plant's work and take part in what is assigned to you",
+    cta: "Accept and create your account",
+  },
+  // ── The same two seats, held in a sending church or a network (AS-005/AS-007,
+  //    #500). The labels and the article are the seat's own; what changes is
+  //    what the seat REACHES, because an org's subject is its portfolio of
+  //    plants rather than a congregation.
+  org_admin: {
+    label: "Admin",
+    article: "an",
+    subjectTail: "join them on EveryField",
+    accepting:
+      "you can see how every church plant they oversee is doing, and invite other people onto the team",
+    cta: "Accept and create your account",
+  },
+  org_member: {
+    label: "Member",
+    article: "a",
+    subjectTail: "join them on EveryField",
+    // THE READ IS THE WHOLE GRANT, and the sentence says so. An org Member sees
+    // everything the org's Owner sees (ruling 185 (3)) and changes nothing —
+    // stating the limit here is what stops the invitee expecting controls the
+    // screen will not show them.
+    accepting:
+      "you can see how every church plant they oversee is doing — it is a read-only seat, so nothing you do changes their work",
     cta: "Accept and create your account",
   },
   coach: {
@@ -102,7 +153,26 @@ export const INVITED_AS_COPY = {
  * "an Admin" / "a Member" / "a Coach" — DERIVED from the table rather than
  * stored beside it, so the two spellings of one entry cannot drift apart.
  */
-export function invitedAsWithArticle(invitedAs: InvitedAs): string {
-  const copy = INVITED_AS_COPY[invitedAsKey(invitedAs)];
+export function invitedAsWithArticle(
+  invitedAs: InvitedAs,
+  tenancyType: SeatTenancyType
+): string {
+  const copy = INVITED_AS_COPY[invitedAsKey(invitedAs, tenancyType)];
   return `${copy.article} ${copy.label}`;
 }
+
+/**
+ * The reader's word for the KIND of thing they are being invited into — the
+ * noun the register banner puts beside the org's name.
+ *
+ * It is not `scopeLabelForOrgType` (`@/lib/oversight/org-label`) and cannot be:
+ * that table has two entries and answers for an oversight org only, while this
+ * one has to name a church plant too. The two overlap on two words and are
+ * reconciled by `seat-copy.test.ts` rather than by an import, because this file
+ * is an import-free leaf feeding a client bundle.
+ */
+export const TENANCY_NOUN = {
+  church: "church plant",
+  sending_church: "sending church",
+  network: "network",
+} as const satisfies Record<SeatTenancyType, string>;

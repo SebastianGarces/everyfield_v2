@@ -8,7 +8,13 @@ import { ChurchDigestScheduleSelect } from "@/components/settings/church-digest-
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
-import { isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
+import {
+  isOrgOwner,
+  isPlantOwner,
+  oversightOrgOf,
+  tenancyOf,
+} from "@/lib/auth/tenancy";
+import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
 import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
 import { NOTIFICATION_PREFERENCES_HEADING_ID } from "@/lib/notifications/channels/email";
 import { isAddressSuppressed } from "@/lib/notifications/channels/suppression";
@@ -72,8 +78,12 @@ export default async function SettingsPage() {
   // (`memory/invariants.md` → Multi-Tenancy) is a page nobody can find. The
   // condition mirrors the page's own guard exactly; anyone else is redirected
   // there, and every write behind it refuses them again server-side.
+  // THE SEAT AS WELL AS THE TENANCY (#500). Every write behind that link is
+  // Owner-only, and an org now has Members — so the tenancy alone would show a
+  // link to a page that redirects them straight back here.
   const isSendingChurchAdminWithOrg =
-    oversightOrgOf(session.user)?.type === "sending_church";
+    oversightOrgOf(session.user)?.type === "sending_church" &&
+    isOrgOwner(session.user);
   const canManageAssociation =
     isPlanterWithPlant || isSendingChurchAdminWithOrg;
 
@@ -82,6 +92,11 @@ export default async function SettingsPage() {
   // a link an Admin can see leading to a page that redirects them is the visible
   // half of a permission drift.
   const canManageTeam = holdsSeatFor(session.user, "seat.invitation.manage");
+
+  // The noun for whichever team that is — a plant, a sending church or a
+  // network (#500). `canManageTeam` is `tenancy: "tenancy"`, so wherever the
+  // section renders the tenancy resolves; the fallback is for the type only.
+  const teamNoun = TENANCY_NOUN[tenancyOf(session.user)?.type ?? "church"];
 
   return (
     <>
@@ -240,7 +255,7 @@ export default async function SettingsPage() {
               Team
             </h2>
             <p className="text-muted-foreground text-sm text-pretty">
-              Invite people onto this church plant, and see who is still to
+              Invite people onto this {teamNoun}, and see who is still to
               answer.{" "}
               <Link
                 href="/settings/team"

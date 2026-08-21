@@ -73,6 +73,12 @@ import {
 } from "@/db/schema";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import type { SessionValidationResult } from "@/lib/auth/session";
+import {
+  tenancyOf,
+  type SeatTenancy,
+  type SeatTenancyType,
+} from "@/lib/auth/tenancy";
+import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
 
 declare const seatManagementActorBrand: unique symbol;
 
@@ -85,9 +91,50 @@ declare const seatManagementActorBrand: unique symbol;
  */
 export type SeatManagementActor = {
   readonly id: string;
-  readonly churchId: string;
+  /**
+   * THE TENANCY BEING STAFFED — a church plant, a sending church or a network
+   * (#500). One value rather than three nullable FKs, so every `WHERE` below
+   * names the actor's own column by construction and a target seated in another
+   * tenancy is simply not found.
+   */
+  readonly tenancy: SeatTenancy;
   readonly [seatManagementActorBrand]: true;
 };
+
+/**
+ * WHICH `users` COLUMN A TENANCY IS. The sibling of `TENANCY_COLUMN` in
+ * `@/lib/invitations/seat`, over this table — a `Record` over
+ * `SeatTenancyType`, so a fourth kind is a compile error rather than a `WHERE`
+ * that silently matches nothing.
+ */
+const USER_TENANCY_COLUMN = {
+  church: users.churchId,
+  sending_church: users.sendingChurchId,
+  network: users.sendingNetworkId,
+} as const satisfies Record<SeatTenancyType, unknown>;
+
+/** `<the tenancy's column> = <its id>` — the scope every read and write shares. */
+function inTenancy(tenancy: SeatTenancy) {
+  return eq(USER_TENANCY_COLUMN[tenancy.type], tenancy.id);
+}
+
+/**
+ * The PLANT this actor is staffing, for the two verbs that are a plant's alone.
+ *
+ * Coaching is a relationship with a CHURCH PLANT and has no org-side form: a
+ * sending church does not coach, it oversees. So the coach list and the
+ * assignment-ending verb ask for the plant explicitly and refuse an org actor
+ * with a sentence, rather than silently querying `coach_assignments.church_id`
+ * with a sending church's id and answering "no coaches".
+ */
+function plantOf(actor: SeatManagementActor): string {
+  if (actor.tenancy.type !== "church") {
+    throw new SeatManagementError(
+      "Coaching assignments belong to a church plant."
+    );
+  }
+  return actor.tenancy.id;
+}
 
 /**
  * Raised when a legible business rule refuses the call. THE MESSAGE IS USER
@@ -109,22 +156,25 @@ export class SeatManagementError extends Error {
  * call site reads as "the actor is whoever this request is authenticated as"
  * and there is no id parameter for a client value to slot into.
  *
- * @throws `SeatManagementError` when the account holds no plant. That is the
- * oversight Owner who passed `seat.manage`'s `tenancy: "any"`, and the copy
- * says what is missing without naming another tenancy.
+ * @throws `SeatManagementError` when the account names no tenancy at all. That
+ * is the registered Owner whose plant does not exist yet, who passed
+ * `seat.manage`'s `tenancy: "any"` — and the two-tenancy defect
+ * (`memory/invariants.md` → Seats & Tenancy), which `tenancyOf` resolves to
+ * nothing so that it reaches nothing here either.
  */
 export function seatActorFromSession(
   session: SessionValidationResult
 ): SeatManagementActor {
-  const { id, churchId } = session.user;
+  const { id } = session.user;
+  const tenancy = tenancyOf(session.user);
 
-  if (!churchId) {
+  if (!tenancy) {
     throw new SeatManagementError(
-      "Seat management is for a church plant's own team."
+      "Seat management is for a team you belong to. Create your church plant first."
     );
   }
 
-  return { id, churchId } as SeatManagementActor;
+  return { id, tenancy } as SeatManagementActor;
 }
 
 /** One person on the plant's seat roster, as AS-023 asks it to be read. */
@@ -178,9 +228,7 @@ export async function listSeatRoster(
       joinedAt: users.createdAt,
     })
     .from(users)
-    .where(
-      and(eq(users.churchId, actor.churchId), sql`${users.seat} is not null`)
-    )
+    .where(and(inTenancy(actor.tenancy), sql`${users.seat} is not null`))
     .orderBy(SEAT_ORDER, users.createdAt);
 
   // The NOT NULL is in the `WHERE`; this narrows the TYPE to match, and is not
@@ -221,7 +269,7 @@ export async function listPlantCoaches(
     .innerJoin(users, eq(users.id, coachAssignments.coachUserId))
     .where(
       and(
-        eq(coachAssignments.churchId, actor.churchId),
+        eq(coachAssignments.churchId, plantOf(actor)),
         eq(coachAssignments.status, "active")
       )
     )
@@ -251,7 +299,7 @@ async function moveSeat(
     .where(
       and(
         eq(users.id, targetUserId),
-        eq(users.churchId, actor.churchId),
+        inTenancy(actor.tenancy),
         eq(users.seat, from)
       )
     )
@@ -270,7 +318,7 @@ export async function appointAdmin(
     targetUserId,
     "member",
     "admin",
-    "That person is no longer a Member of this plant. Reload the page to see who is on the team."
+    `That person is no longer a Member of this ${TENANCY_NOUN[actor.tenancy.type]}. Reload the page to see who is on the team.`
   );
 }
 
@@ -284,8 +332,77 @@ export async function demoteToMember(
     targetUserId,
     "admin",
     "member",
-    "That person is no longer an Admin of this plant. Reload the page to see who is on the team."
+    `That person is no longer an Admin of this ${TENANCY_NOUN[actor.tenancy.type]}. Reload the page to see who is on the team.`
   );
+}
+
+/**
+ * STATEMENTS 2 AND 3 — the cascade a PLANT's removal runs, and no other
+ * tenancy's (AS-016, #500).
+ *
+ * A named tuple rather than two statements inline in one branch of the batch,
+ * so the batch literal reads as the four ordered effects the redo-safety
+ * argument is about, and the plant-only pair has somewhere to state WHY it is
+ * plant-only. Both are redo-safe, which is what lets them sit above the marker.
+ *
+ * `churchId` is passed rather than read off the actor because the caller has
+ * already narrowed the tenancy — proving it again here would be the same check
+ * twice, and passing the id is what makes the narrowing visible at the call
+ * site.
+ */
+function plantRemovalEffects(
+  actor: SeatManagementActor,
+  churchId: string,
+  targetUserId: string
+) {
+  return [
+    // 2. OPEN TASKS TO THE OWNER, COMPLETED ONES LEFT ALONE. An unassigned task
+    //    disappears from every "my work" view, so the plant would silently lose
+    //    the commitment; a completed one is a record of what happened and
+    //    reassigning it would rewrite that. `ne(status, "complete")` rather than
+    //    an `inArray` of the other three, so a new open status is covered the
+    //    day it is added instead of being silently dropped.
+    db
+      .update(tasks)
+      .set({ assignedToId: actor.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.assignedToId, targetUserId),
+          ne(tasks.status, "complete")
+        )
+      ),
+
+    // 3. MINISTRY-TEAM LEADERSHIP CLEARED, so the team reads as an open leader
+    //    slot (`listTeams` returns `leaderName: null` for it). `leader_id` names
+    //    a PERSON, not an account, so the account is resolved to its person
+    //    record through `persons.user_id` — the link AS-013 writes — and both
+    //    halves stay scoped to this plant.
+    db
+      .update(ministryTeams)
+      .set({ leaderId: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(ministryTeams.churchId, churchId),
+          sql`${ministryTeams.leaderId} in (
+            select ${persons.id} from ${persons}
+            where ${persons.churchId} = ${churchId}
+              and ${persons.userId} = ${targetUserId}
+          )`
+        )
+      ),
+  ] as const;
+}
+
+/**
+ * WHAT A MISSING TARGET READS AS — one sentence, two call sites.
+ *
+ * The pre-read and the marker's rowcount are the same refusal seen a
+ * millisecond apart, so they say the same words: telling them apart would
+ * describe the internals of the batch to somebody who only needs to reload.
+ */
+function notOnTheTeam(actor: SeatManagementActor): string {
+  return `That person is not on this ${TENANCY_NOUN[actor.tenancy.type]}'s team. Reload the page to see who is.`;
 }
 
 /**
@@ -321,13 +438,11 @@ export async function removeSeat(
       sendingNetworkId: users.sendingNetworkId,
     })
     .from(users)
-    .where(and(eq(users.id, targetUserId), eq(users.churchId, actor.churchId)))
+    .where(and(eq(users.id, targetUserId), inTenancy(actor.tenancy)))
     .limit(1);
 
   if (!target || !target.seat) {
-    throw new SeatManagementError(
-      "That person is not on this plant's team. Reload the page to see who is."
-    );
+    throw new SeatManagementError(notOnTheTeam(actor));
   }
 
   // THE OWNER IS THE ACCOUNT THAT ITSELF CARRIES `seat.manage`, asked of the
@@ -336,116 +451,102 @@ export async function removeSeat(
   // and it is also the honest sentence: what may not be removed is the account
   // holding the authority to remove. Handing ownership over is #342's verb.
   if (holdsSeatFor(target, "seat.manage")) {
-    throw new SeatManagementError("The plant's Owner cannot be removed.");
+    throw new SeatManagementError(
+      `The ${TENANCY_NOUN[actor.tenancy.type]}'s Owner cannot be removed.`
+    );
   }
 
-  const [, , , marked] = await db.batch([
-    // 1. SESSIONS REVOKED. Deleting the rows rather than expiring them: the
-    //    session store is the only record of a live sign-in, so "holds nothing
-    //    for that account" is the state AS-016 asks for, and the next request
-    //    carrying the old cookie finds no row and is unauthenticated.
-    //
-    //    THE `exists` IS THE LEAK GUARD, and it is here because this is the only
-    //    statement whose subject is keyed by the ACCOUNT rather than by the
-    //    plant — statements 2–4 all carry `actor.churchId` in their own `WHERE`.
-    //    Without it, a target that moved tenancy between the pre-read and this
-    //    batch would still be signed out of a plant this actor has no authority
-    //    over. It reads `users` BEFORE the marker writes it (statement order is
-    //    the whole point), and on a replay the marker has already cleared
-    //    `church_id`, so it correctly matches nothing.
-    db.delete(sessions).where(
-      and(
-        eq(sessions.userId, targetUserId),
-        sql`exists (
+  // 1. SESSIONS REVOKED. Deleting the rows rather than expiring them: the
+  //    session store is the only record of a live sign-in, so "holds nothing
+  //    for that account" is the state AS-016 asks for, and the next request
+  //    carrying the old cookie finds no row and is unauthenticated.
+  //
+  //    THE `exists` IS THE LEAK GUARD, and it is here because this is the only
+  //    statement whose subject is keyed by the ACCOUNT rather than by the
+  //    tenancy — every other statement carries the actor's own tenancy column in
+  //    its own `WHERE`. Without it, a target that moved tenancy between the
+  //    pre-read and this batch would still be signed out of a tenancy this actor
+  //    has no authority over. It reads `users` BEFORE the marker writes it
+  //    (statement order is the whole point), and on a replay the marker has
+  //    already cleared the FK, so it correctly matches nothing.
+  const revokeSessions = db.delete(sessions).where(
+    and(
+      eq(sessions.userId, targetUserId),
+      sql`exists (
             select 1 from ${users}
             where ${users.id} = ${targetUserId}
-              and ${users.churchId} = ${actor.churchId}
+              and ${inTenancy(actor.tenancy)}
           )`
+    )
+  );
+
+  // 4. THE MARKER, LAST IN BOTH BATCHES BELOW. Tenancy and seat cleared; the
+  //    account ROW survives, which is what lets the person be re-invited and
+  //    what keeps every `created_by` and `assigned_to_id` elsewhere pointing at
+  //    a real row.
+  //
+  //    ALL THREE TENANCY FKs, NOT JUST THE ONE IT ACTED ON, AND THAT IS A
+  //    SECURITY RULE RATHER THAN TIDINESS. A row naming TWO tenancies is
+  //    representable (`memory/invariants.md` → Seats & Tenancy: the accepted
+  //    residual migration 0050 §1 repaired twelve of). Such a row reaches
+  //    NOTHING today because `tenancyOf` answers only for exactly one FK — so
+  //    clearing one alone would leave one FK standing and PROMOTE the account
+  //    into that org's oversight surface, which `requireOversightUser` admits on
+  //    the FK alone without asking the seat. A removal that widens reach is the
+  //    one outcome this verb must never have, so the marker clears every FK and
+  //    the row names no tenancy at all.
+  const mark = db
+    .update(users)
+    .set({
+      churchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: null,
+      seat: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(users.id, targetUserId),
+        inTenancy(actor.tenancy),
+        ne(users.seat, "owner")
       )
-    ),
+    )
+    .returning({ id: users.id });
 
-    // 2. OPEN TASKS TO THE OWNER, COMPLETED ONES LEFT ALONE. An unassigned task
-    //    disappears from every "my work" view, so the plant would silently lose
-    //    the commitment; a completed one is a record of what happened and
-    //    reassigning it would rewrite that. `ne(status, "complete")` rather
-    //    than an `inArray` of the other three, so a new open status is covered
-    //    the day it is added instead of being silently dropped.
-    db
-      .update(tasks)
-      .set({ assignedToId: actor.id, updatedAt: new Date() })
-      .where(
-        and(
-          eq(tasks.churchId, actor.churchId),
-          eq(tasks.assignedToId, targetUserId),
-          ne(tasks.status, "complete")
-        )
-      ),
-
-    // 3. MINISTRY-TEAM LEADERSHIP CLEARED, so the team reads as an open leader
-    //    slot (`listTeams` returns `leaderName: null` for it). `leader_id`
-    //    names a PERSON, not an account, so the account is resolved to its
-    //    person record through `persons.user_id` — the link AS-013 writes — and
-    //    both halves stay scoped to this plant.
-    db
-      .update(ministryTeams)
-      .set({ leaderId: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(ministryTeams.churchId, actor.churchId),
-          sql`${ministryTeams.leaderId} in (
-            select ${persons.id} from ${persons}
-            where ${persons.churchId} = ${actor.churchId}
-              and ${persons.userId} = ${targetUserId}
-          )`
-        )
-      ),
-
-    // 4. THE MARKER, LAST. Tenancy and seat cleared; the account ROW survives,
-    //    which is what lets the person be re-invited and what keeps every
-    //    `created_by` and `assigned_to_id` elsewhere pointing at a real row.
-    //
-    //    ALL THREE TENANCY FKs, NOT JUST `church_id`, AND THAT IS A SECURITY
-    //    RULE RATHER THAN TIDINESS. A row naming TWO tenancies is representable
-    //    (`memory/invariants.md` → Seats & Tenancy: the accepted residual
-    //    migration 0050 §1 repaired twelve of). Such a row reaches NOTHING today
-    //    because `oversightOrgOf` answers only for exactly one FK — so clearing
-    //    `church_id` alone would leave one FK standing and PROMOTE the account
-    //    into that org's oversight surface, which `requireOversightUser` admits
-    //    on the FK alone without asking the seat. A removal that widens reach is
-    //    the one outcome this verb must never have, so the marker clears every
-    //    FK and the row names no tenancy at all.
-    db
-      .update(users)
-      .set({
-        churchId: null,
-        sendingChurchId: null,
-        sendingNetworkId: null,
-        seat: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(users.id, targetUserId),
-          eq(users.churchId, actor.churchId),
-          ne(users.seat, "owner")
-        )
-      )
-      .returning({ id: users.id }),
-  ]);
+  // TWO LITERAL BATCHES, NOT ONE WITH A SPREAD, AND THE DIFFERENCE IS THE
+  // CASCADE (#500). Statements 2 and 3 are a PLANT's: a sending church and a
+  // network have no `tasks` and no `ministry_teams`, so for them those writes
+  // are not empty, they are meaningless — scoping a `church_id` column by an
+  // org's id would read as an effect and be none. An org's removal is therefore
+  // the access and nothing else, which is what the confirmation dialog promises
+  // (`REMOVAL_CONSEQUENCES` in `@/components/settings/seat-roster`).
+  //
+  // Literal rather than a built array so each shape keeps its exact return type
+  // and the marker is read by its own index rather than by arithmetic on a
+  // dynamic one. It is LAST in both, which is the ordering the redo-safety
+  // argument above rests on.
+  const marked =
+    actor.tenancy.type === "church"
+      ? (
+          await db.batch([
+            revokeSessions,
+            ...plantRemovalEffects(actor, actor.tenancy.id, targetUserId),
+            mark,
+          ])
+        )[3]
+      : (await db.batch([revokeSessions, mark]))[1];
 
   // THE MARKER'S ROWCOUNT IS THE ANSWER, and a zero here is not an error the
   // batch rolled back — `db.batch` is all-or-nothing on FAILURE, and a zero-row
-  // UPDATE is a success, so statements 1–3 have already committed. What they
-  // committed is three no-ops: each one is scoped to a target that, by the
-  // marker matching nothing, is no longer on this plant. So the state is
+  // UPDATE is a success, so the statements before it have already committed.
+  // What they committed is no-ops: each one is scoped to a target that, by the
+  // marker matching nothing, is no longer in this tenancy. So the state is
   // consistent and what is left to get right is the REPORT — telling an Owner
   // their removal succeeded when the roster is about to re-render unchanged is
   // the one failure this cannot leave standing. `moveSeat` and
   // `endCoachAssignment` both answer on their own rowcount for the same reason.
   if (marked.length === 0) {
-    throw new SeatManagementError(
-      "That person is not on this plant's team. Reload the page to see who is."
-    );
+    throw new SeatManagementError(notOnTheTeam(actor));
   }
 }
 
@@ -468,7 +569,7 @@ export async function endCoachAssignment(
     .where(
       and(
         eq(coachAssignments.id, assignmentId),
-        eq(coachAssignments.churchId, actor.churchId),
+        eq(coachAssignments.churchId, plantOf(actor)),
         eq(coachAssignments.status, "active")
       )
     )

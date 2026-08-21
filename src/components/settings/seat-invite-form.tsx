@@ -43,11 +43,55 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { InvitableSeat } from "@/db/schema/user-invitation";
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import { invitationCreatedNotice } from "@/lib/invitations/create-notice";
+import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
 
 const initialState: CreateSeatInvitationState = {};
 
-export function SeatInviteForm({ expiryDays }: { expiryDays: number }) {
+/**
+ * WHAT EACH SEAT IS, IN THE ONE PLACE A SEAT IS CHOSEN (#500).
+ *
+ * Keyed by the tenancy first, because that is what changes the answer: an Admin
+ * in a church plant runs the day-to-day work, and an Admin in a sending church
+ * or a network staffs the org and reads a portfolio. A table rather than a
+ * ternary in the JSX for the reason `INVITED_AS_COPY` is one — `seat-guard.test.ts`
+ * bans a hand-compared seat anywhere outside the permissions module, and the ban
+ * is right even where the branch is only copy.
+ *
+ * The two org kinds share their entries: a sending church's Admin and a
+ * network's Admin do the same things over a different portfolio.
+ */
+const SEAT_CHOICE_COPY = {
+  church: {
+    member: "Member — takes part in the work",
+    admin: "Admin — can run the plant with you",
+  },
+  sending_church: {
+    member: "Member — reads everything, changes nothing",
+    admin: "Admin — reads everything and can invite others",
+  },
+  network: {
+    member: "Member — reads everything, changes nothing",
+    admin: "Admin — reads everything and can invite others",
+  },
+} as const satisfies Record<SeatTenancyType, Record<InvitableSeat, string>>;
+
+export function SeatInviteForm({
+  expiryDays,
+  tenancyType,
+}: {
+  expiryDays: number;
+  /**
+   * WHICH KIND OF TEAM IS BEING STAFFED. The form posts no tenancy — the server
+   * takes the actor's own — so this decides copy only, and the words it picks
+   * are the ones the invitation email will repeat.
+   */
+  tenancyType: SeatTenancyType;
+}) {
+  const noun = TENANCY_NOUN[tenancyType];
+  const seatCopy = SEAT_CHOICE_COPY[tenancyType];
+
   const [state, formAction, pending] = useActionState(
     createSeatInvitationAction,
     initialState
@@ -63,7 +107,7 @@ export function SeatInviteForm({ expiryDays }: { expiryDays: number }) {
         <CardTitle>Invite someone to your team</CardTitle>
         <CardDescription>
           They get an email with a link to create their EveryField account and
-          join this plant. The link only works for the address you type, and
+          join this {noun}. The link only works for the address you type, and
           only for someone who does not already have an account.
         </CardDescription>
       </CardHeader>
@@ -117,10 +161,10 @@ export function SeatInviteForm({ expiryDays }: { expiryDays: number }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="member" className="cursor-pointer">
-                    Member — takes part in the work
+                    {seatCopy.member}
                   </SelectItem>
                   <SelectItem value="admin" className="cursor-pointer">
-                    Admin — can run the plant with you
+                    {seatCopy.admin}
                   </SelectItem>
                 </SelectContent>
               </Select>
