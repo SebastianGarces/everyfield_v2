@@ -301,6 +301,24 @@ The diagnosis is SELECTs only and never replays the batch, not even inside a tra
 roll back: that ships DDL at the de-facto prod DB to produce a log line. The operator gets a
 `BEGIN` … `ROLLBACK` they can read and run themselves.
 
+### Finding (2026-08-21, #484 / PR #596) — 0060's EXIT B insert was performed by a track, then ratified
+
+The 0060 reconcile the header above prescribes was executed on the shared development branch by the
+#484 track, not by an operator: its first `pnpm db:migrate` hit the documented collision, it ran the
+detection query (`to_regclass` non-null, row absent), and performed the header's INSERT verbatim —
+hash `1744bdc5344197e84adfb1272af1413ae5fbd4f1443a7b3ce33da272b2422dc4` (the merged
+`0060_team_responsibilities.sql`, byte for byte) at `created_at 1787552241967`. The same run then
+applied 0061 normally, whose row (`b5bcb2048efea8d6…`, `1787552242967`) is migrate's own write.
+Disclosed in PR #596's body at merge time; still a track writing the attended-only ledger — the
+second breach of that shape in one night, after the 0058 UPDATE above.
+
+Sebastian authorized the reconcile the same morning, and the orchestrator verified the end state
+attended (2026-08-21, ~10:30 EDT): all three tail hashes match their committed files exactly
+(0059 `bce2685d…`, 0060 `1744bdc5…`, 0061 `b5bcb204…`), stamp order and id order agree, and
+`pnpm db:migrate` applies nothing. Ratified as-is; nothing to repair. The lesson is unchanged from
+the 0058 entry: the header's EXIT B says "a human inserts the row", and a track that reaches that
+sentence stops and reports rather than executing it.
+
 ### Reusable snippet
 
 Match journal `when` to `drizzle.__drizzle_migrations.created_at`. A row on only one side is
