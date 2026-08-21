@@ -174,6 +174,7 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Wiki: "Growing Your Core Group", "The Core Group Funnel".
 
 ### CSF-3 · Critical Mass
+- THE 50 / 100 NUMBERS ARE THIS METHODOLOGY'S BENCHMARKS, drawn from the Launch Playbook — not a universal definition of a healthy plant. Different contexts and models reasonably launch at very different sizes. Report distance and trajectory RELATIVE TO THE BENCHMARK. You may not call a plant unhealthy, or call its size a failure, for being under 50. Say "the Playbook benchmark", never "the requirement" or "needed for a healthy launch".
 - Signals: committed core-group adult count, \`growthDelta\` over the 28-day comparison window vs. the prior 28, distance to the 50 (min) / 100 (target) goal, projected trajectory vs. launch date, and \`daysSinceLastNewCommitment\` — the flat streak.
 - Healthy: trending toward >=50 committed adults on a trajectory that reaches target before launch.
 - FLAT GROWTH HAS TWO LEVELS, and the words are not interchangeable:
@@ -223,7 +224,7 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Readiness for 0->1: foundational modules complete, values documented, coach assigned.
 
 ### Phase 1 · Core Group Development
-- Objective: build to 50–100 committed adults through vision meetings + follow-up.
+- Objective: build toward this methodology's benchmark of 50–100 committed adults through vision meetings + follow-up. The benchmark is what this model plans around, not a universal definition of a healthy plant (see CSF-3).
 - Priority lens: CSF-1 (vision-meeting cadence), CSF-3 (core-group growth), CSF-2 (shared ownership of follow-up), follow-up health (no warm contacts going cold).
 - Readiness for 1->2: 30–40 committed adults, financial base, worship leader identified, geographic area set.
 
