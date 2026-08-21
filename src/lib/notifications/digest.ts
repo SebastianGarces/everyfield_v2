@@ -34,11 +34,13 @@ import {
   composePlanterDigestBody,
   composePlanterDigestTitle,
   currentDigestDedupeKeys,
+  digestAnchorFrom,
   digestPeriodFor,
   planterDigestDedupeKey,
   PLANTER_DIGEST_TYPE,
   totalOutstanding,
   widestPeriodEnd,
+  type DigestAnchor,
   type DigestCounts,
   type DigestPeriod,
 } from "./digest-content";
@@ -121,6 +123,28 @@ import { buildPreferenceMap, resolveDigestCadence } from "./preferences";
 // scopes it, and leaving it out is what lets the sweep's owed-set test be an
 // `IN (two literals)` instead of the concatenated-uuid `LIKE` the oversight
 // sweep had to fall back on.
+//
+// ----------------------------------------------------------------------------
+// ...AND THE PERIOD IS THE CHURCH'S, WHICH IS NOT THE SAME THING (N-013, #448)
+// ----------------------------------------------------------------------------
+//
+// The send time is a church setting now — Sunday 16:00 in the church's own
+// zone by default. That makes the key's VALUE church-dependent while leaving
+// the key STRING church-free, and the distinction is the whole design:
+//
+//   * The string still omits the church id, so the owed-set test stays an
+//     `IN (two literals)` and the partial unique index keeps scoping it.
+//   * But "the current keys" is no longer a question with one answer.
+//     `currentDigestDedupeKeys` takes an ANCHOR, and nothing computes a current
+//     key set across churches — the signature does not permit it.
+//
+// The sweep therefore walks ANCHOR COHORTS rather than the whole table at once:
+// one pass per distinct (zone, weekday, hour), each with its own two literals
+// and its own keyset cursor. Two churches an hour apart are two cohorts, get
+// two different key pairs on the same tick, and each keeps the liveness
+// property the sweep was built for — the owed set shrinks monotonically
+// through the period, so a starved plant cannot park at the head of a stable
+// ordering. See `runPlanterDigestSweep`.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -199,7 +223,7 @@ export interface PlanterDigestReport {
  */
 export async function runPlanterDigest(
   deps: PlanterDigestDeps,
-  input: { churchId: string; at: Date }
+  input: { churchId: string; at: Date; anchor: DigestAnchor }
 ): Promise<PlanterDigestReport> {
   const recipients = await deps.listRecipients(input.churchId);
 
@@ -231,7 +255,10 @@ export async function runPlanterDigest(
     const cadence = resolveDigestCadence(
       buildPreferenceMap(byUser.get(recipient.id) ?? [])
     );
-    const period = digestPeriodFor(cadence, input.at);
+    // The CADENCE is the recipient's; the PERIOD it names is the church's. A
+    // daily and a weekly recipient in the same plant land at the same hour on
+    // the same wall clock, and only the weekly one cares about the weekday.
+    const period = digestPeriodFor(cadence, input.anchor, input.at);
 
     const counts = await deps.summarizeOutstanding({
       churchId: input.churchId,
@@ -474,12 +501,106 @@ export const dbPlanterDigestDeps: PlanterDigestDeps = {
   enqueue,
 };
 
-/** The wired-up entrypoint for ONE plant. */
-export function runDailyPlanterDigest(
+/**
+ * WHEN this plant's digests land, read off its own row.
+ *
+ * `digestAnchorFrom` falls back per field rather than throwing, so a church
+ * whose zone is somehow unreadable gets the ruled default — Sunday 16:00 in
+ * `DEFAULT_CHURCH_TIME_ZONE` — instead of costing the tick an exception.
+ */
+export async function loadChurchDigestAnchor(
+  churchId: string
+): Promise<DigestAnchor> {
+  const [row] = await db
+    .select({
+      timeZone: churches.timeZone,
+      digestSendWeekday: churches.digestSendWeekday,
+      digestSendHour: churches.digestSendHour,
+    })
+    .from(churches)
+    .where(eq(churches.id, churchId))
+    .limit(1);
+
+  return digestAnchorFrom(row ?? {});
+}
+
+/**
+ * ONE COHORT: the three columns EXACTLY AS STORED.
+ *
+ * Deliberately the raw row and not a `DigestAnchor`, and the distinction is the
+ * whole reason this type exists. `digestAnchorFrom` COERCES — an unreadable
+ * zone or an out-of-range integer folds to the ruled default — so the anchor a
+ * row produces is not always the row. A cohort has to be both things at once:
+ * the tuple the selection filters `churches` on, and the anchor the period
+ * arithmetic runs on. Keying the cohort by the COERCED anchor and then
+ * filtering with it is a plant that is listed under one cohort and selected by
+ * none, which is a digest owed forever with nothing in any log to say why.
+ *
+ * So the cohort is the raw tuple, and the anchor is derived from it at the two
+ * places that need one. Two rows that coerce alike but store differently are
+ * two cohorts — one extra keyset scan in a case that cannot arise while the
+ * `NOT NULL`s, the `CHECK`s and `isValidTimeZone` hold, which is the right way
+ * round for a guard that exists for the day one of them does not.
+ */
+export type DigestCohort = {
+  timeZone: string;
+  digestSendWeekday: number;
+  digestSendHour: number;
+};
+
+/**
+ * Every distinct cohort a plant is set to — one cheap grouped read per tick.
+ *
+ * It is what makes the sweep's owed-set test survive a per-church send time:
+ * every plant in a cohort shares one pair of dedupe keys, so the selection below
+ * keeps its `IN (two literals)`.
+ *
+ * ORDERED, and that is load-bearing rather than tidy. The tick's budget and
+ * plant ceiling are shared across cohorts, so a cohort the budget never reaches
+ * is a cohort that never shrinks. A stable order plus the rotation in
+ * `runPlanterDigestSweep` is what turns "the tail is never swept" into "every
+ * cohort leads on one tick in every N".
+ */
+export async function listDigestCohorts(): Promise<DigestCohort[]> {
+  return db
+    .selectDistinct({
+      timeZone: churches.timeZone,
+      digestSendWeekday: churches.digestSendWeekday,
+      digestSendHour: churches.digestSendHour,
+    })
+    .from(churches)
+    .orderBy(
+      churches.timeZone,
+      churches.digestSendWeekday,
+      churches.digestSendHour
+    );
+}
+
+/** The wired-up entrypoint for ONE plant, under its own anchor. */
+export async function runDailyPlanterDigest(
   churchId: string,
   at: Date = new Date()
 ): Promise<PlanterDigestReport> {
-  return runPlanterDigest(dbPlanterDigestDeps, { churchId, at });
+  return runPlanterDigest(dbPlanterDigestDeps, {
+    churchId,
+    at,
+    anchor: await loadChurchDigestAnchor(churchId),
+  });
+}
+
+/**
+ * The same run, for a caller that already knows the anchor.
+ *
+ * The sweep does: a cohort IS an anchor, so re-reading it per plant would be a
+ * query for a value the loop is already holding — and, worse, a second chance
+ * for the plant to be selected under one anchor and digested under another.
+ */
+export function runPlanterDigestForChurch(
+  churchId: string,
+  at: Date,
+  anchor: DigestAnchor
+): Promise<PlanterDigestReport> {
+  return runPlanterDigest(dbPlanterDigestDeps, { churchId, at, anchor });
 }
 
 // ----------------------------------------------------------------------------
@@ -521,15 +642,30 @@ export const MAX_PLANTER_DIGEST_SWEEP_PLANTS = 500;
  */
 export const PLANTER_DIGEST_SWEEP_BUDGET_MS = 10_000;
 
+/**
+ * The dispatcher's tick, in milliseconds — every 15 minutes, from
+ * `.github/workflows/notifications-dispatch.yml`.
+ *
+ * Used for ONE thing: rotating which cohort the sweep starts at, so a tick is
+ * the unit the rotation advances in. It is not a schedule this module keeps —
+ * nothing here reads a clock — and a tick that fires late simply rotates to
+ * wherever its own `at` lands.
+ */
+const TICK_MS = 15 * 60_000;
+
 export interface OwedPlanterDigestPageQuery {
-  /** Every dedupe key a current digest could carry — `currentDigestDedupeKeys`. */
-  dedupeKeys: readonly string[];
+  /**
+   * The COHORT this page scans — the three columns as stored. It is both the
+   * filter on `churches` and the thing the two dedupe keys are derived from,
+   * which is deliberate: passing the keys separately would let a caller scan
+   * one cohort while testing another's keys, and every plant in the product
+   * would look owed.
+   */
+  cohort: DigestCohort;
   /** The instant the tick fired; "overdue" and "coming up" are measured from it. */
   at: Date;
-  /** The widest period end of any cadence — see `widestPeriodEnd`. */
-  lookaheadEnd: Date;
   limit: number;
-  /** Keyset anchor: only plants with a GREATER id. `null` starts the scan. */
+  /** Keyset cursor: only plants with a GREATER id. `null` starts the scan. */
   afterChurchId: string | null;
 }
 
@@ -549,11 +685,25 @@ export interface OwedPlanterDigestPageQuery {
 export function plantsOwedPlanterDigestQuery(
   query: OwedPlanterDigestPageQuery
 ) {
+  const { cohort } = query;
+  // Derived from the cohort, never taken alongside it — and derived through the
+  // SAME `digestAnchorFrom` the per-plant run uses, so a plant cannot be
+  // selected under one anchor and digested under another.
+  const anchor = digestAnchorFrom(cohort);
+  const dedupeKeys = currentDigestDedupeKeys(anchor, query.at);
+  const lookaheadEnd = widestPeriodEnd(anchor, query.at);
+
   return db
     .select({ id: churches.id })
     .from(churches)
     .where(
       and(
+        // The cohort, matched on the columns AS STORED. Matching on the coerced
+        // anchor instead would make a row that failed coercion unselectable by
+        // the very cohort it was listed under — see `DigestCohort`.
+        eq(churches.timeZone, cohort.timeZone),
+        eq(churches.digestSendWeekday, cohort.digestSendWeekday),
+        eq(churches.digestSendHour, cohort.digestSendHour),
         exists(
           db
             .select({ one: sql`1` })
@@ -567,7 +717,7 @@ export function plantsOwedPlanterDigestQuery(
                   churches.id,
                   owedDigestMember.id,
                   query.at,
-                  query.lookaheadEnd
+                  lookaheadEnd
                 ),
                 // ...and they hold no LIVE digest row for the current period of
                 // either cadence. Cancelled rows are excluded for the same
@@ -582,7 +732,7 @@ export function plantsOwedPlanterDigestQuery(
                         eq(notifications.churchId, churches.id),
                         eq(notifications.recipientUserId, owedDigestMember.id),
                         eq(notifications.type, PLANTER_DIGEST_TYPE),
-                        inArray(notifications.dedupeKey, [...query.dedupeKeys]),
+                        inArray(notifications.dedupeKey, dedupeKeys),
                         ne(notifications.status, "cancelled")
                       )
                     )
@@ -607,8 +757,14 @@ export async function selectPlantsOwedPlanterDigest(
 }
 
 export interface PlanterDigestSweepDeps {
+  /** Every distinct (zone, weekday, hour) a plant is set to — the cohorts. */
+  listCohorts(): Promise<DigestCohort[]>;
   selectPlantsOwed(query: OwedPlanterDigestPageQuery): Promise<string[]>;
-  runDigest(churchId: string, at: Date): Promise<PlanterDigestReport>;
+  runDigest(
+    churchId: string,
+    at: Date,
+    anchor: DigestAnchor
+  ): Promise<PlanterDigestReport>;
 }
 
 export interface PlanterDigestSweepSummary {
@@ -671,71 +827,106 @@ export async function runPlanterDigestSweep(
     durationMs: 0,
   };
 
-  const dedupeKeys = currentDigestDedupeKeys(options.at);
-  const lookaheadEnd = widestPeriodEnd(options.at);
-  let afterChurchId: string | null = null;
+  let cohorts: DigestCohort[];
+  try {
+    cohorts = await deps.listCohorts();
+  } catch (error) {
+    // "Never throws" has to include the cohort read, and a tick that cannot
+    // read the cohorts has nothing to sweep rather than something to guess at.
+    summary.failed += 1;
+    console.error("[notifications/digest] cohorts failed", { error });
+    summary.durationMs = elapsedMs();
+    return summary;
+  }
 
-  walk: while (summary.plantsScanned < maxPlants) {
-    if (elapsedMs() >= budgetMs) {
-      summary.budgetExhausted = true;
-      break;
-    }
+  // THE COHORT ORDER ROTATES WITH THE TICK, and that is what keeps the sweep's
+  // liveness argument true across cohorts as well as inside one.
+  //
+  // Within a cohort the owed set shrinks monotonically through the period, so a
+  // plant cannot park at the head of a stable ordering (see this module's
+  // header). Across cohorts that argument does not carry: the budget and the
+  // plant ceiling belong to the TICK, so if they run out inside cohort k, then
+  // k+1…n are never reached — and, `listCohorts` being ordered, never reached
+  // on any tick either. A cohort that is never reached never shrinks. Starting
+  // at a different cohort each tick makes every one of them lead once every n
+  // ticks, so the tail is delayed rather than starved.
+  const start =
+    cohorts.length > 0
+      ? Math.floor(options.at.getTime() / TICK_MS) % cohorts.length
+      : 0;
+  const ordered = [...cohorts.slice(start), ...cohorts.slice(0, start)];
 
-    let page: string[];
-    try {
-      page = await deps.selectPlantsOwed({
-        dedupeKeys,
-        at: options.at,
-        lookaheadEnd,
-        limit,
-        afterChurchId,
-      });
-    } catch (error) {
-      // "Never throws" has to include the SELECT.
-      summary.failed += 1;
-      console.error("[notifications/digest] selection failed", {
-        afterChurchId,
-        error,
-      });
-      break;
-    }
+  // ONE COHORT AT A TIME. Each has its own two dedupe keys and its own keyset
+  // cursor; the budget and the plant ceiling are the TICK's and are shared, so
+  // a product with many zones costs the same wall clock as one with a single
+  // zone and simply reaches fewer plants per tick.
+  walk: for (const cohort of ordered) {
+    const anchor = digestAnchorFrom(cohort);
+    let afterChurchId: string | null = null;
 
-    summary.pages += 1;
-    summary.selected += page.length;
-    if (page.length === 0) break;
-
-    for (const churchId of page) {
+    while (summary.plantsScanned < maxPlants) {
       if (elapsedMs() >= budgetMs) {
         summary.budgetExhausted = true;
         break walk;
       }
 
-      // Advances on EVERY plant reached, including one whose digest threw — a
-      // failure must not become a head-of-line block on the plants behind it.
-      afterChurchId = churchId;
-      summary.plantsScanned += 1;
-
+      let page: string[];
       try {
-        const report = await deps.runDigest(churchId, options.at);
-        summary.created += report.created;
-        summary.deduped += report.deduped;
-        summary.quiet += report.quiet;
+        page = await deps.selectPlantsOwed({
+          cohort,
+          at: options.at,
+          limit,
+          afterChurchId,
+        });
       } catch (error) {
+        // "Never throws" has to include the SELECT. The cohort is abandoned,
+        // not the tick: the zones behind it are unrelated plants.
         summary.failed += 1;
-        console.error("[notifications/digest] plant failed", {
-          churchId,
+        console.error("[notifications/digest] selection failed", {
+          cohort,
+          afterChurchId,
           error,
         });
+        continue walk;
       }
 
-      if (summary.plantsScanned >= maxPlants) {
-        summary.budgetExhausted = true;
-        break walk;
+      summary.pages += 1;
+      summary.selected += page.length;
+      if (page.length === 0) break;
+
+      for (const churchId of page) {
+        if (elapsedMs() >= budgetMs) {
+          summary.budgetExhausted = true;
+          break walk;
+        }
+
+        // Advances on EVERY plant reached, including one whose digest threw — a
+        // failure must not become a head-of-line block on the plants behind it.
+        afterChurchId = churchId;
+        summary.plantsScanned += 1;
+
+        try {
+          const report = await deps.runDigest(churchId, options.at, anchor);
+          summary.created += report.created;
+          summary.deduped += report.deduped;
+          summary.quiet += report.quiet;
+        } catch (error) {
+          summary.failed += 1;
+          console.error("[notifications/digest] plant failed", {
+            churchId,
+            error,
+          });
+        }
+
+        if (summary.plantsScanned >= maxPlants) {
+          summary.budgetExhausted = true;
+          break walk;
+        }
       }
+
+      // A short page is the end of THIS cohort's owed set — on to the next.
+      if (page.length < limit) break;
     }
-
-    // A short page is the end of the owed set — nothing further to follow.
-    if (page.length < limit) break;
   }
 
   summary.durationMs = elapsedMs();
@@ -743,11 +934,13 @@ export async function runPlanterDigestSweep(
 }
 
 export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
+  listCohorts: listDigestCohorts,
   selectPlantsOwed: selectPlantsOwedPlanterDigest,
   // The per-plant entrypoint itself, not a second copy of its body: one wiring
   // of `dbPlanterDigestDeps` in the module, so a plant swept and a plant run by
-  // hand cannot be run with different dependencies.
-  runDigest: runDailyPlanterDigest,
+  // hand cannot be run with different dependencies. It takes the COHORT's
+  // anchor rather than re-reading the church row the cursor just walked past.
+  runDigest: runPlanterDigestForChurch,
 };
 
 /**
