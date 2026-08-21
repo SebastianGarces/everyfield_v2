@@ -63,6 +63,22 @@ export const roleUpdateSchema = z.object({
 export type RoleUpdateInput = z.infer<typeof roleUpdateSchema>;
 
 // ============================================================================
+// Responsibility Validations
+// ============================================================================
+
+/**
+ * A checklist item is a LINE OF TEXT and nothing else (#311 WS1). Completion is
+ * not here: it arrives as an argument from a checkbox, never as a form field,
+ * so there is no shape in which a title and a tick can be posted together and
+ * disagree.
+ */
+export const responsibilitySchema = z.object({
+  title: z.string().min(1, "Responsibility is required").max(255),
+});
+
+export type ResponsibilityInput = z.infer<typeof responsibilitySchema>;
+
+// ============================================================================
 // Membership Validations
 // ============================================================================
 

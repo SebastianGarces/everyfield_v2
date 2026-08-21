@@ -83,6 +83,19 @@ tenant scope; `created_at`/`updated_at` default now.
   Read only through `buildResponseBreakdown` (`lib/meetings/response-card.ts`), which reports
   `notRecordedCount` separately. One upserted row per (meeting, person),
   `meeting_responses_meeting_person_unique`, so a double submit cannot double-count.
+- **`ministry_teams.responsibilities_seeded_at` is a CLAIM, not a timestamp anybody reads**
+  (`ministry-teams.ts`, #311): NULL = this team has never been offered its Launch Playbook
+  checklist, and stamping it is what makes the offer once-ever. Written by ONE compare-and-set in
+  `seedPlaybookResponsibilities`, whose `WHERE` also demands a `template_key` — so a custom team is
+  never claimed and its stamp is NULL forever, saying something true. `team_responsibilities` rows
+  carry no seed key on purpose: an arbiter on the rows only sees rows that still exist, so a
+  deleted playbook item would return on the next page load. Full rule: `../invariants.md` →
+  Ministry Teams.
+- **`team_responsibilities.completed_at` is the ONLY completion field** (`ministry-teams.ts`,
+  #311): `completed_at IS NOT NULL` is the whole answer, asked through `isResponsibilityComplete`.
+  There is no `completed` boolean beside it, so the contradictory pair cannot be written; the
+  action takes a `complete` flag and the service derives the timestamp, so no caller names a
+  completion time of its own.
 - **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation** — the
   invitee had no account when the admin typed `invitee_email`. `bindOpenInvitationTarget`
   (`src/lib/invitations/core.ts`) fills it in at registration, and its compare-and-set is what

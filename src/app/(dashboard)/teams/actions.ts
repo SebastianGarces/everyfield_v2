@@ -20,6 +20,9 @@ import {
   importRoleTemplates,
   assignMember,
   removeMember,
+  createResponsibility,
+  updateResponsibility,
+  deleteResponsibility,
   createTrainingProgram,
   markTrainingComplete,
 } from "@/lib/ministry-teams/service";
@@ -44,6 +47,7 @@ import {
   teamUpdateSchema,
   roleCreateSchema,
   roleUpdateSchema,
+  responsibilitySchema,
   memberAssignSchema,
   trainingProgramCreateSchema,
   trainingCompleteSchema,
@@ -53,6 +57,7 @@ import type {
   MinistryTeam,
   TeamRole,
   TeamMembership,
+  TeamResponsibility,
   TrainingProgram,
   TrainingCompletion,
 } from "@/db/schema";
@@ -328,6 +333,99 @@ export async function importRoleTemplatesAction(
       );
       revalidateTeamSurfaces();
       return { success: true, data: roles };
+    }
+  );
+}
+
+// ============================================================================
+// Responsibility Actions (MT-002b)
+// ============================================================================
+//
+// There is no LIST action here: the responsibilities tab is a server component
+// and calls `listResponsibilities` directly — a read with no caller does not
+// get an endpoint. The seed rides on that read, so it is not an endpoint
+// either, which is the point: nothing a POST can reach decides whether a team
+// has been offered its playbook.
+
+export async function createResponsibilityAction(
+  teamId: string,
+  formData: FormData
+): Promise<ActionResult<TeamResponsibility>> {
+  return withChurch(
+    "teams.write",
+    "Failed to add responsibility",
+    async ({ churchId, userId }) => {
+      const parsed = responsibilitySchema.safeParse(formEntries(formData));
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+
+      const responsibility = await createResponsibility(
+        churchId,
+        teamId,
+        userId,
+        parsed.data
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: responsibility };
+    }
+  );
+}
+
+export async function updateResponsibilityAction(
+  responsibilityId: string,
+  formData: FormData
+): Promise<ActionResult<TeamResponsibility>> {
+  return withChurch(
+    "teams.write",
+    "Failed to update responsibility",
+    async ({ churchId }) => {
+      const parsed = responsibilitySchema.safeParse(formEntries(formData));
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+
+      const responsibility = await updateResponsibility(
+        churchId,
+        responsibilityId,
+        parsed.data
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: responsibility };
+    }
+  );
+}
+
+/**
+ * Tick a responsibility off, or reopen it. The COMPLETE/NOT flag is the whole
+ * argument — `completed_at` is derived from it in the service, so a caller can
+ * never post a completion time of its own choosing.
+ */
+export async function setResponsibilityCompleteAction(
+  responsibilityId: string,
+  completed: boolean
+): Promise<ActionResult<TeamResponsibility>> {
+  return withChurch(
+    "teams.write",
+    "Failed to update responsibility",
+    async ({ churchId }) => {
+      const responsibility = await updateResponsibility(
+        churchId,
+        responsibilityId,
+        { completed }
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: responsibility };
+    }
+  );
+}
+
+export async function deleteResponsibilityAction(
+  responsibilityId: string
+): Promise<ActionResult> {
+  return withChurch(
+    "teams.write",
+    "Failed to delete responsibility",
+    async ({ churchId }) => {
+      await deleteResponsibility(churchId, responsibilityId);
+      revalidateTeamSurfaces();
+      return { success: true, data: undefined };
     }
   );
 }
