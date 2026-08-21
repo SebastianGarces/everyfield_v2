@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#480 — Limited visibility posture (C11) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 11 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #480 — Unshared plants read "Limited visibility", never "On track"
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C11</span>
+          <span class="chip chip-keep">Ruling: accept</span>
+          <span class="chip chip-change">4th posture + UI</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          Bryan's fear is not hypothetical — it is the current behavior,
+          verified: the classifier sees only privacy-gated insights, so a plant
+          sharing nothing falls through every check and returns
+          <code>on-track</code>. Silence currently reads as health.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span><span class="done">479 ✓</span
+          ><span class="now">480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · Today, verified</h2>
+        <p class="text-secondary mb-4 text-sm">
+          <code>classifyPlantHealth</code>
+          (<code>phase-engine/oversight/read.ts</code>) is pure and deliberately
+          fed only the network insights that survived privacy gating. Postures:
+          <code>on-track</code> · <code>watch</code> · <code>readiness</code>. A
+          fully-private plant has zero visible insights and no escalating launch
+          state → <code>on-track</code>. The classifier cannot tell "nothing
+          wrong" from "nothing visible" — the caller never tells it anything was
+          withheld.
+        </p>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            I would not want absence of warning signs to accidentally look like
+            an "on track" signal.
+            <span class="text-muted">— Bryan, C11</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · The design</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.1 · A fourth posture, with a precedence rule
+        </h3>
+        <div class="card mb-5 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              <code>PlantHealthClassification</code> gains
+              <code>limited-visibility</code>. The classifier learns what was
+              withheld: callers pass the gating outcome (shared features / count
+              of insights hidden by gating) alongside the visible insights.
+            </li>
+            <li>
+              <strong>Precedence: real signals still win.</strong>
+              <code>readiness</code> and <code>watch</code> fire from visible
+              insights exactly as today — a visible critical is a readiness
+              conversation regardless of what else is hidden. What
+              <code>limited-visibility</code> replaces is the
+              <em>on-track claim</em>: when anything was withheld by gating, or
+              no assessment-bearing category is shared at all, the plant can
+              never read "on track."
+            </li>
+            <li>
+              Order: <code>readiness</code> → <code>watch</code> →
+              <code>limited-visibility</code> → <code>on-track</code>.
+            </li>
+          </ul>
+        </div>
+
+        <h3 class="mb-2 text-base font-semibold">2.2 · The surfaces</h3>
+        <ul class="mb-5 list-disc space-y-1 pl-5 text-sm">
+          <li>
+            Portfolio views (plants directory, plant-health portfolio): a
+            neutral "Limited visibility" badge — visually distinct from the
+            three health postures, not a warning color; silence is a fact, not a
+            fault.
+          </li>
+          <li>
+            Plant detail: the posture line reads Bryan's wording — "Plant has
+            chosen not to share assessment data." — beside the existing
+            explain-why empty states (OV-002 already explains per-section
+            gating; this is the portfolio-level companion).
+          </li>
+          <li>
+            Oversight digest/summary surfaces reuse the same posture value — one
+            vocabulary (`health-presentation.ts`).
+          </li>
+        </ul>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.3 · Rubric v1 §7 delta (into the D0 draft)
+        </h3>
+        <div class="card p-5">
+          <p class="text-sm">
+            The posture vocabulary becomes four-valued, and the rule is stated:
+            a plant that shares no assessment data (or whose gating withholds
+            observations) is presented as
+            <strong>Limited visibility</strong> — never On track, Worth a look,
+            or Readiness focus on the strength of silence. The v0 "please
+            confirm" on the privacy trade is answered in the text: the trade
+            stands (privacy wins), and this posture is its honest label.
+            Escalations from visible data still apply.
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          D1 · Confirm the precedence rule
+          <span class="chip chip-change ml-1">confirm</span>
+        </h2>
+        <form
+          class="decision-form"
+          data-lavish-question="d1-precedence"
+          onsubmit="queueDecision(event, 'D1 — posture precedence')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="escalations win: readiness/watch from visible data still show; limited-visibility only replaces on-track"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Escalations win (recommended).</strong
+                >
+                A visible high/critical still reads "Readiness focus" — real,
+                shared signals deserve attention. Limited visibility replaces
+                only the on-track claim.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="limited-visibility always wins when anything is withheld"
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Limited visibility always wins.</strong
+                >
+                Any withholding blanks the posture entirely — simpler to
+                explain, but hides a real visible escalation from the portfolio
+                view.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Classifier.</strong>
+              <code>classifyPlantHealth</code> gains the gating context input
+              and the <code>limited-visibility</code> value with D1 precedence;
+              stays pure; unit tests cover all-private, partially-gated,
+              visible-critical-while-gated, and nothing-withheld cases.
+            </li>
+            <li>
+              <strong>AC-2 Callers.</strong> Every caller passes the real gating
+              outcome — a caller that cannot say what was withheld may not claim
+              on-track (compile-enforced by the new signature).
+            </li>
+            <li>
+              <strong>AC-3 UI.</strong> Portfolio badge (neutral styling) +
+              plant-detail line with Bryan's wording;
+              <code>health-presentation.ts</code> carries the one label
+              vocabulary; digest surfaces inherit it.
+            </li>
+            <li>
+              <strong>AC-4 Rubric.</strong> The D0 draft's §7 states the
+              four-posture vocabulary and the never-on-track-from-silence rule;
+              the v0 "please confirm" placeholder is resolved in text.
+            </li>
+            <li>
+              <strong>AC-5 Works.</strong> Browser validation on the preview: an
+              all-private plant shows "Limited visibility" in the directory and
+              the detail wording; a shared plant with no elevated insights still
+              shows "On track."
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">4 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>No forcing of assessment sharing (issue's own guard).</li>
+            <li>
+              The 30-day readiness escalation trigger (time + gaps compound) —
+              #486.
+            </li>
+            <li>Sharing defaults and consent — #479 (ledger row 187).</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-480"
+          onsubmit="queueDecision(event, '#480 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #480 with my D1 answer"
+                checked
+              />
+              <span>Approve — file the spec into #480 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>phase-engine/oversight/read.ts</code>
+        (classifyPlantHealth falls through to on-track; callers pass only
+        gated-surviving insights; CATEGORY_PRIVACY_FEATURE mapping) ·
+        <code>health-presentation.ts</code> · oversight FRD OV-002. Filed:
+        #470–#479 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

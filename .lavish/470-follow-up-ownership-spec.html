@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#470 — Follow-up ownership (C01/C13) — full spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #181d19;
+        --color-cream: #fbf8ea;
+        --color-card: #fffef6;
+        --color-green: #1ce362;
+        --color-field: #0b7a3f;
+        --color-danger: #b4432f;
+        --color-secondary: #4e584f;
+        --color-muted: #616b62;
+        --color-hairline: rgba(24, 29, 25, 0.12);
+        --color-edge: rgba(24, 29, 25, 0.3);
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #fbf8ea;
+        color: #181d19;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(24, 29, 25, 0.3);
+        background: #fffef6;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #fbf8ea;
+        color: #0b7a3f;
+        border-color: #0b7a3f;
+      }
+      .chip-add {
+        background: #1ce362;
+        color: #181d19;
+        border-color: #181d19;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .card {
+        background: #fffef6;
+        border: 1px solid rgba(24, 29, 25, 0.3);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(24, 29, 25, 0.06);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #4e584f;
+        border-bottom: 1px solid rgba(24, 29, 25, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(24, 29, 25, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .mermaid {
+        background: #fffef6;
+        border: 1px solid rgba(24, 29, 25, 0.12);
+        padding: 0.75rem;
+        overflow-x: auto;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(24, 29, 25, 0.2);
+        color: #616b62;
+        background: #fffef6;
+      }
+      .queue-strip span.done {
+        background: #f2fbe9;
+        color: #0b7a3f;
+        border-color: #0b7a3f;
+      }
+      .decided {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 0.35rem 0.9rem;
+        font-size: 0.92rem;
+      }
+      .decided dt {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: #0b7a3f;
+        padding-top: 0.1rem;
+        white-space: nowrap;
+      }
+      .decided dd {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-8">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 1 of 18 · Final
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #470 — Follow-up ownership: stop inferring the planter is the
+          bottleneck
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C01 + C13</span>
+          <span class="chip chip-keep">All decisions ruled</span>
+          <span class="chip chip-add">Filed · agent:queued</span>
+        </div>
+        <div class="card p-4 text-sm">
+          <strong class="display">Done.</strong> The spec below is written into
+          <a
+            class="underline"
+            href="https://github.com/SebastianGarces/everyfield_v2/issues/470"
+            >issue #470</a
+          >, label flipped <code>needs-spec</code> → <code>agent:queued</code>.
+          This page stays as the session record. Next up:
+          <strong>#471 — stalled growth is 28 days (C02)</strong>.
+        </div>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ownership ✓</span><span>471 stall 28d</span
+          ><span>472 benchmarks</span><span>473 cohesion</span
+          ><span>474 prayer</span><span>475 generosity</span
+          ><span>476 60-day signal</span><span>477 P1 cluster</span
+          ><span>478 1+2 budget</span><span>479 sharing lang</span
+          ><span>480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="card mb-10 p-6">
+        <h2 class="mb-3 text-lg font-semibold">Decision record (2026-08-20)</h2>
+        <dl class="decided">
+          <dt>D0</dt>
+          <dd>
+            <strong>Draft rubric-v1, flip once.</strong> Every sub-issue edits a
+            draft <code>rubric-v1.md</code> + a registered-but-inactive
+            <code>RUBRIC_V1_BODY</code>; a final activation issue flips
+            <code>ACTIVE_RUBRIC_VERSION</code>.
+          </dd>
+          <dt>D1</dt>
+          <dd>
+            <strong>Ownership lives on the follow-up task</strong>, using the
+            existing <code>tasks.assignedToId</code>. No new column. Task
+            ownership, not ownership of the relationship — the CRM person record
+            is untouched.
+          </dd>
+          <dt>D2</dt>
+          <dd>
+            <strong>Committed statuses only, enforced in the write path</strong>
+            (<code>core_group</code> / <code>launch_team</code> /
+            <code>leader</code> on the assignee's linked person row).
+          </dd>
+          <dt>D3</dt>
+          <dd>
+            <strong>Copy approved</strong>; the network line ends at "…worth a
+            coaching conversation."
+          </dd>
+          <dt>D4</dt>
+          <dd>
+            <strong>Task page, not people page</strong> — Assigned To on the
+            follow-up task view, assignments-across-all-tasks view, "needs
+            owner" banner.
+          </dd>
+          <dt>D5</dt>
+          <dd>
+            <strong>One issue, sequenced PRs.</strong> PR 1: rubric v1 Lens 2
+            text. PR 2: guard + views + facts + measured arm.
+          </dd>
+          <dt>Q1</dt>
+          <dd>
+            <strong>One-click create-and-assign.</strong> Stale contacts with no
+            open follow-up task appear in the "Needs owner" group; one click
+            creates the task and opens the assignee select.
+          </dd>
+          <dt>Q2</dt>
+          <dd>
+            <strong>Inline dialog on demotion.</strong> Status change out of the
+            committed set asks "This member owns N open follow-ups — who should
+            receive them?" One select, all move together; skippable (skipped
+            tasks land in "Needs owner").
+          </dd>
+        </dl>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · The settled design</h2>
+        <p class="text-secondary mb-4 text-sm">
+          A follow-up "has a clear owner" when an open task
+          (<code>category='follow_up'</code>,
+          <code>relatedType='person'</code>) exists for that contact with
+          <code>assignedToId</code> set to a live, still-committed member.
+          Owners are accounts — coherent with the seat chain (#495 merged,
+          #497/#500 queued). Every seat-holder already has a person row with
+          status <code>leader</code> (<code>account-person.ts</code>, verified),
+          so the D2 guard passes for seat-holders until a demotion.
+        </p>
+
+        <pre class="mermaid">
+flowchart LR
+  P["persons<br/>(open follow-up statuses)"] -->|"updatedAt → staleness"| S["FollowUpSignals"]
+  T["tasks category=follow_up<br/>assignedToId → users"] ==>|"NEW: ownership facts"| S
+  S --> F["fact snapshot<br/>(deterministic)"] --> J["LLM judge<br/>+ rubric v1"] --> I["Lens 2 insight"]
+  G["write-path guard:<br/>assignee's person is committed"] -.-> T
+        </pre>
+
+        <h3 class="mt-6 mb-2 text-base font-semibold">
+          1.1 · New deterministic facts (<code>FollowUpSignals</code>)
+        </h3>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Fact</th>
+                <th>Definition</th>
+                <th>Phrase</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>unownedCount</code></td>
+                <td>
+                  Open follow-up contacts with no open, assigned follow-up task
+                  — covers "task unassigned" and "no task at all."
+                </td>
+                <td>"4 follow-ups have no clear owner"</td>
+              </tr>
+              <tr>
+                <td><code>staleUnownedCount</code></td>
+                <td>Stale ∩ unowned.</td>
+                <td>"3 stale follow-ups have no owner"</td>
+              </tr>
+              <tr>
+                <td><code>distinctOwnerCount</code></td>
+                <td>
+                  Distinct <code>assignedToId</code> across open follow-up
+                  tasks.
+                </td>
+                <td>"follow-up is spread across 5 people"</td>
+              </tr>
+              <tr>
+                <td><code>planterOwnedCount</code></td>
+                <td>
+                  Open follow-up tasks assigned to the Owner-seat account.
+                </td>
+                <td>"you own 6 of the 9 open follow-ups"</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt-6 mb-2 text-base font-semibold">
+          1.2 · Lens 2 copy — final
+        </h3>
+        <div class="card p-5">
+          <p class="mb-2 text-sm">
+            <span class="chip chip-keep mr-1">planter · unmeasured</span>
+            "8 follow-ups are currently stale. Make sure each one has a clear
+            owner and reconnect with them this week."
+          </p>
+          <p class="mb-2 text-sm">
+            <span class="chip chip-keep mr-1">planter · measured</span>
+            "You own 6 of the 9 open follow-ups. Handing some to committed
+            members spreads ownership of growth — the second Critical Success
+            Factor."
+          </p>
+          <p class="text-sm">
+            <span class="chip chip-keep mr-1">network</span>
+            "Several follow-ups have been waiting longer than the follow-up
+            window. This may be worth a coaching conversation."
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-2 text-xl font-semibold">
+          2 · Acceptance criteria — as filed
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Guard.</strong> Assigning a follow-up task requires a
+              committed-status assignee; write path, church-scoped.
+            </li>
+            <li>
+              <strong>AC-2 Task view.</strong> Follow-up task view exposes
+              changing Assigned To, filtered to eligible assignees.
+            </li>
+            <li>
+              <strong>AC-3 Assignments view.</strong> /tasks group-by-assignee;
+              "Needs owner" pinned first; stale contacts with no task get
+              one-click create-and-assign.
+            </li>
+            <li>
+              <strong>AC-4 Banner.</strong> "N follow-ups need an owner" on
+              /tasks, linking to the group.
+            </li>
+            <li>
+              <strong>AC-5 Demotion flow.</strong> Inline reassignment dialog;
+              declining leaves tasks in "Needs owner."
+            </li>
+            <li>
+              <strong>AC-6 Facts.</strong> Four new facts + phrases + tests;
+              demoted/removed owner counts as unowned.
+            </li>
+            <li>
+              <strong>AC-7 Rubric.</strong> Draft rubric-v1 carries the Lens 2
+              text; the v0 bottleneck line is absent.
+            </li>
+            <li>
+              <strong>AC-8 Network guard.</strong> Pattern + coaching pointer;
+              never a name, never a cause.
+            </li>
+            <li>
+              <strong>AC-9 Works.</strong> Browser validation on the preview +
+              fact-snapshot test to the judge prompt.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Session record · filed 2026-08-20 to
+        <a
+          class="underline"
+          href="https://github.com/SebastianGarces/everyfield_v2/issues/470"
+          >#470</a
+        >
+        · decisions ruled by Sebastian in this Lavish session · verified
+        sources: <code>rubric.ts</code>, <code>signals/queries.ts</code>,
+        <code>fact-phrases.ts</code>, <code>schema/people.ts</code>,
+        <code>schema/tasks.ts</code>, <code>task-form.tsx</code>,
+        <code>account-person.ts</code>.
+      </footer>
+    </main>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+      const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const paint = document.createElement("canvas").getContext("2d");
+      function toRgba(color) {
+        paint.clearRect(0, 0, 1, 1);
+        paint.fillStyle = "#000";
+        paint.fillStyle = color;
+        paint.fillRect(0, 0, 1, 1);
+        return paint.getImageData(0, 0, 1, 1).data;
+      }
+      function compositeRgba(fg, bg) {
+        const fa = fg[3] / 255;
+        const ba = bg[3] / 255;
+        const a = fa + ba * (1 - fa);
+        if (a === 0) return [0, 0, 0, 0];
+        return [
+          (fg[0] * fa + bg[0] * ba * (1 - fa)) / a,
+          (fg[1] * fa + bg[1] * ba * (1 - fa)) / a,
+          (fg[2] * fa + bg[2] * ba * (1 - fa)) / a,
+          a * 255,
+        ];
+      }
+      function pageIsDark() {
+        const root = document.documentElement;
+        const rb = toRgba(getComputedStyle(root).backgroundColor);
+        const bb = document.body
+          ? toRgba(getComputedStyle(document.body).backgroundColor)
+          : [0, 0, 0, 0];
+        const [r, g, b, a] = compositeRgba(bb, rb);
+        if (a > 0) return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+        const cs = getComputedStyle(root).colorScheme;
+        if (cs.includes("dark") && !cs.includes("light")) return true;
+        if (cs.includes("light") && !cs.includes("dark")) return false;
+        return darkQuery.matches;
+      }
+      const diagrams = [...document.querySelectorAll(".mermaid")].map((el) => ({
+        el,
+        src: el.textContent,
+      }));
+      let applied;
+      let rendering = false;
+      let queued = false;
+      function queueRender() {
+        queued = true;
+        if (rendering) return;
+        void render();
+      }
+      async function render() {
+        rendering = true;
+        try {
+          while (queued) {
+            queued = false;
+            const theme = pageIsDark() ? "dark" : "default";
+            if (theme === applied) continue;
+            mermaid.initialize({
+              startOnLoad: false,
+              theme,
+              securityLevel: "strict",
+            });
+            for (const { el, src } of diagrams) {
+              el.removeAttribute("data-processed");
+              el.textContent = src;
+            }
+            try {
+              await mermaid.run({ nodes: diagrams.map((d) => d.el) });
+            } catch (error) {
+              console.error("Mermaid diagram render failed:", error);
+              return;
+            }
+            applied = theme;
+          }
+        } finally {
+          rendering = false;
+          if (queued) queueRender();
+        }
+      }
+      if (document.readyState === "complete") queueRender();
+      else window.addEventListener("load", queueRender, { once: true });
+      const themeObserver = new MutationObserver(queueRender);
+      for (const el of [document.documentElement, document.body]) {
+        if (!el) continue;
+        themeObserver.observe(el, {
+          attributes: true,
+          attributeFilter: ["data-theme", "class", "style"],
+        });
+      }
+      document.addEventListener("change", queueRender, true);
+      document.addEventListener(
+        "transitionend",
+        ({ propertyName }) => {
+          if (propertyName === "background-color") queueRender();
+        },
+        true
+      );
+      darkQuery.addEventListener("change", queueRender);
+    </script>
+  </body>
+</html>

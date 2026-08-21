@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#475 — Split Generosity from Financial Readiness (C06) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      textarea.copybox {
+        width: 100%;
+        min-height: 7rem;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        color: #ece9db;
+        padding: 0.6rem 0.75rem;
+        font-family: "Newsreader", serif;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 6 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #475 — Generosity and Financial Readiness are two questions
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C06 + C21</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-change">Split the scores</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          Solvent-from-outside with a core that doesn't give, and a giving core
+          that isn't solvent — both real (Bryan lives the second one). Until the
+          finance feature (#114) exists, both halves are attestations, scored
+          separately, never collapsed into "finances in place."
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="now">475 generosity</span
+          ><span>476 60-day signal</span><span>477 P1 cluster</span
+          ><span>478 1+2 budget</span><span>479 sharing lang</span
+          ><span>480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · Today, verified</h2>
+        <p class="text-secondary mb-4 text-sm">
+          Lens 6 feeds on one toggle — <code>financial_base_established</code>
+          ("Initial funding and a giving plan are established") — which is
+          <em>both</em> questions fused. That key is also a phase-gate input in
+          <code>exit-criteria.ts</code>, which matters for how we split.
+        </p>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            We want to grow in plant ownership but we are in year 2 and people
+            give sacrificially but we arent solvent yet.
+            <span class="text-muted">— Bryan, C06</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · The design</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D1 · One lens or two?
+          <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          The 8 CSFs are the Playbook's list, and <code>generosity</code> is a
+          persisted category slug (scorecard, judge enum — same shape as the
+          #473 rename). Splitting into a ninth category breaks the "8 CSF" frame
+          everywhere it appears; keeping one lens with two separately-scored
+          signals keeps the frame and still forbids the collapse.
+        </p>
+        <form
+          class="decision-form mb-6"
+          data-lavish-question="d1-lens-shape"
+          onsubmit="queueDecision(event, 'D1 — lens shape')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="one lens, two separately-scored signals (Generosity & Financial Readiness)"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >One lens, two scored signals (recommended).</strong
+                >
+                CSF-6 keeps its slug; the rubric heading becomes "Generosity
+                &amp; Financial Readiness" and the judge must assess and phrase
+                the two separately, never as one verdict. The scorecard stays 8
+                chips.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="two lenses (9 categories, slug + scorecard change)"
+              />
+              <span
+                ><strong class="display text-sm">Two lenses.</strong> A ninth
+                category (<code>financial_readiness</code>): enum + scorecard +
+                oversight mappings change, and "the 8 CSFs" copy needs reframing
+                everywhere it appears.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.1 · The attestation split
+        </h3>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Question</th>
+                <th>Attestation</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>Generosity</strong> — is the core learning to give
+                  sacrificially?
+                </td>
+                <td>
+                  <strong>New</strong> toggle <code>core_group_giving</code>. A
+                  rhythm-shaped claim, so it joins the #474 reaffirm set (30-day
+                  window, inline "still true?" chip).
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Financial readiness</strong> — enough money/support to
+                  launch and sustain?
+                </td>
+                <td>
+                  The existing <code>financial_base_established</code> toggle,
+                  <strong>key unchanged</strong> (it feeds phase gates), with
+                  label/clause tightened to solvency-only so it stops implying
+                  the core gives.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-secondary mb-4 text-sm">
+          Mechanism note: #474 introduces the per-signal reaffirm window in the
+          vocabulary. This issue reuses it (sets the window on
+          <code>core_group_giving</code>) — sequencing: #474 lands first, or the
+          two PRs share the mechanism commit.
+        </p>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D2 · Copy <span class="chip chip-change ml-1">edit or approve</span>
+        </h3>
+        <form
+          class="decision-form mb-2"
+          data-lavish-question="d2-copy"
+          onsubmit="queueCopy(event)"
+        >
+          <textarea class="copybox" name="copy">
+core_group_giving (NEW · 30-day reaffirm)
+  label: "Core group giving sacrificially"
+  description: "People in your core group are learning to give sacrificially and regularly."
+  clause: "your core group is giving sacrificially"
+
+financial_base_established (EXISTING KEY · label tightened)
+  label: "Launch funding viable"
+  description: "Funds and support available now are enough to launch and sustain ministry."
+  clause: "your launch funding is viable"</textarea
+          >
+          <div class="mt-3">
+            <button type="submit" class="qbtn">Queue D2 copy</button>
+            <span class="queued-note ml-2">Queued ✓</span>
+          </div>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Rubric v1 Lens 6 delta (into the D0 draft)
+        </h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              Two named signals with their own healthy lines: generosity (giving
+              culture) and financial readiness (launch solvency).
+            </li>
+            <li>
+              The judge assesses each on its own evidence and
+              <strong>never collapses them</strong>: outside-funded solvency
+              does not make generosity healthy; a giving core does not make the
+              budget viable.
+            </li>
+            <li>
+              "financial base not yet confirmed — Generosity and 'finances in
+              place' are both launch gates" (the fused v0 line) is deleted.
+            </li>
+            <li>
+              Unanswered = unknown, never healthy (local rule; the vocabulary is
+              #483). Stale <code>core_group_giving</code> is cited with its age,
+              like prayer.
+            </li>
+            <li>
+              A forward note: measured scoring (who gives, how often) arrives
+              with #114 — the rubric names what it will feed on so the lens
+              upgrades without redesign.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          4 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Vocabulary.</strong>
+              <code>core_group_giving</code> added to
+              <code>MANUAL_SIGNALS</code> (D2 copy) with the 30-day reaffirm
+              window; <code>financial_base_established</code> keeps its key,
+              gets the tightened label/description/clause.
+            </li>
+            <li>
+              <strong>AC-2 Gates unchanged.</strong> Phase gates reading
+              <code>financial_base_established</code> still pass/fail
+              identically — a test asserts the gate reads the same key.
+            </li>
+            <li>
+              <strong>AC-3 Rubric.</strong> The D0 draft carries the Lens 6
+              delta (§3); the fused v0 line is absent; the two signals are never
+              one verdict.
+            </li>
+            <li>
+              <strong>AC-4 Facts + phrases.</strong> Both signals cited by their
+              clauses; <code>core_group_giving</code> age exposed like the
+              prayer signals; tests updated.
+            </li>
+            <li>
+              <strong>AC-5 Works.</strong> Preview: both toggles visible and
+              answerable; snapshot test proves both reach the judge prompt as
+              separate facts.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">5 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>No finance feature — measured scoring waits for #114.</li>
+            <li>No schema change; no slug change (assuming D1 = one lens).</li>
+            <li>
+              The attestation card grows by one toggle — the page-layout answer
+              is #533, not here.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-475"
+          onsubmit="queueDecision(event, '#475 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #475 with my D1/D2 answers"
+                checked
+              />
+              <span>Approve — file the spec into #475 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>manual-signals.ts</code> (financial_base_established
+        copy) · <code>exit-criteria.ts</code> (gate reads the key) ·
+        <code>rubric.ts</code> CSF-6. Filed: #470–#474 ✓ · new: #533 (/phase
+        layout), #534 (prayer beyond toggles).
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+      function queueCopy(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const value = new FormData(form).get("copy");
+        window.lavish.queuePrompt(
+          "D2 — approved attestation copy (use exactly this):\n" + value,
+          {
+            tag: "decision",
+            text: "D2 attestation copy approved/edited",
+            element: form,
+            queueKey: "d2-copy",
+            data: { question: "d2-copy", answer: value },
+          }
+        );
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

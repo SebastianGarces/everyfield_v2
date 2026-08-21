@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#473 — Rename Unity (C04) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .badquote {
+        border-left: 3px solid #e0705a;
+        padding-left: 1rem;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 4 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #473 — Lens 4 stops being called "Unity"
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C04</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-change">Rename across the board</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          Attendance can speak to cohesion; it cannot prove unity. The lens
+          keeps its signals and loses its name. Two decisions below: the new
+          name, and how deep the rename goes.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="now">473 cohesion</span
+          ><span>474 prayer</span><span>475 generosity</span
+          ><span>476 60-day signal</span><span>477 P1 cluster</span
+          ><span>478 1+2 budget</span><span>479 sharing lang</span
+          ><span>480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          1 · Where "Unity" lives — full inventory, verified
+        </h2>
+        <p class="text-secondary mb-4 text-sm">
+          The good news first: <strong>zero</strong> persisted
+          <code>unity</code> insight rows in the database, and
+          <strong>zero</strong> wiki articles mention it (live queries). The
+          rename is a code + docs sweep with no data burden.
+        </p>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Surface</th>
+                <th>Occurrences</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>The slug</strong> (persisted vocabulary)</td>
+                <td>
+                  <code>judge/schema.ts:38</code> — <code>"unity"</code> in the
+                  insight-category enum; written into
+                  <code>plant_insights.category</code> on future assessments.
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Scorecard + mappings</strong></td>
+                <td>
+                  <code>assessment/queries.ts:229,273,275</code> (category list
+                  + display "Unity");
+                  <code>phase-engine/oversight/read.ts:128</code>
+                  (<code>unity: "people"</code> icon mapping).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Rubric</strong></td>
+                <td>
+                  <code>rubric.ts:56</code> "CSF-4 · Unity";
+                  <code>rubric-v0.md</code> Lens 4 + the Appendix B sample
+                  "Unity is fragile in this phase" (the copy Bryan flagged).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Marketing fixtures</strong></td>
+                <td>
+                  <code>csf-fixture.ts:100–102</code>,
+                  <code>network-health-fixture.ts:66–77</code> ("spiritual
+                  unity" prose + fixture insight).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Other docs</strong></td>
+                <td>
+                  <code>progress-dashboard/frd.md:127,387</code> (CSF bar + 4
+                  C's mapping table). <code>CONTEXT.md</code> has no entry for
+                  the lens — the glossary gains one either way.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            Maybe this lens is better called Core Group Cohesion or Engagement,
+            and actual unity remains something assessed relationally by the
+            planter/coach.
+            <span class="text-muted">— Bryan, C04</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · Decisions</h2>
+
+        <h3 class="mt-4 mb-2 text-base font-semibold">
+          D1 · The name <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          Bryan offered both. "Engagement" collides with two things we already
+          say: "breadth of engagement" is one of this very lens's signals, and
+          "engagement" is scattered through marketing copy — the same word
+          naming a lens and a signal inside it would blur. "Cohesion" names the
+          group property the attendance signals actually approximate, and it is
+          the word Bryan led with.
+        </p>
+        <form
+          class="decision-form mb-6"
+          data-lavish-question="d1-lens-name"
+          onsubmit="queueDecision(event, 'D1 — Lens 4 name')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="Cohesion (slug cohesion, rubric heading Core Group Cohesion)"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Cohesion (recommended).</strong
+                >
+                Scorecard/UI label "Cohesion"; rubric heading "CSF-4 · Core
+                Group Cohesion"; slug <code>cohesion</code>.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="Engagement (slug engagement)"
+              />
+              <span
+                ><strong class="display text-sm">Engagement.</strong> Label
+                "Engagement"; slug <code>engagement</code>.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D2 · How deep <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          The slug is part of the persisted vocabulary. With zero existing rows
+          and no production database yet, a full rename costs one enum edit plus
+          a defensive <code>UPDATE</code> migration — and the codebase never
+          carries two words for one lens.
+        </p>
+        <form
+          class="decision-form mb-2"
+          data-lavish-question="d2-rename-depth"
+          onsubmit="queueDecision(event, 'D2 — rename depth')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="full rename: slug + display + defensive UPDATE migration"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Full rename (recommended).</strong
+                >
+                Slug, display names, rubric, fixtures, docs — plus a
+                one-statement migration updating any stray
+                <code>plant_insights.category = 'unity'</code> rows. One
+                vocabulary everywhere.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="display-only: slug stays unity internally"
+              />
+              <span
+                ><strong class="display text-sm">Display-only.</strong> Slug
+                stays <code>unity</code>; every human-visible string renames.
+                Smaller diff, permanent code-vs-screen mismatch.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D2 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · The design (assuming D1 = Cohesion, D2 = full)
+        </h2>
+        <div class="card mb-5 p-5">
+          <p class="display text-field mb-2 text-xs tracking-wider uppercase">
+            Rubric v1 Lens 4 delta (into the D0 draft)
+          </p>
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              Heading: "CSF-4 · Core Group Cohesion". Signals unchanged —
+              meeting cadence, attendance consistency, engagement breadth.
+            </li>
+            <li>
+              A one-line note Bryan asked for in spirit:
+              <em
+                >actual unity is a relational judgment for the planter and
+                coach; this lens reads attendance-shaped signals only.</em
+              >
+            </li>
+            <li>
+              The "Unity is fragile in this phase" sample copy is deleted;
+              cohesion copy names the measured pattern (attendance drop), never
+              a spiritual state.
+            </li>
+            <li>
+              The 4+-members cluster threshold is untouched here — its
+              percentage rewrite is #486.
+            </li>
+          </ul>
+        </div>
+        <div class="card p-5">
+          <p class="display text-field mb-2 text-xs tracking-wider uppercase">
+            Ubiquitous language (CONTEXT.md)
+          </p>
+          <p class="text-sm">
+            The glossary gains the entry: <strong>Cohesion</strong> — Lens 4 /
+            CSF-4, the attendance-shaped group-health lens.
+            <strong>Unity</strong> is listed as the deprecated synonym (the
+            Playbook's own CSF name stays "Unity" in source-material docs, which
+            are quotations, not our voice).
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          4 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Vocabulary.</strong> The category slug renames in
+              <code>judge/schema.ts</code>, <code>assessment/queries.ts</code>,
+              <code>oversight/read.ts</code>; a migration updates any stray
+              <code>plant_insights.category = 'unity'</code> rows (defensive —
+              zero exist today). Via <code>pnpm db:migrate</code>.
+            </li>
+            <li>
+              <strong>AC-2 Display.</strong> Scorecard label, fixtures, and
+              marketing vignette prose rename; "spiritual unity" prose in
+              <code>network-health-fixture.ts</code> is rewritten, not
+              word-swapped.
+            </li>
+            <li>
+              <strong>AC-3 Rubric.</strong> The D0 draft carries the renamed
+              Lens 4 with the relational-judgment note and no "unity is fragile"
+              copy.
+            </li>
+            <li>
+              <strong>AC-4 Docs.</strong>
+              <code>progress-dashboard/frd.md</code> renames its CSF references;
+              <code>CONTEXT.md</code> gains the glossary entry with Unity as
+              deprecated synonym.
+            </li>
+            <li>
+              <strong>AC-5 Sweep proof.</strong> A case-insensitive repo search
+              for the old lens name returns hits only in source material
+              (Playbook transcriptions, research docs,
+              <code>bryan-comments-review.md</code> quotes) and this spec's
+              artifacts — the command and its output attached to the PR.
+            </li>
+            <li>
+              <strong>AC-6 Works.</strong> Preview spot-check: the CSF scorecard
+              on <code>/phase</code> shows the new label.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">5 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              Source-material docs keep "Unity": the Playbook transcription
+              (<code>launch-playbook.md</code>), research briefs, and quoted
+              text in <code>bryan-comments-review.md</code>. We rename our
+              voice, not our sources.
+            </li>
+            <li>No software measure of spiritual unity is invented.</li>
+            <li>The cluster-drop threshold rewrite — #486.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <p class="text-secondary mb-3 text-sm">
+          Queue D1 and D2 above, then approve — or annotate first.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-473"
+          onsubmit="queueDecision(event, '#473 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #473 with my D1/D2 answers"
+                checked
+              />
+              <span>Approve — file the spec into #473 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>judge/schema.ts:38</code> ·
+        <code>assessment/queries.ts:229,273,275</code> ·
+        <code>oversight/read.ts:128</code> · <code>rubric.ts:56</code> ·
+        fixtures · <code>progress-dashboard/frd.md:127,387</code> · live DB (0
+        unity rows) · live corpus (0 articles). Filed: #470 ✓ · #471 ✓ · #472 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

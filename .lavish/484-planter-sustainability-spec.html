@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#484 — Planter sustainability check-in (C19) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      .chip-danger {
+        background: #191e18;
+        color: #e0705a;
+        border-color: #e0705a;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      .mockup {
+        border: 1px solid rgba(236, 233, 219, 0.25);
+        background: #10140f;
+        padding: 1rem;
+        font-size: 0.85rem;
+      }
+      .mockup .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+        padding: 0.35rem 0;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.1);
+        flex-wrap: wrap;
+      }
+      .dots {
+        display: inline-flex;
+        gap: 0.4rem;
+      }
+      .dot {
+        width: 0.9rem;
+        height: 0.9rem;
+        border-radius: 50%;
+        border: 1px solid rgba(236, 233, 219, 0.4);
+        display: inline-block;
+      }
+      .dot.g {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .dot.y {
+        background: #e0c05a;
+        border-color: #e0c05a;
+      }
+      .dot.r {
+        background: #e0705a;
+        border-color: #e0705a;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 15 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #484 — The planter sustainability check-in
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C19</span>
+          <span class="chip chip-keep"
+            >Ruling: accept with tweak — a feature</span
+          >
+          <span class="chip chip-danger">Sensitive data</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          "A plant can hit every launch metric while the planter himself is
+          falling apart." The design's spine is a privacy decision: this data —
+          marriage, spiritual health —
+          <strong>never enters the fact snapshot</strong>, so no pipeline, no
+          judge, and no oversight surface can ever leak it. Everything else
+          follows from that.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span><span class="done">479 ✓</span
+          ><span class="done">480 ✓</span><span class="done">481 ✓</span
+          ><span class="done">482 ✓</span><span class="done">483 ✓</span
+          ><span class="now">484 sustainability</span
+          ><span>485 launch health</span><span>486 thresholds</span
+          ><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · The shape</h2>
+        <p class="text-secondary mb-4 text-sm">
+          A weekly self-check on Bryan's four dimensions, one tap each, optional
+          private note. Ten seconds on a good week.
+        </p>
+        <div class="mockup mb-4" aria-label="Check-in sketch">
+          <p class="display text-muted mb-2 text-xs tracking-wider uppercase">
+            Your weekly check-in · private to you
+          </p>
+          <div class="row">
+            <span>Spiritually</span>
+            <span class="dots"
+              ><span class="dot g"></span><span class="dot y"></span
+              ><span class="dot r"></span
+            ></span>
+          </div>
+          <div class="row">
+            <span>Marriage &amp; family</span>
+            <span class="dots"
+              ><span class="dot g"></span><span class="dot y"></span
+              ><span class="dot r"></span
+            ></span>
+          </div>
+          <div class="row">
+            <span>Financially</span>
+            <span class="dots"
+              ><span class="dot g"></span><span class="dot y"></span
+              ><span class="dot r"></span
+            ></span>
+          </div>
+          <div class="row" style="border-bottom: none">
+            <span>Pace — can you keep this up?</span>
+            <span class="dots"
+              ><span class="dot g"></span><span class="dot y"></span
+              ><span class="dot r"></span
+            ></span>
+          </div>
+          <p class="text-muted mt-2 text-xs">+ optional note, private</p>
+        </div>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            Is the planter spiritually healthy? Is his marriage/family surviving
+            the process? Is he financially sustainable? Is he building at a pace
+            he can actually maintain?
+            <span class="text-muted"
+              >— Bryan, C19 (the four dimensions, verbatim)</span
+            >
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · Decisions</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D1 · Capture shape <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <form
+          class="decision-form mb-6"
+          data-lavish-question="d1-capture"
+          onsubmit="queueDecision(event, 'D1 — capture shape')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="four dimensions x three-level (steady/strained/struggling) + optional private note"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Traffic-light (recommended).</strong
+                >
+                Steady / strained / struggling per dimension + optional note.
+                One tap each; honest without demanding introspection math.
+                Trends read clearly.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="1-5 scale per dimension + note"
+              />
+              <span
+                >1–5 scales — finer grain, slower to answer, false precision on
+                questions like "is your marriage surviving."</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D2 · The weekly prompt
+          <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <form
+          class="decision-form mb-6"
+          data-lavish-question="d2-prompt"
+          onsubmit="queueDecision(event, 'D2 — weekly prompt mechanism')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="inline weekly card (answer in place, one tap per dimension); no task generation"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Inline weekly card (recommended).</strong
+                >
+                A card that appears when this week is unanswered — answer in
+                place, ten seconds, done. No task machinery, nothing to mark
+                complete. Placement decided with #533; interim: the
+                dashboard/phase surface.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="auto-scheduled recurring task via the tasks system"
+              />
+              <span
+                >Auto-scheduled recurring task — uses existing recurrence, but
+                puts a soul-health prompt in the same list as "book the
+                projector," and adds generation/idempotency machinery.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D2 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D3 · Who sees it
+          <span class="chip chip-danger ml-1">the open ruling</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          The 08-18 ruling left "does it reach the sending org" open. My
+          recommendation is decided by the data's nature: marriage and spiritual
+          health are the most sensitive facts the product will ever hold.
+        </p>
+        <form
+          class="decision-form mb-2"
+          data-lavish-question="d3-visibility"
+          onsubmit="queueDecision(event, 'D3 — check-in visibility')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d3"
+                value="planter-only in v1; coach/org sharing is a later opt-in discovery issue"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Planter-only in v1 (recommended).</strong
+                >
+                Private, full stop. A follow-up discovery issue explores coach
+                opt-in sharing later (Bryan said "planter/coach attestation" —
+                the coach half deserves its own spec with consent design). The
+                sending org never sees it in v1.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d3"
+                value="planter + assigned coach from v1"
+              />
+              <span
+                >Planter + assigned coach from day one — matches Bryan's phrase,
+                but ships consent UX now and the coach relationship model is
+                young.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D3 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · The privacy spine + rubric delta
+        </h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              <strong>New table <code>planter_checkins</code></strong>
+              (church-scoped, one row per week — unique
+              <code>(church_id, week_start)</code>, upsert; four dimension
+              values + optional note; migration via
+              <code>pnpm db:migrate</code>).
+            </li>
+            <li>
+              <strong>Never in the fact snapshot.</strong> The check-in feeds no
+              signals, no judge prompt, no insights, no oversight read —
+              structurally unreachable by every pipeline that leaves the
+              planter's own view.
+            </li>
+            <li>
+              <strong>Launch-green never washes planter-red:</strong> the
+              private check-in strip (latest week's four dots + streak) renders
+              beside the assessment on the planter's surface, so a green
+              assessment is never shown without the care state next to it.
+              Nudges ("pace has been strained three weeks running — who is
+              caring for you?") are computed deterministically in UI code, not
+              by the LLM.
+            </li>
+            <li>
+              <strong>Rubric v1 "what we cannot see" section:</strong> Plant
+              Intelligence assesses launch health; planter sustainability is
+              tracked privately and is never inferred. The judge is banned from
+              claiming planter wellbeing, burnout, or capacity from any activity
+              fact.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          4 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Schema.</strong> <code>planter_checkins</code> per
+              §3; unique week upsert; migration.
+            </li>
+            <li>
+              <strong>AC-2 Check-in UI.</strong> The weekly card (per D2):
+              appears when the current week is unanswered; one tap per dimension
+              (D1 shape); optional note; idempotent answer;
+              <code>cursor-pointer</code>.
+            </li>
+            <li>
+              <strong>AC-3 History.</strong> A private trend view (last ~12
+              weeks of dots) on the planter's surface; the
+              launch-green-beside-care-state rule holds.
+            </li>
+            <li>
+              <strong>AC-4 Privacy.</strong> A test proves check-in data is
+              absent from the fact snapshot, judge prompt, and every oversight
+              payload (sweep-style assertion, same pattern as the
+              no-person-names sweep).
+            </li>
+            <li>
+              <strong>AC-5 Rubric.</strong> The D0 draft carries the "what we
+              cannot see" section and the activity-inference ban.
+            </li>
+            <li>
+              <strong>AC-6 Works.</strong> Browser validation: answer a week,
+              see the strip update; the following week the card returns.
+            </li>
+            <li>
+              <strong>AC-7 Follow-up filed.</strong> Per D3: a discovery issue
+              for coach/org sharing with consent design.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">5 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              No scoring planter soul-health from CRM activity (issue's own
+              guard, now also a rubric ban).
+            </li>
+            <li>Not a ninth lens — it is deliberately outside the engine.</li>
+            <li>Surface placement finalized with #533.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-484"
+          onsubmit="queueDecision(event, '#484 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #484 with my D1/D2/D3 answers"
+                checked
+              />
+              <span>Approve — file the spec into #484 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Feature-shaped issue: one new table, one card, one trend strip, one
+        rubric section, one privacy sweep test. Filed: #470–#483 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>
