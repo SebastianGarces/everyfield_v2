@@ -1235,37 +1235,18 @@ test("the two invariants AS-010 names are CHECKs in the migration", () => {
   assert.doesNotMatch(MIGRATION, /'owner'/);
 });
 
-test("the journal never regresses, and 0054 sits where it says it does", () => {
-  const entries = JOURNAL.entries;
-  const mine = entries.find((entry) => entry.tag === "0054_user_invitations");
+test("0054 sits where its own header says it does", () => {
+  // The journal's GENERAL properties — strictly increasing `when` and `idx`,
+  // and the silent-skip hazard behind them — moved to
+  // `src/db/migrations.test.ts` (#592), which owns the folder. What stays here
+  // is the half that is about 0054: where it sits, and that its header names
+  // its own ledger row.
+  const mine = JOURNAL.entries.find(
+    (entry) => entry.tag === "0054_user_invitations"
+  );
 
   assert.ok(mine, "the journal has no 0054_user_invitations entry");
   assert.equal(mine.idx, 54);
-
-  // THE SILENT-SKIP HAZARD (0036's, still live). `drizzle-kit migrate` compares
-  // each entry's `when` against the MAXIMUM `created_at` already in the ledger,
-  // never against that migration's own row — so a `when` below a sibling that
-  // reached the database first is skipped in SILENCE.
-  //
-  // STATED AS THE GENERAL PROPERTY, not as "0054 is last" (#521). This test
-  // used to pin the journal's TAIL, which is a claim that expires the moment
-  // anybody adds a migration: 0055 broke it while being stamped perfectly
-  // correctly, and the only repair available was to re-point the pin at the new
-  // tail — a test the next author has to edit again is a test that will
-  // eventually be deleted instead. Strictly increasing `when` AND `idx` over
-  // the whole journal is the hazard itself, it covers every migration rather
-  // than one, and it needs no maintenance.
-  for (let i = 1; i < entries.length; i++) {
-    const [previous, entry] = [entries[i - 1], entries[i]];
-    assert.ok(
-      entry.when > previous.when,
-      `${entry.tag} is stamped at or below ${previous.tag} — re-stamp it, or it applies nothing and prints success`
-    );
-    assert.ok(
-      entry.idx > previous.idx,
-      `${entry.tag} carries idx ${entry.idx}, at or below ${previous.tag}'s ${previous.idx} — the journal is read in order`
-    );
-  }
 
   // The rollback header names the ledger row by that same `when`, not by a file
   // hash — the correction 0036's header records.
