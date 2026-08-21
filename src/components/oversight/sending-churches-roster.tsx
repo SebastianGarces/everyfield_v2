@@ -50,8 +50,18 @@ const ROSTER_NOTE_ID = "sending-churches-note";
 
 export function SendingChurchesRoster({
   sendingChurches,
+  canInvite,
 }: {
   sendingChurches: NetworkSendingChurchSummary[];
+  /**
+   * WHETHER THIS READER MAY ACTUALLY SEND THAT INVITATION (#500).
+   *
+   * The empty state's call to action is a promise, and an org MEMBER cannot
+   * keep it — `org.invitation.manage` is Owner-only, so the form behind the
+   * link is not rendered for them. Without this the emptiest screen in the
+   * product would hand a Member the one control they may not use.
+   */
+  canInvite: boolean;
 }) {
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -73,7 +83,7 @@ export function SendingChurchesRoster({
       </header>
 
       {sendingChurches.length === 0 ? (
-        <EmptyRoster />
+        <EmptyRoster canInvite={canInvite} />
       ) : (
         <div className="bg-card max-w-4xl overflow-hidden rounded-xl border shadow-sm">
           <div className="border-b px-6 py-5">
@@ -146,7 +156,7 @@ export function SendingChurchesRoster({
   );
 }
 
-function EmptyRoster() {
+function EmptyRoster({ canInvite }: { canInvite: boolean }) {
   return (
     <div className="bg-card max-w-4xl rounded-xl border border-dashed p-10 text-center">
       <h2 className="font-semibold">No sending churches yet</h2>
@@ -154,14 +164,16 @@ function EmptyRoster() {
         A sending church appears here once it accepts an invitation from your
         network.
       </p>
-      <p className="mt-4 text-sm">
-        <Link
-          href="/oversight/invitations"
-          className="text-primary cursor-pointer font-medium underline underline-offset-4"
-        >
-          Invite a sending church
-        </Link>
-      </p>
+      {canInvite && (
+        <p className="mt-4 text-sm">
+          <Link
+            href="/oversight/invitations"
+            className="text-primary cursor-pointer font-medium underline underline-offset-4"
+          >
+            Invite a sending church
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

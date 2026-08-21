@@ -43,17 +43,19 @@ export type TenancyFields = Pick<
 /**
  * The three kinds of tenancy a seat can be held in.
  *
- * `AssociationOrgType` PLUS the plant, and in that order on purpose: the two
- * oversight kinds are the same two words `associationEvents.org_type` and the
- * notification anchor already use, so `OversightOrg` below is this union with
- * `church` removed rather than a second vocabulary.
+ * DERIVED FROM `AssociationOrgType`, NOT RESTATED BESIDE IT. The two oversight
+ * kinds are the same two words `associationEvents.org_type` and the
+ * notification anchor already use, so writing them out again here would be a
+ * second vocabulary that drifts the day a third org kind is added. Stating it
+ * as "the association org types, plus the plant" makes `oversightOrgOf` below a
+ * narrowing that holds by construction rather than by a cast.
+ *
+ * A bare union rather than the `as const` tuple this file's neighbours use,
+ * because nothing needs the values at runtime: the exhaustiveness that matters
+ * is carried by `satisfies Record<SeatTenancyType, …>` at each lookup table and
+ * by the switch in `tenancyDisplayName`.
  */
-export const seatTenancyTypes = [
-  "church",
-  "sending_church",
-  "network",
-] as const;
-export type SeatTenancyType = (typeof seatTenancyTypes)[number];
+export type SeatTenancyType = AssociationOrgType | "church";
 
 /**
  * WHICH TENANCY A ROW NAMES — the kind and the id together, and the shape every

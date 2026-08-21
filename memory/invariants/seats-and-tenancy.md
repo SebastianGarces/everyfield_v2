@@ -220,6 +220,25 @@ Each is now a `holdsSeatFor` call on the same verb the action guards with, so th
 page and its writes cannot disagree. The server-side refusal was always there;
 what was missing was not offering the control.
 
+**And gating the controls exposed a read that was too narrow.** `invitingOrgOf`
+had the Owner check baked in, and it scoped the LIST as well as the revoke — so
+the moment `/oversight/invitations` grew a read-only variant, that variant showed
+an org Member an empty list under copy promising the org's whole history. The
+same false equality, one layer down: while an org had one account, "the org's
+invitations" and "the Owner's invitations" were the same rows.
+
+It splits into `readableOrgOf` (the FK alone) and `invitingOrgOf` (that,
+and-ed with `isOrgOwner`). The 2026-08-04 rule the shared predicate protected —
+never show a row whose Revoke will be refused — is not lost; it moves to the
+render side, where `canAct` decides both controls from the same verb the action
+guards with. The list is now deliberately wider than the verbs on it, which is
+what read parity means.
+
+The same defect in its most visible form is the empty state: the oversight index,
+`PlantsDirectory` and `SendingChurchesRoster` each offered "Invite a planter" or
+"Invite a sending church" as the ONLY thing on the page. All three take a
+`canInvite` prop now.
+
 ## The removal cascade is a plant's
 
 AS-016's five effects were written for a plant. Two of them — open tasks

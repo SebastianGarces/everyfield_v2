@@ -46,6 +46,7 @@ import {
   summarizePortfolioPhases,
 } from "@/lib/oversight/presentation";
 import { getOversightPortfolio } from "@/lib/oversight/read";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export default async function OversightDashboardPage() {
@@ -152,15 +153,22 @@ export default async function OversightDashboardPage() {
               No church plants associated yet.{" "}
               {/*
                 This sentence named a page that did not exist until #23. Copy
-                that points at a surface is a promise; the link is what keeps it.
+                that points at a surface is a promise; the link is what keeps it
+                — and since #500 the promise is only made to whoever can keep
+                it, because an org Member may not invite (`org.invitation.manage`
+                is Owner-only).
               */}
-              <Link
-                href="/oversight/invitations"
-                className="text-primary cursor-pointer underline underline-offset-4"
-              >
-                Invite a planter
-              </Link>{" "}
-              to get started.
+              {holdsSeatFor(user, "org.invitation.manage") && (
+                <>
+                  <Link
+                    href="/oversight/invitations"
+                    className="text-primary cursor-pointer underline underline-offset-4"
+                  >
+                    Invite a planter
+                  </Link>{" "}
+                  to get started.
+                </>
+              )}
             </p>
           ) : (
             <div className="space-y-3">

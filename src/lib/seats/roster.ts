@@ -1,55 +1,72 @@
 // ============================================================================
-// THE SEATS A PLANT HOLDS, AND THE FOUR ACTS THAT CHANGE THEM — AS-015 through
-// AS-018 and AS-023 (#497).
+// THE SEATS A TENANCY HOLDS, AND THE FOUR ACTS THAT CHANGE THEM — AS-015
+// through AS-018 and AS-023 (#497, widened to the org side by #500).
 //
 // One module, because the four verbs share one subject: a row in `users` whose
-// `church_id` is this plant. The roster READ is here for the same reason — it
-// is the same subject seen from the other side, and a reader that disagreed
-// with the writers about who is on this plant is how a control appears beside
+// tenancy FK is this one. The roster READ is here for the same reason — it is
+// the same subject seen from the other side, and a reader that disagreed with
+// the writers about who is on this team is how a control appears beside
 // somebody the action would refuse.
 //
-// THE ACTOR IS BRANDED AND CARRIES THE PLANT. `SeatManagementActor` is minted
+// THE ACTOR IS BRANDED AND CARRIES THE TENANCY. `SeatManagementActor` is minted
 // only by `seatActorFromSession`, so a bare `User` — the shape a forged payload
-// could carry — is not assignable, and the mint REFUSES an account with no
-// plant. That is what makes `churchId: string` rather than `string | null`
-// here: every query below puts the actor's own plant in its `WHERE`, so there
-// is no route param, query string or form field anywhere on this surface that
-// names a plant, and a target seated somewhere else is simply not found.
+// could carry — is not assignable, and the mint REFUSES an account that names
+// no tenancy at all. That is what makes `tenancy: SeatTenancy` rather than a
+// nullable one here: every query below puts the actor's own tenancy in its
+// `WHERE` through `inTenancy`, so there is no route param, query string or form
+// field anywhere on this surface that names a team, and a target seated
+// elsewhere is simply not found.
+//
+// ONE VALUE, NOT THREE FKs. The tenancy comes from `tenancyOf`, which answers
+// only for a row naming EXACTLY ONE — so the two-tenancy defect
+// (`memory/invariants.md` → Seats & Tenancy) mints no actor and reaches nothing
+// here, in the same place the no-tenancy account is refused.
 //
 // The mint is also the tenancy half of the authority rule. `seat.manage` is
 // declared `tenancy: "any"` in `@/lib/auth/seat-rules` because the ruling gives
-// the verb to an Owner in all THREE tenancies; this track ships the plant side,
-// so an oversight Owner passes `requireSeat` and is then refused here for
-// having no plant. Fail-closed, and in one place rather than per verb.
+// the verb to an Owner in all three tenancies; what it does NOT cover is the
+// registered Owner whose plant does not exist yet, and that account is refused
+// here. Fail-closed, and in one place rather than per verb.
+//
+// TWO VERBS STAY A PLANT'S. `listPlantCoaches` and `endCoachAssignment` go
+// through `plantOf`, which refuses an org with a sentence: coaching is a
+// relationship with a church plant, and a `coach_assignments.church_id` scoped
+// by a network's id would read as an answer and be none.
 //
 // WHY THE REMOVAL IS ONE `db.batch` WITH THE MARKER LAST
 // ----------------------------------------------------------------------------
 // `db.transaction()` throws on neon-http; `db.batch([...])` is the only atomic
-// unit (`memory/invariants/transactions-atomicity.md`). The five effects the
-// FRD pins are ordered so the CLEARING OF THE TENANCY IS THE LAST STATEMENT:
+// unit (`memory/invariants/transactions-atomicity.md`). The effects the FRD
+// pins are ordered so the CLEARING OF THE TENANCY IS THE LAST STATEMENT:
 //
 //   1. sessions deleted      — redo-safe, keyed on the account
 //   2. open tasks reassigned — redo-safe, keyed on the plant and the assignee
 //   3. team leadership nulled — redo-safe, idempotent by construction
-//   4. MARKER: `church_id` and `seat` set NULL
+//   4. MARKER: every tenancy FK and `seat` set NULL
 //
 // Every earlier step is redo-safe, which is exactly what a marker-last sequence
-// requires: a replayed request re-runs three no-ops and a marker that now
-// matches zero rows.
+// requires: a replayed request re-runs no-ops and a marker that now matches
+// zero rows.
+//
+// STEPS 2 AND 3 ARE THE PLANT'S ALONE (#500), so there are TWO batch shapes:
+// `[1, 2, 3, 4]` for a plant and `[1, 4]` for an org, which has neither `tasks`
+// nor `ministry_teams`. The marker is last in both, which is all the ordering
+// argument needs. `plantRemovalEffects` holds the pair so the batch literal
+// still reads as the ordered effects.
 //
 // THE MARKER IS A COMPARE-AND-SET, AND ITS ROWCOUNT IS READ. Its `WHERE`
-// re-asserts what the pre-read decided — still this plant, still not the Owner
-// — so two removals of one target serialise on it. What that does NOT do is
-// roll the batch back: `db.batch` is all-or-nothing on FAILURE, and a zero-row
-// UPDATE is a success, so a stale read still COMMITS statements 1–3. Each of
-// them is scoped to the same target and plant, so what commits is three no-ops
-// — but the call must not then report success, which is why `removeSeat` reads
-// `marked` and refuses on an empty one.
+// re-asserts what the pre-read decided — still this tenancy, still not the
+// Owner — so two removals of one target serialise on it. What that does NOT do
+// is roll the batch back: `db.batch` is all-or-nothing on FAILURE, and a
+// zero-row UPDATE is a success, so a stale read still COMMITS the earlier
+// statements. Each of them is scoped to the same target and tenancy, so what
+// commits is no-ops — but the call must not then report success, which is why
+// `removeSeat` reads `marked` and refuses on an empty one.
 //
-// Every statement carries `actor.churchId`, including the sessions delete,
-// which reaches it through an `exists` because its own subject is keyed by the
-// account. That uniformity is the tenancy leak guard, and `roster.test.ts`
-// asserts it statement by statement.
+// Every statement carries the actor's own tenancy, the sessions delete through
+// an `exists` because its own subject is keyed by the account. That uniformity
+// is the tenancy leak guard, and `roster.test.ts` asserts it statement by
+// statement.
 //
 // The person record is effect (3) of the FRD's five by being ABSENT: nothing
 // below touches `persons` or `team_memberships`, because a person record and an
@@ -83,7 +100,7 @@ import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
 declare const seatManagementActorBrand: unique symbol;
 
 /**
- * Whoever is managing seats, and the plant they are managing them in.
+ * Whoever is managing seats, and the tenancy they are managing them in.
  *
  * Minted only by `seatActorFromSession`, so an authority decision can never be
  * handed a user object that arrived from a client — the same technique
@@ -177,7 +194,7 @@ export function seatActorFromSession(
   return { id, tenancy } as SeatManagementActor;
 }
 
-/** One person on the plant's seat roster, as AS-023 asks it to be read. */
+/** One person on the tenancy's seat roster, as AS-023 asks it to be read. */
 export type SeatRosterRow = {
   readonly userId: string;
   readonly name: string | null;
@@ -194,7 +211,7 @@ export type SeatRosterRow = {
    * predating their removal. Nothing can re-invite yet (the surface is out of
    * #497's scope), so the column is accurate for every row that can exist.
    * Whoever ships re-invitation owes this label a real source: the accepted
-   * `user_invitations` row for that address on this plant.
+   * `user_invitations` row for that address in this tenancy.
    */
   readonly joinedAt: Date;
 };
@@ -209,12 +226,12 @@ export type SeatRosterRow = {
 const SEAT_ORDER = sql`case ${users.seat} when 'owner' then 0 when 'admin' then 1 else 2 end`;
 
 /**
- * Everyone holding a seat on this plant (AS-023).
+ * Everyone holding a seat in this tenancy (AS-023).
  *
  * `ne(users.seat, ...)` is not needed and no seat filter is applied beyond
- * NOT NULL: an account with `church_id` set and `seat` NULL is not a member of
- * this plant's team — it is the shape a REMOVED account leaves behind before
- * its tenancy clears, and it must not reappear on the roster.
+ * NOT NULL: an account carrying the tenancy FK with `seat` NULL is not a member
+ * of this team — it is the shape a REMOVED account leaves behind before its
+ * tenancy clears, and it must not reappear on the roster.
  */
 export async function listSeatRoster(
   actor: SeatManagementActor
@@ -280,7 +297,7 @@ export async function listPlantCoaches(
  * Move one seat between `member` and `admin` (AS-015).
  *
  * A COMPARE-AND-SET, AND THE `from` SEAT IS HALF THE PREDICATE. The update
- * matches only a row that is still on this plant AND still holds the seat the
+ * matches only a row that is still in this tenancy AND still holds the seat the
  * caller believed it held, so a double submit changes nothing the first one
  * did, and the Owner's row is unreachable from either direction — `owner`
  * equals neither `from` value, so no `ne(seat, 'owner')` guard is needed or
@@ -409,13 +426,13 @@ function notOnTheTeam(actor: SeatManagementActor): string {
  * Remove a seat, with the five effects the FRD pins (AS-016, AS-017).
  *
  * THE PRE-READ IS THE AUTHORIZATION DECISION and the reason it is scoped to the
- * actor's own plant: a forged `targetUserId` naming somebody else's account is
+ * actor's own tenancy: a forged `targetUserId` naming somebody else's account is
  * refused HERE, before the batch deletes a single session. Removing the check
- * and trusting the marker's `WHERE` would let statements 1–3 fire against an
- * account this Owner may not touch.
+ * and trusting the marker's `WHERE` would let the earlier statements fire
+ * against an account this Owner may not touch.
  *
  * THE SELF-REMOVAL REFUSAL IS SEPARATE FROM THE OWNER REFUSAL on purpose. They
- * are the same row today — a plant has exactly one Owner and it is the only
+ * are the same row today — a tenancy has exactly one Owner and it is the only
  * account that reaches this verb — but they are different rules (AS-017 is
  * about the ACTOR; the seat check is about the TARGET), and collapsing them
  * would silently widen the day an org's second Owner-equivalent appears.

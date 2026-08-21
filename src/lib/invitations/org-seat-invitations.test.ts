@@ -577,6 +577,114 @@ test("/oversight/invitations gates the form and the row verbs on ONE rule", () =
   );
 });
 
+test("the association invitation LIST is a read, and the verbs are not (AC 6)", () => {
+  // FOUND BY REVIEW. Gating this page's controls on `org.invitation.manage`
+  // exposed that the READ behind it was Owner-only too — so an org Member was
+  // served a page promising "every invitation your org has sent" and shown an
+  // empty list for ever. AS-007 makes that list one of the reads a Member gets
+  // in full; the verbs over it stay Owner-only.
+  //
+  // ONE ORG DERIVATION, TWO SCOPES. The write predicate is the read predicate
+  // and-ed with the Owner check, so the two can only ever differ by that clause
+  // — which is what keeps "what a reader is offered" and "what the action
+  // admits" in step.
+  const core = sourceReader(
+    stripComments(read("lib", "invitations", "core.ts")),
+    "core.ts (stripped)"
+  );
+
+  const readScope = core.span(
+    "function readableOrgOf",
+    "function invitingOrgOf"
+  );
+  assert.match(
+    readScope,
+    /const org = oversightOrgOf\(actor\);/,
+    "the list scope must resolve from the tenancy FK alone — an org Member reads what its Owner reads"
+  );
+  assert.ok(
+    !readScope.includes("isOrgOwner"),
+    "the read scope must not ask the seat"
+  );
+
+  const writeScope = core.span(
+    "function invitingOrgOf",
+    "export function invitationsForOrgQuery"
+  );
+  assert.match(
+    writeScope,
+    /if \(!isOrgOwner\(actor\)\) return sql`false`;/,
+    "the write scope must add the Owner check"
+  );
+  assert.match(
+    writeScope,
+    /return readableOrgOf\(actor\);/,
+    "…on top of the SAME org derivation, never a second one"
+  );
+
+  // The list statement and the early return must both use the read scope, or
+  // the round-trip skip would refuse somebody the predicate admits.
+  assert.match(
+    core.span(
+      "export function invitationsForOrgQuery",
+      "export async function getInvitationsForOrg"
+    ),
+    /\.where\(readableOrgOf\(actor\)\)/
+  );
+  assert.match(
+    core.after("export async function getInvitationsForOrg"),
+    /if \(!isOversightUser\(actor\)\) \{\s*return \[\];/,
+    "the skip must ask the same question the predicate does"
+  );
+});
+
+test("no empty state offers an invite the reader cannot send (AC 7)", () => {
+  // The same invariant `PlantDetail` got, applied to the three emptiest screens
+  // in the product. An org Member on a fresh network would otherwise be handed
+  // "Invite a sending church" — the one control they may not use — as the only
+  // thing on the page.
+  for (const [what, code, marker] of [
+    [
+      "the oversight index",
+      stripComments(read("app", "(dashboard)", "oversight", "page.tsx")),
+      /\{holdsSeatFor\(user, "org\.invitation\.manage"\) && \(/,
+    ],
+    [
+      "the plants directory",
+      stripComments(read("components", "oversight", "plants-directory.tsx")),
+      /\{canInvite && \(/,
+    ],
+    [
+      "the sending-church roster",
+      stripComments(
+        read("components", "oversight", "sending-churches-roster.tsx")
+      ),
+      /\{canInvite && \(/,
+    ],
+  ] as const) {
+    assert.match(code, marker, `${what} must gate its invite call to action`);
+  }
+
+  // …and both pages feed that flag from the capability table rather than from a
+  // seat comparison of their own.
+  for (const [what, page] of [
+    [
+      "/oversight/plants",
+      read("app", "(dashboard)", "oversight", "plants", "page.tsx"),
+    ],
+    [
+      "/oversight/sending-churches",
+      read("app", "(dashboard)", "oversight", "sending-churches", "page.tsx"),
+    ],
+  ] as const) {
+    assert.match(
+      stripComments(page),
+      /canInvite=\{holdsSeatFor\(user, "org\.invitation\.manage"\)\}/,
+      `${what} must ask the capability table`
+    );
+  }
+});
+
 test("the sever is the Owner's, on the page and in the component (AC 7)", () => {
   assert.match(
     PLANT_DETAIL_PAGE,

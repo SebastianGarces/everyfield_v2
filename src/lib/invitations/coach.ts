@@ -169,5 +169,15 @@ export async function acceptCoachInvitationAs(
     }
   }
 
+  // THE SAME NARROWING ITS SIBLING ASSERTS (#500). A coach invitation is always
+  // a plant's — `coach.assignment.manage` is `tenancy: "plant"`, so no org can
+  // create one — and `describeCoachInvitationForViewer` refuses a row that says
+  // otherwise. Two readers of one row must not disagree about whether that is
+  // assumed or checked: an org-targeted coach row would otherwise be accepted
+  // here and named with an org's name.
+  if (described.tenancy.type !== "church") {
+    throw new InvitationError(COACH_INVITATION_NOT_ANSWERABLE_MESSAGE);
+  }
+
   return { churchName: described.tenancyName };
 }
