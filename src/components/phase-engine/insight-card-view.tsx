@@ -31,6 +31,7 @@ import {
   severityMeta,
 } from "@/components/phase-engine/focus-presentation";
 import { Badge } from "@/components/ui/badge";
+import type { EvidenceQuality } from "@/lib/phase-engine/signals/evidence";
 import type { PlantInsight } from "@/db/schema";
 // The one humanising formatter, shared with the CSF scorecard
 // (components/phase-engine/csf-scorecard.tsx): a planter reads the evidence in
@@ -91,7 +92,30 @@ interface InsightCardViewProps {
    *  clickable, focusable or prefetchable. Absent, as in the app, this card is
    *  unchanged. */
   linkStatic?: boolean;
+  /**
+   * How strong the evidence behind this insight's LENS is (#483, C17) —
+   * derived by the caller from the same snapshot the insight cites, never
+   * persisted (D1).
+   *
+   * Omitted, nothing renders. The badge exists so a planter reading an
+   * observation knows whether it rests on something counted or on their own
+   * answer, which is the difference between "your core group is 22" and "you
+   * told us your prayer rhythm is established".
+   */
+  evidence?: EvidenceQuality;
 }
+
+/**
+ * What the evidence badge says, and what it deliberately does not.
+ *
+ * There is no badge for `unknown`: an insight EXISTS, so the judge had
+ * something to say and the lens is not blank. The blank case is the scorecard's
+ * insufficient-evidence tile, not a card.
+ */
+const EVIDENCE_LABEL: Partial<Record<EvidenceQuality, string>> = {
+  measured: "Measured",
+  attested: "Your answer",
+};
 
 /** Shared by the link and its inert twin, so the two can never drift. */
 const ARTICLE_LINK_CLASS =
@@ -102,6 +126,7 @@ export function InsightCardView({
   articleRefs = [],
   feedbackSlot,
   linkStatic,
+  evidence,
 }: InsightCardViewProps) {
   const severity = severityMeta(insight.severity);
   const citedFacts = formatCitedFacts(
@@ -125,9 +150,18 @@ export function InsightCardView({
     <article className="rounded-lg border p-4">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-sm leading-snug font-semibold">{insight.title}</h3>
-        <Badge variant={severity.badgeVariant} className="shrink-0">
-          {severity.label}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {evidence && EVIDENCE_LABEL[evidence] && (
+            <Badge
+              variant="outline"
+              data-slot="insight-evidence"
+              className="text-muted-foreground font-normal"
+            >
+              {EVIDENCE_LABEL[evidence]}
+            </Badge>
+          )}
+          <Badge variant={severity.badgeVariant}>{severity.label}</Badge>
+        </div>
       </div>
 
       <p className="text-muted-foreground mt-2 text-sm leading-relaxed">

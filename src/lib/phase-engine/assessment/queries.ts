@@ -26,6 +26,10 @@ import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  buildEvidenceProfile,
+  type LensEvidence,
+} from "@/lib/phase-engine/signals/evidence";
+import {
   churches,
   plantAssessments,
   plantInsights,
@@ -467,6 +471,16 @@ export interface CsfFactorStanding extends CsfDefinition {
    * words the exit-criteria drill-down does (ruled 2026-08-12 on #319).
    */
   insights: AssessedInsight[];
+  /**
+   * WHAT THIS LENS ACTUALLY KNOWS (#483, C17) — derived from the snapshot this
+   * scorecard was projected from, never stored.
+   *
+   * A tile with no insight and no evidence is not a quiet pass; it is a lens
+   * the engine cannot see. Without this the two render identically, and the
+   * two blindest lenses — prayer and generosity — are exactly the two that
+   * looked calmest.
+   */
+  evidence: LensEvidence;
 }
 
 /**
@@ -506,7 +520,12 @@ export function buildCsfScorecard(
 ): CsfScorecard | null {
   if (!latest) return null;
 
-  const snapshot = latest.assessment.factSnapshot;
+  const snapshot = latest.assessment.factSnapshot as PlantFactSnapshot;
+
+  // Recomputed rather than read off `snapshot.evidence` (#483 D1): a snapshot
+  // persisted before that field existed still gets a real profile, and there is
+  // no stored verdict that could disagree with the facts beside it.
+  const evidence = buildEvidenceProfile(snapshot);
 
   const byCategory = new Map<CsfCategory, AssessedInsight[]>();
   for (const insight of latest.insights) {
@@ -534,6 +553,7 @@ export function buildCsfScorecard(
         ? standingForSeverity(insights[0].severity)
         : ("not_raised" as const),
       insights,
+      evidence: evidence[definition.category],
     } satisfies CsfFactorStanding;
   });
 
