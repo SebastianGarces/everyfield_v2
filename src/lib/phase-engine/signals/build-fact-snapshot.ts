@@ -556,10 +556,7 @@ function buildLaunchSignals(
 // Manual attestations (PE-005)
 // ----------------------------------------------------------------------------
 
-function buildManualSignals(
-  rows: PlantSignalRow[],
-  asOf: Date
-): ManualSignals {
+function buildManualSignals(rows: PlantSignalRow[], asOf: Date): ManualSignals {
   // PROTOTYPE-FREE, because `row.signalKey` is a stored string and this is the
   // WRITE half of the untrusted-key rule (memory/invariants.md → Phase Engine —
   // Cited Facts & Attestation Citations). On a plain `{}`, `byKey["__proto__"]`

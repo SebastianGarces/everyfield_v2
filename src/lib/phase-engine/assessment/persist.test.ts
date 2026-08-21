@@ -103,11 +103,11 @@ function makeSnapshot(
       isEmpty: false,
     },
     manual: {
-    attestations: [],
-    byKey: {},
-    reaffirmWindowDays: 30,
-    isEmpty: true,
-  },
+      attestations: [],
+      byKey: {},
+      reaffirmWindowDays: 30,
+      isEmpty: true,
+    },
     ...overrides,
   };
 }

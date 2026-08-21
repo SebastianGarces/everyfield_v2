@@ -113,11 +113,11 @@ function makeSnapshot(churchId: string): PlantFactSnapshot {
       isEmpty: false,
     },
     manual: {
-    attestations: [],
-    byKey: {},
-    reaffirmWindowDays: 30,
-    isEmpty: true,
-  },
+      attestations: [],
+      byKey: {},
+      reaffirmWindowDays: 30,
+      isEmpty: true,
+    },
   };
 }
 
