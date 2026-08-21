@@ -184,6 +184,17 @@ test("v1 reads role fill as coverage, not as an absence of people (#481)", () =>
   assert.match(RUBRICS.v1.body, /"a lack of emerging leadership"/);
 });
 
+test("v1 puts the network in a coaching register (#482)", () => {
+  assert.match(
+    RUBRICS.v1.body,
+    /THE PLANTER SEES IT FIRST, AND EVERY NETWORK CONCERN IS ALSO A PLANTER CONCERN/
+  );
+  assert.match(RUBRICS.v1.body, /BANNED IN NETWORK-AUDIENCE TEXT/);
+  assert.match(RUBRICS.v1.body, /PATTERN, NOT CAUSE/);
+  // The one idiom the ban must not swallow.
+  assert.match(RUBRICS.v1.body, /"critical mass" is the name of CSF-3/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

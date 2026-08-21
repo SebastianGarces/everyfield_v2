@@ -15,7 +15,10 @@ export {
 
 export {
   selectPlantsForAssessment,
+  assessmentReleasedToOversight,
   getLatestAssessment,
+  markAssessmentSeenByPlanter,
+  PLANTER_FIRST_WINDOW_HOURS,
   getLatestCompleteSnapshot,
   type LatestAssessment,
   type SelectedPlant,

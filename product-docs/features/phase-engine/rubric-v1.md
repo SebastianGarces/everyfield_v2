@@ -38,6 +38,7 @@ recorded rulings, and the recommended v1 delta.
 | Sharing language matches the sending-invite spec | C10 | [#479](https://github.com/SebastianGarces/everyfield_v2/issues/479) | §7's universal "off by default" splits into the two real cases — self-started plants share nothing, invited plants start with sharing on and consent at the acceptance screen. Doc text only; the behaviour was already ruled (ledger row 187). |
 | Unshared plants read Limited visibility, never On track | C11 | [#480](https://github.com/SebastianGarces/everyfield_v2/issues/480) | The network posture becomes four-valued. Silence cannot forge "On track"; escalations still win; the label is neutral, not a warning. The v0 "please confirm" on the privacy trade is answered. |
 | Unfilled roles are a coverage gap, not "no emerging leaders" | C14 | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) | Lens 7 coverage copy talks about assignment only; inferring the absence of leaders from role-fill data is banned. The two pipelines — people and coverage — are named as separate. Appendix B's sample replaced with Bryan's wording. |
+| The network register coaches, and the planter sees it first | C15, C16, C24, C25 | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) | §7 gains a verdict ban-list, a same-concern pairing rule and pattern-not-cause — all three enforced on judge output. An assessment releases to oversight when the planter opens it, or after 72 hours. Appendix B's network samples rewritten. |
 
 ---
 
@@ -421,12 +422,28 @@ affect whether planters trust the platform at all.
 
 Three rules govern it:
 
-1. **The planter sees it first.** Network staff can never see an assessment the planter
-   has not been able to see. No planter is surprised by something their overseer was
-   told.
-2. **Observations, never verdicts.** Network-facing language is deliberately
-   conservative: "may be worth a coaching touchpoint," not "this plant is failing."
-   The network view is a prompt for a conversation, not a score.
+1. **The planter sees it first — and that is now a mechanism, not a hope.** ✅ An
+   assessment is released to oversight when **the planter opens it**, or after **72
+   hours**, whichever comes first. The window exists so an org that pays per plant is
+   never blocked indefinitely by a planter on holiday; the gate exists so no planter
+   discovers their own diagnosis from their overseer.
+   - **Every network concern is also a planter concern.** The two audiences get
+     different wording — they should — but the same underlying concern must be raised to
+     both. A negative conclusion the planter was never shown is not permitted.
+   - **The planter's version carries the contributing signals**, so they hold the
+     explanation before anyone asks for it: "Growth has stalled, and two contributing
+     signals are vision cadence and stale follow-up."
+2. **Observations, never verdicts — and the register is coaching.** ✅ Network language
+   sounds like church planting, not like a quarterly review of an underperforming
+   business unit.
+   - **Banned for the network audience:** *intervention*, *failing*, *critical*,
+     *lack of*, and "needs to be addressed" framings. *(The phrase "critical mass" is
+     the name of Lens 3 and is always allowed.)*
+   - **Pattern, not cause.** Name the measured pattern and point at a conversation:
+     "Core-group momentum has slowed. This may be worth a coaching conversation around
+     vision cadence, invitations, and follow-up." Say *why* only when the cause is
+     itself a measured fact. "Growth has been flat for four weeks" is allowed; telling a
+     network director what is causing it usually is not.
 3. **The planter controls what is shared. What it starts as depends on how the plant
    got here.** ✅ There is no universal default, and the engine must not claim one.
    *(Source: `product-docs/decisions.md` ledger row 187, 2026-08-15.)*
@@ -603,10 +620,16 @@ situation produces the measured line instead: "You own 6 of the 9 open follow-up
 
 **Shown to the sending network** (same plant, same moment):
 
-> **Core Group Growth Stagnation**
-> The core group has been static at 7 committed adults for the last 28 days, well below
-> the target needed for healthy phase progression. Intervention to boost growth is
-> needed to reach the critical mass target of at least 50 adults.
+> **Core-Group Momentum Has Slowed**
+> The core group has been at 7 committed adults for the last 28 days. This may be worth
+> a coaching conversation around vision cadence, invitations, and follow-up.
+
+*(v0 read "well below the target needed for healthy phase progression. Intervention to
+boost growth is needed to reach the critical mass target of at least 50 adults." Three
+problems in one paragraph: "intervention" and "needed" are a verdict; "well below the
+target" treats a methodology benchmark as a universal standard (Lens 3); and the planter
+is told about vision-meeting cadence while their overseer is told about growth — the same
+plant, two different headlines, which is exactly how a planter is ambushed.)*
 
 > **Ministry Roles Not Yet Assigned**
 > No ministry roles have been assigned yet, so leadership coverage needs attention.
@@ -621,11 +644,12 @@ Every number above was computed from the database, not written by the model. Eac
 observation links back to the relevant wiki articles — in this case "What is a Core
 Group?", "Growing Your Core Group", and "Your First Vision Meeting."
 
-**Questions worth asking of this sample:** Is the planter language direct enough, or
-too soft? Is "Intervention to boost growth is needed" the right register for a network
-director, or does it read as a verdict? Is it correct that the network sees the growth
-stall while the planter is instead told about meeting cadence — or should both audiences
-see the same headline?
+**What changed in this sample, and why.** All three network observations were rewritten
+into the coaching register, and the pairing rule now forces the planter's list to cover
+the same concerns the network hears about. The v0 draft asked whether it was "correct
+that the network sees the growth stall while the planter is instead told about meeting
+cadence" — it was not, and that is the rule this version enforces rather than the question
+it asks.
 
 ---
 
@@ -647,8 +671,10 @@ see the same headline?
    before a follow-up is stale · 30 days out for network readiness escalation ·
    30–40 committed adults for the Phase 1 gate. Which are wrong?
 
-4. **Network conservatism.** Is the Appendix B network wording appropriately restrained?
-   Where is the line between useful oversight and a planter feeling surveilled?
+4. ~~**Network conservatism.**~~ *(Ruled: the philosophy was right and the wording was
+   not. The register is now a ban-list plus a pattern-not-cause rule, both enforced on
+   judge output rather than requested in prose, and the planter-first order is a release
+   gate rather than an intention. See §7 and #482.)*
 
 5. **Anything absent.** The eight lenses came from the Playbook's Critical Success
    Factors. If there is something you assess in a plant that has no lens here, that is

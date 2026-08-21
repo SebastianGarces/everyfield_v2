@@ -22,7 +22,7 @@
 // file, one test file each.
 // ============================================================================
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -56,12 +56,41 @@ export interface LatestAssessment {
 }
 
 /**
+ * THE PLANTER-FIRST WINDOW (#482, C16/C25), in hours.
+ *
+ * Bryan: "The planter should never discover the diagnosis through his
+ * overseer." An assessment reaches oversight once the planter has opened it —
+ * or once this long has passed, because the org that pays per plant may not be
+ * blocked indefinitely by a planter who is simply on holiday (ledger row 187).
+ */
+export const PLANTER_FIRST_WINDOW_HOURS = 72;
+
+/**
+ * "This assessment has been released to oversight", as a SQL predicate.
+ *
+ * COMPUTED AT READ TIME, deliberately. A `released_at` column would need a job
+ * to stamp it, and every window in which that job has not run yet is a window
+ * where an assessment is invisible to the org — the exact failure ledger row
+ * 187 calls out. This has no scheduler, no backfill, and no state to get stuck.
+ */
+export function assessmentReleasedToOversight(): SQL {
+  return sql`(${plantAssessments.planterSeenAt} is not null or ${plantAssessments.generatedAt} < now() - interval '${sql.raw(String(PLANTER_FIRST_WINDOW_HOURS))} hours')`;
+}
+
+/**
  * The latest COMPLETE assessment for a church with its insights, ordered by
  * rank (PE-011). Returns null when the plant has never completed an assessment.
  * No LLM call — pure read.
+ *
+ * `audience` decides whether the planter-first gate applies (#482). The default
+ * is the PLANTER's view, which is ungated by definition: the planter reading
+ * their own newest assessment is the event that releases it. An oversight
+ * caller passes `"network"` and gets the newest RELEASED one, which may be an
+ * older row.
  */
 export async function getLatestAssessment(
-  churchId: string
+  churchId: string,
+  audience: InsightAudience = "planter"
 ): Promise<LatestAssessment | null> {
   const [assessment] = await db
     .select()
@@ -69,7 +98,8 @@ export async function getLatestAssessment(
     .where(
       and(
         eq(plantAssessments.churchId, churchId),
-        eq(plantAssessments.status, "complete")
+        eq(plantAssessments.status, "complete"),
+        ...(audience === "network" ? [assessmentReleasedToOversight()] : [])
       )
     )
     .orderBy(desc(plantAssessments.generatedAt))
@@ -93,6 +123,38 @@ export async function getLatestAssessment(
       withCitedFactSignals(insight, assessment.factSnapshot)
     ),
   };
+}
+
+/**
+ * Record that the planter has now seen this assessment, which RELEASES it to
+ * oversight (#482, C16/C25).
+ *
+ * WRITTEN ONCE. The `IS NULL` guard means a second render — a refresh, a second
+ * tab, a return visit next week — does not move the timestamp, so the stamp
+ * records when the planter FIRST saw the diagnosis rather than when they last
+ * looked at it. Those are different facts and the first is the one the rule is
+ * about.
+ *
+ * FIRE-AND-FORGET FROM A RENDER. The `/phase` page awaits it, which costs one
+ * cheap indexed UPDATE on the first view only, and nothing about the page
+ * depends on the result. A failure here delays release to the 72-hour arm; it
+ * never blocks the planter from reading their own assessment, which would
+ * invert the whole point of the rule.
+ */
+export async function markAssessmentSeenByPlanter(
+  churchId: string,
+  assessmentId: string
+): Promise<void> {
+  await db
+    .update(plantAssessments)
+    .set({ planterSeenAt: new Date() })
+    .where(
+      and(
+        eq(plantAssessments.id, assessmentId),
+        eq(plantAssessments.churchId, churchId),
+        isNull(plantAssessments.planterSeenAt)
+      )
+    );
 }
 
 /**
