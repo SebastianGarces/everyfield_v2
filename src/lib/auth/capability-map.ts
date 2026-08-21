@@ -261,9 +261,13 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/teams/actions.ts → assignTeamLeaderAction":
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → createMeetingAction": "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → createResponsibilityAction":
+    "teams.write",
   "src/app/(dashboard)/teams/actions.ts → createRoleAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → createTeamAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction":
+    "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction":
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → deleteRoleAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → importRoleTemplatesAction":
@@ -276,6 +280,10 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "teams.write",
   "src/app/(dashboard)/teams/actions.ts → removeMemberAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction": "read",
+  "src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction":
+    "teams.write",
+  "src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction":
+    "teams.write",
   "src/app/(dashboard)/teams/actions.ts → updateRoleAction": "teams.write",
   "src/app/(dashboard)/teams/actions.ts → updateTeamAction": "teams.write",
   "src/app/(dashboard)/wiki/actions.ts → searchWikiArticles": "read",

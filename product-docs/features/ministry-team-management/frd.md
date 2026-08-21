@@ -52,8 +52,10 @@ Ministry Team Management enables church planters to organize, staff, and track t
 |----|-------------|-------------|
 | MT-001 | Ministry team list | View all 10 core ministry teams |
 | MT-002 | Team detail view | Full view of team members, roles, and status |
+| MT-002b | Responsibilities checklist | A team's responsibilities are persisted rows the planter owns — add, edit, tick off and delete, with a completion summary. A predefined team is seeded with its Launch Playbook items exactly once, on first view; a custom team starts empty and is filled in by hand. Completion is a timestamp, so an item is done or it is not |
 | MT-003 | Team leader assignment | Assign team leaders from Person records |
 | MT-004 | Role definition | Define roles within each team |
+| MT-004b | Role editing, removal, and the derived team leader | An existing role can be edited or removed, removal taking its assignments with it. A FILLED role marked as a leadership role names its occupant the team's leader, and vacating that seat gives the leadership back — but only while nobody has answered explicitly: MT-003's assignment is never overwritten by the derived path, and an existing leader stands |
 | MT-005 | Member assignment | Assign people to team roles |
 | MT-006 | Staffing status | Track filled vs open roles per team |
 | MT-007 | Role templates | Pre-built role definitions per team |

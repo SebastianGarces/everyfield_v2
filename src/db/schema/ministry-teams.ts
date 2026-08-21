@@ -142,7 +142,35 @@ export const ministryTeams = pgTable(
       .default("predefined"),
     description: text("description"),
     icon: varchar("icon", { length: 50 }),
+    /**
+     * The team's leader, as a PERSON.
+     *
+     * TWO DOORS WRITE IT AND THEY ARE NOT EQUALS (#311 WS2). `assignTeamLeader`
+     * is the EXPLICIT one and it sets this column unconditionally. The DERIVED
+     * one is `leader-sync.ts`: a filled leadership role implies the team's
+     * leader, but only while the column is NULL, so an explicit answer is never
+     * overwritten by somebody being seated.
+     *
+     * NOTHING RECORDS WHICH DOOR WROTE IT, deliberately — see `leader-sync.ts`
+     * for what that costs.
+     */
     leaderId: uuid("leader_id").references(() => persons.id),
+    /**
+     * When this team was offered its playbook responsibilities — the CLAIM that
+     * makes that offer happen exactly once (#311 WS1).
+     *
+     * NULL means "not offered yet", and it is the only thing that decides. The
+     * rows themselves cannot: a planter who deletes a seeded item would get it
+     * back on the next page load, which is the bug a row-keyed arbiter cannot
+     * see. Stamped by a same-row compare-and-set, so two concurrent first views
+     * produce one set — `seedPlaybookResponsibilities` in
+     * `ministry-teams/responsibilities.ts`.
+     *
+     * A custom team never gets one: the claim's `WHERE` demands a
+     * `template_key`, so the column stays NULL there forever and says something
+     * true about it.
+     */
+    responsibilitiesSeededAt: timestamp("responsibilities_seeded_at"),
     reportsToTeamId: uuid("reports_to_team_id"),
     phaseIntroduced: varchar("phase_introduced", { length: 10 })
       .$type<PhaseIntroduced>()
@@ -325,6 +353,57 @@ export const teamMemberships = pgTable(
 
 export type TeamMembership = typeof teamMemberships.$inferSelect;
 export type NewTeamMembership = typeof teamMemberships.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// Team Responsibilities - the team's checklist (MT-002b, #311 WS1)
+// ----------------------------------------------------------------------------
+/**
+ * What a team is on the hook for, one row per item.
+ *
+ * IT HAS NO PROVENANCE COLUMN, and that is the point. A predefined team's first
+ * view seeds the Launch Playbook's items as ORDINARY rows, so from that moment
+ * a seeded item and one the planter typed are the same kind of thing: both are
+ * editable, both are deletable, and neither reappears. What keeps the seed
+ * from running twice is `ministry_teams.responsibilities_seeded_at`, over on
+ * the team — never a key on these rows, which a delete takes with it.
+ *
+ * COMPLETION IS `completed_at`, NOT A BOOLEAN BESIDE A DATE. There is one field
+ * and `completed_at IS NOT NULL` is the whole answer, so the contradictory
+ * `{ completed: true, completedAt: null }` cannot be written. The ACTION takes
+ * a boolean and the service derives the timestamp from it, so no caller names a
+ * completion time of its own either.
+ *
+ * `created_by` ON A SEEDED ROW IS THE ACCOUNT WHOSE FIRST VIEW CLAIMED THE
+ * SEED, not an author — nobody wrote those items. It is why the read carries an
+ * actor at all. The column is audit and is never read to decide anything.
+ */
+export const teamResponsibilities = pgTable(
+  "team_responsibilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    teamId: uuid("team_id")
+      .references(() => ministryTeams.id, { onDelete: "cascade" })
+      .notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    completedAt: timestamp("completed_at"),
+    createdBy: uuid("created_by")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("team_responsibilities_church_id_idx").on(table.churchId),
+    index("team_responsibilities_team_id_idx").on(table.teamId),
+  ]
+);
+
+export type TeamResponsibility = typeof teamResponsibilities.$inferSelect;
+export type NewTeamResponsibility = typeof teamResponsibilities.$inferInsert;
 
 // ----------------------------------------------------------------------------
 // Training Programs - Training program definitions

@@ -1,90 +1,145 @@
 "use client";
 
-import { Circle } from "lucide-react";
+import { useOptimistic, useRef, useState, useTransition } from "react";
+import { ListChecks, Plus } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { TEAM_TEMPLATES } from "@/lib/ministry-teams/role-templates";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import {
+  createResponsibilityAction,
+  setResponsibilityCompleteAction,
+} from "@/app/(dashboard)/teams/actions";
+import type { TeamResponsibility } from "@/db/schema";
+
+import { ResponsibilityItem } from "./responsibility-item";
 
 interface ResponsibilitiesTabProps {
-  /** `ministry_teams.template_key` — NULL for a team the planter made. */
-  templateKey: string | null;
+  teamId: string;
+  /** Server data, straight from `listResponsibilities` — props, never state. */
+  responsibilities: TeamResponsibility[];
 }
 
 /**
- * Derives responsibility items from the team template description.
- * In a future iteration, these could be stored in the database
- * as checklist items with status tracking.
+ * The team's checklist (MT-002b, #311 WS1).
  *
- * Looked up by TEMPLATE KEY, not by name (ruling 2026-08-12, #378): a display
- * name is not an identity, and matching on one meant a renamed team — the
- * planter's rename or ours — quietly showed nothing here.
+ * SERVER DATA ARRIVES AS PROPS AND STAYS THERE. The only local copy is
+ * `useOptimistic`, which React discards the moment the revalidated props land
+ * (`memory/invariants.md` → Client/Server Data Synchronization) — a `useState`
+ * mirror would go stale against exactly that repaint. Ticking is the one
+ * interaction fast enough to feel wrong at a round trip, so it is the one that
+ * gets an optimistic value; adding and deleting say what they are doing on
+ * their button instead.
  */
-function getTeamResponsibilities(templateKey: string | null): string[] {
-  const template = TEAM_TEMPLATES.find((t) => t.teamKey === templateKey);
+export function ResponsibilitiesTab({
+  teamId,
+  responsibilities,
+}: ResponsibilitiesTabProps) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [adding, setAdding] = useState(false);
+  const [, startTransition] = useTransition();
 
-  if (!template) return [];
+  const [items, applyToggle] = useOptimistic(
+    responsibilities,
+    (current, toggled: { id: string; complete: boolean }) =>
+      current.map((item) =>
+        item.id === toggled.id
+          ? { ...item, completedAt: toggled.complete ? new Date() : null }
+          : item
+      )
+  );
 
-  // Split the description by comma to get individual responsibilities
-  return template.description
-    .split(",")
-    .map((r) => r.trim())
-    .filter(Boolean);
-}
+  const completed = items.filter((item) => item.completedAt !== null).length;
 
-export function ResponsibilitiesTab({ templateKey }: ResponsibilitiesTabProps) {
-  const responsibilities = getTeamResponsibilities(templateKey);
+  function handleToggle(responsibility: TeamResponsibility, complete: boolean) {
+    startTransition(async () => {
+      applyToggle({ id: responsibility.id, complete });
+      const result = await setResponsibilityCompleteAction(
+        responsibility.id,
+        complete
+      );
+      // The optimistic value is dropped either way when the transition ends;
+      // on a refusal the props are still the truth, so the row snaps back and
+      // the toast says why.
+      if (!result.success) toast.error(result.error);
+    });
+  }
 
-  if (responsibilities.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center p-8 text-center">
-          <Circle className="text-muted-foreground h-10 w-10" />
-          <h3 className="mt-3 font-medium">No responsibilities defined</h3>
-          <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-            This is a custom team. Responsibilities tracking will be available
-            in a future update.
-          </p>
-        </CardContent>
-      </Card>
-    );
+  async function handleAdd(formData: FormData) {
+    setAdding(true);
+    try {
+      const result = await createResponsibilityAction(teamId, formData);
+      if (result.success) {
+        formRef.current?.reset();
+      } else {
+        toast.error(result.error);
+      }
+    } finally {
+      setAdding(false);
+    }
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">
-          Responsibilities ({responsibilities.length})
+          Responsibilities ({items.length})
         </h2>
-        <Badge variant="outline" className="text-xs">
-          From Launch Playbook
-        </Badge>
+        {items.length > 0 && (
+          <div className="flex items-center gap-3">
+            <Progress
+              value={(completed / items.length) * 100}
+              className="h-2 w-24"
+            />
+            <span className="text-muted-foreground text-sm">
+              {completed} of {items.length} complete
+            </span>
+          </div>
+        )}
       </div>
 
-      <div className="space-y-2">
-        {responsibilities.map((responsibility, index) => (
-          <Card key={index} className="py-0">
-            <CardContent className="flex items-center gap-4 p-4">
-              <div className="bg-muted text-muted-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
-                <Circle className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium capitalize">
-                  {responsibility}
-                </p>
-              </div>
-              <Badge variant="secondary" className="text-xs">
-                Not Started
-              </Badge>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {items.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center p-8 text-center">
+            <ListChecks className="text-muted-foreground h-10 w-10" />
+            <h3 className="mt-3 font-medium">No responsibilities yet</h3>
+            <p className="text-muted-foreground mt-1 max-w-sm text-sm">
+              Add what this team owns. Each one can be ticked off as the team
+              gets it done.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((responsibility) => (
+            <ResponsibilityItem
+              key={responsibility.id}
+              responsibility={responsibility}
+              onToggle={handleToggle}
+            />
+          ))}
+        </ul>
+      )}
 
-      <p className="text-muted-foreground text-xs">
-        Status tracking for individual responsibilities is planned for a future
-        release. Currently showing responsibilities from the Launch Playbook
-        template.
-      </p>
+      <form
+        ref={formRef}
+        action={handleAdd}
+        className="flex items-center gap-2"
+      >
+        <Input
+          name="title"
+          placeholder="Add a responsibility..."
+          maxLength={255}
+          required
+          aria-label="New responsibility"
+        />
+        <Button type="submit" disabled={adding} className="cursor-pointer">
+          <Plus className="mr-2 h-4 w-4" />
+          {adding ? "Adding..." : "Add"}
+        </Button>
+      </form>
     </div>
   );
 }

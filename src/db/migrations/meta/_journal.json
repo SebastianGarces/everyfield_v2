@@ -414,6 +414,13 @@
       "when": 1787552240967,
       "tag": "0059_assessment_planter_seen_at",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787552241967,
+      "tag": "0060_team_responsibilities",
+      "breakpoints": true
     }
   ]
 }
