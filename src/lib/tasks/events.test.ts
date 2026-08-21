@@ -3,41 +3,47 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { isUniqueViolation } from "@/db/errors";
-import { sourceReader } from "@/lib/testing/source-span";
+import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
 import type { FinalizedAttendee } from "@/lib/meetings/events";
 
 import {
-  TASKS_MEETING_EVALUATION_UNIQUE,
   followUpDueDate,
   followUpRecipients,
   handleMeetingAttendanceFinalized,
 } from "./events";
 
 // ----------------------------------------------------------------------------
-// MEET-011 — two concurrent finalizes both pass the SELECT guard in
-// `handleMeetingAttendanceFinalized`; the partial unique index
-// `tasks_meeting_evaluation_unique_idx` is what actually stops the second one.
-// The loser's INSERT is rejected as a whole (the evaluation row shares the
-// statement with the follow-ups), and the handler treats exactly that error as
-// an idempotent no-op.
+// MEET-011 / #521 — EVERY ROW THE GENERATION INSERT WRITES HAS AN ARBITER, AND
+// EACH ARBITER IS SPELLED LIKE THE READ ABOVE IT.
 //
-// WHAT IS ASSERTED HERE CHANGED WITH #411, AND THE DELETION IS THE POINT. This
-// file used to own a byte-identical copy of `isUniqueViolation` under the name
-// `isDuplicateGenerationError`, with five tests over the cause chain, the
-// message fallback and the -1 branches — a second implementation of a predicate
-// `src/db/errors.ts` already owns, and a second suite proving the same walk.
-// Both are gone. `src/db/errors.test.ts` proves the WALK; what is left here is
-// the pair of facts that are this domain's own and that the shared predicate
-// cannot check for itself:
+// Two concurrent finalizes both pass the SELECT guards in
+// `handleMeetingAttendanceFinalized`; only a partial unique index can tell them
+// apart. There are two, one per kind of row the handler writes, and the pair is
+// what lets the INSERT be per-row idempotent rather than all-or-nothing:
 //
-//   1. the constant names the index the migration actually creates — the
-//      predicate matches on that string, so a rename anywhere else turns a
-//      caught race into a thrown finalize;
-//   2. the catch in `handleMeetingAttendanceFinalized` reaches the SHARED
-//      predicate with THAT constant, rather than a broadened `code === '23505'`
-//      test that would swallow a genuine write failure.
+//   `tasks_meeting_evaluation_unique_idx`  (church_id, related_id)
+//   `tasks_person_follow_up_unique_idx`    (church_id, related_id, due_date)
+//
+// WHAT THESE TESTS PIN, AND WHY IT IS NOT THE INDEX NAME. Until #521 this file
+// asserted that an exported constant named the index the migration creates, and
+// that the handler's catch reached `isUniqueViolation` with that constant.
+// There is no catch left: the INSERT carries an untargeted
+// `ON CONFLICT DO NOTHING`, so no name is matched on and the constant is gone
+// (`src/db/errors.test.ts` still proves the shared predicate's walk, for the
+// domains that do recognise a violation).
+//
+// What replaces it is the property the two residuals were both instances of: AN
+// INDEX PREDICATE WIDER THAN THE READ IT GUARDS IS A SUPPRESSION VECTOR. The
+// evaluation index named the completion event and the soft-delete while the
+// guard also demanded `related_type = 'meeting'`, so a row with that event, a
+// meeting's id and `related_type = 'person'` held the slot INVISIBLY: the real
+// INSERT failed 23505, was read as a benign lost race, and the meeting
+// finalized with no tasks, permanently (#323 WS1, from #162). So each predicate
+// is asserted clause for clause against the SELECT it stands behind.
+//
+// The live half — that a real Postgres enforces this, and that the crafted row
+// no longer steals the slot — is `follow-up-race.test.ts`.
 // ----------------------------------------------------------------------------
 
 const EVENTS_SOURCE = readFileSync(
@@ -45,65 +51,101 @@ const EVENTS_SOURCE = readFileSync(
   "utf8"
 );
 
-const MIGRATION_SOURCE = readFileSync(
-  path.join(process.cwd(), "src/db/migrations/0022_tense_hydra.sql"),
+const SCHEMA_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/db/schema/tasks.ts"),
   "utf8"
 );
 
-test("the constant names the index the migration creates", () => {
+/**
+ * One index declaration, cut out between its own opener and the NEXT one.
+ *
+ * `span` resolves both anchors against the whole file, so the closing anchor has
+ * to be text that occurs once and later — the following declaration, never a
+ * `"),"` that first appears three hundred lines up (`source-span.ts`, on why a
+ * mis-anchored span is a test about nothing). Reordering the declarations
+ * therefore throws here rather than quietly asserting against a neighbour.
+ */
+function indexPredicate(from: string, to: string): string {
+  return sourceReader(SCHEMA_SOURCE, "schema/tasks.ts").span(
+    `uniqueIndex("${from}")`,
+    `uniqueIndex("${to}")`
+  );
+}
+
+test("the evaluation index names every clause its guard reads", () => {
+  const predicate = indexPredicate(
+    "tasks_meeting_evaluation_unique_idx",
+    "tasks_person_follow_up_unique_idx"
+  );
+
+  for (const clause of [
+    "completionEvent} = 'meeting.evaluation.completed'",
+    "relatedType} = 'meeting'",
+    "deletedAt} is null",
+  ]) {
+    assert.ok(
+      predicate.includes(clause),
+      `#323 WS1: the guard reads ${clause} and an index that does not is a slot a row can hold unseen`
+    );
+  }
+
   assert.ok(
-    MIGRATION_SOURCE.includes(TASKS_MEETING_EVALUATION_UNIQUE),
-    "the predicate matches on this exact string; a rename that misses one side " +
-      "turns an expected race into a finalize that throws"
+    predicate.includes("table.churchId, table.relatedId"),
+    "one live evaluation task per (church, meeting)"
   );
 });
 
-test("the race is classified by the shared predicate, not a local copy", () => {
-  // Anchored on the INSERT's opening, not its whole one-line form: the
-  // statement gained a `.returning({ id: tasks.id })` when T-018 wired the
-  // generated follow-ups into the notification queue, and the anchor throwing on
-  // that move is the guard working (`memory/invariants.md` → Multi-Tenancy, on
-  // why a moved anchor must throw rather than slice the empty string).
-  const catchBlock = sourceReader(EVENTS_SOURCE, "events.ts").span(
+test("the follow-up index is keyed on the tuple that identifies a meeting's follow-up", () => {
+  const predicate = indexPredicate(
+    "tasks_person_follow_up_unique_idx",
+    "tasks_id_church_id_unique_idx"
+  );
+
+  assert.ok(
+    predicate.includes("table.churchId, table.relatedId, table.dueDate"),
+    "a follow-up row names no meeting, so the meeting-derived due day IS its identity"
+  );
+
+  for (const clause of [
+    "category} = 'follow_up'",
+    "relatedType} = 'person'",
+    "deletedAt} is null",
+  ]) {
+    assert.ok(
+      predicate.includes(clause),
+      `the reconcile read filters on ${clause}; the index must too`
+    );
+  }
+});
+
+test("the generation INSERT is per-row idempotent, not all-or-nothing", () => {
+  // `span` resolves both anchors against the whole file, and
+  // `autoCompleteTasksByEvent` already carries a `.returning({ id: tasks.id })`
+  // higher up — so the closing anchor is the call that follows the INSERT.
+  const insert = sourceReader(EVENTS_SOURCE, "events.ts").span(
     ".insert(tasks)",
-    "throw error;"
+    "await syncTaskNotificationsFor("
   );
 
   assert.match(
-    catchBlock,
-    /isUniqueViolation\(\s*error,\s*TASKS_MEETING_EVALUATION_UNIQUE\s*\)/,
-    "the one predicate in src/db/errors.ts decides this, with this index named"
+    insert,
+    /\.onConflictDoNothing\(\)/,
+    "#521: with both kinds of row guarded, a raced top-up must skip the row somebody else wrote and land the rest — aborting the statement drops a late-added first-timer"
   );
 
   assert.doesNotMatch(
-    EVENTS_SOURCE,
-    /23505/,
-    "the SQLSTATE belongs to src/db/errors.ts; spelling it here is how the " +
-      "second copy grew back"
-  );
-});
-
-test("a violation of THIS index is the expected race outcome, and no other", () => {
-  // One case each side of the line, through the shared predicate — the walk
-  // itself is proven in src/db/errors.test.ts and is not re-proven here.
-  const ours = Object.assign(
-    new Error(
-      `duplicate key value violates unique constraint "${TASKS_MEETING_EVALUATION_UNIQUE}"`
-    ),
-    { code: "23505", constraint: TASKS_MEETING_EVALUATION_UNIQUE }
+    insert,
+    /onConflictDoNothing\(\s*\{/,
+    "untargeted, deliberately: a named arbiter covers one index and re-raises 23505 on the other"
   );
 
-  assert.equal(isUniqueViolation(ours, TASKS_MEETING_EVALUATION_UNIQUE), true);
-
-  const somebodyElses = Object.assign(
-    new Error('duplicate key value violates unique constraint "tasks_pkey"'),
-    { code: "23505", constraint: "tasks_pkey" }
-  );
-
-  assert.equal(
-    isUniqueViolation(somebodyElses, TASKS_MEETING_EVALUATION_UNIQUE),
-    false,
-    "swallowing this would finalize a meeting whose tasks never landed"
+  // Comments stripped: the docblock explains the untargeted choice by naming
+  // the SQLSTATE, and a module that documents what it forbids fails its own
+  // `doesNotMatch` otherwise.
+  assert.doesNotMatch(
+    stripComments(EVENTS_SOURCE),
+    /23505|isUniqueViolation/,
+    "no conflict reaches the application any more, so a catch that classified one is dead code"
   );
 });
 
