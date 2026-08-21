@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#474 — Prayer rhythms, not a title (C05/C21) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .badquote {
+        border-left: 3px solid #e0705a;
+        padding-left: 1rem;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      textarea.copybox {
+        width: 100%;
+        min-height: 7rem;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        color: #ece9db;
+        padding: 0.6rem 0.75rem;
+        font-family: "Newsreader", serif;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 5 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #474 — Prayer is rhythms, not a title
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C05 + C21</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-change">Rubric + attestations + UI</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          The trick that keeps this from becoming a questionnaire: Bryan's "has
+          it happened in the last 30 days?" doesn't need to be a question. Every
+          attestation already records <em>when</em> it was last touched —
+          freshness is metadata we have, not a toggle we add.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="now">474 prayer</span><span>475 generosity</span
+          ><span>476 60-day signal</span><span>477 P1 cluster</span
+          ><span>478 1+2 budget</span><span>479 sharing lang</span
+          ><span>480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          1 · What the system knows today
+        </h2>
+        <p class="text-secondary mb-4 text-sm">
+          Verified: attestations are a curated vocabulary (<code
+            >manual-signals.ts</code
+          >
+          — 4 toggles, one object literal per signal, all four read/write sites
+          bound to it). Answers upsert into <code>plant_signals</code>
+          <strong>with who/when recorded</strong>
+          (<code>updatedAt</code>). Lens 5 today feeds on the
+          <code>prayer_leader_assigned</code> toggle — the exact title-equals-
+          health equation Bryan rejects. The rubric itself marks the lens
+          "nearly blind."
+        </p>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            I don't think "Do you have a Prayer Leader?" tells you very much
+            about whether prayer is actually central.
+            <span class="text-muted">— Bryan, C21</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · The design</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.1 · Bryan's three questions become two toggles + metadata
+        </h3>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Bryan asked</th>
+                <th>Ships as</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>"Established corporate prayer rhythm?"</td>
+                <td>New attestation <code>prayer_rhythm_established</code>.</td>
+              </tr>
+              <tr>
+                <td>"Has it actually happened in the last 30 days?"</td>
+                <td>
+                  <strong>Not a question.</strong> The snapshot exposes each
+                  manual signal's age (<code>attestedDaysAgo</code>, from
+                  <code>plant_signals.updatedAt</code>). A prayer attestation
+                  older than the reaffirm window reads as "attested, but not
+                  reaffirmed in N days" — and the UI offers a one-click "still
+                  true" reaffirm that bumps the timestamp.
+                </td>
+              </tr>
+              <tr>
+                <td>"Prayer regularly incorporated into gatherings?"</td>
+                <td>New attestation <code>prayer_in_gatherings</code>.</td>
+              </tr>
+              <tr>
+                <td>"Do you have a Prayer Leader?"</td>
+                <td>
+                  The <code>prayer_leader_assigned</code> toggle stays, but as a
+                  <strong>coverage</strong> signal (cited with Lens 7 role
+                  coverage). It is never again a Lens 5 health pass.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D1 · The two new attestations — copy
+          <span class="chip chip-change ml-1">edit or approve</span>
+        </h3>
+        <p class="text-secondary mb-2 text-sm">
+          One entry each in <code>MANUAL_SIGNALS</code> (label · description ·
+          citation clause). Edit inline if the register is off, then queue.
+        </p>
+        <form
+          class="decision-form mb-8"
+          data-lavish-question="d1-copy"
+          onsubmit="queueCopy(event)"
+        >
+          <textarea class="copybox" name="copy">
+prayer_rhythm_established
+  label: "Corporate prayer rhythm established"
+  description: "Your core group has a regular, recurring rhythm of praying together."
+  clause: "your core group has an established corporate prayer rhythm"
+
+prayer_in_gatherings
+  label: "Prayer woven into gatherings"
+  description: "Prayer is a regular part of core-group and leadership gatherings."
+  clause: "prayer is regularly part of your gatherings"</textarea
+          >
+          <div class="mt-3">
+            <button type="submit" class="qbtn">Queue D1 copy</button>
+            <span class="queued-note ml-2">Queued ✓</span>
+          </div>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D2 · The reaffirm cadence
+          <span class="chip chip-change ml-1">pick one</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          Bryan's own window is 30 days. The mechanism below is the lightest one
+          that makes the window real; the alternatives add machinery.
+        </p>
+        <form
+          class="decision-form mb-2"
+          data-lavish-question="d2-cadence"
+          onsubmit="queueDecision(event, 'D2 — reaffirm cadence')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="30-day window; inline reaffirm chip on the toggle card"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >30 days, inline reaffirm (recommended).</strong
+                >
+                A prayer toggle answered more than 30 days ago shows "last
+                affirmed N days ago — still true?" with a one-click reaffirm on
+                the existing signal card. No new surface, no scheduled
+                anything.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="30-day window; auto-generated reaffirm task"
+              />
+              <span
+                >30 days, plus an auto-generated task when stale — more push,
+                more machinery (task generation, idempotency).</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="different window (say which in a note)"
+              />
+              <span>A different window — annotate which.</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D2 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Rubric v1 Lens 5 delta (into the D0 draft)
+        </h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              "What feeds it" becomes the two rhythm attestations
+              <strong>and their freshness</strong>; the Prayer Leader title is
+              removed from Lens 5 and cited only as Lens 7 coverage.
+            </li>
+            <li>
+              Healthy: rhythm established and reaffirmed within the window;
+              prayer woven into gatherings.
+            </li>
+            <li>
+              An unanswered prayer attestation is
+              <strong>unknown, never healthy</strong> — the judge says "we do
+              not have enough information to assess prayer health" (the full
+              evidence-quality vocabulary is #483; Lens 5 states the local rule
+              now).
+            </li>
+            <li>
+              A stale attestation is cited honestly: "you confirmed a prayer
+              rhythm, 45 days ago — is it still happening?"
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          4 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Vocabulary.</strong> Two new entries in
+              <code>MANUAL_SIGNALS</code> (D1 copy). By the module's own
+              contract that is the only edit the vocabulary needs — schema,
+              phrases, and gates bind to it.
+            </li>
+            <li>
+              <strong>AC-2 Freshness fact.</strong> The snapshot's manual block
+              gains per-signal age (<code>attestedDaysAgo</code>) read from
+              <code>plant_signals.updatedAt</code>, plus the reaffirm window
+              constant; fact phrases cite age for stale prayer signals; tests
+              updated.
+            </li>
+            <li>
+              <strong>AC-3 Reaffirm UI.</strong> Prayer toggles older than the
+              window show the reaffirm affordance (D2); one click re-writes the
+              same value and bumps <code>updatedAt</code>. Idempotent;
+              <code>cursor-pointer</code>.
+            </li>
+            <li>
+              <strong>AC-4 Rubric.</strong> The D0 draft carries the Lens 5
+              delta (§3): rhythm-fed, leader-title demoted to coverage,
+              unanswered = unknown, stale cited with age.
+            </li>
+            <li>
+              <strong>AC-5 Works.</strong> Browser validation on the preview:
+              answer the two new toggles, see them cited; a snapshot test proves
+              value + age reach the judge prompt.
+            </li>
+            <li>
+              <strong>AC-6 Follow-up filed.</strong> A discovery issue "prayer
+              health beyond toggles" is opened (the ruling's separate thread),
+              linking here.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">5 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              No schema change — <code>plant_signals</code> already records
+              who/when; freshness is a read.
+            </li>
+            <li>
+              The Prayer Leader toggle is not deleted — it changes lens
+              allegiance only.
+            </li>
+            <li>
+              Generosity's attestation split — #475. The full
+              measured/attested/inferred/unknown vocabulary — #483.
+            </li>
+            <li>No questionnaire: the attestation card stays a toggle card.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-474"
+          onsubmit="queueDecision(event, '#474 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #474 with my D1/D2 answers"
+                checked
+              />
+              <span>Approve — file the spec into #474 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>manual-signals.ts</code> (4-signal vocabulary, 4-site
+        binding) · <code>schema/phase-engine.ts:189–213</code>
+        (plant_signals upsert, who/when) ·
+        <code>rubric.ts</code> CSF-5 · <code>signal-toggles.tsx</code> /
+        <code>signals-actions.ts</code> (the write path). Filed: #470–#473 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+      function queueCopy(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const value = new FormData(form).get("copy");
+        window.lavish.queuePrompt(
+          "D1 — approved attestation copy (use exactly this):\n" + value,
+          {
+            tag: "decision",
+            text: "D1 attestation copy approved/edited",
+            element: form,
+            queueKey: "d1-copy",
+            data: { question: "d1-copy", answer: value },
+          }
+        );
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

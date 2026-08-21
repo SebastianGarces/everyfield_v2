@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#487 — Growth composition (C26) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 18 of 18 — the
+          last one
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #487 — Where is the growth coming from?
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C26</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-keep">Light visibility, never gamified</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          20 → 60 entirely from neighboring churches is launch growth and a very
+          different Great Commission story. The first honest signal already
+          exists: <code>persons.source</code>. The rubric says exactly what that
+          field can and cannot claim.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span><span class="done">479 ✓</span
+          ><span class="done">480 ✓</span><span class="done">481 ✓</span
+          ><span class="done">482 ✓</span><span class="done">483 ✓</span
+          ><span class="done">484 ✓</span><span class="done">485 ✓</span
+          ><span class="done">486 ✓</span
+          ><span class="now">487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · The design</h2>
+        <div class="card mb-5 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              <strong>New fact:</strong>
+              <code>coreGroup.sourceComposition</code> — committed members
+              counted by the existing source vocabulary
+              (<code>personal_referral</code>, <code>social_media</code>,
+              <code>vision_meeting</code>, <code>website</code>,
+              <code>event</code>, <code>partner_church</code>,
+              <code>other</code>) plus <code>unknownSourceCount</code>
+              (source null). Deterministic, no schema change.
+            </li>
+            <li>
+              <strong
+                >Rubric v1 — a growth-composition note under Lens 3:</strong
+              >
+              the judge may describe the mix ("9 of your 24 committed adults
+              came through vision meetings; 4 from a partner church; 5 have no
+              recorded source") and may gently observe when growth is
+              predominantly <code>partner_church</code>. It may
+              <em>never</em> claim conversions, spiritual background, or Great
+              Commission fruit from this field — source records how a contact
+              reached the plant, nothing more.
+            </li>
+            <li>
+              <strong>Unseen is said</strong> (per #483): mostly-null sources →
+              "we cannot see where growth is coming from yet" — never a quiet
+              gap.
+            </li>
+            <li>
+              <strong>Anti-gamification, in writing:</strong> the rubric bans
+              ranking, scoring, or comparing plants on composition; no
+              composition fact reaches network-facing portfolio comparisons.
+            </li>
+            <li>
+              <strong>Post-alpha named, not built:</strong> professions of
+              faith, baptisms, evangelistic relationships as person-profile
+              records — a filed follow-up, and the rubric names them as the
+              future upgrade path.
+            </li>
+          </ul>
+        </div>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            Again, don't gamify conversion counts. But professions of faith,
+            baptisms, evangelistic relationships, etc. seem important enough
+            that I would want them somewhere.
+            <span class="text-muted">— Bryan, C26</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          D1 · Who sees the composition?
+          <span class="chip chip-change ml-1">pick one</span>
+        </h2>
+        <p class="text-secondary mb-3 text-sm">
+          The gamification vector Bryan warns about is precisely a network
+          comparing plants on where growth comes from.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="d1-visibility"
+          onsubmit="queueDecision(event, 'D1 — composition visibility')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="planter-only in v1; no composition fact in network-audience insights or portfolio"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Planter-only (recommended).</strong
+                >
+                Composition appears in planter-audience insights and drill-down
+                facts only. Nothing composition-shaped reaches the network
+                audience or portfolio views.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="planter + network aggregate (same coaching-register rules)"
+              />
+              <span
+                >Network sees the aggregate too, under #482's coaching register
+                — more transparency, opens the comparison vector.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          2 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Fact.</strong>
+              <code>coreGroup.sourceComposition</code> +
+              <code>unknownSourceCount</code> in the snapshot; fact phrases;
+              tests (including the mostly-null case).
+            </li>
+            <li>
+              <strong>AC-2 Rubric.</strong> The D0 draft carries the Lens 3
+              growth-composition note: what source can say, the conversion-claim
+              ban, the unseen-is-said rule, the anti-gamification ban, and the
+              named post-alpha upgrade path.
+            </li>
+            <li>
+              <strong>AC-3 Audience.</strong> Per D1 — a test asserts no
+              composition fact appears in network-audience payloads.
+            </li>
+            <li>
+              <strong>AC-4 Works.</strong> Snapshot test proves composition
+              reaches the judge prompt; a planter insight citing it renders with
+              its facts. No new UI.
+            </li>
+            <li>
+              <strong>AC-5 Follow-up.</strong> The post-alpha issue (professions
+              / baptisms / evangelistic relationships on the person profile, no
+              gamification) exists — filed at spec time.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">3 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>No conversion leaderboards, ever (issue's own guard).</li>
+            <li>No alpha-blocking baptisms tracking.</li>
+            <li>No schema change — the source vocabulary stands as is.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">
+          Approve — and close the series
+        </h2>
+        <p class="text-secondary mb-3 text-sm">
+          On approval I file #487, create the post-alpha follow-up, then close
+          out the series: the "assemble &amp; activate rubric v1" issue (the D0
+          flip) and a summary on parent #469.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-487"
+          onsubmit="queueDecision(event, '#487 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #487 with my D1 answer, then close out the series"
+                checked
+              />
+              <span>Approve — file #487 and close out the series</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>personSources</code> vocabulary in
+        <code>schema/people.ts:35–44</code> · no existing composition fact in
+        <code>CoreGroupSignals</code>. Series: 17 specs filed, this is 18.
+        Follow-ups so far: #533 layout · #534 prayer beyond toggles · #535
+        check-in sharing · #536 church health.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

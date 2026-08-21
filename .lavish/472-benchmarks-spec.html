@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#472 — 50/100 are methodology benchmarks (C03) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .badquote {
+        border-left: 3px solid #e0705a;
+        padding-left: 1rem;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      .filelist {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+        line-height: 1.7;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 3 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #472 — 50/100 are methodology benchmarks, not universal health
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C03</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-change">Rubric + app + wiki sweep</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          The numbers stay. What changes is what they claim to be: the
+          Playbook's benchmarks for this methodology, never a definition of a
+          healthy plant. The sweep is concrete — I queried the corpus and found
+          every place the claim lives.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="now">472 benchmarks</span><span>473 cohesion</span
+          ><span>474 prayer</span><span>475 generosity</span
+          ><span>476 60-day signal</span><span>477 P1 cluster</span
+          ><span>478 1+2 budget</span><span>479 sharing lang</span
+          ><span>480 limited vis</span><span>481 coverage gap</span
+          ><span>482 coaching reg</span><span>483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          1 · Where the claim lives today
+        </h2>
+        <p class="text-secondary mb-4 text-sm">
+          Three surfaces, all verified — the wiki list is from a live query of
+          the corpus (global articles, <code>church_id IS NULL</code>).
+        </p>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Surface</th>
+                <th>What it says now</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="whitespace-nowrap"><strong>Rubric</strong></td>
+                <td>
+                  <code>rubric.ts</code> CSF-3: "distance to the 50 (min) / 100
+                  (target) goal"; Phase 1: "build to 50–100 committed adults".
+                  <code>rubric-v0.md</code> Lens 3: "Minimum: 50 · Target: 100"
+                  with no framing.
+                </td>
+              </tr>
+              <tr>
+                <td class="whitespace-nowrap"><strong>App copy</strong></td>
+                <td>
+                  <code>phase-tabs.tsx:88</code> (marketing): "Commitment
+                  tracking against your 50-adult floor." The
+                  <code>/phase</code> exit criteria cite 30–40 (that gate is
+                  #477, untouched here).
+                </td>
+              </tr>
+              <tr>
+                <td class="whitespace-nowrap">
+                  <strong>Wiki · 10 articles</strong>
+                </td>
+                <td>
+                  <div class="filelist">
+                    core-group/…/growing-your-core-group<br />
+                    core-group/…/the-core-group-funnel<br />
+                    core-group/…/what-is-a-core-group<br />
+                    core-group/vision-meetings/what-is-a-vision-meeting<br />
+                    discovery/setting-your-initial-goals<br />
+                    frameworks/8-critical-success-factors-overview<br />
+                    getting-started/launch-process-goals<br />
+                    launch-team/launch-date/setting-your-launch-date<br />
+                    launch-team/…/variables-that-drive-your-launch-date<br />
+                    pre-launch/promotion-channels-guide
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card p-5">
+          <p class="quote text-sm">
+            I'm okay with these numbers if we are explicitly saying, "These are
+            the benchmarks of this planting methodology." … we only had 25 when
+            we launched. i wanted to wait the team wanted to go.
+            <span class="text-muted">— Bryan, C03</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · The design</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.1 · Rubric v1 Lens 3 preface (into the D0 draft)
+        </h3>
+        <div class="card mb-5 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              Lens 3 opens with the framing:
+              <em
+                >"50 minimum / 100 target are this planting methodology's
+                benchmarks (Playbook-derived). Different contexts and models
+                reasonably launch at very different sizes — these numbers are
+                not a universal definition of a healthy plant."</em
+              >
+            </li>
+            <li>
+              The judge reports
+              <strong>distance and trajectory relative to the benchmark</strong
+              >. It may not call a plant unhealthy, or its size a failure, for
+              being under 50.
+            </li>
+            <li>
+              Insight copy says "the Playbook benchmark", never "the
+              requirement" or "needed for a healthy launch".
+            </li>
+          </ul>
+        </div>
+
+        <h3 class="mb-2 text-base font-semibold">
+          2.2 · Wiki sweep — with a lever, because the corpus is a database
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          Wiki content lives only in <code>wiki_articles</code> (a protected
+          table — no repo seed), so the sweep cannot be a normal diff. The work
+          ships a committed, re-runnable audit script:
+        </p>
+        <div class="card mb-5 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              <code>scripts/audit-benchmark-language.ts</code> — read-only:
+              flags global articles where 50/100 appears with gate phrasing
+              ("must", "required", "minimum needed", "cannot launch") and prints
+              the offending sentences.
+            </li>
+            <li>
+              Content edits reframe each of the 10 articles: the number stays,
+              prefixed as the methodology's benchmark; gate verbs become
+              benchmark verbs. Edits are applied to the canonical corpus via a
+              companion script run once, and the audit re-run proves zero
+              findings remain.
+            </li>
+            <li>
+              The audit stays in the repo — it is the regression guard when
+              future wiki content lands.
+            </li>
+          </ul>
+        </div>
+
+        <h3 class="mb-2 text-base font-semibold">2.3 · App copy</h3>
+        <p class="mb-2 text-sm">
+          <span class="chip mr-1">before</span>
+          <span class="text-danger"
+            >"Commitment tracking against your 50-adult floor."</span
+          >
+        </p>
+        <p class="text-sm">
+          <span class="chip mr-1">after</span>
+          "Commitment tracking against the Playbook's 50-adult benchmark."
+        </p>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Rubric.</strong> The D0 draft (<code
+                >rubric-v1.md</code
+              >
+              + inactive <code>RUBRIC_V1_BODY</code>) carries the Lens 3
+              benchmark preface and the judge constraint (no unhealthy-verdict
+              from undershoot); Phase 1's "build to 50–100" gains the same
+              benchmark framing.
+            </li>
+            <li>
+              <strong>AC-2 Audit lever.</strong>
+              <code>scripts/audit-benchmark-language.ts</code> committed;
+              running it against the corpus prints the flagged sentences per
+              article; after the content pass it reports zero findings.
+            </li>
+            <li>
+              <strong>AC-3 Wiki content.</strong> Each of the 10 listed articles
+              frames 50/100 as this methodology's benchmark; no gate phrasing
+              survives the audit.
+            </li>
+            <li>
+              <strong>AC-4 App copy.</strong> <code>phase-tabs.tsx</code>
+              "50-adult floor" becomes benchmark phrasing.
+            </li>
+            <li>
+              <strong>AC-5 Works.</strong> Audit output (clean) attached to the
+              PR as the proof artifact; a spot-check of one rewritten article on
+              the preview's wiki route.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">4 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              The numbers themselves do not change — 50/100 stay as stated
+              benchmarks.
+            </li>
+            <li>
+              Network-level configurability of the benchmark — later product
+              decision, explicitly not a v1 block (per the ruling).
+            </li>
+            <li>The 30–40 Phase 1 gate cluster — #477.</li>
+            <li>
+              Church-scoped (per-plant) wiki articles are untouched; the sweep
+              covers the global corpus.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <p class="text-secondary mb-3 text-sm">
+          The one judgment call I made: the wiki sweep ships as an audit script
+          + content pass (re-runnable proof), not hand edits. Approve to file
+          and queue #472, or annotate.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-472"
+          onsubmit="queueDecision(event, '#472 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #472"
+                checked
+              />
+              <span>Approve — file the spec into #472 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Sources verified: <code>rubric.ts:51–52,94</code> ·
+        <code>phase-tabs.tsx:88</code> · live corpus query (10 global articles)
+        · <code>seed-dev-db.ts</code> (wiki tables protected, no repo seed) ·
+        <code>exit-criteria.ts</code> (30–40 gate belongs to #477). Filed so
+        far: #470 ✓ · #471 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

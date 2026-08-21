@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#483 — Evidence quality, unknown ≠ healthy (C17) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 14 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #483 — Every lens knows its evidence; unknown is never a quiet pass
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C17</span>
+          <span class="chip chip-keep">Ruling: accept</span>
+          <span class="chip chip-change">Facts + scorecard + rubric</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          The vocabulary is Bryan's: measured · attested · inferred · unknown.
+          The design principle is derive-don't-sync: evidence quality is
+          computed deterministically from the snapshot, and every badge derives
+          from that one profile — the judge phrases it but can never invent it.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span><span class="done">479 ✓</span
+          ><span class="done">480 ✓</span><span class="done">481 ✓</span
+          ><span class="done">482 ✓</span><span class="now">483 evidence</span
+          ><span>484 sustainability</span><span>485 launch health</span
+          ><span>486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · The design</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          1.1 · A deterministic evidence profile per lens
+        </h3>
+        <div class="card mb-5 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              The snapshot gains <code>evidence.byLens</code>: for each of the 8
+              lenses, the strongest evidence available —
+              <code>measured</code> (SQL-derived facts exist),
+              <code>attested</code> (only manual signals speak, and they are
+              answered), or <code>unknown</code> (nothing measured, nothing
+              answered). Computed from a lens → fact-paths map, pure SQL/code,
+              tested.
+            </li>
+            <li>
+              <code>inferred</code> is deliberately NOT a snapshot value — a
+              fact is never inferred; only a <em>conclusion</em> can be. The
+              rubric governs inference (below); the profile stays honest.
+            </li>
+            <li>
+              Stale attestations (the #474/#475 reaffirm windows) degrade the
+              profile's phrasing ("attested, 45 days ago") but not its category
+              — freshness already lives in the facts.
+            </li>
+          </ul>
+        </div>
+
+        <h3 class="mb-2 text-base font-semibold">
+          1.2 · Surfaces — derived, never synced
+        </h3>
+        <ul class="mb-5 list-disc space-y-1 pl-5 text-sm">
+          <li>
+            <strong>CSF scorecard:</strong> a lens whose profile is
+            <code>unknown</code> renders "Insufficient evidence — we don't have
+            enough information to assess prayer health" (Bryan's phrasing),
+            visually distinct from healthy AND from needs-attention. Never a
+            quiet blank.
+          </li>
+          <li>
+            <strong>Insight cards:</strong> an evidence badge (measured /
+            attested) derived from the insight's category → lens profile. No new
+            persisted field — one source of truth.
+          </li>
+          <li>
+            <strong>Network:</strong> unknown lenses phrase as insufficient
+            evidence; at the portfolio level this composes with #480's
+            Limited-visibility posture.
+          </li>
+        </ul>
+
+        <h3 class="mb-2 text-base font-semibold">
+          1.3 · Rubric v1 — the evidence rules (into the D0 draft)
+        </h3>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              Every conclusion states its basis. The snapshot's per-lens profile
+              is handed to the judge as facts; the judge may not claim stronger
+              evidence than the profile grants.
+            </li>
+            <li>
+              <strong>Unknown ≠ healthy.</strong> A lens with an unknown profile
+              produces at most an "insufficient evidence" statement — never a
+              pass, never silence read as health.
+            </li>
+            <li>
+              <strong>Inferred conclusions are named and constrained:</strong>
+              the judge may infer only where the rubric explicitly permits it,
+              and the copy must name the inference and its weakness (the Lens 2
+              pattern from #470 is the template).
+            </li>
+            <li>
+              The Appendix C Q2 placeholder (prayer/generosity nearly invisible)
+              resolves: thin coverage is shown as thin, and #474/#475's
+              attestations are what upgrade it.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          D1 · Confirm derive-don't-persist
+          <span class="chip chip-change ml-1">confirm</span>
+        </h2>
+        <p class="text-secondary mb-3 text-sm">
+          The alternative is a persisted <code>evidence_quality</code> column on
+          insights (judge-claimed, migration, second source of truth that can
+          drift from the facts). The lean shape derives every badge from the
+          deterministic profile.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="d1-derive"
+          onsubmit="queueDecision(event, 'D1 — evidence representation')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="derive from the deterministic per-lens profile; no persisted evidence column"
+                checked
+              />
+              <span
+                ><strong class="display text-sm">Derive (recommended).</strong>
+                One deterministic profile in the snapshot; badges and copy
+                derive from it. No migration, nothing to drift.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="persist evidence_quality per insight (judge-claimed enum + column)"
+              />
+              <span
+                ><strong class="display text-sm">Persist per insight.</strong> A
+                judge-claimed enum stored on each insight — more granular, one
+                migration, and a second vocabulary that can disagree with the
+                facts.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          2 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Profile.</strong> <code>evidence.byLens</code> in the
+              snapshot, computed from a single lens → fact-paths map; unit tests
+              cover measured, attested-only, and unknown lenses (prayer
+              unanswered is the canonical case).
+            </li>
+            <li>
+              <strong>AC-2 Scorecard.</strong> Unknown lenses render the
+              insufficient-evidence state with Bryan's phrasing; visually
+              distinct from healthy and needs-attention;
+              <code>cursor-pointer</code> where clickable.
+            </li>
+            <li>
+              <strong>AC-3 Badges.</strong> Insight cards show the derived
+              evidence badge; no new persisted field (per D1).
+            </li>
+            <li>
+              <strong>AC-4 Rubric.</strong> The D0 draft carries the
+              evidence-quality section (§1.3): basis stated, unknown ≠ healthy,
+              inference named and constrained, Appendix C Q2 resolved.
+            </li>
+            <li>
+              <strong>AC-5 Works.</strong> Browser validation: a plant with
+              unanswered prayer toggles shows "Insufficient evidence" on the
+              scorecard; a snapshot test proves the profile reaches the judge
+              prompt.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">3 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              No faking prayer/generosity scores from unrelated activity
+              (issue's own guard).
+            </li>
+            <li>
+              The attestations that upgrade prayer/generosity coverage —
+              #474/#475 (queued). Lens 2's named inference — #470 (queued).
+            </li>
+            <li>Portfolio-level visibility posture — #480 (queued).</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-483"
+          onsubmit="queueDecision(event, '#483 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #483 with my D1 answer"
+                checked
+              />
+              <span>Approve — file the spec into #483 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Builds on verified structures: the exit-criteria fact-path lens
+        (measurement axis), the CSF scorecard's standing relabelling, and the
+        #474/#475 attestation freshness facts. Filed: #470–#482 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

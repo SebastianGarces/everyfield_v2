@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#486 — The remaining threshold pack (C22/C23) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+      table.spec th {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.72rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        color: #a7b0a3;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.3);
+        padding: 0.4rem 0.75rem 0.4rem 0;
+      }
+      table.spec td {
+        vertical-align: top;
+        border-bottom: 1px solid rgba(236, 233, 219, 0.12);
+        padding: 0.55rem 0.75rem 0.55rem 0;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 17 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #486 — The remaining threshold pack
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C22 + C23</span>
+          <span class="chip chip-keep">Ruling: accept</span>
+          <span class="chip chip-change">4 rules, new facts, classifier</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          Four threshold rewrites, each following the established pattern:
+          thresholds live as constant facts, the deterministic measurement lives
+          in signals, the judge cites and never invents. Two number picks are
+          yours (D1, D2).
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span><span class="done">479 ✓</span
+          ><span class="done">480 ✓</span><span class="done">481 ✓</span
+          ><span class="done">482 ✓</span><span class="done">483 ✓</span
+          ><span class="done">484 ✓</span><span class="done">485 ✓</span
+          ><span class="now">486 thresholds</span><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">1 · The four rules</h2>
+        <div class="mb-4 overflow-x-auto">
+          <table class="spec">
+            <thead>
+              <tr>
+                <th>Rule</th>
+                <th>v0</th>
+                <th>v1 design</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Vision-meeting cadence</strong></td>
+                <td>21 days = flag</td>
+                <td>
+                  Two levels: <em>watch</em> at 21 days
+                  (<code>cadenceWatchDays</code>), <em>direct</em> at 28
+                  (<code>cadenceDirectDays</code>). Never crisis language at 21.
+                  Lens 1 healthy gains "meetings happen on a predictable rhythm"
+                  — consistency, not only frequency. Facts exist
+                  (<code>daysSinceLastMeeting</code>); only constants + rubric
+                  text are new.
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Cluster disengagement</strong></td>
+                <td>Absolute 4+ members</td>
+                <td>
+                  Percentage of the active committed group over 28 days, with an
+                  absolute minimum of 3 (D1 picks the percentage). New facts:
+                  <code>activeCommittedCount</code>,
+                  <code>disengagedCount</code> (attended nothing in the last 28
+                  days after attending in the prior 28 — D2 confirms),
+                  <code>disengagedIncludesLeader</code>. A leader among the
+                  disengaged bumps the language a level (qualitative rule for
+                  the judge, not a weighting formula).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Follow-up staleness</strong></td>
+                <td>Universal 14 days</td>
+                <td>
+                  Split by warmth. <em>Warm</em> = attended a vision meeting
+                  within the last 14 days: ideal follow-up 48–72h, flagged at 7
+                  days, seriously stale at 14. <em>Cold</em>: 14 days stands.
+                  New facts: <code>staleWarmCount</code>,
+                  <code>seriouslyStaleWarmCount</code>,
+                  <code>staleColdCount</code> + the threshold constants.
+                  Composes with #470's ownership facts.
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Network readiness focus</strong></td>
+                <td>Launch within 30 days ⇒ escalate</td>
+                <td>
+                  Compound: time is never sufficient.
+                  <code>classifyPlantHealth</code>'s imminent/past-due arm
+                  escalates only when the snapshot also shows
+                  <strong>unresolved readiness gaps</strong> — critical roles
+                  unfilled or required training incomplete. "30 days out and on
+                  track" stays wherever visible insights put it. (Composes with
+                  #480's limited-visibility precedence.)
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">2 · Your two numbers</h2>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D1 · The disengagement percentage
+          <span class="chip chip-change ml-1">Bryan said 20–25%</span>
+        </h3>
+        <form
+          class="decision-form mb-6"
+          data-lavish-question="d1-percentage"
+          onsubmit="queueDecision(event, 'D1 — disengagement percentage')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="20% of active committed group over 28 days, min 3"
+                checked
+              />
+              <span
+                ><strong class="display text-sm">20% (recommended).</strong>
+                Catches the pattern earlier; the min-3 floor already prevents
+                small-group noise (4 of 12 = 33% fires either way; 8 of 40 fires
+                at 20%, waits for 10 at 25%).</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="25% of active committed group over 28 days, min 3"
+              />
+              <span
+                ><strong class="display text-sm">25%.</strong> More
+                conservative; fewer false alarms in mid-size groups.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+
+        <h3 class="mb-2 text-base font-semibold">
+          D2 · What "disengaging" measures
+          <span class="chip chip-change ml-1">confirm</span>
+        </h3>
+        <p class="text-secondary mb-3 text-sm">
+          "Meaningful attendance decline" needs one deterministic definition.
+          The proposal: a committed member who attended
+          <strong>no core-group meeting in the last 28 days</strong> after
+          attending at least one in the prior 28. Explainable in one sentence,
+          no scoring curve.
+        </p>
+        <form
+          class="decision-form mb-2"
+          data-lavish-question="d2-definition"
+          onsubmit="queueDecision(event, 'D2 — disengagement definition')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="zero attendance in last 28d after attending in prior 28d"
+                checked
+              />
+              <span
+                >Confirm the zero-after-active definition (recommended)</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d2"
+                value="attendance rate dropped below 50% of their prior-28d rate"
+              />
+              <span
+                >Rate-drop definition (below 50% of their prior rate) — finer,
+                harder to explain to a planter in one line.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D2 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Cadence.</strong> Constants
+              <code>cadenceWatchDays: 21</code> /
+              <code>cadenceDirectDays: 28</code> in the snapshot; rubric Lens 1
+              carries the two-level language + the consistency line; watch copy
+              is never crisis copy.
+            </li>
+            <li>
+              <strong>AC-2 Disengagement.</strong> New facts per D1/D2 (count,
+              share, includes-leader) computed from meeting attendance; rubric
+              Lens 4 (Cohesion, post-#473) replaces the absolute-4 flag; leader
+              presence bumps language one level.
+            </li>
+            <li>
+              <strong>AC-3 Warmth split.</strong> Warm/cold stale facts + the
+              7/14 constants and the 48–72h ideal named in the rubric; the
+              universal 14-day rule is gone from v1.
+            </li>
+            <li>
+              <strong>AC-4 Compound trigger.</strong>
+              <code>classifyPlantHealth</code>'s launch-window arm requires
+              unresolved readiness gaps (critical roles unfilled or required
+              training incomplete, read from the snapshot); tests cover
+              imminent+gaps, imminent+clean, past-due+gaps, past-due+clean.
+            </li>
+            <li>
+              <strong>AC-5 Rubric.</strong> The D0 draft's Appendix C Q3 table
+              is resolved — every ⚠️ threshold either rewritten here or
+              cross-referenced to its owning issue (#471, #476, #477).
+            </li>
+            <li>
+              <strong>AC-6 Works.</strong> Snapshot tests prove the new facts
+              reach the judge prompt; classifier unit tests for AC-4. No browser
+              gate (no UI change).
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">4 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>Stall clock (28 days, +1 resets) — #471, queued.</li>
+            <li>60-day candidate signal — #476, queued.</li>
+            <li>Phase 1 cluster gate — #477, queued.</li>
+            <li>28-day growth comparison window — kept, untouched.</li>
+            <li>
+              The vision-meeting <em>target</em> (biweekly vs weekly) — C12,
+              still unruled; not in this issue.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-486"
+          onsubmit="queueDecision(event, '#486 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #486 with my D1/D2 answers"
+                checked
+              />
+              <span>Approve — file the spec into #486 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>daysSinceLastMeeting</code> exists
+        (VisionMeetingSignals) · <code>classifyPlantHealth</code>'s time-only
+        imminent arm (READINESS_LAUNCH_WINDOW_DAYS) · the constant-fact pattern
+        (<code>staleThresholdDays</code>). Filed: #470–#485 ✓ · follow-ups:
+        #533–#536.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>

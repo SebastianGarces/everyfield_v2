@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>#479 — Sharing language alignment (C10) — spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-display: "Outfit", sans-serif;
+        --font-serif: "Newsreader", serif;
+        --color-ink: #ece9db;
+        --color-cream: #131711;
+        --color-card: #191e18;
+        --color-green: #1ce362;
+        --color-field: #3ddb7c;
+        --color-danger: #e0705a;
+        --color-secondary: #b7bfb2;
+        --color-muted: #939c8f;
+      }
+    </style>
+    <style>
+      html,
+      body {
+        background: #131711;
+        color: #ece9db;
+        min-height: 100%;
+      }
+      body {
+        font-family: "Newsreader", serif;
+      }
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Outfit", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .min0 {
+        min-width: 0;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.15rem 0.55rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 1px solid rgba(236, 233, 219, 0.3);
+        background: #191e18;
+        white-space: nowrap;
+      }
+      .chip-keep {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .chip-change {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+      button,
+      a,
+      label,
+      summary {
+        cursor: pointer;
+      }
+      .quote {
+        border-left: 3px solid #1ce362;
+        padding-left: 1rem;
+        white-space: pre-wrap;
+      }
+      .badquote {
+        border-left: 3px solid #e0705a;
+        padding-left: 1rem;
+      }
+      .card {
+        background: #191e18;
+        border: 1px solid rgba(236, 233, 219, 0.25);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: rgba(236, 233, 219, 0.1);
+        padding: 0.05rem 0.3rem;
+      }
+      .decision-form label.opt {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        background: #191e18;
+      }
+      .decision-form label.opt:has(input:checked) {
+        border-color: #3ddb7c;
+        background: #16241b;
+      }
+      .decision-form input[type="radio"] {
+        margin-top: 0.3rem;
+        accent-color: #3ddb7c;
+        flex-shrink: 0;
+      }
+      .qbtn {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 0.45rem 0.9rem;
+        background: #ece9db;
+        color: #131711;
+        border: 1px solid #ece9db;
+      }
+      .qbtn:hover {
+        background: #1ce362;
+        border-color: #1ce362;
+      }
+      .queued-note {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.75rem;
+        color: #3ddb7c;
+        display: none;
+      }
+      form.answered .queued-note {
+        display: inline;
+      }
+      .queue-strip {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .queue-strip span {
+        font-family: "Outfit", sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.4rem;
+        border: 1px solid rgba(236, 233, 219, 0.2);
+        color: #939c8f;
+        background: #191e18;
+      }
+      .queue-strip span.done {
+        background: #16241b;
+        color: #3ddb7c;
+        border-color: #3ddb7c;
+      }
+      .queue-strip span.now {
+        background: #ece9db;
+        color: #131711;
+        border-color: #ece9db;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="min0 mx-auto max-w-4xl px-5 py-10">
+      <header class="mb-10">
+        <p class="display text-muted mb-2 text-xs tracking-widest uppercase">
+          EveryField · Phase Engine · Rubric v1 series · Spec 10 of 18
+        </p>
+        <h1 class="mb-3 text-3xl leading-tight font-semibold">
+          #479 — Rubric §7 aligns with the sending-invite sharing ruling
+        </h1>
+        <div class="mb-4 flex flex-wrap gap-2">
+          <span class="chip">Parent #469</span>
+          <span class="chip">Bryan C10</span>
+          <span class="chip chip-keep">Ruling: accept with tweak</span>
+          <span class="chip chip-keep">Docs-only alignment</span>
+        </div>
+        <p class="text-secondary max-w-2xl">
+          Good news: Bryan's question is already answered in the decisions
+          ledger — and it answers the piece the 08-18 session left open, too.
+          This spec is an alignment: rubric §7 stops claiming "off by default,
+          forever" universally.
+        </p>
+        <div class="queue-strip mt-5">
+          <span class="done">470 ✓</span><span class="done">471 ✓</span
+          ><span class="done">472 ✓</span><span class="done">473 ✓</span
+          ><span class="done">474 ✓</span><span class="done">475 ✓</span
+          ><span class="done">476 ✓</span><span class="done">477 ✓</span
+          ><span class="done">478 ✓</span
+          ><span class="now">479 sharing lang</span><span>480 limited vis</span
+          ><span>481 coverage gap</span><span>482 coaching reg</span
+          ><span>483 evidence</span><span>484 sustainability</span
+          ><span>485 launch health</span><span>486 thresholds</span
+          ><span>487 growth comp</span>
+        </div>
+      </header>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          1 · The ruling that already exists
+        </h2>
+        <p class="text-secondary mb-4 text-sm">
+          <code>product-docs/decisions.md</code>, ledger row 187 (the sharing
+          half), verified today:
+        </p>
+        <div class="card mb-4 p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              A plant that joins via a sending-church or network invitation
+              defaults <strong>ALL sharing toggles ON</strong> — the six pull
+              toggles and the push toggle alike.
+            </li>
+            <li>
+              Consent moves to the <strong>acceptance moment</strong>: the
+              screen states in plain language what the overseer will see, before
+              the planter accepts. DB defaults stay FALSE; the ON write is
+              application-level in <code>acceptInvitation</code>.
+            </li>
+            <li>A self-started plant stays all-OFF.</li>
+            <li>
+              The planter can turn any toggle off at any time. Turning one off
+              notifies the overseer's admins with <strong>coarse</strong>
+              wording ("changed what it shares with you"), never per-toggle —
+              per-toggle wording maximizes social pressure and poisons the
+              relationship.
+            </li>
+          </ul>
+        </div>
+        <p class="text-secondary mb-4 text-sm">
+          That last line answers the question the 08-18 session left open
+          ("maybe planters cannot turn those off"): the ledger says they
+          <strong>can</strong>, with coarse notify. And it is very close to what
+          Bryan asked for — the sharing agreement established up front, at
+          acceptance, rather than only as individual toggles.
+        </p>
+        <div class="card p-5">
+          <p class="badquote mb-3 text-sm">
+            "The planter controls what is shared, and it is off by default." —
+            rubric v0 §7, stated universally
+          </p>
+          <p class="quote text-sm">
+            Maybe the sharing agreement is established up front by the planter
+            and sending organization rather than handled only as individual
+            toggles. <span class="text-muted">— Bryan, C10</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          D1 · Does the ledger ruling stand?
+          <span class="chip chip-change ml-1">confirm</span>
+        </h2>
+        <p class="text-secondary mb-3 text-sm">
+          The rubric should describe one rule, and the ledger already states it.
+          Confirm, or reopen the lock question.
+        </p>
+        <form
+          class="decision-form"
+          data-lavish-question="d1-ledger"
+          onsubmit="queueDecision(event, 'D1 — sharing ruling')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="ledger row 187 stands: invited = all-on at acceptance, planter may turn off anytime, coarse notify"
+                checked
+              />
+              <span
+                ><strong class="display text-sm"
+                  >Ledger stands (recommended).</strong
+                >
+                Invited plants: all-on at acceptance with plain-language
+                consent; planter may turn any toggle off anytime; coarse notify
+                to the org. Self-started: all-off.</span
+              ></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="d1"
+                value="reopen: sending-relationship toggles should be locked on (needs a new ledger ruling)"
+              />
+              <span
+                ><strong class="display text-sm">Reopen the lock.</strong>
+                Toggles from a sending agreement cannot be turned off. This
+                contradicts the ledger and needs a new dated ruling before the
+                rubric can say it.</span
+              ></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue D1 answer</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          2 · Rubric v1 §7 delta (into the D0 draft, assuming D1 = ledger)
+        </h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              §7's universal "off by default" splits into the two real cases:
+              <strong>self-started plants</strong> share nothing until the
+              planter turns it on;
+              <strong>plants that accepted a sending-org invitation</strong>
+              start with sharing on, agreed at the acceptance screen.
+            </li>
+            <li>
+              Both keep planter control: any toggle can be turned off at any
+              time; the rubric notes the org is notified in coarse terms — so
+              the judge never treats sharing state as secret or surprising.
+            </li>
+            <li>
+              When a category is off, its observations disappear from the
+              network view — unchanged — and the unshared posture reads "Limited
+              visibility" (cross-reference to #480, which owns that rule).
+            </li>
+            <li>
+              The judge may not describe sharing as "off by default" as a
+              universal fact, and may not editorialize about a plant's sharing
+              choices to either audience.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-1 text-xl font-semibold">
+          3 · Acceptance criteria (draft)
+        </h2>
+        <div class="card p-5">
+          <ol class="list-decimal space-y-2 pl-5 text-sm">
+            <li>
+              <strong>AC-1 Rubric.</strong> The D0 draft's §7 carries the
+              two-case rule (§2) and cites ledger row 187 as its source; the
+              universal "off by default" sentence is gone.
+            </li>
+            <li>
+              <strong>AC-2 Cross-links.</strong> §7 cross-references #480's
+              Limited-visibility posture instead of restating it; the oversight
+              FRD's `share_*` gating (OV-002) is cited, not paraphrased.
+            </li>
+            <li>
+              <strong>AC-3 No behavior change.</strong> This issue ships doc
+              text only — the acceptance-flow toggle write is #500-chain work;
+              the settings sharing panel is #187. A grep proves no `src/` diff.
+            </li>
+            <li>
+              <strong>AC-4 Judge constraint.</strong> The v1 text forbids the
+              judge from stating a universal sharing default or editorializing
+              about sharing choices.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="mb-10">
+        <h2 class="mb-3 text-xl font-semibold">4 · Boundaries</h2>
+        <div class="card p-5">
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              No privacy-default change without a recorded ruling (the issue's
+              own guard) — D1 keeps or escalates, never silently edits.
+            </li>
+            <li>
+              Implementation of acceptance-flow defaults — the #495/#500 seat
+              chain. Settings panel — #187. Limited visibility — #480.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card mb-12 p-6">
+        <h2 class="mb-1 text-lg font-semibold">Approve</h2>
+        <form
+          class="decision-form"
+          data-lavish-question="approve-479"
+          onsubmit="queueDecision(event, '#479 spec verdict')"
+        >
+          <div class="mb-3 flex flex-col gap-2">
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="approved — file and queue #479 with my D1 answer"
+                checked
+              />
+              <span>Approve — file the spec into #479 and queue it</span></label
+            >
+            <label class="opt"
+              ><input
+                type="radio"
+                name="verdict"
+                value="changes requested — see annotations"
+              />
+              <span>Changes first — I annotated what is off</span></label
+            >
+          </div>
+          <button type="submit" class="qbtn">Queue verdict</button>
+          <span class="queued-note ml-2">Queued ✓</span>
+        </form>
+      </section>
+
+      <footer class="text-muted pb-10 text-xs">
+        Verified: <code>decisions.md</code> ledger rows 187 (two rows: settings
+        shape + invited-defaults ruling) ·
+        <code>church-privacy-settings.ts</code> (six pull toggles + one push
+        toggle, all default FALSE) · oversight FRD OV-002/OV-010 ·
+        <code>rubric-v0.md</code> §7. Filed: #470–#478 ✓.
+      </footer>
+    </main>
+
+    <script>
+      function queueDecision(event, label) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        const value = [...data.values()].join(" · ");
+        if (!value) return;
+        window.lavish.queuePrompt(label + ": " + value, {
+          tag: "decision",
+          text: label + " → " + value,
+          element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: { question: form.dataset.lavishQuestion, answer: value },
+        });
+        form.classList.add("answered");
+      }
+    </script>
+  </body>
+</html>
