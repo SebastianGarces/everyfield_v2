@@ -1092,7 +1092,7 @@ test("#319: the scorecard tile and the drill-down say the identical sentence", (
 
   assert.deepEqual(column, [drillDown]);
   assert.deepEqual(column, [
-    "you have not confirmed your financial base is in place",
+    "you have not confirmed your launch funding is viable",
   ]);
   // …and the raw citation is still the judge's own, on the surface that shows
   // one (the round-2 ruling: attribution and wording unify, `data-path` does
@@ -1161,7 +1161,7 @@ test("#319: two citations that were never one group each keep their own voice", 
 
   assert.deepEqual(formatCitedFacts(lead.citedFacts, lead.citedFactSignals), [
     "you confirmed your core values are documented",
-    "you have not confirmed your financial base is in place",
+    "you have not confirmed your launch funding is viable",
   ]);
 });
 

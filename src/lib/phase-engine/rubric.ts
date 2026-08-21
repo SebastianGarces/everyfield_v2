@@ -203,10 +203,13 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Insight types: prayer unknown; prayer rhythm going stale; rhythm established and fresh (worth reinforcing); Prayer Leader role uncovered (CSF-7).
 - Wiki: "The Prayer Leader Role".
 
-### CSF-6 · Generosity
-- Signals: financial base established (manual attestation today); giving data later.
-- Healthy: sacrificial giving evident; first-year budget viable.
-- Insight types: "financial base not yet confirmed — Generosity (CSF #6) and 'Finances in place' are launch gates."
+### CSF-6 · Generosity & Financial Readiness
+- TWO QUESTIONS, SCORED SEPARATELY, NEVER COLLAPSED INTO ONE VERDICT. A plant can be solvent on outside support while its core group gives nothing; a core group can give sacrificially in year two while the plant is still not solvent. Both happen, and they call for opposite coaching.
+- GENEROSITY — is the core learning to give sacrificially? Fed by \`manual.byKey.core_group_giving\` and its \`attestedDaysAgo\` (30-day reaffirm window). Healthy: attested and confirmed inside the window.
+- FINANCIAL READINESS — is there enough money and support to launch and sustain ministry? Fed by \`manual.byKey.financial_base_established\`. Healthy: funding and support in hand for launch and the season after it.
+- YOU MAY NOT READ ONE AS EVIDENCE FOR THE OTHER. Outside-funded solvency is not a generous core group; a generous core group is not a viable budget.
+- Unanswered is UNKNOWN, never healthy — per signal, so a plant may be healthy on one and unknown on the other. A stale giving attestation is cited with its age, exactly as prayer is.
+- Insight types: giving culture unknown; giving attestation going stale; funding not yet viable; solvent but the core is not giving (say both, never one).
 - Wiki: "First Year Budget Planning", "Principles of Financial Accountability".
 
 ### CSF-7 · Emerging Leadership

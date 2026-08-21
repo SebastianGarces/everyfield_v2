@@ -807,3 +807,38 @@ test("the age and the window reach the judge's fact ledger", () => {
   assert.equal(ledger.get("manual.attestations.0.value"), "true");
   assert.equal(ledger.get("manual.reaffirmWindowDays"), "30");
 });
+
+test("generosity and solvency reach the judge as two separate facts (#475)", () => {
+  // Bryan's case: solvent on outside support, core group giving nothing. The
+  // judge can only report that apart if it arrives apart.
+  const inputs = coldStartInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "financial_base_established",
+      value: true,
+      attestedAt: daysBefore(AS_OF, 5),
+    },
+    {
+      signalKey: "core_group_giving",
+      value: false,
+      attestedAt: daysBefore(AS_OF, 40),
+    },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.manual.byKey.financial_base_established, true);
+  assert.equal(snap.manual.byKey.core_group_giving, false);
+
+  const ledger = new Map(
+    flattenFacts(snap).map((line) => [line.key, line.value])
+  );
+  assert.equal(ledger.get("manual.byKey.financial_base_established"), "true");
+  assert.equal(ledger.get("manual.byKey.core_group_giving"), "false");
+  // And the giving attestation carries its age, so a stale "yes" cannot pass
+  // for a current one.
+  assert.equal(
+    snap.manual.attestations.find((a) => a.signalKey === "core_group_giving")
+      ?.attestedDaysAgo,
+    40
+  );
+});

@@ -31,6 +31,7 @@ recorded rulings, and the recommended v1 delta.
 | 50/100 are methodology benchmarks, not universal health | C03 | [#472](https://github.com/SebastianGarces/everyfield_v2/issues/472) | The numbers stay; the grammar around them changes, in Lens 3, in Phase 1, in the app copy and across the global wiki corpus. Undershoot is never an unhealthy verdict. |
 | Lens 4 is Cohesion, not Unity | C04 | [#473](https://github.com/SebastianGarces/everyfield_v2/issues/473) | Renamed heading, slug (`cohesion`) and scorecard label. Signals unchanged. Unity is named as a relational judgment the engine does not attempt; the "unity is fragile" sample is deleted. |
 | Prayer is rhythms, with a lighter attestation cycle | C05, C21 | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) | Lens 5 is fed by two rhythm attestations and their age; the Prayer Leader title moves to Lens 7 coverage. "Has it happened in the last 30 days?" ships as freshness metadata plus a reaffirm chip, not as a third question. Unanswered is unknown. |
+| Generosity is split from Financial Readiness | C06, C21 | [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) | Lens 6 becomes two separately-scored signals under one heading. New `core_group_giving` attestation for giving culture; the existing funding key keeps its slug and narrows to solvency. Neither may be read as evidence for the other. |
 
 ---
 
@@ -84,9 +85,10 @@ on this list, I either add the data capture or the rule waits.
 | **Individuals** | Per person: how long they have been in the system, how many vision meetings attended, how many teams they serve on, whether they hold a commitment, whether they lead a team |
 | **Training** | Programs defined, how many are required, completion rate across committed people |
 | **Launch** | Target launch date and days remaining (or days elapsed if past) |
-| **Planter attestations** | Things software cannot observe, which the planter confirms with a toggle: values documented, financial base in place, systems tested, corporate prayer rhythm established, prayer woven into gatherings — **and, for every one of them, how many days ago it was confirmed** |
+| **Planter attestations** | Things software cannot observe, which the planter confirms with a toggle: values documented, launch funding viable, core group giving sacrificially, systems tested, corporate prayer rhythm established, prayer woven into gatherings — **and, for every one of them, how many days ago it was confirmed** |
 
-**Known weak spots.** Generosity (lens 6) has almost no measurable representation today.
+**Known weak spots.** Generosity (lens 6) has no measured representation today — it rests
+on one attestation about giving culture until the financial feature ships.
 Prayer (lens 5) rests on planter self-attestation too, but on attestations about
 *rhythms* rather than about a title, carrying their own age — which is the most a
 software product should claim about prayer. See Appendix C, question 2.
@@ -212,13 +214,34 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
   reads as a pass. *(The full evidence-quality vocabulary — measured / attested /
   inferred / unknown — is a separate change; Lens 5 states the local rule now.)*
 
-### Lens 6 · Generosity
+### Lens 6 · Generosity & Financial Readiness
 
-- **What feeds it:** whether a financial base has been established (planter attestation
-  today; giving data when financial tracking ships).
-- **Healthy:** sacrificial giving evident among the core group; first-year budget viable.
-- **What it says:** "financial base not yet confirmed — Generosity and 'finances in
-  place' are both launch gates."
+**Two questions, scored separately, never collapsed into one verdict.** ✅ A plant can be
+solvent on outside support while its core group gives nothing; a core group can give
+sacrificially in year two while the plant is still not solvent. Both are true situations
+and they call for opposite coaching, so the engine reports them apart.
+
+- **Generosity — is the core learning to give sacrificially?**
+  - *What feeds it:* the attestation *Core group giving sacrificially* — "People in your
+    core group are learning to give sacrificially and regularly" — and how recently it
+    was confirmed. It perishes on the same **30-day reaffirm window** as the prayer
+    rhythms: a giving culture is a claim about the present tense.
+  - *Healthy:* a giving culture attested and confirmed inside the window.
+- **Financial readiness — is there enough to launch and sustain ministry?**
+  - *What feeds it:* the attestation *Launch funding viable* — "Funds and support
+    available now are enough to launch and sustain ministry." This is the same stored
+    signal the Phase 1 financial gate reads; only its wording narrowed.
+  - *Healthy:* funding and support in hand for launch and the season after it.
+- **The engine may not read one as evidence for the other.** Outside-funded solvency is
+  not a generous core group. A generous core group is not a viable budget. The v0 line
+  "financial base not yet confirmed — Generosity and 'finances in place' are both launch
+  gates" fused them and is deleted from v1.
+- **Unanswered is unknown, never healthy** — per lens, so a plant may be healthy on one
+  and unknown on the other. A stale giving attestation is cited with its age, exactly as
+  prayer is.
+- **Forward note:** measured giving — who gives, how often, what share of the core group —
+  arrives with the financial feature. When it does it feeds **generosity**, not financial
+  readiness, and the lens gains a measured signal without being redesigned.
 
 ### Lens 7 · Emerging Leadership
 
