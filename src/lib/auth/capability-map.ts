@@ -127,6 +127,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
   "src/app/(dashboard)/people/actions.ts → loadMorePeopleAction": "read",
   "src/app/(dashboard)/people/actions.ts → quickAddPersonAction":
     "people.write",
+  "src/app/(dashboard)/people/actions.ts → removePersonPhotoAction":
+    "people.write",
   "src/app/(dashboard)/people/actions.ts → updatePersonAction": "people.write",
   "src/app/(dashboard)/people/actions.ts → uploadPersonPhotoAction":
     "people.write",

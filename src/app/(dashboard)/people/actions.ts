@@ -276,16 +276,70 @@ export async function uploadPersonPhotoAction(
         };
       }
 
-      // The row no longer names the previous object, so it is safe to remove.
-      // A failure here leaves garbage, not a broken profile, so it never fails
-      // the upload the planter just watched succeed.
-      if (updated.previousKey && updated.previousKey !== key) {
-        try {
-          await deleteFile(updated.previousKey);
-        } catch (error) {
-          console.error("uploadPersonPhotoAction stale object:", error);
-        }
+      await discardUnreferencedPhoto(updated.previousKey, key);
+
+      revalidatePath("/people");
+      revalidatePath(`/people/${personId}`);
+
+      return { success: true, data: updated.person };
+    }
+  );
+}
+
+/**
+ * Drop the object the row has stopped naming (P-024a, P-024b).
+ *
+ * Called only AFTER `setPersonPhoto` has returned, which is the whole rule:
+ * a failure here leaves an orphaned object a sweep collects, while deleting
+ * first would leave the row naming a file that is not there — an avatar the
+ * route answers 404 for and nothing inside the app can repair. So it never
+ * fails the write the planter just watched succeed.
+ */
+async function discardUnreferencedPhoto(
+  previousKey: string | null,
+  currentKey: string | null
+): Promise<void> {
+  if (!previousKey || previousKey === currentKey) return;
+
+  try {
+    await deleteFile(previousKey);
+  } catch (error) {
+    console.error("person photo stale object:", error);
+  }
+}
+
+/**
+ * Remove a person's photo (P-024b).
+ *
+ * The row stops naming the object first, then the object goes — the same
+ * asymmetry the upload argues, and the reason removal is `setPersonPhoto` with
+ * a null key rather than a writer of its own. Church scope is checked inside
+ * `setPersonPhoto`'s own lookup, so a `personId` from another tenant reads as
+ * missing and no object of theirs is ever deleted.
+ */
+export async function removePersonPhotoAction(
+  personId: string
+): Promise<ActionResult<PersonForClient>> {
+  return withChurchSession(
+    "people.write",
+    "removePersonPhotoAction",
+    {
+      noChurch: "You must be associated with a church to update people",
+      known: {
+        "Person not found": "Person not found or has been deleted",
+      },
+      fallback: "An unexpected error occurred while removing the photo",
+    },
+    async ({ churchId }) => {
+      const updated = await setPersonPhoto(churchId, personId, null);
+      if (!updated) {
+        return {
+          success: false,
+          error: "Person not found or has been deleted",
+        };
       }
+
+      await discardUnreferencedPhoto(updated.previousKey, null);
 
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);

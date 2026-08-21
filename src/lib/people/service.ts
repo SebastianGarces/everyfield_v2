@@ -547,14 +547,18 @@ export async function updatePerson(
 }
 
 /**
- * Point a person at a stored photo object (P-024a).
+ * Point a person at a stored photo object, or at none (P-024a, P-024b).
  *
  * THE ONE WRITER OF `photo_url`, and separate from `updatePerson` on purpose.
  * That function takes a `PersonUpdateInput` parsed out of the profile form's
  * `FormData` — a bag whose keys a POST chooses — so a photo field there would
  * be a client-supplied storage key, and the photo route trusts the stored key
  * precisely because nothing client-supplied can reach it. `key` here is always
- * one `personPhotoStorageKey` just built on this server.
+ * one `personPhotoStorageKey` just built on this server, or `null`.
+ *
+ * A REMOVAL IS THIS WRITE WITH A NULL KEY, not a second writer: upload, replace
+ * and remove all end as one row update whose previous key the caller then
+ * discards, so the ordering the invariant demands has one spelling.
  *
  * Returns the previous key so the caller can delete the object the row no
  * longer names, and `null` when the person is gone.
@@ -562,7 +566,7 @@ export async function updatePerson(
 export async function setPersonPhoto(
   churchId: string,
   personId: string,
-  key: string
+  key: string | null
 ): Promise<{ person: PersonForClient; previousKey: string | null } | null> {
   const existing = await getPerson(churchId, personId);
   if (!existing) return null;
