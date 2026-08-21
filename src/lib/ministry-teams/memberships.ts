@@ -17,6 +17,7 @@ import {
   emitTeamStaffingChanged,
 } from "./events";
 import { ExpectedError } from "./expected-error";
+import { syncLeaderOnFill, syncLeaderOnVacate } from "./leader-sync";
 import { isSeatConflict } from "./membership-conflict";
 import {
   PERSON_ALREADY_ASSIGNED_MESSAGE,
@@ -356,6 +357,11 @@ export async function assignMember(
 
   // If this is a leadership role, also emit leader assigned event
   if (role.isLeadershipRole) {
+    // …and make them the team's leader, if the team has none (#311 WS2). The
+    // event has always fired here and drives the person's status hop; what it
+    // never did was write `ministry_teams.leader_id`, so a plant could seat its
+    // Senior Pastor and still read "No leader assigned" in the header.
+    await syncLeaderOnFill(churchId, teamId, personId);
     await emitTeamLeaderAssigned(teamId, personId, churchId, userId);
   }
 
@@ -372,16 +378,26 @@ export async function assignMember(
 }
 
 /**
- * Remove (deactivate) a team membership
+ * Remove (deactivate) a team membership.
+ *
+ * IF THE SEAT WAS A LEADERSHIP SEAT, THE TEAM'S LEADER FOLLOWS IT OUT — but
+ * only when `leader_id` points at this person (#311 WS2, `leader-sync.ts`). The
+ * role's flag is read in the SAME statement as the membership, because it is
+ * one question ("what did this person hold?") and a role row always exists for
+ * a membership: `role_id` is NOT NULL and cascades.
  */
 export async function removeMember(
   churchId: string,
   membershipId: string,
   userId: string
 ): Promise<void> {
-  const [membership] = await db
-    .select()
+  const [held] = await db
+    .select({
+      membership: teamMemberships,
+      isLeadershipRole: teamRoles.isLeadershipRole,
+    })
     .from(teamMemberships)
+    .innerJoin(teamRoles, eq(teamRoles.id, teamMemberships.roleId))
     .where(
       and(
         eq(teamMemberships.churchId, churchId),
@@ -391,7 +407,9 @@ export async function removeMember(
     .limit(1);
 
   // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
-  if (!membership) throw new ExpectedError("Membership not found");
+  if (!held) throw new ExpectedError("Membership not found");
+
+  const { membership, isLeadershipRole } = held;
 
   // Deactivate the membership and reopen its role in ONE db.batch — both
   // writes are known up front, so a failure in between can no longer leave the
@@ -424,6 +442,15 @@ export async function removeMember(
         )
       ),
   ]);
+
+  // AFTER the removal, never before: the vacated seat is the fact and the
+  // leader is derived from it. A derived value that lags a crash reads as a
+  // leader who is no longer on the team — odd, and repaired by the next
+  // assignment. One that LED would clear a leader whose seat is still filled,
+  // which is a lie about a row that still exists.
+  if (isLeadershipRole) {
+    await syncLeaderOnVacate(churchId, membership.teamId, membership.personId);
+  }
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, membership.teamId);
