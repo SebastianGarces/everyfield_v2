@@ -32,6 +32,14 @@ import type { InsightFeedbackState } from "@/components/phase-engine/insight-car
 import { MilestoneTimeline } from "@/components/phase-engine/milestone-timeline";
 import { PhaseControl } from "@/components/phase-engine/phase-control";
 import { SignalToggles } from "@/components/phase-engine/signal-toggles";
+import { PlanterCheckinCard } from "@/components/phase-engine/planter-checkin-card";
+import {
+  checkinNudges,
+  CHECKIN_HISTORY_WEEKS,
+  hasAnsweredThisWeek,
+  listRecentCheckins,
+  recentWeekStarts,
+} from "@/lib/phase-engine/planter-checkin";
 import { Trends } from "@/components/phase-engine/trends";
 import {
   Card,
@@ -92,11 +100,24 @@ export default async function PhasePage() {
     redirect("/dashboard");
   }
 
+  // ONE CLOCK READ for the whole page. Every week boundary and every
+  // attestation age under it is measured against this instant, so nothing
+  // recomputes it and disagrees with the markup beside it
+  // (`memory/invariants.md` → Date & Time Rendering).
+  const now = new Date();
+
   // All reads below are pure DB reads — ZERO LLM calls on load (PE-011).
-  const [latest, readiness, manualSignals] = await Promise.all([
+  //
+  // The check-ins (#484) ride along here and go NOWHERE ELSE: they are read for
+  // this page, rendered on this page, and touch no signal, no snapshot and no
+  // oversight payload. A plant can hit every launch metric while the planter is
+  // falling apart, so the care state is read beside the assessment rather than
+  // on a page somebody has to go looking for.
+  const [latest, readiness, manualSignals, checkins] = await Promise.all([
     getLatestAssessment(churchId),
     getPhaseReadiness(churchId),
     listManualSignals(churchId),
+    listRecentCheckins(churchId, now),
   ]);
 
   // OPENING THIS PAGE IS WHAT RELEASES THE ASSESSMENT TO OVERSIGHT (#482).
@@ -156,7 +177,30 @@ export default async function PhasePage() {
   const booleanSignals = readBooleanSignals(manualSignals);
   // ONE clock read for the ages the card renders (#474 D2). Two ages computed
   // a millisecond apart can straddle a day boundary and disagree.
-  const attestationAges = readAttestationAges(manualSignals, new Date());
+  const attestationAges = readAttestationAges(manualSignals, now);
+
+  // The strip's twelve slots, with the unanswered ones drawn as gaps rather
+  // than skipped (#484): three unanswered weeks in a row is part of the
+  // picture.
+  const byWeek = new Map(
+    checkins.map((checkin) => [checkin.weekStart.slice(0, 10), checkin])
+  );
+  const checkinWeeks = recentWeekStarts(now, CHECKIN_HISTORY_WEEKS).map(
+    (weekStart) => {
+      const checkin = byWeek.get(weekStart);
+      return {
+        weekStart,
+        levels: checkin
+          ? {
+              spiritually: checkin.spiritually,
+              marriageFamily: checkin.marriageFamily,
+              financially: checkin.financially,
+              pace: checkin.pace,
+            }
+          : null,
+      };
+    }
+  );
 
   // The CSF scorecard (PE-023) is a pure projection of the SAME snapshot the
   // Focus panel renders — built here rather than re-read, so the two halves of
@@ -235,6 +279,14 @@ export default async function PhasePage() {
               where the plant is in time. Keeping it out of the main column also
               leaves the focus list — the only part of the page a planter acts
               on — directly under the evidence for it. */}
+          {/* #484 — the private one. It sits in the same column as the
+              assessment, deliberately: launch-green may not be shown without
+              the planter's own state beside it. */}
+          <PlanterCheckinCard
+            needsAnswer={!hasAnsweredThisWeek(checkins, now)}
+            weeks={checkinWeeks}
+            nudges={checkinNudges(checkins)}
+          />
           <MilestoneTimeline timeline={timeline} />
           <SignalToggles
             initialValues={booleanSignals}
