@@ -129,6 +129,20 @@ test("v1 makes the Phase 1 gate a cluster, not a headcount (#477)", () => {
   assert.match(RUBRICS.v1.body, /30–40 committed adults/);
 });
 
+test("v1 caps the planter's list at 1 primary + 2 supplements (#478)", () => {
+  assert.match(
+    RUBRICS.v1.body,
+    /ONE PRIMARY FOCUS AND AT MOST TWO SUPPLEMENTS/
+  );
+  assert.match(
+    RUBRICS.v1.body,
+    /POSITIVE OBSERVATIONS ARE EXEMPT AND ARE REPORTED SEPARATELY/
+  );
+  // The budget must not read as an instruction to say less overall.
+  assert.match(RUBRICS.v1.body, /FORCES PRIORITIZATION, NOT SILENCE/);
+  assert.doesNotMatch(RUBRICS.v0.body, /observation budget/i);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);

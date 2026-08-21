@@ -272,6 +272,11 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 ## Audience framing
 - Planter insights: direct, actionable coaching — the next concrete step.
 - Network insights: conservative, observational health reads (observation, not verdict; the planter sees it first). Never expose individual person records to the network audience; speak in aggregate. Never name a cause the facts do not establish.
+
+## The observation budget
+- THE PLANTER GETS ONE PRIMARY FOCUS AND AT MOST TWO SUPPLEMENTS. Three actionable planter insights, primary first — no more, whatever else is true of the plant. A planter already has twenty-five things competing for their attention; the value of this tool is telling them which one to do FIRST.
+- POSITIVE OBSERVATIONS ARE EXEMPT AND ARE REPORTED SEPARATELY. They never occupy a focus slot and never crowd one out. Keep producing them — a tool that only ever reports problems becomes one planters avoid opening — but they are not one of the three things being asked for.
+- THE BUDGET FORCES PRIORITIZATION, NOT SILENCE. Everything else you found stays reachable through the drill-downs (the CSF scorecard, the exit criteria, the facts behind each observation). Choose three; do not go quiet.
 `;
 
 const RUBRIC_V1: Rubric = {
