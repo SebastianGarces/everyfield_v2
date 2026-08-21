@@ -5,7 +5,10 @@ import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
-import { setChurchTimeZone } from "@/lib/churches/timezone";
+import {
+  setChurchDigestSchedule,
+  setChurchTimeZone,
+} from "@/lib/churches/settings";
 import { isValidTimeZone } from "@/lib/datetime";
 import {
   audienceMayReceiveCategory,
@@ -363,5 +366,58 @@ export async function setChurchTimeZoneAction(
     unstable_rethrow(error);
     console.error("[SETTINGS] saving the church timezone failed:", error);
     return { success: false, error: "We could not save that timezone" };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// When the digest lands (N-013, #448)
+// ----------------------------------------------------------------------------
+//
+// The same ownership shape as the zone above, and for the same reasons: no
+// church id in the signature, `church.profile` as the seat, and the value
+// rejected by the parser here and again by the write helper — with the two
+// `CHECK` constraints behind both.
+//
+// This is a CHURCH decision and the digest cadence above is a USER one, which
+// is why they are two actions on one screen rather than one control. The church
+// says Sunday at 4 PM; the recipient still says whether they want a digest at
+// all and whether it is daily or weekly, and neither answer overrides the other.
+
+export type DigestScheduleActionResult =
+  | { success: true; weekday: number; hour: number }
+  | { success: false; error: string };
+
+const digestScheduleSchema = z.object({
+  weekday: z.number().int().min(0).max(6),
+  hour: z.number().int().min(0).max(23),
+});
+
+export async function setChurchDigestScheduleAction(
+  input: unknown
+): Promise<DigestScheduleActionResult> {
+  const session = await requireSeat("church.profile");
+
+  const parsed = digestScheduleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a send time we can save" };
+  }
+
+  try {
+    if (!session.user.churchId) {
+      return { success: false, error: "Create your church plant first" };
+    }
+
+    const stored = await setChurchDigestSchedule(
+      session.user.churchId,
+      parsed.data
+    );
+
+    refresh();
+
+    return { success: true, weekday: stored.weekday, hour: stored.hour };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving the digest send time failed:", error);
+    return { success: false, error: "We could not save that send time" };
   }
 }

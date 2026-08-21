@@ -4,6 +4,7 @@ import Link from "next/link";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { EmailSuppressionNotice } from "@/components/notifications/email-suppression-notice";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
+import { ChurchDigestScheduleSelect } from "@/components/settings/church-digest-schedule-select";
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
@@ -138,10 +139,21 @@ export default async function SettingsPage() {
                 Church
               </h2>
               <p className="text-muted-foreground text-sm">
-                How this plant&apos;s dates and times are shown.
+                How this plant&apos;s dates and times are shown, and when its
+                digest arrives.
               </p>
             </div>
             <ChurchTimeZoneSelect timeZone={church.timeZone} />
+            {/* Directly under the zone, because it is read on that clock: "4:00
+                PM" only means anything once you know whose afternoon it is.
+                #187 will own the broader church settings page (name, launch
+                date, privacy) and absorbs this section whole rather than
+                reconciling a second church-settings surface. */}
+            <ChurchDigestScheduleSelect
+              weekday={church.digestSendWeekday}
+              hour={church.digestSendHour}
+              timeZone={church.timeZone}
+            />
           </section>
         )}
 

@@ -3,19 +3,27 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { zonedHour } from "@/lib/datetime";
+
 import {
   composePlanterDigestBody,
   composePlanterDigestTitle,
   currentDigestDedupeKeys,
-  DEFAULT_WEEKLY_DIGEST_WEEKDAY,
+  DEFAULT_DIGEST_ANCHOR,
+  DEFAULT_DIGEST_SEND_HOUR,
+  DEFAULT_DIGEST_SEND_WEEKDAY,
+  digestAnchorFrom,
   digestLinesFromBody,
   digestPeriodFor,
+  digestSendHourLabel,
   DIGEST_SECTION_KEYS,
   DIGEST_SECTIONS,
+  DIGEST_SEND_WEEKDAYS,
   planterDigestDedupeKey,
   PLANTER_DIGEST_TYPE,
   totalOutstanding,
   widestPeriodEnd,
+  type DigestAnchor,
   type DigestCounts,
 } from "./digest-content";
 
@@ -42,56 +50,339 @@ const BUSY: DigestCounts = {
   upcoming_meetings: 1,
 };
 
-// ----------------------------------------------------------------------------
-// The default cadence day — FRD Open Question 2, decided here
-// ----------------------------------------------------------------------------
+/** `America/New_York` at the ruled default — Sunday 16:00 Eastern. */
+const EASTERN: DigestAnchor = {
+  ...DEFAULT_DIGEST_ANCHOR,
+  timeZone: "America/New_York",
+};
 
-test("a weekly digest defaults to landing on a Monday", () => {
-  assert.equal(DEFAULT_WEEKLY_DIGEST_WEEKDAY, 1, "1 is Monday in UTC");
+/** A second church, a different zone AND a different configured time. */
+const PACIFIC_WED_7AM: DigestAnchor = {
+  timeZone: "America/Los_Angeles",
+  weekday: 3,
+  hour: 7,
+};
 
-  // Every day of one week resolves to the SAME Monday, which is both halves of
-  // the ruling: the day it lands on, and the fact that the period is stable.
-  const monday = "2026-08-17";
-  for (let offset = 0; offset < 7; offset += 1) {
-    const at = new Date(`2026-08-${17 + offset}T13:45:00.000Z`);
-    const period = digestPeriodFor("weekly", at);
-    assert.equal(period.key, monday, `day +${offset} belongs to ${monday}`);
-    assert.equal(period.start.getUTCDay(), DEFAULT_WEEKLY_DIGEST_WEEKDAY);
+/** Every fifteen minutes from `from`, for `days` days. The dispatcher's tick. */
+function ticks(from: Date, days: number): Date[] {
+  const out: Date[] = [];
+  for (let i = 0; i < days * 96; i += 1) {
+    out.push(new Date(from.getTime() + i * 15 * 60_000));
   }
+  return out;
+}
 
-  // ...and the next day opens the next period, seven days later.
-  const next = digestPeriodFor("weekly", new Date("2026-08-24T00:00:00.000Z"));
-  assert.equal(next.key, "2026-08-24");
+// ----------------------------------------------------------------------------
+// The anchor — the ruled default, and the fallback that must not throw
+// ----------------------------------------------------------------------------
+
+test("the default anchor is Sunday 16:00 in the church's zone", () => {
+  assert.equal(DEFAULT_DIGEST_SEND_WEEKDAY, 0, "0 is Sunday");
+  assert.equal(DEFAULT_DIGEST_SEND_HOUR, 16, "16:00 local");
+  assert.equal(DIGEST_SEND_WEEKDAYS[DEFAULT_DIGEST_SEND_WEEKDAY], "Sunday");
+  assert.equal(digestSendHourLabel(DEFAULT_DIGEST_SEND_HOUR), "4:00 PM");
+  assert.equal(digestSendHourLabel(0), "12:00 AM");
+  assert.equal(digestSendHourLabel(12), "12:00 PM");
 });
 
-test("a daily period is the calendar day, and the two cadences never share a key", () => {
-  const daily = digestPeriodFor("daily", NOW);
-  assert.equal(daily.key, "2026-08-19");
-  assert.equal(daily.end.toISOString(), "2026-08-20T00:00:00.000Z");
-
-  // A Monday is both the DAY 2026-08-17 and the WEEK of 2026-08-17, so only the
-  // cadence in the key keeps a cadence switch from swallowing a digest.
-  const monday = new Date("2026-08-17T06:00:00.000Z");
-  assert.notEqual(
-    planterDigestDedupeKey(digestPeriodFor("daily", monday)),
-    planterDigestDedupeKey(digestPeriodFor("weekly", monday))
+test("a church row with nothing usable falls back rather than throwing", () => {
+  // The sweep runs across every plant in the product. One unreadable row costs
+  // that plant its configured time, never the tick.
+  assert.deepEqual(digestAnchorFrom({}), DEFAULT_DIGEST_ANCHOR);
+  assert.deepEqual(
+    digestAnchorFrom({
+      timeZone: null,
+      digestSendWeekday: null,
+      digestSendHour: null,
+    }),
+    DEFAULT_DIGEST_ANCHOR
+  );
+  assert.deepEqual(
+    digestAnchorFrom({
+      timeZone: "Not/AZone",
+      digestSendWeekday: 7,
+      digestSendHour: 24,
+    }),
+    DEFAULT_DIGEST_ANCHOR,
+    "out of range folds into the default, one field at a time"
   );
 
-  assert.deepEqual(currentDigestDedupeKeys(monday).sort(), [
-    `${PLANTER_DIGEST_TYPE}:daily:2026-08-17`,
-    `${PLANTER_DIGEST_TYPE}:weekly:2026-08-17`,
+  // ...and a good row is taken verbatim, including hour 0.
+  assert.deepEqual(
+    digestAnchorFrom({
+      timeZone: "America/New_York",
+      digestSendWeekday: 0,
+      digestSendHour: 0,
+    }),
+    { timeZone: "America/New_York", weekday: 0, hour: 0 }
+  );
+
+  // A null zone still resolves to a formattable one — the failure this guards
+  // is a period whose every instant is `Invalid Date`.
+  assert.ok(
+    !Number.isNaN(
+      digestPeriodFor(
+        "weekly",
+        digestAnchorFrom({ timeZone: null }),
+        NOW
+      ).start.getTime()
+    )
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The send time — the whole ruling, at the boundary that motivated it
+// ----------------------------------------------------------------------------
+
+test("a weekly digest lands at Sunday 16:00 Eastern, not at 00:00 UTC", () => {
+  // 2026-08-16 is a Sunday. 16:00 EDT is 20:00 UTC.
+  const period = digestPeriodFor(
+    "weekly",
+    EASTERN,
+    new Date("2026-08-19T09:00:00.000Z")
+  );
+
+  assert.equal(period.key, "2026-08-16");
+  assert.equal(period.start.toISOString(), "2026-08-16T20:00:00.000Z");
+  assert.equal(period.end.toISOString(), "2026-08-23T20:00:00.000Z");
+
+  // THE FAILURE THE RULING EXISTS TO PREVENT. Moving only the weekday to Sunday
+  // and leaving the boundary at midnight would have opened this period at
+  // 2026-08-16T00:00Z — Saturday 8 PM Eastern.
+  assert.ok(
+    period.start > new Date("2026-08-16T00:00:00.000Z"),
+    "the period opens in Sunday afternoon, not Saturday evening"
+  );
+
+  // The first tick at or after the open is the one that emits, and the tick
+  // fifteen minutes earlier still belongs to the week before.
+  const before = digestPeriodFor(
+    "weekly",
+    EASTERN,
+    new Date("2026-08-16T19:45:00.000Z")
+  );
+  assert.equal(before.key, "2026-08-09");
+  assert.equal(
+    digestPeriodFor("weekly", EASTERN, new Date("2026-08-16T20:00:00.000Z"))
+      .key,
+    "2026-08-16"
+  );
+});
+
+test("the hour governs BOTH cadences; the weekday governs only the weekly one", () => {
+  // 09:00 Eastern on a Wednesday, under a 16:00 anchor: today's daily period
+  // has not opened yet, so the current one is yesterday's.
+  const morning = new Date("2026-08-19T13:00:00.000Z");
+  assert.equal(digestPeriodFor("daily", EASTERN, morning).key, "2026-08-18");
+  // ...and seven hours later it has.
+  const afternoon = new Date("2026-08-19T20:00:00.000Z");
+  assert.equal(digestPeriodFor("daily", EASTERN, afternoon).key, "2026-08-19");
+
+  // Every daily period opens at 16:00 Eastern, whatever the weekday is set to.
+  for (const weekday of [0, 1, 2, 3, 4, 5, 6]) {
+    const daily = digestPeriodFor("daily", { ...EASTERN, weekday }, afternoon);
+    assert.equal(daily.key, "2026-08-19", "the weekday never moves a daily");
+    assert.equal(daily.start.toISOString(), "2026-08-19T20:00:00.000Z");
+  }
+
+  // The weekly one walks back to the configured day, at the same hour.
+  const wednesday = digestPeriodFor(
+    "weekly",
+    { ...EASTERN, weekday: 3 },
+    afternoon
+  );
+  assert.equal(wednesday.key, "2026-08-19");
+  assert.equal(wednesday.start.toISOString(), "2026-08-19T20:00:00.000Z");
+});
+
+test("two churches in two zones, at two configured times, hold different keys on the same instant", () => {
+  const at = new Date("2026-08-19T15:30:00.000Z");
+
+  const eastern = currentDigestDedupeKeys(EASTERN, at).sort();
+  const pacific = currentDigestDedupeKeys(PACIFIC_WED_7AM, at).sort();
+
+  // 11:30 EDT is before 16:00, so Eastern is still on Tuesday's daily and the
+  // week that opened Sunday. 08:30 PDT is past 07:00, so Pacific has already
+  // opened Wednesday's daily AND Wednesday's week.
+  assert.deepEqual(eastern, [
+    `${PLANTER_DIGEST_TYPE}:daily:2026-08-18`,
+    `${PLANTER_DIGEST_TYPE}:weekly:2026-08-16`,
   ]);
+  assert.deepEqual(pacific, [
+    `${PLANTER_DIGEST_TYPE}:daily:2026-08-19`,
+    `${PLANTER_DIGEST_TYPE}:weekly:2026-08-19`,
+  ]);
+
+  // THE INVARIANT THAT SURVIVES ALL OF THIS: the church id is still absent from
+  // every key string, which is what keeps the sweep's owed test a two-literal
+  // `IN` rather than a concatenated-uuid `LIKE`.
+  for (const key of [...eastern, ...pacific]) {
+    assert.match(key, /^digest\.planter:(daily|weekly):\d{4}-\d{2}-\d{2}$/);
+  }
+});
+
+test("the two cadences never share a key, whatever the anchor", () => {
+  // A Wednesday under a Wednesday anchor is both the DAY 2026-08-19 and the
+  // WEEK of 2026-08-19, so only the cadence in the key keeps a cadence switch
+  // from swallowing a digest.
+  const at = new Date("2026-08-19T15:30:00.000Z");
+  assert.notEqual(
+    planterDigestDedupeKey(digestPeriodFor("daily", PACIFIC_WED_7AM, at)),
+    planterDigestDedupeKey(digestPeriodFor("weekly", PACIFIC_WED_7AM, at))
+  );
 });
 
 test("the sweep's lookahead is the widest any cadence could ask for", () => {
-  for (const at of [
-    new Date("2026-08-17T00:00:00.000Z"),
-    NOW,
-    new Date("2026-08-23T23:59:59.000Z"),
-  ]) {
-    const widest = widestPeriodEnd(at);
-    assert.ok(widest >= digestPeriodFor("daily", at).end);
-    assert.ok(widest >= digestPeriodFor("weekly", at).end);
+  for (const anchor of [EASTERN, PACIFIC_WED_7AM, DEFAULT_DIGEST_ANCHOR]) {
+    for (const at of [
+      new Date("2026-08-17T00:00:00.000Z"),
+      NOW,
+      new Date("2026-08-23T23:59:59.000Z"),
+    ]) {
+      const widest = widestPeriodEnd(anchor, at);
+      assert.ok(widest >= digestPeriodFor("daily", anchor, at).end);
+      assert.ok(widest >= digestPeriodFor("weekly", anchor, at).end);
+    }
+  }
+});
+
+// ----------------------------------------------------------------------------
+// THE PARTITION PROPERTY — what makes "once per period" mean anything
+// ----------------------------------------------------------------------------
+//
+// Every instant belongs to exactly one period of each cadence, the periods
+// abut with no gap and no overlap, and the key changes exactly once per period.
+// Everything else in the digest — the dedupe key, the sweep's owed set, "one
+// email per recipient per period" — rests on this and nothing else.
+
+test("every tick lands inside its own period, in every zone tested", () => {
+  for (const anchor of [EASTERN, PACIFIC_WED_7AM, DEFAULT_DIGEST_ANCHOR]) {
+    for (const at of ticks(new Date("2026-08-12T00:00:00.000Z"), 21)) {
+      for (const cadence of ["daily", "weekly"] as const) {
+        const period = digestPeriodFor(cadence, anchor, at);
+        assert.ok(
+          period.start <= at && at < period.end,
+          `${cadence} ${anchor.timeZone}: ${at.toISOString()} fell outside [${period.start.toISOString()}, ${period.end.toISOString()})`
+        );
+      }
+    }
+  }
+});
+
+test("a DST transition produces neither two digests nor zero", () => {
+  // The 23-hour day (2026-03-08, US spring forward) and the 25-hour one
+  // (2026-11-01, US fall back). Under a 2:00 anchor, 02:00 does not exist on
+  // one of them and 01:00 happens twice on the other — the two hours that break
+  // 24-hour arithmetic.
+  for (const hour of [1, 2, 3, 16]) {
+    const anchor: DigestAnchor = { ...EASTERN, hour };
+
+    for (const [label, from] of [
+      ["spring forward", "2026-03-06T00:00:00.000Z"],
+      ["fall back", "2026-10-30T00:00:00.000Z"],
+    ] as const) {
+      const window = ticks(new Date(from), 5);
+      const keys = window.map((at) => digestPeriodFor("daily", anchor, at).key);
+
+      // Exactly one period opens per calendar day: the key changes on a day
+      // boundary and never returns to a value it has left. Two digests would
+      // show as a key repeating after a change; zero would show as a day with
+      // no key of its own.
+      const runs = keys.filter((key, i) => i === 0 || key !== keys[i - 1]);
+      assert.deepEqual(
+        runs,
+        [...new Set(runs)],
+        `${label} @${hour}: a key came back after changing — that is a second digest`
+      );
+      assert.equal(
+        new Set(keys).size,
+        runs.length,
+        `${label} @${hour}: a day was skipped entirely`
+      );
+
+      // And the transition day is genuinely 23 or 25 hours, not 24 — which is
+      // the proof the arithmetic is the zone's and not the epoch's.
+      for (const at of window) {
+        const period = digestPeriodFor("daily", anchor, at);
+        assert.ok(period.start <= at && at < period.end, `${label} @${hour}`);
+      }
+    }
+  }
+
+  // The 23-hour and the 25-hour period, named outright. Note WHICH period each
+  // is: under a 16:00 anchor the day that loses an hour runs from Saturday
+  // 16:00 EST to Sunday 16:00 EDT, because the 02:00 transition falls inside
+  // it. Saying "the DST day is short" without naming the anchor is the mistake
+  // this pair of cases pins.
+  const springPeriod = digestPeriodFor(
+    "daily",
+    { ...EASTERN, hour: 16 },
+    new Date("2026-03-07T22:00:00.000Z")
+  );
+  assert.equal(springPeriod.key, "2026-03-07");
+  assert.equal(springPeriod.start.toISOString(), "2026-03-07T21:00:00.000Z");
+  assert.equal(springPeriod.end.toISOString(), "2026-03-08T20:00:00.000Z");
+  assert.equal(
+    springPeriod.end.getTime() - springPeriod.start.getTime(),
+    23 * 3_600_000
+  );
+
+  const fallPeriod = digestPeriodFor(
+    "daily",
+    { ...EASTERN, hour: 16 },
+    new Date("2026-10-31T22:00:00.000Z")
+  );
+  assert.equal(fallPeriod.key, "2026-10-31");
+  assert.equal(fallPeriod.start.toISOString(), "2026-10-31T20:00:00.000Z");
+  assert.equal(fallPeriod.end.toISOString(), "2026-11-01T21:00:00.000Z");
+  assert.equal(
+    fallPeriod.end.getTime() - fallPeriod.start.getTime(),
+    25 * 3_600_000
+  );
+
+  // Both still land at 16:00 on the church's own wall clock, which is the point
+  // of doing any of this — the send time does not drift by an hour twice a year.
+  for (const period of [springPeriod, fallPeriod]) {
+    assert.equal(zonedHour(period.start, EASTERN.timeZone), 16);
+    assert.equal(zonedHour(period.end, EASTERN.timeZone), 16);
+  }
+});
+
+test("changing the setting mid-period reopens the period, and never twice", () => {
+  // THE CHOSEN BEHAVIOUR (stated in the PR): a change takes effect at once.
+  // The period is recomputed from the new anchor and the dedupe key arbitrates,
+  // so the transition costs AT MOST one extra digest — never two rows for one
+  // key, and never a period that goes unserved.
+  const at = new Date("2026-08-19T15:30:00.000Z");
+
+  // Moving the hour only, within a week already served: the weekly key does not
+  // move, so the row that exists still covers it and nothing is sent again.
+  const before = planterDigestDedupeKey(digestPeriodFor("weekly", EASTERN, at));
+  const laterSameDay = planterDigestDedupeKey(
+    digestPeriodFor("weekly", { ...EASTERN, hour: 20 }, at)
+  );
+  assert.equal(laterSameDay, before, "same week, same key, no second send");
+
+  // Moving to a day already past this week opens a period the recipient has no
+  // row for, so one digest lands now and the next falls on the new day.
+  const moved = digestPeriodFor("weekly", { ...EASTERN, weekday: 2 }, at);
+  assert.notEqual(planterDigestDedupeKey(moved), before);
+  assert.equal(moved.key, "2026-08-18", "the Tuesday just gone");
+
+  // ...and from there the schedule is simply the new one. No period is skipped
+  // and none repeats: consecutive keys are exactly seven days apart.
+  const after = ticks(at, 28).map(
+    (tick) => digestPeriodFor("weekly", { ...EASTERN, weekday: 2 }, tick).key
+  );
+  const distinct = [...new Set(after)];
+  assert.equal(distinct[0], "2026-08-18");
+  for (let i = 1; i < distinct.length; i += 1) {
+    assert.equal(
+      Date.parse(`${distinct[i]}T00:00:00Z`) -
+        Date.parse(`${distinct[i - 1]}T00:00:00Z`),
+      7 * 86_400_000,
+      `${distinct[i - 1]} → ${distinct[i]} is not one week`
+    );
   }
 });
 
@@ -120,14 +411,30 @@ test("the body summarises the outstanding work, and omits what is zero", () => {
   );
 });
 
-test("the title names the period, never 'today'", () => {
-  const weekly = composePlanterDigestTitle(digestPeriodFor("weekly", NOW));
-  const daily = composePlanterDigestTitle(digestPeriodFor("daily", NOW));
+test("the title names the period, in the church's zone, never 'today'", () => {
+  const weekly = composePlanterDigestTitle(
+    digestPeriodFor("weekly", EASTERN, NOW)
+  );
+  const daily = composePlanterDigestTitle(
+    digestPeriodFor("daily", EASTERN, NOW)
+  );
 
   assert.match(weekly, /^What needs your attention — week of /);
   assert.match(daily, /^What needs your attention — /);
   assert.doesNotMatch(weekly, /today/i);
   assert.doesNotMatch(daily, /today/i);
+
+  // A 16:00 Eastern period opens at 20:00 UTC, so a title formatted in
+  // `APP_TIME_ZONE` names the same day here — but one at 20:00 Eastern opens at
+  // 00:00 the NEXT UTC day, and that is the case that catches the wrong pin.
+  const evening = composePlanterDigestTitle(
+    digestPeriodFor("daily", { ...EASTERN, hour: 20 }, NOW)
+  );
+  assert.match(
+    evening,
+    /Aug 18, 2026$/,
+    "the church's Tuesday, not UTC's Wednesday"
+  );
 });
 
 test("composing and re-reading a body is a lossless round trip", () => {

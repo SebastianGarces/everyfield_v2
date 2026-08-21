@@ -300,6 +300,15 @@ export function parseDateTimeLocalValue(value: string): Date | null {
  * Church-zoned *labels* (`relativeDayOffset` with a zone argument) compare
  * calendar dates in that zone rather than adding this number. A NEW local
  * copy of this constant is the mistake the calendar-day rule stops.
+ *
+ * THE LINE THIS CONSTANT MAY NOT CROSS. Adding it to an INSTANT means "24
+ * hours later", which is a different day in any zone that observes DST: the
+ * spring-forward day is 23 hours long and the autumn one 25. So
+ * `addCalendarDays` stays on the UTC grid, where the two are the same thing,
+ * and anything that needs a wall clock in a real zone goes through
+ * `instantAtZonedHour` below instead of arithmetic on this number. Applying it
+ * to a CALENDAR DATE STRING is safe and is what `relativeDayOffset` does —
+ * `YYYY-MM-DD` parsed as UTC midnight is a day INDEX, not an instant.
  */
 export const MS_PER_DAY = 86_400_000;
 
@@ -349,6 +358,126 @@ export function addCalendarDays(from: Date, days: number): string {
   return toCalendarDate(new Date(from.getTime() + days * MS_PER_DAY));
 }
 
+// ----------------------------------------------------------------------------
+// WALL CLOCKS IN A REAL ZONE — the two primitives, and the only two
+// ----------------------------------------------------------------------------
+//
+// `toCalendarDate` answers "which day is this instant?" in a zone. These answer
+// the other two halves: "what hour does this instant read?" and, the inverse,
+// "which instant reads this hour on this day?".
+//
+// They exist because the church-configurable digest send time (N-013) needs a
+// period that OPENS at 16:00 in the church's own zone. UTC-grid arithmetic
+// cannot express that: `America/New_York` is five or four hours behind
+// depending on the date, so "Sunday 16:00 there" is two different UTC instants
+// six months apart, and the two DST days each have one hour that either does
+// not exist or happens twice.
+//
+// `Intl` is the only tz database in the runtime, so both are built on it:
+// format an instant into the zone's civil fields, and read the offset back off
+// the difference. Nothing here hand-maintains a rule about any zone.
+
+function zonedPartsFormatter(timeZone: string) {
+  return formatter(`parts:${timeZone}`, {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    // Without this, `en-US` renders midnight as hour `12` and the whole
+    // calculation is off by twelve hours for one hour a day.
+    hourCycle: "h23",
+  });
+}
+
+/** The civil fields `date` shows on the wall clock in `timeZone`. */
+function zonedParts(date: Date, timeZone: string) {
+  const parts = zonedPartsFormatter(timeZone).formatToParts(date);
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+  return {
+    year: valueOf("year"),
+    month: valueOf("month"),
+    day: valueOf("day"),
+    hour: valueOf("hour"),
+    minute: valueOf("minute"),
+    second: valueOf("second"),
+  };
+}
+
+/**
+ * The wall clock `date` shows in `timeZone`, re-encoded as the UTC instant with
+ * those same civil fields. The difference from `date` is the zone's offset.
+ */
+function wallClockOf(date: Date, timeZone: string): number {
+  const parts = zonedParts(date, timeZone);
+  return Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+}
+
+function offsetMsAt(date: Date, timeZone: string): number {
+  // `formatToParts` has no milliseconds, so the comparison drops them on both
+  // sides rather than reading a whole second of offset that is not there.
+  return (
+    wallClockOf(date, timeZone) - (date.getTime() - date.getUTCMilliseconds())
+  );
+}
+
+/** The hour (0–23) `date` reads on the wall clock in `timeZone`. */
+export function zonedHour(date: Date, timeZone: string): number {
+  return zonedParts(date, timeZone).hour;
+}
+
+/**
+ * The instant at which `calendarDate` (`YYYY-MM-DD`) reads `hour`:00:00 on the
+ * wall clock in `timeZone`. The inverse of `toCalendarDate` + `zonedHour`.
+ *
+ * The offset depends on the answer, so the answer is guessed and corrected: the
+ * offset AT the naive UTC reading, then the offset at that guess. On the ~364
+ * ordinary days of the year both agree and that is the instant.
+ *
+ * THE TWO DAYS THEY DO NOT AGREE ON are the whole reason this is a function and
+ * not two lines at a call site, and each gets a stated rule:
+ *
+ *   * **The hour that happens twice** (autumn, the 25-hour day). Both guesses
+ *     really do read `hour`, so the EARLIER is taken — the first occurrence.
+ *   * **The hour that never happens** (spring, the 23-hour day). Neither guess
+ *     reads `hour`, so the LATER is taken, which is exactly the instant the
+ *     clock jumps to. 02:00 on a US spring-forward morning resolves to 03:00.
+ *
+ * Both rules are chosen so that consecutive days tile the timeline with no gap
+ * and no overlap, which is what lets a caller treat `[start, end)` as a
+ * partition — see `digestPeriodFor`, whose 15-minute sweep across both
+ * transitions asserts exactly that.
+ */
+export function instantAtZonedHour(
+  calendarDate: string,
+  hour: number,
+  timeZone: string
+): Date {
+  const [year, month, day] = calendarDate.split("-").map(Number);
+  const wall = Date.UTC(year, month - 1, day, hour);
+
+  const first = wall - offsetMsAt(new Date(wall), timeZone);
+  const second = wall - offsetMsAt(new Date(first), timeZone);
+
+  const real = [first, second].filter(
+    (candidate) => wallClockOf(new Date(candidate), timeZone) === wall
+  );
+
+  return new Date(
+    real.length > 0 ? Math.min(...real) : Math.max(first, second)
+  );
+}
+
 /**
  * Whole calendar days from `now` to `date`, counted in `timeZone`.
  *
@@ -356,6 +485,12 @@ export function addCalendarDays(from: Date, days: number): string {
  * ("Today"), never `1` ("Tomorrow"), which is what a difference-in-milliseconds
  * calculation would say. Two churches in two zones can disagree about the
  * same pair of instants when they straddle that zone's midnight.
+ *
+ * DST-safe in any zone, and it is worth naming why, because it looks like the
+ * 24-hour arithmetic `MS_PER_DAY` warns about. Both operands are already
+ * `YYYY-MM-DD` in `timeZone`; dividing their UTC-midnight parse by `MS_PER_DAY`
+ * turns each into a day INDEX on the proleptic Gregorian calendar. No instant
+ * is being advanced, so a 23- or 25-hour day cannot move the answer.
  *
  * Only safe to call where a re-render on the client is impossible (server
  * components), since it reads the clock when `now` is omitted.
