@@ -290,6 +290,14 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
     if (value === "flat") return "vision-meeting attendance holding steady";
     return null;
   },
+  // The two levels of a cadence slip (#486). Named separately so the judge
+  // cites the one it is actually invoking rather than "the threshold".
+  "visionMeetings.cadenceWatchDays": numeric(
+    (n) => `${n} days without a vision meeting before it is worth noticing`
+  ),
+  "visionMeetings.cadenceDirectDays": numeric(
+    (n) => `${n} days without a vision meeting before it needs saying plainly`
+  ),
   "visionMeetings.isEmpty": boolean(
     "no vision meetings held yet",
     "vision meetings on record"
@@ -330,9 +338,73 @@ const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
   "followUp.planterOwnedCount": numeric((n) =>
     count(n, "follow-up you own", "follow-ups you own")
   ),
+  // Warmth (#486). A contact who just came to a vision meeting goes stale
+  // faster than one who has been on the list since spring.
+  "followUp.warmCount": numeric((n) =>
+    n === 1
+      ? "1 contact who came to a vision meeting recently"
+      : `${n} contacts who came to a vision meeting recently`
+  ),
+  "followUp.staleWarmCount": numeric((n) =>
+    n === 1
+      ? "1 warm contact past the 7-day window"
+      : `${n} warm contacts past the 7-day window`
+  ),
+  "followUp.seriouslyStaleWarmCount": numeric((n) =>
+    n === 1
+      ? "1 warm contact untouched for two weeks"
+      : `${n} warm contacts untouched for two weeks`
+  ),
+  "followUp.staleColdCount": numeric((n) =>
+    n === 1
+      ? "1 colder contact past the follow-up window"
+      : `${n} colder contacts past the follow-up window`
+  ),
+  "followUp.warmWindowDays": numeric(
+    (n) => `a contact counts as warm for ${n} days after a vision meeting`
+  ),
+  "followUp.warmStaleThresholdDays": numeric(
+    (n) => `a ${n}-day window for a warm contact`
+  ),
   "followUp.isEmpty": boolean(
     "no open follow-ups",
     "open follow-ups on your list"
+  ),
+
+  // -- cohesion (CSF-4) ------------------------------------------------------
+  // Every phrase here reports ATTENDANCE. None of them says why somebody is
+  // absent, because the data does not know (#473).
+  "cohesion.activeCommittedCount": numeric((n) =>
+    count(n, "active committed member", "active committed members")
+  ),
+  "cohesion.disengagedCount": numeric((n) =>
+    n === 1
+      ? "1 committed member who has stopped attending"
+      : `${n} committed members who have stopped attending`
+  ),
+  "cohesion.disengagedShare": (value) => {
+    const share = toNumber(value);
+    return share === null
+      ? null
+      : `${Math.round(share * 100)}% of your active committed members`;
+  },
+  "cohesion.disengagedIncludesLeader": boolean(
+    "a ministry-team leader among them",
+    "no ministry-team leader among them"
+  ),
+  "cohesion.disengagedShareThreshold": (value) => {
+    const share = toNumber(value);
+    return share === null
+      ? null
+      : `${Math.round(share * 100)}% of the active group as the level worth naming`;
+  },
+  "cohesion.disengagedMinimumCount": numeric(
+    (n) => `never fewer than ${n} people, however small the plant`
+  ),
+  "cohesion.windowDays": numeric((n) => `a ${n}-day attendance window`),
+  "cohesion.isEmpty": boolean(
+    "no active committed members to read",
+    "active committed members on record"
   ),
 
   // -- ministry roles (CSF-7) ------------------------------------------------

@@ -77,6 +77,8 @@ function makeSnapshot(churchId: string): PlantFactSnapshot {
       latestAttendance: 30,
       previousAttendance: 30,
       attendanceTrend: "flat",
+      cadenceWatchDays: 21,
+      cadenceDirectDays: 28,
       isEmpty: false,
     },
     followUp: {
@@ -88,6 +90,12 @@ function makeSnapshot(churchId: string): PlantFactSnapshot {
       staleUnownedCount: 0,
       distinctOwnerCount: 0,
       planterOwnedCount: 0,
+      warmCount: 0,
+      staleWarmCount: 0,
+      seriouslyStaleWarmCount: 0,
+      staleColdCount: 0,
+      warmWindowDays: 14,
+      warmStaleThresholdDays: 7,
       isEmpty: false,
     },
     ministryRoles: {
@@ -115,6 +123,16 @@ function makeSnapshot(churchId: string): PlantFactSnapshot {
       daysUntilLaunch: 112,
       isPastDue: false,
       isEmpty: false,
+    },
+    cohesion: {
+      activeCommittedCount: 0,
+      disengagedCount: 0,
+      disengagedShare: null,
+      disengagedIncludesLeader: false,
+      disengagedShareThreshold: 0.2,
+      disengagedMinimumCount: 3,
+      windowDays: 28,
+      isEmpty: true,
     },
     manual: {
       attestations: [],

@@ -109,7 +109,60 @@ export interface VisionMeetingSignals {
    * `null` when fewer than 2 measured meetings exist.
    */
   attendanceTrend: "up" | "down" | "flat" | null;
+  /**
+   * THE CADENCE SLIP HAS TWO LEVELS (#486, C22). Bryan: "21 days without a
+   * vision meeting: KEEP, but make it a 'watch'… I wouldn't make it sound like
+   * a crisis. At 28+ days, the language can get more direct."
+   *
+   * v0 had one number and therefore one voice. Facts rather than numbers in the
+   * prompt text, so the judge cites thresholds it was handed.
+   */
+  cadenceWatchDays: number;
+  cadenceDirectDays: number;
   /** No completed vision meetings yet. */
+  isEmpty: boolean;
+}
+
+/**
+ * COHESION, MEASURED AS A SHARE (#486, C22/D1/D2).
+ *
+ * Bryan on the v0 rule: "Four members disengaging: CHANGE COMPLETELY.
+ * Percentage based. 20-25% of the active committed group over 28 days,
+ * absolute minimum of three people. Leaders carry more weight." Four of twelve
+ * is a crisis; four of seventy may be a holiday.
+ *
+ * "Disengaging" has ONE definition (D2), chosen because it fits in a sentence:
+ * a committed member who attended NO meeting in the last 28 days after
+ * attending at least one in the 28 before that. No scoring curve, nothing to
+ * explain twice.
+ */
+export interface CohesionSignals {
+  /**
+   * Committed members who attended anything in the last 56 days — the
+   * denominator. "Active" is deliberately not "everyone who ever signed":
+   * a plant carrying forty dormant commitments would make any share look tiny.
+   */
+  activeCommittedCount: number;
+  /** Of those, how many have gone quiet by the definition above. */
+  disengagedCount: number;
+  /** Their share of the active committed group, 0–1. `null` when nobody is active. */
+  disengagedShare: number | null;
+  /**
+   * At least one of the disengaged leads a ministry team.
+   *
+   * A QUALITATIVE FLAG, NOT A WEIGHT. Bryan said leaders carry more weight;
+   * turning that into a coefficient would produce a number nobody could
+   * explain, so the rubric tells the judge to make the language more direct
+   * when this is true and the arithmetic stays honest.
+   */
+  disengagedIncludesLeader: boolean;
+  /** Share of the active group at which the pattern is worth naming. */
+  disengagedShareThreshold: number;
+  /** …and never fewer people than this, however small the plant. */
+  disengagedMinimumCount: number;
+  /** The window both halves of the definition are measured over. */
+  windowDays: number;
+  /** No committed members are active, so there is nothing to read. */
   isEmpty: boolean;
 }
 
@@ -149,7 +202,29 @@ export interface FollowUpSignals {
   staleUnownedCount: number;
   distinctOwnerCount: number;
   planterOwnedCount: number;
-  /** No open follow-up contacts. */
+  /**
+   * STALENESS DEPENDS ON THE CONTACT (#486, C22). Bryan: "Warm / just came to a
+   * vision meeting: 48-72 hours ideal, flag at 7, seriously stale at 14. Colder
+   * contacts: 14 may be fine."
+   *
+   * A universal 14 days was wrong in both directions at once — a week late for
+   * somebody who came on Tuesday, and fussy about somebody who has been on the
+   * list since spring.
+   *
+   * WARM = attended a vision meeting within the last `warmWindowDays`. Not a
+   * status and not a guess: the thing that makes a contact warm is that they
+   * just turned up.
+   */
+  warmCount: number;
+  /** Warm contacts untouched beyond `warmStaleThresholdDays` (7). */
+  staleWarmCount: number;
+  /** Warm contacts untouched beyond the cold threshold (14) — seriously stale. */
+  seriouslyStaleWarmCount: number;
+  /** Cold contacts untouched beyond the cold threshold (14). */
+  staleColdCount: number;
+  warmWindowDays: number;
+  warmStaleThresholdDays: number;
+  /** The 48–72h ideal is rubric language, not a fact: nothing measures hours. */
   isEmpty: boolean;
 }
 
@@ -378,6 +453,7 @@ export interface PlantFactSnapshot {
   leadership: LeadershipSignals;
   training: TrainingSignals;
   launch: LaunchSignals;
+  cohesion: CohesionSignals;
   manual: ManualSignals;
   /**
    * WHAT EACH LENS ACTUALLY KNOWS (#483, C17) — measured / attested / unknown

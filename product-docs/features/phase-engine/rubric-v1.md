@@ -57,6 +57,7 @@ recorded rulings, and the recommended v1 delta.
 | Every lens has an evidence quality, including unknown | C17 | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) | New §5b: measured / attested / unknown per lens, derived from the snapshot and handed to the judge. Unknown is never healthy; the scorecard renders an insufficient-evidence tile. Appendix C question 2 resolved. |
 | Planter sustainability is captured, never inferred | C19 | [#484](https://github.com/SebastianGarces/everyfield_v2/issues/484) | New §5c: the engine may not claim planter wellbeing from any activity fact. A private weekly check-in captures it directly, outside the pipeline, and renders beside the assessment so launch-green cannot wash planter-red. |
 | We assess launch health, not church health | C20 | [#485](https://github.com/SebastianGarces/everyfield_v2/issues/485) | The document opens with the scope statement and names what is out of it. The judge is banned from church-health verdicts in either direction; the same sentence ships on `/phase`, on the oversight portfolio and in the FRD. |
+| The remaining ⚠️ thresholds are ruled | C22, C23 | [#486](https://github.com/SebastianGarces/everyfield_v2/issues/486) | Two-level cadence (21 watch / 28 direct), percentage-based disengagement (20%, min 3), warmth-split follow-up staleness (7 warm / 14 cold), and a compound readiness trigger — time alone never escalates. Appendix C question 3 is now a record rather than a question. |
 
 ---
 
@@ -105,7 +106,7 @@ on this list, I either add the data capture or the rule waits.
 |---|---|
 | **Core group** | Number of people with a signed core-group commitment; number with a launch-team commitment; net change over the last 28 days versus the 28 days before |
 | **Vision meetings** | Total completed; date of the most recent; days since; average gap between recent meetings; attendance at the last two and the direction between them |
-| **Follow-up** | How many contacts are in an active follow-up stage; how many days since the most neglected one was touched; how many are past the staleness threshold; **who owns each open follow-up task** — how many have no live owner, how many stale ones have no live owner, how many distinct people own one, and how many the planter owns |
+| **Follow-up** | How many contacts are in an active follow-up stage; how many days since the most neglected one was touched; how many are past the staleness threshold, **split by warmth — whether they came to a vision meeting in the last two weeks**; **who owns each open follow-up task** — how many have no live owner, how many stale ones have no live owner, how many distinct people own one, and how many the planter owns |
 | **Ministry roles** | Which of the eight roles (Worship, Children's, Assimilation, Small Groups, Admin/Finance, Facilities, Promotion, Technology) have a leader assigned |
 | **Individuals** | Per person: how long they have been in the system, how many vision meetings attended, how many teams they serve on, whether they hold a commitment, whether they lead a team — **and the human judgments already recorded about them**: how many 5-criteria interviews and 4 C's assessments exist, the most recent interview's result, and the most recent 4 C's total, each with its date |
 | **Training** | Programs defined, how many are required, completion rate across committed people |
@@ -132,12 +133,17 @@ what healthy looks like, and what the engine should say when it is not.
 - **What feeds it:** vision-meeting cadence, attendance trend between the last two
   meetings, inflow of new contacts, conversion of attendees into core-group members.
 - **Cadence target:** at least one vision meeting every **two weeks** ✅
-- **Flag a slip at:** **21 days** with no meeting ⚠️
-- **Healthy:** meetings happening on cadence, with a steady stream of *new* attendees
-  rather than the same faces returning.
-- **What it says:** cadence slipping ("no vision meeting in three weeks — the vision
-  meeting is the engine of the whole launch"); attendance plateauing; strong conversion
-  worth reinforcing.
+- **A slip has two levels, and they do not share a voice** ✅
+  - **Watch at 21 days.** The engine notices you are off cadence. It does not sound like
+    a crisis, because three weeks is not one: "it has been three weeks since your last
+    vision meeting."
+  - **Direct at 28 days.** Now the language can say plainly what is at stake — the vision
+    meeting is the engine of the whole launch.
+- **Healthy: meetings on cadence *and on a predictable rhythm*** ✅ — consistency, not
+  only frequency. Inconsistency makes it hard for even committed team members to know
+  when meetings happen, and that costs more than the occasional missed week.
+- **What it says:** cadence slipping, at the level the gap earns; attendance plateauing;
+  strong conversion worth reinforcing.
 
 ### Lens 2 · Shared Ownership
 
@@ -161,6 +167,15 @@ what healthy looks like, and what the engine should say when it is not.
   may not be reconstructed from volume or staleness.
 - **Network wording:** "Several follow-ups have been waiting longer than the follow-up
   window. This may be worth a coaching conversation." Never an owner's name, never a cause.
+
+- **Staleness depends on the contact** ✅ — a universal 14 days was wrong in both
+  directions at once: a week late for somebody who came on Tuesday, and fussy about
+  somebody who has been on the list since spring.
+  - **Warm** = attended a vision meeting in the last **14 days**. Ideal follow-up is
+    **48–72 hours**; flag at **7 days**; seriously stale at **14**.
+  - **Colder contacts:** 14 days stands.
+  - Warmth is a fact, not a status and not a guess: the thing that makes a contact warm
+    is that they just turned up.
 
 **Ownership is task ownership, not relationship ownership.** The assignee owns the open
 follow-up task, not the relationship with the contact; the person record is untouched. A
@@ -213,8 +228,18 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
 - **What it says:** the measured pattern and nothing past it — core-group meetings
   lapsing, or attendance dropping across several members this month. Never a spiritual
   state. The v0 line "unity is fragile in this season" is deleted from v1.
-- **Flag cluster disengagement at:** **4 or more** members' attendance dropping within
-  a month ⚠️
+- **Flag cluster disengagement at: 20% of the active committed group over 28 days, never
+  fewer than 3 people.** ✅ Four of twelve is a crisis; four of seventy may be a holiday,
+  and an absolute count cannot tell them apart.
+  - **"Disengaging" has one definition, and it fits in a sentence:** a committed member
+    who attended **no** meeting in the last 28 days after attending at least one in the
+    28 before that. No scoring curve — a number nobody can explain back to a planter
+    about a real person is worse than a blunt one.
+  - **The denominator is the *active* committed group**, not everyone who ever signed. A
+    plant carrying forty dormant commitments would otherwise make any share look tiny.
+  - **A ministry-team leader among the disengaged makes the language one level more
+    direct** — a qualitative rule, not a weighting. Turning "leaders carry more weight"
+    into a coefficient would produce arithmetic nobody could defend.
 
 ### Lens 5 · Prayer
 
@@ -229,7 +254,7 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
   the eight roles to fill — never as a Lens 5 health pass.
 - **Freshness is part of the fact, not a third question.** Every attestation records
   when it was answered. An attestation confirmed longer ago than the **30-day reaffirm
-  window** ⚠️ is reported with its age — "you confirmed a prayer rhythm, 45 days ago —
+  window** ✅ is reported with its age — "you confirmed a prayer rhythm, 45 days ago —
   is it still happening?" — and the toggle card offers a one-click *Still true*. A stale
   answer is never silently treated as false, and never silently treated as current.
 - **Healthy:** a rhythm established and reaffirmed inside the window, with prayer woven
@@ -566,8 +591,15 @@ names a limit on the *overseer's view* — "Plant has chosen not to share assess
 and never a judgement about the plant, so it carries no warning colour and the engine
 never editorializes about it (see rule 3 above).
 
-**⚠️ The engine escalates to "readiness focus" when launch is within 30 days** — a
-placeholder.
+**The engine escalates to "readiness focus" only when a near launch meets an unresolved
+gap.** ✅ Thirty days out is not a warning by itself: **time is never sufficient.** A
+launch inside the window — or past due — escalates only when the plant also has critical
+roles unfilled or required training incomplete.
+
+*"30 days from launch + 3 critical roles unfilled + training incomplete" is readiness
+focus. "30 days from launch + everything on track" is nothing to escalate* — and that is
+the month those planters least need a warning about themselves on their overseer's
+dashboard.
 
 A plant that shares nothing shows only its phase, so a healthy private plant and a
 struggling private plant carry the same information. **That trade is confirmed** ✅ — it
@@ -735,12 +767,19 @@ it asks.
    evidence (§5b, #483). The answer to "accept thin coverage or lean on attestation" is
    both, honestly labelled.)*
 
-3. **Every ⚠️ threshold in this document.** Collected: 21 days for a cadence slip ·
-   28-day growth comparison window · ~~3 weeks flat to call growth stalled~~ *(ruled:
-   21 days slowed / 28 days stalled — #471)* · 4+ members
-   for cluster disengagement · 60 days for individual leadership readiness · 14 days
-   before a follow-up is stale · 30 days out for network readiness escalation ·
-   30–40 committed adults for the Phase 1 gate. Which are wrong?
+3. ~~**Every ⚠️ threshold in this document.**~~ *(All ruled. The table below is the
+   record; nothing in this document carries an unruled ⚠️ any more.)*
+
+   | Threshold | v0 | v1 | Where |
+   |---|---|---|---|
+   | Vision-meeting cadence slip | 21 days = flag | Watch at 21, direct at 28 | Lens 1, #486 |
+   | Growth comparison window | 28 days vs prior 28 | **Kept** | Lens 3, #471 |
+   | Growth "stalled" | 3 weeks flat | Slowed at 21 days, stalled at 28; any +1 resets | Lens 3, #471 |
+   | Cluster disengagement | 4 or more members | 20% of the active committed group, min 3 | Lens 4, #486 |
+   | Individual leadership readiness | 60 days | **Number kept**, renamed to a Candidate Signal | Lens 7, #476 |
+   | Follow-up staleness | 14 days, universal | Split by warmth: 48–72h ideal, 7 days warm, 14 days cold | Lens 2, #486 |
+   | Network "readiness focus" | 30 days out | Compound — 30 days out **and** an unresolved gap | §7, #486 |
+   | Phase 1 gate | 30–40 adults | **Kept**, scored as a five-indicator cluster | Phase 1, #477 |
 
 4. ~~**Network conservatism.**~~ *(Ruled: the philosophy was right and the wording was
    not. The register is now a ban-list plus a pattern-not-cause rule, both enforced on

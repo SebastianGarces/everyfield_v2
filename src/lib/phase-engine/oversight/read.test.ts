@@ -35,7 +35,17 @@ function insight(severity: Sev): Pick<PlantInsight, "severity"> {
  */
 function snapshotWithLaunch(
   daysUntilLaunch: number | null,
-  status: "planning" | "scheduled" | "postponed" | "completed" = "scheduled"
+  status: "planning" | "scheduled" | "postponed" | "completed" = "scheduled",
+  /**
+   * Whether the plant still has an unresolved readiness gap (#486, C23). The
+   * launch window escalates only ALONGSIDE one — time alone is never
+   * sufficient — so every launch-arm test now has to say which case it is.
+   *
+   * Default `true` keeps the pre-#486 tests testing the LAUNCH arm rather than
+   * silently testing the new gate; the "everything is on track" case gets its
+   * own tests below.
+   */
+  hasGap = true
 ): PlantFactSnapshot {
   return {
     launch: {
@@ -46,6 +56,13 @@ function snapshotWithLaunch(
         daysUntilLaunch !== null &&
         daysUntilLaunch < 0 &&
         status !== "completed",
+    },
+    ministryRoles: hasGap
+      ? { filledCount: 5, totalRoles: 8, roles: [], isEmpty: false }
+      : { filledCount: 8, totalRoles: 8, roles: [], isEmpty: false },
+    training: {
+      requiredCompletionRate: hasGap ? 0.4 : 1,
+      isEmpty: false,
     },
   } as unknown as PlantFactSnapshot;
 }
@@ -319,5 +336,91 @@ test("nothing withheld and something shared is still on-track", () => {
       withheldCount: 0,
     }),
     "on-track"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Time is never sufficient (#486, C23)
+//
+// Bryan: "Thirty days out alone should not create a warning. Thirty days out
+// with significant unresolved readiness gaps should. '30 days from launch +
+// everything is on track' = nothing to escalate."
+//
+// The old rule put EVERY plant into readiness focus for the month before its
+// launch, including the ones that had done everything right — which is the
+// month those planters least need a warning about themselves on their
+// overseer's dashboard.
+// ----------------------------------------------------------------------------
+
+test("imminent launch + unresolved gaps = readiness focus", () => {
+  assert.equal(
+    classifyPlantHealth(
+      [],
+      snapshotWithLaunch(READINESS_LAUNCH_WINDOW_DAYS, "scheduled", true),
+      FULLY_VISIBLE
+    ),
+    "readiness"
+  );
+});
+
+test("imminent launch + everything on track = nothing to escalate", () => {
+  assert.equal(
+    classifyPlantHealth(
+      [],
+      snapshotWithLaunch(READINESS_LAUNCH_WINDOW_DAYS, "scheduled", false),
+      FULLY_VISIBLE
+    ),
+    "on-track"
+  );
+});
+
+test("past due + unresolved gaps = readiness focus", () => {
+  assert.equal(
+    classifyPlantHealth(
+      [],
+      snapshotWithLaunch(-5, "scheduled", true),
+      FULLY_VISIBLE
+    ),
+    "readiness"
+  );
+});
+
+test("past due + everything on track does not escalate on the clock alone", () => {
+  assert.equal(
+    classifyPlantHealth(
+      [],
+      snapshotWithLaunch(-5, "scheduled", false),
+      FULLY_VISIBLE
+    ),
+    "on-track"
+  );
+});
+
+test("a snapshot that cannot show a gap does not manufacture one", () => {
+  // "We could not tell" must not become a warning on an overseer's dashboard.
+  // An older persisted snapshot reads as no gap, which is the conservative
+  // direction.
+  const bare = {
+    launch: {
+      daysUntilLaunch: 10,
+      status: "scheduled",
+      isCompleted: false,
+      isPastDue: false,
+    },
+  } as unknown as PlantFactSnapshot;
+
+  assert.equal(classifyPlantHealth([], bare, FULLY_VISIBLE), "on-track");
+});
+
+test("a visible escalation still wins, gap or no gap", () => {
+  // The compound trigger narrows the LAUNCH arm only. What the judge actually
+  // raised is untouched.
+  assert.equal(
+    classifyPlantHealth(
+      [insight("high")],
+      snapshotWithLaunch(200, "scheduled", false),
+      FULLY_VISIBLE
+    ),
+    "readiness"
   );
 });

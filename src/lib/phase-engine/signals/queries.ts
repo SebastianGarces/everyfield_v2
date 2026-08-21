@@ -43,7 +43,7 @@ import {
   trainingPrograms,
 } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { isRecruitedContact } from "@/lib/people/person-user";
 import { FOLLOW_UP_STATUSES } from "@/lib/people/status.shared";
 
@@ -449,6 +449,56 @@ export async function getMeetingsAttendedByPerson(
       )
     )
     .groupBy(meetingAttendance.personId);
+}
+
+/**
+ * One person attending one completed meeting — the raw rows behind cohesion
+ * and follow-up warmth (#486, C22).
+ */
+export interface AttendanceRow {
+  personId: string;
+  meetingType: string;
+  datetime: Date;
+}
+
+/**
+ * Attendance at completed meetings since `since`, church-scoped.
+ *
+ * ROWS, NOT BUCKETS. Two different rules read this — the cohesion windows
+ * (attended in the prior 28 days, absent in the last 28) and follow-up warmth
+ * (attended a vision meeting inside 14 days) — and both are time-relative, so
+ * the bucketing belongs beside the snapshot's single `asOf` rather than in SQL
+ * that would have to be told the same instant twice (AC-PE-2).
+ *
+ * EVERY completed meeting, not just vision meetings. Cohesion is about the
+ * group gathering at all: `church_meetings` has no `core_group` type, and
+ * `team_meeting` and `orientation` are gatherings a committed member turning up
+ * to is exactly the signal this lens is named for.
+ */
+export async function getAttendanceSince(
+  churchId: string,
+  since: Date
+): Promise<AttendanceRow[]> {
+  return db
+    .select({
+      personId: meetingAttendance.personId,
+      meetingType: churchMeetings.type,
+      datetime: churchMeetings.datetime,
+    })
+    .from(meetingAttendance)
+    .innerJoin(
+      churchMeetings,
+      eq(meetingAttendance.meetingId, churchMeetings.id)
+    )
+    .where(
+      and(
+        eq(meetingAttendance.churchId, churchId),
+        eq(meetingAttendance.status, "attended"),
+        eq(churchMeetings.status, "completed"),
+        gte(churchMeetings.datetime, since)
+      )
+    )
+    .orderBy(churchMeetings.datetime, meetingAttendance.personId);
 }
 
 /** Active ministry-team membership counts per person, church-scoped. */

@@ -75,6 +75,38 @@ export type PlantHealthClassification =
   | "readiness"
   | "limited-visibility";
 
+/**
+ * Is there something still unresolved that a launch this close makes urgent?
+ *
+ * TWO GAPS, both named by Bryan (C23): "30 days from launch + 3 critical roles
+ * unfilled + training incomplete". Roles are the coverage half — a plant
+ * launching without a worship leader has a real problem the clock makes worse.
+ * Training is the preparation half.
+ *
+ * UNKNOWN IS NOT A GAP. A snapshot missing either block cannot establish one,
+ * and the escalation needs a POSITIVE finding: "we could not tell" must not
+ * manufacture a warning on somebody's overseer dashboard. An older persisted
+ * snapshot therefore reads as no gap, which is the conservative direction.
+ */
+function hasReadinessGap(snapshot: PlantFactSnapshot | null): boolean {
+  if (!snapshot) return false;
+
+  const roles = snapshot.ministryRoles;
+  const rolesUnfilled =
+    roles !== undefined &&
+    roles.isEmpty === false &&
+    roles.filledCount < roles.totalRoles;
+
+  const training = snapshot.training;
+  const trainingIncomplete =
+    training !== undefined &&
+    training.isEmpty === false &&
+    training.requiredCompletionRate !== null &&
+    training.requiredCompletionRate < 1;
+
+  return rolesUnfilled || trainingIncomplete;
+}
+
 /** DB severities that escalate a plant to the `readiness` posture. */
 const READINESS_SEVERITIES = new Set<PlantInsight["severity"]>([
   "high",
@@ -129,7 +161,16 @@ export function classifyPlantHealth(
   );
   if (hasReadinessSeverity) return "readiness";
 
-  // Imminent or past-due launch warrants a readiness conversation.
+  // Imminent or past-due launch warrants a readiness conversation — BUT ONLY
+  // ALONGSIDE AN UNRESOLVED GAP (#486, C23). Bryan: "Thirty days out alone
+  // should not create a warning. Thirty days out with significant unresolved
+  // readiness gaps should… '30 days from launch + everything is on track' =
+  // nothing to escalate."
+  //
+  // TIME IS NEVER SUFFICIENT. The old rule put every plant into readiness focus
+  // for the month before its launch, including the ones that had done
+  // everything right — which is the month those planters least need a warning
+  // about themselves on their overseer's dashboard.
   const launch = snapshot?.launch ?? null;
   const days = launch?.daysUntilLaunch ?? null;
   // AHEAD and inside the window. The lower bound is what stops a launch that
@@ -139,7 +180,7 @@ export function classifyPlantHealth(
   // BEHIND, and the snapshot says it was never recorded as held. One field, one
   // decision — see the note above `PlantHealthClassification`.
   const overdue = launch?.isPastDue === true;
-  if (imminent || overdue) {
+  if ((imminent || overdue) && hasReadinessGap(snapshot)) {
     return "readiness";
   }
 
