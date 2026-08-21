@@ -20,6 +20,7 @@
 // launch lifecycle the schema defines instead of re-declaring it as a string
 // union that could drift from `launches.status`.
 import type { LaunchStatus } from "@/db/schema/launch";
+import type { EvidenceProfile } from "./evidence";
 
 /**
  * The 8 canonical ministry roles a plant must fill before launch
@@ -378,6 +379,20 @@ export interface PlantFactSnapshot {
   training: TrainingSignals;
   launch: LaunchSignals;
   manual: ManualSignals;
+  /**
+   * WHAT EACH LENS ACTUALLY KNOWS (#483, C17) — measured / attested / unknown
+   * per CSF lens, derived from the blocks above.
+   *
+   * OPTIONAL, because a snapshot persisted before #483 does not carry it and
+   * every reader recomputes it with `buildEvidenceProfile(snapshot)` anyway.
+   * It is written on every new snapshot so that it FLATTENS INTO THE JUDGE'S
+   * FACT LEDGER — the judge has to be handed what each lens knows, or "unknown
+   * is not healthy" is a rule it cannot apply.
+   *
+   * Derived and never a stored verdict (D1): there is no `evidence_quality`
+   * column to drift from the facts it describes.
+   */
+  evidence?: EvidenceProfile;
 }
 
 /** Options controlling the snapshot computation (kept deterministic). */

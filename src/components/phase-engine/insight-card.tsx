@@ -24,6 +24,7 @@
 // ============================================================================
 
 import { InsightCardView } from "@/components/phase-engine/insight-card-view";
+import type { EvidenceQuality } from "@/lib/phase-engine/signals/evidence";
 import { InsightFeedback } from "@/components/phase-engine/insight-feedback";
 import type { InsightFeedbackRating } from "@/db/schema";
 import type { AssessedInsight } from "@/lib/phase-engine/assessment";
@@ -46,9 +47,15 @@ interface InsightCardProps {
   insight: AssessedInsight;
   /** The current user's existing feedback for this insight, if any. */
   feedback?: InsightFeedbackState;
+  /** The evidence behind this insight's lens (#483). Passed straight through. */
+  evidence?: EvidenceQuality;
 }
 
-export async function InsightCard({ insight, feedback }: InsightCardProps) {
+export async function InsightCard({
+  insight,
+  feedback,
+  evidence,
+}: InsightCardProps) {
   // Only pay for the slug index when there is something to resolve; the view
   // drops any stored slug that no longer resolves (PE-024).
   const storedSlugs = insight.relatedArticleSlugs ?? [];
@@ -69,6 +76,7 @@ export async function InsightCard({ insight, feedback }: InsightCardProps) {
     <InsightCardView
       insight={insight}
       articleRefs={articleRefs}
+      evidence={evidence}
       feedbackSlot={
         <InsightFeedback
           insightId={insight.id}
