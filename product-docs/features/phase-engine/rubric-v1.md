@@ -27,6 +27,7 @@ recorded rulings, and the recommended v1 delta.
 | Change | Comments | Issue | What changed |
 |---|---|---|---|
 | Lens 2 stops inferring the planter is the bottleneck | C01, C13 | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) | Lens 2 may claim who carries follow-up only from measured task ownership. Appendix B's "Delegate Follow-Up Responsibilities" sample replaced. |
+| Stalled growth is 28 days, and any +1 resets it | C02, C22 | [#471](https://github.com/SebastianGarces/everyfield_v2/issues/471) | Lens 3's single "3 weeks flat" ⚠️ becomes two ruled levels: slowed at 21 days, stalled at 28. The 28-day comparison window is kept. |
 
 ---
 
@@ -140,8 +141,20 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
 - **What feeds it:** committed core-group adult count, growth over the trailing 28 days,
   distance to goal, projected trajectory against the launch date.
 - **Minimum:** **50** committed adults ✅ · **Target:** **100** ✅
-- **Growth comparison window:** **28 days** versus the prior 28 ⚠️
-- **Flag stalled growth at:** **3 weeks** flat ⚠️
+- **Growth comparison window:** **28 days** versus the prior 28 ✅ *(kept — weekly is
+  noisy.)*
+- **Flat growth is two levels, not one** ✅
+  - **Momentum has slowed** at **21 days** since the last new committed adult.
+  - **Growth has stalled** only at **28 days**. The engine may not use the word
+    *stalled* for any shorter streak — one vision-meeting cycle can change the whole
+    picture inside three weeks.
+  - **Any new committed adult resets both clocks.** The engine measures days since the
+    most recent person's *first* core-group commitment, so one new adult puts the
+    streak back to zero. Somebody's second commitment — a launch-team card, a re-signed
+    core-group card — is not a new adult and resets nothing.
+  - This is a different measurement from the comparison window above. `growthDelta` can
+    read flat while somebody joined yesterday; the streak is the fact the word *stalled*
+    rests on.
 - **Healthy:** trending toward at least 50 committed adults on a trajectory that
   reaches target before launch.
 - **What it says:** "you are at 22 committed adults with four months to launch — at
@@ -317,9 +330,11 @@ These are the outputs I am aiming for, written as: *situation → what the engin
 They double as my test cases.
 
 **Growth and core group**
-1. *Stalled growth* — count flat for three or more weeks in Phase 1 → "Your core group
-   has held at 18 for three weeks. The vision meeting is the engine of growth — when
+1. *Momentum slowed* — 21 days since the last new committed adult, Phase 1 → "No new
+   committed adults in three weeks. The vision meeting is the engine of growth — when
    did you last hold one?"
+1b. *Stalled growth* — 28 days since the last new committed adult → "Your core group has
+   held at 18 for four weeks."
 2. *Trajectory against launch* — 22 committed, growing by two per week, launch in 16
    weeks → "At your current pace you will reach about 54 by launch, just over the 50
    minimum. To hit the 100 target you would need roughly five per week."
@@ -441,7 +456,8 @@ see the same headline?
    turning it into a compliance exercise?
 
 3. **Every ⚠️ threshold in this document.** Collected: 21 days for a cadence slip ·
-   28-day growth comparison window · 3 weeks flat to call growth stalled · 4+ members
+   28-day growth comparison window · ~~3 weeks flat to call growth stalled~~ *(ruled:
+   21 days slowed / 28 days stalled — #471)* · 4+ members
    for cluster disengagement · 60 days for individual leadership readiness · 14 days
    before a follow-up is stale · 30 days out for network readiness escalation ·
    30–40 committed adults for the Phase 1 gate. Which are wrong?

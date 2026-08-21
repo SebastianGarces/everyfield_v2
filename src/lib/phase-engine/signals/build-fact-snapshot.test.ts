@@ -626,3 +626,108 @@ test("every owner fact has a phrase, so a citation of one can be read back", () 
     assert.equal(typeof FACT_PHRASES.get(key)!("2"), "string");
   }
 });
+
+// ----------------------------------------------------------------------------
+// The flat streak, and what resets it (#471, C02/C22)
+//
+// v0 let the judge eyeball "3 weeks flat" off `growthDelta`, and there was no
+// fact a +1 could reset. Bryan: do not confidently say STALLED before about
+// four weeks, and one extra adult should change the reading. Both halves are
+// the definition of `daysSinceLastNewCommitment`, so these tests are the proof
+// that the definition holds rather than that the judge behaves.
+// ----------------------------------------------------------------------------
+
+test("the streak is measured from the LATEST first commitment", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = [
+    {
+      personId: "a",
+      commitmentType: "core_group",
+      signedDate: "2026-05-01",
+    },
+    {
+      personId: "b",
+      commitmentType: "core_group",
+      signedDate: "2026-06-01",
+    },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF); // 2026-06-22
+  assert.equal(snap.coreGroup.daysSinceLastNewCommitment, 21);
+  assert.equal(snap.coreGroup.slowedThresholdDays, 21);
+  assert.equal(snap.coreGroup.stalledThresholdDays, 28);
+});
+
+test("AC-2: one new committed adult resets the streak to 0", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = [
+    { personId: "a", commitmentType: "core_group", signedDate: "2026-05-01" },
+  ];
+  assert.equal(
+    assembleFactSnapshot(CHURCH_ID, inputs, AS_OF).coreGroup
+      .daysSinceLastNewCommitment,
+    52
+  );
+
+  inputs.commitments.push({
+    personId: "b",
+    commitmentType: "core_group",
+    signedDate: "2026-06-22",
+  });
+  assert.equal(
+    assembleFactSnapshot(CHURCH_ID, inputs, AS_OF).coreGroup
+      .daysSinceLastNewCommitment,
+    0
+  );
+});
+
+test("AC-2: somebody's SECOND commitment is not a new adult", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = [
+    { personId: "a", commitmentType: "core_group", signedDate: "2026-05-01" },
+    // The same person signing a launch-team card today. The plant did not grow.
+    { personId: "a", commitmentType: "launch_team", signedDate: "2026-06-22" },
+    // And a re-signed core-group card, which is not growth either.
+    { personId: "a", commitmentType: "core_group", signedDate: "2026-06-22" },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.coreGroup.committedCount, 1);
+  assert.equal(snap.coreGroup.launchTeamCount, 1);
+  assert.equal(snap.coreGroup.daysSinceLastNewCommitment, 52);
+});
+
+test("a cold-start plant has no streak rather than a streak of zero", () => {
+  const snap = assembleFactSnapshot(CHURCH_ID, coldStartInputs(), AS_OF);
+  assert.equal(snap.coreGroup.daysSinceLastNewCommitment, null);
+  // The thresholds are still there — the judge cites them even when the streak
+  // is unknown, and a missing threshold is a number it would have to invent.
+  assert.equal(snap.coreGroup.slowedThresholdDays, 21);
+  assert.equal(snap.coreGroup.stalledThresholdDays, 28);
+});
+
+test("AC-4: the streak and both thresholds reach the judge's fact ledger", () => {
+  const inputs = coldStartInputs();
+  inputs.commitments = [
+    { personId: "a", commitmentType: "core_group", signedDate: "2026-05-01" },
+  ];
+
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, inputs, AS_OF)).map((line) => [
+      line.key,
+      line.value,
+    ])
+  );
+
+  assert.equal(ledger.get("coreGroup.daysSinceLastNewCommitment"), "52");
+  assert.equal(ledger.get("coreGroup.slowedThresholdDays"), "21");
+  assert.equal(ledger.get("coreGroup.stalledThresholdDays"), "28");
+
+  for (const key of [
+    "coreGroup.daysSinceLastNewCommitment",
+    "coreGroup.slowedThresholdDays",
+    "coreGroup.stalledThresholdDays",
+  ]) {
+    assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
+  }
+});

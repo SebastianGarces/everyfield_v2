@@ -45,6 +45,9 @@ function makeSnapshot(
       launchTeamCount: 0,
       growthDelta: 2,
       growthWindowDays: 7,
+      daysSinceLastNewCommitment: 30,
+      slowedThresholdDays: 21,
+      stalledThresholdDays: 28,
       isEmpty: false,
     },
     visionMeetings: {
