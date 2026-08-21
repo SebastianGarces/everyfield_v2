@@ -27,7 +27,8 @@ Each iteration:
 - **Decisions:** make them yourself and record them (`product-docs/decisions.md` for product, PR body for code). Never block on Sebastian. Keep working on any follow-up a decision creates.
 - **Browser MCP hygiene:** headless Chrome (chrome-devtools MCP) and Playwright MCP leak contexts across parallel tracks. Clean them up constantly — close pages after each validation, and kill orphaned headless Chrome/Playwright processes between passes (`pkill -f "chrome.*headless"`, check `ps` for stray `mcp-chrome`/`playwright` processes).
 - **Context hygiene:** keep your own context lean. Route bulk output to subagents; hold summaries only. Roughly every hour, shed stale context (compaction) so you stay fresh for the whole night.
-- **Quality bar:** it does not have to be perfect. Do not stop early because work is imperfect; ship, note the follow-up, keep going. Going somewhat past the stop time to finish in-flight work is fine.
+- **Quality bar is unchanged:** the engineering principles and `ops/process.md` apply in full overnight. Ship to the normal bar; make every agent aware the bar is not lowered. File follow-ups for genuine scope cuts, never as a substitute for doing the work right.
+- **Stop time is soft:** treat the target as approximate. Never interrupt in-flight work to hit it; let running tracks finish and choose a stopping point close to the target. Stop dispatching new work as the target nears.
 - **No collisions:** one claim per issue (`agent:in-progress`), worktrees for parallel branches, fresh `pnpm install` per worktree.
 
 ## Stop and report
