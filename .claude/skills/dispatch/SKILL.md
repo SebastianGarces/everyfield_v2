@@ -14,13 +14,16 @@ loop, and this skill only adds the guard, the pass shape, and the report.
 A claim means another pass, a human, or a dead run. All three mean do not start.
 
 ```bash
-R=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-gh api --paginate "repos/$R/issues?labels=agent:in-progress&state=open&per_page=100" \
-  --jq '.[] | select(.pull_request == null) | "\(.number)\t\(.title)"'    # must be empty
-git status --porcelain                                                    # must be empty
+ops/board.sh claims          # must be empty
+git status --porcelain       # must be empty
 git fetch -q origin
 [ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ] && echo IN-SYNC || echo STALE
 ```
+
+The claim read matches labels itself rather than asking the API to filter them. A server-side
+label filter lags about three seconds behind the write, and two passes starting inside that window
+would both read an empty claim list and both proceed — the exact collision this section exists to
+refuse. Measurement in the header of `ops/board.sh`.
 
 Any claim, a dirty tree, or `STALE` → stop, and say which sha each side is on. Stopping is a normal
 outcome; report which check stopped it.
@@ -34,8 +37,9 @@ gh issue edit <n> --add-label agent:queued --remove-label agent:in-progress
 
 ## 2. Read the frontier
 
-Run the canonical frontier query in `ops/process.md` § The loop. Do not re-derive one. An empty
-frontier → stop, and say what the board is waiting on. A quiet no-op is a success.
+`ops/board.sh frontier` — the canonical query, and the only one. Do not re-derive it with
+`gh issue list --label` or `?labels=`; see § 1. An empty frontier → stop, and say what the board is
+waiting on. A quiet no-op is a success.
 
 Pick what this pass will build. Two or three issues is a normal pass; prefer issues whose
 `## Likely files` do not overlap, and take at most one issue that will mint a migration — two
