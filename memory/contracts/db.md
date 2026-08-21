@@ -244,6 +244,45 @@ not at a second orphan.
 clone, every restore predating 2026-08-21 and production all take EXIT A in that header's reconcile
 block and apply 0058 cleanly.
 
+### Finding (2026-08-21, #577) — the apply is one transaction, so the ledger cannot name the failure
+
+The reconcile block in `0058_church_digest_send_time.sql` says the operator will not be shown the
+error: `drizzle-kit migrate` swallows it and exits 1 with an unfinished spinner and nothing on
+stdout or stderr. `pnpm db:migrate` is now `scripts/db-migrate.ts`, which diagnoses that exit.
+
+Two facts about `drizzle-orm`'s migrator were established on scratch databases while building it,
+because the first design got the second one wrong:
+
+1. **The ledger's maximum `created_at` is read ONCE, before the loop.** Every entry above it is a
+   candidate, journal order — this is the rule the ⚖ renumbering invariant already states.
+2. **The whole batch runs inside a single `begin`/`commit`.** Proven directly: with two pending
+   migrations and a collision in the SECOND, the FIRST one's table was absent afterwards and the
+   ledger was byte-identical to before the run. So a failure rolls back the ledger rows it inserted,
+   the maximum does not move, and every attempted migration is still pending.
+
+The consequence is the one worth remembering: **the ledger cannot tell you which migration failed.**
+"The first pending one is the culprit" is wrong whenever the collider is not first, and it is wrong
+in the direction that hurts — it reads the wrong file, finds none of its objects present, and
+confidently rules out the renumbering diagnosis that is true. The pending list is the search space;
+what identifies the culprit is catalog evidence, so the script asks which objects the batch would
+create that are already there, and reports the migrations that own them.
+
+Two traps it has to avoid, both real in this repo:
+
+- **A migration that drops an object and recreates it under the same name** is not a collision.
+  `0025_notification_dedupe_liveness.sql` drops `notifications_dedupe_key_unique_idx` before
+  creating it, and 0018, 0029 and 0055 do the same for theirs. On any database that ran 0023 and not
+  0025 that index is present, so without subtracting a migration's own `DROP`s the report accuses a
+  migration that cannot collide — and points a human at an attended ledger write. Verified against a
+  scratch database left at 0024.
+- **`does not exist` is not a missing ledger.** Postgres says it for an unknown database (3D000) and
+  an unknown role (28000) too, so the "ledger not created yet" branch keys on SQLSTATE `42P01` and
+  everything else falls through to "could not reach the database".
+
+The diagnosis is SELECTs only and never replays the batch, not even inside a transaction it means to
+roll back: that ships DDL at the de-facto prod DB to produce a log line. The operator gets a
+`BEGIN` … `ROLLBACK` they can read and run themselves.
+
 ### Reusable snippet
 
 Match journal `when` to `drizzle.__drizzle_migrations.created_at`. A row on only one side is
