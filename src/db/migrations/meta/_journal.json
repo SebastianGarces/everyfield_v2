@@ -386,6 +386,13 @@
       "when": 1787293039967,
       "tag": "0055_task_followup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787379439967,
+      "tag": "0056_insight_category_cohesion",
+      "breakpoints": true
     }
   ]
 }

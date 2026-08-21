@@ -35,7 +35,7 @@ export const insightCategorySchema = z.enum([
   "vision_casting", // CSF-1
   "shared_ownership", // CSF-2
   "critical_mass", // CSF-3
-  "unity", // CSF-4
+  "cohesion", // CSF-4
   "prayer", // CSF-5
   "generosity", // CSF-6
   "emerging_leadership", // CSF-7

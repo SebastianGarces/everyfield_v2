@@ -125,7 +125,7 @@ const CATEGORY_PRIVACY_FEATURE: Record<string, PrivacyFeatureKey | null> = {
   vision_casting: "people",
   shared_ownership: "people",
   critical_mass: "people",
-  unity: "people",
+  cohesion: "people",
   prayer: "people",
   generosity: "people",
   emerging_leadership: "people",

@@ -186,7 +186,22 @@ invitation** and a **coach invitation** create or extend an account (§1).
 **Deprecated synonyms:** "go-live", "opening day", "first service" → **Launch Sunday**. "launch
 date on the church" → there is no such column; say **the launch date**, owned by the launch.
 
-## 8. Launch Playbook
+## 8. Cohesion (CSF-4)
+
+| Canonical word | Meaning |
+|---|---|
+| **Cohesion** | Lens 4 of the eight Critical Success Factors, and the category slug `cohesion`. The group-health lens fed by **attendance-shaped** signals: core-group meeting cadence, attendance consistency, engagement breadth. |
+| **unity** | What the plant is actually after, and something this product does not measure. Attendance can say whether the group is holding together; it cannot say whether it is unified — four people missing may be conflict, vacation, sickness or a work rota. Unity is a relational judgment for the planter and their coach. |
+
+**Deprecated synonyms:** "Unity" as the name of Lens 4, "the unity lens", `category: "unity"` →
+**Cohesion**. Ruled 2026-08-18 on Bryan's C04; renamed in #473. "Engagement" was considered and
+rejected — it collides with the lens's own *engagement breadth* signal.
+
+**Source material keeps its own words.** The Launch Playbook's fourth Critical Success Factor is
+"Unity", and `product-docs/launch-playbook.md`, the research briefs and the quoted text in
+`bryan-comments-review.md` all still say so. We renamed our voice, not our sources.
+
+## 9. Launch Playbook
 
 The **Launch Playbook** (`product-docs/launch-playbook.md`) is the methodology this product
 implements — the domain source for phases, ministry-team structure, meeting objectives, launch

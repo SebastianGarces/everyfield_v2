@@ -226,7 +226,7 @@ export const CSF_CATEGORIES = [
   "vision_casting",
   "shared_ownership",
   "critical_mass",
-  "unity",
+  "cohesion",
   "prayer",
   "generosity",
   "emerging_leadership",
@@ -270,9 +270,13 @@ export const CSF_DEFINITIONS: readonly CsfDefinition[] = [
     summary: "Committed adults growing on a trajectory that reaches launch.",
   },
   {
-    category: "unity",
+    category: "cohesion",
     number: 4,
-    name: "Unity",
+    // NOT "Unity" (#473, C04). Attendance can say whether the group is holding
+    // together; it cannot say whether the group is UNIFIED — four people
+    // missing may be conflict, or vacation, or a work rota. Actual unity stays
+    // a relational judgment for the planter and their coach.
+    name: "Cohesion",
     summary: "Regular core-group gatherings with consistent attendance.",
   },
   {

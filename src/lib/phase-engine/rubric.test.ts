@@ -54,6 +54,19 @@ test("v1 frames 50/100 as this methodology's benchmark (#472)", () => {
   assert.match(RUBRICS.v1.body, /benchmark of 50–100 committed adults/);
 });
 
+test("v1 renames Lens 4 to Cohesion and says why (#473)", () => {
+  assert.match(RUBRICS.v0.body, /### CSF-4 · Unity/);
+  assert.match(RUBRICS.v1.body, /### CSF-4 · Core Group Cohesion/);
+  assert.doesNotMatch(RUBRICS.v1.body, /### CSF-4 · Unity/);
+  // The rename is only half of it. The other half is telling the judge that
+  // the thing it cannot see is the thing the old name claimed.
+  assert.match(RUBRICS.v1.body, /THIS LENS IS NOT ABOUT UNITY/);
+  assert.match(
+    RUBRICS.v1.body,
+    /relational judgment for the planter and their coach/
+  );
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
