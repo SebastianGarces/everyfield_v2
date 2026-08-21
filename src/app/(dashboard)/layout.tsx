@@ -10,7 +10,6 @@ import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
-import { assignedPlantsFor } from "@/lib/coaching/assignments";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
@@ -19,6 +18,7 @@ import {
   type NotificationViewer,
 } from "@/lib/notifications/feed";
 
+import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
 
 /**
@@ -134,7 +134,14 @@ export default async function DashboardLayout({
   // The coaching reach, read for the sidebar's "Assigned plants" section
   // (#496). Independent of `org` above: an oversight Owner who also coaches a
   // plant has both, and each is drawn in its own section from its own consent.
-  const assignedPlants = await assignedPlantsFor(user.id);
+  //
+  // STARTED HERE AND AWAITED IN THE SIDEBAR (#569), on the same two grounds as
+  // the badge below. It cannot fail the shell — `assignedPlantsSafely` turns a
+  // throwing join into an empty list — and it cannot delay the shell, because
+  // the promise crosses into `AppSidebar` unawaited and is unwrapped under a
+  // `<Suspense>` boundary there. An `await` on this line is the whole dashboard
+  // waiting on a query that returns nothing for nearly every account.
+  const assignedPlants = assignedPlantsSafely(user.id);
 
   return (
     <SidebarProvider defaultOpen={defaultOpen}>

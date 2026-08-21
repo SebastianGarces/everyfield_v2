@@ -19,19 +19,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type {
-  InsightSeverity,
-  PlantAssessment,
-  PlantInsight,
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import {
+  plantAssessments,
+  type InsightSeverity,
+  type PlantAssessment,
+  type PlantInsight,
 } from "@/db/schema";
 import { privacyFeatureForCategory } from "@/lib/phase-engine/oversight/read";
 
 import {
+  assessmentReleasedToOversight,
   buildCsfScorecard,
   CSF_CATEGORIES,
   CSF_DEFINITIONS,
   csfStandingUrgency,
   isCsfCategory,
+  PLANTER_FIRST_WINDOW_HOURS,
   standingForSeverity,
   type LatestAssessment,
 } from "./queries";
@@ -365,4 +371,59 @@ test("PE-023: a withheld insight reads as not_raised, it cannot leak through a s
   );
   assert.ok(!rendered.includes(withheld.title));
   assert.ok(!rendered.some((s) => s.includes("financialBaseInPlace")));
+});
+
+// ----------------------------------------------------------------------------
+// The planter-first release gate (#482, C16/C25)
+//
+// Bryan: "The planter should never discover the diagnosis through his
+// overseer." The predicate below is what oversight reads through, and it has
+// two arms for two different reasons — one so the planter is first, one so an
+// org that pays per plant is never blocked by a planter on holiday.
+// ----------------------------------------------------------------------------
+
+test("release has two arms: the planter has seen it, OR it is old enough", () => {
+  const { sql: text } = db
+    .select()
+    .from(plantAssessments)
+    .where(assessmentReleasedToOversight())
+    .toSQL();
+
+  assert.match(text, /"planter_seen_at" is not null/);
+  assert.match(text, /"generated_at" < now\(\) - interval '72 hours'/);
+  assert.match(text, / or /);
+});
+
+test("the window is stated once, and the SQL reads it", () => {
+  // A second copy of "72" in the predicate is how the column's meaning and the
+  // documented rule come apart.
+  assert.equal(PLANTER_FIRST_WINDOW_HOURS, 72);
+  assert.match(
+    db
+      .select()
+      .from(plantAssessments)
+      .where(assessmentReleasedToOversight())
+      .toSQL().sql,
+    new RegExp(`interval '${PLANTER_FIRST_WINDOW_HOURS} hours'`)
+  );
+});
+
+test("the planter's own read is NOT gated", () => {
+  // The planter opening their assessment is the event that releases it. Gating
+  // their view on it would mean nobody could ever see anything.
+  const planterQuery = db
+    .select()
+    .from(plantAssessments)
+    .where(
+      and(
+        eq(plantAssessments.churchId, CHURCH_ID),
+        eq(plantAssessments.status, "complete")
+      )
+    )
+    .toSQL().sql;
+
+  // The WHERE clause only — `select()` names every column, this one included.
+  const where = planterQuery.slice(planterQuery.indexOf(" where "));
+  assert.doesNotMatch(where, /planter_seen_at/);
+  assert.doesNotMatch(where, /interval/);
 });

@@ -47,6 +47,7 @@ import {
   buildCsfScorecard,
   buildExitCriteriaProgress,
   getLatestAssessment,
+  markAssessmentSeenByPlanter,
 } from "@/lib/phase-engine/assessment";
 import { assessmentColdStart } from "@/lib/phase-engine/cold-start";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
@@ -97,6 +98,16 @@ export default async function PhasePage() {
     getPhaseReadiness(churchId),
     listManualSignals(churchId),
   ]);
+
+  // OPENING THIS PAGE IS WHAT RELEASES THE ASSESSMENT TO OVERSIGHT (#482).
+  // Bryan: "The planter should never discover the diagnosis through his
+  // overseer." The stamp is written once (the writer guards on `IS NULL`), and
+  // nothing on this page depends on it — a failure here just leaves release to
+  // the 72-hour arm rather than blocking the planter from reading their own
+  // assessment, which would invert the rule.
+  if (latest) {
+    await markAssessmentSeenByPlanter(churchId, latest.assessment.id);
+  }
 
   // The trends (PE-026) and the milestone timeline (PE-027). Both take the
   // `latest` above rather than re-reading it, so the alert badges they carry are

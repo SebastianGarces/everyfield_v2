@@ -1,5 +1,5 @@
 {
-  "id": "c73b0ce8-7d1e-4343-b6ba-7c75c4a33c5f",
+  "id": "12923b7c-e765-46ba-a761-25b645a2eb0f",
   "prevId": "98ad8be7-b9f3-4f06-b41c-8a298f1b1cf2",
   "version": "7",
   "dialect": "postgresql",
@@ -8897,6 +8897,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'pending'"
+        },
+        "planter_seen_at": {
+          "name": "planter_seen_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
