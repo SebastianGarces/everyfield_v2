@@ -32,14 +32,14 @@ import { RESEND_DEDUPE_WINDOW_MS, resendDedupeWindowAt } from "./resend-window";
 import { INVITED_SEAT_COPY, invitedSeatWithArticle } from "./seat-copy";
 import { seatInvitationEmailIdempotencyKey } from "./seat-email";
 import {
-  claimSeatInvitationStatement,
-  hashSeatInvitationToken,
-  newSeatInvitationToken,
-  SEAT_INVITE_RATE_LIMITED_MESSAGE,
-  seatInvitationActedOnAtRegistration,
+  claimUserInvitationStatement,
+  hashUserInvitationToken,
+  newUserInvitationToken,
+  USER_INVITE_RATE_LIMITED_MESSAGE,
+  userInvitationActedOnAtRegistration,
   seatInviteeRefusal,
-  seatInvitesFromChurchToAddressQuery,
-  type SeatRegistrationInvitation,
+  invitesFromChurchToAddressQuery,
+  type UserRegistrationInvitation,
 } from "./seat";
 
 // ============================================================================
@@ -60,7 +60,7 @@ import {
 //   * GENERATED SQL, for the queries — a cap that quietly grew a `status`
 //     predicate is invisible in behaviour until somebody runs a revoke-reinvite
 //     loop for real, and visible in `toSQL()` immediately.
-//   * SOURCE, for the ORDER and for the module graph — `createSeatInvitationAs`
+//   * SOURCE, for the ORDER and for the module graph — `createUserInvitationAs`
 //     needs a database to run, but the property that matters about it is the
 //     ORDER of its four checks (`memory/invariants.md` → Multi-Tenancy: the
 //     neutrality rule is POSITIONAL), and an order is a fact about the source.
@@ -103,7 +103,7 @@ const JOURNAL = JSON.parse(
 
 /** The create, cut out of its module once. */
 const CREATE = SEAT.span(
-  "export async function createSeatInvitationAs",
+  "export async function createUserInvitationAs",
   "async function emailSeatInvitee"
 );
 
@@ -227,7 +227,7 @@ test("a minted token is 256 bits of base64url, and never repeats", () => {
   const drawn = new Set<string>();
 
   for (let i = 0; i < 200; i += 1) {
-    const token = newSeatInvitationToken();
+    const token = newUserInvitationToken();
     assert.match(token, /^[A-Za-z0-9_-]{43}$/, token);
     drawn.add(token);
   }
@@ -236,8 +236,8 @@ test("a minted token is 256 bits of base64url, and never repeats", () => {
 });
 
 test("what is stored is the digest, and it is not the token", () => {
-  const token = newSeatInvitationToken();
-  const stored = hashSeatInvitationToken(token);
+  const token = newUserInvitationToken();
+  const stored = hashUserInvitationToken(token);
 
   // The property AS-010 states, executed: the column's value is not the value
   // the email carried.
@@ -248,8 +248,8 @@ test("what is stored is the digest, and it is not the token", () => {
     createHash("sha256").update(token, "utf8").digest("hex")
   );
   // Deterministic, which is what makes the registration lookup a point read.
-  assert.equal(stored, hashSeatInvitationToken(token));
-  assert.notEqual(stored, hashSeatInvitationToken(newSeatInvitationToken()));
+  assert.equal(stored, hashUserInvitationToken(token));
+  assert.notEqual(stored, hashUserInvitationToken(newUserInvitationToken()));
 });
 
 test("no write and no read ever names the plaintext token", () => {
@@ -260,7 +260,7 @@ test("no write and no read ever names the plaintext token", () => {
     "const row: NewUserInvitation = {",
     "const [invitation] = await db"
   );
-  assert.match(row, /tokenHash: hashSeatInvitationToken\(token\)/);
+  assert.match(row, /tokenHash: hashUserInvitationToken\(token\)/);
   assert.doesNotMatch(
     row,
     /^\s*token:/m,
@@ -271,7 +271,7 @@ test("no write and no read ever names the plaintext token", () => {
   // backup, or a log — hands nobody a working link.
   assert.match(
     SEAT.code,
-    /eq\(userInvitations\.tokenHash, hashSeatInvitationToken\(candidate\)\)/
+    /eq\(userInvitations\.tokenHash, hashUserInvitationToken\(candidate\)\)/
   );
 
   // The schema and the migration agree that `token_hash` is the only column,
@@ -384,13 +384,13 @@ test("every legible refusal runs ABOVE the address lookup", () => {
   // lets them keep their own legible words.
   assertInOrder(
     CREATE,
-    "createSeatInvitationAs",
+    "createUserInvitationAs",
     [
       'assertSeatFor(actor, "seat.invitation.manage")',
       "normalizeInviteeEmail(request.inviteeEmail)",
       "isInvitableEmailAddress(inviteeEmail)",
       'eq(userInvitations.status, "pending")',
-      "seatInvitesFromChurchToAddressQuery(",
+      "invitesFromChurchToAddressQuery(",
       ".from(users)",
       "seatInviteeRefusal(existingAccount)",
       "db.insert(userInvitations)",
@@ -402,7 +402,7 @@ test("every legible refusal runs ABOVE the address lookup", () => {
 test("nothing below the lookup composes a sentence of its own", () => {
   const belowTheLookup = SEAT.span(
     "const [existingAccount]",
-    "const token = newSeatInvitationToken()"
+    "const token = newUserInvitationToken()"
   );
 
   // Exactly one refusal is reachable down here, and it is the imported
@@ -418,7 +418,7 @@ test("nothing below the lookup composes a sentence of its own", () => {
 
 test("the cap counts EVERY status, scoped to this plant and this address", () => {
   const since = new Date("2026-07-21T12:00:00.000Z");
-  const { sql, params } = seatInvitesFromChurchToAddressQuery(
+  const { sql, params } = invitesFromChurchToAddressQuery(
     PLANT,
     "stranger@example.com",
     since
@@ -463,13 +463,13 @@ test("the fourth invitation inside the window is the one that is refused", () =>
 
 test("the cap's refusal names the plant's own behaviour, never an account", () => {
   assert.notEqual(
-    SEAT_INVITE_RATE_LIMITED_MESSAGE,
+    USER_INVITE_RATE_LIMITED_MESSAGE,
     ACCOUNT_NOT_INVITABLE_MESSAGE
   );
   // Legible precisely because it is unreachable from below the lookup — it can
   // only ever be a statement about invitations THIS plant sent.
-  assert.doesNotMatch(SEAT_INVITE_RATE_LIMITED_MESSAGE, /account/i);
-  assert.doesNotMatch(SEAT_INVITE_RATE_LIMITED_MESSAGE, /exist/i);
+  assert.doesNotMatch(USER_INVITE_RATE_LIMITED_MESSAGE, /account/i);
+  assert.doesNotMatch(USER_INVITE_RATE_LIMITED_MESSAGE, /exist/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -509,14 +509,14 @@ test("the logic layer refuses a Member itself, not only the action", () => {
 
   // …and EVERY export that takes an actor asserts it, before anything else it
   // does. The reads were missing it at review round 1, and one of them
-  // (`expireLapsedSeatInvitations`) is an UPDATE whose only authority was the
+  // (`expireLapsedUserInvitations`) is an UPDATE whose only authority was the
   // page's redirect — which holds for a browser and for nothing else.
   for (const write of [
-    "export async function createSeatInvitationAs",
-    "export async function listSeatInvitationsFor",
-    "export async function revokeSeatInvitationAs",
-    "export async function resendSeatInvitationEmailAs",
-    "export async function expireLapsedSeatInvitations",
+    "export async function createUserInvitationAs",
+    "export async function listUserInvitationsFor",
+    "export async function revokeUserInvitationAs",
+    "export async function resendUserInvitationEmailAs",
+    "export async function expireLapsedUserInvitations",
   ]) {
     const body = SEAT.after(write).slice(0, 400);
     assert.match(
@@ -549,7 +549,7 @@ test("the three endpoints are checked in against that capability", () => {
 // 7. REGISTRATION — the token is address-bound, and the grant is ONE write
 // ----------------------------------------------------------------------------
 
-const described: SeatRegistrationInvitation = {
+const described: UserRegistrationInvitation = {
   id: INVITATION,
   inviteeEmail: "stranger@example.com",
   churchId: PLANT,
@@ -559,12 +559,12 @@ const described: SeatRegistrationInvitation = {
 
 test("a seat token is acted on only for the address it names", () => {
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "stranger@example.com"),
+    userInvitationActedOnAtRegistration(described, "stranger@example.com"),
     described
   );
   // Case and surrounding space are not the address.
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "  Stranger@Example.COM "),
+    userInvitationActedOnAtRegistration(described, "  Stranger@Example.COM "),
     described
   );
 
@@ -572,16 +572,16 @@ test("a seat token is acted on only for the address it names", () => {
   // ordinary sign-up exactly as an unknown token does, because `/register` is
   // an anonymous POST (Ruling C).
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "someone-else@example.com"),
+    userInvitationActedOnAtRegistration(described, "someone-else@example.com"),
     null
   );
-  assert.equal(seatInvitationActedOnAtRegistration(described, ""), null);
+  assert.equal(userInvitationActedOnAtRegistration(described, ""), null);
   assert.equal(
-    seatInvitationActedOnAtRegistration(null, "stranger@example.com"),
+    userInvitationActedOnAtRegistration(null, "stranger@example.com"),
     null
   );
   assert.equal(
-    seatInvitationActedOnAtRegistration({ ...described, inviteeEmail: "" }, ""),
+    userInvitationActedOnAtRegistration({ ...described, inviteeEmail: "" }, ""),
     null
   );
 });
@@ -638,10 +638,10 @@ test("the grant and the claim go into the SAME batch as the account", () => {
     register,
     "register",
     [
-      "const seatInvitation = seatInvitationActedOnAtRegistration(",
+      "const seatInvitation = userInvitationActedOnAtRegistration(",
       "createAccountEntities(",
       "db\n      .insert(users)",
-      "statements.push(claimSeatInvitationStatement(seatInvitation.id, userId))",
+      "statements.push(claimUserInvitationStatement(seatInvitation.id, userId))",
       "await db.batch(statements)",
     ],
     "AS-012: the seat, its tenancy, the person link and the claim commit together or not at all"
@@ -653,7 +653,7 @@ test("the grant and the claim go into the SAME batch as the account", () => {
 
   // The claim is a compare-and-set on `pending`, so a revoke landing in the
   // same instant wins and the row is not re-answered.
-  const { sql, params } = claimSeatInvitationStatement(
+  const { sql, params } = claimUserInvitationStatement(
     INVITATION,
     USER,
     new Date("2026-08-20T12:00:00.000Z")
@@ -834,16 +834,16 @@ test("two rotations inside one bucket present two provider keys (#495 r1)", () =
 
 test("a refused resend puts the old digest back, so the live link survives", () => {
   const resend = SEAT.after(
-    "export async function resendSeatInvitationEmailAs"
+    "export async function resendUserInvitationEmailAs"
   );
 
   // The restore is a compare-and-set on the digest THIS call wrote, so it
   // cannot clobber a rotation that raced past it.
   assertInOrder(
     resend,
-    "resendSeatInvitationEmailAs",
+    "resendUserInvitationEmailAs",
     [
-      "const rotatedHash = hashSeatInvitationToken(token)",
+      "const rotatedHash = hashUserInvitationToken(token)",
       "if (!outcome.sent)",
       "set({ tokenHash: invitation.tokenHash })",
       "eq(userInvitations.tokenHash, rotatedHash)",
@@ -860,14 +860,14 @@ test("the register lookup does not swallow a database failure (#495 r1)", () => 
   // plant. `users_email_unique` then holds the address and AS-010 refuses to
   // re-invite it, so a transient blip becomes a permanent wrong outcome.
   const lookup = SEAT.span(
-    "export async function describeSeatInvitationForRegistration",
-    "export function seatInvitationActedOnAtRegistration"
+    "export async function describeUserInvitationForRegistration",
+    "export function userInvitationActedOnAtRegistration"
   );
 
   assert.doesNotMatch(lookup, /catch/);
   assert.match(
     lookup,
-    /eq\(\s*userInvitations\.tokenHash,\s*hashSeatInvitationToken\(candidate\)\s*\)/
+    /eq\(\s*userInvitations\.tokenHash,\s*hashUserInvitationToken\(candidate\)\s*\)/
   );
 });
 
@@ -876,14 +876,14 @@ test("the expiry sweep compares through the typed helper, not a template", () =>
   // `sql` template bypasses the column's driver mapping: the offset is
   // serialised and then discarded by the cast, so on any non-UTC host the sweep
   // is wrong by that offset.
-  const sweep = SEAT.after("export async function expireLapsedSeatInvitations");
+  const sweep = SEAT.after("export async function expireLapsedUserInvitations");
   assert.match(sweep, /lt\(userInvitations\.expiresAt, now\)/);
   assert.doesNotMatch(sweep, /sql`/);
 });
 
 test("a failed resend is a failed action, in the org path's own words", () => {
   const resend = SEAT.after(
-    "export async function resendSeatInvitationEmailAs"
+    "export async function resendUserInvitationEmailAs"
   );
   assert.match(
     resend,
@@ -903,8 +903,8 @@ test('"no such invitation" and "not yours" are ONE message', () => {
   // here it is not, but telling the two apart would still turn any seated
   // account into a reader of which invitation ids exist.
   const revoke = SEAT.span(
-    "export async function revokeSeatInvitationAs",
-    "export async function resendSeatInvitationEmailAs"
+    "export async function revokeUserInvitationAs",
+    "export async function resendUserInvitationEmailAs"
   );
   const refusals = [
     ...revoke.matchAll(/throw new InvitationError\(([^)]*)\)/g),
@@ -915,10 +915,10 @@ test('"no such invitation" and "not yours" are ONE message', () => {
   // revoke and the resend — so the three can never disagree about "ours".
   assert.match(SEAT.code, /function oursFilter\(actor: InvitationActor\)/);
   for (const reader of [
-    "export async function listSeatInvitationsFor",
+    "export async function listUserInvitationsFor",
     "async function loadOurs",
-    "export async function revokeSeatInvitationAs",
-    "export async function expireLapsedSeatInvitations",
+    "export async function revokeUserInvitationAs",
+    "export async function expireLapsedUserInvitations",
   ]) {
     assert.match(
       SEAT.after(reader).slice(0, 700),
@@ -937,7 +937,7 @@ test("the pending list on /settings/team is the org surface's component", () => 
   assert.match(TEAM_PAGE, /revoke: revokeSeatInvitationAction/);
   // …and it lists this plant's rows only, with no route param or query string
   // anywhere on the screen naming a plant.
-  assert.match(TEAM_PAGE, /listSeatInvitationsFor\(actor\)/);
+  assert.match(TEAM_PAGE, /listUserInvitationsFor\(actor\)/);
   assert.doesNotMatch(TEAM_PAGE, /searchParams/);
   assert.doesNotMatch(TEAM_PAGE, /params/);
 });

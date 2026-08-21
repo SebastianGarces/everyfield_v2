@@ -29,7 +29,7 @@
 //     a database read — or a log, or a backup — hands nobody a working link.
 //   * A RESEND MINTS A NEW TOKEN. That follows from hashing: the plaintext
 //     exists only in transit, so the send that fails cannot be repeated
-//     verbatim. `resendSeatInvitationEmailAs` rotates `token_hash` and the email
+//     verbatim. `resendUserInvitationEmailAs` rotates `token_hash` and the email
 //     says plainly that earlier links stop working.
 //
 // ----------------------------------------------------------------------------
@@ -49,7 +49,7 @@
 // ----------------------------------------------------------------------------
 //
 // "Everything downstream of target resolution speaks about a STRANGER." The
-// address lookup in `createSeatInvitationAs` is that resolution, so every check
+// address lookup in `createUserInvitationAs` is that resolution, so every check
 // that can compose a LEGIBLE refusal runs ABOVE it: the authority check, the
 // email parse, the duplicate-pending check and the cap all read the caller's own
 // tenancy's rows for an address the caller itself typed, and answer identically
@@ -103,7 +103,7 @@ import {
  * with a 30-day life needs. `base64url` so it survives a query string with no
  * escaping and no `%` in an inbox.
  */
-export function newSeatInvitationToken(): string {
+export function newUserInvitationToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
@@ -116,7 +116,7 @@ export function newSeatInvitationToken(): string {
  * no dictionary to run and a per-row salt would only stop the lookup being a
  * point read on a unique index.
  */
-export function hashSeatInvitationToken(token: string): string {
+export function hashUserInvitationToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
@@ -150,10 +150,10 @@ export function seatInviteeRefusal(
  * THEY sent, to an address THEY typed — so it is legible without being an
  * oracle, and it is only reachable from ABOVE the address lookup.
  */
-export const SEAT_INVITE_RATE_LIMITED_MESSAGE =
+export const USER_INVITE_RATE_LIMITED_MESSAGE =
   "You have already sent that address several invitations recently — wait for them to sign up, or reach them another way";
 
-export const SEAT_INVITE_DUPLICATE_MESSAGE =
+export const USER_INVITE_DUPLICATE_MESSAGE =
   "There is already a pending invitation to that address — revoke it first";
 
 /**
@@ -166,7 +166,7 @@ export const SEAT_INVITE_DUPLICATE_MESSAGE =
  * counting only the pending ones would count only the invitations that are not
  * the problem.
  */
-export function seatInvitesFromChurchToAddressQuery(
+export function invitesFromChurchToAddressQuery(
   churchId: string,
   inviteeEmail: string,
   since: Date
@@ -196,7 +196,7 @@ export interface SeatInvitationRequest {
 }
 
 /** What a create produces. The token is returned for the EMAIL and nothing else. */
-export interface CreatedSeatInvitation {
+export interface CreatedUserInvitation {
   invitation: UserInvitation;
   /** Did the provider accept the invitation email? See `./seat-email`. */
   emailSent: boolean;
@@ -224,12 +224,12 @@ function invitingChurchId(actor: InvitationActor): string {
  * then the address lookup. Nothing below the lookup composes a message of its
  * own.
  */
-export async function createSeatInvitationAs(
+export async function createUserInvitationAs(
   actor: InvitationActor,
   request: SeatInvitationRequest,
   deps: SeatInvitationEmailDeps = {},
   now: Date = new Date()
-): Promise<CreatedSeatInvitation> {
+): Promise<CreatedUserInvitation> {
   // AUTHORITY FIRST, and specifically before the address is looked up: the
   // lookup's refusal is a fact about a stranger, and handing it to somebody who
   // may not invite at all would be an account-enumeration oracle for free.
@@ -262,19 +262,19 @@ export async function createSeatInvitationAs(
     .limit(1);
 
   if (duplicate) {
-    throw new InvitationError(SEAT_INVITE_DUPLICATE_MESSAGE);
+    throw new InvitationError(USER_INVITE_DUPLICATE_MESSAGE);
   }
 
   // THE CAP, counting EVERY status (AS-010). Also above the lookup, and for the
   // same reason: a cap that applied only to invitable addresses would itself be
   // a probe.
-  const recent = await seatInvitesFromChurchToAddressQuery(
+  const recent = await invitesFromChurchToAddressQuery(
     churchId,
     inviteeEmail,
     rateLimitWindowStart(now)
   );
   if (recent.length >= INVITES_PER_INVITEE_PER_WINDOW) {
-    throw new InvitationError(SEAT_INVITE_RATE_LIMITED_MESSAGE);
+    throw new InvitationError(USER_INVITE_RATE_LIMITED_MESSAGE);
   }
 
   // THE RESOLUTION. Everything from here down speaks about a stranger, so there
@@ -294,13 +294,13 @@ export async function createSeatInvitationAs(
     throw new InvitationError(refusal);
   }
 
-  const token = newSeatInvitationToken();
+  const token = newUserInvitationToken();
   const row: NewUserInvitation = {
     kind: "seat",
     inviteeEmail,
     churchId,
     seat: request.seat,
-    tokenHash: hashSeatInvitationToken(token),
+    tokenHash: hashUserInvitationToken(token),
     inviterUserId: actor.id,
     status: "pending",
     // Applied HERE, from the shared constant, so there is exactly one place the
@@ -404,7 +404,7 @@ function oursFilter(actor: InvitationActor) {
 }
 
 /** Every seat invitation this plant has issued, newest first. */
-export async function listSeatInvitationsFor(
+export async function listUserInvitationsFor(
   actor: InvitationActor
 ): Promise<UserInvitation[]> {
   assertSeatFor(actor, "seat.invitation.manage");
@@ -433,7 +433,7 @@ async function loadOurs(
  * registering with at the same instant either wins outright or loses outright —
  * never both.
  */
-export async function revokeSeatInvitationAs(
+export async function revokeUserInvitationAs(
   actor: InvitationActor,
   invitationId: string
 ): Promise<void> {
@@ -487,7 +487,7 @@ export async function revokeSeatInvitationAs(
  * clobber a rotation that raced past it, and it makes "a failed resend is a
  * failed action" true rather than merely stated.
  */
-export async function resendSeatInvitationEmailAs(
+export async function resendUserInvitationEmailAs(
   actor: InvitationActor,
   invitationId: string,
   deps: SeatInvitationEmailDeps = {},
@@ -522,8 +522,8 @@ export async function resendSeatInvitationEmailAs(
 
   // THE ROTATION, as a compare-and-set on `pending`: a revoke that lands first
   // wins, and this path then finds no row to email.
-  const token = newSeatInvitationToken();
-  const rotatedHash = hashSeatInvitationToken(token);
+  const token = newUserInvitationToken();
+  const rotatedHash = hashUserInvitationToken(token);
   const rotated = await db
     .update(userInvitations)
     .set({ tokenHash: rotatedHash })
@@ -579,7 +579,7 @@ export async function resendSeatInvitationEmailAs(
  * the reader's own address or the plant's public name — nothing about any other
  * account, and NOT the token, which the browser already holds in its URL.
  */
-export type SeatRegistrationInvitation = {
+export type UserRegistrationInvitation = {
   id: string;
   inviteeEmail: string;
   churchId: string;
@@ -607,10 +607,10 @@ export type SeatRegistrationInvitation = {
  *
  * Runs with NO session, by construction: there is no account yet.
  */
-export async function describeSeatInvitationForRegistration(
+export async function describeUserInvitationForRegistration(
   token: string | null | undefined,
   now: Date = new Date()
-): Promise<SeatRegistrationInvitation | null> {
+): Promise<UserRegistrationInvitation | null> {
   const candidate = (token ?? "").trim();
   if (candidate.length === 0) return null;
 
@@ -626,7 +626,7 @@ export async function describeSeatInvitationForRegistration(
     .innerJoin(churches, eq(churches.id, userInvitations.churchId))
     .where(
       and(
-        eq(userInvitations.tokenHash, hashSeatInvitationToken(candidate)),
+        eq(userInvitations.tokenHash, hashUserInvitationToken(candidate)),
         eq(userInvitations.kind, "seat"),
         eq(userInvitations.status, "pending"),
         gt(userInvitations.expiresAt, now)
@@ -656,10 +656,10 @@ export async function describeSeatInvitationForRegistration(
  * because `/register` is an anonymous POST and a per-row message there tells a
  * stranger which address a live token names.
  */
-export function seatInvitationActedOnAtRegistration(
-  described: SeatRegistrationInvitation | null,
+export function userInvitationActedOnAtRegistration(
+  described: UserRegistrationInvitation | null,
   registeringEmail: string
-): SeatRegistrationInvitation | null {
+): UserRegistrationInvitation | null {
   if (!described) return null;
   const invited = described.inviteeEmail.trim().toLowerCase();
   const registering = (registeringEmail ?? "").trim().toLowerCase();
@@ -676,7 +676,7 @@ export function seatInvitationActedOnAtRegistration(
  * wins and this row is not re-answered.
  *
  * ACCEPTED RESIDUAL, recorded rather than guarded: a revoke committing between
- * `describeSeatInvitationForRegistration` and this batch leaves an account
+ * `describeUserInvitationForRegistration` and this batch leaves an account
  * created with the seat while the invitation reads `revoked`. What makes the
  * link SINGLE USE is not this compare-and-set but `users_email_unique` — the
  * token is bound to one address, so at most one account can ever be created for
@@ -684,7 +684,7 @@ export function seatInvitationActedOnAtRegistration(
  * revoke race as well would need the users insert itself to be conditional on
  * the invitation, which is an `INSERT … SELECT` guarding a millisecond.
  */
-export function claimSeatInvitationStatement(
+export function claimUserInvitationStatement(
   invitationId: string,
   userId: string,
   now: Date = new Date()
@@ -709,7 +709,7 @@ export function claimSeatInvitationStatement(
  * Idempotent by construction: it only ever moves `pending` rows whose window has
  * closed, so running it twice changes nothing the first run did not.
  */
-export async function expireLapsedSeatInvitations(
+export async function expireLapsedUserInvitations(
   actor: InvitationActor,
   now: Date = new Date()
 ): Promise<void> {

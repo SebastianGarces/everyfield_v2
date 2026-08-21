@@ -21,9 +21,9 @@ import {
   invitationActorFromSession,
 } from "@/lib/invitations/core";
 import {
-  claimSeatInvitationStatement,
-  describeSeatInvitationForRegistration,
-  seatInvitationActedOnAtRegistration,
+  claimUserInvitationStatement,
+  describeUserInvitationForRegistration,
+  userInvitationActedOnAtRegistration,
 } from "@/lib/invitations/seat";
 import { findLinkablePersonId } from "@/lib/people/account-person-link";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
@@ -120,8 +120,8 @@ export async function register(
   // The address binding is applied to BOTH, by the same rule and for the same
   // reason: an invitation link travels by email, so acting on one submitted with
   // a different address would hand the holder somebody else's plant.
-  const seatInvitation = seatInvitationActedOnAtRegistration(
-    await describeSeatInvitationForRegistration(invitationId),
+  const seatInvitation = userInvitationActedOnAtRegistration(
+    await describeUserInvitationForRegistration(invitationId),
     identifier
   );
 
@@ -305,7 +305,7 @@ export async function register(
   // insert, so an account can never exist holding a seat from an invitation
   // this batch did not close — and a failure anywhere rolls both back.
   if (seatInvitation) {
-    statements.push(claimSeatInvitationStatement(seatInvitation.id, userId));
+    statements.push(claimUserInvitationStatement(seatInvitation.id, userId));
   }
 
   // The org entity goes FIRST — the users FKs point at it. (`unshift` rather

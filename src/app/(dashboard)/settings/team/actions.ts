@@ -49,9 +49,9 @@ import {
   invitationActorFromSession,
 } from "@/lib/invitations/core";
 import {
-  createSeatInvitationAs,
-  resendSeatInvitationEmailAs,
-  revokeSeatInvitationAs,
+  createUserInvitationAs,
+  resendUserInvitationEmailAs,
+  revokeUserInvitationAs,
 } from "@/lib/invitations/seat";
 import {
   appointAdmin,
@@ -129,7 +129,7 @@ export async function createSeatInvitationAction(
   }
 
   try {
-    const result = await createSeatInvitationAs(
+    const result = await createUserInvitationAs(
       invitationActorFromSession(session),
       parsed.data
     );
@@ -166,7 +166,7 @@ export async function resendSeatInvitationEmailAction(
   }
 
   try {
-    const result = await resendSeatInvitationEmailAs(
+    const result = await resendUserInvitationEmailAs(
       invitationActorFromSession(session),
       parsed.data.invitationId
     );
@@ -202,7 +202,7 @@ export async function revokeSeatInvitationAction(
   }
 
   try {
-    await revokeSeatInvitationAs(
+    await revokeUserInvitationAs(
       invitationActorFromSession(session),
       parsed.data.invitationId
     );

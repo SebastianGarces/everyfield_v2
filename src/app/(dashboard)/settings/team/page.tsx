@@ -13,8 +13,8 @@ import { INVITATION_EXPIRY_DAYS } from "@/lib/invitations/core";
 import { toSeatInvitationListRow } from "@/lib/invitations/list-row";
 import { invitationActorFromSession } from "@/lib/invitations/core";
 import {
-  expireLapsedSeatInvitations,
-  listSeatInvitationsFor,
+  expireLapsedUserInvitations,
+  listUserInvitationsFor,
 } from "@/lib/invitations/seat";
 import {
   listPlantCoaches,
@@ -61,7 +61,7 @@ import {
 // which holds for a POST that never saw this page.
 //
 // SCOPING IS THE LEAK GUARD, exactly as on `/oversight/invitations`:
-// `listSeatInvitationsFor` puts the actor's OWN `church_id` in the WHERE, so
+// `listUserInvitationsFor` puts the actor's OWN `church_id` in the WHERE, so
 // there is no route param, query string or form field anywhere on this screen
 // that names a plant.
 //
@@ -90,9 +90,9 @@ export default async function TeamSettingsPage() {
   // has closed, so a second look changes nothing the first did. Without it a
   // lapsed invitation keeps its Resend and Revoke controls — offering an action
   // whose own guard is guaranteed to refuse it.
-  await expireLapsedSeatInvitations(actor);
+  await expireLapsedUserInvitations(actor);
 
-  const rows = (await listSeatInvitationsFor(actor)).map(
+  const rows = (await listUserInvitationsFor(actor)).map(
     toSeatInvitationListRow
   );
 

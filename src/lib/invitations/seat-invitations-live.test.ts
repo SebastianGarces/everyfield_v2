@@ -17,14 +17,14 @@ import {
 } from "./core";
 import { invitationRegisterPath } from "./register-path";
 import {
-  claimSeatInvitationStatement,
-  createSeatInvitationAs,
-  describeSeatInvitationForRegistration,
-  hashSeatInvitationToken,
-  resendSeatInvitationEmailAs,
-  revokeSeatInvitationAs,
-  SEAT_INVITE_RATE_LIMITED_MESSAGE,
-  seatInvitationActedOnAtRegistration,
+  claimUserInvitationStatement,
+  createUserInvitationAs,
+  describeUserInvitationForRegistration,
+  hashUserInvitationToken,
+  resendUserInvitationEmailAs,
+  revokeUserInvitationAs,
+  USER_INVITE_RATE_LIMITED_MESSAGE,
+  userInvitationActedOnAtRegistration,
 } from "./seat";
 import type { SeatInvitationEmailDeps } from "./seat-email";
 
@@ -197,7 +197,7 @@ test(
       inviteeEmail: scratchEmail(),
       churchId,
       seat: "admin" as const,
-      tokenHash: hashSeatInvitationToken(randomUUID()),
+      tokenHash: hashUserInvitationToken(randomUUID()),
       inviterUserId: ownerId,
       expiresAt: new Date(Date.now() + 86_400_000),
       ...overrides,
@@ -270,7 +270,7 @@ test(
     const mail = captureTransport();
     const invitee = scratchEmail();
 
-    const { invitation, emailSent } = await createSeatInvitationAs(
+    const { invitation, emailSent } = await createUserInvitationAs(
       actor,
       { inviteeEmail: invitee, seat: "admin" },
       mail.deps
@@ -286,7 +286,7 @@ test(
       .where(eq(userInvitations.id, invitation.id));
 
     assert.notEqual(stored.tokenHash, token);
-    assert.equal(stored.tokenHash, hashSeatInvitationToken(token));
+    assert.equal(stored.tokenHash, hashUserInvitationToken(token));
     assert.match(stored.tokenHash, /^[0-9a-f]{64}$/);
 
     // …and the link the email built is the shared `?invitation=` contract, so a
@@ -338,7 +338,7 @@ test(
       });
 
       await assert.rejects(
-        createSeatInvitationAs(
+        createUserInvitationAs(
           actor,
           { inviteeEmail: address, seat: "member" },
           mail.deps
@@ -372,7 +372,7 @@ test(
 
     const created = [];
     for (let i = 0; i < INVITES_PER_INVITEE_PER_WINDOW; i += 1) {
-      const { invitation } = await createSeatInvitationAs(
+      const { invitation } = await createUserInvitationAs(
         actor,
         { inviteeEmail: invitee, seat: "member" },
         mail.deps
@@ -380,20 +380,20 @@ test(
       created.push(invitation.id);
       // Each create refuses a second PENDING row, so close this one before the
       // next — which is exactly the revoke–reinvite loop the cap exists to stop.
-      await revokeSeatInvitationAs(actor, invitation.id);
+      await revokeUserInvitationAs(actor, invitation.id);
     }
 
     assert.equal(created.length, 3);
 
     await assert.rejects(
-      createSeatInvitationAs(
+      createUserInvitationAs(
         actor,
         { inviteeEmail: invitee, seat: "member" },
         mail.deps
       ),
       (error: unknown) => {
         assert.ok(error instanceof InvitationError);
-        assert.equal(error.message, SEAT_INVITE_RATE_LIMITED_MESSAGE);
+        assert.equal(error.message, USER_INVITE_RATE_LIMITED_MESSAGE);
         return true;
       }
     );
@@ -413,7 +413,7 @@ test(
 
     // …and another plant is not capped by this one's behaviour.
     const other = await scratchPlant();
-    const { invitation } = await createSeatInvitationAs(
+    const { invitation } = await createUserInvitationAs(
       other.actor,
       { inviteeEmail: invitee, seat: "member" },
       mail.deps
@@ -433,17 +433,17 @@ test(
     const { actor } = await scratchPlant();
     const mail = captureTransport();
 
-    const { invitation } = await createSeatInvitationAs(
+    const { invitation } = await createUserInvitationAs(
       actor,
       { inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
     );
     const first = mail.tokenFrom();
-    assert.ok(await describeSeatInvitationForRegistration(first));
+    assert.ok(await describeUserInvitationForRegistration(first));
 
     // A RESEND ROTATES, which is what hashing costs: the plaintext existed only
     // in transit, so the row cannot reproduce the link it already sent.
-    const resent = await resendSeatInvitationEmailAs(
+    const resent = await resendUserInvitationEmailAs(
       actor,
       invitation.id,
       mail.deps
@@ -456,20 +456,20 @@ test(
 
     const second = mail.tokenFrom();
     assert.notEqual(second, first);
-    assert.equal(await describeSeatInvitationForRegistration(first), null);
-    assert.ok(await describeSeatInvitationForRegistration(second));
+    assert.equal(await describeUserInvitationForRegistration(first), null);
+    assert.ok(await describeUserInvitationForRegistration(second));
 
     // A REVOKE CLOSES IT IMMEDIATELY, and the link stops working.
-    await revokeSeatInvitationAs(actor, invitation.id);
-    assert.equal(await describeSeatInvitationForRegistration(second), null);
+    await revokeUserInvitationAs(actor, invitation.id);
+    assert.equal(await describeUserInvitationForRegistration(second), null);
 
     // …and a closed row can be neither revoked nor emailed again.
     await assert.rejects(
-      revokeSeatInvitationAs(actor, invitation.id),
+      revokeUserInvitationAs(actor, invitation.id),
       InvitationError
     );
     await assert.rejects(
-      resendSeatInvitationEmailAs(actor, invitation.id, mail.deps),
+      resendUserInvitationEmailAs(actor, invitation.id, mail.deps),
       InvitationError
     );
     assert.equal(mail.sent.length, 2);
@@ -478,7 +478,7 @@ test(
     // such invitation" and "not yours".
     const stranger = await scratchPlant();
     await assert.rejects(
-      revokeSeatInvitationAs(stranger.actor, invitation.id),
+      revokeUserInvitationAs(stranger.actor, invitation.id),
       InvitationError
     );
   }
@@ -491,7 +491,7 @@ test(
     const { actor } = await scratchPlant();
     const mail = captureTransport();
 
-    const { invitation } = await createSeatInvitationAs(
+    const { invitation } = await createUserInvitationAs(
       actor,
       { inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
@@ -508,11 +508,11 @@ test(
     };
 
     await assert.rejects(
-      resendSeatInvitationEmailAs(actor, invitation.id, refusing),
+      resendUserInvitationEmailAs(actor, invitation.id, refusing),
       InvitationError
     );
 
-    const described = await describeSeatInvitationForRegistration(live);
+    const described = await describeUserInvitationForRegistration(live);
     assert.ok(described, "a refused resend destroyed the working link");
     assert.equal(described.id, invitation.id);
 
@@ -520,12 +520,12 @@ test(
       .select({ tokenHash: userInvitations.tokenHash })
       .from(userInvitations)
       .where(eq(userInvitations.id, invitation.id));
-    assert.equal(row.tokenHash, hashSeatInvitationToken(live));
+    assert.equal(row.tokenHash, hashUserInvitationToken(live));
 
     // …and a successful resend afterwards still rotates.
-    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps);
-    assert.equal(await describeSeatInvitationForRegistration(live), null);
-    assert.ok(await describeSeatInvitationForRegistration(mail.tokenFrom()));
+    await resendUserInvitationEmailAs(actor, invitation.id, mail.deps);
+    assert.equal(await describeUserInvitationForRegistration(live), null);
+    assert.ok(await describeUserInvitationForRegistration(mail.tokenFrom()));
   }
 );
 
@@ -536,7 +536,7 @@ test(
     const { actor } = await scratchPlant();
     const mail = captureTransport();
 
-    const { invitation } = await createSeatInvitationAs(
+    const { invitation } = await createUserInvitationAs(
       actor,
       { inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
@@ -546,8 +546,8 @@ test(
     // collapsed. Each one mints a NEW credential, so each one must be
     // deliverable and each must present its own provider key.
     const at = new Date("2026-08-20T12:00:10.000Z");
-    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps, at);
-    await resendSeatInvitationEmailAs(actor, invitation.id, mail.deps, at);
+    await resendUserInvitationEmailAs(actor, invitation.id, mail.deps, at);
+    await resendUserInvitationEmailAs(actor, invitation.id, mail.deps, at);
 
     assert.equal(mail.sent.length, 3);
     assert.equal(new Set(mail.sent.map((m) => m.idempotencyKey)).size, 3);
@@ -558,9 +558,9 @@ test(
       .select({ tokenHash: userInvitations.tokenHash })
       .from(userInvitations)
       .where(eq(userInvitations.id, invitation.id));
-    assert.equal(row.tokenHash, hashSeatInvitationToken(mail.tokenFrom()));
+    assert.equal(row.tokenHash, hashUserInvitationToken(mail.tokenFrom()));
     assert.equal(
-      await describeSeatInvitationForRegistration(mail.tokenFrom(1)),
+      await describeUserInvitationForRegistration(mail.tokenFrom(1)),
       null
     );
   }
@@ -575,8 +575,8 @@ test(
  * see "THE RESIDUAL, NAMED" in the header.
  */
 async function registerThrough(token: string, email: string, name: string) {
-  const described = seatInvitationActedOnAtRegistration(
-    await describeSeatInvitationForRegistration(token),
+  const described = userInvitationActedOnAtRegistration(
+    await describeUserInvitationForRegistration(token),
     email
   );
   assert.ok(described, "the token did not resolve for the invited address");
@@ -610,7 +610,7 @@ async function registerThrough(token: string, email: string, name: string) {
       })
       .returning({ id: users.id }),
     ...account.linkStatements,
-    claimSeatInvitationStatement(described.id, userId),
+    claimUserInvitationStatement(described.id, userId),
   ]);
 
   return { userId, invitationId: described.id };
@@ -624,7 +624,7 @@ test(
     const mail = captureTransport();
     const invitee = scratchEmail();
 
-    await createSeatInvitationAs(
+    await createUserInvitationAs(
       actor,
       { inviteeEmail: invitee, seat: "admin" },
       mail.deps
@@ -664,7 +664,7 @@ test(
     assert.equal(row.status, "accepted");
     assert.equal(row.respondedBy, userId);
     assert.equal(
-      await describeSeatInvitationForRegistration(mail.tokenFrom()),
+      await describeUserInvitationForRegistration(mail.tokenFrom()),
       null
     );
   }
@@ -678,7 +678,7 @@ test(
     const mail = captureTransport();
     const invitee = scratchEmail();
 
-    await createSeatInvitationAs(
+    await createUserInvitationAs(
       actor,
       { inviteeEmail: invitee, seat: "member" },
       mail.deps
@@ -726,7 +726,7 @@ test(
       })
       .returning({ id: persons.id });
 
-    await createSeatInvitationAs(
+    await createUserInvitationAs(
       actor,
       { inviteeEmail: invitee, seat: "member" },
       mail.deps

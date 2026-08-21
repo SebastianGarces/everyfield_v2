@@ -522,7 +522,7 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     "src/app/(dashboard)/settings/team/actions.ts",
-    "#495/AS-010 — the PLANT'S seat invitations, over `user_invitations` rather than `organization_invitations`. It reaches `./core` only transitively, through `./seat`, and only for the shared vocabulary AS-010 forbids a second copy of: `INVITATION_EXPIRY_DAYS`, `INVITES_PER_INVITEE_PER_WINDOW`, `ACCOUNT_NOT_INVITABLE_MESSAGE`, `InvitationError` and `invitationActorFromSession`. It imports NO core primitive of its own — every write it makes is `createSeatInvitationAs` / `revokeSeatInvitationAs` / `resendSeatInvitationEmailAs`, each of which takes a branded actor and asserts `seat.invitation.manage` inside the logic layer as well as at the action's `requireSeat`",
+    "#495/AS-010 — the PLANT'S seat invitations, over `user_invitations` rather than `organization_invitations`. It reaches `./core` only transitively, through `./seat`, and only for the shared vocabulary AS-010 forbids a second copy of: `INVITATION_EXPIRY_DAYS`, `INVITES_PER_INVITEE_PER_WINDOW`, `ACCOUNT_NOT_INVITABLE_MESSAGE`, `InvitationError` and `invitationActorFromSession`. It imports NO core primitive of its own — every write it makes is `createUserInvitationAs` / `revokeUserInvitationAs` / `resendUserInvitationEmailAs`, each of which takes a branded actor and asserts `seat.invitation.manage` inside the logic layer as well as at the action's `requireSeat`",
   ],
   [
     "src/app/(auth)/register/actions.ts",
