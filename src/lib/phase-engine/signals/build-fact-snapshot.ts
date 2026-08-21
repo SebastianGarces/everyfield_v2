@@ -75,6 +75,15 @@ export const SNAPSHOT_VERSION = "v1";
 const GROWTH_WINDOW_DAYS = 28;
 
 /**
+ * The two levels of a flat core group (#471, C02/C22). Bryan: "I'd probably say
+ * 'momentum has slowed' sooner, but I wouldn't confidently label growth
+ * 'stalled' until roughly four weeks, especially because one vision-meeting
+ * cycle can radically change things." v0 flagged stalled at 3 weeks.
+ */
+const GROWTH_SLOWED_THRESHOLD_DAYS = 21;
+const GROWTH_STALLED_THRESHOLD_DAYS = 28;
+
+/**
  * A follow-up contact is "stale" once untouched beyond this many days.
  * Exported since #470: `/tasks`' assignments view labels the same contacts, and
  * a second copy of the number would let the page and the snapshot disagree
@@ -215,6 +224,17 @@ function buildCoreGroupSignals(
     else if (firstDate > priorStart && firstDate <= windowStart) inPrior += 1;
   }
 
+  // The flat streak, measured from the LATEST first-commitment (#471). Reading
+  // it off `firstCoreByPerson` is what makes the +1 reset structural: a second
+  // commitment for somebody already in that map never becomes the maximum,
+  // because the map only ever holds their earliest.
+  let lastNewCommitment: Date | null = null;
+  for (const firstDate of firstCoreByPerson.values()) {
+    if (lastNewCommitment === null || firstDate > lastNewCommitment) {
+      lastNewCommitment = firstDate;
+    }
+  }
+
   const isEmpty = commitmentRows.length === 0;
 
   return {
@@ -222,6 +242,12 @@ function buildCoreGroupSignals(
     launchTeamCount,
     growthDelta: isEmpty ? null : inWindow - inPrior,
     growthWindowDays: GROWTH_WINDOW_DAYS,
+    daysSinceLastNewCommitment:
+      lastNewCommitment === null
+        ? null
+        : Math.max(0, diffInDays(lastNewCommitment, asOf)),
+    slowedThresholdDays: GROWTH_SLOWED_THRESHOLD_DAYS,
+    stalledThresholdDays: GROWTH_STALLED_THRESHOLD_DAYS,
     isEmpty,
   };
 }

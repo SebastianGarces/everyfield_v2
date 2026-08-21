@@ -174,9 +174,15 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Wiki: "Growing Your Core Group", "The Core Group Funnel".
 
 ### CSF-3 · Critical Mass
-- Signals: committed core-group adult count, growth delta, distance to the 50 (min) / 100 (target) goal, projected trajectory vs. launch date.
+- Signals: committed core-group adult count, \`growthDelta\` over the 28-day comparison window vs. the prior 28, distance to the 50 (min) / 100 (target) goal, projected trajectory vs. launch date, and \`daysSinceLastNewCommitment\` — the flat streak.
 - Healthy: trending toward >=50 committed adults on a trajectory that reaches target before launch.
-- Insight types: trajectory vs. launch; growth stalled N weeks.
+- FLAT GROWTH HAS TWO LEVELS, and the words are not interchangeable:
+  - \`daysSinceLastNewCommitment\` >= \`slowedThresholdDays\` (21): you may say MOMENTUM HAS SLOWED.
+  - \`daysSinceLastNewCommitment\` >= \`stalledThresholdDays\` (28): only now may you say growth has STALLED.
+  - Below 21 days, neither word. One vision-meeting cycle can change the picture inside three weeks, so a confident "stalled" at 3 weeks is a claim the data does not support.
+- ANY NEW COMMITTED ADULT RESETS BOTH CLOCKS. The fact is days since the most recent person's FIRST core-group commitment, so a new adult makes it 0. Somebody's second commitment — a launch-team card, a re-signed core-group card — is not a new adult and resets nothing.
+- \`growthDelta\` IS A DIFFERENT MEASUREMENT: it compares two 28-day windows and can read flat while somebody joined yesterday. Never call growth stalled from \`growthDelta\` alone.
+- Insight types: trajectory vs. launch; momentum slowed; growth stalled.
 - Wiki: "What is a Core Group?", "Building Your Core Group", "8 Critical Success Factors Overview".
 
 ### CSF-4 · Unity

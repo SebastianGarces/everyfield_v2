@@ -32,6 +32,17 @@ test("v0 is frozen — its Lens 2 keeps the bottleneck line v1 deletes", () => {
   assert.match(RUBRICS.v0.body, /you're carrying all the follow-up yourself/);
 });
 
+test("v1 will not call three weeks flat 'stalled' (#471)", () => {
+  // v0 said "growth stalled N weeks" with nothing under it; v1 names the two
+  // levels and the facts they read, so the word has a floor the judge cannot
+  // slide under.
+  assert.match(RUBRICS.v0.body, /growth stalled N weeks/);
+  assert.doesNotMatch(RUBRICS.v1.body, /growth stalled N weeks/);
+  assert.match(RUBRICS.v1.body, /slowedThresholdDays` \(21\)/);
+  assert.match(RUBRICS.v1.body, /stalledThresholdDays` \(28\)/);
+  assert.match(RUBRICS.v1.body, /ANY NEW COMMITTED ADULT RESETS BOTH CLOCKS/);
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
