@@ -80,13 +80,15 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-001 | Meeting scheduling | Create meetings with date, time, location, and type |
 | VM-002 | Meeting list view | View all upcoming and past meetings with type filter tabs |
 | VM-003 | Attendance capture | Record who attended each meeting |
+| MEET-011 | Attendance finalization | Finalizing a meeting counts who attended, advances person statuses, generates the follow-up and evaluation tasks, and records the count — and it converges. Finalizing the same meeting again picks up whoever was added since and writes nothing twice; a meeting is never marked finalized without the tasks it owes; and two finalizes racing each other leave one live evaluation task, not two |
 | VM-004 | New vs returning tracking | Distinguish first-time, returning, and core-group attendees. The distinction is derived from person status and prior attendance, not entered by the user |
 | VM-005 | Attendee-to-person linking | Create Person records for new attendees (People/CRM integration) |
 | VM-006 | Guest list management | Add people from CRM to a meeting's guest list; auto-populate from team roster for team meetings |
 | VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none — returning attendees are already in the pipeline, and the committed core group needs no 48-hour touch. Due date anchors to meeting date + 48 hours. (Task Management integration) |
 | VM-008 | Meeting detail view | Full view of meeting details, attendance, and outcomes |
 | VM-009 | Location management | Save and reuse venue information across meeting types |
-| VM-010 | Basic analytics | Track attendance counts and trends, filterable by meeting type |
+| VM-010 | Basic analytics | Track attendance counts and trends, filterable by meeting type. The filter itself is VM-010k, which is the spelling the code cites |
+| VM-010k | Meeting-type filter | One set of offered filters — all types, then the three types — serves both the meetings list and the analytics view. The active filter lives in the URL, so a reloaded or shared link shows the figures it showed the person who sent it. The list opens on all types; the analytics view opens on vision meetings, and a `?type=` value it cannot read narrows to that default rather than widening the figures |
 | VM-026 | Meeting types | Support vision_meeting, orientation, and team_meeting types with type-specific behavior |
 | VM-028 | RSVP tracking | Track invited / confirmed / declined / no_response status per guest list member. Each invitation carries a personal confirmation link; the recipient answers yes or no from that link without an account or a sign-in, and the answer sets that member's status |
 
@@ -99,7 +101,8 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-013 | Agenda builder | Create and customize meeting agendas |
 | VM-014 | Response card capture | Record response card data (interested, ready to commit, etc.) — vision meetings only |
 | VM-015 | Meeting evaluation | Self-assess 8 meeting quality factors after each vision meeting |
-| VM-016 | Success score tracking | Calculate and trend success scores over time — vision meetings only |
+| VM-016 | Success score tracking | Calculate and trend success scores over time — vision meetings only. The per-meeting comparison is VM-016c, which is the spelling the code cites |
+| VM-016c | Evaluation comparison | An evaluated vision meeting shows how its total score sits against the meetings evaluated before it: the average of those scores and the score of the one immediately before. The comparison covers a bounded recent window rather than all history — the question it answers is how this meeting went against how things have been going. A meeting with nothing before it in that window says so instead of comparing |
 | VM-018 | Meeting reminders | Automated reminders to guest list before meetings, delivered via the Communication Hub |
 | VM-019 | Calendar integration | Create calendar events for meetings |
 | VM-020 | Follow-up completion tracking | Show follow-up completion percentage per vision meeting |
@@ -115,6 +118,10 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-023 | Virtual meeting support | Support for hybrid or fully virtual meetings |
 | VM-024 | SMS confirmations | Text confirmation requests to guest list members |
 | VM-025 | Attendance predictions | AI-based attendance forecasting |
+
+### Cut from scope
+
+**VM-017 — per-invite tracking.** Attributing each guest-list invitation to the member who sent it, and ranking members by how many they sent, is outside Meetings. Meetings tracks RSVP status per guest-list member (VM-028) and stops there: a leaderboard turns inviting a friend to a vision meeting into a score, which works against the thing the invitation is for. The id is retired and is not reassigned.
 
 ---
 

@@ -9,6 +9,58 @@
 -- order). Nothing is dropped and no existing column changes type, so it rolls
 -- back by dropping what it added.
 --
+-- OPERATOR RECONCILE — REQUIRED BEFORE `pnpm db:migrate` ON ANY DATABASE THAT
+-- RAN THIS BRANCH BEFORE 2026-08-21 (memory/invariants.md → Migrations; added
+-- retrospectively, see the note at the end of this block).
+--
+-- This migration was minted as `0056_church_digest_send_time.sql` and renumbered
+-- to 0058 during a rebase. `drizzle-kit migrate` decides by `when` against the
+-- ledger's MAXIMUM `created_at` and never asks whether THIS migration's own row
+-- is present, so a database that applied the OLD number is invisible to it: the
+-- four statements below re-run and the first one raises Postgres 42701,
+-- `column "digest_send_weekday" of relation "churches" already exists`.
+--
+-- RUN THE DETECTION QUERY RATHER THAN WAITING FOR THAT ERROR — you will not be
+-- shown it. Verified on a scratch database 2026-08-21: `drizzle-kit migrate`
+-- swallows the driver error and exits 1 with an unfinished
+-- `[⣷] applying migrations...` spinner and NOTHING on stdout or stderr. An
+-- operator who has not read this block gets a silent non-zero exit and no
+-- indication of which statement failed or why.
+--
+--   DETECTION — does this database hold the OLD row?
+--
+--     SELECT id, created_at FROM drizzle.__drizzle_migrations
+--      WHERE hash = '5e50c38558648cc885eccb14a186240c4c5e4848a5a6e92073145e1edc012b52';
+--
+--   EXIT A — NO ROW (every fresh clone, every restore predating 2026-08-21, and
+--   production). Nothing to reconcile. Run `pnpm db:migrate` normally; the
+--   statements below apply cleanly.
+--
+--   EXIT B — ROW PRESENT. The DDL is already in place and must NOT re-run. Do
+--   not delete the row and do not re-run the statements. This is an ATTENDED
+--   ledger write (`memory/contracts/db.md` → Migration ledger vs journal): a
+--   human re-points that row at this file, in one psql session,
+--
+--     UPDATE drizzle.__drizzle_migrations
+--        SET hash = '<sha256 of THIS file, byte for byte, from the deployed commit>',
+--            created_at = 1787465840967
+--      WHERE hash = '5e50c38558648cc885eccb14a186240c4c5e4848a5a6e92073145e1edc012b52';
+--
+--     *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+--   and verifies with `pnpm db:migrate`, which must then apply nothing.
+--   `shasum -a 256 src/db/migrations/0058_church_digest_send_time.sql` gives the
+--   hash; take it from the commit you are deploying, because amending any
+--   comment in this file changes it.
+--
+-- WHY THIS BLOCK IS RETROSPECTIVE, stated rather than tidied away. Exactly one
+-- database ever held the old row — the shared Neon branch — and its row was
+-- re-pointed on 2026-08-21 by the #448 track itself, unattended, which is the
+-- HR2 breach recorded in `memory/contracts/db.md`. The ruled path was always
+-- this block plus a human; it shipped without one, and this is the repair. The
+-- old file existed only on an unmerged branch for about an hour, so no other
+-- database can be holding that hash — EXIT A is the live case everywhere else.
+--
 -- THE BACKFILL IS THE DEFAULT. `ADD COLUMN ... DEFAULT ... NOT NULL` fills every
 -- existing row with the ruled default in the same statement, so there is no
 -- separate UPDATE to get wrong and no window in which a church holds NULL. Every

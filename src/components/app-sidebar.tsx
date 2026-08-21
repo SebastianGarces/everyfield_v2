@@ -59,8 +59,15 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
    * who also coaches a plant has both, and each is drawn in its own section.
    * Empty for almost everybody, which is why the section is omitted rather than
    * emptied.
+   *
+   * A PROMISE, NOT A LIST, and required rather than defaulted (#569). The
+   * layout starts the read and hands it over unawaited, so the shell paints
+   * without waiting on a join that answers nothing for nearly every account;
+   * `AssignedPlantsGroup` below unwraps it under its own `<Suspense>`. A
+   * default would have to be a promise built during render, which `use()` would
+   * treat as a new one on every pass — so the one caller passes it always.
    */
-  assignedPlants?: readonly AssignedPlant[];
+  assignedPlants: Promise<readonly AssignedPlant[]>;
   /** Server-decided: whether the current user is a platform admin. */
   isPlatformAdmin?: boolean;
 };
@@ -91,21 +98,70 @@ function getNavConfig(orgType: AssociationOrgType | null) {
   }
 }
 
+/**
+ * The Assigned plants section, and the only place the coaching read is awaited.
+ *
+ * It is its own component so that the `use()` suspends HERE — under the
+ * boundary its caller wraps it in — rather than suspending the sidebar, which
+ * has nothing to do with coaching and is the first thing a planter sees (#569).
+ * The rest of the nav, the header and the page are painted while this waits.
+ *
+ * The promise it is given never rejects (`assignedPlantsSafely`), so there is no
+ * error boundary here to pair with the Suspense one: a failed read arrives as an
+ * empty list and takes the same branch a planter who coaches nobody takes.
+ */
+function AssignedPlantsGroup({
+  plants,
+}: {
+  plants: Promise<readonly AssignedPlant[]>;
+}) {
+  const pathname = usePathname();
+  const coaching = assignedPlantsNavSection(React.use(plants));
+  const coachingActive = coaching
+    ? resolveActiveNavHref(pathname, coaching.items)
+    : null;
+
+  return (
+    <>
+      {/* Rendered only when there is at least one active assignment —
+          `assignedPlantsNavSection` returns null otherwise, so the heading and
+          the rows appear and disappear together (#496). */}
+      {coaching && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{coaching.title}</SidebarGroupLabel>
+          <SidebarMenu>
+            {coaching.items.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton
+                  asChild
+                  tooltip={item.title}
+                  isActive={item.href === coachingActive}
+                >
+                  <Link href={item.href ?? "#"} className="cursor-pointer">
+                    {item.icon && <item.icon />}
+                    <span>{item.title}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
+    </>
+  );
+}
+
 export function AppSidebar({
   user,
   orgType,
   hasChurch,
-  assignedPlants = [],
+  assignedPlants,
   isPlatformAdmin = false,
   ...props
 }: AppSidebarProps) {
   const navConfig = getNavConfig(orgType);
   const pathname = usePathname();
   const adminActive = isPathWithin(pathname, "/admin");
-  const coaching = assignedPlantsNavSection(assignedPlants);
-  const coachingActive = coaching
-    ? resolveActiveNavHref(pathname, coaching.items)
-    : null;
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -132,30 +188,12 @@ export function AppSidebar({
           label={navConfig.label}
           hasChurch={hasChurch}
         />
-        {/* Assigned plants. Rendered only when there is at least one active
-            assignment — `assignedPlantsNavSection` returns null otherwise, so
-            the heading and the rows appear and disappear together (#496). */}
-        {coaching && (
-          <SidebarGroup>
-            <SidebarGroupLabel>{coaching.title}</SidebarGroupLabel>
-            <SidebarMenu>
-              {coaching.items.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    tooltip={item.title}
-                    isActive={item.href === coachingActive}
-                  >
-                    <Link href={item.href ?? "#"} className="cursor-pointer">
-                      {item.icon && <item.icon />}
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-        )}
+        {/* Assigned plants, streamed in. The fallback is nothing, not a
+            skeleton: the section is absent for almost every account, so a
+            placeholder would promise a shelf that is about to vanish. */}
+        <React.Suspense fallback={null}>
+          <AssignedPlantsGroup plants={assignedPlants} />
+        </React.Suspense>
         {/* Admin group is rendered only when the server marks the user as a
             platform admin — invisible to everyone else. */}
         {isPlatformAdmin && (
