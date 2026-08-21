@@ -180,6 +180,70 @@ If a repair is later approved: identify objects, drop or keep them on purpose, t
 `DELETE FROM drizzle.__drizzle_migrations WHERE id IN (19, 40)` in the same attended session.
 Never edit `_journal.json` to invent tags for hashes we do not have.
 
+### Finding (2026-08-21, #448) — a track wrote to the ledger unattended
+
+The first breach of the rule at the top of this section by one of our own tracks, recorded here
+because the alternative is a hash nobody can account for in six months.
+
+**What happened.** `0058_church_digest_send_time.sql` was minted as `0056_church_digest_send_time`
+and applied to the shared branch under that name. Two other tracks then took slots 0056 and 0057, so
+it was regenerated as 0058 and its sha256 changed. The shared branch was left holding a row for a
+file no longer in the repo — and since `drizzle-kit migrate` decides by `when` against the ledger's
+maximum `created_at` and never asks whether a given migration's own row is present, the next
+`pnpm db:migrate` there would have re-run applied DDL and aborted on `column ... already exists`.
+
+**What the track did, and why it was wrong.** The #448 track re-pointed the row itself:
+
+```sql
+UPDATE drizzle.__drizzle_migrations
+   SET hash = '9924e218…', created_at = 1787465840967
+ WHERE hash = '5e50c38558648cc885eccb14a186240c4c5e4848a5a6e92073145e1edc012b52';
+```
+
+That is exactly the write this section forbids: a ledger write as a side effect of a track, on the
+branch that is the de-facto prod DB, with no operator present. The ruled path was an OPERATOR
+RECONCILE step in the migration header (`../invariants.md` → Migrations) for a human to run, and the
+migration shipped without one. Self-reported by the track the same night, and repaired forward under
+an orchestrator ruling rather than reverted — reverting would only recreate the inconsistency.
+
+**The three hashes, so no later audit has to reconstruct them.**
+
+| Hash | What it is |
+|---|---|
+| `5e50c38558648cc885eccb14a186240c4c5e4848a5a6e92073145e1edc012b52` | `0056_church_digest_send_time.sql`, the pre-rebase file. Existed only on an unmerged branch, for about an hour. What the row held before the write. |
+| `9924e218839006d269c6df1775b5fdc75a041925e6141fd0de619ebb6a759196` | `0058_church_digest_send_time.sql` as merged in PR #560. What the row was set to, and what it still holds. |
+| `537b189599304747d58cd8465ed2f76b77b56a6d7576cfbb737b91dbf1da72db` | The same file once its header gained the reconcile block. **The committed blob from here on.** |
+
+**Accepted history, deliberately.** The shared branch's row holds the middle hash, so from the header
+amendment onward it matches no committed blob — the same shape as the two orphans above, reached by a
+different route. It is left alone. The DDL it names is applied, correct and fully attributable to a
+file in git, which is more than either orphan above can claim, and a second unattended write to
+"tidy" it would repeat the original error. `pnpm db:migrate` is a clean no-op against it, verified
+2026-08-21.
+
+**How to recognise it in the ledger, without taking this account on trust.** The write left a
+fingerprint that a read-only query still shows: `id` is a sequence, so insertion order and stamp
+order agree everywhere except at the row that was updated.
+
+```
+ id  71  1787257458645  fafa0c0a0c6f   0054_user_invitations
+ id  72  1787293039967  75f550408de6   0055_task_followup_indexes
+ id  74  1787379439967  54756455312f   0056_insight_category_cohesion
+ id  75  1787465839967  840b2bc27970   0057_feedback_github_issue_number
+ id  73  1787465840967  9924e2188390   0058_church_digest_send_time   <- inserted 3rd, stamped 5th
+```
+
+`id 73` was INSERTED third, when this migration was still `0056_church_digest_send_time` and carried
+`created_at = 1787295616718`; the `UPDATE` moved its stamp above 0057's without moving its id. So the
+row is self-consistent today — its `created_at` matches the journal and its hash matched the
+committed file at the time — while the id ordering is the only surviving trace of how it got there.
+An auditor who finds `id` out of step with `created_at` at exactly one row is looking at this, and
+not at a second orphan.
+
+**Scope.** Exactly one database was ever affected. The old file never reached `main`, so every fresh
+clone, every restore predating 2026-08-21 and production all take EXIT A in that header's reconcile
+block and apply 0058 cleanly.
+
 ### Reusable snippet
 
 Match journal `when` to `drizzle.__drizzle_migrations.created_at`. A row on only one side is
