@@ -72,7 +72,6 @@ export {
   createResponsibility,
   updateResponsibility,
   deleteResponsibility,
-  isResponsibilityComplete,
 } from "./responsibilities";
 
 export {

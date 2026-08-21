@@ -16,6 +16,7 @@ import {
   type ScratchPlant,
 } from "@/lib/testing/ministry-teams-scratch";
 
+import { syncLeaderOnFill } from "./leader-sync";
 import { assignMember, removeMember } from "./memberships";
 import { createRole, deleteRole, updateRole } from "./roles";
 import { assignTeamLeader, initializePredefinedTeams } from "./teams";
@@ -402,6 +403,117 @@ test(
     assert.equal(renamed.name, "Lead Musician");
     assert.equal(renamed.isLeadershipRole, true, "the flag is untouched");
     assert.equal(await leaderOf(team.id), ada, "and so is the leader");
+  }
+);
+
+test(
+  "editing an ordinary FILLED role does not clear the leader — even posting the flag",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweepScratch(SCRATCH_NAME);
+
+    // THE BUG REVIEW CAUGHT, pinned. The edit dialog posts `isLeadershipRole`
+    // on EVERY submit — an unticked checkbox is absent from FormData, so a
+    // hidden input carries the boolean to make unticking expressible. Gating
+    // the vacate on "the caller mentioned it and it is now false" therefore
+    // fired on every save of an ordinary role, and a change of time commitment
+    // erased an explicitly named leader. The gate is the TRANSITION.
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const { team, role } = await teamWithRole(plant, false);
+    const ada = await createScratchPerson(plant, "Ada");
+
+    await assignMember(plant.churchId, team.id, role.id, ada, plant.actorId);
+    await assignTeamLeader(plant.churchId, team.id, ada, plant.actorId);
+
+    // Exactly what the dialog posts for an untouched checkbox on an ordinary
+    // role: the flag, spelled false, alongside a real edit.
+    await updateRole(plant.churchId, role.id, plant.actorId, {
+      timeCommitment: "high",
+      isLeadershipRole: false,
+    });
+
+    assert.equal(
+      await leaderOf(team.id),
+      ada,
+      "a save that did not flip the flag must not vacate the leader"
+    );
+  }
+);
+
+test(
+  "a second, ordinary role held by the derived leader does not clear them",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweepScratch(SCRATCH_NAME);
+
+    // The seat index is per ROLE, so one person may hold two roles in a team.
+    // Editing the ordinary one must not disturb the leadership seat they
+    // actually lead from — and no explicit assignment is involved here, so
+    // this is the derived rule breaking itself.
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const team = await scratchTeam(plant);
+    const leadRole = await createRole(plant.churchId, team.id, plant.actorId, {
+      name: "Worship Leader",
+      isLeadershipRole: true,
+    });
+    const ordinaryRole = await createRole(
+      plant.churchId,
+      team.id,
+      plant.actorId,
+      { name: "Vocalist", isLeadershipRole: false }
+    );
+    const ada = await createScratchPerson(plant, "Ada");
+
+    await assignMember(
+      plant.churchId,
+      team.id,
+      leadRole.id,
+      ada,
+      plant.actorId
+    );
+    await assignMember(
+      plant.churchId,
+      team.id,
+      ordinaryRole.id,
+      ada,
+      plant.actorId
+    );
+    assert.equal(await leaderOf(team.id), ada);
+
+    await updateRole(plant.churchId, ordinaryRole.id, plant.actorId, {
+      name: "Backing Vocalist",
+      isLeadershipRole: false,
+    });
+
+    assert.equal(
+      await leaderOf(team.id),
+      ada,
+      "the leadership seat is still filled, so the leader stands"
+    );
+  }
+);
+
+test(
+  "a person who is not on the team cannot be made its leader",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweepScratch(SCRATCH_NAME);
+
+    // `syncLeaderOnFill` re-asserts the SEAT inside its own write, so a stale
+    // holder read cannot install a leader who has left. Asserted directly,
+    // because the race that produces a stale read is not reproducible here —
+    // what is testable is that the statement refuses the value.
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const team = await scratchTeam(plant);
+    const stranger = await createScratchPerson(plant, "Stranger");
+
+    const filled = await syncLeaderOnFill(plant.churchId, team.id, stranger);
+
+    assert.equal(filled, false, "the write matched nothing");
+    assert.equal(await leaderOf(team.id), null);
   }
 );
 

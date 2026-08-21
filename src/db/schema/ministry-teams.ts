@@ -369,9 +369,13 @@ export type NewTeamMembership = typeof teamMemberships.$inferInsert;
  *
  * COMPLETION IS `completed_at`, NOT A BOOLEAN BESIDE A DATE. There is one field
  * and `completed_at IS NOT NULL` is the whole answer, so the contradictory
- * `{ completed: true, completedAt: null }` cannot be written
- * (`memory/invariants.md` is the general rule; `isResponsibilityComplete` is
- * the one spelling).
+ * `{ completed: true, completedAt: null }` cannot be written. The ACTION takes
+ * a boolean and the service derives the timestamp from it, so no caller names a
+ * completion time of its own either.
+ *
+ * `created_by` ON A SEEDED ROW IS THE ACCOUNT WHOSE FIRST VIEW CLAIMED THE
+ * SEED, not an author — nobody wrote those items. It is why the read carries an
+ * actor at all. The column is audit and is never read to decide anything.
  */
 export const teamResponsibilities = pgTable(
   "team_responsibilities",

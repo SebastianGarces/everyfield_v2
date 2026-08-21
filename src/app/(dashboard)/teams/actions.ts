@@ -293,7 +293,16 @@ export async function updateRoleAction(
     "teams.write",
     "Failed to update role",
     async ({ churchId, userId }) => {
-      const parsed = roleUpdateSchema.safeParse(formEntries(formData));
+      const parsed = roleUpdateSchema.safeParse({
+        ...formEntries(formData),
+        // The one field the edit dialog can EMPTY. `formEntries` drops empty
+        // strings, which is "not mentioned" — right for a create form and wrong
+        // for a pre-filled one, where an empty box is the planter clearing it.
+        // `null` from `.get()` means the field was not posted at all, which
+        // stays "not mentioned". `roleUpdateSchema` turns "" into an explicit
+        // NULL.
+        description: formData.get("description") ?? undefined,
+      });
       if (!parsed.success) return fieldErrorResult(parsed.error);
 
       const role = await updateRole(churchId, roleId, userId, parsed.data);

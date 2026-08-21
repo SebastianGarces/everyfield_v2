@@ -51,9 +51,25 @@ export const roleCreateSchema = z.object({
 
 export type RoleCreateInput = z.infer<typeof roleCreateSchema>;
 
+/**
+ * An EDIT can say "clear this"; a CREATE cannot, and `formEntries` speaks only
+ * the second language — it drops empty strings so an untouched optional field
+ * stays undefined rather than becoming "". That is right for creation and wrong
+ * the moment a form is pre-filled: emptying a role's description would post
+ * nothing, read as "not mentioned", and the old text would reappear on the next
+ * paint with no message. So the empty string reaches this schema (the action
+ * passes the raw value) and becomes an explicit NULL here.
+ */
+const clearableText = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .optional()
+    .transform((value) => (value === "" ? null : value));
+
 export const roleUpdateSchema = z.object({
   name: z.string().min(1).max(255).optional(),
-  description: z.string().max(2000).optional(),
+  description: clearableText(2000),
   isLeadershipRole: checkboxBoolean,
   timeCommitment: z.enum(timeCommitments).optional(),
   desiredSkills: z.string().max(1000).optional(),

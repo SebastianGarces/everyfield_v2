@@ -31,7 +31,7 @@
 
 import { db } from "@/db";
 import { ministryTeams, teamMemberships } from "@/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, exists, isNull, sql } from "drizzle-orm";
 
 /**
  * Who actively holds a role right now, or null for an open seat.
@@ -62,6 +62,16 @@ export async function activeRoleHolder(
  * Somebody now holds a leadership role: make them the team's leader, unless
  * the team already has one.
  *
+ * THE SEAT IS RE-ASSERTED INSIDE THE WRITE, not read above it. The caller
+ * learned who the holder was from a SELECT, and a predicate about another table
+ * is a snapshot (`memory/invariants.md` → Transactions) — so between that read
+ * and this write a concurrent `removeMember` could take the person off the
+ * team, and its own vacate would be a no-op because it read the role's flag
+ * before this call flipped it. The result was a team led by somebody who had
+ * left, with no door left to clear them: their membership is already inactive,
+ * so no later vacate fires for them. The `EXISTS` makes one statement decide
+ * both halves, so that ordering cannot commit.
+ *
  * @returns whether this call is what made them leader. The caller decides what
  *   that is worth — nothing here emits, because the two doors into this
  *   function have different stories to tell about the same row.
@@ -78,7 +88,20 @@ export async function syncLeaderOnFill(
       and(
         eq(ministryTeams.churchId, churchId),
         eq(ministryTeams.id, teamId),
-        isNull(ministryTeams.leaderId)
+        isNull(ministryTeams.leaderId),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(teamMemberships)
+            .where(
+              and(
+                eq(teamMemberships.churchId, churchId),
+                eq(teamMemberships.teamId, teamId),
+                eq(teamMemberships.personId, personId),
+                eq(teamMemberships.status, "active")
+              )
+            )
+        )
       )
     )
     .returning({ id: ministryTeams.id });

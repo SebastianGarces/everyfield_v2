@@ -21,16 +21,6 @@ import { playbookResponsibilities } from "./role-templates";
 import { verifyTeamOwnership } from "./shared";
 
 /**
- * THE one spelling of "is this done". `completed_at` is the only field, so
- * there is no second value to keep in step with it.
- */
-export function isResponsibilityComplete(
-  responsibility: TeamResponsibility
-): boolean {
-  return responsibility.completedAt !== null;
-}
-
-/**
  * Offer a predefined team its Launch Playbook items, exactly once in its life.
  *
  * CLAIM FIRST, THEN THE WORK IT GATES (`memory/invariants.md` → Transactions).
@@ -53,11 +43,17 @@ export function isResponsibilityComplete(
  * deletes comes back on the next page load. The rows are the planter's; the
  * offer is ours to make once.
  *
- * THE WINDOW THIS ACCEPTS: a crash between the claim and the insert leaves the
- * team stamped with no rows, and the tab opens on its empty state with the Add
- * form. That is the trade the claim-first shape names, and it is the same
- * posture `leadership-fill.ts` takes — the surface still works and the planter
- * can type the items in. The alternative loses a deletion, which is worse.
+ * TWO WINDOWS THIS ACCEPTS, both of them named rather than guarded:
+ *
+ *   1. A crash between the claim and the insert leaves the team stamped with no
+ *      rows, and the tab opens on its empty state with the Add form. That is
+ *      the trade the claim-first shape names, and the same posture
+ *      `leadership-fill.ts` takes — the surface still works and the planter can
+ *      type the items in. The alternative loses a deletion, which is worse.
+ *   2. The LOSER of a concurrent first view returns from here immediately and
+ *      then reads, so it can select before the winner's INSERT commits and
+ *      render an empty list for a team that is being seeded. It is one paint in
+ *      the losing tab of a double-open, and the next load has the rows.
  */
 async function seedPlaybookResponsibilities(
   churchId: string,

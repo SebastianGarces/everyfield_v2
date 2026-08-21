@@ -90,11 +90,22 @@ export async function createRole(
  * back — both through `leader-sync.ts`, whose `WHERE` clauses carry the "only
  * when the team has none" and "only when it points at them" halves.
  *
- * IT READS THE FLAG'S NEW VALUE, NOT A BEFORE/AFTER DIFF. Re-asserting the
- * value a role already has is a no-op given those predicates, so there is
- * nothing a diff would save and one fewer read to get wrong. The gate is
- * whether the CALLER SPOKE about the flag: renaming a role must not disturb the
- * header, and `undefined` is exactly "did not mention it".
+ * THE GATE IS THE TRANSITION, NOT THE FLAG'S NEW VALUE, and the difference is a
+ * bug that shipped in review. "The caller mentioned the flag and it is now
+ * false" reads like the same thing and is not: the edit dialog mentions the
+ * flag on EVERY submit by design — an unticked checkbox is absent from
+ * `FormData`, so `LeadershipRoleField` posts the boolean through a hidden input
+ * to make unticking expressible at all. So every save on an ordinary FILLED
+ * role posted `false` and reached the vacate, and changing a role's time
+ * commitment cleared a leader that pointed at its occupant. Two ways that bit:
+ * an explicitly named leader erased by a rename, and — because the seat index
+ * is per ROLE, so one person may hold two roles in a team — a derived leader
+ * cleared by an edit to their OTHER, ordinary role while the leadership seat
+ * they lead from is still filled.
+ *
+ * So the before-value is read, and only a real flip does anything. That also
+ * puts `emitTeamLeaderAssigned` where it belongs: a rename no longer announces
+ * that somebody became the leader they already were.
  */
 export async function updateRole(
   churchId: string,
@@ -102,13 +113,23 @@ export async function updateRole(
   userId: string,
   data: {
     name?: string;
-    description?: string;
+    /** `null` CLEARS it — the edit dialog can empty a description. */
+    description?: string | null;
     isLeadershipRole?: boolean;
     timeCommitment?: TimeCommitment;
     desiredSkills?: string;
     sortOrder?: number;
   }
 ): Promise<TeamRole> {
+  // BEFORE the write, because afterwards the old value is gone and the
+  // transition is what decides. Church-scoped, so a foreign id reads nothing
+  // and the UPDATE below refuses it anyway.
+  const [before] = await db
+    .select({ isLeadershipRole: teamRoles.isLeadershipRole })
+    .from(teamRoles)
+    .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)))
+    .limit(1);
+
   const updateData: Partial<NewTeamRole> = { updatedAt: new Date() };
 
   if (data.name !== undefined) updateData.name = data.name;
@@ -132,15 +153,18 @@ export async function updateRole(
   // refusal are the same statement.
   if (!updated) throw new ExpectedError("Role not found");
 
-  if (data.isLeadershipRole !== undefined) {
+  const flipped =
+    before !== undefined &&
+    before.isLeadershipRole !== updated.isLeadershipRole;
+
+  if (flipped) {
     const holder = await activeRoleHolder(churchId, roleId);
     if (holder) {
       if (updated.isLeadershipRole) {
         await syncLeaderOnFill(churchId, updated.teamId, holder);
         // The same event `assignMember` emits when somebody lands in a
-        // leadership seat, on the other door into that state. F2 advances the
-        // person's status from it, and `autoAdvanceStatus` moves them only out
-        // of `launch_team`, so a repeat is a no-op rather than a demotion.
+        // leadership seat, on the other door into that state — and only on a
+        // real flip, so it never announces a change a rename did not make.
         await emitTeamLeaderAssigned(updated.teamId, holder, churchId, userId);
       } else {
         await syncLeaderOnVacate(churchId, updated.teamId, holder);
