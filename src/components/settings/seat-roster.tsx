@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/table";
 import type { UserSeat } from "@/db/schema";
 
+import type { SeatActionOutcome } from "./seat-action-outcome";
+
 /** What one roster row looks like to the browser. No ids beyond the subject. */
 export type SeatRosterViewRow = {
   userId: string;
@@ -76,19 +78,6 @@ export type SeatRosterActions = {
   demote: (userId: string) => Promise<SeatActionOutcome>;
   remove: (userId: string) => Promise<SeatActionOutcome>;
 };
-
-/**
- * The shape every roster action answers in.
- *
- * Declared here rather than imported from the `"use server"` module: a
- * `"use server"` module's exports are enumerated into the page's action
- * manifest, so re-exporting a type through one fails the build
- * (`settings/team/actions.ts` carries the whole note). The two declarations are
- * checked against each other by the compiler at the call site in `page.tsx`.
- */
-export type SeatActionOutcome =
-  | { success: true }
-  | { success: false; error: string };
 
 /**
  * EVERYTHING THIS SURFACE KNOWS ABOUT A SEAT, AS ONE TABLE.
@@ -211,10 +200,13 @@ function SeatRow({
   // fourth row and a runtime crash on the same day.
   const move = rule.move;
 
-  // THE WHOLE ABSENCE RULE, IN ONE EXPRESSION. An Admin manages nothing
-  // (AS-015); nobody manages their own row (AS-017); and whether the seat
-  // itself may be touched is the table's answer, not a comparison here.
-  const manageable = canManageSeats && !row.isSelf && rule.removable;
+  // WHO MAY ACT ON THIS ROW AT ALL: an Admin manages nothing (AS-015), and
+  // nobody manages their own row (AS-017). WHAT may then be done is each rule's
+  // own answer — `move` and `removable` gate their own buttons below, and
+  // deliberately not each other's. Reading `removable` for both would mean a
+  // seat declared movable-but-not-removable silently lost its appoint control,
+  // with no diff anywhere near the line that decided it.
+  const mayAct = canManageSeats && !row.isSelf;
 
   function run(mutate: () => Promise<SeatActionOutcome>) {
     setError(null);
@@ -245,24 +237,24 @@ function SeatRow({
 
       {canManageSeats ? (
         <TableCell className="text-right">
-          {manageable ? (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {move ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={pending}
-                  aria-label={`${move.label} — ${name}`}
-                  // The table names WHICH action, so there is no ternary here
-                  // to get backwards and no second place stating that a Member
-                  // is appointed and an Admin is demoted.
-                  onClick={() => run(() => actions[move.action](row.userId))}
-                >
-                  {move.label}
-                </Button>
-              ) : null}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {mayAct && move ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                aria-label={`${move.label} — ${name}`}
+                // The table names WHICH action, so there is no ternary here
+                // to get backwards and no second place stating that a Member
+                // is appointed and an Admin is demoted.
+                onClick={() => run(() => actions[move.action](row.userId))}
+              >
+                {move.label}
+              </Button>
+            ) : null}
 
+            {mayAct && rule.removable ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -274,10 +266,18 @@ function SeatRow({
               >
                 Remove
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
-          {error ? (
+          {/* THE REFUSAL GOES WHERE THE READER IS LOOKING. While the dialog is
+              open it is MODAL — Radix portals it over a `fixed inset-0`
+              overlay and `aria-hidden`s everything outside — so a message
+              rendered in this cell would be painted under the overlay and
+              taken out of the accessibility tree, which is the one path the
+              plain-Button-instead-of-AlertDialogAction choice below exists to
+              serve. So the removal's refusal renders INSIDE the dialog, and
+              only the appoint/demote refusal renders here. */}
+          {error && !confirmingRemoval ? (
             <p role="alert" className="text-destructive mt-1 text-xs">
               {error}
             </p>
@@ -304,6 +304,13 @@ function SeatRow({
                   them again.
                 </AlertDialogDescription>
               </AlertDialogHeader>
+
+              {error ? (
+                <p role="alert" className="text-destructive text-sm">
+                  {error}
+                </p>
+              ) : null}
+
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
                 {/* A plain Button, not `AlertDialogAction`: the primitive closes

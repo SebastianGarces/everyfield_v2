@@ -6,9 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { namedButtons } from "@/lib/testing/rendered-markup";
 
+import type { SeatActionOutcome } from "./seat-action-outcome";
 import {
   SeatRoster,
-  type SeatActionOutcome,
   type SeatRosterActions,
   type SeatRosterViewRow,
 } from "./seat-roster";

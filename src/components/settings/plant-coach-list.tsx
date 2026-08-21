@@ -42,7 +42,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import type { SeatActionOutcome } from "./seat-roster";
+import type { SeatActionOutcome } from "./seat-action-outcome";
 
 /** One active coach assignment, as the browser sees it. */
 export type PlantCoachViewRow = {
@@ -127,7 +127,13 @@ function CoachRow({
         <p className="text-muted-foreground truncate text-sm">
           {row.email} &middot; coaching since {row.assignedLabel}
         </p>
-        {error ? (
+        {/* Only while the dialog is CLOSED. Radix's AlertDialog is modal — it
+            portals over a `fixed inset-0` overlay and `aria-hidden`s everything
+            outside — so a refusal rendered here during the confirmation would
+            be both invisible and unannounced. It renders inside the dialog
+            instead, which is the whole reason the confirm control below is a
+            plain Button rather than `AlertDialogAction`. */}
+        {error && !confirming ? (
           <p role="alert" className="text-destructive mt-1 text-xs">
             {error}
           </p>
@@ -159,6 +165,13 @@ function CoachRow({
               coach. To bring them back, invite them again.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {error ? (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          ) : null}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
             {/* A plain Button rather than `AlertDialogAction`, which closes on

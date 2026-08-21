@@ -35,9 +35,21 @@
 //
 // Every earlier step is redo-safe, which is exactly what a marker-last sequence
 // requires: a replayed request re-runs three no-ops and a marker that now
-// matches zero rows. The marker's own `WHERE` RE-ASSERTS what the pre-read
-// decided — still this plant, still not the Owner — so a stale read cannot
-// commit, and two removals of one target serialise on that compare-and-set.
+// matches zero rows.
+//
+// THE MARKER IS A COMPARE-AND-SET, AND ITS ROWCOUNT IS READ. Its `WHERE`
+// re-asserts what the pre-read decided — still this plant, still not the Owner
+// — so two removals of one target serialise on it. What that does NOT do is
+// roll the batch back: `db.batch` is all-or-nothing on FAILURE, and a zero-row
+// UPDATE is a success, so a stale read still COMMITS statements 1–3. Each of
+// them is scoped to the same target and plant, so what commits is three no-ops
+// — but the call must not then report success, which is why `removeSeat` reads
+// `marked` and refuses on an empty one.
+//
+// Every statement carries `actor.churchId`, including the sessions delete,
+// which reaches it through an `exists` because its own subject is keyed by the
+// account. That uniformity is the tenancy leak guard, and `roster.test.ts`
+// asserts it statement by statement.
 //
 // The person record is effect (3) of the FRD's five by being ABSENT: nothing
 // below touches `persons` or `team_memberships`, because a person record and an
@@ -121,6 +133,19 @@ export type SeatRosterRow = {
   readonly name: string | null;
   readonly email: string;
   readonly seat: UserSeat;
+  /**
+   * `users.created_at`, which is the join date because registration grants the
+   * tenancy and the seat in the SAME write that creates the account (AS-012) —
+   * so for every account that exists today the two are one event.
+   *
+   * THE ONE CASE THAT WILL BREAK IT is a re-invite. AS-016 leaves the account
+   * row alive so a removed person can be invited back, and that reuses this row
+   * with `created_at` untouched — so the roster would report a join date
+   * predating their removal. Nothing can re-invite yet (the surface is out of
+   * #497's scope), so the column is accurate for every row that can exist.
+   * Whoever ships re-invitation owes this label a real source: the accepted
+   * `user_invitations` row for that address on this plant.
+   */
   readonly joinedAt: Date;
 };
 
@@ -314,12 +339,30 @@ export async function removeSeat(
     throw new SeatManagementError("The plant's Owner cannot be removed.");
   }
 
-  await db.batch([
+  const [, , , marked] = await db.batch([
     // 1. SESSIONS REVOKED. Deleting the rows rather than expiring them: the
     //    session store is the only record of a live sign-in, so "holds nothing
     //    for that account" is the state AS-016 asks for, and the next request
     //    carrying the old cookie finds no row and is unauthenticated.
-    db.delete(sessions).where(eq(sessions.userId, targetUserId)),
+    //
+    //    THE `exists` IS THE LEAK GUARD, and it is here because this is the only
+    //    statement whose subject is keyed by the ACCOUNT rather than by the
+    //    plant — statements 2–4 all carry `actor.churchId` in their own `WHERE`.
+    //    Without it, a target that moved tenancy between the pre-read and this
+    //    batch would still be signed out of a plant this actor has no authority
+    //    over. It reads `users` BEFORE the marker writes it (statement order is
+    //    the whole point), and on a replay the marker has already cleared
+    //    `church_id`, so it correctly matches nothing.
+    db.delete(sessions).where(
+      and(
+        eq(sessions.userId, targetUserId),
+        sql`exists (
+            select 1 from ${users}
+            where ${users.id} = ${targetUserId}
+              and ${users.churchId} = ${actor.churchId}
+          )`
+      )
+    ),
 
     // 2. OPEN TASKS TO THE OWNER, COMPLETED ONES LEFT ALONE. An unassigned task
     //    disappears from every "my work" view, so the plant would silently lose
@@ -360,18 +403,50 @@ export async function removeSeat(
     // 4. THE MARKER, LAST. Tenancy and seat cleared; the account ROW survives,
     //    which is what lets the person be re-invited and what keeps every
     //    `created_by` and `assigned_to_id` elsewhere pointing at a real row.
-    //    Its `WHERE` re-asserts the pre-read, so a stale read commits nothing.
+    //
+    //    ALL THREE TENANCY FKs, NOT JUST `church_id`, AND THAT IS A SECURITY
+    //    RULE RATHER THAN TIDINESS. A row naming TWO tenancies is representable
+    //    (`memory/invariants.md` → Seats & Tenancy: the accepted residual
+    //    migration 0050 §1 repaired twelve of). Such a row reaches NOTHING today
+    //    because `oversightOrgOf` answers only for exactly one FK — so clearing
+    //    `church_id` alone would leave one FK standing and PROMOTE the account
+    //    into that org's oversight surface, which `requireOversightUser` admits
+    //    on the FK alone without asking the seat. A removal that widens reach is
+    //    the one outcome this verb must never have, so the marker clears every
+    //    FK and the row names no tenancy at all.
     db
       .update(users)
-      .set({ churchId: null, seat: null, updatedAt: new Date() })
+      .set({
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        seat: null,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(users.id, targetUserId),
           eq(users.churchId, actor.churchId),
           ne(users.seat, "owner")
         )
-      ),
+      )
+      .returning({ id: users.id }),
   ]);
+
+  // THE MARKER'S ROWCOUNT IS THE ANSWER, and a zero here is not an error the
+  // batch rolled back — `db.batch` is all-or-nothing on FAILURE, and a zero-row
+  // UPDATE is a success, so statements 1–3 have already committed. What they
+  // committed is three no-ops: each one is scoped to a target that, by the
+  // marker matching nothing, is no longer on this plant. So the state is
+  // consistent and what is left to get right is the REPORT — telling an Owner
+  // their removal succeeded when the roster is about to re-render unchanged is
+  // the one failure this cannot leave standing. `moveSeat` and
+  // `endCoachAssignment` both answer on their own rowcount for the same reason.
+  if (marked.length === 0) {
+    throw new SeatManagementError(
+      "That person is not on this plant's team. Reload the page to see who is."
+    );
+  }
 }
 
 /**

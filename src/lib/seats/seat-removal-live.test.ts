@@ -10,6 +10,7 @@ import {
   coachAssignments,
   ministryTeams,
   persons,
+  sendingNetworks,
   sessions,
   tasks,
   teamMemberships,
@@ -106,6 +107,10 @@ async function sweep(): Promise<void> {
   );
   await db.delete(users).where(eq(users.name, SCRATCH_NAME));
   await db.delete(churches).where(eq(churches.name, SCRATCH_NAME));
+  // The two-tenancy fixture's network, after the users referencing it are gone.
+  await db
+    .delete(sendingNetworks)
+    .where(eq(sendingNetworks.name, SCRATCH_NAME));
 }
 
 after(async () => {
@@ -522,6 +527,85 @@ test(
       otherAfter.leaderId,
       bystander.id,
       "a team led by somebody else keeps its leader — the cascade is scoped to the removed account's own person record"
+    );
+  }
+);
+
+test(
+  "removing a two-tenancy row clears every FK, never promoting it into oversight",
+  { skip },
+  async () => {
+    // THE ONE WAY A REMOVAL COULD *WIDEN* REACH, and the reason the marker
+    // clears all three FKs rather than only `church_id`.
+    //
+    // A row naming two tenancies is representable (`memory/invariants.md` →
+    // Seats & Tenancy: migration 0050 §1 repaired twelve). Today it reaches
+    // NOTHING, because `oversightOrgOf` answers only for exactly one FK. Clear
+    // `church_id` alone and the row names exactly one — and
+    // `requireOversightUser` admits it on the FK ALONE, without asking the
+    // seat. The plant Admin who was just removed would sign back in with that
+    // network's whole oversight surface open to them.
+    const churchId = await makeChurch();
+    const ownerId = await makeUser(churchId, "owner");
+    const targetId = await makeUser(churchId, "admin");
+    const actor = actorFor(ownerId, churchId);
+
+    // The defect row, written directly — no product flow creates one, which is
+    // exactly why the REPAIR path is the thing that has to be tested.
+    const [network] = await db
+      .insert(sendingNetworks)
+      .values({ name: SCRATCH_NAME })
+      .returning({ id: sendingNetworks.id });
+    await db
+      .update(users)
+      .set({ sendingNetworkId: network.id })
+      .where(eq(users.id, targetId));
+
+    await removeSeat(actor, targetId);
+
+    const [after] = await db
+      .select({
+        churchId: users.churchId,
+        sendingChurchId: users.sendingChurchId,
+        sendingNetworkId: users.sendingNetworkId,
+        seat: users.seat,
+      })
+      .from(users)
+      .where(eq(users.id, targetId));
+
+    assert.deepEqual(
+      after,
+      {
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        seat: null,
+      },
+      "AS-016: a removed account names NO tenancy — one FK left standing hands it that org's oversight surface"
+    );
+  }
+);
+
+test(
+  "a removal that changes nothing refuses instead of reporting success",
+  { skip },
+  async () => {
+    // `db.batch` is all-or-nothing on FAILURE; a zero-row UPDATE is a SUCCESS.
+    // So a marker matching nothing still COMMITS statements 1–3 — three no-ops,
+    // each scoped to the same target and plant — and the call must not then
+    // answer "removed". An Owner told their removal worked, watching the roster
+    // re-render with the person still on it, is the one outcome the rowcount
+    // check exists to prevent.
+    const churchId = await makeChurch();
+    const ownerId = await makeUser(churchId, "owner");
+    const targetId = await makeUser(churchId, "member");
+    const actor = actorFor(ownerId, churchId);
+
+    await removeSeat(actor, targetId);
+    await assert.rejects(
+      () => removeSeat(actor, targetId),
+      SeatManagementError,
+      "a second removal changes nothing, so it must say so rather than succeed"
     );
   }
 );
