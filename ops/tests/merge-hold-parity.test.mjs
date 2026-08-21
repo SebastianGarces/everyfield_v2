@@ -83,3 +83,50 @@ test("the ship step runs the check and the merge as one command", () => {
     "the open-pr skill no longer joins the hold check to the merge with `&&` — a check that does not gate the merge in the same command is not a gate"
   );
 });
+
+test("the ship step disables auto-merge, back-fills, and merges — in that order", () => {
+  // #583. The merge has to be the LAST thing the ship step does. #579 moved the
+  // merge into step 3 and left the body back-fill in step 4, so following the
+  // recipe in order produced the one thing the same skill refuses to merge: a
+  // body still reading "⏳ anchoring". It read fine to a human because each step
+  // was individually correct.
+  //
+  // Ordering in prose has no compiler, so it gets one here: three literals, and
+  // their positions must increase.
+  const skill = read(".claude/skills/open-pr/SKILL.md");
+
+  const steps = [
+    [
+      "--disable-auto",
+      "auto-merge can rebase the branch and fire between the back-fill and your merge",
+    ],
+    // `gh pr edit`, not a bare `--body-file` — step 2's `gh pr create` carries
+    // that flag too, and matching it would compare against the wrong step.
+    [
+      "gh pr edit <number> --body-file <path>",
+      "the body must be corrected while the merge is still in your hands",
+    ],
+    [
+      "gh pr merge <number> --squash",
+      "the merge is the last thing the ship step does",
+    ],
+  ];
+
+  let previous = -1;
+  let previousLiteral = "the start of the file";
+
+  for (const [literal, why] of steps) {
+    const at = skill.indexOf(literal);
+    assert.notEqual(
+      at,
+      -1,
+      `the open-pr ship step no longer contains \`${literal}\` — ${why}`
+    );
+    assert.ok(
+      at > previous,
+      `\`${literal}\` now comes before \`${previousLiteral}\` in the open-pr ship step. ${why}.`
+    );
+    previous = at;
+    previousLiteral = literal;
+  }
+});

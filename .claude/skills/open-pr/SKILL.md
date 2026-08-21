@@ -28,17 +28,26 @@ both inline rather than calling this skill; anything opening a PR by hand follow
    does. The issues keep `agent:in-progress`; the merge closes them via `Closes #`, and a closed
    issue's labels are history (ruled 2026-08-19 — `agent:in-review` is retired with the review
    queue).
-3. Anchor on CI: `gh pr checks <number> --watch --fail-fast`, then merge behind the hold check:
+3. Anchor on CI: `gh pr checks <number> --watch --fail-fast`.
+4. **Take the merge off autopilot, then back-fill the body from the anchor.** In that order:
+   ```bash
+   gh pr merge <number> --disable-auto
+   gh pr edit <number> --body-file <path>
+   gh pr view <number> --json headRefOid   # the body must still describe the head
+   ```
+   `--disable-auto` runs **every time**, not only after a stall, and it is safe when nothing is
+   armed. With strict required checks, auto-merge silently rebases the branch and can fire
+   *between* the back-fill and your merge — #571 landed with an accurate body only by ordering
+   luck. The back-fill replaces the CI row with the conclusion GitHub reported and the sha it ran
+   at.
+5. Merge, behind the hold check:
    ```bash
    ops/merge-hold.sh <number> --wait && gh pr merge <number> --squash
    ```
    **The check and the merge are one command, joined by `&&`** — see *The merge hold* below. Never
-   run the check at the top of the ship step and merge minutes later, and never arm `--auto` while
-   it exits 1.
-4. **Back-fill the body from the anchor**, then read it back: `gh pr edit <number> --body-file <path>`
-   replaces the CI row with the conclusion GitHub reported and the sha it ran at, and
-   `gh pr view <number> --json headRefOid` proves the body still describes the head.
-5. Return the PR URL.
+   run the check earlier in the ship step and merge minutes later, and never arm `--auto` to get
+   around a hold: it fires later without re-reading anything.
+6. Return the PR URL.
 
 ## The merge hold
 
@@ -72,7 +81,10 @@ Report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbati
   A table still reading `⏳ anchoring`, or `CI ❌ at <ancestor sha>`, or a preview validated one
   commit back, describes a different commit than the one about to merge — and it will be believed
   too. **This refuses the merge**, it is not a note for later: back-fill the CI cell from the landed
-  anchor, correct any cell the fix round moved, and only then merge or enable auto-merge.
+  anchor, correct any cell the fix round moved, and only then merge. This is why the merge is the
+  last step and `--disable-auto` comes before the back-fill — a merge that beats the edit makes
+  `⏳ anchoring` the permanent record. After any merge you did not personally execute, read the
+  published body back (`gh pr view <number> --json body`).
 
 ## PR body template
 
