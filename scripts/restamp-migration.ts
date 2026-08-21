@@ -16,31 +16,35 @@
  *
  * WHAT A `when` TOUCHES. Exactly two files, and this script keeps them equal:
  *   1. the entry in `meta/_journal.json`, which decides apply order;
- *   2. the ROLLBACK header in the migration's own `.sql`, which names the
- *      ledger row to delete by `created_at` — a number, not a file hash.
+ *   2. the migration's own `.sql` header, which names the ledger row an
+ *      operator must delete by `created_at` — a number, not a file hash.
  * Snapshots carry no timestamp. Nothing else does either.
  *
- * IT IS THE TAIL'S STAMP ONLY. Entries already behind the tail are history:
- * their stamps match rows in databases that applied them, so this script never
+ * IT IS THE TAIL'S STAMP ONLY. Entries behind the tail are history: their
+ * stamps match rows in databases that applied them, so this script never
  * touches them, and it never touches a `tag`. It reads them to find the floor
  * the tail has to clear.
+ *
+ * A MIGRATION SOME DATABASE ALREADY APPLIED IS NOT A CANDIDATE. Moving its
+ * stamp orphans the ledger row written under the old one, which re-applies the
+ * DDL and aborts on `already exists` (`memory/invariants.md` → Migrations).
+ * The automatic caller is safe because `pnpm db:generate` re-stamps a
+ * migration it just minted; a hand run owes the reconcile the CLI prints.
  *
  * Rerunning is a no-op: the tail's stamp converges, and a second pass finds it
  * already above the floor. `pnpm db:generate` runs it for exactly that reason,
  * which makes generation stamp `max(Date.now(), floor + 1s)` without forking
  * drizzle-kit.
  *
- * Usage: `tsx scripts/restamp-migration.ts [--dir <migrations-dir>]`
+ * Usage: `tsx scripts/restamp-migration.ts [<migrations-dir>]`
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The smallest stamp that restores order. Never a day. See #566. */
 export const RESTAMP_GAP_MS = 1000;
-
-export const DEFAULT_MIGRATIONS_DIR = "src/db/migrations";
 
 export type JournalEntry = {
   idx: number;
@@ -76,18 +80,34 @@ export function tailStamp(entries: readonly JournalEntry[]): number {
 }
 
 /**
- * The rollback header's `created_at`, re-pointed at `when`.
+ * `from` re-pointed at `to`, in the migration's COMMENTS only.
  *
- * The header names this migration's OWN ledger row, so the journal's stamp is
- * the only right answer for it. That makes the rewrite unconditional and
- * self-healing rather than a search for one specific old number. A migration
- * carrying no such header (29 of the first 54) comes back unchanged.
+ * Both halves of that are load-bearing, because a header is prose that names
+ * OTHER migrations' ledger rows too — 0048 lists three siblings an operator
+ * must delete in the same session, and 0049 lists ten inside a `where
+ * created_at in (…)`. So:
+ *
+ *   * the OLD STAMP is the anchor, never the surrounding words. Matching on
+ *     `created_at = ` instead would rewrite every sibling in that list to this
+ *     migration's stamp, and would still miss 0049's lowercase `in (` form —
+ *     a silent miss being the exact failure this whole script exists to stop.
+ *     No two migrations share a stamp, so the number alone identifies the row.
+ *   * only `--` lines are rewritten, so a stamp-shaped literal in executable
+ *     DDL is never touched.
+ *
+ * A migration whose header does not name its own stamp (29 of the first 54
+ * carry no ledger line at all) comes back unchanged.
  */
-export function retimeRollbackHeader(sql: string, when: number): string {
-  return sql.replace(
-    /(__drizzle_migrations WHERE created_at = )\d+/g,
-    `$1${when}`
-  );
+export function retimeOwnStamp(sql: string, from: number, to: number): string {
+  if (from === to) return sql;
+
+  const stamp = new RegExp(String.raw`\b${from}\b`, "g");
+  return sql
+    .split("\n")
+    .map((line) =>
+      /^\s*--/.test(line) ? line.replace(stamp, String(to)) : line
+    )
+    .join("\n");
 }
 
 export type Restamp = {
@@ -99,8 +119,8 @@ export type Restamp = {
 };
 
 /**
- * Read the journal, bring the tail's stamp and its rollback header into
- * agreement with {@link tailStamp}, and report what moved.
+ * Read the journal, bring the tail's stamp and its own header into agreement
+ * with {@link tailStamp}, and report what moved.
  */
 export function reconcileTail(dir: string): Restamp {
   const journalPath = join(dir, "meta", "_journal.json");
@@ -122,7 +142,7 @@ export function reconcileTail(dir: string): Restamp {
   const sqlName = `${tail.tag}.sql`;
   const sqlPath = join(dir, sqlName);
   const sql = readFileSync(sqlPath, "utf8");
-  const retimed = retimeRollbackHeader(sql, to);
+  const retimed = retimeOwnStamp(sql, from, to);
   if (retimed !== sql) {
     writeFileSync(sqlPath, retimed);
     wrote.push(sqlName);
@@ -132,24 +152,27 @@ export function reconcileTail(dir: string): Restamp {
 }
 
 function main(argv: readonly string[]): void {
-  const flag = argv.indexOf("--dir");
-  const dir = flag === -1 ? DEFAULT_MIGRATIONS_DIR : argv[flag + 1];
+  const { tag, from, to, wrote } = reconcileTail(
+    argv[0] ?? "src/db/migrations"
+  );
 
-  if (!dir) {
-    console.error("restamp-migration: --dir needs a path");
-    process.exitCode = 2;
+  if (wrote.length === 0) {
+    console.log(`restamp-migration: ${tag} already sorts last at ${to}.`);
     return;
   }
 
-  const { tag, to, wrote } = reconcileTail(dir);
-
   console.log(
-    wrote.length === 0
-      ? `restamp-migration: ${tag} already sorts last at ${to}. Nothing to do.`
-      : `restamp-migration: ${tag} re-stamped to ${to} (${new Date(to).toISOString()}) in ${wrote.join(", ")}`
+    [
+      `restamp-migration: ${tag} re-stamped ${from} → ${to} (${new Date(to).toISOString()}) in ${wrote.join(", ")}`,
+      `  If any database already applied ${tag}, its ledger row still reads ${from}:`,
+      `  UPDATE drizzle.__drizzle_migrations SET created_at = ${to} WHERE created_at = ${from};`,
+      `  Skip that and the migration re-applies and aborts on "already exists".`,
+    ].join("\n")
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   main(process.argv.slice(2));
 }
