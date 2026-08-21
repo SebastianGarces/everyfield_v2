@@ -59,7 +59,7 @@ export default async function RegisterPage({
               token: token ?? "",
               inviteeEmail: seatInvite.inviteeEmail,
               churchName: seatInvite.churchName,
-              seat: seatInvite.seat,
+              role: seatInvite.role,
             }
           : null
       }

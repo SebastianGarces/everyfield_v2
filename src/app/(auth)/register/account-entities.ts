@@ -17,26 +17,30 @@
 // ============================================================================
 
 import { db } from "@/db";
-import type { InvitableSeat, UserSeat } from "@/db/schema";
+import type { UserSeat } from "@/db/schema";
 import { sendingChurches, sendingNetworks } from "@/db/schema";
+import type { InvitedRole } from "@/lib/invitations/seat-copy";
 import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { accountPersonLinkStatements } from "@/lib/people/account-person-link";
 import type { AccountType } from "@/lib/validations/auth";
 import type { BatchItem } from "drizzle-orm/batch";
 
 /**
- * A seat invitation this registration is redeeming (AS-012, #495) — resolved by
- * the action from the emailed token, never from anything a client said.
+ * A user invitation this registration is redeeming (AS-008 / AS-012, #495,
+ * #496) — resolved by the action from the emailed token, never from anything a
+ * client said.
  *
  * `matchedPersonId` comes from `findLinkablePersonId`: the plant may already
  * hold a contact record for this address, and AS-013 says it is LINKED rather
  * than duplicated. The read happens in the action because this planner awaits
  * nothing; the DECISION about which statement to issue stays in the directory's
- * own `accountPersonLinkStatements`.
+ * own `accountPersonLinkStatements`. It is a SEAT-only input — a coach is not a
+ * member of the plant and gets no `persons` row, which is why it hangs off the
+ * seat arm of the union rather than sitting beside it.
  */
-export type RedeemedSeatInvitation = {
+export type RedeemedUserInvitation = {
   churchId: string;
-  seat: InvitableSeat;
+  role: InvitedRole;
   matchedPersonId: string | null;
 };
 
@@ -65,11 +69,12 @@ export function createAccountEntities(
   account: { name: string | null; email: string },
   createChurchForPlanter = false,
   /**
-   * A seat invitation being redeemed. When present it DECIDES the whole plan and
+   * A user invitation being redeemed. When present it DECIDES the whole plan and
    * every other argument about organizations is ignored: the plant already
-   * exists, nothing is created, and the account joins it with the invited seat.
+   * exists and nothing is created. A SEAT joins it with the invited seat; a
+   * COACH joins nothing at all.
    */
-  seatInvitation: RedeemedSeatInvitation | null = null
+  userInvitation: RedeemedUserInvitation | null = null
 ): {
   seat: UserSeat | null;
   churchId: string | null;
@@ -88,6 +93,8 @@ export function createAccountEntities(
    *   * an invited SEAT: the invitation's plant, which already exists. There is
    *     no race to compare-and-set against — the seat and its tenancy are
    *     written together, in the one insert, which is what AS-012 asks for.
+   *   * an invited COACH: `null`. A coach holds no tenancy at all; their reach
+   *     is the `coach_assignments` row and nothing else.
    */
   userChurchId: string | null;
   /**
@@ -101,30 +108,53 @@ export function createAccountEntities(
    */
   linkStatements: BatchItem<"pg">[];
 } {
-  // A SEAT INVITATION DECIDES EVERYTHING, and it is checked before the account
+  // A USER INVITATION DECIDES EVERYTHING, and it is checked before the account
   // type is even read (AS-012, #495).
   //
-  // The registrant clicked a link that already names a plant and a seat, so
-  // whichever radio button their form carried is not a question: creating a
-  // second organization for them would leave the account naming two tenancies,
-  // which `holdsSeatFor` refuses outright and no product path can repair. The
-  // ONLY writes are the account's own — the seat and its tenancy go into the
-  // users insert, and the person record AS-013 asks for is minted or claimed
-  // after it.
-  if (seatInvitation) {
+  // The registrant clicked a link that already names a plant, so whichever radio
+  // button their form carried is not a question: creating an organization for
+  // them would leave the account naming a tenancy the invitation never granted.
+  if (userInvitation) {
+    // A COACH GETS NO TENANCY AND NO SEAT, and that is the whole shape of the
+    // arm (AS-008, ruling 185 (5), #496).
+    //
+    // `users.seat` stays NULL and every tenancy FK stays NULL, which is what
+    // makes the account a coach: `holdsSeatFor` refuses every `tenancy: "plant"`
+    // verb for want of a `church_id`, so read-only is structural rather than a
+    // rule somebody has to keep applying. There is no `persons` row either — a
+    // coach is not a member of the plant, and AS-013's link is about somebody
+    // joining it. The whole grant is one `coach_assignments` row, and the action
+    // batches that statement AFTER the claim so it can be gated on it.
+    if (userInvitation.role.kind === "coach") {
+      return {
+        seat: null,
+        churchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+        userChurchId: null,
+        statements: [],
+        linkStatements: [],
+      };
+    }
+
+    // A SEAT joins the plant. Creating a second organization for them would
+    // leave the account naming two tenancies, which `holdsSeatFor` refuses
+    // outright and no product path can repair. The ONLY writes are the account's
+    // own — the seat and its tenancy go into the users insert, and the person
+    // record AS-013 asks for is minted or claimed after it.
     return {
-      seat: seatInvitation.seat,
-      churchId: seatInvitation.churchId,
+      seat: userInvitation.role.seat,
+      churchId: userInvitation.churchId,
       sendingChurchId: null,
       sendingNetworkId: null,
-      userChurchId: seatInvitation.churchId,
+      userChurchId: userInvitation.churchId,
       statements: [],
       linkStatements: accountPersonLinkStatements({
         userId,
-        churchId: seatInvitation.churchId,
+        churchId: userInvitation.churchId,
         name: account.name,
         email: account.email,
-        matchedPersonId: seatInvitation.matchedPersonId,
+        matchedPersonId: userInvitation.matchedPersonId,
       }),
     };
   }

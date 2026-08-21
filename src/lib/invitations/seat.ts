@@ -63,13 +63,15 @@ import { and, desc, eq, gt, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
+  coachAssignments,
   userInvitations,
   users,
   type InvitableSeat,
   type NewUserInvitation,
   type UserInvitation,
+  type UserInvitationKind,
 } from "@/db/schema";
-import { assertSeatFor } from "@/lib/auth/seat-rules";
+import { assertSeatFor, type Capability } from "@/lib/auth/seat-rules";
 
 import {
   ACCOUNT_NOT_INVITABLE_MESSAGE,
@@ -89,6 +91,7 @@ import {
   resendRefusalMessage,
 } from "./resend";
 import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
+import { type InvitedRole } from "./seat-copy";
 import {
   sendSeatInvitationEmail,
   type SeatInvitationEmailDeps,
@@ -125,21 +128,65 @@ export function hashUserInvitationToken(token: string): string {
 // ----------------------------------------------------------------------------
 
 /**
- * REGISTER-ONLY, AS ONE PURE FUNCTION (AS-010).
+ * WHAT THE TWO KINDS DISAGREE ABOUT, AS ONE TABLE (AS-008 / AS-010, #496).
  *
- * Any existing account is refused, whatever it is: a plant Owner, an Admin, a
- * Member, an oversight seat, or a coach holding no seat at all. There is
- * deliberately no arm that admits one — a seat invitation is answered by
- * registering, and somebody who already has an account cannot register again, so
- * an admitted account would produce an invitation nobody could answer.
+ * `user_invitations` has always had two kinds and exactly one axis of
+ * difference: whether an address that ALREADY HOLDS AN ACCOUNT may be invited.
+ * The asymmetry is deliberate and it is a ruling (2026-08-20, 185 (5)), not an
+ * oversight:
  *
- * Pure, and total over "is there a row", so the property AS-010 states is
- * executable across every kind of account without a database.
+ *   * A SEAT invitation would MOVE an account between tenancies. One account
+ *     holds one home tenancy, so accepting would have to vacate the old one —
+ *     which is a support request, not a click. Register-only, therefore.
+ *   * A COACH invitation only ADDS a `coach_assignments` row. Nothing moves, no
+ *     tenancy is touched, and access is the UNION of what the account already
+ *     reached and what the assignment reaches. Any account can hold one, so any
+ *     account may be invited.
+ *
+ * Keeping it as a lookup rather than an `if` is what makes the property
+ * `ACCOUNT_NOT_INVITABLE_MESSAGE` states checkable: ONE predicate answers for
+ * both kinds, so "a coach invitation is never refused with that message" and "a
+ * seat invitation always is" are two reads of the same row rather than two code
+ * paths that can drift.
  */
-export function seatInviteeRefusal(
+const INVITATION_KIND_RULES = {
+  seat: {
+    admitsExistingAccount: false,
+    capability: "seat.invitation.manage",
+  },
+  coach: {
+    // `coach.assignment.manage`, NOT `seat.invitation.manage`: coaching is an
+    // assignment and never a seat, so the verb that ENDS an assignment is the
+    // verb that starts one (`endCoachAssignmentAction`, #497). Both are
+    // ADMIN_PLUS on a plant tenancy, which is what refuses a Member (AS-004).
+    admitsExistingAccount: true,
+    capability: "coach.assignment.manage",
+  },
+} as const satisfies Record<
+  UserInvitationKind,
+  { admitsExistingAccount: boolean; capability: Capability }
+>;
+
+/**
+ * REGISTER-ONLY, OR NOT, DECIDED BY THE KIND — one pure function for both
+ * (AS-008 / AS-010).
+ *
+ * For `seat`, any existing account is refused, whatever it is: a plant Owner, an
+ * Admin, a Member, an oversight seat, or a coach holding no seat at all. For
+ * `coach`, none of them is — the invitation adds an assignment and moves
+ * nothing, so there is no account it cannot be answered by.
+ *
+ * Pure, and total over "is there a row" × "which kind", so the property AS-010
+ * states is executable across every kind of account without a database.
+ */
+export function inviteeRefusalFor(
+  kind: UserInvitationKind,
   existingAccount: { id: string } | null | undefined
 ): string | null {
-  return existingAccount ? ACCOUNT_NOT_INVITABLE_MESSAGE : null;
+  if (!existingAccount) return null;
+  return INVITATION_KIND_RULES[kind].admitsExistingAccount
+    ? null
+    : ACCOUNT_NOT_INVITABLE_MESSAGE;
 }
 
 /**
@@ -157,6 +204,17 @@ export const USER_INVITE_DUPLICATE_MESSAGE =
   "There is already a pending invitation to that address — revoke it first";
 
 /**
+ * What an Owner or Admin reads when the person they are inviting to coach
+ * already coaches this plant (AS-009).
+ *
+ * It names the plant's OWN roster — the one rendered a few inches up the same
+ * screen — so it is legible without telling the caller anything they could not
+ * already read.
+ */
+export const ALREADY_COACHING_MESSAGE =
+  "That person already coaches this plant — end the current assignment first";
+
+/**
  * The cap's statement. Exported so a test can read its bound parameters: the
  * scope is this PLANT's own rows and the window is the SERVER's instant, neither
  * of which a request can influence.
@@ -167,6 +225,7 @@ export const USER_INVITE_DUPLICATE_MESSAGE =
  * the problem.
  */
 export function invitesFromChurchToAddressQuery(
+  kind: UserInvitationKind,
   churchId: string,
   inviteeEmail: string,
   since: Date
@@ -176,7 +235,7 @@ export function invitesFromChurchToAddressQuery(
     .from(userInvitations)
     .where(
       and(
-        eq(userInvitations.kind, "seat"),
+        eq(userInvitations.kind, kind),
         eq(userInvitations.churchId, churchId),
         eq(userInvitations.inviteeEmail, inviteeEmail),
         gte(userInvitations.createdAt, since)
@@ -189,10 +248,46 @@ export function invitesFromChurchToAddressQuery(
 // Create
 // ----------------------------------------------------------------------------
 
-/** What a client may say: WHO, and WHICH SEAT. That is the whole of it. */
-export interface SeatInvitationRequest {
-  inviteeEmail: string;
-  seat: InvitableSeat;
+/**
+ * What a client may say: WHO, and — for a seat — WHICH SEAT. That is the whole
+ * of it.
+ *
+ * A UNION RATHER THAN AN OPTIONAL `seat`, because the database says the same
+ * thing: `user_invitations_seat_check` is the biconditional
+ * `(kind = 'seat') = (seat is not null)`. A shape that let a coach request carry
+ * a seat could only ever produce a constraint violation, so it is not a shape.
+ */
+export type UserInvitationRequest =
+  | { kind: "seat"; inviteeEmail: string; seat: InvitableSeat }
+  | { kind: "coach"; inviteeEmail: string };
+
+/**
+ * The `seat` column for a request — the ONE place the biconditional above is
+ * satisfied, so no caller has to remember it.
+ */
+function seatColumnFor(request: UserInvitationRequest): InvitableSeat | null {
+  return request.kind === "seat" ? request.seat : null;
+}
+
+/**
+ * Read a row back as the role it invites — the inverse of `seatColumnFor`, and
+ * the ONE place a stored row becomes words (`./seat-copy`).
+ *
+ * NO `?? "member"` FALLBACK, which is what it had while `seat` was the only
+ * thing a row could carry. `user_invitations_seat_check` makes a seat row with
+ * no seat unrepresentable, so a fallback could not fire on a well-formed row —
+ * it could only ever fire on a DEFECTIVE one, and what it would do there is
+ * email a coach describing a Member's powers. Failing is the smaller harm, and
+ * the caller turns it into a refusal with a reason.
+ */
+function invitedRoleOf(invitation: UserInvitation): InvitedRole {
+  if (invitation.kind === "coach") return { kind: "coach" };
+  if (!invitation.seat) {
+    throw new InvitationError(
+      `invitation ${invitation.id} is kind 'seat' with no seat`
+    );
+  }
+  return { kind: "seat", seat: invitation.seat };
 }
 
 /** What a create produces. The token is returned for the EMAIL and nothing else. */
@@ -226,16 +321,18 @@ function invitingChurchId(actor: InvitationActor): string {
  */
 export async function createUserInvitationAs(
   actor: InvitationActor,
-  request: SeatInvitationRequest,
+  request: UserInvitationRequest,
   deps: SeatInvitationEmailDeps = {},
   now: Date = new Date()
 ): Promise<CreatedUserInvitation> {
+  const rules = INVITATION_KIND_RULES[request.kind];
+
   // AUTHORITY FIRST, and specifically before the address is looked up: the
   // lookup's refusal is a fact about a stranger, and handing it to somebody who
-  // may not invite at all would be an account-enumeration oracle for free.
-  // `seat.invitation.manage` is ADMIN_PLUS on a plant tenancy, so a Member is
-  // refused here as well as at the action's own `requireSeat` (AS-010).
-  assertSeatFor(actor, "seat.invitation.manage");
+  // may not invite at all would be an account-enumeration oracle for free. Both
+  // verbs are ADMIN_PLUS on a plant tenancy, so a Member is refused here as well
+  // as at the action's own `requireSeat` (AS-004 / AS-010).
+  assertSeatFor(actor, rules.capability);
 
   const churchId = invitingChurchId(actor);
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
@@ -246,13 +343,14 @@ export async function createUserInvitationAs(
 
   // THIS PLANT'S OWN ROWS, for an address this plant typed. Legible, and
   // deliberately above the lookup so it cannot become a statement about the
-  // person behind the address.
+  // person behind the address. Scoped to the KIND: a pending coach invitation is
+  // not a reason to refuse a seat invitation, and the two answer separately.
   const [duplicate] = await db
     .select({ id: userInvitations.id })
     .from(userInvitations)
     .where(
       and(
-        eq(userInvitations.kind, "seat"),
+        eq(userInvitations.kind, request.kind),
         eq(userInvitations.churchId, churchId),
         eq(userInvitations.inviteeEmail, inviteeEmail),
         eq(userInvitations.status, "pending"),
@@ -265,10 +363,39 @@ export async function createUserInvitationAs(
     throw new InvitationError(USER_INVITE_DUPLICATE_MESSAGE);
   }
 
+  // ALREADY COACHING THIS PLANT — an in-app sentence rather than the 500 the
+  // unique index would otherwise deliver on acceptance (AS-009, #496).
+  //
+  // IT SITS ABOVE THE LOOKUP AND IT IS STILL NOT AN ORACLE, which is worth
+  // saying because it does resolve an address to an account. The join is scoped
+  // to THIS PLANT'S OWN `coach_assignments`, and the plant already reads that
+  // roster by name on the same screen (`PlantCoachList`, #497). So the only fact
+  // it can state is one the caller was already looking at — unlike the general
+  // account lookup below, which speaks about the whole product.
+  if (request.kind === "coach") {
+    const [assigned] = await db
+      .select({ id: coachAssignments.id })
+      .from(coachAssignments)
+      .innerJoin(users, eq(users.id, coachAssignments.coachUserId))
+      .where(
+        and(
+          eq(coachAssignments.churchId, churchId),
+          eq(coachAssignments.status, "active"),
+          eq(users.email, inviteeEmail)
+        )
+      )
+      .limit(1);
+
+    if (assigned) {
+      throw new InvitationError(ALREADY_COACHING_MESSAGE);
+    }
+  }
+
   // THE CAP, counting EVERY status (AS-010). Also above the lookup, and for the
   // same reason: a cap that applied only to invitable addresses would itself be
   // a probe.
   const recent = await invitesFromChurchToAddressQuery(
+    request.kind,
     churchId,
     inviteeEmail,
     rateLimitWindowStart(now)
@@ -278,7 +405,8 @@ export async function createUserInvitationAs(
   }
 
   // THE RESOLUTION. Everything from here down speaks about a stranger, so there
-  // is exactly one sentence available and it is the imported constant.
+  // is exactly one sentence available and it is the imported constant — and for
+  // `coach` there is not even that one, because the kind admits every account.
   //
   // The projection is a single column: answering "does this address hold an
   // account" must not pull `password_hash` into application memory (the same
@@ -289,17 +417,17 @@ export async function createUserInvitationAs(
     .where(eq(users.email, inviteeEmail))
     .limit(1);
 
-  const refusal = seatInviteeRefusal(existingAccount);
+  const refusal = inviteeRefusalFor(request.kind, existingAccount);
   if (refusal) {
     throw new InvitationError(refusal);
   }
 
   const token = newUserInvitationToken();
   const row: NewUserInvitation = {
-    kind: "seat",
+    kind: request.kind,
     inviteeEmail,
     churchId,
-    seat: request.seat,
+    seat: seatColumnFor(request),
     tokenHash: hashUserInvitationToken(token),
     inviterUserId: actor.id,
     status: "pending",
@@ -341,11 +469,15 @@ async function seatInviteeEmailOutcome(
 ) {
   let churchName: string | null = null;
   let inviterName: string | null = null;
+  let role: InvitedRole;
 
   try {
     const facts = await lookupSeatInvitationSender(invitation);
     churchName = facts.churchName;
     inviterName = facts.inviterName;
+    // INSIDE THE TRY, so a row that contradicts its own CHECK becomes a refusal
+    // with a reason rather than an unhandled throw out of a best-effort send.
+    role = invitedRoleOf(invitation);
   } catch (error) {
     console.error("seat invitation sender lookup failed", {
       invitationId: invitation.id,
@@ -362,7 +494,7 @@ async function seatInviteeEmailOutcome(
       status: invitation.status,
       churchName,
       inviterName,
-      seat: invitation.seat ?? "member",
+      role,
       expiresAt: invitation.expiresAt,
     },
     deps
@@ -395,12 +527,22 @@ async function lookupSeatInvitationSender(
  * THE AUTHORITY IS THE `WHERE`, and it is one predicate shared by the list, the
  * revoke and the resend — so what an Admin sees, closes and re-emails is
  * exactly one population and the three can never disagree about "ours".
+ *
+ * BOTH KINDS, AND THE KIND PREDICATE IS GONE (#496). It read
+ * `kind = 'seat'` while that was the only kind with a caller. Keeping it would
+ * have made every coach invitation invisible to the plant that sent it and
+ * un-revokable by anyone — the list would not show it, `loadOurs` would not find
+ * it, and the auto-expire sweep would leave it pending for ever.
+ *
+ * It is not a widening of authority, which is the question to ask of a `WHERE`
+ * that loses a term: the two create verbs (`seat.invitation.manage` and
+ * `coach.assignment.manage`) carry the SAME seat set on the SAME tenancy, so
+ * every caller that could reach a seat row could already have sent the coach row
+ * beside it. What is left is the tenancy, which is the part that was ever load
+ * bearing.
  */
 function oursFilter(actor: InvitationActor) {
-  return and(
-    eq(userInvitations.kind, "seat"),
-    eq(userInvitations.churchId, invitingChurchId(actor))
-  );
+  return eq(userInvitations.churchId, invitingChurchId(actor));
 }
 
 /** Every seat invitation this plant has issued, newest first. */
@@ -575,16 +717,20 @@ export async function resendUserInvitationEmailAs(
 // ----------------------------------------------------------------------------
 
 /**
- * What `/register` needs to know about a seat token. Everything here is either
- * the reader's own address or the plant's public name — nothing about any other
- * account, and NOT the token, which the browser already holds in its URL.
+ * What `/register` needs to know about a user-invitation token. Everything here
+ * is either the reader's own address or the plant's public name — nothing about
+ * any other account, and NOT the token, which the browser already holds in its
+ * URL.
+ *
+ * `role` is the union rather than a nullable seat, so the sign-up path cannot
+ * read a seat off a coach invitation and grant one (#496).
  */
 export type UserRegistrationInvitation = {
   id: string;
   inviteeEmail: string;
   churchId: string;
   churchName: string;
-  seat: InvitableSeat;
+  role: InvitedRole;
 };
 
 /**
@@ -592,8 +738,12 @@ export type UserRegistrationInvitation = {
  *
  * `null` for anything a visitor must not be told about — unknown, answered,
  * revoked, expired — so a guessed token learns exactly what a wrong one does.
- * There is no branch here that varies on whether an ACCOUNT exists, because a
- * seat invitation is only ever created for an address that had none.
+ * There is no branch here that varies on whether an ACCOUNT exists, and that
+ * stays true now BOTH kinds pass through it (#496): a coach invitation may name
+ * an address that already holds an account, but this lookup never asks, so the
+ * page it feeds cannot tell the visitor either. What a coach with an account
+ * does instead is answer at `/coach-invitation`, where the branch is on the
+ * VIEWER's own session.
  *
  * IT THROWS ON A DATABASE FAILURE, and that is a correction (#495, review round
  * 1). This had a blanket `catch { return null }`, which cannot catch anything
@@ -617,6 +767,7 @@ export async function describeUserInvitationForRegistration(
   const [row] = await db
     .select({
       id: userInvitations.id,
+      kind: userInvitations.kind,
       inviteeEmail: userInvitations.inviteeEmail,
       churchId: userInvitations.churchId,
       churchName: churches.name,
@@ -627,21 +778,33 @@ export async function describeUserInvitationForRegistration(
     .where(
       and(
         eq(userInvitations.tokenHash, hashUserInvitationToken(candidate)),
-        eq(userInvitations.kind, "seat"),
         eq(userInvitations.status, "pending"),
         gt(userInvitations.expiresAt, now)
       )
     )
     .limit(1);
 
-  if (!row || !row.churchId || !row.seat) return null;
+  if (!row || !row.churchId) return null;
+
+  // Narrowed rather than cast: a `seat` row with no seat contradicts
+  // `user_invitations_seat_check`, and it is read as no invitation at all — the
+  // same `null` an unknown token gets, which is the only answer this route is
+  // allowed to distinguish.
+  const role: InvitedRole | null =
+    row.kind === "coach"
+      ? { kind: "coach" }
+      : row.seat
+        ? { kind: "seat", seat: row.seat }
+        : null;
+
+  if (!role) return null;
 
   return {
     id: row.id,
     inviteeEmail: row.inviteeEmail,
     churchId: row.churchId,
     churchName: row.churchName,
-    seat: row.seat,
+    role,
   };
 }
 

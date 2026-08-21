@@ -12,8 +12,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import type { InvitableSeat } from "@/db/schema/user-invitation";
-import { invitedSeatWithArticle } from "@/lib/invitations/seat-copy";
+import {
+  invitedRoleWithArticle,
+  type InvitedRole,
+} from "@/lib/invitations/seat-copy";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
@@ -86,8 +88,12 @@ export type SeatInvitationForForm = {
   token: string;
   inviteeEmail: string;
   churchName: string;
-  /** The invitation's own vocabulary, never a second spelling of it. */
-  seat: InvitableSeat;
+  /**
+   * The invitation's own vocabulary, never a second spelling of it — the union,
+   * so a coach invitation redeemed at sign-up (#496) cannot be described with a
+   * seat's words.
+   */
+  role: InvitedRole;
 };
 
 export function RegisterForm({
@@ -183,7 +189,7 @@ export function RegisterForm({
               </p>
               <p className="text-muted-foreground mt-1">
                 Finish signing up and you will join them as{" "}
-                {invitedSeatWithArticle(seatInvitation.seat)}.
+                {invitedRoleWithArticle(seatInvitation.role)}.
               </p>
             </div>
           )}

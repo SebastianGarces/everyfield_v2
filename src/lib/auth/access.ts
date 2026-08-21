@@ -1,8 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
-  coachAssignments,
   churchPrivacySettings,
   type User,
   type ChurchPrivacySettings,
@@ -13,6 +12,7 @@ import {
 // import paths, the failure `@/lib/invitations/register-path` and
 // `@/lib/oversight/org-label` are both written to avoid.
 import { isChurchLevelUser, oversightOrgOf } from "@/lib/auth/tenancy";
+import { assignedChurchIds } from "@/lib/coaching/assignments";
 
 // ============================================================================
 // Church Access Resolution
@@ -198,18 +198,14 @@ export async function canAccessFeatureData(
 // Internal Helpers
 // ============================================================================
 
+/**
+ * DELEGATED, NOT DUPLICATED (#496). "Which plants does this coach reach" is one
+ * question with one answer, and `@/lib/coaching/assignments` owns it — the nav
+ * section, the coached-plant page and this access check now read the same
+ * `WHERE`, so an assignment that is live for one of them is live for all three.
+ */
 async function getCoachChurchIds(coachUserId: string): Promise<string[]> {
-  const assignments = await db
-    .select({ churchId: coachAssignments.churchId })
-    .from(coachAssignments)
-    .where(
-      and(
-        eq(coachAssignments.coachUserId, coachUserId),
-        eq(coachAssignments.status, "active")
-      )
-    );
-
-  return assignments.map((a) => a.churchId);
+  return assignedChurchIds(coachUserId);
 }
 
 async function getSendingChurchPlantIds(

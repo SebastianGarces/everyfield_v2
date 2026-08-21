@@ -10,6 +10,7 @@ import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
+import { assignedPlantsFor } from "@/lib/coaching/assignments";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
@@ -130,12 +131,18 @@ export default async function DashboardLayout({
 
   const userIsPlatformAdmin = isPlatformAdmin(user);
 
+  // The coaching reach, read for the sidebar's "Assigned plants" section
+  // (#496). Independent of `org` above: an oversight Owner who also coaches a
+  // plant has both, and each is drawn in its own section from its own consent.
+  const assignedPlants = await assignedPlantsFor(user.id);
+
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar
         user={sidebarUser}
         orgType={org?.type ?? null}
         hasChurch={!!user.churchId}
+        assignedPlants={assignedPlants}
         isPlatformAdmin={userIsPlatformAdmin}
       />
       <SidebarInset className="flex h-screen flex-col overflow-hidden">

@@ -80,6 +80,16 @@ const createSchema = z.object({
   seat: z.enum(["admin", "member"]),
 });
 
+/**
+ * The coach form asks for an address and NOTHING ELSE — derived from the seat
+ * schema so the two cannot disagree about what a valid address is.
+ *
+ * There is no seat field because a coach has no seat: `user_invitations` writes
+ * NULL there, and `user_invitations_seat_check` is the biconditional that makes
+ * any other value a constraint violation rather than a bug to find later.
+ */
+const createCoachSchema = createSchema.omit({ seat: true });
+
 const invitationIdSchema = z.object({
   invitationId: z.uuid("That is not an invitation we can act on"),
 });
@@ -131,7 +141,7 @@ export async function createSeatInvitationAction(
   try {
     const result = await createUserInvitationAs(
       invitationActorFromSession(session),
-      parsed.data
+      { kind: "seat", ...parsed.data }
     );
 
     refresh();
@@ -140,6 +150,56 @@ export async function createSeatInvitationAction(
     // reaches the client — the create either succeeded or refused with the one
     // neutral message, and the success says only what the admin typed plus what
     // the mail provider said (`invitationCreatedNotice`).
+    return {
+      created: {
+        inviteeEmail: result.invitation.inviteeEmail,
+        emailSent: result.emailSent,
+      },
+    };
+  } catch (error) {
+    return { error: refusal(error, GENERIC_FAILURE) };
+  }
+}
+
+/**
+ * Invite somebody to COACH this plant (AS-008 / AS-009, #496).
+ *
+ * `coach.assignment.manage`, the same verb that ENDS an assignment
+ * (`endCoachAssignmentAction`): coaching is an assignment and never a seat, so
+ * the two halves of managing one answer to one authority. It is ADMIN_PLUS on a
+ * plant tenancy, which is what refuses a Member.
+ *
+ * The result shape is the seat action's, unchanged and deliberately so — the
+ * create-notice rule (`invitationCreatedNotice`) says the same neutral sentence
+ * for both kinds, and a coach-specific success message would be the one place
+ * the surface could start saying whether an account exists.
+ */
+export async function createCoachInvitationAction(
+  _prevState: CreateSeatInvitationState,
+  formData: FormData
+): Promise<CreateSeatInvitationState> {
+  const session = await requireSeat("coach.assignment.manage");
+
+  const parsed = createCoachSchema.safeParse({
+    inviteeEmail: formData.get("inviteeEmail") ?? "",
+  });
+
+  if (!parsed.success) {
+    return {
+      error:
+        z.flattenError(parsed.error).fieldErrors.inviteeEmail?.[0] ??
+        "Check the form and try again",
+    };
+  }
+
+  try {
+    const result = await createUserInvitationAs(
+      invitationActorFromSession(session),
+      { kind: "coach", ...parsed.data }
+    );
+
+    refresh();
+
     return {
       created: {
         inviteeEmail: result.invitation.inviteeEmail,

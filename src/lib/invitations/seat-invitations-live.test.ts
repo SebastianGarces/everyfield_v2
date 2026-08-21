@@ -272,7 +272,7 @@ test(
 
     const { invitation, emailSent } = await createUserInvitationAs(
       actor,
-      { inviteeEmail: invitee, seat: "admin" },
+      { kind: "seat", inviteeEmail: invitee, seat: "admin" },
       mail.deps
     );
 
@@ -340,7 +340,7 @@ test(
       await assert.rejects(
         createUserInvitationAs(
           actor,
-          { inviteeEmail: address, seat: "member" },
+          { kind: "seat", inviteeEmail: address, seat: "member" },
           mail.deps
         ),
         (error: unknown) => {
@@ -374,7 +374,7 @@ test(
     for (let i = 0; i < INVITES_PER_INVITEE_PER_WINDOW; i += 1) {
       const { invitation } = await createUserInvitationAs(
         actor,
-        { inviteeEmail: invitee, seat: "member" },
+        { kind: "seat", inviteeEmail: invitee, seat: "member" },
         mail.deps
       );
       created.push(invitation.id);
@@ -388,7 +388,7 @@ test(
     await assert.rejects(
       createUserInvitationAs(
         actor,
-        { inviteeEmail: invitee, seat: "member" },
+        { kind: "seat", inviteeEmail: invitee, seat: "member" },
         mail.deps
       ),
       (error: unknown) => {
@@ -415,7 +415,7 @@ test(
     const other = await scratchPlant();
     const { invitation } = await createUserInvitationAs(
       other.actor,
-      { inviteeEmail: invitee, seat: "member" },
+      { kind: "seat", inviteeEmail: invitee, seat: "member" },
       mail.deps
     );
     assert.equal(invitation.churchId, other.churchId);
@@ -435,7 +435,7 @@ test(
 
     const { invitation } = await createUserInvitationAs(
       actor,
-      { inviteeEmail: scratchEmail(), seat: "member" },
+      { kind: "seat", inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
     );
     const first = mail.tokenFrom();
@@ -493,7 +493,7 @@ test(
 
     const { invitation } = await createUserInvitationAs(
       actor,
-      { inviteeEmail: scratchEmail(), seat: "member" },
+      { kind: "seat", inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
     );
     const live = mail.tokenFrom();
@@ -538,7 +538,7 @@ test(
 
     const { invitation } = await createUserInvitationAs(
       actor,
-      { inviteeEmail: scratchEmail(), seat: "member" },
+      { kind: "seat", inviteeEmail: scratchEmail(), seat: "member" },
       mail.deps
     );
 
@@ -590,7 +590,7 @@ async function registerThrough(token: string, email: string, name: string) {
     false,
     {
       churchId: described.churchId,
-      seat: described.seat,
+      role: described.role,
       matchedPersonId: await findLinkablePersonId(described.churchId, email),
     }
   );
@@ -626,7 +626,7 @@ test(
 
     await createUserInvitationAs(
       actor,
-      { inviteeEmail: invitee, seat: "admin" },
+      { kind: "seat", inviteeEmail: invitee, seat: "admin" },
       mail.deps
     );
     const { userId, invitationId } = await registerThrough(
@@ -680,7 +680,7 @@ test(
 
     await createUserInvitationAs(
       actor,
-      { inviteeEmail: invitee, seat: "member" },
+      { kind: "seat", inviteeEmail: invitee, seat: "member" },
       mail.deps
     );
     const { userId } = await registerThrough(
@@ -728,7 +728,7 @@ test(
 
     await createUserInvitationAs(
       actor,
-      { inviteeEmail: invitee, seat: "member" },
+      { kind: "seat", inviteeEmail: invitee, seat: "member" },
       mail.deps
     );
     const { userId } = await registerThrough(

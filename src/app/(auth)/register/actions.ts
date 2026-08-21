@@ -25,6 +25,7 @@ import {
   describeUserInvitationForRegistration,
   userInvitationActedOnAtRegistration,
 } from "@/lib/invitations/seat";
+import { assignCoachOnAcceptStatement } from "@/lib/coaching/assignments";
 import { findLinkablePersonId } from "@/lib/people/account-person-link";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import { eq } from "drizzle-orm";
@@ -245,14 +246,19 @@ export async function register(
     // somebody invited to a vision meeting months ago — and it is LINKED rather
     // than duplicated. The recipe itself is the directory's
     // (`accountPersonLinkStatements`); this is only its input.
+    // A COACH NEEDS NO PERSON LOOKUP, so it is not run for one: AS-013's
+    // match-or-create is about somebody JOINING the plant, and a coach does not
+    // join it. Skipping the read is also the honest thing — it asks the plant's
+    // directory about an address, and a coach's address is not the plant's to
+    // look up.
     seatInvitation
       ? {
           churchId: seatInvitation.churchId,
-          seat: seatInvitation.seat,
-          matchedPersonId: await findLinkablePersonId(
-            seatInvitation.churchId,
-            identifier
-          ),
+          role: seatInvitation.role,
+          matchedPersonId:
+            seatInvitation.role.kind === "seat"
+              ? await findLinkablePersonId(seatInvitation.churchId, identifier)
+              : null,
         }
       : null
   );
@@ -306,6 +312,18 @@ export async function register(
   // this batch did not close — and a failure anywhere rolls both back.
   if (seatInvitation) {
     statements.push(claimUserInvitationStatement(seatInvitation.id, userId));
+
+    // A COACH'S GRANT IS THE ROW AFTER IT, AND THE ORDER IS THE GUARD (#496).
+    //
+    // A seat is granted by the users insert itself — the seat and its tenancy in
+    // one write. A coach has neither, so their grant is a `coach_assignments`
+    // row, and it is batched AFTER the claim because its `WHERE` re-asserts what
+    // the claim set (`status = 'accepted'`). A claim that matched nothing leaves
+    // this insert selecting nothing, so it writes nothing rather than assigning
+    // a coach to a plant on an invitation that was revoked a millisecond ago.
+    if (seatInvitation.role.kind === "coach") {
+      statements.push(assignCoachOnAcceptStatement(seatInvitation.id));
+    }
   }
 
   // The org entity goes FIRST — the users FKs point at it. (`unshift` rather
