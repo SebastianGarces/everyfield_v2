@@ -38,12 +38,13 @@ that fits the task and keep moving.
    Assert the outcome; a screenshot you only admired proves nothing. Backend work gets one real
    request asserting status and shape.
 6. **Ship.** One PR, `Closes #<issue>` per issue, evidence in the body. CI green
-   (`Format, Lint, Typecheck, Build`) is the merge bar: enable auto-merge and move on. Don't wait
-   for a human. If a migration is in the diff, apply it on a scratch DB first and paste the DDL
-   delta in the body. When another PR carries **`merge-priority`** it is starved and every other
-   track holds until it lands — read that off the board at the moment you merge, never earlier:
-   `ops/merge-hold.sh <your-pr> --wait && gh pr merge <your-pr> --squash`
-   (`.claude/skills/open-pr/` → The merge hold).
+   (`Format, Lint, Typecheck, Build`) is the merge bar, and you drive the merge yourself rather
+   than waiting for a human. If a migration is in the diff, apply it on a scratch DB first and
+   paste the DDL delta in the body. The order is anchor → `--disable-auto` → back-fill the body →
+   merge, and when another PR carries **`merge-priority`** it is starved, so every other track
+   holds until it lands — read that off the board in the same breath as merging, never earlier:
+   `ops/merge-hold.sh <your-pr> --wait && gh pr merge <your-pr> --squash`. Full recipe and the
+   reason the merge goes last: `.claude/skills/open-pr/`.
 7. **If something fails, fix it and go again.** There is no attempt cap, no blocked label, no
    handing the work back. "I could not finish because X" is only acceptable when X is missing
    access or credentials.
