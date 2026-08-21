@@ -970,6 +970,13 @@ const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
         wellFormed: ["America/Chicago"],
         malformed: ["Not/AZone"],
       },
+      {
+        // N-013 (#448). The malformed case is an hour of 24 — a wall clock that
+        // never comes round, and therefore a digest owed forever if it landed.
+        name: "setChurchDigestScheduleAction",
+        wellFormed: [{ weekday: 0, hour: 16 }],
+        malformed: [{ weekday: 7, hour: 24 }],
+      },
     ],
   },
   {

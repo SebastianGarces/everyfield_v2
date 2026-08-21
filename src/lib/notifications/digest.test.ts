@@ -25,6 +25,7 @@ import {
   plantsOwedPlanterDigestQuery,
   runPlanterDigest,
   runPlanterDigestSweep,
+  type DigestCohort,
   type PlanterDigestDeps,
   type PlanterDigestSweepDeps,
 } from "./digest";
@@ -34,10 +35,11 @@ import {
   composePlanterDigestBody,
   composePlanterDigestTitle,
   currentDigestDedupeKeys,
+  DEFAULT_DIGEST_ANCHOR,
   digestPeriodFor,
   planterDigestDedupeKey,
   PLANTER_DIGEST_TYPE,
-  widestPeriodEnd,
+  type DigestAnchor,
   type DigestCounts,
   type DigestPeriod,
 } from "./digest-content";
@@ -69,6 +71,48 @@ const COACH = "44444444-4444-4444-8444-444444444444";
 /** A Wednesday, so a weekly period's Monday start is not the same day. */
 const NOW = new Date("2026-08-19T09:00:00.000Z");
 
+/**
+ * The anchor the cadence cases below run under: UTC, Monday, midnight.
+ *
+ * NOT the product's default — that is Sunday 16:00 in the CHURCH's own zone
+ * (N-013, #448), and `digest-content.test.ts` owns the anchor's own cases. It
+ * is chosen here because these cases are about the CADENCE guard, and a period
+ * boundary on the UTC grid keeps their dates readable. What they prove — that
+ * "once per period" is the dedupe key and not a clock this module keeps — is
+ * true of every anchor, which is what the two-zone sweep at the bottom of this
+ * file asserts directly.
+ */
+const MONDAY_UTC: DigestAnchor = { timeZone: "UTC", weekday: 1, hour: 0 };
+
+/** Church A's real anchor for the sweep cases: Sunday 16:00 Eastern. */
+const EASTERN_SUNDAY_4PM: DigestAnchor = {
+  timeZone: "America/New_York",
+  weekday: 0,
+  hour: 16,
+};
+
+/** Church B's: a different zone AND a different configured time. */
+const PACIFIC_WEDNESDAY_7AM: DigestAnchor = {
+  timeZone: "America/Los_Angeles",
+  weekday: 3,
+  hour: 7,
+};
+
+/**
+ * The three columns a church would hold to produce this anchor.
+ *
+ * A cohort is the STORED tuple and an anchor is the COERCED one; for every
+ * anchor here the two agree, which is why this conversion is honest. The case
+ * where they do not is the point of `DigestCohort` and has its own test below.
+ */
+function cohortOf(anchor: DigestAnchor): DigestCohort {
+  return {
+    timeZone: anchor.timeZone,
+    digestSendWeekday: anchor.weekday,
+    digestSendHour: anchor.hour,
+  };
+}
+
 const NOTHING: DigestCounts = {
   overdue_tasks: 0,
   tasks_due_soon: 0,
@@ -96,6 +140,8 @@ interface FakeOptions {
 
 class FakeDigestDeps implements PlanterDigestDeps {
   readonly enqueued: EnqueueNotificationInput[] = [];
+  /** The subset of `enqueued` that actually wrote a row — the index let through. */
+  readonly created: EnqueueNotificationInput[] = [];
   readonly summarised: {
     churchId: string;
     recipientUserId: string;
@@ -185,6 +231,7 @@ class FakeDigestDeps implements PlanterDigestDeps {
     }
 
     held.add(key);
+    this.created.push(input);
     return {
       status: "recorded",
       notification: null,
@@ -203,7 +250,11 @@ test("a run enqueues exactly one digest per eligible recipient", async () => {
     recipients: [PLANTER, TEAM_MEMBER, COACH],
   });
 
-  const report = await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
+  const report = await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
 
   assert.equal(deps.enqueued.length, 3);
   assert.equal(report.recipients, 3);
@@ -228,7 +279,11 @@ test("a recipient with nothing outstanding receives NO digest", async () => {
     counts: { [`${CHURCH_A}|${PLANTER}`]: NOTHING },
   });
 
-  const report = await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
+  const report = await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
 
   assert.equal(report.quiet, 1);
   assert.equal(report.created, 1);
@@ -248,7 +303,11 @@ test("a plant where nobody has anything outstanding sends nothing at all", async
     },
   });
 
-  const report = await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
+  const report = await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
 
   assert.equal(deps.enqueued.length, 0);
   assert.equal(report.quiet, 2);
@@ -261,7 +320,11 @@ test("a recipient enqueue refuses is reported, and costs nobody else theirs", as
     refuse: [PLANTER],
   });
 
-  const report = await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
+  const report = await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
 
   assert.equal(report.skipped, 1);
   assert.equal(report.created, 1);
@@ -285,7 +348,11 @@ test("a weekly recipient gets ONE digest per week, not one per run", async () =>
   let created = 0;
   let deduped = 0;
   for (const at of withinOneWeek) {
-    const report = await runPlanterDigest(deps, { churchId: CHURCH_A, at });
+    const report = await runPlanterDigest(deps, {
+      churchId: CHURCH_A,
+      at,
+      anchor: MONDAY_UTC,
+    });
     created += report.created;
     deduped += report.deduped;
   }
@@ -304,6 +371,7 @@ test("a weekly recipient gets ONE digest per week, not one per run", async () =>
   const nextWeek = await runPlanterDigest(deps, {
     churchId: CHURCH_A,
     at: new Date("2026-08-24T07:00:00.000Z"),
+    anchor: MONDAY_UTC,
   });
   assert.equal(nextWeek.created, 1);
 });
@@ -314,14 +382,20 @@ test("a daily recipient gets one per day, and cadence is read per recipient", as
     cadences: { [PLANTER]: "daily" },
   });
 
-  await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
+  await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
   await runPlanterDigest(deps, {
     churchId: CHURCH_A,
     at: new Date("2026-08-19T21:00:00.000Z"),
+    anchor: MONDAY_UTC,
   });
   const nextDay = await runPlanterDigest(deps, {
     churchId: CHURCH_A,
     at: new Date("2026-08-20T08:00:00.000Z"),
+    anchor: MONDAY_UTC,
   });
 
   const forPlanter = deps.enqueued.filter(
@@ -357,7 +431,9 @@ test("the digest email carries a link into the app for every line it reports", a
     "digest",
     [
       {
-        title: composePlanterDigestTitle(digestPeriodFor("weekly", NOW)),
+        title: composePlanterDigestTitle(
+          digestPeriodFor("weekly", MONDAY_UTC, NOW)
+        ),
         body,
       },
     ],
@@ -440,8 +516,16 @@ test("a digest is church-scoped and carries no other church's data", async () =>
     },
   });
 
-  await runPlanterDigest(deps, { churchId: CHURCH_A, at: NOW });
-  await runPlanterDigest(deps, { churchId: CHURCH_B, at: NOW });
+  await runPlanterDigest(deps, {
+    churchId: CHURCH_A,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
+  await runPlanterDigest(deps, {
+    churchId: CHURCH_B,
+    at: NOW,
+    anchor: MONDAY_UTC,
+  });
 
   const forA = deps.enqueued.filter((row) => row.churchId === CHURCH_A);
   const forB = deps.enqueued.filter((row) => row.churchId === CHURCH_B);
@@ -472,9 +556,8 @@ test("a digest is church-scoped and carries no other church's data", async () =>
 
 test("the owed-plants selection scopes every correlated probe by church", () => {
   const { sql } = plantsOwedPlanterDigestQuery({
-    dedupeKeys: currentDigestDedupeKeys(NOW),
+    cohort: cohortOf(MONDAY_UTC),
     at: NOW,
-    lookaheadEnd: widestPeriodEnd(NOW),
     limit: 25,
     afterChurchId: null,
   }).toSQL();
@@ -496,16 +579,65 @@ test("the owed-plants selection scopes every correlated probe by church", () => 
   // A subtask is a checklist item, not a task (memory/invariants.md → Tasks).
   assert.match(sql, /"tasks"\."parent_task_id" is null/);
 
-  // The keyset anchor is absent on the first page and present after it.
+  // The keyset cursor is absent on the first page and present after it.
   assert.doesNotMatch(sql, /"churches"\."id" > /);
   const paged = plantsOwedPlanterDigestQuery({
-    dedupeKeys: currentDigestDedupeKeys(NOW),
+    cohort: cohortOf(MONDAY_UTC),
     at: NOW,
-    lookaheadEnd: widestPeriodEnd(NOW),
     limit: 25,
     afterChurchId: CHURCH_A,
   }).toSQL();
   assert.match(paged.sql, /"churches"\."id" > /);
+});
+
+test("the selection is COHORT-scoped, and its owed test is still two literals", () => {
+  // The half of #448 that keeps the sweep's design intact. Making the send time
+  // per-church makes the key's VALUE church-dependent; it must not make the key
+  // STRING carry a church id, or the owed test degrades from an `IN` on two
+  // literals into the concatenated-uuid `LIKE` the oversight sweep fell back on.
+  const eastern = plantsOwedPlanterDigestQuery({
+    cohort: cohortOf(EASTERN_SUNDAY_4PM),
+    at: NOW,
+    limit: 25,
+    afterChurchId: null,
+  }).toSQL();
+
+  // The page is filtered to one (zone, weekday, hour)...
+  assert.match(eastern.sql, /"churches"\."time_zone" = /);
+  assert.match(eastern.sql, /"churches"\."digest_send_weekday" = /);
+  assert.match(eastern.sql, /"churches"\."digest_send_hour" = /);
+  assert.ok(eastern.params.includes("America/New_York"));
+
+  // ...and the dedupe test names exactly two keys, neither carrying a church.
+  const keys = eastern.params.filter(
+    (param): param is string =>
+      typeof param === "string" && param.startsWith(`${PLANTER_DIGEST_TYPE}:`)
+  );
+  assert.equal(keys.length, 2, "one key per cadence, and no more");
+  assert.deepEqual(
+    keys.sort(),
+    currentDigestDedupeKeys(EASTERN_SUNDAY_4PM, NOW).sort()
+  );
+  for (const key of keys) {
+    assert.doesNotMatch(key, /-4[0-9a-f]{3}-/, "a uuid reached the key string");
+  }
+  assert.doesNotMatch(eastern.sql, /like/i, "the owed test degraded to a LIKE");
+
+  // A second cohort on the same instant asks for different keys — which is the
+  // whole reason the query derives them from the anchor rather than taking them.
+  const pacific = plantsOwedPlanterDigestQuery({
+    cohort: cohortOf(PACIFIC_WEDNESDAY_7AM),
+    at: NOW,
+    limit: 25,
+    afterChurchId: null,
+  }).toSQL();
+  assert.notDeepEqual(
+    pacific.params.filter(
+      (param) =>
+        typeof param === "string" && param.startsWith(`${PLANTER_DIGEST_TYPE}:`)
+    ),
+    keys
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -635,7 +767,7 @@ class TinyDispatchStore implements DispatchDeps {
 }
 
 function digestRow(overrides: Partial<NewNotification> = {}): Notification {
-  const period = digestPeriodFor("weekly", NOW);
+  const period = digestPeriodFor("weekly", MONDAY_UTC, NOW);
   return {
     id: "n-digest",
     anchorType: "church",
@@ -759,8 +891,15 @@ class FakeSweepDeps implements PlanterDigestSweepDeps {
   pages: string[][] = [];
   failOn = new Set<string>();
   selectionThrows = false;
+  /** One cohort unless a case says otherwise — the shape before #448. */
+  cohorts: DigestCohort[] = [cohortOf(MONDAY_UTC)];
+
+  async listCohorts(): Promise<DigestCohort[]> {
+    return this.cohorts;
+  }
 
   async selectPlantsOwed(query: {
+    cohort: DigestCohort;
     afterChurchId: string | null;
     limit: number;
   }): Promise<string[]> {
@@ -844,4 +983,318 @@ test("the budget stops the sweep between plants and the rest roll over", async (
   assert.equal(summary.budgetExhausted, true);
   assert.ok(summary.plantsScanned < 4, "it stopped early");
   assert.equal(deps.digested.length, summary.plantsScanned);
+});
+
+test("one tick sweeps every cohort, and a cohort's failure costs only that cohort", async () => {
+  const deps = new FakeSweepDeps();
+  deps.cohorts = [
+    cohortOf(EASTERN_SUNDAY_4PM),
+    cohortOf(PACIFIC_WEDNESDAY_7AM),
+  ];
+  deps.pages = [["c1", "c2"]];
+
+  const summary = await runPlanterDigestSweep(deps, { at: NOW, limit: 5 });
+
+  // Each cohort gets its own keyset scan, so the same fake page is walked twice.
+  assert.deepEqual(deps.digested, ["c1", "c2", "c1", "c2"]);
+  assert.equal(summary.pages, 2);
+
+  // The budget and the plant ceiling are the TICK's, shared across cohorts —
+  // a product with many zones reaches fewer plants per tick, never more.
+  const capped = new FakeSweepDeps();
+  capped.cohorts = [
+    cohortOf(EASTERN_SUNDAY_4PM),
+    cohortOf(PACIFIC_WEDNESDAY_7AM),
+  ];
+  capped.pages = [["c1", "c2", "c3"]];
+  const bounded = await runPlanterDigestSweep(capped, {
+    at: NOW,
+    limit: 3,
+    maxPlants: 3,
+  });
+  assert.equal(bounded.plantsScanned, 3, "the ceiling spans the cohorts");
+});
+
+test("a sweep with no plants configured anywhere does nothing and reports it", async () => {
+  const deps = new FakeSweepDeps();
+  deps.cohorts = [];
+
+  const summary = await runPlanterDigestSweep(deps, { at: NOW });
+
+  assert.equal(summary.plantsScanned, 0);
+  assert.equal(summary.pages, 0);
+  assert.equal(summary.failed, 0);
+});
+
+// ----------------------------------------------------------------------------
+// AC — TWO ZONES, TWO CONFIGURED TIMES, ONE DISPATCHER RUN (N-013, #448)
+// ----------------------------------------------------------------------------
+//
+// The acceptance criterion this file exists to answer, driven end to end: the
+// real sweep over the real per-plant run, across eight days of 15-minute ticks.
+// Nothing is stubbed but the storage.
+
+/** Every fifteen minutes from `from`, for `days` days. The dispatcher's tick. */
+function ticks(from: Date, days: number): Date[] {
+  return Array.from(
+    { length: days * 96 },
+    (_, i) => new Date(from.getTime() + i * 15 * 60_000)
+  );
+}
+
+class TwoChurchWorld implements PlanterDigestSweepDeps {
+  readonly digest: FakeDigestDeps;
+  /** Every row actually written, with the tick that wrote it. */
+  readonly sends: {
+    churchId: string;
+    recipientUserId: string;
+    dedupeKey: string;
+    at: Date;
+  }[] = [];
+
+  /** Each church's three STORED columns, which is what the real query filters on. */
+  private readonly cohortOfChurch = new Map<string, DigestCohort>([
+    [CHURCH_A, cohortOf(EASTERN_SUNDAY_4PM)],
+    [CHURCH_B, cohortOf(PACIFIC_WEDNESDAY_7AM)],
+  ]);
+
+  constructor() {
+    // Church A runs a weekly planter and a DAILY team member, so the same
+    // church anchor serves both cadences in the same sweep.
+    this.digest = new FakeDigestDeps({
+      cadences: { [TEAM_MEMBER]: "daily" },
+    });
+  }
+
+  async listCohorts(): Promise<DigestCohort[]> {
+    return [...this.cohortOfChurch.values()];
+  }
+
+  async selectPlantsOwed(query: {
+    cohort: DigestCohort;
+    afterChurchId: string | null;
+    limit: number;
+  }): Promise<string[]> {
+    // The real query filters on the cohort's three COLUMN VALUES and on
+    // owed-ness. Matching by value rather than by object identity is the point:
+    // an identity match would have hidden the defect where a cohort was keyed
+    // by the coerced anchor and filtered by the stored columns. Owed-ness is
+    // modelled by the dedupe index inside `FakeDigestDeps.enqueue`, which is
+    // the same arbiter the real one uses.
+    const matches = (cohort: DigestCohort) =>
+      cohort.timeZone === query.cohort.timeZone &&
+      cohort.digestSendWeekday === query.cohort.digestSendWeekday &&
+      cohort.digestSendHour === query.cohort.digestSendHour;
+
+    return [...this.cohortOfChurch.entries()]
+      .filter(([, cohort]) => matches(cohort))
+      .map(([churchId]) => churchId)
+      .filter((id) => (query.afterChurchId ? id > query.afterChurchId : true))
+      .sort()
+      .slice(0, query.limit);
+  }
+
+  async runDigest(churchId: string, at: Date, anchor: DigestAnchor) {
+    const before = this.digest.created.length;
+    const report = await runPlanterDigest(this.digest, {
+      churchId,
+      at,
+      anchor,
+    });
+    for (const row of this.digest.created.slice(before)) {
+      // `enqueue` admits an org-anchored notification, so both are optional on
+      // its input. A digest is always church-anchored and always keyed; asserting
+      // it here says so rather than widening the record with a `?? ""`.
+      assert.ok(row.churchId, "a digest row with no church");
+      assert.ok(row.dedupeKey, "a digest row with no dedupe key");
+      this.sends.push({
+        churchId: row.churchId,
+        recipientUserId: row.recipientUserId,
+        dedupeKey: row.dedupeKey,
+        at,
+      });
+    }
+    return report;
+  }
+}
+
+test("two churches, two zones, two configured times — one dispatcher run each tick", async () => {
+  const world = new TwoChurchWorld();
+  const window = ticks(new Date("2026-08-16T00:00:00.000Z"), 8);
+
+  for (const at of window) {
+    await runPlanterDigestSweep(world, { at, limit: 10 });
+  }
+
+  // ------------------------------------------------------------------
+  // ONCE PER RECIPIENT PER PERIOD, across every tick in that period.
+  // ------------------------------------------------------------------
+  const identities = world.sends.map(
+    (send) => `${send.churchId}|${send.recipientUserId}|${send.dedupeKey}`
+  );
+  assert.deepEqual(
+    identities,
+    [...new Set(identities)],
+    "a period was served twice"
+  );
+
+  // ------------------------------------------------------------------
+  // EACH ROW LANDED IN THE TICK COVERING ITS OWN LOCAL SEND TIME.
+  // ------------------------------------------------------------------
+  // The expected tick is the first in the sweep at or after the period opened —
+  // which for a period already open when the window started is the very first
+  // tick, and for every later one is 16:00 Eastern or 07:00 Pacific exactly.
+  for (const send of world.sends) {
+    const cadence = send.dedupeKey.includes(":daily:") ? "daily" : "weekly";
+    const anchor =
+      send.churchId === CHURCH_A ? EASTERN_SUNDAY_4PM : PACIFIC_WEDNESDAY_7AM;
+    const period = digestPeriodFor(cadence, anchor, send.at);
+
+    assert.equal(
+      planterDigestDedupeKey(period),
+      send.dedupeKey,
+      "the row was written under a period the tick does not belong to"
+    );
+    const firstCoveringTick = window.find((tick) => tick >= period.start);
+    assert.equal(
+      send.at.toISOString(),
+      firstCoveringTick?.toISOString(),
+      `${send.recipientUserId} was served late: ${send.at.toISOString()} for a period opening ${period.start.toISOString()}`
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // THE SEND INSTANTS THEMSELVES.
+  // ------------------------------------------------------------------
+  const weeklyFor = (userId: string) =>
+    world.sends
+      .filter(
+        (send) =>
+          send.recipientUserId === userId && send.dedupeKey.includes(":weekly:")
+      )
+      .map((send) => send.at.toISOString());
+
+  // Church A's planter, at Sunday 16:00 Eastern. The window opens at
+  // 2026-08-16T00:00Z, which is Saturday 20:00 EDT — still inside the week that
+  // began Sunday the 9th, so that period is served on the first tick. The two
+  // after it are Sundays the 16th and the 23rd, each at 16:00 EDT = 20:00 UTC.
+  //
+  // NOT 2026-08-16T00:00Z for the week of the 16th, which is what a UTC-day
+  // boundary would have produced and is Saturday evening in the Americas — the
+  // failure the ruling exists to prevent.
+  assert.deepEqual(weeklyFor(PLANTER), [
+    "2026-08-16T00:00:00.000Z",
+    "2026-08-16T20:00:00.000Z",
+    "2026-08-23T20:00:00.000Z",
+  ]);
+
+  // Church B's coach, at Wednesday 07:00 Pacific: the week already open on the
+  // first tick, then Wednesday 2026-08-19 at 07:00 PDT — 14:00 UTC. A DIFFERENT
+  // day AND a different hour from Church A's, out of the same dispatcher runs.
+  assert.deepEqual(weeklyFor(COACH), [
+    "2026-08-16T00:00:00.000Z",
+    "2026-08-19T14:00:00.000Z",
+  ]);
+
+  // ------------------------------------------------------------------
+  // THE HOUR GOVERNS THE DAILY CADENCE TOO, AND THE WEEKDAY DOES NOT.
+  // ------------------------------------------------------------------
+  // The team member chose daily, in the same church, under the same anchor.
+  // Every one of their sends is at 16:00 Eastern, on every weekday.
+  const daily = world.sends.filter(
+    (send) => send.recipientUserId === TEAM_MEMBER
+  );
+  assert.ok(
+    daily.every((send) => send.dedupeKey.includes(":daily:")),
+    "the CHURCH setting overrode the RECIPIENT's cadence"
+  );
+  // Nine: the day already in progress when the window opened, plus the eight
+  // that opened inside it.
+  assert.equal(daily.length, 9, "one per day across the window");
+  assert.deepEqual(
+    daily.slice(1).map((send) => send.at.toISOString().slice(11)),
+    Array(8).fill("20:00:00.000Z"),
+    "every daily after the first landed at 16:00 EDT"
+  );
+
+  // And the planter in that same church stayed weekly — three rows, not nine.
+  assert.equal(weeklyFor(PLANTER).length, 3);
+});
+
+test("a cohort filters on the STORED columns, never on the coerced anchor", () => {
+  // The defect this pins: `listDigestCohorts` reads the raw columns and the
+  // selection filters on them, but the dedupe keys come from the COERCED
+  // anchor. Key the cohort by the coerced value and filter with it, and a row
+  // that failed coercion is listed under one cohort and matched by none — a
+  // plant owed a digest forever, with nothing in any log to say why.
+  const stored: DigestCohort = {
+    timeZone: "Not/AZone",
+    digestSendWeekday: 9,
+    digestSendHour: 25,
+  };
+
+  const { sql, params } = plantsOwedPlanterDigestQuery({
+    cohort: stored,
+    at: NOW,
+    limit: 25,
+    afterChurchId: null,
+  }).toSQL();
+
+  // The WHERE names what the row actually holds, verbatim...
+  assert.ok(params.includes("Not/AZone"), "the filter was coerced away");
+  assert.ok(params.includes(9));
+  assert.ok(params.includes(25));
+  assert.match(sql, /"churches"\."time_zone" = /);
+
+  // ...while the dedupe keys are the ones the DEFAULT anchor produces, because
+  // that is the anchor the per-plant run will digest it under.
+  const keys = params.filter(
+    (param): param is string =>
+      typeof param === "string" && param.startsWith(`${PLANTER_DIGEST_TYPE}:`)
+  );
+  assert.deepEqual(
+    keys.sort(),
+    currentDigestDedupeKeys(DEFAULT_DIGEST_ANCHOR, NOW).sort(),
+    "the keys must be the ones the run will actually write"
+  );
+});
+
+test("the cohort the sweep starts at rotates with the tick", async () => {
+  // Without this the budget always runs out in the same place, and the cohorts
+  // behind it are never swept on ANY tick — a silent permanent starvation that
+  // the per-cohort liveness argument does not cover.
+  const cohorts = [
+    cohortOf(MONDAY_UTC),
+    cohortOf(EASTERN_SUNDAY_4PM),
+    cohortOf(PACIFIC_WEDNESDAY_7AM),
+  ];
+
+  const leaders: string[] = [];
+  for (let tick = 0; tick < 6; tick += 1) {
+    const deps = new FakeSweepDeps();
+    deps.cohorts = cohorts;
+    deps.pages = [["c1"]];
+
+    const seen: DigestCohort[] = [];
+    const inner = deps.selectPlantsOwed.bind(deps);
+    deps.selectPlantsOwed = async (query) => {
+      seen.push(query.cohort);
+      return inner(query);
+    };
+
+    await runPlanterDigestSweep(deps, {
+      at: new Date(NOW.getTime() + tick * 15 * 60_000),
+      limit: 5,
+    });
+    leaders.push(seen[0].timeZone);
+  }
+
+  // Every cohort leads at least once across `cohorts.length` consecutive ticks.
+  assert.equal(
+    new Set(leaders).size,
+    cohorts.length,
+    `only ${new Set(leaders).size} of ${cohorts.length} cohorts ever led: ${leaders.join(", ")}`
+  );
+  // ...and the rotation advances by exactly one cohort per tick.
+  assert.equal(leaders[0], leaders[3], "the cycle is not the cohort count");
 });
