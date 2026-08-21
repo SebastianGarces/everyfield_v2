@@ -40,6 +40,7 @@ export const CSF_FIXTURE = {
       summary:
         "Vision meetings on cadence, drawing a steady flow of new people.",
       standing: "strength",
+      evidence: { quality: "measured", attestedDaysAgo: null },
       insights: [
         {
           id: "fixture-insight-1",
@@ -68,6 +69,7 @@ export const CSF_FIXTURE = {
       summary:
         "Inviting and follow-up spread across the core group, not carried alone.",
       standing: "attention",
+      evidence: { quality: "measured", attestedDaysAgo: null },
       insights: [
         {
           id: "fixture-insight-2",
@@ -95,6 +97,7 @@ export const CSF_FIXTURE = {
       summary: "Committed adults growing on a trajectory that reaches launch.",
       standing: "not_raised",
       insights: [],
+      evidence: { quality: "measured", attestedDaysAgo: null },
     },
     {
       category: "cohesion",
@@ -103,6 +106,7 @@ export const CSF_FIXTURE = {
       summary: "Regular core-group gatherings with consistent attendance.",
       standing: "not_raised",
       insights: [],
+      evidence: { quality: "measured", attestedDaysAgo: null },
     },
     {
       category: "prayer",
@@ -111,6 +115,7 @@ export const CSF_FIXTURE = {
       summary: "Prayer leadership identified and prayer rhythms established.",
       standing: "not_raised",
       insights: [],
+      evidence: { quality: "unknown", attestedDaysAgo: null },
     },
     {
       category: "generosity",
@@ -119,6 +124,7 @@ export const CSF_FIXTURE = {
       summary: "A financial base in place and a viable first-year budget.",
       standing: "not_raised",
       insights: [],
+      evidence: { quality: "unknown", attestedDaysAgo: null },
     },
     {
       category: "emerging_leadership",
@@ -126,6 +132,7 @@ export const CSF_FIXTURE = {
       name: "Emerging leadership",
       summary: "Leaders rising from within to fill the eight ministry roles.",
       standing: "watch",
+      evidence: { quality: "measured", attestedDaysAgo: null },
       insights: [
         {
           id: "fixture-insight-3",
@@ -153,6 +160,7 @@ export const CSF_FIXTURE = {
       summary:
         "Ministry-model and role training underway, finishing before launch.",
       standing: "watch",
+      evidence: { quality: "measured", attestedDaysAgo: null },
       insights: [
         {
           id: "fixture-insight-4",

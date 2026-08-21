@@ -919,3 +919,28 @@ test("the candidate threshold and the recorded verdict reach the judge's ledger"
     assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
   }
 });
+
+test("the evidence profile reaches the judge's fact ledger (#483)", () => {
+  // The judge cannot apply "unknown is not healthy" to a lens whose evidence it
+  // was never shown.
+  const inputs = coldStartInputs();
+  inputs.plantSignals = [
+    {
+      signalKey: "prayer_rhythm_established",
+      value: true,
+      attestedAt: daysBefore(AS_OF, 45),
+    },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.evidence?.prayer.quality, "attested");
+  assert.equal(snap.evidence?.generosity.quality, "unknown");
+
+  const ledger = new Map(
+    flattenFacts(snap).map((line) => [line.key, line.value])
+  );
+  assert.equal(ledger.get("evidence.prayer.quality"), "attested");
+  assert.equal(ledger.get("evidence.prayer.attestedDaysAgo"), "45");
+  assert.equal(ledger.get("evidence.generosity.quality"), "unknown");
+  assert.equal(ledger.get("evidence.critical_mass.quality"), "unknown");
+});
