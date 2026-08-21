@@ -1,0 +1,12 @@
+-- #190 — the issue the feedback bridge opened for this row.
+--
+-- Nullable with no default and no backfill: null means the bridge was unset or
+-- GitHub refused, and every row that predates the bridge is legitimately null.
+-- The column is a convenience link, never the record — the row itself is.
+--
+-- `when` is 0056's + one day, not this file's generation time. ORDER IS DECIDED
+-- BY `when`, NOT BY `idx` (memory/invariants.md → Migrations): 0056 was minted
+-- on a parallel branch with a `when` a day ahead, so a fresh Date.now() would
+-- sort BEFORE it and `drizzle-kit migrate` would skip this migration in silence
+-- on any database that already applied 0056.
+ALTER TABLE "feedback" ADD COLUMN "github_issue_number" integer;
