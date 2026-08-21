@@ -68,6 +68,7 @@ const GUARDED: readonly { readonly dir: string; readonly atLeast: number }[] = [
   { dir: "src/lib/email/templates", atLeast: 2 },
   { dir: "src/lib/notifications", atLeast: 15 },
   { dir: "src/components/notifications", atLeast: 1 },
+  { dir: "src/app/(dashboard)", atLeast: 2 },
 ];
 
 /** Repo-relative POSIX path → absolute, for `readdirSync`/`readFileSync`. */

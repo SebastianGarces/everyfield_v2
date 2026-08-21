@@ -45,8 +45,21 @@ const SIDEBAR = sourceReader(
   "app-sidebar.tsx (comments stripped)"
 );
 
+/**
+ * The layout's body ABOVE its returned tree — which is the whole subject, since
+ * that is where a read either delays the shell or does not.
+ *
+ * It stops at the `return (` rather than running to the end of the file, so a
+ * new slot component declared BELOW the layout — the shape both guards below
+ * tell the next author to reach for — is not read as the layout's own await.
+ */
+const ABOVE_THE_TREE = LAYOUT.span(
+  "export default async function DashboardLayout",
+  "return ("
+);
+
 test("the layout starts the coaching read without awaiting it", () => {
-  const body = LAYOUT.after("export default async function DashboardLayout");
+  const body = ABOVE_THE_TREE;
 
   assert.match(
     body,
@@ -77,8 +90,9 @@ test("the shell awaits the request itself and nothing else", () => {
   // how they left the sidebar. Everything else a dashboard route needs is
   // either a page's job or a slot's — read below a `<Suspense>` boundary,
   // through a loader that reports failure as a value.
-  const body = LAYOUT.after("export default async function DashboardLayout");
-  const awaited = [...body.matchAll(/await\s+([\w$.]+)\(/g)].map((m) => m[1]);
+  const awaited = [...ABOVE_THE_TREE.matchAll(/await\s+([\w$.]+)\(/g)].map(
+    (match) => match[1]
+  );
 
   assert.deepEqual(
     awaited,
