@@ -34,6 +34,8 @@
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
 
+import type { PlantFactSnapshot } from "../src/lib/phase-engine/signals/types";
+
 config({ path: ".env.local" });
 
 const connectionString = process.env.DATABASE_URL;
@@ -211,14 +213,25 @@ async function audit(): Promise<void> {
 
   // ---- Rule audit ------------------------------------------------------
   const violations: Violation[] = [];
-  const { buildFactSnapshot } = await import("../src/lib/phase-engine/signals");
-  const churchIds = (await sql`
-    SELECT id, name FROM churches WHERE name LIKE ${EVAL_PREFIX + "%"}`) as {
-    id: string;
-    name: string;
-  }[];
-  const idByName = new Map(churchIds.map((c) => [c.name, c.id]));
-  const NOW = new Date("2026-06-22T12:00:00.000Z");
+  // THE SNAPSHOT THE JUDGE ACTUALLY SAW, read back off the assessment rather
+  // than recomputed. This audit first recomputed it at the seeder's clock and
+  // reported eleven vocabulary violations that were not violations at all: the
+  // assessments had been generated against the REAL clock, where every plant's
+  // stall really had passed 28 days. Auditing a model's output against facts it
+  // was never given produces confident nonsense, which is the same failure the
+  // rubric spends its whole length forbidding.
+  const snapshots = (await sql`
+    SELECT c.name AS church, a.fact_snapshot
+    FROM plant_assessments a
+    JOIN churches c ON c.id = a.church_id
+    WHERE c.name LIKE ${EVAL_PREFIX + "%"} AND a.status = 'complete'
+      AND a.id IN (
+        SELECT DISTINCT ON (church_id) id FROM plant_assessments
+        WHERE status = 'complete' ORDER BY church_id, generated_at DESC
+      )`) as { church: string; fact_snapshot: PlantFactSnapshot }[];
+  const snapByChurch = new Map(
+    snapshots.map((s) => [s.church, s.fact_snapshot])
+  );
 
   for (const [church, insights] of byChurch) {
     const planter = insights.filter((i) => i.audience === "planter");
@@ -278,10 +291,9 @@ async function audit(): Promise<void> {
     }
 
     // The vocabulary floor, checked against the plant's real stall clock.
-    const churchId = idByName.get(church);
-    if (churchId) {
-      const snap = await buildFactSnapshot(churchId, { asOf: NOW });
-      const days = snap.coreGroup.daysSinceLastNewCommitment;
+    const snap = snapByChurch.get(church);
+    if (snap) {
+      const days = snap.coreGroup?.daysSinceLastNewCommitment ?? null;
       for (const i of insights) {
         const text = `${i.title} ${i.body}`;
         if (/\bstalled\b/i.test(text) && (days === null || days < 28)) {
