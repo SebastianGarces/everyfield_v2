@@ -279,6 +279,27 @@ const CAPABILITIES = {
    * and product feedback.
    */
   "self.write": { seats: null, tenancy: "any" },
+  /**
+   * Answering a COACH invitation from an account that already exists (AS-009,
+   * #496).
+   *
+   * NO SEAT SET AND NO TENANCY REQUIREMENT, and both halves are the ruling
+   * (2026-08-20, 185 (5)) rather than laxity. Who may answer one is decided by
+   * the TOKEN and the address it is bound to, not by standing: a plant Member, an
+   * oversight Owner and a coach with no tenancy at all are equally able to coach
+   * somebody else's plant, because accepting adds a `coach_assignments` row and
+   * moves nothing — no tenancy is vacated and no seat is touched.
+   *
+   * Narrowing it would break the flow it exists for. `tenancy: "plant"` would
+   * refuse the seatless coach the invitation is most often for; any seat set at
+   * all would refuse them too, since `users.seat` is NULL for a coach.
+   *
+   * What stops this being a hole is that the verb grants nothing by itself:
+   * `acceptCoachInvitationAs` refuses every token that is not pending, unexpired
+   * and issued to this account's own address, and the assignment is written by an
+   * `INSERT … SELECT` that reads the plant out of the invitation row.
+   */
+  "coach.invitation.answer": { seats: null, tenancy: "any" },
 } as const satisfies Record<string, Authority>;
 
 /** A verb this product has an authority rule for. */

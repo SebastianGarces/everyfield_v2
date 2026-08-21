@@ -63,3 +63,24 @@ export const INVITATION_REGISTER_PATH = "/register";
 export function invitationRegisterPath(invitationId: string): string {
   return `${INVITATION_REGISTER_PATH}?invitation=${encodeURIComponent(invitationId)}`;
 }
+
+/**
+ * WHERE A COACH INVITATION LANDS, which is NOT the sign-up form (#496).
+ *
+ * A seat invitation is answered by registering, so its link may go straight to
+ * `/register`. A coach invitation may be answered by an account that already
+ * exists (AS-009), and the sender is not allowed to know which — so the link
+ * cannot fork on the invitee and lands instead on a page that asks the VIEWER.
+ * Signed in, it offers Accept; signed out, it hands on to `/register` with the
+ * same token. The branch is on the reader's own session and never on whether the
+ * address holds an account, so the link is not an oracle either.
+ *
+ * Same query key as the register route, deliberately: one spelling for "this URL
+ * carries an invitation", whichever page reads it.
+ */
+export const COACH_INVITATION_PATH = "/coach-invitation";
+
+/** `/coach-invitation?invitation=<token>` — the path half. */
+export function coachInvitationPath(token: string): string {
+  return `${COACH_INVITATION_PATH}?invitation=${encodeURIComponent(token)}`;
+}

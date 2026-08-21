@@ -450,3 +450,46 @@ export const wikiNavSections: NavSection[] = [
     ],
   },
 ];
+
+/**
+ * THE COACH'S NAVIGATION, AND THE WHOLE OF IT (AS-011, #496).
+ *
+ * A coach has no plant of their own, so nothing in `mainNavItems` resolves for
+ * them — those pages all read `user.church_id`. What they do have is a list of
+ * assignments, and this section IS that list: one row per plant, linking to the
+ * only route in the app that names a church in its path.
+ *
+ * NO SECTION AT ALL WHEN THERE ARE NO ASSIGNMENTS — `null`, not an empty group
+ * with a heading. A planter who has never been asked to coach anybody must not
+ * carry a permanent empty shelf labelled "Assigned plants", and returning the
+ * section rather than the items is what makes "shown" and "omitted" one decision
+ * instead of a heading in one file and a list in another.
+ *
+ * A PURE FUNCTION, so both halves of that decision are testable without
+ * rendering: the caller passes what `assignedPlantsFor` read and this returns
+ * what the sidebar draws.
+ */
+export const ASSIGNED_PLANTS_LABEL = "Assigned plants";
+
+export function assignedPlantsNavSection(
+  plants: readonly { churchId: string; churchName: string }[]
+): NavSection | null {
+  if (plants.length === 0) return null;
+
+  return {
+    title: ASSIGNED_PLANTS_LABEL,
+    items: plants.map((plant) => ({
+      title: plant.churchName,
+      href: coachedPlantPath(plant.churchId),
+      icon: Church,
+    })),
+  };
+}
+
+/**
+ * The route an assigned plant opens at. One spelling, shared by the nav and by
+ * anything else that has to build it, so a rename is one edit.
+ */
+export function coachedPlantPath(churchId: string): string {
+  return `/coaching/${churchId}`;
+}

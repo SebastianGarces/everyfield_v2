@@ -1,4 +1,4 @@
-import { describeSeatInvitationForRegistration } from "@/lib/invitations/seat";
+import { describeUserInvitationForRegistration } from "@/lib/invitations/seat";
 
 import { RegisterForm } from "./register-form";
 import {
@@ -41,7 +41,7 @@ export default async function RegisterPage({
   // lookup reject anything malformed.
   const token = Array.isArray(invitation) ? invitation[0] : invitation;
 
-  const seatInvite = await describeSeatInvitationForRegistration(token ?? null);
+  const seatInvite = await describeUserInvitationForRegistration(token ?? null);
   const invite = seatInvite
     ? null
     : await describeInvitationForRegistration(token ?? null);
@@ -59,7 +59,7 @@ export default async function RegisterPage({
               token: token ?? "",
               inviteeEmail: seatInvite.inviteeEmail,
               churchName: seatInvite.churchName,
-              seat: seatInvite.seat,
+              invitedAs: seatInvite.invitedAs,
             }
           : null
       }
