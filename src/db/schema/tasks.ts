@@ -160,17 +160,58 @@ export const tasks = pgTable(
       table.relatedId
     ),
     // MEET-011: at most ONE live evaluation task per meeting. This is the
-    // idempotency key for follow-up generation
+    // idempotency key for the evaluation half of follow-up generation
     // (`handleMeetingAttendanceFinalized`), and it has to be enforced by the
     // database: a SELECT-then-INSERT guard in application code cannot stop two
-    // concurrent finalizes from both passing the check. Because the evaluation
-    // task is inserted in the SAME statement as the per-attendee follow-ups,
-    // the unique violation aborts that whole INSERT — so the loser of a race
-    // writes nothing at all, not a set of orphan follow-ups.
+    // concurrent finalizes from both passing the check.
+    //
+    // THE PREDICATE REPEATS THE GUARD'S THIRD CLAUSE, `related_type = 'meeting'`
+    // (#521, from #323 WS1). It used to name only the completion event and the
+    // soft-delete, while the read in `handleMeetingAttendanceFinalized` also
+    // demanded the related type — so a row carrying the event, a meeting's id
+    // and `related_type = 'person'` held this slot while remaining INVISIBLE to
+    // the guard: the real INSERT then failed on it, was classified as a benign
+    // lost race, and the meeting finalized with no tasks at all, permanently.
+    // #323 shut the client-reachable door by deleting `completionEvent` from
+    // the zod schemas; this closes the index itself, so a row written by any
+    // other route (a script, a repair, a future writer) cannot occupy a slot
+    // nothing can see. An index predicate that is WIDER than the read it
+    // guards is the general shape of that bug — keep the two spellings
+    // identical.
     uniqueIndex("tasks_meeting_evaluation_unique_idx")
       .on(table.churchId, table.relatedId)
       .where(
-        sql`${table.completionEvent} = 'meeting.evaluation.completed' and ${table.deletedAt} is null`
+        sql`${table.completionEvent} = 'meeting.evaluation.completed' and ${table.relatedType} = 'meeting' and ${table.deletedAt} is null`
+      ),
+    // ONE live follow-up per (church, person, day) — the arbiter that retires
+    // the concurrent-reconcile residual (#521, from #323 WS3).
+    //
+    // WHAT THE KEY IS, AND WHY IT IS SPELLED THIS WAY. A follow-up row relates
+    // to a PERSON and no column names the meeting that generated it, so "this
+    // meeting's follow-up for this person" is identified by the meeting-derived
+    // due day (`followUpDueDate`, the meeting's day + 2). The key is therefore
+    // the tuple `handleMeetingAttendanceFinalized` already SELECTs on, column
+    // for column: church, related person, due day, under the same three
+    // predicates. An index wider than its read is the #323 WS1 bug; an index
+    // narrower than its read guards nothing the read can see.
+    //
+    // WHAT IT REPLACES. The residual was that a TOP-UP insert — a late-added
+    // first-timer, reconciled after the finalize — carries no evaluation row,
+    // so `tasks_meeting_evaluation_unique_idx` stood over nothing and two
+    // concurrent reconciles could each write that person the same follow-up.
+    // With this index every row the generator writes has an arbiter of its own,
+    // which is what lets the INSERT become per-row idempotent
+    // (`ON CONFLICT DO NOTHING`) instead of all-or-nothing.
+    //
+    // NULLS ARE DISTINCT IN A BTREE, deliberately left that way: a task with no
+    // `related_id` or no `due_date` collides with nothing. The generator writes
+    // both on every row, so nothing it produces escapes; a hand-written
+    // follow-up with no due date is not "this meeting's follow-up" and must not
+    // contend for the slot.
+    uniqueIndex("tasks_person_follow_up_unique_idx")
+      .on(table.churchId, table.relatedId, table.dueDate)
+      .where(
+        sql`${table.category} = 'follow_up' and ${table.relatedType} = 'person' and ${table.deletedAt} is null`
       ),
     // Composite FKs on task_dependencies reference (id, church_id), so both
     // ends of an edge are the same church as the row that names them. `id` is

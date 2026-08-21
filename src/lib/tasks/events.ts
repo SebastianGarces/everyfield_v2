@@ -1,5 +1,4 @@
 import { db } from "@/db";
-import { isUniqueViolation } from "@/db/errors";
 import {
   churches,
   persons,
@@ -210,25 +209,38 @@ export function followUpDueDate(meetingDate: Date): string {
  * day cannot collide through it — the second one's attendees are `returning`
  * by derivation, so they are not candidates at all.
  *
- * CONCURRENCY, and where the guarantee comes from. On the FIRST generation both
- * kinds are written by a SINGLE INSERT and
- * `tasks_meeting_evaluation_unique_idx` (partial unique on church_id +
- * related_id for live evaluation tasks) makes the evaluation row unique per
- * meeting. Two finalizes racing both pass the reads above and both attempt the
- * INSERT; the index rejects the loser, and because the evaluation row shares
- * the statement with the follow-ups the WHOLE insert is aborted — the loser
- * writes nothing rather than a duplicate set. That rejection is the expected
- * outcome of a race, so it is swallowed as a no-op.
+ * CONCURRENCY, and where the guarantee comes from: EVERY ROW THIS WRITES HAS AN
+ * ARBITER, so the INSERT is per-row idempotent (#521). Two partial unique
+ * indexes stand over the two kinds — `tasks_meeting_evaluation_unique_idx` on
+ * (church_id, related_id) for live evaluation tasks, and
+ * `tasks_person_follow_up_unique_idx` on (church_id, related_id, due_date) for
+ * live person follow-ups — each spelled with the same predicate as the read
+ * above it. Racing finalizes both pass those reads and both attempt the INSERT;
+ * `ON CONFLICT DO NOTHING` then skips exactly the rows somebody else already
+ * wrote and lands the rest.
  *
- * Accepted residual: a TOP-UP insert carries no evaluation row, so no index
- * stands over it. Two reconciles racing can each write the same late attendee
- * one follow-up. The domain already tolerates a duplicate follow-up for one
- * person (a second meeting generates one beside an open one), and the planter
- * can dismiss it; what MEET-011 protects — the whole set duplicating — is
- * untouched. Retired by a partial unique index over (church, person, due date)
- * for live follow-up tasks.
+ * WHY THAT REPLACED "THE LOSER WRITES NOTHING" (#521, reversing #323 WS3). The
+ * INSERT used to carry no conflict clause on purpose: the follow-ups had no key
+ * of their own, so the only guard available was the evaluation row's, and
+ * letting its violation abort the WHOLE statement was what stopped a loser from
+ * writing a duplicate set. The comment that said `onConflictDoNothing()` "would
+ * skip only the conflicting evaluation row and happily insert the loser's
+ * follow-ups" was true of a table where a follow-up was unguarded, and its
+ * premise is what #521's index removed. All-or-nothing is now the WORSE shape:
+ * a top-up race in which one reconcile writes {Ann} and the other {Ann, Bo}
+ * aborts the second one whole, so Bo — a late-added first-timer, the exact case
+ * #323 WS3 made this handler convergent for — is dropped until some later
+ * finalize runs. Per-row skip writes Bo and skips Ann, which is what "writes
+ * whatever is MISSING and nothing else" has always claimed.
  *
- * THROWS on any other failure. `finalizeAttendance` only records the attendance
+ * The conflict clause is deliberately UNTARGETED. Naming an arbiter covers that
+ * one index and re-raises the unique violation on any other
+ * (`memory/invariants/transactions-atomicity.md`); bare `DO NOTHING` covers
+ * every unique index on the table, including a person who appears twice in one
+ * register, which a targeted form would have raised mid-statement.
+ *
+ * THROWS on failure — nothing is swallowed here any more, because no conflict
+ * reaches the application. `finalizeAttendance` only records the attendance
  * count after this resolves, so swallowing an error here would strand a
  * finalized meeting with no follow-up tasks. Letting it propagate leaves the
  * meeting un-finalized (or its count stale) and the whole operation safely
@@ -431,31 +443,17 @@ export async function handleMeetingAttendanceFinalized(
   // -----------------------------------------------------------------------
   // Bulk insert whatever is missing
   // -----------------------------------------------------------------------
-  // ONE statement, deliberately. Postgres applies it atomically, so on a first
-  // generation the follow-ups and the evaluation task land together or not at
-  // all — which is what lets the unique index on the evaluation task speak for
-  // the whole set.
-  //
-  // Note the absence of `onConflictDoNothing()`: it would skip only the
-  // conflicting evaluation row and happily insert the loser's follow-ups,
-  // which is the duplication this is here to prevent. We want the violation.
-  let created: { id: string }[];
-  try {
-    created = await db
-      .insert(tasks)
-      .values(tasksToCreate)
-      .returning({ id: tasks.id });
-  } catch (error) {
-    if (isUniqueViolation(error, TASKS_MEETING_EVALUATION_UNIQUE)) {
-      // A concurrent finalize won the race and generated the same set. The
-      // whole INSERT rolled back, so there is nothing to clean up.
-      console.warn(
-        `[EVENT] Follow-up tasks for meeting ${meetingId} were generated concurrently — skipping (idempotent)`
-      );
-      return;
-    }
-    throw error;
-  }
+  // ONE statement, and every row in it has a partial unique index of its own
+  // (see the handler docblock). `DO NOTHING` therefore means precisely "a
+  // concurrent finalize already wrote this exact task" — the untargeted form,
+  // so it covers both indexes rather than one named arbiter. `returning()`
+  // yields only the rows that LANDED, which is what the notification sync
+  // below needs.
+  const created = await db
+    .insert(tasks)
+    .values(tasksToCreate)
+    .onConflictDoNothing()
+    .returning({ id: tasks.id });
 
   // T-018. Every generated row carries an assignee (the planter) and a due
   // date, so every one owes a due and an overdue notification — and a
@@ -474,21 +472,7 @@ export async function handleMeetingAttendanceFinalized(
 
   if (process.env.NODE_ENV === "development") {
     console.log(
-      `[EVENT] Created ${tasksToCreate.length} task(s) for meeting ${meetingId}`
+      `[EVENT] Created ${created.length} of ${tasksToCreate.length} task(s) for meeting ${meetingId}`
     );
   }
 }
-
-/**
- * The partial unique index that enforces one live evaluation task per meeting.
- *
- * The NAME is what this module owns; the PREDICATE that recognises a violation
- * of it is `isUniqueViolation` (`src/db/errors.ts`), the one copy every domain
- * shares. This file carried its own byte-identical walk of the cause chain
- * until #411 — a second implementation of "the unique index is the concurrency
- * guard and it just did its job", which is exactly the shape that goes stale in
- * one place and not the other (a new driver wrapping, a `constraint` field that
- * stops being populated). Never re-inline it.
- */
-export const TASKS_MEETING_EVALUATION_UNIQUE =
-  "tasks_meeting_evaluation_unique_idx";

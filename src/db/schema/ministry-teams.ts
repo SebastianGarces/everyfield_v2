@@ -253,10 +253,16 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
  * The partial unique index that enforces ONE PERSON PER TEAM ROLE (#409 D1).
  *
  * Exported so the code that recognises its violation names the same string the
- * declaration below does — the shape `TASKS_MEETING_EVALUATION_UNIQUE`
- * (`src/lib/tasks/events.ts`) established. The NAME is what the schema owns;
- * the PREDICATE that recognises a violation of it is `isUniqueViolation`
- * (`src/db/errors.ts`), the one copy every domain shares.
+ * declaration below does. The NAME is what the schema owns; the PREDICATE that
+ * recognises a violation of it is `isUniqueViolation` (`src/db/errors.ts`), the
+ * one copy every domain shares.
+ *
+ * A constant only exists where something RECOGNISES the violation. `tasks`
+ * established this shape and no longer needs it: #521 gave every row its
+ * generation INSERT writes an arbiter of its own, so the statement carries an
+ * untargeted `ON CONFLICT DO NOTHING` and there is no name left to match on
+ * (`src/lib/tasks/events.ts`). Here the refusal is a MESSAGE a planter reads,
+ * so the name stays.
  */
 export const TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE =
   "team_memberships_role_active_unique_idx";
