@@ -29,13 +29,13 @@
 // bucket, all imported rather than restated.
 // ============================================================================
 
-import type { InvitableSeat } from "@/db/schema/user-invitation";
 import type { UserInvitationStatus } from "@/db/schema/user-invitation";
 import { formatDate } from "@/lib/datetime";
 import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
 import { redactForLog } from "@/lib/email/redact";
 import { seatInvitationEmail } from "@/lib/email/templates/seat-invitation";
 import { appBaseUrl } from "@/lib/notifications/channels/email";
+import type { InvitedAs } from "./seat-copy";
 
 import type {
   InvitationEmailMessage,
@@ -44,7 +44,7 @@ import type {
 } from "./email";
 // The `?invitation=` contract, from the import-free leaf that owns it — never
 // hand-built, and never re-exported from here (see `./register-path`).
-import { invitationRegisterPath } from "./register-path";
+import { coachInvitationPath, invitationRegisterPath } from "./register-path";
 
 /**
  * WHICH SEND THIS IS — and a seat RESEND is identified by its ROTATION, never
@@ -91,7 +91,12 @@ export interface SeatInvitationEmailFacts {
   status: UserInvitationStatus;
   churchName: string | null;
   inviterName: string | null;
-  seat: InvitableSeat;
+  /**
+   * What the invitation makes them — the union, not a seat, so a coach cannot
+   * be described with a seat's words (#496). It also decides where the link
+   * points; see `invitationLandingUrl`.
+   */
+  invitedAs: InvitedAs;
   expiresAt: Date | null;
 }
 
@@ -123,12 +128,26 @@ export function seatInvitationEmailIdempotencyKey(
   return `${base}-resend-${occasion.rotationId}`;
 }
 
-/** The absolute, token-bound register URL — what the email actually links to. */
+/**
+ * The absolute, token-bound URL the email links to — and THE ONE PLACE the two
+ * kinds part company (#496).
+ *
+ * A seat invitation is register-only, so it goes to the sign-up form. A coach
+ * invitation may be answered by an account that already exists, and the sender
+ * must not learn whether this one does, so it goes to a page that asks the
+ * reader instead of a form that assumes them. See `./register-path` for why the
+ * fork is on the KIND and never on the invitee.
+ */
 export function seatInvitationRegisterUrl(
+  invitedAs: InvitedAs,
   token: string,
   baseUrl?: string
 ): string {
-  return `${baseUrl ?? appBaseUrl()}${invitationRegisterPath(token)}`;
+  const path =
+    invitedAs.kind === "coach"
+      ? coachInvitationPath(token)
+      : invitationRegisterPath(token);
+  return `${baseUrl ?? appBaseUrl()}${path}`;
 }
 
 /** Render the message, or say why it cannot be rendered. */
@@ -156,9 +175,9 @@ export async function buildSeatInvitationEmail(
   const { subject, html, text } = await seatInvitationEmail({
     churchName,
     inviterName: facts.inviterName?.trim() || null,
-    seat: facts.seat,
+    invitedAs: facts.invitedAs,
     inviteeEmail: to,
-    inviteUrl: seatInvitationRegisterUrl(facts.token, baseUrl),
+    inviteUrl: seatInvitationRegisterUrl(facts.invitedAs, facts.token, baseUrl),
     // Formatted HERE, through `@/lib/datetime`, so the date the invitee reads is
     // the one every surface shows (`memory/invariants.md` → Date & Time
     // Rendering).

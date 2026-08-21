@@ -12,8 +12,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import type { InvitableSeat } from "@/db/schema/user-invitation";
-import { invitedSeatWithArticle } from "@/lib/invitations/seat-copy";
+import { loginPathFor } from "@/lib/auth/safe-redirect";
+import { coachInvitationPath } from "@/lib/invitations/register-path";
+import {
+  invitedAsWithArticle,
+  type InvitedAs,
+} from "@/lib/invitations/seat-copy";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
@@ -86,8 +90,12 @@ export type SeatInvitationForForm = {
   token: string;
   inviteeEmail: string;
   churchName: string;
-  /** The invitation's own vocabulary, never a second spelling of it. */
-  seat: InvitableSeat;
+  /**
+   * The invitation's own vocabulary, never a second spelling of it — the union,
+   * so a coach invitation redeemed at sign-up (#496) cannot be described with a
+   * seat's words.
+   */
+  invitedAs: InvitedAs;
 };
 
 export function RegisterForm({
@@ -183,7 +191,7 @@ export function RegisterForm({
               </p>
               <p className="text-muted-foreground mt-1">
                 Finish signing up and you will join them as{" "}
-                {invitedSeatWithArticle(seatInvitation.seat)}.
+                {invitedAsWithArticle(seatInvitation.invitedAs)}.
               </p>
             </div>
           )}
@@ -382,7 +390,27 @@ export function RegisterForm({
           </Button>
           <p className="text-muted-foreground text-center text-sm">
             Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline">
+            {/*
+              A COACH INVITEE KEEPS THEIR TOKEN THROUGH THE ROUND TRIP (#496).
+
+              A coach invitation may be answered by an account that already
+              exists — that is the whole of AS-009 — and this link is the exit
+              such a reader takes when the sign-up form refuses their address as
+              a duplicate. A bare `/login` drops the token and lands them on
+              `/dashboard`, so the only way back is the original email.
+
+              This leaks nothing: the branch is on the invitation KIND, which the
+              reader already holds in their own URL, never on whether the address
+              has an account.
+            */}
+            <Link
+              href={
+                seatInvitation?.invitedAs.kind === "coach"
+                  ? loginPathFor(coachInvitationPath(seatInvitation.token))
+                  : "/login"
+              }
+              className="text-primary hover:underline"
+            >
               Sign in
             </Link>
           </p>

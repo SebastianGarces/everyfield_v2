@@ -23,10 +23,13 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { AssociationOrgType } from "@/db/schema";
+import type { AssignedPlant } from "@/lib/coaching/assignments";
 import {
+  assignedPlantsNavSection,
   isPathWithin,
   mainNavItems,
   networkAdminNavItems,
+  resolveActiveNavHref,
   sendingChurchNavItems,
 } from "@/lib/navigation";
 
@@ -46,6 +49,18 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
    */
   orgType: AssociationOrgType | null;
   hasChurch: boolean;
+  /**
+   * The plants this account actively coaches — read server-side from
+   * `coach_assignments` (AS-011, #496).
+   *
+   * A SECOND REACH, NOT A SECOND TENANCY. It is a list rather than a flag
+   * because an account may coach several plants, and it sits beside `orgType`
+   * rather than inside it because the two are independent: an oversight Owner
+   * who also coaches a plant has both, and each is drawn in its own section.
+   * Empty for almost everybody, which is why the section is omitted rather than
+   * emptied.
+   */
+  assignedPlants?: readonly AssignedPlant[];
   /** Server-decided: whether the current user is a platform admin. */
   isPlatformAdmin?: boolean;
 };
@@ -80,12 +95,17 @@ export function AppSidebar({
   user,
   orgType,
   hasChurch,
+  assignedPlants = [],
   isPlatformAdmin = false,
   ...props
 }: AppSidebarProps) {
   const navConfig = getNavConfig(orgType);
   const pathname = usePathname();
   const adminActive = isPathWithin(pathname, "/admin");
+  const coaching = assignedPlantsNavSection(assignedPlants);
+  const coachingActive = coaching
+    ? resolveActiveNavHref(pathname, coaching.items)
+    : null;
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -112,6 +132,30 @@ export function AppSidebar({
           label={navConfig.label}
           hasChurch={hasChurch}
         />
+        {/* Assigned plants. Rendered only when there is at least one active
+            assignment — `assignedPlantsNavSection` returns null otherwise, so
+            the heading and the rows appear and disappear together (#496). */}
+        {coaching && (
+          <SidebarGroup>
+            <SidebarGroupLabel>{coaching.title}</SidebarGroupLabel>
+            <SidebarMenu>
+              {coaching.items.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={item.href === coachingActive}
+                  >
+                    <Link href={item.href ?? "#"} className="cursor-pointer">
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
         {/* Admin group is rendered only when the server marks the user as a
             platform admin — invisible to everyone else. */}
         {isPlatformAdmin && (

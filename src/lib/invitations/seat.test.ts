@@ -29,17 +29,17 @@ import {
   invitationActorFromSession,
 } from "./core";
 import { RESEND_DEDUPE_WINDOW_MS, resendDedupeWindowAt } from "./resend-window";
-import { INVITED_SEAT_COPY, invitedSeatWithArticle } from "./seat-copy";
+import { INVITED_AS_COPY, invitedAsWithArticle } from "./seat-copy";
 import { seatInvitationEmailIdempotencyKey } from "./seat-email";
 import {
-  claimSeatInvitationStatement,
-  hashSeatInvitationToken,
-  newSeatInvitationToken,
-  SEAT_INVITE_RATE_LIMITED_MESSAGE,
-  seatInvitationActedOnAtRegistration,
-  seatInviteeRefusal,
-  seatInvitesFromChurchToAddressQuery,
-  type SeatRegistrationInvitation,
+  claimUserInvitationStatement,
+  hashUserInvitationToken,
+  newUserInvitationToken,
+  USER_INVITE_RATE_LIMITED_MESSAGE,
+  userInvitationActedOnAtRegistration,
+  inviteeRefusalFor,
+  invitesFromChurchToAddressQuery,
+  type UserRegistrationInvitation,
 } from "./seat";
 
 // ============================================================================
@@ -60,7 +60,7 @@ import {
 //   * GENERATED SQL, for the queries — a cap that quietly grew a `status`
 //     predicate is invisible in behaviour until somebody runs a revoke-reinvite
 //     loop for real, and visible in `toSQL()` immediately.
-//   * SOURCE, for the ORDER and for the module graph — `createSeatInvitationAs`
+//   * SOURCE, for the ORDER and for the module graph — `createUserInvitationAs`
 //     needs a database to run, but the property that matters about it is the
 //     ORDER of its four checks (`memory/invariants.md` → Multi-Tenancy: the
 //     neutrality rule is POSITIONAL), and an order is a fact about the source.
@@ -103,7 +103,7 @@ const JOURNAL = JSON.parse(
 
 /** The create, cut out of its module once. */
 const CREATE = SEAT.span(
-  "export async function createSeatInvitationAs",
+  "export async function createUserInvitationAs",
   "async function emailSeatInvitee"
 );
 
@@ -227,7 +227,7 @@ test("a minted token is 256 bits of base64url, and never repeats", () => {
   const drawn = new Set<string>();
 
   for (let i = 0; i < 200; i += 1) {
-    const token = newSeatInvitationToken();
+    const token = newUserInvitationToken();
     assert.match(token, /^[A-Za-z0-9_-]{43}$/, token);
     drawn.add(token);
   }
@@ -236,8 +236,8 @@ test("a minted token is 256 bits of base64url, and never repeats", () => {
 });
 
 test("what is stored is the digest, and it is not the token", () => {
-  const token = newSeatInvitationToken();
-  const stored = hashSeatInvitationToken(token);
+  const token = newUserInvitationToken();
+  const stored = hashUserInvitationToken(token);
 
   // The property AS-010 states, executed: the column's value is not the value
   // the email carried.
@@ -248,8 +248,8 @@ test("what is stored is the digest, and it is not the token", () => {
     createHash("sha256").update(token, "utf8").digest("hex")
   );
   // Deterministic, which is what makes the registration lookup a point read.
-  assert.equal(stored, hashSeatInvitationToken(token));
-  assert.notEqual(stored, hashSeatInvitationToken(newSeatInvitationToken()));
+  assert.equal(stored, hashUserInvitationToken(token));
+  assert.notEqual(stored, hashUserInvitationToken(newUserInvitationToken()));
 });
 
 test("no write and no read ever names the plaintext token", () => {
@@ -260,7 +260,7 @@ test("no write and no read ever names the plaintext token", () => {
     "const row: NewUserInvitation = {",
     "const [invitation] = await db"
   );
-  assert.match(row, /tokenHash: hashSeatInvitationToken\(token\)/);
+  assert.match(row, /tokenHash: hashUserInvitationToken\(token\)/);
   assert.doesNotMatch(
     row,
     /^\s*token:/m,
@@ -271,7 +271,7 @@ test("no write and no read ever names the plaintext token", () => {
   // backup, or a log — hands nobody a working link.
   assert.match(
     SEAT.code,
-    /eq\(userInvitations\.tokenHash, hashSeatInvitationToken\(candidate\)\)/
+    /eq\(userInvitations\.tokenHash, hashUserInvitationToken\(candidate\)\)/
   );
 
   // The schema and the migration agree that `token_hash` is the only column,
@@ -325,7 +325,7 @@ test("every kind of existing account is refused with the ONE constant", () => {
 
   for (const [what, row] of accounts) {
     assert.equal(
-      seatInviteeRefusal(row),
+      inviteeRefusalFor("seat", row),
       ACCOUNT_NOT_INVITABLE_MESSAGE,
       `${what} was not refused with the one neutral message`
     );
@@ -333,16 +333,59 @@ test("every kind of existing account is refused with the ONE constant", () => {
 
   // A stranger is not refused at all — the other half, or the test above would
   // pass on a function that returned the constant unconditionally.
-  assert.equal(seatInviteeRefusal(undefined), null);
-  assert.equal(seatInviteeRefusal(null), null);
+  assert.equal(inviteeRefusalFor("seat", undefined), null);
+  assert.equal(inviteeRefusalFor("seat", null), null);
+});
+
+test("a COACH invitation is never refused with that constant (AS-009)", () => {
+  // THE RULED ASYMMETRY, from the SAME predicate the seat rule is read off —
+  // which is what makes it one decision rather than two that can drift. A seat
+  // invitation would MOVE an account between tenancies; a coach invitation only
+  // ADDS an assignment, so every account above may hold one.
+  const accounts = [
+    ["a plant Owner", { id: USER, seat: "owner", churchId: PLANT }],
+    ["a plant Admin", { id: USER, seat: "admin", churchId: PLANT }],
+    ["a plant Member", { id: USER, seat: "member", churchId: PLANT }],
+    ["an org Owner", { id: USER, seat: "owner", sendingNetworkId: NETWORK }],
+    [
+      "an org Member",
+      { id: USER, seat: "member", sendingChurchId: SENDING_CHURCH },
+    ],
+    ["a coach already, holding no seat at all", { id: USER, seat: null }],
+    ["the one-column projection the create reads", { id: USER }],
+    ["a stranger", undefined],
+  ] as const;
+
+  for (const [what, row] of accounts) {
+    assert.equal(
+      inviteeRefusalFor("coach", row),
+      null,
+      `${what} was refused a coach invitation — AS-009 admits every account`
+    );
+  }
 });
 
 test("the refusal is the imported constant, not a sentence that resembles it", () => {
   // Identity, not similarity: two strings that agree today are two strings.
-  assert.equal(seatInviteeRefusal({ id: USER }), ACCOUNT_NOT_INVITABLE_MESSAGE);
+  assert.equal(
+    inviteeRefusalFor("seat", { id: USER }),
+    ACCOUNT_NOT_INVITABLE_MESSAGE
+  );
+  // THE PATTERN IS ONE STRING LITERAL, and it has to be spelled that way.
+  //
+  // It read `/"[^"]*already[^"]*account[^"]*"/i`, and `[^"]` matches a NEWLINE —
+  // so the "sentence" it caught was free to start at the end of one literal, run
+  // through a screenful of code, and finish at the start of another. #496 tripped
+  // it twice that way without composing any sentence at all: once across a header
+  // paragraph, once across `"active"` … `ALREADY_COACHING_MESSAGE` …
+  // `existingAccount`. Excluding the newline is what makes it mean what it says —
+  // one literal, on one line, saying an account already exists — and it still
+  // catches the thing it was written for, since a string literal never spans
+  // lines. Comments are stripped for the same reason `stripComments`' own
+  // docblock gives: a module that documents the rule must not fail it.
   assert.doesNotMatch(
-    SEAT.code,
-    /"[^"]*already[^"]*account[^"]*"/i,
+    stripComments(SEAT.code),
+    /"[^"\n]*already[^"\n]*account[^"\n]*"/i,
     "seat.ts composes a sentence about an account instead of importing the one message"
   );
 });
@@ -384,15 +427,18 @@ test("every legible refusal runs ABOVE the address lookup", () => {
   // lets them keep their own legible words.
   assertInOrder(
     CREATE,
-    "createSeatInvitationAs",
+    "createUserInvitationAs",
     [
-      'assertSeatFor(actor, "seat.invitation.manage")',
+      // The capability comes off the KIND table now (#496), but it still runs
+      // first — and the table's two rows are asserted below, so "whichever verb
+      // the kind names" is not a loophole.
+      "assertSeatFor(actor, rules.capability)",
       "normalizeInviteeEmail(request.inviteeEmail)",
       "isInvitableEmailAddress(inviteeEmail)",
       'eq(userInvitations.status, "pending")',
-      "seatInvitesFromChurchToAddressQuery(",
+      "invitesFromChurchToAddressQuery(",
       ".from(users)",
-      "seatInviteeRefusal(existingAccount)",
+      "inviteeRefusalFor(request.kind, existingAccount)",
       "db.insert(userInvitations)",
     ],
     "the neutrality rule is positional: a check that can compose a legible message must run before the address resolves to an account"
@@ -402,7 +448,7 @@ test("every legible refusal runs ABOVE the address lookup", () => {
 test("nothing below the lookup composes a sentence of its own", () => {
   const belowTheLookup = SEAT.span(
     "const [existingAccount]",
-    "const token = newSeatInvitationToken()"
+    "const token = newUserInvitationToken()"
   );
 
   // Exactly one refusal is reachable down here, and it is the imported
@@ -418,7 +464,8 @@ test("nothing below the lookup composes a sentence of its own", () => {
 
 test("the cap counts EVERY status, scoped to this plant and this address", () => {
   const since = new Date("2026-07-21T12:00:00.000Z");
-  const { sql, params } = seatInvitesFromChurchToAddressQuery(
+  const { sql, params } = invitesFromChurchToAddressQuery(
+    "seat",
     PLANT,
     "stranger@example.com",
     since
@@ -463,13 +510,13 @@ test("the fourth invitation inside the window is the one that is refused", () =>
 
 test("the cap's refusal names the plant's own behaviour, never an account", () => {
   assert.notEqual(
-    SEAT_INVITE_RATE_LIMITED_MESSAGE,
+    USER_INVITE_RATE_LIMITED_MESSAGE,
     ACCOUNT_NOT_INVITABLE_MESSAGE
   );
   // Legible precisely because it is unreachable from below the lookup — it can
   // only ever be a statement about invitations THIS plant sent.
-  assert.doesNotMatch(SEAT_INVITE_RATE_LIMITED_MESSAGE, /account/i);
-  assert.doesNotMatch(SEAT_INVITE_RATE_LIMITED_MESSAGE, /exist/i);
+  assert.doesNotMatch(USER_INVITE_RATE_LIMITED_MESSAGE, /account/i);
+  assert.doesNotMatch(USER_INVITE_RATE_LIMITED_MESSAGE, /exist/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -509,14 +556,13 @@ test("the logic layer refuses a Member itself, not only the action", () => {
 
   // …and EVERY export that takes an actor asserts it, before anything else it
   // does. The reads were missing it at review round 1, and one of them
-  // (`expireLapsedSeatInvitations`) is an UPDATE whose only authority was the
+  // (`expireLapsedUserInvitations`) is an UPDATE whose only authority was the
   // page's redirect — which holds for a browser and for nothing else.
   for (const write of [
-    "export async function createSeatInvitationAs",
-    "export async function listSeatInvitationsFor",
-    "export async function revokeSeatInvitationAs",
-    "export async function resendSeatInvitationEmailAs",
-    "export async function expireLapsedSeatInvitations",
+    "export async function listUserInvitationsFor",
+    "export async function revokeUserInvitationAs",
+    "export async function resendUserInvitationEmailAs",
+    "export async function expireLapsedUserInvitations",
   ]) {
     const body = SEAT.after(write).slice(0, 400);
     assert.match(
@@ -524,6 +570,75 @@ test("the logic layer refuses a Member itself, not only the action", () => {
       /assertSeatFor\(actor, "seat\.invitation\.manage"\)/,
       write
     );
+  }
+
+  // THE CREATE GUARDS OFF THE KIND TABLE (#496), so it is asserted against the
+  // table rather than against a literal — and the table itself is pinned below,
+  // which is what stops "whichever verb the kind names" becoming a hole.
+  assert.match(
+    SEAT.after("export async function createUserInvitationAs").slice(0, 400),
+    /assertSeatFor\(actor, rules\.capability\)/
+  );
+});
+
+test("A MEMBER CANNOT INVITE A COACH EITHER — the kind table's other verb", () => {
+  // AC 9 of #496. The create reads its capability off `INVITATION_KIND_RULES`,
+  // so the table IS the authority and both of its rows are pinned here: the
+  // coach row names `coach.assignment.manage` rather than a fourth verb,
+  // because ending an assignment already answers to it (#497), and that verb
+  // carries the same ADMIN_PLUS-on-a-plant rule the seat one does.
+  const table = SEAT.span(
+    "const INVITATION_KIND_RULES",
+    "} as const satisfies"
+  );
+
+  assert.match(table, /capability: "seat\.invitation\.manage"/);
+  assert.match(table, /capability: "coach\.assignment\.manage"/);
+
+  for (const who of [PLANT_OWNER, PLANT_ADMIN]) {
+    assert.equal(holdsSeatFor(who, "coach.assignment.manage"), true);
+  }
+
+  for (const [what, who] of [
+    ["a plant Member", PLANT_MEMBER],
+    ["a coach", COACH],
+    ["a network Owner", NETWORK_OWNER],
+    ["a sending-church Member", SC_MEMBER],
+  ] as const) {
+    assert.equal(
+      holdsSeatFor(who, "coach.assignment.manage"),
+      false,
+      `${what} may invite a coach onto a plant`
+    );
+  }
+
+  // And the logic layer refuses them itself, not only the action.
+  assert.throws(
+    () => assertSeatFor(actorFor(PLANT_MEMBER), "coach.assignment.manage"),
+    SeatRefusalError
+  );
+});
+
+test("the coach endpoints are checked in against their capabilities", () => {
+  // The walk proves a guard is called; only the map proves the verb.
+  assert.equal(
+    CAPABILITY_BY_EXPORT[
+      "src/app/(dashboard)/settings/team/actions.ts → createCoachInvitationAction"
+    ],
+    "coach.assignment.manage"
+  );
+  assert.equal(
+    CAPABILITY_BY_EXPORT[
+      "src/app/(auth)/coach-invitation/actions.ts → acceptCoachInvitationAction"
+    ],
+    "coach.invitation.answer"
+  );
+
+  // ANSWERING carries no seat set and no tenancy, deliberately: a plant Member,
+  // an oversight Owner and a seatless coach must all be able to accept one, and
+  // any narrowing would refuse the coach the invitation is most often for.
+  for (const who of [PLANT_OWNER, PLANT_MEMBER, COACH, NETWORK_OWNER]) {
+    assert.equal(holdsSeatFor(who, "coach.invitation.answer"), true);
   }
 });
 
@@ -549,22 +664,22 @@ test("the three endpoints are checked in against that capability", () => {
 // 7. REGISTRATION — the token is address-bound, and the grant is ONE write
 // ----------------------------------------------------------------------------
 
-const described: SeatRegistrationInvitation = {
+const described: UserRegistrationInvitation = {
   id: INVITATION,
   inviteeEmail: "stranger@example.com",
   churchId: PLANT,
   churchName: "Redemption Hill",
-  seat: "admin",
+  invitedAs: { kind: "seat", seat: "admin" },
 };
 
 test("a seat token is acted on only for the address it names", () => {
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "stranger@example.com"),
+    userInvitationActedOnAtRegistration(described, "stranger@example.com"),
     described
   );
   // Case and surrounding space are not the address.
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "  Stranger@Example.COM "),
+    userInvitationActedOnAtRegistration(described, "  Stranger@Example.COM "),
     described
   );
 
@@ -572,16 +687,16 @@ test("a seat token is acted on only for the address it names", () => {
   // ordinary sign-up exactly as an unknown token does, because `/register` is
   // an anonymous POST (Ruling C).
   assert.equal(
-    seatInvitationActedOnAtRegistration(described, "someone-else@example.com"),
+    userInvitationActedOnAtRegistration(described, "someone-else@example.com"),
     null
   );
-  assert.equal(seatInvitationActedOnAtRegistration(described, ""), null);
+  assert.equal(userInvitationActedOnAtRegistration(described, ""), null);
   assert.equal(
-    seatInvitationActedOnAtRegistration(null, "stranger@example.com"),
+    userInvitationActedOnAtRegistration(null, "stranger@example.com"),
     null
   );
   assert.equal(
-    seatInvitationActedOnAtRegistration({ ...described, inviteeEmail: "" }, ""),
+    userInvitationActedOnAtRegistration({ ...described, inviteeEmail: "" }, ""),
     null
   );
 });
@@ -597,7 +712,11 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
     USER,
     { name: "Sam Stranger", email: "stranger@example.com" },
     false,
-    { churchId: PLANT, seat: "admin", matchedPersonId: null }
+    {
+      churchId: PLANT,
+      invitedAs: { kind: "seat", seat: "admin" },
+      matchedPersonId: null,
+    }
   );
 
   assert.equal(plan.seat, "admin");
@@ -609,6 +728,31 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
   assert.deepEqual(plan.statements, []);
   // Exactly one link statement: the person record AS-013 asks for.
   assert.equal(plan.linkStatements.length, 1);
+});
+
+test("a redeemed COACH invitation writes no tenancy, no seat and no person", () => {
+  // AC 1 of #496, read off the planner rather than inferred from an INSERT:
+  // a coach's whole grant is the `coach_assignments` row the ACTION batches
+  // after the claim, so the plan itself creates nothing at all.
+  const plan = createAccountEntities(
+    // Again the org-creating account type, to prove the invitation overrides it.
+    "network",
+    "Some Network They Typed",
+    USER,
+    { name: "Casey Coach", email: "coach@example.com" },
+    false,
+    { churchId: PLANT, invitedAs: { kind: "coach" }, matchedPersonId: null }
+  );
+
+  assert.equal(plan.seat, null, "a coach holds no seat");
+  assert.equal(plan.churchId, null, "a coach holds no tenancy");
+  assert.equal(plan.userChurchId, null, "…and the users insert writes none");
+  assert.equal(plan.sendingChurchId, null);
+  assert.equal(plan.sendingNetworkId, null);
+  assert.deepEqual(plan.statements, []);
+  // NO PERSON ROW. AS-013's link is about somebody JOINING the plant; a coach
+  // reads it and is not part of it.
+  assert.deepEqual(plan.linkStatements, []);
 });
 
 test("an ordinary registration still writes no tenancy on the users insert", () => {
@@ -638,10 +782,10 @@ test("the grant and the claim go into the SAME batch as the account", () => {
     register,
     "register",
     [
-      "const seatInvitation = seatInvitationActedOnAtRegistration(",
+      "const seatInvitation = userInvitationActedOnAtRegistration(",
       "createAccountEntities(",
       "db\n      .insert(users)",
-      "statements.push(claimSeatInvitationStatement(seatInvitation.id, userId))",
+      "statements.push(claimUserInvitationStatement(seatInvitation.id, userId))",
       "await db.batch(statements)",
     ],
     "AS-012: the seat, its tenancy, the person link and the claim commit together or not at all"
@@ -653,7 +797,7 @@ test("the grant and the claim go into the SAME batch as the account", () => {
 
   // The claim is a compare-and-set on `pending`, so a revoke landing in the
   // same instant wins and the row is not re-answered.
-  const { sql, params } = claimSeatInvitationStatement(
+  const { sql, params } = claimUserInvitationStatement(
     INVITATION,
     USER,
     new Date("2026-08-20T12:00:00.000Z")
@@ -834,16 +978,16 @@ test("two rotations inside one bucket present two provider keys (#495 r1)", () =
 
 test("a refused resend puts the old digest back, so the live link survives", () => {
   const resend = SEAT.after(
-    "export async function resendSeatInvitationEmailAs"
+    "export async function resendUserInvitationEmailAs"
   );
 
   // The restore is a compare-and-set on the digest THIS call wrote, so it
   // cannot clobber a rotation that raced past it.
   assertInOrder(
     resend,
-    "resendSeatInvitationEmailAs",
+    "resendUserInvitationEmailAs",
     [
-      "const rotatedHash = hashSeatInvitationToken(token)",
+      "const rotatedHash = hashUserInvitationToken(token)",
       "if (!outcome.sent)",
       "set({ tokenHash: invitation.tokenHash })",
       "eq(userInvitations.tokenHash, rotatedHash)",
@@ -860,14 +1004,14 @@ test("the register lookup does not swallow a database failure (#495 r1)", () => 
   // plant. `users_email_unique` then holds the address and AS-010 refuses to
   // re-invite it, so a transient blip becomes a permanent wrong outcome.
   const lookup = SEAT.span(
-    "export async function describeSeatInvitationForRegistration",
-    "export function seatInvitationActedOnAtRegistration"
+    "export async function describeUserInvitationForRegistration",
+    "export function userInvitationActedOnAtRegistration"
   );
 
   assert.doesNotMatch(lookup, /catch/);
   assert.match(
     lookup,
-    /eq\(\s*userInvitations\.tokenHash,\s*hashSeatInvitationToken\(candidate\)\s*\)/
+    /eq\(\s*userInvitations\.tokenHash,\s*hashUserInvitationToken\(candidate\)\s*\)/
   );
 });
 
@@ -876,14 +1020,14 @@ test("the expiry sweep compares through the typed helper, not a template", () =>
   // `sql` template bypasses the column's driver mapping: the offset is
   // serialised and then discarded by the cast, so on any non-UTC host the sweep
   // is wrong by that offset.
-  const sweep = SEAT.after("export async function expireLapsedSeatInvitations");
+  const sweep = SEAT.after("export async function expireLapsedUserInvitations");
   assert.match(sweep, /lt\(userInvitations\.expiresAt, now\)/);
   assert.doesNotMatch(sweep, /sql`/);
 });
 
 test("a failed resend is a failed action, in the org path's own words", () => {
   const resend = SEAT.after(
-    "export async function resendSeatInvitationEmailAs"
+    "export async function resendUserInvitationEmailAs"
   );
   assert.match(
     resend,
@@ -903,8 +1047,8 @@ test('"no such invitation" and "not yours" are ONE message', () => {
   // here it is not, but telling the two apart would still turn any seated
   // account into a reader of which invitation ids exist.
   const revoke = SEAT.span(
-    "export async function revokeSeatInvitationAs",
-    "export async function resendSeatInvitationEmailAs"
+    "export async function revokeUserInvitationAs",
+    "export async function resendUserInvitationEmailAs"
   );
   const refusals = [
     ...revoke.matchAll(/throw new InvitationError\(([^)]*)\)/g),
@@ -915,10 +1059,10 @@ test('"no such invitation" and "not yours" are ONE message', () => {
   // revoke and the resend — so the three can never disagree about "ours".
   assert.match(SEAT.code, /function oursFilter\(actor: InvitationActor\)/);
   for (const reader of [
-    "export async function listSeatInvitationsFor",
+    "export async function listUserInvitationsFor",
     "async function loadOurs",
-    "export async function revokeSeatInvitationAs",
-    "export async function expireLapsedSeatInvitations",
+    "export async function revokeUserInvitationAs",
+    "export async function expireLapsedUserInvitations",
   ]) {
     assert.match(
       SEAT.after(reader).slice(0, 700),
@@ -937,7 +1081,7 @@ test("the pending list on /settings/team is the org surface's component", () => 
   assert.match(TEAM_PAGE, /revoke: revokeSeatInvitationAction/);
   // …and it lists this plant's rows only, with no route param or query string
   // anywhere on the screen naming a plant.
-  assert.match(TEAM_PAGE, /listSeatInvitationsFor\(actor\)/);
+  assert.match(TEAM_PAGE, /listUserInvitationsFor\(actor\)/);
   assert.doesNotMatch(TEAM_PAGE, /searchParams/);
   assert.doesNotMatch(TEAM_PAGE, /params/);
 });
@@ -1018,9 +1162,22 @@ test("the journal never regresses, and 0054 sits where it says it does", () => {
 // ----------------------------------------------------------------------------
 
 test("every invitable seat has copy, and nothing branches to get it", () => {
-  assert.deepEqual(Object.keys(INVITED_SEAT_COPY).sort(), ["admin", "member"]);
-  assert.equal(invitedSeatWithArticle("admin"), "an Admin");
-  assert.equal(invitedSeatWithArticle("member"), "a Member");
+  assert.deepEqual(Object.keys(INVITED_AS_COPY).sort(), [
+    "admin",
+    "coach",
+    "member",
+  ]);
+  assert.equal(
+    invitedAsWithArticle({ kind: "seat", seat: "admin" }),
+    "an Admin"
+  );
+  assert.equal(
+    invitedAsWithArticle({ kind: "seat", seat: "member" }),
+    "a Member"
+  );
+  // Coach is a third KEY and not a third seat: the union's coach arm carries no
+  // seat, so nothing can read one off it (#496).
+  assert.equal(invitedAsWithArticle({ kind: "coach" }), "a Coach");
 
   // The reason it is a table: `seat-guard.test.ts` bans a hand-written seat
   // comparison outside the permissions module, and it bans it even where the

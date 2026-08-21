@@ -180,7 +180,16 @@ const DOMAIN_LEAVES = [
     file: ["lib", "invitations", "register-path.ts"] as const,
     specifier: "@/lib/invitations/register-path",
     barrelPath: "register-path",
-    symbols: ["INVITATION_REGISTER_PATH", "invitationRegisterPath"],
+    symbols: [
+      "INVITATION_REGISTER_PATH",
+      "invitationRegisterPath",
+      // The coach invitation's landing page (#496). Registered here rather than
+      // left as a bare export so it gets all four rules — the same door, the
+      // same import-free guarantee — instead of only the ones somebody
+      // remembered, which is the failure this table exists to stop.
+      "COACH_INVITATION_PATH",
+      "coachInvitationPath",
+    ],
   },
   {
     file: ["lib", "invitations", "resend-window.ts"] as const,

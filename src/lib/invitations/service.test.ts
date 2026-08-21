@@ -522,7 +522,11 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     "src/app/(dashboard)/settings/team/actions.ts",
-    "#495/AS-010 — the PLANT'S seat invitations, over `user_invitations` rather than `organization_invitations`. It reaches `./core` only transitively, through `./seat`, and only for the shared vocabulary AS-010 forbids a second copy of: `INVITATION_EXPIRY_DAYS`, `INVITES_PER_INVITEE_PER_WINDOW`, `ACCOUNT_NOT_INVITABLE_MESSAGE`, `InvitationError` and `invitationActorFromSession`. It imports NO core primitive of its own — every write it makes is `createSeatInvitationAs` / `revokeSeatInvitationAs` / `resendSeatInvitationEmailAs`, each of which takes a branded actor and asserts `seat.invitation.manage` inside the logic layer as well as at the action's `requireSeat`",
+    "#495/AS-010 — the PLANT'S seat invitations, over `user_invitations` rather than `organization_invitations`. It reaches `./core` only transitively, through `./seat`, and only for the shared vocabulary AS-010 forbids a second copy of: `INVITATION_EXPIRY_DAYS`, `INVITES_PER_INVITEE_PER_WINDOW`, `ACCOUNT_NOT_INVITABLE_MESSAGE`, `InvitationError` and `invitationActorFromSession`. It imports NO core primitive of its own — every write it makes is `createUserInvitationAs` / `revokeUserInvitationAs` / `resendUserInvitationEmailAs`, each of which takes a branded actor and asserts `seat.invitation.manage` inside the logic layer as well as at the action's `requireSeat`",
+  ],
+  [
+    "src/app/(auth)/coach-invitation/actions.ts",
+    "#496/AS-009 — ANSWERING a coach invitation, the surface a seat invitation never needed because it refuses every existing account. It reaches `./core` only transitively, through `./coach`, and only for `InvitationError`: the class the action narrows on to tell a refusal the invitee may read from a failure they may not. It imports NO core primitive of its own — its one write is `acceptCoachInvitationAs`, which takes the SESSION's user rather than an id from the form, re-resolves the token itself, and refuses everything that is not a clean accept with the single message the invitee is allowed to see",
   ],
   [
     "src/app/(auth)/register/actions.ts",

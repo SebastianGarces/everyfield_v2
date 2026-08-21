@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { InvitationsList } from "@/components/oversight/invitations-list";
 import { PlantCoachList } from "@/components/settings/plant-coach-list";
+import { CoachInviteForm } from "@/components/settings/coach-invite-form";
 import { SeatInviteForm } from "@/components/settings/seat-invite-form";
 import { SeatRoster } from "@/components/settings/seat-roster";
 import { verifySession } from "@/lib/auth/session";
@@ -13,8 +14,8 @@ import { INVITATION_EXPIRY_DAYS } from "@/lib/invitations/core";
 import { toSeatInvitationListRow } from "@/lib/invitations/list-row";
 import { invitationActorFromSession } from "@/lib/invitations/core";
 import {
-  expireLapsedSeatInvitations,
-  listSeatInvitationsFor,
+  expireLapsedUserInvitations,
+  listUserInvitationsFor,
 } from "@/lib/invitations/seat";
 import {
   listPlantCoaches,
@@ -61,7 +62,7 @@ import {
 // which holds for a POST that never saw this page.
 //
 // SCOPING IS THE LEAK GUARD, exactly as on `/oversight/invitations`:
-// `listSeatInvitationsFor` puts the actor's OWN `church_id` in the WHERE, so
+// `listUserInvitationsFor` puts the actor's OWN `church_id` in the WHERE, so
 // there is no route param, query string or form field anywhere on this screen
 // that names a plant.
 //
@@ -90,11 +91,21 @@ export default async function TeamSettingsPage() {
   // has closed, so a second look changes nothing the first did. Without it a
   // lapsed invitation keeps its Resend and Revoke controls — offering an action
   // whose own guard is guaranteed to refuse it.
-  await expireLapsedSeatInvitations(actor);
+  await expireLapsedUserInvitations(actor);
 
-  const rows = (await listSeatInvitationsFor(actor)).map(
-    toSeatInvitationListRow
-  );
+  // PARTITIONED BY KIND, NOT MIXED (#496). `listUserInvitationsFor` returns both
+  // kinds because the plant owns both, but an Admin reading one list of pending
+  // addresses could not tell which of them was being offered a seat and which a
+  // coaching assignment — and `InvitationListRow` deliberately carries no `kind`
+  // to tell them with (`./list-row.ts`: only what the admin themselves typed).
+  // Two lists under two headings answers it without widening the row.
+  const invitations = await listUserInvitationsFor(actor);
+  const seatRows = invitations
+    .filter((row) => row.kind === "seat")
+    .map(toSeatInvitationListRow);
+  const coachRows = invitations
+    .filter((row) => row.kind === "coach")
+    .map(toSeatInvitationListRow);
 
   // Safe to mint: `seat.invitation.manage` is `tenancy: "plant"`, so the
   // redirect above already refused every account whose `church_id` is null.
@@ -126,6 +137,15 @@ export default async function TeamSettingsPage() {
 
         <SeatInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />
 
+        {/*
+          Unconditional, and that is not an oversight. The redirect above gates
+          this page on `seat.invitation.manage`, and `coach.assignment.manage`
+          carries the SAME seat set on the SAME tenancy — so a guard here could
+          never read false, and writing one would claim a distinction the
+          permissions table does not make.
+        */}
+        <CoachInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />
+
         <SeatRoster
           rows={roster.map((row) => ({
             userId: row.userId,
@@ -155,7 +175,7 @@ export default async function TeamSettingsPage() {
         />
 
         <InvitationsList
-          rows={rows}
+          rows={seatRows}
           actions={{
             resend: resendSeatInvitationEmailAction,
             revoke: revokeSeatInvitationAction,
@@ -163,6 +183,18 @@ export default async function TeamSettingsPage() {
           pendingDescription="Waiting for them to sign up. Anyone who can invite for this plant can resend the email or revoke the invitation — revoking closes it immediately, and the link stops working."
           answeredDescription="Every invitation this plant has sent that is no longer open."
         />
+
+        {coachRows.length > 0 && (
+          <InvitationsList
+            rows={coachRows}
+            actions={{
+              resend: resendSeatInvitationEmailAction,
+              revoke: revokeSeatInvitationAction,
+            }}
+            pendingDescription="Coaching invitations waiting for an answer. Resending mints a new link and the earlier one stops working; revoking closes the invitation immediately."
+            answeredDescription="Every coaching invitation this plant has sent that is no longer open."
+          />
+        )}
       </div>
     </>
   );

@@ -215,6 +215,10 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "sharing.toggle",
   "src/app/(dashboard)/settings/team/actions.ts → appointAdminAction":
     "seat.manage",
+  "src/app/(auth)/coach-invitation/actions.ts → acceptCoachInvitationAction":
+    "coach.invitation.answer",
+  "src/app/(dashboard)/settings/team/actions.ts → createCoachInvitationAction":
+    "coach.assignment.manage",
   "src/app/(dashboard)/settings/team/actions.ts → createSeatInvitationAction":
     "seat.invitation.manage",
   "src/app/(dashboard)/settings/team/actions.ts → demoteToMemberAction":
