@@ -73,13 +73,19 @@ export const CLASSIFICATION_META: Record<
   },
   // NEUTRAL, NOT A WARNING (#480, C11). Bryan asked only that absence of
   // warning signs not read as an on-track signal — not that privacy be
-  // presented as a problem. The label states a fact about the OVERSEER'S VIEW
-  // ("limited visibility"), never a judgement about the plant, and the detail
-  // wording is his: "Plant has chosen not to share assessment data."
+  // presented as a problem. The label states a fact about the OVERSEER'S VIEW,
+  // never a judgement about the plant.
+  //
+  // THE DESCRIPTION NAMES NO CAUSE, deliberately. This group holds two
+  // different plants: one that shares nothing, and one that has never been
+  // assessed. Both are genuinely "we cannot see"; only the first has chosen
+  // anything. Asserting the sharing reason here would tell an overseer a
+  // planter withheld something when the truth is the engine has not run yet.
+  // The CARD says which reason applies, because the card knows.
   "limited-visibility": {
     label: "Limited visibility",
     description:
-      "This plant has chosen not to share assessment data, so there is nothing here to read as health either way.",
+      "There is not enough visible here to read these plants' health either way.",
     anchor: "limited-visibility",
   },
   "on-track": {
@@ -90,9 +96,13 @@ export const CLASSIFICATION_META: Record<
 };
 
 /**
- * The one sentence a plant-detail surface shows when the overseer cannot see.
- * Bryan's own wording (C11), kept in the presentation vocabulary so the
- * portfolio badge and the detail line cannot drift into two explanations.
+ * The one sentence a plant-detail surface shows when the overseer cannot see
+ * BECAUSE THE PLANTER SHARED NOTHING. Bryan's own wording (C11), kept in the
+ * presentation vocabulary so the portfolio badge and the detail line cannot
+ * drift into two explanations.
+ *
+ * Not used for a never-assessed plant, which lands in the same posture for an
+ * entirely different reason and says so in its own words.
  */
 export const LIMITED_VISIBILITY_DETAIL =
   "Plant has chosen not to share assessment data.";
