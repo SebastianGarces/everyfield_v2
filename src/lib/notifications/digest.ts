@@ -525,32 +525,55 @@ export async function loadChurchDigestAnchor(
 }
 
 /**
- * THE DISTINCT ANCHOR COHORTS — every (zone, weekday, hour) a plant is set to.
+ * ONE COHORT: the three columns EXACTLY AS STORED.
  *
- * One cheap grouped read per tick, and it is what makes the sweep's owed-set
- * test survive a per-church send time: each cohort shares one pair of dedupe
- * keys, so the selection below keeps its `IN (two literals)`.
+ * Deliberately the raw row and not a `DigestAnchor`, and the distinction is the
+ * whole reason this type exists. `digestAnchorFrom` COERCES — an unreadable
+ * zone or an out-of-range integer folds to the ruled default — so the anchor a
+ * row produces is not always the row. A cohort has to be both things at once:
+ * the tuple the selection filters `churches` on, and the anchor the period
+ * arithmetic runs on. Keying the cohort by the COERCED anchor and then
+ * filtering with it is a plant that is listed under one cohort and selected by
+ * none, which is a digest owed forever with nothing in any log to say why.
  *
- * A church whose columns fail `digestAnchorFrom`'s range checks folds into the
- * default cohort, which is where it will be swept from — the same coercion the
- * per-plant run applies, so a plant cannot be selected under one anchor and
- * digested under another.
+ * So the cohort is the raw tuple, and the anchor is derived from it at the two
+ * places that need one. Two rows that coerce alike but store differently are
+ * two cohorts — one extra keyset scan in a case that cannot arise while the
+ * `NOT NULL`s, the `CHECK`s and `isValidTimeZone` hold, which is the right way
+ * round for a guard that exists for the day one of them does not.
  */
-export async function listDigestAnchors(): Promise<DigestAnchor[]> {
-  const rows = await db
+export type DigestCohort = {
+  timeZone: string;
+  digestSendWeekday: number;
+  digestSendHour: number;
+};
+
+/**
+ * Every distinct cohort a plant is set to — one cheap grouped read per tick.
+ *
+ * It is what makes the sweep's owed-set test survive a per-church send time:
+ * every plant in a cohort shares one pair of dedupe keys, so the selection below
+ * keeps its `IN (two literals)`.
+ *
+ * ORDERED, and that is load-bearing rather than tidy. The tick's budget and
+ * plant ceiling are shared across cohorts, so a cohort the budget never reaches
+ * is a cohort that never shrinks. A stable order plus the rotation in
+ * `runPlanterDigestSweep` is what turns "the tail is never swept" into "every
+ * cohort leads on one tick in every N".
+ */
+export async function listDigestCohorts(): Promise<DigestCohort[]> {
+  return db
     .selectDistinct({
       timeZone: churches.timeZone,
       digestSendWeekday: churches.digestSendWeekday,
       digestSendHour: churches.digestSendHour,
     })
-    .from(churches);
-
-  const byKey = new Map<string, DigestAnchor>();
-  for (const row of rows) {
-    const anchor = digestAnchorFrom(row);
-    byKey.set(`${anchor.timeZone}|${anchor.weekday}|${anchor.hour}`, anchor);
-  }
-  return [...byKey.values()];
+    .from(churches)
+    .orderBy(
+      churches.timeZone,
+      churches.digestSendWeekday,
+      churches.digestSendHour
+    );
 }
 
 /** The wired-up entrypoint for ONE plant, under its own anchor. */
@@ -619,15 +642,26 @@ export const MAX_PLANTER_DIGEST_SWEEP_PLANTS = 500;
  */
 export const PLANTER_DIGEST_SWEEP_BUDGET_MS = 10_000;
 
+/**
+ * The dispatcher's tick, in milliseconds — every 15 minutes, from
+ * `.github/workflows/notifications-dispatch.yml`.
+ *
+ * Used for ONE thing: rotating which cohort the sweep starts at, so a tick is
+ * the unit the rotation advances in. It is not a schedule this module keeps —
+ * nothing here reads a clock — and a tick that fires late simply rotates to
+ * wherever its own `at` lands.
+ */
+const TICK_MS = 15 * 60_000;
+
 export interface OwedPlanterDigestPageQuery {
   /**
-   * The COHORT this page scans — one (zone, weekday, hour). It is both the
+   * The COHORT this page scans — the three columns as stored. It is both the
    * filter on `churches` and the thing the two dedupe keys are derived from,
    * which is deliberate: passing the keys separately would let a caller scan
    * one cohort while testing another's keys, and every plant in the product
    * would look owed.
    */
-  anchor: DigestAnchor;
+  cohort: DigestCohort;
   /** The instant the tick fired; "overdue" and "coming up" are measured from it. */
   at: Date;
   limit: number;
@@ -651,7 +685,11 @@ export interface OwedPlanterDigestPageQuery {
 export function plantsOwedPlanterDigestQuery(
   query: OwedPlanterDigestPageQuery
 ) {
-  const { anchor } = query;
+  const { cohort } = query;
+  // Derived from the cohort, never taken alongside it — and derived through the
+  // SAME `digestAnchorFrom` the per-plant run uses, so a plant cannot be
+  // selected under one anchor and digested under another.
+  const anchor = digestAnchorFrom(cohort);
   const dedupeKeys = currentDigestDedupeKeys(anchor, query.at);
   const lookaheadEnd = widestPeriodEnd(anchor, query.at);
 
@@ -660,11 +698,12 @@ export function plantsOwedPlanterDigestQuery(
     .from(churches)
     .where(
       and(
-        // The cohort. Every plant this page can reach shares the anchor the
-        // keys above were derived from — see `OwedPlanterDigestPageQuery`.
-        eq(churches.timeZone, anchor.timeZone),
-        eq(churches.digestSendWeekday, anchor.weekday),
-        eq(churches.digestSendHour, anchor.hour),
+        // The cohort, matched on the columns AS STORED. Matching on the coerced
+        // anchor instead would make a row that failed coercion unselectable by
+        // the very cohort it was listed under — see `DigestCohort`.
+        eq(churches.timeZone, cohort.timeZone),
+        eq(churches.digestSendWeekday, cohort.digestSendWeekday),
+        eq(churches.digestSendHour, cohort.digestSendHour),
         exists(
           db
             .select({ one: sql`1` })
@@ -719,7 +758,7 @@ export async function selectPlantsOwedPlanterDigest(
 
 export interface PlanterDigestSweepDeps {
   /** Every distinct (zone, weekday, hour) a plant is set to — the cohorts. */
-  listAnchors(): Promise<DigestAnchor[]>;
+  listCohorts(): Promise<DigestCohort[]>;
   selectPlantsOwed(query: OwedPlanterDigestPageQuery): Promise<string[]>;
   runDigest(
     churchId: string,
@@ -788,23 +827,41 @@ export async function runPlanterDigestSweep(
     durationMs: 0,
   };
 
-  let anchors: DigestAnchor[];
+  let cohorts: DigestCohort[];
   try {
-    anchors = await deps.listAnchors();
+    cohorts = await deps.listCohorts();
   } catch (error) {
     // "Never throws" has to include the cohort read, and a tick that cannot
-    // read the anchors has nothing to sweep rather than something to guess at.
+    // read the cohorts has nothing to sweep rather than something to guess at.
     summary.failed += 1;
-    console.error("[notifications/digest] anchors failed", { error });
+    console.error("[notifications/digest] cohorts failed", { error });
     summary.durationMs = elapsedMs();
     return summary;
   }
+
+  // THE COHORT ORDER ROTATES WITH THE TICK, and that is what keeps the sweep's
+  // liveness argument true across cohorts as well as inside one.
+  //
+  // Within a cohort the owed set shrinks monotonically through the period, so a
+  // plant cannot park at the head of a stable ordering (see this module's
+  // header). Across cohorts that argument does not carry: the budget and the
+  // plant ceiling belong to the TICK, so if they run out inside cohort k, then
+  // k+1…n are never reached — and, `listCohorts` being ordered, never reached
+  // on any tick either. A cohort that is never reached never shrinks. Starting
+  // at a different cohort each tick makes every one of them lead once every n
+  // ticks, so the tail is delayed rather than starved.
+  const start =
+    cohorts.length > 0
+      ? Math.floor(options.at.getTime() / TICK_MS) % cohorts.length
+      : 0;
+  const ordered = [...cohorts.slice(start), ...cohorts.slice(0, start)];
 
   // ONE COHORT AT A TIME. Each has its own two dedupe keys and its own keyset
   // cursor; the budget and the plant ceiling are the TICK's and are shared, so
   // a product with many zones costs the same wall clock as one with a single
   // zone and simply reaches fewer plants per tick.
-  walk: for (const anchor of anchors) {
+  walk: for (const cohort of ordered) {
+    const anchor = digestAnchorFrom(cohort);
     let afterChurchId: string | null = null;
 
     while (summary.plantsScanned < maxPlants) {
@@ -816,7 +873,7 @@ export async function runPlanterDigestSweep(
       let page: string[];
       try {
         page = await deps.selectPlantsOwed({
-          anchor,
+          cohort,
           at: options.at,
           limit,
           afterChurchId,
@@ -826,7 +883,7 @@ export async function runPlanterDigestSweep(
         // not the tick: the zones behind it are unrelated plants.
         summary.failed += 1;
         console.error("[notifications/digest] selection failed", {
-          anchor,
+          cohort,
           afterChurchId,
           error,
         });
@@ -877,7 +934,7 @@ export async function runPlanterDigestSweep(
 }
 
 export const dbPlanterDigestSweepDeps: PlanterDigestSweepDeps = {
-  listAnchors: listDigestAnchors,
+  listCohorts: listDigestCohorts,
   selectPlantsOwed: selectPlantsOwedPlanterDigest,
   // The per-plant entrypoint itself, not a second copy of its body: one wiring
   // of `dbPlanterDigestDeps` in the module, so a plant swept and a plant run by

@@ -71,9 +71,14 @@ export function ChurchDigestScheduleSelect({
   return (
     <div className="bg-card space-y-3 rounded-lg border px-4 py-4">
       <div className="space-y-1">
-        <Label htmlFor="digest-send-hour" className="cursor-pointer">
+        {/* A GROUP HEADING, not a label — it names the pair of selects, and the
+            two `<Label>`s below name one control each. Pointing it at
+            `digest-send-hour` as well made the hour's accessible name the
+            concatenation "When the digest arrives At", because name
+            computation joins every label associated with a control. */}
+        <h3 id="digest-send-heading" className="text-sm font-medium">
           When the digest arrives
-        </Label>
+        </h3>
         <p
           id="digest-send-help"
           className="text-muted-foreground text-sm text-pretty"
@@ -85,7 +90,11 @@ export function ChurchDigestScheduleSelect({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-3">
+      <div
+        role="group"
+        aria-labelledby="digest-send-heading"
+        className="flex flex-wrap gap-3"
+      >
         <div className="min-w-40 flex-1 space-y-1.5">
           <Label
             htmlFor="digest-send-weekday"

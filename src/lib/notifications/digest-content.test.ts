@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { zonedHour } from "@/lib/datetime";
+import { instantAtZonedHour, zonedHour } from "@/lib/datetime";
 
 import {
   composePlanterDigestBody,
@@ -267,6 +267,96 @@ test("every tick lands inside its own period, in every zone tested", () => {
       }
     }
   }
+});
+
+/**
+ * Sixteen zones, every hour of the day, every DST window of the year.
+ *
+ * THIS SWEEP EXISTS BECAUSE THE ONE ABOVE WAS NOT ENOUGH. It only walked
+ * `America/*` anchors, and the partition held there while being false in seven
+ * (zone, hour) pairs — Berlin at 02:00, London and Dublin at 01:00, Sydney and
+ * Auckland at 02:00, Chatham at 03:00, Beirut at 23:00. Every one of them is
+ * EAST of UTC, where a fall-back day puts the naive UTC reading of the wall
+ * clock on the far side of the transition. `digestPeriodFor` classified those
+ * instants by `zonedHour` and the boundary by instant, and on a day when the
+ * wall clock is not monotonic those two disagree.
+ *
+ * The cost of getting this wrong is not theoretical: `[start, end)` being a
+ * partition is what "one digest per recipient per period" reduces to, and the
+ * lookahead a plant is selected on comes off a period that has not opened.
+ */
+test("the partition holds in every zone, at every hour, across every transition", () => {
+  const zones = [
+    "UTC",
+    "America/New_York",
+    "America/Chicago",
+    "America/Los_Angeles",
+    "America/St_Johns", // -03:30 — a half-hour offset
+    "Europe/London",
+    "Europe/Dublin", // negative DST in the tz database
+    "Europe/Berlin",
+    "Asia/Beirut", // a midnight transition
+    "Asia/Tehran",
+    "Asia/Kathmandu", // +05:45
+    "Asia/Tokyo", // no DST at all
+    "Australia/Eucla", // +08:45
+    "Australia/Lord_Howe", // a THIRTY-MINUTE DST shift
+    "Australia/Sydney", // southern hemisphere
+    "Pacific/Chatham", // +12:45, southern hemisphere
+  ];
+  // Two-day windows straddling every transition either hemisphere has in 2026.
+  const windows = [
+    "2026-03-07",
+    "2026-03-28",
+    "2026-04-03",
+    "2026-09-26",
+    "2026-10-24",
+    "2026-10-31",
+    "2026-11-01",
+  ];
+
+  // DAILY only, and that is not a gap: a weekly period's boundaries are a
+  // SUBSET of the daily ones — both are `instantAtZonedHour(day, hour)` — so a
+  // weekly boundary that misplaced an instant would have to misplace it as a
+  // daily one first. The 21-day sweep above walks both cadences. Halving the
+  // matrix here is what keeps a 2.6-million-instant property under a minute.
+  const failures: string[] = [];
+  for (const timeZone of zones) {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const anchor: DigestAnchor = { timeZone, weekday: 0, hour };
+      for (const window of windows) {
+        for (const at of ticks(new Date(`${window}T00:00:00.000Z`), 2)) {
+          const period = digestPeriodFor("daily", anchor, at);
+          if (period.start <= at && at < period.end) continue;
+          failures.push(
+            `${timeZone} h=${hour} ${at.toISOString()} outside [${period.start.toISOString()}, ${period.end.toISOString()})`
+          );
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(failures.slice(0, 5), [], `${failures.length} in total`);
+});
+
+test("an ambiguous wall clock resolves to its FIRST occurrence, east of UTC too", () => {
+  // The specific regression. 02:00 happens twice in Berlin on 2026-10-25:
+  // 00:00Z (CEST) and 01:00Z (CET). The rule is the earlier one, and the
+  // two-probe version of `instantAtZonedHour` returned the later.
+  assert.equal(
+    instantAtZonedHour("2026-10-25", 2, "Europe/Berlin").toISOString(),
+    "2026-10-25T00:00:00.000Z"
+  );
+  // ...and the US case it always got right, so the fix did not trade one for
+  // the other: 01:00 happens twice on 2026-11-01 in New York.
+  assert.equal(
+    instantAtZonedHour("2026-11-01", 1, "America/New_York").toISOString(),
+    "2026-11-01T05:00:00.000Z"
+  );
+  // A wall clock that never happens resolves to the instant the clock jumps to.
+  const gap = instantAtZonedHour("2026-03-08", 2, "America/New_York");
+  assert.equal(gap.toISOString(), "2026-03-08T07:00:00.000Z");
+  assert.equal(zonedHour(gap, "America/New_York"), 3);
 });
 
 test("a DST transition produces neither two digests nor zero", () => {

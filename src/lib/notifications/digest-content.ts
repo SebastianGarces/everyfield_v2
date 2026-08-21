@@ -6,7 +6,6 @@ import {
   instantAtZonedHour,
   isValidTimeZone,
   toCalendarDate,
-  zonedHour,
 } from "@/lib/datetime";
 
 // ============================================================================
@@ -222,9 +221,16 @@ export function digestPeriodFor(
   anchor: DigestAnchor,
   at: Date
 ): DigestPeriod {
+  // "Has today's period opened yet?" asked as an INSTANT comparison against the
+  // very boundary being classified, never as `zonedHour(at) >= anchor.hour`.
+  // The hour form looks equivalent and is not: on a fall-back day the wall
+  // clock is not monotonic, so an instant before the boundary can read an hour
+  // at or after it, and the period computed for that instant would not contain
+  // it. That put 52 instants outside their own period across seven zones — all
+  // of them east of UTC, which is why an `America/*`-only sweep stayed green.
   const localDay = toCalendarDate(at, anchor.timeZone);
   const openedOn =
-    zonedHour(at, anchor.timeZone) >= anchor.hour
+    at >= instantAtZonedHour(localDay, anchor.hour, anchor.timeZone)
       ? localDay
       : shiftCalendarDate(localDay, -1);
 

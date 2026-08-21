@@ -440,23 +440,34 @@ export function zonedHour(date: Date, timeZone: string): number {
  * The instant at which `calendarDate` (`YYYY-MM-DD`) reads `hour`:00:00 on the
  * wall clock in `timeZone`. The inverse of `toCalendarDate` + `zonedHour`.
  *
- * The offset depends on the answer, so the answer is guessed and corrected: the
- * offset AT the naive UTC reading, then the offset at that guess. On the ~364
- * ordinary days of the year both agree and that is the instant.
+ * The offset depends on the answer, so the answer is proposed and checked. Each
+ * PROBE instant yields an offset, subtracting it from the naive UTC reading
+ * yields a candidate, and a candidate is REAL when re-formatting it in the zone
+ * reads back the wall clock asked for.
  *
- * THE TWO DAYS THEY DO NOT AGREE ON are the whole reason this is a function and
- * not two lines at a call site, and each gets a stated rule:
+ * THREE PROBES, one per DST regime the day could sit in: the naive reading
+ * itself, and a day either side of it. Two would be enough on the ~364 ordinary
+ * days, and were what this function first shipped with — but on a fall-back day
+ * in any zone EAST of UTC the naive reading already sits after the transition,
+ * so both probes land in the same regime and converge on the SECOND occurrence.
+ * The day either side is always in the other regime, so the candidate set
+ * contains both occurrences and the rules below can actually choose between
+ * them.
  *
- *   * **The hour that happens twice** (autumn, the 25-hour day). Both guesses
- *     really do read `hour`, so the EARLIER is taken — the first occurrence.
- *   * **The hour that never happens** (spring, the 23-hour day). Neither guess
- *     reads `hour`, so the LATER is taken, which is exactly the instant the
+ * THE TWO DAYS A YEAR the probes disagree are the whole reason this is a
+ * function and not two lines at a call site, and each gets a stated rule:
+ *
+ *   * **The hour that happens twice** (autumn, the 25-hour day). Several
+ *     candidates really do read `hour`, so the EARLIEST is taken — the first
+ *     occurrence.
+ *   * **The hour that never happens** (spring, the 23-hour day). None of them
+ *     reads `hour`, so the LATEST is taken, which is exactly the instant the
  *     clock jumps to. 02:00 on a US spring-forward morning resolves to 03:00.
  *
  * Both rules are chosen so that consecutive days tile the timeline with no gap
  * and no overlap, which is what lets a caller treat `[start, end)` as a
  * partition — see `digestPeriodFor`, whose 15-minute sweep across both
- * transitions asserts exactly that.
+ * transitions in sixteen zones asserts exactly that.
  */
 export function instantAtZonedHour(
   calendarDate: string,
@@ -466,15 +477,15 @@ export function instantAtZonedHour(
   const [year, month, day] = calendarDate.split("-").map(Number);
   const wall = Date.UTC(year, month - 1, day, hour);
 
-  const first = wall - offsetMsAt(new Date(wall), timeZone);
-  const second = wall - offsetMsAt(new Date(first), timeZone);
-
-  const real = [first, second].filter(
+  const candidates = [wall - MS_PER_DAY, wall, wall + MS_PER_DAY].map(
+    (probe) => wall - offsetMsAt(new Date(probe), timeZone)
+  );
+  const real = candidates.filter(
     (candidate) => wallClockOf(new Date(candidate), timeZone) === wall
   );
 
   return new Date(
-    real.length > 0 ? Math.min(...real) : Math.max(first, second)
+    real.length > 0 ? Math.min(...real) : Math.max(...candidates)
   );
 }
 
