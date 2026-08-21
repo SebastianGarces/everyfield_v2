@@ -35,7 +35,7 @@ import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
 import { redactForLog } from "@/lib/email/redact";
 import { seatInvitationEmail } from "@/lib/email/templates/seat-invitation";
 import { appBaseUrl } from "@/lib/notifications/channels/email";
-import type { InvitedRole } from "./seat-copy";
+import type { InvitedAs } from "./seat-copy";
 
 import type {
   InvitationEmailMessage,
@@ -96,7 +96,7 @@ export interface SeatInvitationEmailFacts {
    * be described with a seat's words (#496). It also decides where the link
    * points; see `invitationLandingUrl`.
    */
-  role: InvitedRole;
+  invitedAs: InvitedAs;
   expiresAt: Date | null;
 }
 
@@ -139,12 +139,12 @@ export function seatInvitationEmailIdempotencyKey(
  * fork is on the KIND and never on the invitee.
  */
 export function seatInvitationRegisterUrl(
-  role: InvitedRole,
+  invitedAs: InvitedAs,
   token: string,
   baseUrl?: string
 ): string {
   const path =
-    role.kind === "coach"
+    invitedAs.kind === "coach"
       ? coachInvitationPath(token)
       : invitationRegisterPath(token);
   return `${baseUrl ?? appBaseUrl()}${path}`;
@@ -175,9 +175,9 @@ export async function buildSeatInvitationEmail(
   const { subject, html, text } = await seatInvitationEmail({
     churchName,
     inviterName: facts.inviterName?.trim() || null,
-    role: facts.role,
+    invitedAs: facts.invitedAs,
     inviteeEmail: to,
-    inviteUrl: seatInvitationRegisterUrl(facts.role, facts.token, baseUrl),
+    inviteUrl: seatInvitationRegisterUrl(facts.invitedAs, facts.token, baseUrl),
     // Formatted HERE, through `@/lib/datetime`, so the date the invitee reads is
     // the one every surface shows (`memory/invariants.md` → Date & Time
     // Rendering).

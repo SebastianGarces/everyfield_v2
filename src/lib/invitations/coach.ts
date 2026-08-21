@@ -80,7 +80,7 @@ export async function describeCoachInvitationForViewer(
   now: Date = new Date()
 ): Promise<CoachInvitationForViewer | null> {
   const described = await describeUserInvitationForRegistration(token, now);
-  if (!described || described.role.kind !== "coach") return null;
+  if (!described || described.invitedAs.kind !== "coach") return null;
 
   return {
     inviteeEmail: described.inviteeEmail,
@@ -117,7 +117,7 @@ export async function acceptCoachInvitationAs(
 ): Promise<{ churchName: string }> {
   const described = await describeUserInvitationForRegistration(token, now);
 
-  if (!described || described.role.kind !== "coach") {
+  if (!described || described.invitedAs.kind !== "coach") {
     throw new InvitationError(COACH_INVITATION_NOT_ANSWERABLE_MESSAGE);
   }
 

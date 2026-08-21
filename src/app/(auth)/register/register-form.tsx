@@ -13,8 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
-  invitedRoleWithArticle,
-  type InvitedRole,
+  invitedAsWithArticle,
+  type InvitedAs,
 } from "@/lib/invitations/seat-copy";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
@@ -93,7 +93,7 @@ export type SeatInvitationForForm = {
    * so a coach invitation redeemed at sign-up (#496) cannot be described with a
    * seat's words.
    */
-  role: InvitedRole;
+  invitedAs: InvitedAs;
 };
 
 export function RegisterForm({
@@ -189,7 +189,7 @@ export function RegisterForm({
               </p>
               <p className="text-muted-foreground mt-1">
                 Finish signing up and you will join them as{" "}
-                {invitedRoleWithArticle(seatInvitation.role)}.
+                {invitedAsWithArticle(seatInvitation.invitedAs)}.
               </p>
             </div>
           )}

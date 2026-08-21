@@ -9,10 +9,10 @@ import {
 } from "@react-email/components";
 
 import {
-  INVITED_ROLE_COPY,
-  invitedRoleKey,
-  invitedRoleWithArticle,
-  type InvitedRole,
+  INVITED_AS_COPY,
+  invitedAsKey,
+  invitedAsWithArticle,
+  type InvitedAs,
 } from "@/lib/invitations/seat-copy";
 
 import { BaseLayout } from "../components/base-layout";
@@ -32,7 +32,7 @@ import { BaseLayout } from "../components/base-layout";
 //     COACH invitation is the deliberate exception (AS-009): it adds an
 //     assignment and moves nothing, so any account can answer one and the link
 //     lands on a page that asks rather than on the sign-up form. The words for
-//     both come from `INVITED_ROLE_COPY`; this template picks none of them.
+//     both come from `INVITED_AS_COPY`; this template picks none of them.
 //   * IT IS THE CREDENTIAL CHANNEL. The link carries a random token that only
 //     works for the address in the `To:` line, so forwarding it hands somebody a
 //     link they cannot use — one plain sentence rather than a support
@@ -54,9 +54,9 @@ export interface SeatInvitationEmailProps {
   /**
    * What the invitation makes them: a seat (never `owner` — see
    * `invitableSeats`) or a coaching assignment. The WORDS for it come from
-   * `INVITED_ROLE_COPY`, so this template compares no role of its own.
+   * `INVITED_AS_COPY`, so this template compares no seat of its own.
    */
-  role: InvitedRole;
+  invitedAs: InvitedAs;
   /**
    * The address the invitation was issued to. Rendered in the body on purpose:
    * it is the half of the credential the reader has to match.
@@ -71,34 +71,38 @@ export interface SeatInvitationEmailProps {
 /** Names the plant first — in a crowded inbox that is the only word guaranteed to be read. */
 export function seatInvitationSubject(
   churchName: string,
-  role: InvitedRole
+  invitedAs: InvitedAs
 ): string {
-  return `${churchName} invited you to ${INVITED_ROLE_COPY[invitedRoleKey(role)].subjectTail}`;
+  return `${churchName} invited you to ${INVITED_AS_COPY[invitedAsKey(invitedAs)].subjectTail}`;
 }
 
 /** The preheader. Under 90 characters, which is all any client shows. */
-export function seatInvitationPreview(role: InvitedRole): string {
-  return `You are invited as ${invitedRoleWithArticle(role)} — this link only works for this address.`;
+export function seatInvitationPreview(invitedAs: InvitedAs): string {
+  return `You are invited as ${invitedAsWithArticle(invitedAs)} — this link only works for this address.`;
 }
 
 function SeatInvitationEmail({
   churchName,
   inviterName,
-  role,
+  invitedAs,
   inviteeEmail,
   inviteUrl,
   expiresLabel,
 }: SeatInvitationEmailProps) {
-  const roleCopy = INVITED_ROLE_COPY[invitedRoleKey(role)];
+  const invitedAsCopy = INVITED_AS_COPY[invitedAsKey(invitedAs)];
 
   return (
-    <BaseLayout preview={seatInvitationPreview(role)} footerText={churchName}>
+    <BaseLayout
+      preview={seatInvitationPreview(invitedAs)}
+      footerText={churchName}
+    >
       <Heading style={heading}>{churchName} invited you to EveryField</Heading>
 
       <Text style={text}>
         {inviterName ? `${inviterName} at ` : ""}
         <strong>{churchName}</strong> invited you to join their church plant on
-        EveryField as {roleCopy.article} <strong>{roleCopy.label}</strong>.
+        EveryField as {invitedAsCopy.article}{" "}
+        <strong>{invitedAsCopy.label}</strong>.
       </Text>
 
       <Text style={text}>
@@ -108,7 +112,7 @@ function SeatInvitationEmail({
 
       <Section style={buttonRow}>
         <Button href={inviteUrl} style={button}>
-          {roleCopy.cta}
+          {invitedAsCopy.cta}
         </Button>
       </Section>
 
@@ -124,7 +128,7 @@ function SeatInvitationEmail({
 
       <Text style={sectionHeading}>What accepting means</Text>
       <Text style={text}>
-        {`As ${invitedRoleWithArticle(role)} at ${churchName}, ${roleCopy.accepting}.`}
+        {`As ${invitedAsWithArticle(invitedAs)} at ${churchName}, ${invitedAsCopy.accepting}.`}
       </Text>
 
       <Text style={sectionHeading}>This link belongs to this address</Text>
@@ -160,7 +164,7 @@ function SeatInvitationEmail({
 export async function seatInvitationEmail(
   props: SeatInvitationEmailProps
 ): Promise<{ subject: string; html: string; text: string }> {
-  const subject = seatInvitationSubject(props.churchName, props.role);
+  const subject = seatInvitationSubject(props.churchName, props.invitedAs);
   const html = await render(SeatInvitationEmail(props));
   const text = await render(SeatInvitationEmail(props), { plainText: true });
   return { subject, html, text };

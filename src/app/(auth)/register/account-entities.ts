@@ -19,7 +19,7 @@
 import { db } from "@/db";
 import type { UserSeat } from "@/db/schema";
 import { sendingChurches, sendingNetworks } from "@/db/schema";
-import type { InvitedRole } from "@/lib/invitations/seat-copy";
+import type { InvitedAs } from "@/lib/invitations/seat-copy";
 import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { accountPersonLinkStatements } from "@/lib/people/account-person-link";
 import type { AccountType } from "@/lib/validations/auth";
@@ -40,7 +40,7 @@ import type { BatchItem } from "drizzle-orm/batch";
  */
 export type RedeemedUserInvitation = {
   churchId: string;
-  role: InvitedRole;
+  invitedAs: InvitedAs;
   matchedPersonId: string | null;
 };
 
@@ -125,7 +125,7 @@ export function createAccountEntities(
     // coach is not a member of the plant, and AS-013's link is about somebody
     // joining it. The whole grant is one `coach_assignments` row, and the action
     // batches that statement AFTER the claim so it can be gated on it.
-    if (userInvitation.role.kind === "coach") {
+    if (userInvitation.invitedAs.kind === "coach") {
       return {
         seat: null,
         churchId: null,
@@ -143,7 +143,7 @@ export function createAccountEntities(
     // own — the seat and its tenancy go into the users insert, and the person
     // record AS-013 asks for is minted or claimed after it.
     return {
-      seat: userInvitation.role.seat,
+      seat: userInvitation.invitedAs.seat,
       churchId: userInvitation.churchId,
       sendingChurchId: null,
       sendingNetworkId: null,

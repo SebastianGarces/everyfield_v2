@@ -67,8 +67,8 @@ export default async function CoachedPlantPage({
         </div>
 
         <p className="text-muted-foreground max-w-prose text-sm">
-          You are reading {plant.churchName}&apos;s own records. Coaching is a
-          reading role — nothing here can be changed from your account.
+          You are reading {plant.churchName}&apos;s own records. Coaching is
+          read-only — nothing here can be changed from your account.
         </p>
 
         <Card>

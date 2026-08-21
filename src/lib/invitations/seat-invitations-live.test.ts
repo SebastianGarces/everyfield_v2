@@ -590,7 +590,7 @@ async function registerThrough(token: string, email: string, name: string) {
     false,
     {
       churchId: described.churchId,
-      role: described.role,
+      invitedAs: described.invitedAs,
       matchedPersonId: await findLinkablePersonId(described.churchId, email),
     }
   );

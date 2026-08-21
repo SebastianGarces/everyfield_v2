@@ -29,7 +29,7 @@ import {
   invitationActorFromSession,
 } from "./core";
 import { RESEND_DEDUPE_WINDOW_MS, resendDedupeWindowAt } from "./resend-window";
-import { INVITED_ROLE_COPY, invitedRoleWithArticle } from "./seat-copy";
+import { INVITED_AS_COPY, invitedAsWithArticle } from "./seat-copy";
 import { seatInvitationEmailIdempotencyKey } from "./seat-email";
 import {
   claimUserInvitationStatement,
@@ -669,7 +669,7 @@ const described: UserRegistrationInvitation = {
   inviteeEmail: "stranger@example.com",
   churchId: PLANT,
   churchName: "Redemption Hill",
-  role: { kind: "seat", seat: "admin" },
+  invitedAs: { kind: "seat", seat: "admin" },
 };
 
 test("a seat token is acted on only for the address it names", () => {
@@ -714,7 +714,7 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
     false,
     {
       churchId: PLANT,
-      role: { kind: "seat", seat: "admin" },
+      invitedAs: { kind: "seat", seat: "admin" },
       matchedPersonId: null,
     }
   );
@@ -741,7 +741,7 @@ test("a redeemed COACH invitation writes no tenancy, no seat and no person", () 
     USER,
     { name: "Casey Coach", email: "coach@example.com" },
     false,
-    { churchId: PLANT, role: { kind: "coach" }, matchedPersonId: null }
+    { churchId: PLANT, invitedAs: { kind: "coach" }, matchedPersonId: null }
   );
 
   assert.equal(plan.seat, null, "a coach holds no seat");
@@ -1162,22 +1162,22 @@ test("the journal never regresses, and 0054 sits where it says it does", () => {
 // ----------------------------------------------------------------------------
 
 test("every invitable seat has copy, and nothing branches to get it", () => {
-  assert.deepEqual(Object.keys(INVITED_ROLE_COPY).sort(), [
+  assert.deepEqual(Object.keys(INVITED_AS_COPY).sort(), [
     "admin",
     "coach",
     "member",
   ]);
   assert.equal(
-    invitedRoleWithArticle({ kind: "seat", seat: "admin" }),
+    invitedAsWithArticle({ kind: "seat", seat: "admin" }),
     "an Admin"
   );
   assert.equal(
-    invitedRoleWithArticle({ kind: "seat", seat: "member" }),
+    invitedAsWithArticle({ kind: "seat", seat: "member" }),
     "a Member"
   );
   // Coach is a third KEY and not a third seat: the union's coach arm carries no
   // seat, so nothing can read one off it (#496).
-  assert.equal(invitedRoleWithArticle({ kind: "coach" }), "a Coach");
+  assert.equal(invitedAsWithArticle({ kind: "coach" }), "a Coach");
 
   // The reason it is a table: `seat-guard.test.ts` bans a hand-written seat
   // comparison outside the permissions module, and it bans it even where the

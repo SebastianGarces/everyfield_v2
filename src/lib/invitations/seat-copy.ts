@@ -12,16 +12,17 @@
 // noun by looking at it, so a pattern that let the noun through would let the
 // rule through too.
 //
-// The table has no comparison in it at all. It is keyed by the invited role, so
+// The table has no comparison in it at all. It is keyed by what the invitation
+// grants, so
 // adding a third invitable seat is a compile error here (`satisfies Record<
-// InvitedRoleKey, …>`) rather than a silent fall-through to the `member` arm
+// InvitedAsKey, …>`) rather than a silent fall-through to the `member` arm
 // that every one of those ternaries would have given it.
 //
 // COACH IS A THIRD KEY, NOT A SECOND TABLE (#496). A coach is emphatically not
 // a seat — it is a `coach_assignments` row and `users.seat` stays NULL — but
 // what the email has to say is the same four sentences with different nouns, so
 // a parallel template would be a copy of this one that drifts. What keeps the
-// distinction honest is that `InvitedRole` is a UNION whose coach arm carries no
+// distinction honest is that `InvitedAs` is a UNION whose coach arm carries no
 // seat at all, so no caller can read a seat off a coach.
 //
 // IT GRANTS NOTHING AND DECIDES NOTHING. This is vocabulary; the permissions
@@ -42,20 +43,20 @@ import type { InvitableSeat } from "@/db/schema/user-invitation";
  * database writes `user_invitations_seat_check`: a coach has no seat, so a shape
  * that let one be read off a coach would be a shape that can lie.
  */
-export type InvitedRole =
+export type InvitedAs =
   | { kind: "seat"; seat: InvitableSeat }
   | { kind: "coach" };
 
-export type InvitedRoleKey = InvitableSeat | "coach";
+export type InvitedAsKey = InvitableSeat | "coach";
 
-/** The table's key for a role — the one place the union is flattened. */
-export function invitedRoleKey(role: InvitedRole): InvitedRoleKey {
-  return role.kind === "coach" ? "coach" : role.seat;
+/** The table's key — the one place the union is flattened. */
+export function invitedAsKey(invitedAs: InvitedAs): InvitedAsKey {
+  return invitedAs.kind === "coach" ? "coach" : invitedAs.seat;
 }
 
-export const INVITED_ROLE_COPY = {
+export const INVITED_AS_COPY = {
   admin: {
-    /** The role's name, capitalised the way the product writes it. */
+    /** The name, capitalised the way the product writes it. */
     label: "Admin",
     /** Its indefinite article, kept beside the label rather than inferred. */
     article: "an",
@@ -83,11 +84,11 @@ export const INVITED_ROLE_COPY = {
     // a coach the plant's own records and no write anywhere, so the sentence
     // that describes the reach also has to describe its edge.
     accepting:
-      "you can read the plant's people, meetings, teams and tasks — coaching is a reading role, so nothing you do changes the plant's own work",
+      "you can read the plant's people, meetings, teams and tasks — coaching is read-only, so nothing you do changes the plant's own work",
     cta: "Accept the invitation",
   },
 } as const satisfies Record<
-  InvitedRoleKey,
+  InvitedAsKey,
   {
     label: string;
     article: string;
@@ -99,9 +100,9 @@ export const INVITED_ROLE_COPY = {
 
 /**
  * "an Admin" / "a Member" / "a Coach" — DERIVED from the table rather than
- * stored beside it, so the two spellings of one role cannot drift apart.
+ * stored beside it, so the two spellings of one entry cannot drift apart.
  */
-export function invitedRoleWithArticle(role: InvitedRole): string {
-  const copy = INVITED_ROLE_COPY[invitedRoleKey(role)];
+export function invitedAsWithArticle(invitedAs: InvitedAs): string {
+  const copy = INVITED_AS_COPY[invitedAsKey(invitedAs)];
   return `${copy.article} ${copy.label}`;
 }

@@ -91,7 +91,7 @@ import {
   resendRefusalMessage,
 } from "./resend";
 import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
-import { type InvitedRole } from "./seat-copy";
+import { type InvitedAs } from "./seat-copy";
 import {
   sendSeatInvitationEmail,
   type SeatInvitationEmailDeps,
@@ -270,7 +270,8 @@ function seatColumnFor(request: UserInvitationRequest): InvitableSeat | null {
 }
 
 /**
- * Read a row back as the role it invites — the inverse of `seatColumnFor`, and
+ * Read a row back as what it invites somebody to be — the inverse of
+ * `seatColumnFor`, and
  * the ONE place a stored row becomes words (`./seat-copy`).
  *
  * NO `?? "member"` FALLBACK, which is what it had while `seat` was the only
@@ -280,7 +281,7 @@ function seatColumnFor(request: UserInvitationRequest): InvitableSeat | null {
  * email a coach describing a Member's powers. Failing is the smaller harm, and
  * the caller turns it into a refusal with a reason.
  */
-function invitedRoleOf(invitation: UserInvitation): InvitedRole {
+function invitedAsOf(invitation: UserInvitation): InvitedAs {
   if (invitation.kind === "coach") return { kind: "coach" };
   if (!invitation.seat) {
     throw new InvitationError(
@@ -469,7 +470,7 @@ async function seatInviteeEmailOutcome(
 ) {
   let churchName: string | null = null;
   let inviterName: string | null = null;
-  let role: InvitedRole;
+  let invitedAs: InvitedAs;
 
   try {
     const facts = await lookupSeatInvitationSender(invitation);
@@ -477,7 +478,7 @@ async function seatInviteeEmailOutcome(
     inviterName = facts.inviterName;
     // INSIDE THE TRY, so a row that contradicts its own CHECK becomes a refusal
     // with a reason rather than an unhandled throw out of a best-effort send.
-    role = invitedRoleOf(invitation);
+    invitedAs = invitedAsOf(invitation);
   } catch (error) {
     console.error("seat invitation sender lookup failed", {
       invitationId: invitation.id,
@@ -494,7 +495,7 @@ async function seatInviteeEmailOutcome(
       status: invitation.status,
       churchName,
       inviterName,
-      role,
+      invitedAs,
       expiresAt: invitation.expiresAt,
     },
     deps
@@ -722,7 +723,7 @@ export async function resendUserInvitationEmailAs(
  * any other account, and NOT the token, which the browser already holds in its
  * URL.
  *
- * `role` is the union rather than a nullable seat, so the sign-up path cannot
+ * `invitedAs` is the union rather than a nullable seat, so the sign-up path cannot
  * read a seat off a coach invitation and grant one (#496).
  */
 export type UserRegistrationInvitation = {
@@ -730,7 +731,7 @@ export type UserRegistrationInvitation = {
   inviteeEmail: string;
   churchId: string;
   churchName: string;
-  role: InvitedRole;
+  invitedAs: InvitedAs;
 };
 
 /**
@@ -790,21 +791,21 @@ export async function describeUserInvitationForRegistration(
   // `user_invitations_seat_check`, and it is read as no invitation at all — the
   // same `null` an unknown token gets, which is the only answer this route is
   // allowed to distinguish.
-  const role: InvitedRole | null =
+  const invitedAs: InvitedAs | null =
     row.kind === "coach"
       ? { kind: "coach" }
       : row.seat
         ? { kind: "seat", seat: row.seat }
         : null;
 
-  if (!role) return null;
+  if (!invitedAs) return null;
 
   return {
     id: row.id,
     inviteeEmail: row.inviteeEmail,
     churchId: row.churchId,
     churchName: row.churchName,
-    role,
+    invitedAs,
   };
 }
 

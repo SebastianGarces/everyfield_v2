@@ -254,9 +254,9 @@ export async function register(
     seatInvitation
       ? {
           churchId: seatInvitation.churchId,
-          role: seatInvitation.role,
+          invitedAs: seatInvitation.invitedAs,
           matchedPersonId:
-            seatInvitation.role.kind === "seat"
+            seatInvitation.invitedAs.kind === "seat"
               ? await findLinkablePersonId(seatInvitation.churchId, identifier)
               : null,
         }
@@ -321,7 +321,7 @@ export async function register(
     // the claim set (`status = 'accepted'`). A claim that matched nothing leaves
     // this insert selecting nothing, so it writes nothing rather than assigning
     // a coach to a plant on an invitation that was revoked a millisecond ago.
-    if (seatInvitation.role.kind === "coach") {
+    if (seatInvitation.invitedAs.kind === "coach") {
       statements.push(assignCoachOnAcceptStatement(seatInvitation.id));
     }
   }

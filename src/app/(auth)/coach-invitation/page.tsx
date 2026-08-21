@@ -79,8 +79,8 @@ export default async function CoachInvitationPage({
         <CardTitle>{described.churchName} invited you to coach them</CardTitle>
         <CardDescription>
           Accepting lets you read this plant&apos;s people, meetings, teams and
-          tasks. Coaching is a reading role, so nothing you do changes their
-          work, and nothing about your own account changes.
+          tasks. Coaching is read-only, so nothing you do changes their work,
+          and nothing about your own account changes.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
