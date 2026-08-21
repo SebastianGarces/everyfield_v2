@@ -16,7 +16,9 @@
 | `RESEND_API_KEY` | For email | Resend client (`src/lib/email/client.ts`, webhook route) |
 | `RESEND_WEBHOOK_SECRET` | Email tracking | Svix signature check in `src/app/api/webhooks/resend/route.ts` |
 | `EMAIL_FROM` | For email | Outbound from address |
-| `FEEDBACK_EMAIL_TO` | No | Feedback notification recipient (`feedback/actions.ts`). Not in `.env.example` |
+| `FEEDBACK_EMAIL_TO` | No | Feedback notification recipient (`feedback/actions.ts`) |
+| `GITHUB_FEEDBACK_TOKEN` | No | Fine-grained PAT, `Issues: read and write` on the board repo and nothing else, used by the one-way feedback bridge (`src/lib/feedback/github.ts`, #190). Unset → the bridge logs one line and skips; the submission still saves and still emails, because the `feedback` row is the record |
+| `GITHUB_FEEDBACK_REPO` | No | Which board the bridge opens issues on (default `SebastianGarces/everyfield_v2`). Point it at a scratch repo to exercise the bridge without touching the real board |
 | `AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_ENDPOINT_URL_S3` / `_REGION` / `_BUCKET_NAME` | File storage | Tigris (S3-compatible) — commitment documents etc. |
 | `ADMIN_EMAILS` | Admin UI | Comma-separated platform-admin allowlist (`src/lib/auth/admin.ts`) |
 | `BETA_INVITE_CODE` | No | Private-beta register gate; unset = gate off (`register/actions.ts`). Not in `.env.example` |

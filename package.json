@@ -23,7 +23,8 @@
     "db:reset": "pnpm exec tsx scripts/seed-dev-db.ts",
     "g3:association": "tsx --env-file-if-exists=.env.local scripts/g3-association-lifecycle.ts",
     "g3:oversight": "tsx --env-file-if-exists=.env.local scripts/g3-oversight-model.ts",
-    "g3:followups": "tsx --env-file-if-exists=.env.local scripts/g3-followup-generation.ts"
+    "g3:followups": "tsx --env-file-if-exists=.env.local scripts/g3-followup-generation.ts",
+    "g3:feedback": "tsx --env-file-if-exists=.env.local scripts/g3-feedback-bridge.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.74",
