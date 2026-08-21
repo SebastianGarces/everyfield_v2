@@ -292,11 +292,11 @@ export async function updateRoleAction(
   return withChurch(
     "teams.write",
     "Failed to update role",
-    async ({ churchId }) => {
+    async ({ churchId, userId }) => {
       const parsed = roleUpdateSchema.safeParse(formEntries(formData));
       if (!parsed.success) return fieldErrorResult(parsed.error);
 
-      const role = await updateRole(churchId, roleId, parsed.data);
+      const role = await updateRole(churchId, roleId, userId, parsed.data);
       revalidateTeamSurfaces();
       return { success: true, data: role };
     }

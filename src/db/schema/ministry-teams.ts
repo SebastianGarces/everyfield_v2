@@ -142,6 +142,18 @@ export const ministryTeams = pgTable(
       .default("predefined"),
     description: text("description"),
     icon: varchar("icon", { length: 50 }),
+    /**
+     * The team's leader, as a PERSON.
+     *
+     * TWO DOORS WRITE IT AND THEY ARE NOT EQUALS (#311 WS2). `assignTeamLeader`
+     * is the EXPLICIT one and it sets this column unconditionally. The DERIVED
+     * one is `leader-sync.ts`: a filled leadership role implies the team's
+     * leader, but only while the column is NULL, so an explicit answer is never
+     * overwritten by somebody being seated.
+     *
+     * NOTHING RECORDS WHICH DOOR WROTE IT, deliberately — see `leader-sync.ts`
+     * for what that costs.
+     */
     leaderId: uuid("leader_id").references(() => persons.id),
     /**
      * When this team was offered its playbook responsibilities — the CLAIM that

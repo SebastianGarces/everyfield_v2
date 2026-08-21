@@ -7,8 +7,13 @@ import {
   type TimeCommitment,
 } from "@/db/schema";
 import { and, eq, asc } from "drizzle-orm";
-import { emitTeamStaffingChanged } from "./events";
+import { emitTeamLeaderAssigned, emitTeamStaffingChanged } from "./events";
 import { ExpectedError } from "./expected-error";
+import {
+  activeRoleHolder,
+  syncLeaderOnFill,
+  syncLeaderOnVacate,
+} from "./leader-sync";
 import { fillLeadershipRole } from "./leadership-fill";
 import { getRoleTemplates, type PredefinedTeamKey } from "./role-templates";
 import { getTeamStaffingCounts, verifyTeamOwnership } from "./shared";
@@ -77,11 +82,24 @@ export async function createRole(
 }
 
 /**
- * Update a role
+ * Update a role.
+ *
+ * THE LEADERSHIP FLAG IS THE ONE FIELD WITH A CONSEQUENCE OUTSIDE THIS ROW
+ * (#311 WS2): a FILLED role that becomes a leadership role names its occupant
+ * as the team's leader, and one that stops being a leadership role gives that
+ * back — both through `leader-sync.ts`, whose `WHERE` clauses carry the "only
+ * when the team has none" and "only when it points at them" halves.
+ *
+ * IT READS THE FLAG'S NEW VALUE, NOT A BEFORE/AFTER DIFF. Re-asserting the
+ * value a role already has is a no-op given those predicates, so there is
+ * nothing a diff would save and one fewer read to get wrong. The gate is
+ * whether the CALLER SPOKE about the flag: renaming a role must not disturb the
+ * header, and `undefined` is exactly "did not mention it".
  */
 export async function updateRole(
   churchId: string,
   roleId: string,
+  userId: string,
   data: {
     name?: string;
     description?: string;
@@ -109,12 +127,44 @@ export async function updateRole(
     .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)))
     .returning();
 
-  if (!updated) throw new Error("Role not found");
+  // ExpectedError: user copy — surfaced to the planter verbatim (409-6C). An
+  // id from another church matches nothing, so the tenancy check and the
+  // refusal are the same statement.
+  if (!updated) throw new ExpectedError("Role not found");
+
+  if (data.isLeadershipRole !== undefined) {
+    const holder = await activeRoleHolder(churchId, roleId);
+    if (holder) {
+      if (updated.isLeadershipRole) {
+        await syncLeaderOnFill(churchId, updated.teamId, holder);
+        // The same event `assignMember` emits when somebody lands in a
+        // leadership seat, on the other door into that state. F2 advances the
+        // person's status from it, and `autoAdvanceStatus` moves them only out
+        // of `launch_team`, so a repeat is a no-op rather than a demotion.
+        await emitTeamLeaderAssigned(updated.teamId, holder, churchId, userId);
+      } else {
+        await syncLeaderOnVacate(churchId, updated.teamId, holder);
+      }
+    }
+  }
+
   return updated;
 }
 
 /**
- * Delete a role
+ * Delete a role, and with it whoever was sitting in it.
+ *
+ * THE MEMBERSHIPS GO WITH THE ROLE IN THE SAME STATEMENT, not by the caller
+ * deleting them first: `team_memberships.role_id` is `ON DELETE CASCADE`
+ * (migration 0008), so one DELETE takes the seat and its history together and
+ * there is no ordering for a UI to get wrong. They are HARD-deleted rather than
+ * deactivated the way `removeMember` does it — an inactive membership is a
+ * record of a role somebody used to hold, and this role is about to stop
+ * existing.
+ *
+ * SO THE HOLDER IS READ BEFORE THE DELETE, because afterwards nothing can say
+ * who it was, and a leadership seat owes the team's leader a clear on the way
+ * out (#311 WS2 amendment).
  */
 export async function deleteRole(
   churchId: string,
@@ -130,9 +180,19 @@ export async function deleteRole(
   // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
   if (!role) throw new ExpectedError("Role not found");
 
+  const holder = role.isLeadershipRole
+    ? await activeRoleHolder(churchId, roleId)
+    : null;
+
   await db
     .delete(teamRoles)
     .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)));
+
+  // Derived after the fact, for the reason `removeMember` states: a leader that
+  // lags the seat is repairable, one that leads it is a lie about a live row.
+  if (holder) {
+    await syncLeaderOnVacate(churchId, role.teamId, holder);
+  }
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, role.teamId);

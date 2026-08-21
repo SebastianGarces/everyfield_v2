@@ -8,6 +8,7 @@ export { MembersRolesTab } from "./members-roles-tab";
 export { RoleFormDialog } from "./role-form-dialog";
 export { MemberAssignDialog } from "./member-assign-dialog";
 export { MemberRemoveButton } from "./member-remove-button";
+export { RoleRemoveButton } from "./role-remove-button";
 export { RoleTemplateImport } from "./role-template-import";
 export { ResponsibilitiesTab } from "./responsibilities-tab";
 export { ResponsibilityItem } from "./responsibility-item";

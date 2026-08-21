@@ -96,6 +96,11 @@ tenant scope; `created_at`/`updated_at` default now.
   There is no `completed` boolean beside it, so the contradictory pair cannot be written; the
   action takes a `complete` flag and the service derives the timestamp, so no caller names a
   completion time of its own.
+- **`ministry_teams.leader_id` has an EXPLICIT writer and a DERIVED one** (`ministry-teams.ts`,
+  #311). `assignTeamLeader` sets it unconditionally; `leader-sync.ts` sets it only
+  `WHERE leader_id IS NULL` and clears it only `WHERE leader_id = $person`, off a filled leadership
+  role. Nothing records which door wrote it. Full rule and its accepted residual:
+  `../invariants.md` → Ministry Teams.
 - **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation** — the
   invitee had no account when the admin typed `invitee_email`. `bindOpenInvitationTarget`
   (`src/lib/invitations/core.ts`) fills it in at registration, and its compare-and-set is what

@@ -13,6 +13,7 @@ import type { PersonForClient } from "@/lib/people/types";
 import { RoleFormDialog } from "./role-form-dialog";
 import { MemberAssignDialog } from "./member-assign-dialog";
 import { MemberRemoveButton } from "./member-remove-button";
+import { RoleRemoveButton } from "./role-remove-button";
 import { RoleTemplateImport } from "./role-template-import";
 
 interface MembersRolesTabProps {
@@ -163,6 +164,27 @@ export function MembersRolesTab({
                     />
                   </div>
                 )}
+
+                {/* The role itself, not its occupant: edit its details or
+                    delete it. Both sit outside the filled/open branch above,
+                    because a role can be changed or removed either way.
+                    FENCED OFF BY A RULE, because on a filled card these land
+                    beside "remove this person from the role" — two adjacent
+                    icon buttons that both look like removal and mean different
+                    things. The divider says which pair belongs to whom; the
+                    aria-labels say it again in words. */}
+                <div className="ml-1 flex items-center gap-1 border-l pl-2">
+                  <RoleFormDialog teamId={team.id} role={role} />
+                  <RoleRemoveButton
+                    roleId={role.id}
+                    roleName={role.name}
+                    assigneeName={
+                      role.assignedPerson
+                        ? `${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`
+                        : undefined
+                    }
+                  />
+                </div>
               </CardContent>
             </Card>
           ))}

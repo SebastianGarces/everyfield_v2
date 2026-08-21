@@ -9,6 +9,13 @@
 //   roles.ts        role CRUD + role-template import
 //   memberships.ts  assignments, removals, per-person views
 //   responsibilities.ts  the team's checklist, and the once-ever playbook seed
+//   leader-sync.ts  the DERIVED team leader — a filled leadership role implies
+//                   it, while nobody has said otherwise. Two compare-and-sets,
+//                   called by roles.ts and memberships.ts; deliberately NOT
+//                   re-exported, because no action calls it directly: a leader
+//                   changes as a CONSEQUENCE of a seat changing, never on its
+//                   own. `assignTeamLeader` is the explicit door and it is over
+//                   in teams.ts.
 //   training.ts     programs, completions, matrices
 //   health.ts       the read-model: health metrics + staffing summary
 //   shared.ts       private helpers the modules share (ownership check,
