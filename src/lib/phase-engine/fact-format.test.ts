@@ -470,7 +470,7 @@ test("a resolved attestation reads exactly as its keyed spelling", () => {
   for (const [signalKey, expected] of [
     [
       "financial_base_established",
-      "you confirmed your financial base is in place",
+      "you confirmed your launch funding is viable",
     ],
     ["values_documented", "you confirmed your core values are documented"],
     ["prayer_leader_assigned", "you confirmed a prayer leader is assigned"],
@@ -628,7 +628,7 @@ test("the formerly-divergent pair now agrees for a single resolved signal", () =
 
   assert.deepEqual(formatCitedFacts([arrayForm], FINANCIAL_BASE), [drillDown]);
   assert.deepEqual(formatCitedFacts([arrayForm], FINANCIAL_BASE), [
-    "you confirmed your financial base is in place",
+    "you confirmed your launch funding is viable",
   ]);
 });
 
@@ -661,7 +661,7 @@ test("both spellings of ONE attestation render one line, not the same line twice
       ],
       FINANCIAL_BASE
     ),
-    ["you confirmed your financial base is in place"]
+    ["you confirmed your launch funding is viable"]
   );
 });
 
@@ -814,14 +814,14 @@ test("the resolved signal reaches the other two attestation paths as well", () =
         "manual.attestations.1.signalKey": "financial_base_established",
       }
     ),
-    ["your financial base is in place"]
+    ["your launch funding is viable"]
   );
 
   const [dated] = formatCitedFacts(
     ["manual.attestations.1.attestedAt=2026-07-19T09:30:00.000Z"],
     { "manual.attestations.1.attestedAt": "financial_base_established" }
   );
-  assert.match(dated, /your financial base is in place/);
+  assert.match(dated, /your launch funding is viable/);
   assert.match(dated, /2026/);
 });
 
@@ -839,7 +839,7 @@ test("a valueless attestation row reads as its signal on BOTH paths", () => {
     formatCitedFact(fact, { signalKey: "financial_base_established" }),
   ]);
   assert.deepEqual(formatCitedFacts([fact], signals), [
-    "your financial base is in place",
+    "your launch funding is viable",
   ]);
 });
 
@@ -1043,7 +1043,7 @@ test("ONE attestation cited both legal ways paints ONE chip, not two", () => {
     TWO_SIGNALS
   );
 
-  assert.deepEqual(lines, ["your financial base is in place"]);
+  assert.deepEqual(lines, ["your launch funding is viable"]);
 });
 
 test("no attestation column ever renders the ledger's own label", () => {
@@ -1092,22 +1092,22 @@ test("N=1 keeps its sentence on every leaf and in every spelling", () => {
   // one distinct attestation in a group still reads the drill-down's sentence.
   assert.deepEqual(
     formatCitedFacts(["manual.attestations.1.signalKey"], TWO_SIGNALS),
-    ["your financial base is in place"]
+    ["your launch funding is viable"]
   );
   assert.deepEqual(
     formatCitedFacts(["manual.byKey.financial_base_established"]),
-    ["your financial base is in place"]
+    ["your launch funding is viable"]
   );
   assert.deepEqual(
     formatCitedFacts(["manual.attestations.1.value=true"], TWO_SIGNALS),
-    ["you confirmed your financial base is in place"]
+    ["you confirmed your launch funding is viable"]
   );
 
   const [dated] = formatCitedFacts(
     ["manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z"],
     TWO_SIGNALS
   );
-  assert.match(dated, /your financial base is in place/);
+  assert.match(dated, /your launch funding is viable/);
   assert.match(dated, /2026/);
 });
 

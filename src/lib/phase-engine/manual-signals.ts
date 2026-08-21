@@ -9,7 +9,7 @@
 //      answers, which is what the WRITE behind them stores in
 //      `plant_signals.signal_key`.
 //   2. `fact-phrases.ts` → `MANUAL_SIGNAL_CLAUSES` — the clause a citation of
-//      that signal READS as ("you confirmed your financial base is in place").
+//      that signal READS as ("you confirmed your launch funding is viable").
 //   3. `assessment/exit-criteria.ts` → `attested(<key>, …)` — the phase gate
 //      that MEASURES it, at `manual.byKey.<key>`.
 //   4. `signals/attestation-service.ts` → `setManualSignalSchema` — the zod
@@ -102,11 +102,33 @@ export const MANUAL_SIGNALS = [
     reaffirms: false,
   },
   {
+    // SOLVENCY ONLY, since #475 (C06). The old label — "Initial funding and a
+    // giving plan are established" — fused two questions Bryan pulled apart:
+    // "A plant could have a healthy financial base because of outside support
+    // while the core group is not giving sacrificially. The opposite could also
+    // be true." One toggle could not answer both, so this one answers the
+    // second and `core_group_giving` below answers the first.
+    //
+    // THE KEY DOES NOT MOVE. It is read by the Phase 1 financial gate
+    // (`assessment/exit-criteria.ts`) and by every row already in
+    // `plant_signals`; renaming it would silently reset the gate to `unknown`
+    // for every plant that had answered it.
     key: "financial_base_established",
-    label: "Financial base in place",
-    description: "Initial funding and a giving plan are established.",
-    clause: "your financial base is in place",
+    label: "Launch funding viable",
+    description:
+      "Funds and support available now are enough to launch and sustain ministry.",
+    clause: "your launch funding is viable",
     reaffirms: false,
+  },
+  {
+    key: "core_group_giving",
+    label: "Core group giving sacrificially",
+    description:
+      "People in your core group are learning to give sacrificially and regularly.",
+    clause: "your core group is giving sacrificially",
+    // A giving culture is a claim about the present tense, exactly like a
+    // prayer rhythm — so it perishes on the same 30-day window (#474).
+    reaffirms: true,
   },
   {
     // COVERAGE, NOT HEALTH, since #474 (C05). Bryan: "I would be careful not to

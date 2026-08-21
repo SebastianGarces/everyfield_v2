@@ -318,7 +318,7 @@ test("PE-025: both spellings of one attestation read the same specific sentence"
     label: "A financial base in place",
     factPaths: ["manual.byKey.financial_base_established"],
     measurement: "met",
-    reading: "You have confirmed your financial base is in place.",
+    reading: "You have confirmed your launch funding is viable.",
     facts: [
       {
         path: "manual.byKey.financial_base_established",
@@ -353,7 +353,7 @@ test("PE-025: both spellings of one attestation read the same specific sentence"
   const cited = items(row, "exit-criterion-cited-fact");
 
   assert.equal(cited.length, 2);
-  assert.equal(cited[0], "you confirmed your financial base is in place");
+  assert.equal(cited[0], "you confirmed your launch funding is viable");
   // The whole point: identical wording, not merely both non-empty.
   assert.equal(cited[1], cited[0]);
   // …and none of the old anonymous phrasing survives on either row.

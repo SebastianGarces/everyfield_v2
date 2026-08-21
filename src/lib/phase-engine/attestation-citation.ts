@@ -155,7 +155,7 @@ function signalPhrase(signalKey: string, value: string | null): string {
  * Attribution already resolves the array spelling onto its signal so both
  * spellings land on the same exit criterion; having landed on the same gate they
  * must also READ the same. "something you confirmed" beside "you confirmed your
- * financial base is in place" is the same evidence told twice, once vaguely, and
+ * launch funding is viable" is the same evidence told twice, once vaguely, and
  * the vague one is what makes a planter doubt the specific one.
  */
 export const ATTESTATION_LEAVES: Record<AttestationLeafName, AttestationLeaf> =

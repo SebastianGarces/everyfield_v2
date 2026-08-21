@@ -137,8 +137,30 @@ test("only the rhythm attestations perish", () => {
   // vocabulary in one place (see the source scan above).
   assert.deepEqual(
     MANUAL_SIGNALS.filter((s) => s.reaffirms).map((s) => s.key),
-    ["prayer_rhythm_established", "prayer_in_gatherings"]
+    // A giving culture is a present-tense claim just like a prayer rhythm
+    // (#475), so it joins the same window.
+    ["core_group_giving", "prayer_rhythm_established", "prayer_in_gatherings"]
   );
+});
+
+test("generosity and solvency are two separate attestations (#475)", () => {
+  const byKey = new Map(MANUAL_SIGNALS.map((s) => [s.key, s]));
+
+  const giving = byKey.get("core_group_giving");
+  assert.equal(giving?.label, "Core group giving sacrificially");
+  assert.equal(
+    giving?.description,
+    "People in your core group are learning to give sacrificially and regularly."
+  );
+  assert.equal(giving?.clause, "your core group is giving sacrificially");
+
+  // THE KEY DID NOT MOVE. It is what the Phase 1 financial gate reads, and what
+  // every already-answered row in `plant_signals` carries; renaming it would
+  // reset that gate to `unknown` for every plant that had answered it.
+  const funding = byKey.get("financial_base_established");
+  assert.equal(funding?.label, "Launch funding viable");
+  assert.equal(funding?.clause, "your launch funding is viable");
+  assert.equal(funding?.reaffirms, false);
 });
 
 test("the Prayer Leader toggle survives, as coverage", () => {
@@ -159,4 +181,20 @@ test("the reaffirm chip is driven by the flag, not by a key", () => {
     /signal\.reaffirms/,
     "the card must ask the vocabulary which signals perish"
   );
+});
+
+test("AC-2: the Phase 1 financial gate still reads the same key", () => {
+  // #475 narrowed the WORDS of `financial_base_established` and left the KEY
+  // alone, which is the whole safety of the change: every plant that answered
+  // it keeps its answer, and the gate keeps reading it. If this ever fails, it
+  // means somebody renamed the key and every answered gate silently reset to
+  // `unknown`.
+  const financial = Object.values(PHASE_EXIT_CRITERIA)
+    .flat()
+    .find((criterion) => criterion.key === "financial_base");
+
+  assert.ok(financial, "the Phase 1 financial gate disappeared");
+  assert.deepEqual(financial.factPaths, [
+    "manual.byKey.financial_base_established",
+  ]);
 });

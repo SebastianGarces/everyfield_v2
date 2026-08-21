@@ -319,11 +319,17 @@ export const PHASE_EXIT_CRITERIA: Record<
     },
     {
       key: "financial_base",
-      label: "Financial base in place",
-      detail: "Giving and a first-year budget you can plant on.",
+      // SOLVENCY, not giving culture (#475, C06). The criterion's own key stays
+      // `financial_base` and it still reads `financial_base_established`, so
+      // every plant that answered it keeps its answer — what changed is that
+      // the words no longer promise to cover generosity as well. Whether the
+      // core group gives sacrificially is `core_group_giving`, a CSF-6 signal
+      // and not a Phase 1 gate.
+      label: "Launch funding viable",
+      detail: "Enough funding and support to launch and sustain ministry.",
       ...attested("financial_base_established", {
-        met: "you confirmed your financial base is in place",
-        notMet: "you have not confirmed your financial base is in place",
+        met: "you confirmed your launch funding is viable",
+        notMet: "you have not confirmed your launch funding is viable",
         unknown: "you have not answered this on the phase page yet",
       }),
     },

@@ -93,7 +93,7 @@ function makeLatest(citedFacts: string[]): LatestAssessment {
     category: "generosity",
     severity: "medium",
     title: "Your financial base is not confirmed",
-    body: "You have not yet attested that your financial base is in place.",
+    body: "You have not yet attested that your launch funding is viable.",
     citedFacts,
     relatedArticleSlugs: [],
     rank: 0,
@@ -118,7 +118,7 @@ function renderAllThree(citedFacts: string[]) {
   };
 }
 
-const SPECIFIC = "you have not confirmed your financial base is in place";
+const SPECIFIC = "you have not confirmed your launch funding is viable";
 const GENERIC = "something you have not confirmed";
 
 // ----------------------------------------------------------------------------

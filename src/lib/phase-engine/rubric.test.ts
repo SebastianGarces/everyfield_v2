@@ -80,6 +80,23 @@ test("v1 feeds Lens 5 from rhythms, not from a title (#474)", () => {
   assert.match(RUBRICS.v1.body, /STALE IS CITED WITH ITS AGE/);
 });
 
+test("v1 scores generosity and solvency apart (#475)", () => {
+  // v0 fused them into one line, which is the sentence Bryan objected to.
+  assert.match(
+    RUBRICS.v0.body,
+    /Generosity \(CSF #6\) and 'Finances in place'/
+  );
+  assert.doesNotMatch(RUBRICS.v1.body, /'Finances in place' are launch gates/);
+
+  assert.match(RUBRICS.v1.body, /### CSF-6 · Generosity & Financial Readiness/);
+  assert.match(RUBRICS.v1.body, /core_group_giving/);
+  assert.match(RUBRICS.v1.body, /financial_base_established/);
+  assert.match(
+    RUBRICS.v1.body,
+    /YOU MAY NOT READ ONE AS EVIDENCE FOR THE OTHER/
+  );
+});
+
 test("v1 may not claim the planter carries follow-up", () => {
   assert.doesNotMatch(RUBRICS.v1.body, /carrying all the follow-up/);
   assert.match(RUBRICS.v1.body, /Make sure each one has a clear owner/);
