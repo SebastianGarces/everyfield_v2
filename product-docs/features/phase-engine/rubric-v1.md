@@ -57,6 +57,7 @@ recorded rulings, and the recommended v1 delta.
 | Every lens has an evidence quality, including unknown | C17 | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) | New §5b: measured / attested / unknown per lens, derived from the snapshot and handed to the judge. Unknown is never healthy; the scorecard renders an insufficient-evidence tile. Appendix C question 2 resolved. |
 | Planter sustainability is captured, never inferred | C19 | [#484](https://github.com/SebastianGarces/everyfield_v2/issues/484) | New §5c: the engine may not claim planter wellbeing from any activity fact. A private weekly check-in captures it directly, outside the pipeline, and renders beside the assessment so launch-green cannot wash planter-red. |
 | We assess launch health, not church health | C20 | [#485](https://github.com/SebastianGarces/everyfield_v2/issues/485) | The document opens with the scope statement and names what is out of it. The judge is banned from church-health verdicts in either direction; the same sentence ships on `/phase`, on the oversight portfolio and in the FRD. |
+| Growth composition — transfer vs new believers | C26 | [#487](https://github.com/SebastianGarces/everyfield_v2/issues/487) | Lens 3 gains a light composition note counted from the existing `persons.source` field. Planter-audience only; conversion claims and cross-plant ranking are both banned; the post-alpha upgrade path is named. |
 | The remaining ⚠️ thresholds are ruled | C22, C23 | [#486](https://github.com/SebastianGarces/everyfield_v2/issues/486) | Two-level cadence (21 watch / 28 direct), percentage-based disengagement (20%, min 3), warmth-split follow-up staleness (7 warm / 14 cold), and a compound readiness trigger — time alone never escalates. Appendix C question 3 is now a record rather than a question. |
 
 ---
@@ -211,6 +212,28 @@ counts as unowned, so an owner who leaves surfaces the follow-up again instead o
     rests on.
 - **Healthy:** trending toward at least 50 committed adults on a trajectory that
   reaches target before launch.
+- **Where the growth came from — light visibility, never a scoreboard.** ✅ The engine
+  counts committed members by the source already recorded on their person record
+  (personal referral, social media, vision meeting, website, event, partner church,
+  other), plus how many have none.
+  - **What it may say:** the mix — "9 of your 24 committed adults came through vision
+    meetings; 4 from a partner church; 5 have no recorded source" — and a gentle
+    observation when growth is predominantly from a partner church, which is a real
+    conversation and one the engine could not previously start.
+  - **What it may never say:** anything about conversions, professions of faith,
+    spiritual background, or Great Commission fruit. **Source records how a contact
+    reached the plant and nothing more.** A plant can grow from 20 to 60 entirely from
+    neighbouring churches — that is worth seeing, and it is not evidence about anybody's
+    faith.
+  - **Unseen is said.** Mostly-unrecorded sources read as "we cannot see where growth is
+    coming from yet", never as a quiet gap (§5b).
+  - **Never rank, score, or compare plants on composition.** This is a planter-audience
+    fact only; the network never sees it. A network league table of where growth comes
+    from is exactly the gamification this note exists to prevent.
+  - **The upgrade path, named and not built:** professions of faith, baptisms and
+    evangelistic relationships as records on the person profile. That is what would make
+    the Great Commission question answerable, and it is deliberately post-alpha —
+    counting conversions is the one place gamification would do real damage.
 - **What it says:** "you are at 22 committed adults with four months to launch — at
   your current pace of two per week you will reach about 54, just over the minimum;
   consider increasing vision-meeting frequency."

@@ -6,6 +6,7 @@ import {
   findUnpairedNetworkCategories,
   findVerdictLanguage,
 } from "./network-register";
+import { RUBRICS } from "../rubric";
 import { judgeOutputSchema, type Insight } from "./schema";
 
 // ----------------------------------------------------------------------------
@@ -183,5 +184,22 @@ test("findNetworkRegisterViolations ignores planter text entirely", () => {
       insight({ audience: "planter", body: "Intervention needed." }),
     ]),
     []
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Growth composition is planter-only (#487 D1)
+//
+// A network comparing plants on where their growth comes from is exactly the
+// gamification Bryan warned against — and the rubric's own words for it are the
+// only enforcement that can reach prose.
+// ----------------------------------------------------------------------------
+
+test("the rubric restricts composition to the planter, and bans ranking", () => {
+  assert.match(RUBRICS.v1.body, /PLANTER AUDIENCE ONLY/);
+  assert.match(RUBRICS.v1.body, /never rank, score or compare plants on it/);
+  assert.match(
+    RUBRICS.v1.body,
+    /SOURCE RECORDS HOW A CONTACT REACHED THE PLANT AND NOTHING MORE/
   );
 });

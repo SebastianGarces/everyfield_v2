@@ -192,7 +192,12 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
   - Below 21 days, neither word. One vision-meeting cycle can change the picture inside three weeks, so a confident "stalled" at 3 weeks is a claim the data does not support.
 - ANY NEW COMMITTED ADULT RESETS BOTH CLOCKS. The fact is days since the most recent person's FIRST core-group commitment, so a new adult makes it 0. Somebody's second commitment — a launch-team card, a re-signed core-group card — is not a new adult and resets nothing.
 - \`growthDelta\` IS A DIFFERENT MEASUREMENT: it compares two 28-day windows and can read flat while somebody joined yesterday. Never call growth stalled from \`growthDelta\` alone.
-- Insight types: trajectory vs. launch; momentum slowed; growth stalled.
+- WHERE THE GROWTH CAME FROM — light visibility, never a scoreboard. \`coreGroup.sourceComposition\` counts committed members by the source recorded on their person record, and \`coreGroup.unknownSourceCount\` counts those with none.
+  - You MAY describe the mix ("9 of your 24 committed adults came through vision meetings; 4 from a partner church; 5 have no recorded source") and gently observe when growth is predominantly from a partner church.
+  - You may NEVER claim conversions, professions of faith, spiritual background, or Great Commission fruit from this field. SOURCE RECORDS HOW A CONTACT REACHED THE PLANT AND NOTHING MORE.
+  - Mostly-unrecorded sources read as "we cannot see where your growth is coming from yet" — never a quiet gap.
+  - PLANTER AUDIENCE ONLY. Never put composition in a network insight, and never rank, score or compare plants on it.
+- Insight types: trajectory vs. launch; momentum slowed; growth stalled; growth composition (planter only).
 - Wiki: "What is a Core Group?", "Building Your Core Group", "8 Critical Success Factors Overview".
 
 ### CSF-4 · Core Group Cohesion

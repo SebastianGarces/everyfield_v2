@@ -83,6 +83,12 @@ function richInputs(): SnapshotInputs {
         signedDate: "2026-06-01",
       },
     ],
+    personSources: [
+      { personId: "A", source: "vision_meeting" },
+      { personId: "B", source: "partner_church" },
+      // C has no recorded source — counted, never dropped (#487).
+      { personId: "C", source: null },
+    ],
     visionMeetings: [
       // most-recent first (as queried)
       {
@@ -156,6 +162,7 @@ function coldStartInputs(): SnapshotInputs {
     launch: null,
     launchMilestones: [],
     commitments: [],
+    personSources: [],
     visionMeetings: [],
     followUp: [],
     followUpTasks: [],
@@ -1100,4 +1107,69 @@ test("the cohesion and warmth facts reach the judge's ledger", () => {
   ]) {
     assert.ok(FACT_PHRASES.has(key), `${key} has no phrase`);
   }
+});
+
+// ----------------------------------------------------------------------------
+// Where the growth came from (#487, C26)
+//
+// Bryan: "A plant could grow from 20 to 60 entirely by attracting Christians
+// from neighboring churches. From a launch standpoint, that's growth. From a
+// Great Commission standpoint, that's telling me something very different."
+//
+// The field records HOW SOMEBODY REACHED THE PLANT. It is not a conversion, not
+// a spiritual background, and the rubric bans both readings — what it supports
+// is "most of your growth came through a partner church", which is a real
+// conversation the engine could not previously start.
+// ----------------------------------------------------------------------------
+
+test("composition counts the COMMITTED, by their recorded source", () => {
+  const snap = assembleFactSnapshot(CHURCH_ID, richInputs(), AS_OF);
+
+  assert.deepEqual(snap.coreGroup.sourceComposition, {
+    vision_meeting: 1,
+    partner_church: 1,
+  });
+  assert.equal(snap.coreGroup.unknownSourceCount, 1);
+  // The three counted are exactly the three committed people.
+  assert.equal(snap.coreGroup.committedCount, 3);
+});
+
+test("a person who never committed is not in the composition", () => {
+  // The question is about growth of the CORE GROUP. A prospect's source says
+  // nothing about that yet.
+  const inputs = richInputs();
+  inputs.personSources = [
+    ...inputs.personSources,
+    { personId: "Z", source: "website" },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.coreGroup.sourceComposition.website, undefined);
+});
+
+test("a plant with no recorded sources says so rather than showing nothing", () => {
+  // Unseen is SAID (§5b). An empty composition with a real count is what lets
+  // the rubric produce "we cannot see where your growth is coming from yet".
+  const inputs = richInputs();
+  inputs.personSources = [
+    { personId: "A", source: null },
+    { personId: "B", source: null },
+    { personId: "C", source: null },
+  ];
+
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.deepEqual(snap.coreGroup.sourceComposition, {});
+  assert.equal(snap.coreGroup.unknownSourceCount, 3);
+});
+
+test("composition reaches the judge's fact ledger", () => {
+  const ledger = new Map(
+    flattenFacts(assembleFactSnapshot(CHURCH_ID, richInputs(), AS_OF)).map(
+      (line) => [line.key, line.value]
+    )
+  );
+
+  assert.equal(ledger.get("coreGroup.sourceComposition.vision_meeting"), "1");
+  assert.equal(ledger.get("coreGroup.sourceComposition.partner_church"), "1");
+  assert.equal(ledger.get("coreGroup.unknownSourceCount"), "1");
 });
