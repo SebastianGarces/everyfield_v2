@@ -148,6 +148,8 @@ Applies to `phase_transitions` and every reader of it.
 Applies to `src/lib/phase-engine/**` and the `/phase` surfaces rendering `plant_insights.cited_facts`.
 
 - A CITED PATH IS UNTRUSTED INPUT — the judge writes it, so a segment may be `constructor`, `toString` or `__proto__` — binding every read of a judge-written key AND the write that assembles `manual.byKey`. Exactly three shapes are sanctioned: a `Map` read with `.get`, a `Record` read through `Object.hasOwn`, or a prototype-free `Object.create(null)` accumulator; never a bare `in` or `[key]`.
+- ⚖ THE RULE THE JUDGE IS TOLD AND THE RULE IT IS HELD TO ARE ONE ARRAY (#538). The active rubric body INTERPOLATES `NETWORK_VERDICT_PHRASES`; never retype the ban-list into rubric prose. A hand-kept second copy went short by two phrases, so the judge could emit a word it was never shown and have the whole response rejected for it.
+- ⚖ SHIPPING A RUBRIC VERSION IS A ONE-LINE FLIP OF `ACTIVE_RUBRIC_VERSION`, and every superseded version STAYS in `RUBRICS`. Assessments store the version that produced them, so deleting v0 would silently re-explain historical assessments against text their planter never saw.
 
 ## Wiki Articles
 

@@ -1,9 +1,11 @@
 # Bryan’s comments on the Plant Intelligence Rubric — classified
 
 Source: [plant-intelligence-rubric-v0](https://docs.google.com/document/d/1YS6z8pbSeAl2yL-q3C93VvGuE4pxroh1PTzD2LAeeUk/edit) (Google Doc, `gsgarces1@gmail.com`).
-Reviewer: Bryan Nass. Pulled 2026-08-17. All 26 threads are still **open**.
+Reviewer: Bryan Nass. Pulled 2026-08-17.
 
-This file is the working review. Duplicate comments are grouped under the unique rubric change they imply; the full inventory is at the bottom.
+**Closed 2026-08-21.** All 26 comments are dispositioned and rubric v1 is in force — see [Disposition](#disposition-all-26-comments-2026-08-21) at the foot of this file. The rest of this document is the working review as it stood, kept unedited: it is the reasoning the rulings came from.
+
+Duplicate comments are grouped under the unique rubric change they imply; the full inventory is at the bottom.
 
 ---
 
@@ -272,12 +274,12 @@ If you accept Bryan’s comments as the ruling, v1 of the rubric needs:
 13. **Network**: compound readiness-focus trigger; Limited visibility posture; planter-first same diagnosis; coaching register; no cause-inference.
 14. **New attestations**: planter sustainability; (later) growth source.
 
-Still needs a product ruling, not just a rubric edit:
+Still needs a product ruling, not just a rubric edit *(as written 2026-08-18; three of the four were ruled during the series — see the disposition at the foot of this file)*:
 
-- Sharing: forever-optional toggles vs. an up-front sending agreement (change 10).
-- Whether vision-meeting *target* stays biweekly or moves toward weekly (change 12).
-- Whether planter care is a ninth lens, an attestation block, or a coach prompt.
-- Whether 50/100 becomes network-configurable in v1 or later.
+- ~~Sharing: forever-optional toggles vs. an up-front sending agreement (change 10).~~ Ruled — ledger row 187, shipped by #479.
+- **Whether the vision-meeting *target* stays biweekly or moves toward weekly (change 12). STILL OPEN** — deferred at the v1 flip.
+- ~~Whether planter care is a ninth lens, an attestation block, or a coach prompt.~~ Ruled — none of the three; a private weekly check-in outside the pipeline (#484).
+- ~~Whether 50/100 becomes network-configurable in v1 or later.~~ Ruled — later (#472).
 
 ---
 
@@ -483,9 +485,60 @@ Anchors are the highlighted Doc text. Comments are quoted in full.
 
 ## Open product questions (not answered by the comments)
 
-1. Accept Bryan’s comments as the v1 ruling, or wait for Brett?
-2. Sharing: keep planter-controlled off-by-default, or introduce a sending-relationship agreement?
-3. Vision-meeting target: stay at every two weeks, or move toward weekly given his practice?
-4. Planter sustainability: attestation block, coach prompt, or a named lens?
-5. 50/100 configurability: later, or in v1?
-6. Should there always be one positive observation in the 1+2 budget, or can three urgent items crowd it out?
+1. ~~Accept Bryan’s comments as the v1 ruling, or wait for Brett?~~ *(Accepted as the v1 ruling, 2026-08-18. Brett’s review is a later pass against v1, not a gate on it.)*
+2. ~~Sharing: keep planter-controlled off-by-default, or introduce a sending-relationship agreement?~~ *(Ruled: neither, exactly. There is no universal default — a self-started plant shares nothing, an invited plant starts with everything on and consents at the acceptance screen. `decisions.md` ledger row 187; rubric §7 via #479.)*
+3. **Vision-meeting target: stay at every two weeks, or move toward weekly given his practice? — STILL OPEN.** Deferred at the v1 flip (#538). See C12 below.
+4. ~~Planter sustainability: attestation block, coach prompt, or a named lens?~~ *(Ruled: none of the three. A private weekly planter check-in outside the assessment pipeline, which no model reads — rubric §5c via #484.)*
+5. ~~50/100 configurability: later, or in v1?~~ *(Ruled: later. v1 changes the grammar around the numbers, not the numbers, and network-level configurability is a post-alpha product decision — #472.)*
+6. ~~Should there always be one positive observation in the 1+2 budget, or can three urgent items crowd it out?~~ *(Ruled: neither — positives are exempt from the budget entirely and get their own surface, so they can neither crowd out a focus slot nor be crowded out — #478.)*
+
+---
+
+## Disposition: all 26 comments (2026-08-21)
+
+Closed by [#538](https://github.com/SebastianGarces/everyfield_v2/issues/538), which assembled the 18 landed sub-issues into rubric v1 and flipped `ACTIVE_RUBRIC_VERSION`. Every comment below reached the shipped rubric or was explicitly deferred; none was silently dropped.
+
+25 comments are ruled and implemented. **One — C12 — is deferred**, and it is deferred as a *question*, not as a gap: the rubric states the vision-meeting target as an open Playbook parameter rather than inventing a ruling for it.
+
+| # | Subject | Ruling | Landed in |
+|---|---|---|---|
+| C01 | Stop inferring the planter is the bottleneck | Tweak | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) |
+| C02 | Stall = 28 days; one new adult resets it | Accept | [#471](https://github.com/SebastianGarces/everyfield_v2/issues/471) |
+| C03 | 50/100 are methodology benchmarks | Tweak | [#472](https://github.com/SebastianGarces/everyfield_v2/issues/472) |
+| C04 | Rename Unity → Core Group Cohesion | Tweak | [#473](https://github.com/SebastianGarces/everyfield_v2/issues/473) |
+| C05 | Prayer is rhythms, not a title | Tweak | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) |
+| C06 | Split Generosity from Financial Readiness | Tweak | [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) |
+| C07 | 60 days is a candidate signal, not readiness | Tweak | [#476](https://github.com/SebastianGarces/everyfield_v2/issues/476) |
+| C08 | Phase 1 gate is a cluster, not a headcount | Tweak | [#477](https://github.com/SebastianGarces/everyfield_v2/issues/477) |
+| C09 | Observation budget: 1 primary + 2 supplements | Accept | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) |
+| C10 | Sharing agreement vs forever-optional toggles | Tweak | [#479](https://github.com/SebastianGarces/everyfield_v2/issues/479) |
+| C11 | Private plants must not read "on track" | Accept | [#480](https://github.com/SebastianGarces/everyfield_v2/issues/480) |
+| **C12** | **Vision cadence — he met weekly and consistently** | **DEFERRED** | **Half shipped ([#486](https://github.com/SebastianGarces/everyfield_v2/issues/486)); target open — see below** |
+| C13 | Appendix B follow-up sample (duplicate of C01) | Tweak | [#470](https://github.com/SebastianGarces/everyfield_v2/issues/470) |
+| C14 | Unfilled roles are a coverage gap, not absent leaders | Accept | [#481](https://github.com/SebastianGarces/everyfield_v2/issues/481) |
+| C15 | Network tone too clinical | Tweak | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) |
+| C16 | Planter sees the same diagnosis first | Tweak | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) |
+| C17 | Insufficient-evidence / unknown state | Accept | [#483](https://github.com/SebastianGarces/everyfield_v2/issues/483) |
+| C18 | Observation budget, Appendix C (duplicate of C09) | Accept | [#478](https://github.com/SebastianGarces/everyfield_v2/issues/478) |
+| C19 | Planter sustainability is the biggest absence | Tweak | [#484](https://github.com/SebastianGarces/everyfield_v2/issues/484) |
+| C20 | Launch health, not church health | Tweak | [#485](https://github.com/SebastianGarces/everyfield_v2/issues/485) |
+| C21 | Prayer/generosity capture questions | Tweak | [#474](https://github.com/SebastianGarces/everyfield_v2/issues/474) (prayer) + [#475](https://github.com/SebastianGarces/everyfield_v2/issues/475) (generosity) |
+| C22 | The ⚠️ threshold pack | Accept | [#486](https://github.com/SebastianGarces/everyfield_v2/issues/486) |
+| C23 | 30-day compound trigger; keep the 30–40 cluster | Accept | [#486](https://github.com/SebastianGarces/everyfield_v2/issues/486) |
+| C24 | Network philosophy right, samples too strong | Accept | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) |
+| C25 | Planter never learns the diagnosis via the overseer | Tweak | [#482](https://github.com/SebastianGarces/everyfield_v2/issues/482) |
+| C26 | Source of growth — transfer vs new believers | Tweak | [#487](https://github.com/SebastianGarces/everyfield_v2/issues/487) |
+
+### C12, in full
+
+C12 is two claims, and only one of them is a rubric question.
+
+**Shipped:** consistency belongs in the healthy definition. "Inconsistency makes it hard for even the most committed team members to know when meetings happen" is now Lens 1's healthy line — meetings on cadence *and on a predictable rhythm* — and it arrived with the two-level cadence rule (#486).
+
+**Deferred:** whether the *target* moves from every two weeks to weekly. Three reasons it is not ruled here:
+
+1. **It is a Launch Playbook number, not a rubric number.** The rubric assesses against the methodology; changing what the methodology asks for is a decision for the Playbook's authors. Every other number v1 ruled was a threshold the rubric itself invented.
+2. **One practitioner's practice is not the evidence for it.** Bryan reported what he did, and read literally he was affirming the diagnosis, not voting on the target. Ruling a methodology parameter off one data point is the failure mode C03 exists to prevent.
+3. **Nothing is blocked by leaving it open.** Lens 1 assesses against 14 days and is barred from presenting biweekly as the only defensible rhythm, or from telling a weekly planter they are over-meeting. A wrong ruling would cost more than the open question does.
+
+Recorded in the rubric at Lens 1 and Appendix C question 6, and in `product-docs/decisions.md` (2026-08-21). It is the standing question for Brett's review.

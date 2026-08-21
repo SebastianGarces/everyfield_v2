@@ -9,10 +9,17 @@
 //
 // Every assessment records `ACTIVE_RUBRIC.version`; changing the active version
 // changes the recorded version (AC-PE-4). Shipping a version is a two-step:
-// register it in `RUBRICS` (v1 is registered and DRAFT today), then flip
-// `ACTIVE_RUBRIC_VERSION` — a one-line swap, no pipeline edit. `rubric.test.ts`
-// holds v1 down until #538 does the flip.
+// register it in `RUBRICS`, then flip `ACTIVE_RUBRIC_VERSION` — a one-line
+// swap, no pipeline edit. v1 shipped that way on 2026-08-21 (#538); v0 stays
+// registered because every assessment written before that date recorded "v0"
+// and must still be explainable against the text that produced it.
 // ============================================================================
+
+// The network ban-list is INTERPOLATED into v1's body rather than retyped into
+// it. `network-register.ts` is what fails a response containing one of these
+// phrases; a rubric that named a shorter list would hand the judge a rule it is
+// then punished for obeying. One array, one spelling, no drift.
+import { NETWORK_VERDICT_PHRASES } from "./judge/network-register";
 
 export interface Rubric {
   /** Version string recorded alongside every assessment (e.g. "v0"). */
@@ -133,16 +140,16 @@ const RUBRIC_V0: Rubric = {
 };
 
 /**
- * Rubric v1 — DRAFT, registered but NOT active. Bryan's review of v0 (C01–C26)
- * is landing one ruled change at a time; each sub-issue of #469 edits the lens
- * it owns here and in `product-docs/features/phase-engine/rubric-v1.md`, which
- * carries the change log. #538 flips `ACTIVE_RUBRIC_VERSION` to "v1" once the
- * series is complete. Until then this text reaches no judge prompt and no
- * planter — it is registered so `getRubric("v1")` resolves and the delta is
- * reviewable in one place.
+ * Rubric v1 — IN FORCE since 2026-08-21 (#538). Bryan's review of v0 (C01–C26)
+ * landed one ruled change at a time across the #469 series; each sub-issue
+ * edited the lens it owned here and in
+ * `product-docs/features/phase-engine/rubric-v1.md`, which carries the change
+ * log and the disposition of all 26 comments.
  *
- * v1 starts as v0 and diverges section by section. A section identical to v0
- * has not been ruled on yet.
+ * The through-line of every change, in Bryan's four lines: say only what the
+ * data supports, measure the thing the lens is named for, be a short coaching
+ * list rather than a report, and be honest about blindness. A section that
+ * still reads like v0 is one those four lines had nothing to correct.
  */
 const RUBRIC_V1_BODY = `# Plant Intelligence Rubric — v1
 
@@ -166,6 +173,7 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - A CADENCE SLIP HAS TWO LEVELS AND THEY DO NOT SHARE A VOICE:
   - \`daysSinceLastMeeting\` >= \`cadenceWatchDays\` (21): NOTICE it. Do not sound like a crisis — three weeks is not one. "It has been three weeks since your last vision meeting."
   - \`daysSinceLastMeeting\` >= \`cadenceDirectDays\` (28): now say plainly what is at stake — the vision meeting is the engine of the whole launch.
+- THE TARGET ITSELF IS AN OPEN PLAYBOOK PARAMETER. >=1 every 2 weeks is what the Launch Playbook states, and it is the target you assess against. Experienced planters run weekly; whether the Playbook target moves to weekly is unruled. Never present the biweekly target as the only defensible rhythm, and never tell a planter meeting weekly that they are over-meeting.
 - Insight types: cadence slipping, at the level the gap earns; attendance plateauing; strong conversion worth reinforcing.
 - Wiki: "What is a Vision Meeting?", "8 Critical Success Factors for Vision Meetings", "Planning Your Vision Meeting".
 
@@ -173,13 +181,12 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 - Signals: MEASURED follow-up ownership. Every open follow-up task carries an assignee, and only members holding a committed status (core group, launch team, leader) may hold one. The facts: \`unownedCount\` (open follow-ups with no live owner), \`staleUnownedCount\` (stale ones with no live owner), \`distinctOwnerCount\`, \`planterOwnedCount\`.
 - Healthy: follow-up spread across several distinct committed owners, with few follow-ups sitting unowned.
 - HARD RULE: stale follow-ups do NOT prove the planter is carrying them — they may equally mean ownership was distributed badly, or that people did not do what they agreed. You may state who carries follow-up ONLY from the four owner facts above. Never infer it from follow-up volume or staleness.
+- STALENESS DEPENDS ON THE CONTACT. A universal window was wrong in both directions at once. WARM = attended a vision meeting within \`followUp.warmWindowDays\` (14): the ideal is 48–72 hours, flag at \`followUp.warmStaleThresholdDays\` (7), seriously stale at 14. COLDER contacts: 14 days stands. The facts are \`staleWarmCount\`, \`seriouslyStaleWarmCount\` and \`staleColdCount\` — use the one that matches what you are saying.
+- Ownership is TASK ownership, not ownership of the relationship with the contact. A task assigned to somebody since removed or demoted out of the committed set counts as unowned.
 - Insight types:
   - Ownership measured (\`distinctOwnerCount\` > 0): "You own 6 of the 9 open follow-ups. Handing some to committed members spreads ownership of growth — the second Critical Success Factor."
   - Ownership not measured (no owners recorded): "8 follow-ups are currently stale. Make sure each one has a clear owner and reconnect with them this week." Report the staleness; name no cause.
   - Network audience: "Several follow-ups have been waiting longer than the follow-up window. This may be worth a coaching conversation." Never an owner's name, never a cause.
-- STALENESS DEPENDS ON THE CONTACT. A universal window was wrong in both directions at once. WARM = attended a vision meeting within \`followUp.warmWindowDays\` (14): the ideal is 48–72 hours, flag at \`followUp.warmStaleThresholdDays\` (7), seriously stale at 14. COLDER contacts: 14 days stands. The facts are \`staleWarmCount\`, \`seriouslyStaleWarmCount\` and \`staleColdCount\` — use the one that matches what you are saying.
-- STALENESS DEPENDS ON THE CONTACT. A universal window was wrong in both directions at once. WARM = attended a vision meeting within \`followUp.warmWindowDays\` (14): the ideal is 48–72 hours, flag at \`followUp.warmStaleThresholdDays\` (7), seriously stale at 14. COLDER contacts: 14 days stands. The facts are \`staleWarmCount\`, \`seriouslyStaleWarmCount\` and \`staleColdCount\` — use the one that matches what you are saying.
-- Ownership is TASK ownership, not ownership of the relationship with the contact. A task assigned to somebody since removed or demoted out of the committed set counts as unowned.
 - Wiki: "Growing Your Core Group", "The Core Group Funnel".
 
 ### CSF-3 · Critical Mass
@@ -291,28 +298,24 @@ the lens of the current phase, then phrase output for the audience (planter vs. 
 
 ## Audience framing
 - Planter insights: direct, actionable coaching — the next concrete step.
-- Network insights: conservative, observational health reads (observation, not verdict; the planter sees it first). Never expose individual person records to the network audience; speak in aggregate. Never name a cause the facts do not establish.
+- Network insights: conservative, observational health reads (observation, not verdict; the planter sees it first). Never expose individual person records to the network audience; speak in aggregate. The rules the network audience is held to are the three sections below.
 
 ## The network register — coaching, never verdict
 - THE PLANTER SEES IT FIRST, AND EVERY NETWORK CONCERN IS ALSO A PLANTER CONCERN. For every non-positive network insight you write, write a planter insight in the SAME CATEGORY. The wording should differ — the audiences are different — but a negative conclusion the planter was never shown is not permitted. (An assessment is also withheld from oversight until the planter has opened it, or 72 hours pass; that is a product mechanism, not something you control.)
 - THE PLANTER'S VERSION CARRIES THE CONTRIBUTING SIGNALS, so they hold the explanation before anyone asks for it: "Growth has stalled, and two contributing signals are vision cadence and stale follow-up."
-- BANNED IN NETWORK-AUDIENCE TEXT: "intervention", "failing", "critical", "lack of", "needs to be addressed", "underperform", "is behind". (The phrase "critical mass" is the name of CSF-3 and is always allowed.) These are checked on your output; using one fails the whole response.
+- BANNED IN NETWORK-AUDIENCE TEXT: ${NETWORK_VERDICT_PHRASES.map((phrase) => `"${phrase}"`).join(", ")}. (The phrase "critical mass" is the name of CSF-3 and is always allowed.) These are checked on your output; using one fails the whole response.
 - PATTERN, NOT CAUSE. Name the measured pattern and point at a conversation: "Core-group momentum has slowed. This may be worth a coaching conversation around vision cadence, invitations, and follow-up." Say WHY only when the cause is itself a measured fact. "Growth has been flat for four weeks" is allowed; telling a network director what is causing it usually is not.
 - SOUND LIKE CHURCH PLANTING AND COACHING, not like a quarterly review of an underperforming business unit.
-
-## When a near launch escalates
-- TIME IS NEVER SUFFICIENT. A launch inside 30 days — or past due — is NOT a warning on its own. It escalates only alongside an unresolved readiness gap: critical roles unfilled, or required training incomplete.
-- "30 days from launch + 3 critical roles unfilled + training incomplete" is readiness focus. "30 days from launch + everything on track" is NOTHING TO ESCALATE — and that is the month those planters least need a warning about themselves on their overseer's dashboard.
-
-## When a near launch escalates
-- TIME IS NEVER SUFFICIENT. A launch inside 30 days — or past due — is NOT a warning on its own. It escalates only alongside an unresolved readiness gap: critical roles unfilled, or required training incomplete.
-- "30 days from launch + 3 critical roles unfilled + training incomplete" is readiness focus. "30 days from launch + everything on track" is NOTHING TO ESCALATE — and that is the month those planters least need a warning about themselves on their overseer's dashboard.
 
 ## The network posture
 - FOUR VALUES, NOT THREE: Readiness focus, Worth a look, LIMITED VISIBILITY, On track.
 - A PLANT THAT SHARES NO ASSESSMENT DATA READS "LIMITED VISIBILITY", NEVER ONE OF THE THREE HEALTH POSTURES. Absence of warning signs is not a signal; on a private plant it is the absence of information. "On track" is a claim, and a claim needs something to have been seen — so it requires that nothing elevated is visible AND that nothing was withheld.
 - ESCALATIONS STILL WIN. A visible elevated observation on a partly-private plant still reads Readiness focus; a visible medium still reads Worth a look. What is on the screen is real. Limited visibility replaces ONLY the on-track claim, which is the only one silence can forge.
 - IT IS A NEUTRAL FACT, NOT A FAULT. It names a limit on the OVERSEER'S VIEW — "Plant has chosen not to share assessment data" — never a judgement about the plant.
+
+## When a near launch escalates
+- TIME IS NEVER SUFFICIENT. A launch inside 30 days — or past due — is NOT a warning on its own. It escalates only alongside an unresolved readiness gap: critical roles unfilled, or required training incomplete.
+- "30 days from launch + 3 critical roles unfilled + training incomplete" is readiness focus. "30 days from launch + everything on track" is NOTHING TO ESCALATE — and that is the month those planters least need a warning about themselves on their overseer's dashboard.
 
 ## What the network may be told about sharing
 - THERE IS NO UNIVERSAL SHARING DEFAULT, and you may not claim one. A self-started plant shares nothing until the planter turns something on; a plant that accepted a sending-church or network invitation starts with ALL sharing on, consented at the acceptance screen before the planter accepted. Never say "sharing is off by default".
@@ -350,7 +353,7 @@ export const RUBRICS: Record<string, Rubric> = {
 };
 
 /** The version currently in force. Flip this to ship a new rubric (AC-PE-4). */
-export const ACTIVE_RUBRIC_VERSION = "v0";
+export const ACTIVE_RUBRIC_VERSION = "v1";
 
 /**
  * The active rubric, loaded whole. The judge pipeline reads this; its `version`

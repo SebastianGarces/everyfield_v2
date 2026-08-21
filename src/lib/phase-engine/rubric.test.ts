@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { NETWORK_VERDICT_PHRASES } from "./judge/network-register";
 import {
   ACTIVE_RUBRIC,
   ACTIVE_RUBRIC_VERSION,
@@ -9,23 +10,73 @@ import {
 } from "./rubric";
 
 // ----------------------------------------------------------------------------
-// The draft-then-flip guard (#469 series).
+// The flip, and what survives it (#538, closing the #469 series).
 //
-// v1 lands one ruled change at a time across ~18 PRs. Every one of them edits
-// RUBRIC_V1_BODY, and every one of them is one keystroke away from flipping the
-// version planters actually receive. #538 is the single issue allowed to do
-// that, so the constraint lives here as a test instead of as a sentence in a
-// spec: v1 is registered, and v0 is what runs.
+// v1 landed one ruled change at a time across 18 PRs, each editing
+// RUBRIC_V1_BODY behind a guard that kept v0 running. #538 flipped it. What the
+// guard becomes now is the other half of the same contract: v1 is what a new
+// assessment records, and v0 is still resolvable, because every assessment
+// written before 2026-08-21 recorded "v0" and is re-explained against the text
+// that actually produced it.
 // ----------------------------------------------------------------------------
 
-test("v1 is registered so it can be reviewed and looked up", () => {
-  assert.equal(getRubric("v1")?.version, "v1");
-  assert.ok(RUBRICS.v1.body.startsWith("# Plant Intelligence Rubric — v1"));
+test("v1 is the active rubric (#538)", () => {
+  assert.equal(ACTIVE_RUBRIC_VERSION, "v1");
+  assert.equal(ACTIVE_RUBRIC.version, "v1");
+  assert.ok(ACTIVE_RUBRIC.body.startsWith("# Plant Intelligence Rubric — v1"));
 });
 
-test("v1 is NOT the active rubric — only #538 flips it", () => {
-  assert.equal(ACTIVE_RUBRIC_VERSION, "v0");
-  assert.equal(ACTIVE_RUBRIC.version, "v0");
+test("v0 still resolves, so historical assessments stay explainable", () => {
+  assert.equal(getRubric("v0")?.version, "v0");
+  assert.ok(RUBRICS.v0.body.startsWith("# Plant Intelligence Rubric — v0"));
+});
+
+// ----------------------------------------------------------------------------
+// The coherence guards (#538's assembly pass).
+//
+// v1's body was written by 18 issues that never saw each other's diffs, and it
+// arrived carrying two verbatim duplications: a repeated staleness rule in
+// CSF-2, and the whole "when a near launch escalates" section twice. Nothing
+// caught them, because nothing was reading the assembled document as a
+// document. These two tests are that reader.
+// ----------------------------------------------------------------------------
+
+test("no section of the active rubric is duplicated", () => {
+  const headings = ACTIVE_RUBRIC.body
+    .split("\n")
+    .filter((line) => /^#{1,4} /.test(line));
+  assert.deepEqual(
+    headings.filter((h, i) => headings.indexOf(h) !== i),
+    [],
+    "a heading appears twice — the assembled body has a duplicated section"
+  );
+});
+
+test("no substantive line of the active rubric is duplicated", () => {
+  // Short lines legitimately repeat ("- Healthy:" openers, blank structure), so
+  // the check is scoped to lines long enough that a repeat is a copy, not a
+  // coincidence.
+  const lines = ACTIVE_RUBRIC.body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 60);
+  assert.deepEqual(
+    lines.filter((l, i) => lines.indexOf(l) !== i),
+    [],
+    "a rule is stated twice verbatim — two issues landed the same edit"
+  );
+});
+
+test("the rubric names exactly the phrases the register enforces (#482)", () => {
+  // The body interpolates NETWORK_VERDICT_PHRASES, so this asserts the wiring
+  // still exists: a hand-typed list would drift and hand the judge a rule it is
+  // then failed for obeying.
+  for (const phrase of NETWORK_VERDICT_PHRASES) {
+    assert.ok(
+      ACTIVE_RUBRIC.body.includes(`"${phrase}"`),
+      `the rubric does not name the banned phrase "${phrase}"`
+    );
+  }
 });
 
 test("v0 is frozen — its Lens 2 keeps the bottleneck line v1 deletes", () => {
