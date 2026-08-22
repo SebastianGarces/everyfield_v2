@@ -98,80 +98,65 @@ test("no client module names the avatar storage key", () => {
   );
 });
 
-test("what an avatar action ANSWERS with carries no key either", () => {
-  // THE OTHER CHANNEL, and the one the scan above cannot see. A prop is not the
-  // only way a value reaches the browser: a Server Action's RETURN VALUE is
-  // serialized into the response the caller reads, so a key in the outcome is a
-  // key in the network payload of every successful upload. That is exactly how
-  // this shipped in #617's first draft — `AvatarOutcome` carried `avatarKey`,
-  // nothing read it, and the module scan saw nothing because the leak was a
-  // VALUE and the scan matches IDENTIFIERS.
-  const code = stripComments(
+/**
+ * Every line of `avatar.ts` that names the storage key OUTSIDE the one place
+ * allowed to — the offending lines, so a failure says which.
+ *
+ * A FENCE, NOT A SCAN OF SHAPES, and that is the second rewrite of this guard.
+ * The first looked for the key inside `AvatarOutcome`'s declaration and inside
+ * `return { ok: true … }` literals. Both were escapable, and the escape is the
+ * shape somebody would actually write by accident:
+ *
+ *     const result = { ok: true, avatarKey: key };
+ *     return result;
+ *
+ * That names no union member and returns no literal, so both scans missed it —
+ * and TypeScript misses it too, because excess-property checking applies only to
+ * a fresh object literal assigned or returned directly. Neither the type nor the
+ * test stopped the realistic mistake.
+ *
+ * So this asserts where the key may APPEAR instead of what shape it may take.
+ * `LIVE_AVATAR_EFFECTS` is the one construct with any business naming it — there
+ * it is the Drizzle column mapping, on the server, talking to Postgres. Anywhere
+ * else in this module the key is heading somewhere it should not, whether it goes
+ * through a type, a literal, a variable or a nested object. One rule, nothing to
+ * slice, and no shape to enumerate.
+ */
+export function avatarKeyLeaksIn(source: string): string[] {
+  const code = stripComments(source);
+
+  const start = code.indexOf("const LIVE_AVATAR_EFFECTS");
+  const end = code.indexOf("\n};", start);
+  if (start < 0 || end < 0) {
+    // Fail loudly rather than fence nothing and pass. A rename here must be a
+    // decision somebody makes, not a guard that quietly stops guarding.
+    return ["LIVE_AVATAR_EFFECTS is not where this fence expects it"];
+  }
+
+  const outside = code.slice(0, start) + code.slice(end + 3);
+
+  return outside
+    .split("\n")
+    .filter((line) => AVATAR_KEY.test(line))
+    .map((line) => line.trim());
+}
+
+test("the storage key is named ONLY where it talks to Postgres", () => {
+  // THE OTHER CHANNEL, and the one the client-module scan cannot see. A prop is
+  // not the only way a value reaches the browser: a Server Action's RETURN VALUE
+  // is serialized into the response the caller reads, so a key anywhere on the
+  // way out of this module is a key in the network payload. That is exactly how
+  // #617 shipped its first draft — `AvatarOutcome` carried `avatarKey`, nothing
+  // read it, and the module scan saw nothing because the leak was a VALUE and
+  // that scan matches IDENTIFIERS in OTHER files.
+  const leaks = avatarKeyLeaksIn(
     readFileSync(path.join(ROOT, "src/lib/auth/avatar.ts"), "utf8")
   );
 
-  // TO THE NEXT DECLARATION, not to the next `;`. A union's own members are
-  // separated by semicolons — `{ ok: true; avatarKey: string | null }` — so
-  // stopping at the first one reads `| { ok: true` and finds nothing wrong with
-  // it. That was this test's first draft, and it passed against the very leak it
-  // was written to catch; the fixture at the bottom of this file is what caught
-  // the guard.
-  const start = code.indexOf("export type AvatarOutcome");
-  assert.ok(start >= 0, "AvatarOutcome must still be declared here");
-  const rest = code.slice(start);
-  const next = rest.search(/\n(export|const|function|\/\*\*)/);
-  const outcome = next === -1 ? rest : rest.slice(0, next);
-  assert.equal(
-    AVATAR_KEY.test(outcome),
-    false,
-    `AvatarOutcome names the storage key: ${outcome.trim()} — the actions return this straight to a "use client" caller, so a key in it is a key in the browser`
-  );
-
-  // And no return statement smuggles one past the type either. `[returned]` is
-  // the WHOLE match: the pattern has no capture group, so destructuring index 1
-  // (the other first draft) binds undefined and asserts nothing forever.
-  for (const [returned] of code.matchAll(/return \{ ok: true[^}]*\}/g)) {
-    assert.equal(
-      AVATAR_KEY.test(returned),
-      false,
-      `a success outcome carries the key: ${returned}`
-    );
-  }
-});
-
-test("that guard can see the leak it was written for", () => {
-  // BOTH HALVES ABOVE SHIPPED BROKEN and passed against the real leak, which is
-  // why this fixture exists: it is the code as #617 first wrote it, and each
-  // assertion here is the one the guard failed to make.
-  const leaked = [
-    "export type AvatarOutcome =",
-    "  | { ok: true; avatarKey: string | null }",
-    "  | { ok: false; message: string };",
-    "",
-    "export async function uploadUserAvatar() {",
-    "  return { ok: true, avatarKey: key };",
-    "}",
-  ].join("\n");
-
-  const start = leaked.indexOf("export type AvatarOutcome");
-  const rest = leaked.slice(start);
-  const next = rest.search(/\n(export|const|function|\/\*\*)/);
-  const declaration = next === -1 ? rest : rest.slice(0, next);
-
-  assert.equal(
-    AVATAR_KEY.test(declaration),
-    true,
-    "the declaration slice must reach past the union's own semicolons"
-  );
-
-  const returns = [...leaked.matchAll(/return \{ ok: true[^}]*\}/g)].map(
-    ([whole]) => whole
-  );
-  assert.equal(returns.length, 1);
-  assert.equal(
-    AVATAR_KEY.test(returns[0]),
-    true,
-    "the return scan must read the whole match, not a capture group that does not exist"
+  assert.deepEqual(
+    leaks,
+    [],
+    `avatar.ts names the storage key outside LIVE_AVATAR_EFFECTS. Everything here is returned to a "use client" caller, so a key on any of these lines is a key in the browser:\n  ${leaks.join("\n  ")}`
   );
 });
 
@@ -190,10 +175,85 @@ test("the two surfaces that draw a picture take a route, and it is not a key", (
   }
 });
 
-test("the scan can actually see a violation", () => {
-  // The ratchet above passes trivially if the pattern never matches anything.
-  // This is the shape it exists to catch, pinned so a future edit to the
-  // pattern that quietly stops matching fails HERE rather than passing there.
+/**
+ * A module shaped like `avatar.ts`: the effects object, then whatever `tail`
+ * puts below it. The fence must ignore the first and read the second.
+ */
+function moduleWithTail(tail: string): string {
+  return [
+    "const LIVE_AVATAR_EFFECTS: UserAvatarEffects = {",
+    "  load: async (userId) => {",
+    "    const [row] = await db.select({ avatarKey: users.avatarKey });",
+    "    return row?.avatarKey;",
+    "  },",
+    "  write: async (userId, key) => {",
+    "    await db.update(users).set({ avatarKey: key });",
+    "  },",
+    "};",
+    "",
+    tail,
+  ].join("\n");
+}
+
+test("the fence sees every shape the key can leave in", () => {
+  // THE FIXTURE CALLS THE REAL FUNCTION. An earlier draft of this file
+  // re-implemented the slicing and matching inline, which proved a COPY of the
+  // guard could see a leak — edit the shipped one and this stayed green, the
+  // same failure one level up from the one it exists to prevent.
+  assert.deepEqual(
+    avatarKeyLeaksIn(
+      moduleWithTail("export async function f() { return { ok: true }; }")
+    ),
+    [],
+    "the Drizzle column mapping inside the effects object is not a leak — it is the one place the key belongs"
+  );
+
+  // The shape the first two drafts of this guard both missed, and the one
+  // TypeScript misses too: excess-property checking applies only to a fresh
+  // literal returned directly, so a key parked in a variable first typechecks
+  // against `{ ok: true }` and ships.
+  assert.deepEqual(
+    avatarKeyLeaksIn(
+      moduleWithTail(
+        "export async function f() {\n  const result = { ok: true, avatarKey: key };\n  return result;\n}"
+      )
+    ),
+    ["const result = { ok: true, avatarKey: key };"]
+  );
+
+  // The original leak: a union member.
+  assert.deepEqual(
+    avatarKeyLeaksIn(
+      moduleWithTail(
+        "export type AvatarOutcome =\n  | { ok: true; avatarKey: string | null }\n  | { ok: false; message: string };"
+      )
+    ),
+    ["| { ok: true; avatarKey: string | null }"]
+  );
+
+  // And a return literal, the shape the replaced scan did catch.
+  assert.deepEqual(
+    avatarKeyLeaksIn(
+      moduleWithTail(
+        "export async function f() { return { ok: true, avatarKey: key }; }"
+      )
+    ),
+    ["export async function f() { return { ok: true, avatarKey: key }; }"]
+  );
+
+  // A renamed or deleted fence must FAIL, never silently fence nothing.
+  assert.deepEqual(
+    avatarKeyLeaksIn(
+      "export type AvatarOutcome = { ok: true; avatarKey: string };"
+    ),
+    ["LIVE_AVATAR_EFFECTS is not where this fence expects it"]
+  );
+});
+
+test("the client-module scan can actually see a violation", () => {
+  // That scan passes trivially if the pattern never matches anything. This is
+  // the shape it exists to catch, pinned so a future edit to the pattern that
+  // quietly stops matching fails HERE rather than passing there.
   const violation = stripComments(
     ['"use client";', "", "type Props = { avatarKey: string | null };"].join(
       "\n"

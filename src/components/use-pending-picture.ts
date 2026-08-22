@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { profilePhotoRefusal } from "@/lib/profile-photo";
@@ -91,7 +91,11 @@ export function usePendingPicture({
    */
   const liveUrl = useRef<string | null>(null);
 
-  const settle = useCallback((next: Pending | null) => {
+  // A plain closure, like `run` below. NEITHER is memoised, deliberately:
+  // nothing depends on either identity, and memoising one invites somebody to
+  // memoise the other — which would need `settle`, `send` and `copy` in a
+  // dependency array that has to stay right for the revoke discipline to hold.
+  const settle = (next: Pending | null) => {
     const previous = liveUrl.current;
     const nextUrl = next?.kind === "uploaded" ? next.objectUrl : null;
 
@@ -101,7 +105,7 @@ export function usePendingPicture({
 
     liveUrl.current = nextUrl;
     setPending(next);
-  }, []);
+  };
 
   // The last one, at unmount. Every OTHER transition off an object URL is
   // already revoked by `settle`; this is the one no transition covers.
