@@ -19,6 +19,7 @@ import {
   ALL_CAPABILITIES,
   heldCapabilities,
   requiresPlantTenancy,
+  type Capability,
 } from "@/lib/auth/seat-rules";
 
 // ============================================================================
@@ -297,14 +298,27 @@ test("the two churchless contexts are recorded as unable to reach a plant surfac
 // 3. GATES — the files this sweep changed still ask the question.
 // ----------------------------------------------------------------------------
 
-/** Does `file` ask for any of `row`'s verbs, in either transport? */
-function asksForAVerb(row: ChecklistRow, code: string): boolean {
-  return row.governedBy.some((capability) =>
-    // `useCan("x")`, `holdsSeatFor(user, "x")` and `<Can do="x">` all spell the
-    // capability as a string literal beside the control, which is the whole
-    // reason both transports take one: the gate is greppable from the file that
-    // renders the thing being gated.
-    new RegExp(`["']${capability.replace(".", "\\.")}["']`).test(code)
+/**
+ * Which of `row`'s verbs the row's files do NOT ask for, anywhere between them.
+ *
+ * EVERY VERB, NOT ANY ONE (#659). `some` was the shape here, and it made the
+ * `governedBy` column decorative: the Dashboard row already named
+ * `people.write`, so adding `launch.schedule` to it — for the Launch Sunday
+ * card's imperative — passed whether or not anything ever asked that question.
+ * A regression to `canSchedule={true}` would have kept the whole suite green.
+ * A verb listed in the column is now a verb the sweep is CLAIMING to gate, and
+ * this is what makes the claim cost something.
+ */
+function verbsNotAsked(row: ChecklistRow, files: string[]): Capability[] {
+  return row.governedBy.filter(
+    (capability) =>
+      // `useCan("x")`, `holdsSeatFor(user, "x")` and `<Can do="x">` all spell
+      // the capability as a string literal beside the control, which is the
+      // whole reason both transports take one: the gate is greppable from the
+      // file that renders the thing being gated.
+      !files.some((code) =>
+        new RegExp(`["']${capability.replace(".", "\\.")}["']`).test(code)
+      )
   );
 }
 
@@ -313,17 +327,25 @@ test("every file a fixed row names still gates on one of that row's verbs", () =
 
   for (const row of READ_ONLY_SURFACE_CHECKLIST) {
     if (row.verdict !== "fixed-here") continue;
+
+    const sources: string[] = [];
     for (const file of row.gatedIn) {
       const full = path.join(process.cwd(), file);
       if (!existsSync(full)) {
         missing.push(`${row.surface} → ${file} (file does not exist)`);
         continue;
       }
-      if (!asksForAVerb(row, codeOf(full))) {
-        missing.push(
-          `${row.surface} → ${file} (names none of: ${row.governedBy.join(", ")})`
-        );
-      }
+      sources.push(codeOf(full));
+    }
+    if (sources.length === 0) continue;
+
+    // The row's files are read TOGETHER: a surface split across a page and a
+    // component may hold its two gates in either.
+    const unasked = verbsNotAsked(row, sources);
+    if (unasked.length > 0) {
+      missing.push(
+        `${row.surface} → ${row.gatedIn.join(", ")} (asks for none of: ${unasked.join(", ")})`
+      );
     }
   }
 

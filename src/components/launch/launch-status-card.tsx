@@ -43,12 +43,8 @@ export interface LaunchStatusCardProps {
   outcome?: { attendanceCount: number | null; decisionsCount: number | null };
   /**
    * Whether this viewer may name the day — `launch.schedule`, asked of the
-   * capability table by the page (#659).
-   *
-   * A PROP AND NOT A READ, like every other fact this card renders: it is a
-   * server component with no session in hand, and the same reason `daysUntil`
-   * arrives resolved applies here — one answer, decided once, so the card and
-   * the server cannot disagree about who may act.
+   * capability table by the page and handed down like `daysUntil`, for the same
+   * reason: one answer, decided once (#659).
    */
   canSchedule: boolean;
 }

@@ -180,10 +180,16 @@ export async function PlantDashboard({
   // which is the same table `requireSeat` refuses the POST with; the tile is
   // absent rather than dimmed, per the FRD.
   //
-  // The other two tiles are reads and are not named here at all. Nothing else
-  // on this dashboard needs a gate: the association reminder is Owner-gated at
-  // its data read above, and the leadership prompts by
-  // `canAnswerLeadershipQuestion`.
+  // The other two tiles are reads and are not named here at all. The
+  // association reminder is Owner-gated at its data read above, and the
+  // leadership prompts by `canAnswerLeadershipQuestion`.
+  //
+  // THIS COMMENT USED TO END "nothing else on this dashboard needs a gate", and
+  // that sentence was wrong when it was written (#659). The Launch Sunday card
+  // below told every seat to "Name the day" — `launch.schedule`, OWNER_ONLY —
+  // and a sweep looking for BUTTONS walked past it, because the affordance was
+  // a sentence. There are two gates on this screen now, and the next one to be
+  // missed will not look like a control either.
   const quickActionCapabilities = (
     ["people.write", "meetings.write"] as const
   ).filter((capability) => holdsSeatFor(viewer, capability));

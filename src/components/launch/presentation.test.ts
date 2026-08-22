@@ -595,8 +595,12 @@ test("no component spells the who-names-the-day sentence itself", () => {
     .filter((file) => file !== "presentation.ts" && /\.tsx?$/.test(file))
     .filter((file) => !file.endsWith(".test.ts"))
     .filter((file) =>
+      // Comments off, like the scan above: a doc comment that QUOTES the
+      // sentence is documentation, not a second spelling of it.
       /Your planter names the day/.test(
         readFileSync(path.join(dir, file), "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/\/\/.*$/gm, "")
       )
     );
 

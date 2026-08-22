@@ -105,18 +105,24 @@ export function LaunchDateCard({
                   size="sm"
                   className="group cursor-pointer"
                 >
-                  {isUnscheduled ? (
-                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />
-                  ) : canChangeDate ? (
-                    <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                  ) : (
+                  {!canChangeDate ? (
                     <History className="mr-1.5 h-3.5 w-3.5" />
+                  ) : isUnscheduled ? (
+                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />
+                  ) : (
+                    <Pencil className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  {isUnscheduled
-                    ? "Name the day"
-                    : canChangeDate
-                      ? "Change the date"
-                      : "Date history"}
+                  {/* THE CAPABILITY IS THE OUTERMOST QUESTION (#659). Asking
+                      `isUnscheduled` first put "Name the day" — an imperative
+                      for a write only an Owner holds — in front of a branch
+                      that never consulted the seat. It was unreachable for a
+                      Member only because a launch with history always has a
+                      date, which is an invariant in another file. */}
+                  {canChangeDate
+                    ? isUnscheduled
+                      ? "Name the day"
+                      : "Change the date"
+                    : "Date history"}
                   <ChevronDown
                     className="ml-1.5 h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180"
                     aria-hidden="true"

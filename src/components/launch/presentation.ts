@@ -444,20 +444,11 @@ export function outcomeSummary(outcome: {
 }
 
 /**
- * What the no-date card says UNDER "No date yet", which is not one sentence for
- * every seat (#659).
+ * What the dashboard card says under "No date yet" — an INSTRUCTION only for
+ * the seat that can follow it (#659).
  *
- * "Name the day" is an imperative, and naming the day is `launch.schedule` —
- * OWNER_ONLY on a plant. A Member who read it was being told to do a thing the
- * server refuses them, by a card whose link lands on `/launch`, where the same
- * condition is already stated properly: "No date is set yet. Your planter names
- * the day." So the second sentence here is that page's, verbatim — a card and
- * its destination disagreeing about who acts is the defect, and one string is
- * how they stop.
- *
- * The card still LINKS for both seats. `/launch` is readable by a Member —
- * milestones, history, the readiness list — and #499's rule is about write
- * affordances, not about destinations.
+ * The card still links for both: `/launch` is readable by a Member, and #499's
+ * rule is about write affordances, not destinations.
  */
 export function launchDateInvitation(canSchedule: boolean): string {
   return canSchedule
@@ -466,13 +457,13 @@ export function launchDateInvitation(canSchedule: boolean): string {
 }
 
 /**
- * WHO NAMES THE DAY, IN ONE PLACE — the sentence a reader without
- * `launch.schedule` is given instead of an instruction.
+ * WHO NAMES THE DAY, IN ONE PLACE — what a reader without `launch.schedule`
+ * gets instead of an imperative.
  *
- * Shared by the dashboard card and `/launch`'s own date card, because those two
- * disagreeing is the whole of #659: the page said this and the card pointing at
- * it said "Name the day". The INVITATION differs between them on purpose — the
- * page has room to name the Playbook and the card does not — but the condition
- * is one fact and reads the same wherever a reader meets it.
+ * The dashboard card and `/launch`'s date card both read it, because those two
+ * disagreeing IS #659: the page said this while the card pointing at it said
+ * "Name the day" to everyone. Their invitations still differ on purpose — the
+ * page has room to name the Playbook and the compact card does not — but the
+ * condition is one fact and reads the same wherever a reader meets it.
  */
 export const PLANTER_NAMES_THE_DAY = "Your planter names the day.";

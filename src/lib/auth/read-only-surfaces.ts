@@ -317,12 +317,12 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface: "Launch",
     mustNotRender:
       "Schedule launch, edit launch date, edit milestones, record outcome",
-    governedBy: ["launch.milestone"],
+    governedBy: ["launch.milestone", "launch.schedule"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: ["src/app/(dashboard)/launch/page.tsx"],
     survives:
-      "TICKING A MILESTONE STAYS FOR A MEMBER, and this row is narrowed against the FRD's wording deliberately (ruled for #499). Scheduling, changing the date and recording the outcome are `launch.schedule` (OWNER_ONLY) and were already gated on `isPlanter`. Milestone completion is a DIFFERENT verb — `launch.milestone`, SEATED — which LS-007 split off on purpose so that milestone ticks follow ordinary task rules and a Member may do them. Hiding it would refuse in the UI what the server allows, which is the over-hide the sweep must not commit. What the board's `canEdit` was is `true`, hardcoded; what it is now is that capability, which refuses a coach and an org account and admits the Member.",
+      "TICKING A MILESTONE STAYS FOR A MEMBER, and this row is narrowed against the FRD's wording deliberately (ruled for #499). Scheduling, changing the date and recording the outcome are `launch.schedule` (OWNER_ONLY), gated on `holdsSeatFor(user, \"launch.schedule\")` since #659 — it was `isPlantOwner`, which resolves to the same answer and was a second spelling of one question in a file already asking the table for the sibling verb. Milestone completion is a DIFFERENT verb — `launch.milestone`, SEATED — which LS-007 split off on purpose so that milestone ticks follow ordinary task rules and a Member may do them. Hiding it would refuse in the UI what the server allows, which is the over-hide the sweep must not commit. What the board's `canEdit` was is `true`, hardcoded; what it is now is that capability, which refuses a coach and an org account and admits the Member.",
   },
   {
     surface: "Phase",
