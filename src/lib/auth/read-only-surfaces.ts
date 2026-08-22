@@ -161,6 +161,68 @@ export type ChecklistRow =
       readonly note: string;
     });
 
+// ----------------------------------------------------------------------------
+// A CALL TO ACTION IS A WRITE AFFORDANCE IN SENTENCE FORM.
+// ----------------------------------------------------------------------------
+
+/**
+ * The write verbs a surface's copy can open with. A sentence that STARTS with
+ * one is addressed to somebody who can perform it.
+ *
+ * A closed list rather than "any verb": the alternative is part-of-speech
+ * guessing, which flags every descriptive line that happens to begin with a
+ * word that is also a verb, and a check that cries wolf gets deleted by the
+ * next person. Every entry here is a verb this product's own write affordances
+ * actually use.
+ */
+const WRITE_IMPERATIVES = [
+  "Add",
+  "Assign",
+  "Choose",
+  "Compose",
+  "Create",
+  "Delete",
+  "Edit",
+  "Import",
+  "Invite",
+  "Name",
+  "New",
+  "Pick",
+  "Record",
+  "Remove",
+  "Schedule",
+  "Send",
+  "Set",
+  "Upload",
+  "Write",
+] as const;
+
+/**
+ * Does this line TELL THE READER TO DO SOMETHING? — the shape of #655, #659 and
+ * #666, which were one defect found three times.
+ *
+ * The sweep's first pass read the checklist as being about BUTTONS, and each of
+ * those three shipped copy addressed to a capability the viewer lacks: a
+ * dashboard tile's row 2, the Launch Sunday card's "Name the day", and this
+ * hub's "Send messages…". Nothing was clickable, and all three asked a Member
+ * to do a thing the server would refuse.
+ *
+ * THE FIRST WORD IS WHAT ADDRESSES THE READER, so that is all this looks at.
+ * "Track what your plant has sent and how it was delivered" mentions a write
+ * and asks for none; "Send messages and track communication" is an instruction
+ * whichever clause follows.
+ *
+ * Written for a presentation module's test, not for a scan of JSX: every
+ * capability-conditional sentence in this product lives in a pure `.ts` helper
+ * so the repo's DOM-less `node:test` harness can read it (`launch/presentation.ts`,
+ * `communication/presentation.ts`), and each of those tests asks this of the
+ * copy its non-holder gets.
+ */
+export function readsAsAnImperative(copy: string): boolean {
+  const firstWord = copy.trimStart().split(/[^A-Za-z']/, 1)[0];
+  return (WRITE_IMPERATIVES as readonly string[]).includes(firstWord);
+}
+
 export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
   {
     surface: "Global navigation and command palette",
@@ -303,7 +365,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
       "src/components/communication/resend-non-openers.tsx",
     ],
-    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. There is no 'new template' control to hide — templates are forked server-side on first edit.",
+    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. There is no 'new template' control to hide — templates are forked server-side on first edit. THE HEADER IS PART OF THE ROW TOO (#666): the hub's subtitle read \"Send messages and track communication with your people\" to every seat, which is the Dashboard row's #659 finding on a second surface — a call to action is a write affordance in sentence form, and the sweep's first pass read this row as being about buttons. Both capability-matched sentences now live in `src/lib/communication/presentation.ts`, tested, and `readsAsAnImperative` (below the types in this file) is the shared rule the launch surfaces read too. History and Templates were checked and left alone: their subtitles state a count and describe the list, and name no verb.",
   },
   {
     surface: "Documents",
