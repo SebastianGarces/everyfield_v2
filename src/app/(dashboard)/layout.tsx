@@ -54,8 +54,19 @@ function getInitials(name: string | null, email: string): string {
 
 export default async function DashboardLayout({
   children,
+  settings,
 }: {
   children: React.ReactNode;
+  /**
+   * The settings modal's parallel slot (#615, ruled 2026-08-21 §187).
+   *
+   * It renders BESIDE `children`, never instead of it, which is the whole
+   * mechanism: `@settings/(.)settings/…` intercepts an in-app navigation to a
+   * settings URL, so this slot fills while the screen the reader was on stays
+   * mounted underneath with its state intact. On every other route the slot's
+   * `default.tsx` renders nothing.
+   */
+  settings: React.ReactNode;
 }) {
   const { user } = await getCurrentSession();
   const headersList = await headers();
@@ -174,6 +185,11 @@ export default async function DashboardLayout({
             )}
           </DashboardHeader>
           <main className="flex-1 overflow-auto">{children}</main>
+          {/* Beside `children`, not inside `<main>`: the modal is a sibling of
+              the screen it covers, and Radix portals it to the document body
+              regardless. Rendered here so it sits inside the router and sidebar
+              providers it reads. */}
+          {settings}
           {!org && <WikiGuide />}
         </HeaderProvider>
       </SidebarInset>

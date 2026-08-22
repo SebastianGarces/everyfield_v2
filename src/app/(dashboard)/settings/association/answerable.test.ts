@@ -47,7 +47,18 @@ const REMINDER = read("dashboard", "association-reminder.tsx");
 // two halves on 2026-08-12 (PR #408); the banner belongs to the plant half.
 const DASHBOARD = read("dashboard", "plant-dashboard.tsx");
 const ANSWER = read("settings", "association", "invitation-answer.tsx");
-const PAGE = read("settings", "association", "page.tsx");
+// The association surface is a SECTION of the settings modal since #615. The
+// URL `/settings/association` is unchanged; the sibling page that used to serve
+// it is gone and its body is this component, drawn by `settings/[section]`.
+const PAGE = code(
+  readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/settings/sections/association-section.tsx"
+    ),
+    "utf8"
+  )
+);
 const LEAVE_DIALOG = read("settings", "association", "leave-org-dialog.tsx");
 
 const PLANT = "11111111-1111-4111-8111-111111111111";

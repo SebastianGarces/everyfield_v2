@@ -44,20 +44,22 @@ export const UNSUBSCRIBE_PATH = "/api/notifications/unsubscribe";
 export const UNSUBSCRIBE_CONFIRMATION_PATH = "/unsubscribe";
 
 /**
- * The id of the Notifications heading on /settings — the anchor the deep link
- * below jumps to, and the `aria-labelledby` target of the section it heads.
- * `/settings` imports it for both, so the fragment and the anchor cannot drift.
- */
-export const NOTIFICATION_PREFERENCES_HEADING_ID = "notification-preferences";
-
-/**
- * The full preference screen (N-006), linked from every email and the page.
+ * The full preference screen (N-006), linked from every email and from
+ * /unsubscribe.
  *
- * The fragment is the deep link: `/settings` is one page of sections, and a
- * reader sent here from an email or from /unsubscribe wants the matrix, not the
- * top of Settings (#467).
+ * A REAL PATH, NOT A FRAGMENT (#615, ruled 2026-08-21 §187). This was
+ * `/settings#notification-preferences` while `/settings` was one long page and
+ * the matrix had to be scrolled to (#467); it also needed a matching `<h2 id>`
+ * on that page, and an exported id so the two could not drift. Settings is a
+ * modal addressed by section now, so the preference matrix has a URL the SERVER
+ * can see — which is the whole point of the ruling's "real paths, never a hash".
+ * Both the fragment and the id it pointed at are gone.
+ *
+ * Mail already in the wild still carries the old fragment. It resolves to
+ * `/settings`, which opens the modal at Account rather than at Notifications —
+ * one section off, never a dead link.
  */
-export const NOTIFICATION_PREFERENCES_PATH = `/settings#${NOTIFICATION_PREFERENCES_HEADING_ID}`;
+export const NOTIFICATION_PREFERENCES_PATH = "/settings/notifications";
 
 /**
  * Absolute base for links that have to work from an inbox.
