@@ -18,7 +18,7 @@ import {
 // P-024, ONE FLOOR DOWN
 // ----------------------------------------------------------------------------
 //
-// The person photo (`memory/invariants.md` → Person Photos) settled how a
+// The person photo (`memory/invariants.md` → Profile Photos) settled how a
 // picture behaves in this product, and none of it is person-specific:
 //
 //   * `users.avatar_key` holds a PRIVATE-BUCKET KEY, and the only address a
