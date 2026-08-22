@@ -1,5 +1,3 @@
-"use server";
-
 import { getChurchPrivacySettings, privacyColumnFor } from "@/lib/auth/access";
 import type { PrivacyFeatureKey } from "@/lib/auth/access";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -54,15 +52,24 @@ import {
 // THE ONE READ BEHIND THE SETTINGS MODAL (#657, ruled 2026-08-22).
 //
 // Settings is client state over the current screen, so no route renders a
-// section and no server component can. This module is what replaced them: ONE
-// endpoint the browser calls with a section id, which answers with that
-// section's finished view model (`./section-view.ts`).
+// section and no server component can. This module is what replaced them: the
+// browser asks for a section id and gets that section's finished view model
+// (`./section-view.ts`) back.
 //
-// SESSION FIRST, THEN THE ID — the order every `"use server"` export in this
-// repository keeps (`memory/invariants.md` → Authentication & Session, enforced
-// repo-wide by `@/lib/auth/server-action-surface.test.ts`). The id arrives from
-// the browser's address bar, so it is untrusted input and is parsed at this
-// boundary; past it every section read has a `SettingsSectionId`.
+// IT IS REACHED THROUGH A ROUTE HANDLER, NOT A SERVER ACTION, and that is a
+// correctness requirement rather than a preference — measured on the preview.
+// Every server-action response carries a fresh RSC render of the current route,
+// which regenerates the `serverRenderId` the modal re-reads on (see
+// `settings-modal.tsx`). As an action this read therefore triggered the
+// condition it exists to answer: one notification toggle produced an unbounded
+// loop at ~7 requests a second. A route handler answers with JSON and re-renders
+// nothing, so a write reconciles in exactly one extra read.
+//
+// SESSION FIRST, THEN THE ID. The id arrives from the browser's address bar, so
+// it is untrusted input and is parsed at this boundary; past it every section
+// read has a `SettingsSectionId`. The route handler
+// (`src/app/api/settings/sections/[section]/route.ts`) refuses a request with no
+// session before it reaches this function at all.
 //
 // IT IS THE GATE, NOT THE NAVIGATION'S COPY OF IT. The layout asks
 // `settingsSectionsFor` to decide what the side navigation lists; this asks the
@@ -81,7 +88,9 @@ import {
 // EVERY DATE LEAVES HERE AS A STRING, formatted against `APP_TIME_ZONE`
 // (`memory/invariants.md` → Date & Time Rendering). The section components are
 // `"use client"` now, so a `Date` on the wire would be formatted in the
-// visitor's zone — the exact hydration mismatch the invariant exists to stop.
+// visitor's zone — the exact hydration mismatch the invariant exists to stop —
+// and JSON has no Date at all, so the boundary would hand them a string with no
+// meaning rather than fail.
 // ============================================================================
 
 export async function loadSettingsSection(

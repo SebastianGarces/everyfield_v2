@@ -173,3 +173,54 @@ test("the history policy has one author", () => {
     "only settings-modal.tsx may write the settings fragment or move history for it"
   );
 });
+
+test("the section read is a route handler, never a server action", () => {
+  // THE LOOP THIS FORBIDS WAS REAL, and only a browser found it. Every
+  // server-ACTION response carries a fresh RSC render of the current route —
+  // that is how `refresh()` delivers an update — which regenerates the
+  // `serverRenderId` prop the modal re-reads on. Spelled as an action, this read
+  // therefore asked for itself again on its own answer: one notification toggle
+  // on the preview produced an unbounded loop at about seven requests a second,
+  // for as long as the modal stayed open.
+  //
+  // A route handler answers with JSON and re-renders nothing, so the chain
+  // terminates and a write costs exactly one extra read. Nothing about the two
+  // spellings looks different in a diff, which is why this is a test.
+  const data = read(path.join(SRC, "lib", "settings", "section-data.ts"));
+  assert.doesNotMatch(
+    data.split("\n").slice(0, 3).join("\n"),
+    /^\s*["']use server["']/m,
+    "section-data.ts must not be a `use server` module — its answer would re-render the route and re-trigger itself"
+  );
+
+  // …and the modal must REACH it over HTTP rather than by importing it, because
+  // importing it back into a client component is how it becomes an action again.
+  const modal = stripComments(read(MODAL));
+  assert.doesNotMatch(
+    modal,
+    /from "@\/lib\/settings\/section-data"/,
+    "the modal must fetch the read endpoint, not import the read"
+  );
+  assert.match(
+    modal,
+    /fetch\(`\/api\/settings\/sections\//,
+    "the modal reads its section over the route handler"
+  );
+
+  // The endpoint exists, refuses a sessionless caller, and is not cached — one
+  // reader's Team roster served to another is the one failure here that nothing
+  // on screen would show.
+  const route = read(
+    path.join(
+      SRC,
+      "app",
+      "api",
+      "settings",
+      "sections",
+      "[section]",
+      "route.ts"
+    )
+  );
+  assert.match(route, /status: 401/);
+  assert.match(route, /no-store/);
+});

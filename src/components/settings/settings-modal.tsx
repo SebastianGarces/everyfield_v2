@@ -26,7 +26,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
-import { loadSettingsSection } from "@/lib/settings/section-data";
 import type {
   SettingsSectionLoad,
   SettingsSectionViewOf,
@@ -57,10 +56,11 @@ import {
 // Next 16.2.2 and does not work: a returned tree containing any client component
 // fails to serialize ("Could not find the module … in the React Client
 // Manifest"), and every section here is mostly client components. So each
-// section takes a finished view model instead, read by `loadSettingsSection`
-// (`@/lib/settings/section-data`) — one server endpoint that mints the session
-// FIRST, asks the registry's gate, and answers with what to draw. The seats are
-// still enforced on the server, on the read and on every write.
+// section takes a finished view model instead, read over ONE endpoint —
+// `GET /api/settings/sections/<id>`, which refuses a sessionless caller, asks
+// the registry's gate, and answers with what to draw (`readSection` below says
+// why it is a route handler and not an action). The seats are still enforced on
+// the server, on the read and on every write.
 //
 // ----------------------------------------------------------------------------
 // THE HISTORY POLICY, WHICH THIS FILE OWNS ENTIRELY
@@ -170,6 +170,36 @@ function closeSettings() {
 }
 
 // ----------------------------------------------------------------------------
+// The read
+// ----------------------------------------------------------------------------
+
+/**
+ * Ask the server for a section's values.
+ *
+ * A ROUTE HANDLER, NOT A SERVER ACTION, and that is load-bearing rather than
+ * stylistic. Every server-action response carries a fresh RSC render of the
+ * current route, which regenerates `serverRenderId` — the prop this read
+ * re-runs on. As an action it therefore re-triggered itself: measured on the
+ * preview, one notification toggle produced an unbounded loop at about seven
+ * requests a second. JSON over `fetch` re-renders nothing, so the chain
+ * terminates.
+ *
+ * A failed read is `{ ok: false }`, the same answer a refusal gives, because the
+ * remedy is the same one: show the reader a section that works. A network blip
+ * while switching sections must not leave a dialog with a permanent skeleton in
+ * it.
+ */
+async function readSection(id: SettingsSectionId): Promise<SettingsSectionLoad> {
+  try {
+    const response = await fetch(`/api/settings/sections/${id}`);
+    if (!response.ok) return { ok: false };
+    return (await response.json()) as SettingsSectionLoad;
+  } catch {
+    return { ok: false };
+  }
+}
+
+// ----------------------------------------------------------------------------
 // The modal
 // ----------------------------------------------------------------------------
 
@@ -178,9 +208,9 @@ type SettingsModalProps = {
    * The sections this account may open, in registry order — resolved by the
    * layout from the session it already holds, with `settingsSectionsFor`.
    *
-   * It builds the NAV, and that is all it does. `loadSettingsSection` asks the
-   * same function again on the server before it reads a row, so a stale or
-   * forged list here cannot open a section; it can only fail to list one.
+   * It builds the NAV, and that is all it does. The read endpoint asks the same
+   * function again on the server before it reads a row, so a stale or forged
+   * list here cannot open a section; it can only fail to list one.
    */
   visibleIds: readonly SettingsSectionId[];
   /**
@@ -194,6 +224,12 @@ type SettingsModalProps = {
    * section again". Without it a section fetched once would sit at the value it
    * had when it was opened: the modal is not part of any route, so nothing else
    * about it re-renders when the route does.
+   *
+   * IT IS ALSO WHY THE READ IS A ROUTE HANDLER. Every server-ACTION response
+   * carries a fresh RSC render of the current route, so a read spelled as an
+   * action regenerates this value and asks for itself again, for ever — an
+   * unbounded loop at about seven requests a second, measured on the preview
+   * before the read moved. See `readSection` above.
    */
   serverRenderId: string;
 };
@@ -257,7 +293,7 @@ function SettingsDialog({
   // parked in state goes stale the moment the server moves, while an in-flight
   // request cannot — it is replaced whenever either input does.
   const request = useMemo(
-    () => loadSettingsSection(activeId),
+    () => readSection(activeId),
     // `serverRenderId` is a DEPENDENCY WITHOUT BEING AN ARGUMENT, and the rule
     // cannot see that from the callback body: the endpoint has no use for the
     // value, while a new value is precisely the event this must re-run on. It is
