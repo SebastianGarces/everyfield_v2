@@ -442,6 +442,13 @@
       "when": 1787552244967,
       "tag": "0063_email_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787552245967,
+      "tag": "0064_user_avatar_key",
+      "breakpoints": true
     }
   ]
 }

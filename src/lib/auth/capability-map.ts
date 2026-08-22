@@ -199,7 +199,11 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/settings/account/actions.ts → confirmEmailChangeAction":
     "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → removeAvatarAction":
+    "self.write",
   "src/app/(dashboard)/settings/account/actions.ts → requestEmailChangeAction":
+    "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → uploadAvatarAction":
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → clearMyEmailSuppressionAction":
     "self.write",
@@ -215,6 +219,8 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → setNotificationPreferenceAction":
     "self.write",
+  "src/app/(dashboard)/settings/actions.ts → setSharingToggleAction":
+    "sharing.toggle",
   "src/app/(dashboard)/settings/association/actions.ts → acceptAssociationInvitation":
     "association.answer",
   "src/app/(dashboard)/settings/association/actions.ts → declineAssociationInvitation":
@@ -223,8 +229,6 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "org.association.leave",
   "src/app/(dashboard)/settings/association/actions.ts → leaveOversightOrg":
     "association.leave",
-  "src/app/(dashboard)/settings/sharing/actions.ts → setOversightSharingAction":
-    "sharing.toggle",
   "src/app/(dashboard)/settings/team/actions.ts → appointAdminAction":
     "seat.manage",
   "src/app/(auth)/coach-invitation/actions.ts → acceptCoachInvitationAction":

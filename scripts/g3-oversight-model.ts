@@ -66,7 +66,7 @@ import {
   tasks,
   users,
 } from "@/db/schema";
-import { canAccessChurch } from "@/lib/auth/access";
+import { canAccessChurch, getChurchPrivacySettings } from "@/lib/auth/access";
 import {
   getLaunchForChurch,
   getLaunchJournal,
@@ -86,7 +86,10 @@ import {
   type InvitationActor,
   type ResolvedInvitation,
 } from "@/lib/invitations/core";
-import { notificationCategories } from "@/lib/notifications/categories";
+import {
+  notificationCategories,
+  OVERSIGHT_SHARING_FEATURE,
+} from "@/lib/notifications/categories";
 import { enqueue } from "@/lib/notifications/enqueue";
 import {
   activityWindowForDay,
@@ -101,10 +104,7 @@ import {
 } from "@/lib/notifications/oversight-digest";
 import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
 import { listOversightRecipientsForChurch } from "@/lib/notifications/oversight-audience";
-import {
-  isSharingActivityWithOversight,
-  setSharingActivityWithOversight,
-} from "@/lib/notifications/oversight-sharing";
+import { setSharingToggle } from "@/lib/notifications/oversight-sharing";
 import { persons } from "@/db/schema";
 
 // ----------------------------------------------------------------------------
@@ -142,6 +142,16 @@ function actorFor(user: {
   sendingNetworkId: string | null;
 }): InvitationActor {
   return invitationActorFromSession({ user });
+}
+
+/**
+ * The harness's own read of the push toggle, straight off the gate's reader
+ * (#619 generalised the write path to all seven toggles and dropped the two
+ * single-purpose helpers this used to call).
+ */
+async function sharingIsOn(churchId: string): Promise<boolean> {
+  const settings = await getChurchPrivacySettings(churchId);
+  return settings?.shareActivityWithOversight ?? false;
 }
 
 function ok(label: string) {
@@ -328,7 +338,7 @@ async function run(created: Created) {
 
   // Read back through the shipped reader — every church starts at OFF, which is
   // the substance of the ruling, not a detail of the DDL.
-  assert.equal(await isSharingActivityWithOversight(plant.id), false);
+  assert.equal(await sharingIsOn(plant.id), false);
   const [defaults] = await db
     .select({ enabled: churchPrivacySettings.shareActivityWithOversight })
     .from(churchPrivacySettings)
@@ -345,7 +355,8 @@ async function run(created: Created) {
   assert.equal(await canAccessChurch(adminA, plant.id), true);
 
   for (const sharing of [false, true]) {
-    await setSharingActivityWithOversight({
+    await setSharingToggle({
+      feature: OVERSIGHT_SHARING_FEATURE,
       churchId: plant.id,
       enabled: sharing,
       updatedBy: planter.id,
@@ -394,7 +405,8 @@ async function run(created: Created) {
   // --------------------------------------------------------------------------
   // 3. MILESTONE 1 — the planter accepted an invitation.
   // --------------------------------------------------------------------------
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -454,7 +466,8 @@ async function run(created: Created) {
   assert.equal((await rowsFor(plant.id)).length, 0);
   ok("the exemption did not open the gate for the other milestones");
 
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: true,
     updatedBy: planter.id,
@@ -521,7 +534,8 @@ async function run(created: Created) {
     .set({ sendingChurchId: otherSendingChurch.id })
     .where(eq(churches.id, plant.id));
 
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -1266,7 +1280,8 @@ async function run(created: Created) {
     timestamp: new Date(),
   };
 
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -1275,7 +1290,8 @@ async function run(created: Created) {
   assert.equal((await rowsFor(plant.id)).length, 0);
   ok("phase advanced, sharing OFF → nothing enqueued");
 
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: true,
     updatedBy: planter.id,
@@ -1306,7 +1322,8 @@ async function run(created: Created) {
   // --------------------------------------------------------------------------
   // 5. MILESTONE 3 — a launch date was set or changed.
   // --------------------------------------------------------------------------
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -1318,7 +1335,8 @@ async function run(created: Created) {
   assert.equal((await rowsFor(plant.id)).length, 0);
   ok("launch date set, sharing OFF → nothing enqueued");
 
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: true,
     updatedBy: planter.id,
@@ -1695,7 +1713,8 @@ async function run(created: Created) {
   //     asserts on `rowsFor(plant.id)` rather than on a global count.
   // --------------------------------------------------------------------------
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: true,
     updatedBy: planter.id,
@@ -2036,7 +2055,8 @@ async function run(created: Created) {
   // 7. THE TOGGLE TAKES EFFECT AT THE NEXT ENQUEUE.
   // --------------------------------------------------------------------------
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -2055,18 +2075,20 @@ async function run(created: Created) {
   assert.equal((await rowsFor(plant.id)).length, 0);
 
   // Flip it — no deploy, no cache to clear, no job to restart.
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: true,
     updatedBy: planter.id,
   });
-  assert.equal(await isSharingActivityWithOversight(plant.id), true);
+  assert.equal(await sharingIsOn(plant.id), true);
 
   await digestFor(laterDay);
   assert.equal((await rowsFor(plant.id)).length, 2);
 
   // ...and back off again, for the day after.
-  await setSharingActivityWithOversight({
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: plant.id,
     enabled: false,
     updatedBy: planter.id,
@@ -2091,13 +2113,14 @@ async function run(created: Created) {
     .values({ name: "Scratch Orphan", sendingNetworkId: network.id })
     .returning();
   created.churches.push(orphan.id);
-  assert.equal(await isSharingActivityWithOversight(orphan.id), false);
-  await setSharingActivityWithOversight({
+  assert.equal(await sharingIsOn(orphan.id), false);
+  await setSharingToggle({
+    feature: OVERSIGHT_SHARING_FEATURE,
     churchId: orphan.id,
     enabled: true,
     updatedBy: planter.id,
   });
-  assert.equal(await isSharingActivityWithOversight(orphan.id), true);
+  assert.equal(await sharingIsOn(orphan.id), true);
   const orphanRows = await db
     .select({ id: churchPrivacySettings.id })
     .from(churchPrivacySettings)

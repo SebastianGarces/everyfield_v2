@@ -5,6 +5,7 @@ import type { SeatFields } from "@/lib/auth/tenancy";
 import {
   DEFAULT_SETTINGS_SECTION,
   isSettingsSectionId,
+  RETIRED_SETTINGS_SECTIONS,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
   settingsSectionHref,
@@ -35,7 +36,10 @@ import {
 //   * association — `isPlantOwner(user) && user.churchId`, OR a sending church's
 //     Owner. `isPlantOwner` already asserts the plant FK, so the `&&` was
 //     redundant there too.
-//   * sharing — `isPlantOwner(user) && user.churchId`.
+//   * sharing — `isPlantOwner(user) && user.churchId`. #619 folded its panel
+//     into Church, which carries the identical gate, and deleted the entry;
+//     the panel INSIDE Church asks `sharing.toggle` for itself so that CS-006
+//     can widen the section to plant Admins without widening the panel.
 //   * the index (account, notifications) — no gate at all.
 // ============================================================================
 
@@ -62,15 +66,9 @@ const ACCOUNTS: {
   {
     what: "a plant Owner",
     who: account({ churchId: PLANT, seat: "owner" }),
-    // The only shape that reaches everything, sharing included.
-    sees: [
-      "account",
-      "church",
-      "team",
-      "association",
-      "notifications",
-      "sharing",
-    ],
+    // The only shape that reaches everything, the sharing panel included —
+    // it lives inside `church` since #619.
+    sees: ["account", "church", "team", "association", "notifications"],
   },
   {
     what: "a plant Admin",
@@ -175,13 +173,31 @@ test("the visible sections keep registry order, whoever is asking", () => {
   }
 });
 
-test("only `sharing` is addressable without appearing in the navigation", () => {
-  // The ruled section list names five. A sixth nav entry would be a product
-  // change, and a section that is neither navigable nor linked is unreachable.
+test("every section is in the navigation", () => {
+  // The ruled section list names five and all five are navigable since #619
+  // retired the one unlisted entry (`sharing`, whose panel moved into Church).
+  // A sixth nav entry would be a product change; an UNLISTED sixth is worse —
+  // a section reachable only by a link somebody remembered to draw, which is
+  // how `/settings/sharing`'s teaser came to be the copy that went stale.
   assert.deepEqual(
     SETTINGS_SECTIONS.filter((section) => !section.inNav).map((s) => s.id),
-    ["sharing"]
+    []
   );
+});
+
+test("a retired id lands on the section that absorbed it", () => {
+  // `/settings/sharing` was the consent panel's own address for two releases and
+  // is the one id guaranteed to be in somebody's history. Bouncing it to the
+  // default section would tell a planter their privacy controls were removed.
+  assert.deepEqual(Object.keys(RETIRED_SETTINGS_SECTIONS), ["sharing"]);
+  assert.equal(RETIRED_SETTINGS_SECTIONS.sharing, "church");
+
+  // A retired id is RETIRED — it must not also be a live section, or the
+  // redirect would shadow a real one.
+  for (const [retired, target] of Object.entries(RETIRED_SETTINGS_SECTIONS)) {
+    assert.equal(isSettingsSectionId(retired), false, retired);
+    assert.ok(isSettingsSectionId(target), target);
+  }
 });
 
 test("every section id resolves and nothing else does", () => {

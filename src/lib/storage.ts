@@ -174,7 +174,31 @@ export function personPhotoStorageKey(
   return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
 }
 
-// What a photo MAY be lives in `@/lib/people/photo` instead, and deliberately:
+// ============================================================================
+// Account Pictures (CS-004, #617)
+// ============================================================================
+
+/**
+ * The one spelling of an account picture's storage key.
+ *
+ * `avatars/{userId}/{uuid}.{ext}` — the same convention `personPhotoStorageKey`
+ * follows, one segment shorter because an account belongs to no tenancy. An
+ * account holds a seat in a church, a sending church or a network, or in none
+ * at all (a coach), and it can be re-seated; a key with a tenancy in it would
+ * either go stale on that move or make the picture something the tenancy owns.
+ * It is the ACCOUNT'S picture, so the account id is the whole path.
+ *
+ * The uuid is fresh on every upload rather than derived from the account, for
+ * the same two reasons the person key gives: a replacement is a NEW object, so
+ * the old one is deleted explicitly after the row stops pointing at it and a
+ * failed delete leaves collectable garbage; and the uuid is what the browser
+ * sees change when the bytes do (`userAvatarSrc`).
+ */
+export function userAvatarStorageKey(userId: string, ext: string): string {
+  return `avatars/${userId}/${crypto.randomUUID()}.${ext}`;
+}
+
+// What a photo MAY be lives in `@/lib/profile-photo` instead, and deliberately:
 // the picker in the browser applies the same rule before it sends, and this
 // module pulls in the AWS SDK, so it can never be imported there.
 

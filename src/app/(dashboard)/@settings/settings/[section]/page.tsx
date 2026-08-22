@@ -20,6 +20,12 @@ import {
 //
 // `intercepted: false` — nothing is behind a URL somebody pasted, so Close goes to
 // the account's home instead of out of the app.
+//
+// AN ID THE REGISTRY NO LONGER KNOWS STILL LANDS SOMEWHERE SENSIBLE. This is the
+// half a pasted or bookmarked URL reaches, so it is where a RETIRED section id
+// matters: `/settings/sharing` was the consent panel's own address until #619
+// folded the panel into Church, and `settingsSectionFromParams` redirects it
+// there rather than bouncing its reader to the default section.
 // ============================================================================
 
 export const dynamic = "force-dynamic";

@@ -63,7 +63,7 @@ test("exactly one crumb is current, and it is the last one", () => {
 test("the current page is not a link to itself even when an href is supplied", () => {
   const trail = resolveBreadcrumbTrail([
     { label: "Settings", href: "/settings" },
-    { label: "Sharing", href: "/settings/sharing" },
+    { label: "Church", href: "/settings/church" },
   ]);
 
   assert.equal(trail[0].href, "/settings");

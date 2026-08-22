@@ -84,9 +84,12 @@ export const OVERSIGHT_SECTIONS_BY_KEY = Object.fromEntries(
 //
 // Collapsing them would tell an admin that a plant is hiding something when it
 // is not, which is the misreading most likely to cost the org a conversation.
-// The copy never promises a toggle screen the planter does not have: the
-// per-feature pull toggles have no UI yet (board #187), so it says who decides,
-// not where to click.
+//
+// The copy says WHO decides, not where to click, and that survives #619 giving
+// the pull toggles their first edit surface: the reader of this sentence is the
+// oversight admin, and the panel is on the planter's settings screen, which is
+// somewhere they cannot go. "Until they change it" is now literally true rather
+// than aspirational.
 // ----------------------------------------------------------------------------
 
 /** Heading on a section the plant has not shared. */

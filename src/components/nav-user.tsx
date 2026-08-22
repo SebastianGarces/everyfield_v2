@@ -3,7 +3,7 @@
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
 import Link from "next/link";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,9 +26,27 @@ type NavUserProps = {
     name: string;
     email: string;
     initials: string;
+    /**
+     * The route this account's picture is served from, or undefined for an
+     * account with none (CS-004, #617).
+     *
+     * A ROUTE, NOT A KEY. The layout resolves it, so nothing here holds a
+     * storage key it could leak into the markup — and the route it names checks
+     * the session before it reads a byte.
+     */
+    avatarSrc?: string;
   };
 };
 
+/**
+ * The account block at the foot of the sidebar.
+ *
+ * TWO AVATARS, ONE ACCOUNT: the trigger and the dropdown's own header repeat
+ * the same face, name and address, because the dropdown covers the trigger on
+ * mobile. Both fall back to initials, which is what an account with no picture
+ * shows and what a picture whose object has gone missing shows too — the route
+ * answers 404 and Radix keeps the fallback rendered.
+ */
 export function NavUser({ user }: NavUserProps) {
   const { isMobile } = useSidebar();
 
@@ -42,6 +60,13 @@ export function NavUser({ user }: NavUserProps) {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <Avatar className="h-8 w-8 rounded-lg">
+                {/* Empty alt: the name and the address sit beside it, so a
+                    description here would be a third reading of the same fact. */}
+                <AvatarImage
+                  src={user.avatarSrc}
+                  alt=""
+                  className="rounded-lg"
+                />
                 <AvatarFallback className="rounded-lg">
                   {user.initials}
                 </AvatarFallback>
@@ -62,6 +87,11 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="h-8 w-8 rounded-lg">
+                  <AvatarImage
+                    src={user.avatarSrc}
+                    alt=""
+                    className="rounded-lg"
+                  />
                   <AvatarFallback className="rounded-lg">
                     {user.initials}
                   </AvatarFallback>

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Household } from "@/db/schema";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
-import { personPhotoSrc } from "@/lib/people/photo";
+import { personPhotoSrc } from "@/lib/profile-photo";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";

@@ -14,6 +14,7 @@ import { heldCapabilities } from "@/lib/auth/seat-rules";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
+import { accountInitials, userAvatarSrc } from "@/lib/profile-photo";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
 import {
@@ -41,18 +42,6 @@ async function NotificationBellSlot({
 }) {
   const unreadCount = await loadUnreadBadgeCountSafely(viewer);
   return <NotificationBell unreadCount={unreadCount} />;
-}
-
-function getInitials(name: string | null, email: string): string {
-  if (name) {
-    return name
-      .split(" ")
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  }
-  return email.substring(0, 2).toUpperCase();
 }
 
 export default async function DashboardLayout({
@@ -132,10 +121,14 @@ export default async function DashboardLayout({
   // failure or stall stays inside the bell instead of taking the shell with it.
   const viewer = notificationViewer({ user });
 
+  // The picture is resolved to a ROUTE here, never handed down as a key: the
+  // sidebar is a client component, and a storage key in its props is a key in
+  // the RSC payload (CS-004, #617).
   const sidebarUser = {
     name: user.name || user.email.split("@")[0],
     email: user.email,
-    initials: getInitials(user.name, user.email),
+    initials: accountInitials(user.name, user.email),
+    avatarSrc: userAvatarSrc(user.avatarKey),
   };
 
   // ONE derivation of the caller's tenancy, read twice below: the nav keys off
