@@ -2314,7 +2314,7 @@ export async function revokeInvitationAs(
 // What they must NOT get is a wrapper in `service.ts`. #265's whole finding is
 // that an action layer is an endpoint list; the authenticated wrappers belong
 // with the surfaces that own the authority rule and the audit write, and they
-// derive the entity from the session (as `setOversightSharingAction` does:
+// derive the entity from the session (as `setSharingToggleAction` does:
 // whose plant it is must not be an argument) rather than re-exporting these.
 //
 // HOW #277/#278 IMPORT THEM. `service.test.ts` → "no 'use server' module
@@ -2426,7 +2426,7 @@ export const PLANTER_ONLY_SEVER_MESSAGE =
  *
  * THE ENTITY IS NOT AN ARGUMENT. There is no `churchId` parameter and there
  * never may be: the plant is the actor's own (`actor.churchId`), minted from the
- * session, which is the same shape `setOversightSharingAction` uses and the rule
+ * session, which is the same shape `setSharingToggleAction` uses and the rule
  * `memory/invariants.md` → Authentication states. All a caller says is WHICH OF
  * ITS TWO oversight associations to end, and that is a two-valued enum, not an
  * id.
@@ -3282,7 +3282,7 @@ export function verifyInvitationAuthority(
       // RATIFIED 2026-08-03 (#274 (a); canon in
       // `product-docs/features/oversight/frd.md` OV-010): the Owner only.
       // Joining an oversight org is a plant-level decision and the Owner's to
-      // make (AS-003), the same rule `setOversightSharingAction` applies to what
+      // make (AS-003), the same rule `setSharingToggleAction` applies to what
       // the plant then shares, and OV-010 pins the same rule for severing. A
       // Member or a coach of the target church may do neither — server-side,
       // not merely hidden in a UI.

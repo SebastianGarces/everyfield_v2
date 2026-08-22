@@ -8,6 +8,8 @@ Why and how, for the Hierarchical Access Control rules in [`../invariants.md`](.
 
 `getOversightPlantHealth()` is what the oversight dashboard is *for*; the six `share_*` columns gate the feature data inside a plant, not the listing of plants. So "they see nothing unless you turn sharing on" is false — `OVERSIGHT_SHARING_TOGGLE.detail` states the real limit, and changing either the exposure or the copy means changing both.
 
+Since #619 the pull toggles have a panel of their own, and the overclaim can now be made by LAYOUT rather than by a sentence: six switches with no such line reads as "turn these off and they see nothing". `SHARING_PANEL_INTRO` (`@/lib/sharing/toggles`) is the line, it names the three facts that return regardless (name, current stage, launch date), and `toggles.test.ts` holds it there.
+
 ## Naming the orgs behind a plant
 
 The two oversight FKs are independent, so an accessible plant can name a sending church in a **different network entirely**. Rendering it discloses a third org's name to a caller not party to that relationship, and asserts a causal path the data model does not have. `sendingChurchesInNetwork` (`src/lib/oversight/read.ts`) therefore carries the caller's own `sending_network_id`.

@@ -35,6 +35,7 @@ import {
   announceSendingChurchDeclinedNetwork,
   announceSendingChurchJoinedNetwork,
   announceSendingChurchLeftNetwork,
+  announceSharingChanged,
 } from "./oversight";
 import type {
   OversightAudience,
@@ -42,6 +43,7 @@ import type {
   OversightRecipient,
 } from "./oversight-audience";
 import { OVERSIGHT_ADMIN, type OversightOrgIds } from "./oversight-admin";
+import type { OverseeingOrg } from "./oversight-sharing";
 
 // ----------------------------------------------------------------------------
 // The oversight model, tested at the seam `enqueue` sits behind.
@@ -213,19 +215,21 @@ test("oversight is eligible for exactly two categories, and neither is granular"
   ]);
 });
 
-test("there are exactly five milestones, and the split is own-event vs plant-fact", () => {
+test("there are exactly six milestones, and the split is own-event vs plant-fact", () => {
   // The 2026-07-27 ruling's three, plus the two #304 added for the events that
-  // END an org's relationship with a plant (OV-006 / OV-007). The line between
-  // the two groups is the one the consent exemption turns on and is asserted as
-  // such below: the first three are the ORG'S OWN event and reach that one org
-  // ungated; the last two are facts about the PLANT and reach its whole
-  // oversight union only with sharing on.
+  // END an org's relationship with a plant (OV-006 / OV-007), plus the one #619
+  // added for a plant closing something it was sharing (CS-012). The line
+  // between the two groups is the one the consent exemption turns on and is
+  // asserted as such below: the first FOUR are the ORG'S OWN event and reach
+  // that one org ungated; the last two are facts about the PLANT and reach its
+  // whole oversight union only with sharing on.
   assert.deepEqual(
     [...oversightMilestoneKinds],
     [
       "invitation_accepted",
       "invitation_declined",
       "association_ended",
+      "sharing_changed",
       "phase_advanced",
       "launch_date_changed",
     ]
@@ -345,6 +349,11 @@ const EXEMPT_TYPE_COPY: Readonly<Record<string, RegExp>> = {
   "oversight.milestone.invitation_declined": /when you decline one/,
   "oversight.milestone.association_ended":
     /when your association with them ends/,
+  // The FOURTH exemption arrived with #619 exactly the way this map is meant to
+  // make it arrive: the exempt list grew, this test went red, and the planter's
+  // copy had to name the new event before it could go green again.
+  "oversight.milestone.sharing_changed":
+    /when you close something you were sharing/,
 };
 
 test("the exempt-phrase map covers the exempt list exactly", () => {
@@ -371,10 +380,10 @@ test("the exempt-phrase map covers the exempt list exactly", () => {
  */
 for (const [route, lines] of Object.entries(OVERSIGHT_CONSENT_SURFACES)) {
   test(`${route} names every consent-exempt event, one phrase per exempt type`, () => {
-    // Every phrase is actually on THIS screen. `detail` is handed whole to
-    // `/settings/sharing` (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`) and
-    // `OVERSIGHT_SHARING_TEASER` is rendered whole by `/settings`, so a
-    // sentence in either is a sentence the planter reads.
+    // Every phrase is actually on THIS screen. `detail` is handed whole to the
+    // sharing panel's push row (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`),
+    // which the Church section draws since #619 — so a sentence in it is a
+    // sentence the planter reads.
     const prose = lines.join(" ");
     for (const [type, phrase] of Object.entries(EXEMPT_TYPE_COPY)) {
       assert.match(prose, phrase, `${route} — ${type}`);
@@ -411,7 +420,7 @@ test("the ruled exemption sentence is in the sharing screen's copy verbatim", ()
   // rather than arbitrary.
   assert.ok(
     OVERSIGHT_SHARING_TOGGLE.detail.includes(
-      "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends."
+      "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing."
     ),
     "the ruled exemption sentence is not in the copy verbatim"
   );
@@ -438,10 +447,15 @@ test("no page hardcodes its own version of the consent promise", () => {
   // consent — so they are the surfaces least able to afford a hand-written
   // second version of it. The association one is a modal section too; only the
   // registration form is still a route of its own.
+  //
+  // `/settings/sharing` LEFT the map in #619: the panel moved into the Church
+  // section and the teaser that used to link to it is deleted, so the file that
+  // RENDERS the plant-side promise and the file this guard reads are the same
+  // one. If the panel is ever extracted into a child component it must be added
+  // here — a surface this map cannot see is a surface the drift guard cannot
+  // hold.
   const surfaces = {
     "/settings/church": "../../components/settings/sections/church-section.tsx",
-    "/settings/sharing":
-      "../../components/settings/sections/sharing-section.tsx",
     "/register?invitation=": "../../app/(auth)/register/register-form.tsx",
     "/settings/association":
       "../../components/settings/sections/association-section.tsx",
@@ -678,6 +692,7 @@ test("the exempt list names a type the emitters actually produce", () => {
     [...OVERSIGHT_SHARING_EXEMPT_TYPES],
     [
       oversightMilestoneType("invitation_accepted"),
+      oversightMilestoneType("sharing_changed"),
       oversightMilestoneType("invitation_declined"),
       oversightMilestoneType("association_ended"),
     ]
@@ -1609,4 +1624,272 @@ test("a clean fan-out reports zero, so the signal means something", async () => 
 
   assert.equal(report.misprovisioned, 0);
   assert.equal(report.recorded, 2);
+});
+
+// ----------------------------------------------------------------------------
+// The sharing-change notice (CS-012, #619; ruled §187 2026-08-15)
+//
+// Turning a sharing toggle OFF tells the overseeing org, coarsely. Every
+// property below is one the ruling names, and each is asserted at the seam
+// `enqueue` sits behind rather than through the settings action, because the
+// action's whole contribution is "call this when `stored` is false".
+// ----------------------------------------------------------------------------
+
+const SHARING_CHANGED_TYPE = oversightMilestoneType("sharing_changed");
+
+/** The two orgs over one plant — the case a single-org emitter gets wrong. */
+const BOTH_ORGS = [
+  { kind: "sending_church", orgId: SENDING_CHURCH },
+  { kind: "network", orgId: NETWORK },
+] as const;
+
+const sharingChange = (
+  orgs: readonly OverseeingOrg[],
+  day = "2026-08-22",
+  churchId = CHURCH
+) => ({
+  churchId,
+  plantName: "Grace Chapel",
+  orgs,
+  day,
+});
+
+test("a sharing change reaches BOTH orgs over a plant, each in its own tenancy", async () => {
+  // A `share_*` column is per PLANT, so one toggle closes a section for the
+  // sending church and for the network at the same instant. An emitter that
+  // announced to one of them would leave the other with a page that quietly
+  // lost a card and no account of why.
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: {
+      [SENDING_CHURCH]: [{ id: ADMIN_A }],
+      [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+    },
+  });
+
+  const report = await announceSharingChanged(sharingChange(BOTH_ORGS), deps);
+
+  assert.equal(report.created, 2);
+  assert.deepEqual(
+    deps.written.map((row) => [row.recipientUserId, row.anchorOrg]),
+    [
+      [ADMIN_A, { type: "sending_church", orgId: SENDING_CHURCH }],
+      [ADMIN_OF_OTHER_ORG, { type: "network", orgId: NETWORK }],
+    ]
+  );
+});
+
+test("the notice is ORG-anchored, never filed under the plant", async () => {
+  // THE STRUCTURAL POINT OF THE WHOLE FEATURE. Anchored to the plant it would
+  // be filed under `church_id`, and arm 1 of `oversightScopedWhere` scopes an
+  // oversight reader's feed to the plants whose `share_activity_with_oversight`
+  // is ON, evaluated at READ time. So the one notice that has to survive a
+  // planter switching sharing off is exactly the notice that arm would hide.
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSharingChanged(sharingChange([BOTH_ORGS[0]]), deps);
+
+  const [row] = deps.written;
+  assert.equal(row.churchId, undefined);
+  assert.deepEqual(row.anchorOrg, {
+    type: "sending_church",
+    orgId: SENDING_CHURCH,
+  });
+  assert.equal(row.category, "milestones");
+  assert.equal(row.type, SHARING_CHANGED_TYPE);
+});
+
+test("a plant that turned sharing OFF still gets this one notice out", async () => {
+  // The exemption, proven rather than assumed. `sharing: false` is the state a
+  // planter who just switched the push toggle off is in, and the fake applies
+  // the same `oversightGateFor` the real `enqueue` does — so a regression that
+  // dropped this type from `OVERSIGHT_SHARING_EXEMPT_TYPES` fails here with the
+  // gate's own answer, not with a restatement of it.
+  assert.equal(oversightGateFor("milestones", SHARING_CHANGED_TYPE), "exempt");
+
+  const deps = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  const report = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]]),
+    deps
+  );
+
+  assert.equal(report.created, 1);
+  assert.equal(report.skipped, 0);
+});
+
+test("the wording is COARSE — it names no toggle and no feature", () => {
+  // §187: per-toggle wording ("they hid financials") maximises social pressure
+  // on the planter and poisons the relationship the product exists to serve.
+  // The ban is on the WORDS, so it is asserted against the words.
+  const composed = composeMilestone(
+    {
+      anchor: orgAnchor("sending_church", SENDING_CHURCH),
+      subject: "Grace Chapel",
+      kind: "sharing_changed",
+      occurrence: "2026-08-22",
+      detail: "unused — the emitter's own detail is asserted below",
+    },
+    ADMIN_A
+  );
+
+  assert.equal(composed.title, "Grace Chapel changed what it shares with you");
+
+  for (const forbidden of [
+    "people",
+    "meeting",
+    "task",
+    "financ",
+    "ministry",
+    "facilit",
+    "wiki",
+    "giving",
+    "donor",
+  ]) {
+    assert.doesNotMatch(
+      composed.title.toLowerCase(),
+      new RegExp(forbidden),
+      `the coarse title names "${forbidden}"`
+    );
+  }
+});
+
+test("the coarse body says the association is intact, and names no toggle", async () => {
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSharingChanged(sharingChange([BOTH_ORGS[0]]), deps);
+
+  const body = deps.written[0].body ?? "";
+
+  // An admin who reads "changed what it shares" with no such line reads it as
+  // the plant pulling away — which is the conversation this notice must not
+  // start on a fact that is not true.
+  assert.match(body, /association is unchanged/i);
+
+  for (const forbidden of [
+    "people",
+    "meeting",
+    "task",
+    "financ",
+    "ministry",
+    "facilit",
+    "wiki",
+  ]) {
+    assert.doesNotMatch(
+      body.toLowerCase(),
+      new RegExp(forbidden),
+      `the coarse body names "${forbidden}"`
+    );
+  }
+});
+
+test("a burst of toggle-offs in one day is ONE notice per org", async () => {
+  // Not tidiness — a privacy property. Three coarse notices in a row disclose
+  // that three toggles moved, which is the per-toggle signal §187 ruled out,
+  // reassembled from the count. The dedupe key's occurrence is the DAY.
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  const first = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]]),
+    deps
+  );
+  const second = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]]),
+    deps
+  );
+  const third = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]]),
+    deps
+  );
+
+  assert.equal(first.created, 1);
+  assert.equal(second.created, 0);
+  assert.equal(third.created, 0);
+  // A replay is still REPORTED as recorded — the row exists, it was just not
+  // created again.
+  assert.equal(second.recorded, 1);
+  assert.equal(deps.written.length, 1);
+
+  // …and the next day is a new event, not a swallowed one.
+  const tomorrow = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]], "2026-08-23"),
+    deps
+  );
+  assert.equal(tomorrow.created, 1);
+});
+
+test("the dedupe key is per ORG, so two overseers do not swallow each other", async () => {
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: {
+      [SENDING_CHURCH]: [{ id: ADMIN_A }],
+      [NETWORK]: [{ id: ADMIN_A }],
+    },
+  });
+
+  // The SAME admin in both orgs is the shape that would collide on a key built
+  // from the day alone.
+  await announceSharingChanged(sharingChange(BOTH_ORGS), deps);
+
+  assert.deepEqual(
+    deps.written.map((row) => row.dedupeKey),
+    [
+      `${SHARING_CHANGED_TYPE}:${SENDING_CHURCH}:${CHURCH}:2026-08-22`,
+      `${SHARING_CHANGED_TYPE}:${NETWORK}:${CHURCH}:2026-08-22`,
+    ]
+  );
+});
+
+test("the dedupe key is per PLANT too, so one plant does not silence another", async () => {
+  // THE OTHER HALF OF THE SAME KEY, and the half that is easy to leave out.
+  // `composeMilestone` keys on the ANCHOR's id, which for this milestone is the
+  // ORG — so a key of (type, org, day) is IDENTICAL for every plant under that
+  // org. The second plant to change anything that day would be swallowed by the
+  // first, and a network with thirty plants would hear about one of them.
+  const OTHER_PLANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const deps = new FakeOversightEnqueue([], {
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  const first = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]], "2026-08-22", CHURCH),
+    deps
+  );
+  const second = await announceSharingChanged(
+    sharingChange([BOTH_ORGS[0]], "2026-08-22", OTHER_PLANT),
+    deps
+  );
+
+  assert.equal(first.created, 1);
+  assert.equal(second.created, 1, "the second plant's notice was swallowed");
+  assert.deepEqual(
+    deps.written.map((row) => row.dedupeKey),
+    [
+      `${SHARING_CHANGED_TYPE}:${SENDING_CHURCH}:${CHURCH}:2026-08-22`,
+      `${SHARING_CHANGED_TYPE}:${SENDING_CHURCH}:${OTHER_PLANT}:2026-08-22`,
+    ]
+  );
+});
+
+test("a plant with no oversight tells nobody", async () => {
+  const deps = new FakeOversightEnqueue([{ id: ADMIN_A }]);
+
+  const report = await announceSharingChanged(sharingChange([]), deps);
+
+  assert.deepEqual(report, {
+    considered: 0,
+    recorded: 0,
+    created: 0,
+    skipped: 0,
+    failed: 0,
+    misprovisioned: 0,
+  });
+  assert.equal(deps.calls.length, 0);
 });
