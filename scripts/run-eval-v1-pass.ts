@@ -105,10 +105,32 @@ async function generateAll(): Promise<void> {
     `\n🧪 Generating assessments for ${churches.length} eval plants…\n`
   );
 
+  let retried = 0;
+
   for (const church of churches) {
     const started = Date.now();
+    // A draft the judge's own rules rejected is re-prompted rather than fatal
+    // (#605). Printing it is the point of running this: a plant that needed two
+    // drafts is a plant that used to be a `failed` row, and the rule named here
+    // is the rubric rule the model keeps breaking.
+    const onSchemaRejection = (event: {
+      attempt: number;
+      maxAttempts: number;
+      rules: string[];
+      exhausted: boolean;
+    }) => {
+      retried++;
+      console.log(
+        `   ${pad(church.name.slice(0, 34), 34)} ${pad(`retry ${event.attempt}/${event.maxAttempts}`, 10)} ` +
+          `rejected by ${event.rules.join(", ") || "the output schema"}` +
+          (event.exhausted ? " — no drafts left" : "")
+      );
+    };
+
     try {
-      const result = await generateAssessment(church.id);
+      const result = await generateAssessment(church.id, undefined, {
+        onSchemaRejection,
+      });
       const status =
         result && typeof result === "object" && "assessment" in result
           ? ((result as { assessment: { status: string } }).assessment.status ??
@@ -118,11 +140,17 @@ async function generateAll(): Promise<void> {
         `   ${pad(church.name.slice(0, 34), 34)} ${pad(status, 10)} ${Math.round((Date.now() - started) / 1000)}s`
       );
     } catch (error) {
+      // The message names the rejecting rule when the judge's rules are what
+      // failed, so this line is wide enough to carry it (AC-3).
       console.log(
-        `   ${pad(church.name.slice(0, 34), 34)} FAILED     ${(error as Error).message.slice(0, 60)}`
+        `   ${pad(church.name.slice(0, 34), 34)} FAILED     ${(error as Error).message.slice(0, 120)}`
       );
     }
   }
+
+  console.log(
+    `\n   ${retried} draft(s) rejected and re-prompted across the fleet.\n`
+  );
 }
 
 async function audit(): Promise<void> {

@@ -23,6 +23,11 @@
 // answered and the answer was broken — but a 5xx ladder cut short by the run
 // deadline is marked `isDeadlineTruncatedFailure` so the log can still say "we
 // ran out of clock" rather than "the judge is broken" (ruled 2026-08-10).
+//
+// And a draft rejected by the judge's OWN rules belongs to neither branch: this
+// ladder REPEATS a call, and a repeat cannot fix a response that broke a rule.
+// It stands down immediately so the schema ladder (`run-assessment.ts`) can
+// re-prompt with the rejecting rule instead (#605).
 // ============================================================================
 
 import {
@@ -32,6 +37,7 @@ import {
   retryAfterMsFromError,
   type HeaderLike,
 } from "./rate-limit";
+import { isDraftRejection } from "./schema-rejection";
 import { TokenPacer } from "./token-pacer";
 
 /** What a paced call hands back: the value plus the metering signals. */
@@ -245,6 +251,16 @@ export async function runPacedCall<T>(
       });
       return result.value;
     } catch (error) {
+      // A REJECTED DRAFT IS NOT THIS LADDER'S (#605). The provider answered and
+      // the answer broke one of the judge's own rules, so the identical prompt
+      // draws the identical mistake — repeating it here spent four gpt-4o calls
+      // and ~48s of backoff to learn nothing, and left nothing for a real 429.
+      // `isRetryableError` says yes to it only because a
+      // `NoObjectGeneratedError` carries no status code, so the stand-down is
+      // stated ahead of it rather than hidden inside it. Re-prompting with the
+      // rule that rejected the draft is `runAssessment`'s ladder.
+      if (isDraftRejection(error)) throw error;
+
       const rateLimited = isRateLimitError(error);
 
       if (!rateLimited && !isRetryableError(error)) throw error;

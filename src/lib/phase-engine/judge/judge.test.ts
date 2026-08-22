@@ -82,15 +82,27 @@ test("relatedArticleSlugs is required (OpenAI strict mode) but may be empty", ()
   assert.deepEqual(parsed.relatedArticleSlugs, []);
 });
 
-test("judgeOutputSchema requires a summary and at least one insight", () => {
+test("judgeOutputSchema requires a summary and an insight for each audience", () => {
   assert.throws(() =>
     judgeOutputSchema.parse({ summary: "ok and grounded", insights: [] })
   );
+  // One insight is no longer enough: audience coverage (PE-012) became a
+  // refinement on this schema in #605, so a one-sided assessment is refused
+  // here — and therefore RETRIED — rather than thrown out after the parse.
+  assert.throws(() =>
+    judgeOutputSchema.parse({
+      summary: "Plant is tracking to plan with steady core-group growth.",
+      insights: [validInsight({ audience: "planter" })],
+    })
+  );
   const parsed = judgeOutputSchema.parse({
     summary: "Plant is tracking to plan with steady core-group growth.",
-    insights: [validInsight()],
+    insights: [
+      validInsight({ audience: "planter" }),
+      validInsight({ audience: "network", severity: "positive" }),
+    ],
   });
-  assert.equal(parsed.insights.length, 1);
+  assert.equal(parsed.insights.length, 2);
 });
 
 // --- Audience coverage helper (PE-012) --------------------------------------

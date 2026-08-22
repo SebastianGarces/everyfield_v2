@@ -111,11 +111,46 @@ export const insightSchema = z.object({
 export type Insight = z.infer<typeof insightSchema>;
 
 /**
+ * THE RULES A DRAFT IS HELD TO, by name (#605).
+ *
+ * Every refinement below tags its issue with the rule that raised it, so the
+ * retry ladder and the run log can say WHICH rule rejected a draft without
+ * pattern-matching the message's prose. The message is what the model is told;
+ * the name is what an operator greps for.
+ *
+ * This array is the only place a rule name exists: `JudgeRule` is derived from
+ * it, and `describeDraftRejection` (schema-rejection.ts) checks membership
+ * rather than casting, so a tag that stops matching a real rule is a rule the
+ * reader is told is unknown instead of one silently mislabelled.
+ */
+export const JUDGE_RULES = [
+  "audience_coverage",
+  "observation_budget",
+  "network_verdict_register",
+  "planter_first_pairing",
+] as const;
+export type JudgeRule = (typeof JUDGE_RULES)[number];
+
+/** One refinement issue, tagged with the rule that raised it. */
+function ruleIssue(rule: JudgeRule, message: string) {
+  return {
+    code: "custom" as const,
+    path: ["insights"],
+    message,
+    params: { rule },
+  };
+}
+
+/**
  * The full object the model is constrained to return: a list of insights plus a
- * one-line overall summary. Audience coverage (both planter AND network) is a
- * product requirement (PE-012) enforced in the pipeline rather than the schema,
- * so a missing audience fails loudly with a clear, actionable error rather than
- * a generic Zod parse failure.
+ * one-line overall summary.
+ *
+ * EVERY RULE A DRAFT IS HELD TO IS A REFINEMENT HERE, including audience
+ * coverage (PE-012), which used to be a post-parse throw in the pipeline. That
+ * split cost a plant its assessment: a rule enforced after the parse is a rule
+ * the retry ladder cannot see, so a missing audience was fatal on the first
+ * draft while the other three rules were re-prompted (#605). One list of rules,
+ * one rejection path, one place to add the next one.
  */
 export const judgeOutputSchema = z
   .object({
@@ -125,42 +160,57 @@ export const judgeOutputSchema = z
     insights: z.array(insightSchema).min(1),
   })
   .superRefine((output, ctx) => {
+    // Both audiences must be represented (PE-012). The object shape cannot say
+    // "at least one of each", so it is said here.
+    if (!hasBothAudiences(output.insights)) {
+      ctx.addIssue(
+        ruleIssue(
+          "audience_coverage",
+          "The assessment must include at least one planter AND one network insight (PE-012). One-sided assessments are not stored."
+        )
+      );
+    }
+
     const work = output.insights.filter(
       (insight) =>
         insight.audience === "planter" && insight.severity !== "positive"
     );
 
     if (work.length > PLANTER_FOCUS_BUDGET) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["insights"],
-        message: `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.`,
-      });
+      ctx.addIssue(
+        ruleIssue(
+          "observation_budget",
+          `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.`
+        )
+      );
     }
 
     // THE NETWORK REGISTER (#482). Both rules are stated in the rubric, which
     // is what teaches the model; these are what stop a bad response being
-    // STORED. A violation fails the parse and `runPacedCall` retries the
-    // generation, so an insight breaking either rule never reaches a database.
+    // STORED. A violation fails the parse and the schema ladder re-prompts with
+    // the message below, so an insight breaking either rule never reaches a
+    // database.
     const verdicts = findNetworkRegisterViolations(output.insights);
     if (verdicts.length > 0) {
       const found = verdicts
         .map((violation) => `"${violation.phrase}" in "${violation.title}"`)
         .join("; ");
-      ctx.addIssue({
-        code: "custom",
-        path: ["insights"],
-        message: `Network-audience language must coach, never deliver a verdict. Found ${found}. Name the measured pattern and point at a coaching conversation — "Core-group momentum has slowed. This may be worth a coaching conversation" — never an organisational judgement.`,
-      });
+      ctx.addIssue(
+        ruleIssue(
+          "network_verdict_register",
+          `Network-audience language must coach, never deliver a verdict. Found ${found}. Name the measured pattern and point at a coaching conversation — "Core-group momentum has slowed. This may be worth a coaching conversation" — never an organisational judgement.`
+        )
+      );
     }
 
     const unpaired = findUnpairedNetworkCategories(output.insights);
     if (unpaired.length > 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["insights"],
-        message: `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Different wording for each audience is expected; a concern the planter was never shown is not.`,
-      });
+      ctx.addIssue(
+        ruleIssue(
+          "planter_first_pairing",
+          `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Different wording for each audience is expected; a concern the planter was never shown is not.`
+        )
+      );
     }
   });
 export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
@@ -192,7 +242,7 @@ export interface AssessmentResult extends JudgeOutput {
 
 /**
  * Does this set of insights cover both required audiences (PE-012)?
- * Pure helper, unit-tested, reused by the pipeline to assert coverage.
+ * Pure helper, unit-tested, and the body of the `audience_coverage` refinement.
  */
 export function hasBothAudiences(insights: Insight[]): boolean {
   let planter = false;

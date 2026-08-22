@@ -18,6 +18,8 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 import type { Rubric } from "@/lib/phase-engine/rubric";
 
+import type { DraftRejection } from "./schema-rejection";
+
 /** One flattened, citable fact: a dotted path and its primitive value. */
 export interface FactLine {
   key: string;
@@ -104,10 +106,33 @@ ${rubric.body}
 === END RUBRIC ===`;
 }
 
-/** Per-plant user message: the phase, the fact ledger, and the RAG passages. */
+/**
+ * What a rejected draft is told, so the next one corrects a stated rule rather
+ * than rolling again (#605).
+ *
+ * It goes LAST, after the facts and the methodology: this is the most recent
+ * turn of the conversation, and the rule the model just broke is the thing it
+ * should be holding when it starts writing. The messages are the validation
+ * messages verbatim — each one already names the rule and what to do instead,
+ * which is why the rubric and the refinements share their wording (#538).
+ */
+function renderRejection(rejection: DraftRejection): string {
+  return `
+
+=== YOUR PREVIOUS RESPONSE WAS REJECTED ===
+It broke the rules below. These are not preferences: a response that breaks any of them is discarded, not stored. Produce the WHOLE assessment again with every one of them fixed.
+${rejection.messages.map((message) => `- ${message}`).join("\n")}
+=== END REJECTION ===`;
+}
+
+/**
+ * Per-plant user message: the phase, the fact ledger, and the RAG passages —
+ * plus, on a retry, the rules that rejected the previous draft.
+ */
 export function buildUserPrompt(
   snapshot: PlantFactSnapshot,
-  passages: RetrievedPassage[]
+  passages: RetrievedPassage[],
+  rejection?: DraftRejection | null
 ): string {
   const coldStart = snapshot.isColdStart
     ? "\nNOTE: This plant is at COLD START (little or no activity yet). Favor onboarding guidance over numeric analysis; do not imply numbers that aren't in the FACTS.\n"
@@ -124,7 +149,7 @@ ${renderFactLedger(snapshot)}
 ${renderPassages(passages)}
 === END METHODOLOGY ===
 
-Produce the assessment now. Remember: cite real facts only, no invented numbers, and include both planter and network insights.`;
+Produce the assessment now. Remember: cite real facts only, no invented numbers, and include both planter and network insights.${rejection ? renderRejection(rejection) : ""}`;
 }
 
 /**

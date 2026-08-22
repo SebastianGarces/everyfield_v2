@@ -51,7 +51,6 @@ import {
 // neither `sleeps` nor `advance` — it asserts the OUTCOME of the ladder, not
 // its shape.
 
-
 // ----------------------------------------------------------------------------
 // The one stub: the process's own `fetch`.
 //

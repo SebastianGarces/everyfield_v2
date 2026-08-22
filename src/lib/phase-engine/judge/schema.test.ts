@@ -14,6 +14,11 @@ import {
 // model can talk itself out of on a busy plant — which is precisely the plant
 // where the cap matters most. A cap in the SCHEMA is a refusal: an over-budget
 // response fails validation and is retried, never stored.
+//
+// Since #605 that retry is a RE-PROMPT carrying the message asserted below, so
+// the message is not decoration: it is what the model is told to fix. The other
+// three rules on this schema are exercised elsewhere — coverage and pairing in
+// `schema-retry.test.ts`, the verdict register in `network-register.test.ts`.
 // ----------------------------------------------------------------------------
 
 function insight(over: Partial<Insight> = {}): Insight {
@@ -29,10 +34,25 @@ function insight(over: Partial<Insight> = {}): Insight {
   };
 }
 
+/**
+ * A network insight that satisfies audience coverage and NOTHING ELSE.
+ *
+ * Coverage (PE-012) became a refinement on this schema in #605 — it used to be
+ * a post-parse throw in the pipeline, which is a rule the retry ladder could
+ * not see. Every output below therefore needs a network item, and this one is
+ * `positive` on purpose: a positive network insight is exempt from the pairing
+ * rule and is not budgeted, so it cannot influence what these tests are about.
+ */
+const NETWORK_COVERAGE = insight({
+  audience: "network",
+  severity: "positive",
+  title: "Core-group commitments continue to come in",
+});
+
 function output(insights: Insight[]) {
   return judgeOutputSchema.safeParse({
     summary: "A plain-language read of overall plant health.",
-    insights,
+    insights: [...insights, NETWORK_COVERAGE],
   });
 }
 

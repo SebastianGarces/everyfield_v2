@@ -17,6 +17,7 @@ export {
   insightCategorySchema,
   insightSeveritySchema,
   hasBothAudiences,
+  JUDGE_RULES,
 } from "./schema";
 export type {
   Insight,
@@ -25,7 +26,21 @@ export type {
   InsightSeverity,
   JudgeOutput,
   AssessmentResult,
+  JudgeRule,
 } from "./schema";
+
+// The judge's own rules refusing its own output (#605). `isSchemaRejection` is
+// how the batch runner tells "the judge would not follow a rule" apart from
+// "the provider would not talk to us" (`isRateLimitDeferral`) and from a plain
+// broken call — three different sentences in the 07:00 log.
+export {
+  isSchemaRejection,
+  SchemaRejectionError,
+  describeDraftRejection,
+  type DraftRejection,
+  type SchemaRejectionEvent,
+  type SchemaRejectionReason,
+} from "./schema-rejection";
 
 export { JUDGE_MODEL_ID } from "./provider";
 

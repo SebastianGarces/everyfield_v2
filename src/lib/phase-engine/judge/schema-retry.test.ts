@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 
 import { makeSnapshot } from "@/lib/phase-engine/signals/testing";
 
@@ -79,14 +78,22 @@ function scriptedModel(drafts: string[]) {
   const prompts: string[] = [];
   let call = 0;
   const model = new MockLanguageModelV3({
-    doGenerate: async (options: LanguageModelV3CallOptions) => {
+    doGenerate: async (options) => {
       prompts.push(JSON.stringify(options.prompt));
       const text = drafts[Math.min(call, drafts.length - 1)];
       call++;
       return {
         content: [{ type: "text" as const, text }],
-        finishReason: "stop" as const,
-        usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: {
+          inputTokens: {
+            total: 100,
+            noCache: 100,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+          outputTokens: { total: 200, text: 200, reasoning: 0 },
+        },
         warnings: [],
       };
     },
@@ -206,7 +213,15 @@ test("missing audience coverage is a schema rule, so it is retried too", async (
 });
 
 test("a model that never complies fails with the rejecting rule named", async () => {
-  const run = await assess([UNPAIRED_DRAFT], { maxSchemaAttempts: 3 });
+  // A virtual clock, because a re-prompt is a WHOLE EXTRA CALL against the run's
+  // shared TPM budget: on the real clock this plant's third draft waits ~21s for
+  // the bucket to refill. That is the ladder behaving — a retry queues like any
+  // other call rather than jumping the batch — and it is why `deadlineAt` has to
+  // bound this loop as well as the throttle one.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock });
+
+  const run = await assess([UNPAIRED_DRAFT], { pacer, maxSchemaAttempts: 3 });
 
   assert.ok(isSchemaRejection(run.error));
   const error = run.error as SchemaRejectionError;
@@ -217,6 +232,8 @@ test("a model that never complies fails with the rejecting rule named", async ()
   // AC-3: the rule is in the message, so the operator reading a `failed` row's
   // log line never has to reproduce the run to learn which rule rejected it.
   assert.match(error.message, /planter_first_pairing/);
+  // The drafts really did queue behind the token bucket rather than bypass it.
+  assert.ok(clock.now() > 0, "a re-prompt is paced like any other call");
 
   assert.equal(run.events.length, 3);
   assert.equal(run.events[2].exhausted, true);
