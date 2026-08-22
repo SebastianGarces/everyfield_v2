@@ -217,11 +217,16 @@ export async function getRecentlyViewed(limit: number = 5) {
  * TOTALS AND COUNTS COME FROM ONE READ. `getArticles` is the same call the
  * article list, the sidebar and prev/next resolve against — church scope,
  * `published`, and the church-override rule, all three — so the denominator
- * here IS the population of the surface these numbers sit on, and the
- * `inArray` below keeps the numerator inside it in the statement rather than
- * after the fact. This read used to be scoped to `user_id` alone, which is how
- * "12 of 10 completed" became reachable; `summariseProgress` is where the
- * property is pinned.
+ * here IS the population of the surface these numbers sit on. This read used to
+ * be scoped to `user_id` alone, which is how "12 of 10 completed" became
+ * reachable.
+ *
+ * ONE PLACE DECIDES WHAT COUNTS, and it is `summariseProgress`: it admits a
+ * progress row only when its slug is still in the corpus. The progress query
+ * below is therefore left unnarrowed on purpose — a slug predicate here would
+ * be the same decision written twice, and it would force the corpus read to
+ * finish before the progress read could even be built. The two run together
+ * instead, and the reader's rows are bounded by the articles they have opened.
  *
  * The corpus read costs nothing extra on `/wiki/progress`: `getArticles` is
  * `React.cache`d and the wiki layout above has already called it for the
@@ -235,63 +240,76 @@ export async function getRecentlyViewed(limit: number = 5) {
 export async function getProgressStats(): Promise<WikiProgressStats> {
   const session = await getCurrentSession();
 
-  const articles = await getArticles(session?.user?.churchId ?? null);
-  const slugs = articles.map((article) => article.slug);
+  const corpus = getArticles(session?.user?.churchId ?? null);
+  if (!session?.user) return summariseProgress(await corpus, []);
 
-  if (!session?.user || slugs.length === 0) {
-    return summariseProgress(articles, []);
-  }
-
-  const userProgress = await db
-    .select({
-      articleSlug: wikiProgress.articleSlug,
-      status: wikiProgress.status,
-    })
-    .from(wikiProgress)
-    .where(
-      and(
-        eq(wikiProgress.userId, session.user.id),
-        inArray(wikiProgress.articleSlug, slugs)
-      )
-    );
+  const [articles, userProgress] = await Promise.all([
+    corpus,
+    db
+      .select({
+        articleSlug: wikiProgress.articleSlug,
+        status: wikiProgress.status,
+      })
+      .from(wikiProgress)
+      .where(eq(wikiProgress.userId, session.user.id)),
+  ]);
 
   return summariseProgress(articles, userProgress);
 }
 
-/** Get the last in-progress article for "Continue Reading". */
+/**
+ * The article "Continue Reading" offers — the newest one still in the corpus.
+ *
+ * "STILL IN THE CORPUS" IS THE WHOLE POINT OF THE LOOP. This used to take the
+ * single most recent `in_progress` row and give up when it did not resolve, so
+ * a reader whose last-opened article was later unpublished or overridden away
+ * lost the card entirely — permanently, and while other articles sat half-read.
+ * That is #631's defect one function over on the same page: the counts beside
+ * this card would say "3 in progress" over a card offering nothing.
+ *
+ * Resolving against `getArticles` rather than `getArticle` per row is also what
+ * makes the loop free. `getProgressStats` has already called it with this same
+ * church, `React.cache` returns that array, and `ArticleMeta` carries every
+ * field this card needs — so the per-slug query this used to run is gone.
+ */
 export async function getLastInProgress() {
   const session = await getCurrentSession();
   if (!session?.user) return null;
 
-  const [progress] = await db
-    .select()
-    .from(wikiProgress)
-    .where(
-      and(
-        eq(wikiProgress.userId, session.user.id),
-        eq(wikiProgress.status, "in_progress")
+  const [inProgress, articles] = await Promise.all([
+    db
+      .select({
+        articleSlug: wikiProgress.articleSlug,
+        scrollPosition: wikiProgress.scrollPosition,
+        lastViewedAt: wikiProgress.lastViewedAt,
+      })
+      .from(wikiProgress)
+      .where(
+        and(
+          eq(wikiProgress.userId, session.user.id),
+          eq(wikiProgress.status, "in_progress")
+        )
       )
-    )
-    .orderBy(desc(wikiProgress.lastViewedAt))
-    .limit(1);
+      .orderBy(desc(wikiProgress.lastViewedAt)),
+    getArticles(session.user.churchId ?? null),
+  ]);
 
-  if (!progress) return null;
+  const bySlug = new Map(articles.map((article) => [article.slug, article]));
 
-  // Same church scope as "Recently Viewed" above (#317) — otherwise a church's
-  // own article, once started, can never be the one "Continue Reading" offers.
-  const article = await getArticle(
-    progress.articleSlug,
-    session.user.churchId ?? null
-  );
-  if (!article) return null;
+  for (const progress of inProgress) {
+    const article = bySlug.get(progress.articleSlug);
+    if (!article) continue;
 
-  return {
-    slug: progress.articleSlug,
-    title: article.title,
-    description: article.description,
-    type: article.type,
-    readTime: article.readTime,
-    scrollPosition: progress.scrollPosition,
-    lastViewedAt: progress.lastViewedAt,
-  };
+    return {
+      slug: progress.articleSlug,
+      title: article.title,
+      description: article.description,
+      type: article.type,
+      readTime: article.readTime,
+      scrollPosition: progress.scrollPosition,
+      lastViewedAt: progress.lastViewedAt,
+    };
+  }
+
+  return null;
 }

@@ -44,9 +44,12 @@ export type WikiProgressStats = Record<string, WikiCategoryProgress>;
  * The category an article belongs to — the first segment of its slug.
  *
  * Slugs read `discovery/article-name` or `core-group/section/article`, and this
- * grouping is what `/wiki/progress` shows its "By Section" rows for.
+ * grouping is what `/wiki/progress` shows its "By Section" rows for. The `??` is
+ * a type-level fallback for `noUncheckedIndexedAccess` and nothing more: `split`
+ * always returns at least one element, so `"other"` is not a category anything
+ * can land in.
  */
-export function articleCategoryOf(slug: string): string {
+function articleCategoryOf(slug: string): string {
   return slug.split("/")[0] ?? "other";
 }
 

@@ -548,7 +548,7 @@ const UNSCOPED_SEARCH = /\bsearchArticles\(\s*[^,)]*\)/;
  * two `doesNotMatch` guards below still cover it if one is ever added.
  */
 const CHURCH_TAKING_READ =
-  /\b(?:getArticlesByPrefix|getArticles|getWikiNavigation|getPublishedArticleRefs|getArticle|searchArticles)\s*\(/;
+  /\b(?:getArticlesByPrefix|getArticleNavigation|getArticles|getWikiNavigation|getPublishedArticleRefs|getArticle|searchArticles)\s*\(/;
 
 /** Reads a repo file; `pnpm test` always runs from the repo root. */
 function readRepoFile(relativePath: string): string {
