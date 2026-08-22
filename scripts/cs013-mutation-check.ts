@@ -129,9 +129,16 @@ const MUTATIONS: Mutation[] = [
   {
     claim: "the consent copy names every consent-exempt event",
     file: COPY,
+    // THE NEEDLE HAD DRIFTED, and the harness said so rather than reporting a
+    // pass: the copy grew a fourth exempt event ("when you close something you
+    // were sharing") while this string still said "Three things", so from that
+    // day until #657 this mutation could not be applied and the claim it proves
+    // was unproven. The lesson is the harness's own — a needle is a quotation,
+    // and a quotation rots.
     from:
-      '  "Three things reach them either way, because the relationship itself is theirs too:' +
-      ' when you accept their invitation, when you decline one, and when your association with them ends.",\n] as const;',
+      '  "Four things reach them either way, because the relationship itself is theirs too:' +
+      ' when you accept their invitation, when you decline one, when your association with them ends,' +
+      ' and when you close something you were sharing.",\n] as const;',
     to: "] as const;",
     suite: COPY_SUITE,
   },
