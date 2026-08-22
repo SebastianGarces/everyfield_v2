@@ -219,8 +219,12 @@ function optedInPlantIds(org: OversightOrg) {
  *      subquery and no recipient tenancy check, and had zero callers: a second
  *      door that type-checked. Deleted in #528; this arm subsumes it.
  *
- * A row matches at most one arm: the CHECK partitions `church_id` and
- * `anchor_org_id`, and arms 1 and 2 differ on `type`.
+ * THE ARMS OVERLAP, AND NOTHING MAY BE DERIVED FROM A ROW MATCHING ONE. They
+ * used to partition — the CHECK separates `church_id` from `anchor_org_id`, and
+ * arms 1 and 2 differed on `type` — and #619's `sharing_changed` row matches
+ * arm 2 (its type is consent-exempt) AND arm 3 (it is org-anchored). Harmless,
+ * because this is an `or`; recorded because the old sentence read like a
+ * property somebody could rely on.
  */
 export function oversightScopedWhere(
   scope: OversightNotificationScope,

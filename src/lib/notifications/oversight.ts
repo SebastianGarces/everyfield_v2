@@ -1,4 +1,7 @@
-import type { OrganizationInvitationType } from "@/db/schema";
+import type {
+  AssociationOrgType,
+  OrganizationInvitationType,
+} from "@/db/schema";
 import {
   noOversightOrg,
   oversightOrgOfKind,
@@ -28,16 +31,17 @@ import {
 // is ever told about a plant is composed here or in `./oversight-digest.ts`.
 // There are exactly two shapes:
 //
-//   MILESTONES  five events, delivered per event (this file):
+//   MILESTONES  six events, delivered per event (this file):
 //                 - the planter accepted an invitation,
 //                 - the planter declined an invitation           (#304/OV-006),
 //                 - the planter left the org                     (#304/OV-007),
+//                 - the planter closed something they were sharing  (#619/CS-012),
 //                 - the plant advanced a phase/stage,
 //                 - a launch date was set or changed.
-//               The first three are the ORG'S OWN relationship changing and go
+//               The first four are the ORG'S OWN relationship changing and go
 //               to that one org, consent-exempt; the last two are facts about
 //               the plant and go to the plant's whole oversight union, gated.
-//               The first three repeat ONE LEVEL UP for a sending church's own
+//               Three of the first four repeat ONE LEVEL UP for a sending church's own
 //               membership of a network (#304 WS3 / OV-013): same kinds, same
 //               types, same exempt rail, but ANCHORED TO THE NETWORK because
 //               they name no plant at all (`announceSendingChurch*`).
@@ -95,6 +99,7 @@ export const oversightMilestoneKinds = [
   "invitation_accepted",
   "invitation_declined",
   "association_ended",
+  "sharing_changed",
   "phase_advanced",
   "launch_date_changed",
 ] as const;
@@ -397,6 +402,13 @@ function milestoneTitle(facts: MilestoneFacts): string {
       return `${facts.subject} declined your invitation`;
     case "association_ended":
       return `${facts.subject} left your organization`;
+    // COARSE, AND THE WORDING IS THE RULING'S (§187, 2026-08-15). It names no
+    // toggle: per-toggle wording ("they hid financials") maximises social
+    // pressure on the planter and poisons the relationship the product exists to
+    // serve. The direction is unavoidable — nothing is sent when a toggle goes
+    // ON — but WHICH one stays the plant's business.
+    case "sharing_changed":
+      return `${facts.subject} changed what it shares with you`;
     case "phase_advanced":
       return `${facts.subject} reached a new stage`;
     case "launch_date_changed":
@@ -738,7 +750,109 @@ export async function announceSendingChurchLeftNetwork(
 }
 
 /**
- * The one-org fan-out with the never-throws posture, shared by the six
+ * Source: the sharing panel's write — the planter turned a toggle OFF (#619,
+ * CS-012; ruled §187, 2026-08-15).
+ *
+ * ----------------------------------------------------------------------------
+ * ORG-ANCHORED, AND THAT IS STRUCTURAL RATHER THAN STYLISTIC
+ * ----------------------------------------------------------------------------
+ *
+ * Anchored to the plant it would be filed under `church_id`, and arm 1 of
+ * `oversightScopedWhere` (`./feed.ts`) scopes an oversight reader's feed to the
+ * plants whose `share_activity_with_oversight` is ON — evaluated at READ time.
+ * So the one notice that must survive a planter switching sharing off is exactly
+ * the notice that arm would hide, and it would vanish from the feed the moment
+ * it became true. Filed under the ORG it reaches arm 3 (`anchor_org_id`), which
+ * asks nothing about the plant's consent.
+ *
+ * The same reasoning makes it consent-EXEMPT at the write end
+ * (`OVERSIGHT_SHARING_EXEMPT_TYPES`): `enqueue`'s org arm refuses any type that
+ * `requires_sharing`, and gating "they changed what they share with you" on the
+ * very toggle being changed is a control that silences its own announcement. It
+ * is the same "structurally unreachable" objection the 2026-08-01 ruling made,
+ * and the exemption's own justification transfers whole — this is the org's
+ * relationship with the plant changing, and it says nothing about how the plant
+ * is doing.
+ *
+ * ----------------------------------------------------------------------------
+ * ONE NOTICE PER PLANT PER ORG PER DAY, and the collapse protects the ruling
+ * ----------------------------------------------------------------------------
+ *
+ * `occurrence` is the PLANT AND THE DAY, not the toggle, so a planter who closes
+ * three things in one sitting produces one row per org rather than three. That
+ * is not only tidiness: three coarse notices in a row disclose that three
+ * toggles moved, which is a per-toggle signal reassembled from the count — the
+ * thing §187 ruled out.
+ *
+ * BOTH HALVES OF THE OCCURRENCE ARE LOAD-BEARING, and the plant is the half that
+ * is easy to leave out. `composeMilestone` keys on the ANCHOR's id, which here
+ * is the ORG — so a day alone would give every plant under one org the same
+ * dedupe key, and the second plant to change anything that day would be silently
+ * swallowed by the first. A network with thirty plants would hear about one.
+ * The other org-anchored emitters are safe from this because their occurrence is
+ * already globally unique (an invitation id, an audit row id); a day is not.
+ *
+ * Nothing is sent when a toggle goes ON, and nothing is sent when no org
+ * oversees the plant: an empty `orgs` is nobody.
+ */
+export async function announceSharingChanged(
+  input: {
+    /** The plant whose sharing changed — half the dedupe key. */
+    churchId: string;
+    plantName: string;
+    /** Every org that oversees the plant — `sharingChangeAudience`'s answer. */
+    orgs: readonly { kind: AssociationOrgType; orgId: string }[];
+    /**
+     * The DAY the change happened, as `YYYY-MM-DD`. The caller stamps it so the
+     * dedupe window is one reviewable decision rather than a clock read buried
+     * in the emitter.
+     */
+    day: string;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  const reports = await Promise.all(
+    input.orgs.map((org) =>
+      announceToOrg(
+        deps,
+        oversightOrgOfKind(org.kind, org.orgId),
+        {
+          anchor: orgAnchor(org.kind, org.orgId),
+          subject: input.plantName,
+          kind: "sharing_changed",
+          occurrence: `${input.churchId}:${input.day}`,
+          // Coarse by ruling: it names no toggle, and it tells the admin the
+          // one thing they would otherwise guess wrong — that the association
+          // itself is intact. An admin who reads "changed what it shares" with
+          // no such line reads it as the plant pulling away.
+          detail:
+            "What a plant shares is its own decision, and this one has changed what it shares with you. Your association is unchanged — open their page to see what is available now.",
+        },
+        `${input.churchId}:${input.day}`
+      )
+    )
+  );
+
+  return reports.reduce(mergeReports, emptyReport());
+}
+
+/** Sum two fan-out reports, so a multi-org announcement returns one. */
+function mergeReports(
+  a: OversightFanOutReport,
+  b: OversightFanOutReport
+): OversightFanOutReport {
+  return {
+    recorded: a.recorded + b.recorded,
+    created: a.created + b.created,
+    skipped: a.skipped + b.skipped,
+    considered: a.considered + b.considered,
+    failed: a.failed + b.failed,
+    misprovisioned: a.misprovisioned + b.misprovisioned,
+  };
+}
+
+/**
+ * The one-org fan-out with the never-throws posture, shared by the seven
  * own-relationship milestones so none of them can be the one that lets an
  * infrastructure error escape into the action that caused it.
  */

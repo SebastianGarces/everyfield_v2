@@ -588,9 +588,17 @@ export const dbEnqueueDeps: EnqueueDeps = {
     // the category is one oversight may receive at all (N-025, unchanged).
     // Consent has no third party to come from — there is no plant to have
     // opted in — so a category that REQUIRES sharing is refused outright rather
-    // than approximated. Today only the three consent-exempt own-relationship
-    // milestones are org-anchored, so that refusal is a fail-closed floor and
-    // not a live path.
+    // than approximated. That refusal is a fail-closed floor: every org-anchored
+    // type in the product is consent-EXEMPT, so nothing reaches it today.
+    //
+    // ONE OF THEM IS A LIVE PATH AND IS NOT AN OWN-RELATIONSHIP TYPE.
+    // `oversight.milestone.sharing_changed` (#619/CS-012) tells an org, coarsely,
+    // that a plant changed what it shares — and it is filed HERE, under the org,
+    // precisely so the plant's consent cannot reach it in either direction: not
+    // at this gate, and not at arm 1 of `oversightScopedWhere`, which would hide
+    // a plant-anchored row from an org the plant had just stopped sharing with.
+    // The other three org-anchored types are the sending church's own network
+    // milestones, which name no plant at all.
     // ------------------------------------------------------------------------
     if (anchor.type !== "church") {
       if (!recipientAdministersOrg(recipient, anchor)) {
