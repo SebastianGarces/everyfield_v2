@@ -94,10 +94,16 @@ const FENCES: KeyFence[] = [
       { file: "src/lib/profile-photo.ts" },
       // The serving route, reading the key off the session row.
       { file: "src/app/api/account/avatar/route.ts" },
-      // The two SERVER components that resolve the key before handing a route
-      // down: the dashboard layout (for the sidebar) and the Account section.
+      // The two SERVER readers that resolve the key before handing a route
+      // down: the dashboard layout (for the sidebar) and the settings modal's
+      // read (for the Account section).
+      //
+      // The Account SECTION is no longer one of them (#657). It became a
+      // `"use client"` component fed by a view model, so the key stops in
+      // `readAccount` — which is the boundary this file is about, drawn one step
+      // earlier than before rather than moved.
       { file: "src/app/(dashboard)/layout.tsx" },
-      { file: "src/components/settings/sections/account-section.tsx" },
+      { file: "src/lib/settings/section-data.ts" },
     ],
     guidance:
       'resolve it to a route with userAvatarSrc() on the server and pass that instead — `avatarSrc` being undefined already says "no picture"',
