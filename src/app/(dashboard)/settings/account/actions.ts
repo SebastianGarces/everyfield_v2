@@ -204,67 +204,24 @@ export async function requestEmailChangeAction(input: {
  */
 export async function confirmEmailChangeAction(
   token: string
-): Promise<EmailChangeConfirmRefusal> {
+): Promise<EmailChangeConfirmOutcome> {
   const { user } = await requireSeat("self.write");
 
-  let outcome: EmailChangeConfirmOutcome;
-
   try {
-    outcome = await confirmEmailChange({
+    const outcome = await confirmEmailChange({
       actor: user,
       token: typeof token === "string" ? token : "",
       ip: await getRequestIp(),
     });
+
+    if (outcome.ok) refresh();
+
+    return outcome;
   } catch (error) {
     unstable_rethrow(error);
     console.error("[ACCOUNT] confirming an email change failed:", error);
     return { ok: false, message: "We could not confirm that address" };
   }
-
-  // SUCCESS LEAVES, AND THAT IS WHY THIS ONE DOES NOT `refresh()` (#658).
-  //
-  // The address has moved, so the URL the press came from is a spent token and
-  // the identity the tree was rendered for is gone. A redirect answers both:
-  // the reader lands on a page that reads the NEW address out of the session,
-  // and a reload of that page says the same thing instead of the dead-link
-  // sentence a spent `?token=` earns.
-  //
-  // It also takes the outcome off the client, which is the half that was
-  // BROKEN. The success sentence used to live in `useActionState`, and the
-  // update that would have shown it shared a transition with the tree patch
-  // `refresh()` streamed into this response — a transition that never
-  // committed. The swap landed, the payload arrived carrying the new address,
-  // and the button sat on "Confirming…" forever, while the refusal branch of
-  // the same component cleared in ~2s.
-  //
-  // DO NOT READ THAT AS "a server `refresh()` strands a press". It does not, in
-  // general: `requestEmailChangeAction` above calls `refresh()` from the same
-  // shape and renders its "check your inbox" sentence correctly — driven on
-  // #658's preview to be sure. What differs at this call site was not worth
-  // bisecting a framework race to name, because the fix does not depend on the
-  // answer: a redirect is rendered by the server, so no sentence a reader
-  // depends on waits on a transition to commit. If a third call site strands,
-  // these two are the pair to compare.
-  //
-  // …AND THE DESTINATION IS FRESHENED RATHER THAN THE ROUTE BEING LEFT. A
-  // client-side navigation REUSES the layout segments both routes share, and
-  // the sidebar that renders the address is in exactly such a layout — measured
-  // on this branch's preview, the redirect alone landed on a page reading "you
-  // now sign in as 658-gate@…" beside a sidebar still showing
-  // planter1@everyfield.app. `"layout"` because the identity is chrome: it is
-  // on every screen this account can reach, not on the one it landed on
-  // (`memory/invariants.md` → Client/Server Data Synchronization: an action
-  // whose only caller LEAVES keeps the revalidate and drops the refresh).
-  //
-  // OUTSIDE THE `try` ON PURPOSE: `redirect()` reports itself by throwing, and
-  // the catch above would classify it as a failed confirmation — the one answer
-  // this endpoint must never give about a change that committed.
-  if (outcome.ok) {
-    revalidatePath("/", "layout");
-    redirect("/verify-email/confirmed");
-  }
-
-  return outcome;
 }
 
 /**
