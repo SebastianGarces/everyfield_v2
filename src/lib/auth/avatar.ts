@@ -205,7 +205,7 @@ export async function uploadUserAvatar(
  * the row named nothing, so a removal repeated is a removal.
  */
 export async function removeUserAvatar(
-  actor: AvatarActor,
+  { actor }: { actor: AvatarActor },
   effects: UserAvatarEffects = LIVE_AVATAR_EFFECTS
 ): Promise<AvatarOutcome> {
   if (!(await setUserAvatar(actor.id, null, effects))) {

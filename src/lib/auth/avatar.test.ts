@@ -284,7 +284,7 @@ test("an empty file is not a picture", async () => {
 test("removeUserAvatar is setUserAvatar with a null key and nothing else", async () => {
   const harness = effectHarness(OLD_KEY);
 
-  const outcome = await removeUserAvatar(ACTOR, harness.effects);
+  const outcome = await removeUserAvatar({ actor: ACTOR }, harness.effects);
 
   assert.deepEqual(outcome, { ok: true, avatarKey: null });
   assert.deepEqual(harness.kinds(), ["load", "write", "remove"]);
@@ -294,7 +294,7 @@ test("removeUserAvatar is setUserAvatar with a null key and nothing else", async
 test("removing twice is removing once — the second call finds nothing to drop", async () => {
   const harness = effectHarness(null);
 
-  const outcome = await removeUserAvatar(ACTOR, harness.effects);
+  const outcome = await removeUserAvatar({ actor: ACTOR }, harness.effects);
 
   assert.deepEqual(outcome, { ok: true, avatarKey: null });
   assert.deepEqual(harness.kinds(), ["load", "write"]);

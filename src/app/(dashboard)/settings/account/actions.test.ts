@@ -42,10 +42,29 @@ const READER = sourceReader(SOURCE, "settings/account/actions.ts");
 const CODE = stripComments(SOURCE);
 
 const EXPORTS = [
+  "uploadAvatarAction",
+  "removeAvatarAction",
   "requestEmailChangeAction",
   "confirmEmailChangeAction",
   "changePasswordAction",
 ] as const;
+
+/**
+ * One export's body, bounded by the next one.
+ *
+ * `READER.after` runs to the END OF THE FILE, so an assertion written with it
+ * reads every export below its subject too. That is a trap with a delay on it:
+ * the `refresh()` test below asserts an ABSENCE, and an absence assertion over
+ * the rest of the file passes today and starts reading somebody else's function
+ * the moment an endpoint is added under it. #617 added two, and put them at the
+ * top for unrelated reasons — so this bound is what keeps that a choice rather
+ * than a load-bearing accident.
+ */
+function bodyOf(name: string): string {
+  const rest = READER.after(`export async function ${name}`);
+  const next = rest.indexOf("export async function", 1);
+  return next === -1 ? rest : rest.slice(0, next);
+}
 
 test("every export is mapped, and mapped to self.write", () => {
   for (const name of EXPORTS) {
@@ -59,7 +78,7 @@ test("every export is mapped, and mapped to self.write", () => {
   }
 });
 
-test("the module publishes exactly those three endpoints", () => {
+test("the module publishes exactly those endpoints and no others", () => {
   const published = [...CODE.matchAll(/export async function (\w+)/g)].map(
     (match) => match[1]
   );
@@ -91,6 +110,25 @@ test("the guard is line one of every export, and ABOVE the try", () => {
   }
 });
 
+test("the only thing read out of the picture's FormData is the file (CS-004)", () => {
+  const body = bodyOf("uploadAvatarAction");
+  const reads = [...body.matchAll(/formData\.get\("([^"]+)"\)/g)].map(
+    (match) => match[1]
+  );
+
+  assert.deepEqual(
+    reads,
+    ["avatar"],
+    "a `FormData` is a bag whose keys a POST chooses, so every key read out of one is an input the caller controls — a storage key among them would aim this account's picture at another account's object, which the avatar route would then serve because it trusts the stored key"
+  );
+
+  assert.match(
+    body,
+    /file instanceof File/,
+    "the bag's value is `FormDataEntryValue`, so a POST sending a plain string reaches the logic layer as one unless this narrows first"
+  );
+});
+
 test("no export takes a user, an account or a hash as an argument", () => {
   for (const forbidden of [
     "userId",
@@ -98,6 +136,8 @@ test("no export takes a user, an account or a hash as an argument", () => {
     "passwordHash",
     "currentEmail",
     "previousEmail",
+    "avatarKey",
+    "storageKey",
   ]) {
     assert.equal(
       CODE.includes(forbidden),
@@ -109,15 +149,9 @@ test("no export takes a user, an account or a hash as an argument", () => {
 
 test("the actor handed to the logic layer is the session's own row", () => {
   for (const name of EXPORTS) {
-    // `after` and then up to the NEXT export, so each assertion reads its own
-    // function rather than the first match anywhere below it.
-    const rest = READER.after(`export async function ${name}`);
-    const next = rest.indexOf("export async function", 1);
-    const body = next === -1 ? rest : rest.slice(0, next);
-
     assert.match(
-      body,
-      /actor: user,/,
+      bodyOf(name),
+      /actor: user,?/,
       `${name} must pass the minted user, not something assembled from its input`
     );
   }
@@ -151,29 +185,34 @@ test("every catch defers to unstable_rethrow before it classifies", () => {
   }
 });
 
-test("the two writes that change what the screen shows call refresh()", () => {
-  // The address appears in the Account section AND in the chrome, so both email
-  // actions reconcile the whole tree. The password change deliberately does not:
-  // nothing on screen renders a password, so there is nothing to re-read.
-  assert.match(
-    READER.span(
-      "export async function requestEmailChangeAction",
-      "export async function confirmEmailChangeAction"
-    ),
-    /if \(outcome\.ok\) refresh\(\);/
-  );
-  assert.match(
-    READER.span(
-      "export async function confirmEmailChangeAction",
-      "export async function changePasswordAction"
-    ),
-    /if \(outcome\.ok\) refresh\(\);/
-  );
-  assert.equal(
-    READER.after("export async function changePasswordAction").includes(
-      "refresh()"
-    ),
-    false,
-    "a refresh with nothing to reconcile is dead work on every password change"
-  );
+test("every write that changes what the screen shows calls refresh(), and only those", () => {
+  // The address and the picture BOTH appear in the Account section and in the
+  // chrome, so those four reconcile the whole tree. The password change
+  // deliberately does not: nothing on screen renders a password, so there is
+  // nothing to re-read and a refresh would be dead work on every rotation.
+  const RECONCILES = new Set([
+    "uploadAvatarAction",
+    "removeAvatarAction",
+    "requestEmailChangeAction",
+    "confirmEmailChangeAction",
+  ]);
+
+  for (const name of EXPORTS) {
+    const body = bodyOf(name);
+
+    if (RECONCILES.has(name)) {
+      assert.match(
+        body,
+        /if \(outcome\.ok\) refresh\(\);/,
+        `${name} changes something the sidebar renders — without the refresh the chrome keeps showing what was true before the write`
+      );
+      continue;
+    }
+
+    assert.equal(
+      body.includes("refresh()"),
+      false,
+      `${name} has nothing on screen to reconcile — a refresh here is dead work on every call`
+    );
+  }
 });
