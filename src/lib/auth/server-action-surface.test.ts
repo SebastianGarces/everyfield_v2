@@ -70,7 +70,7 @@ import {
 const ROUND_7_ENDPOINTS = [
   "settings/actions.ts → setNotificationPreferenceAction",
   "settings/actions.ts → setDigestCadenceAction",
-  "settings/sharing/actions.ts → setOversightSharingAction",
+  "settings/actions.ts → setSharingToggleAction",
   "notifications/actions.ts → markNotificationReadAction",
   "notifications/actions.ts → loadMoreNotificationsAction",
 ];

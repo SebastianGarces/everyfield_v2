@@ -134,8 +134,10 @@ export const NOTIFICATION_CATEGORIES: Record<
     // rides the same category from the other side. An earlier version listed
     // only "an invitation accepted, a new stage, a launch date", which named
     // three of six and read as though ending a relationship were silent.
+    // #619 adds the seventh — a plant closing something it was sharing — and
+    // the description names it for the same reason.
     description:
-      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a new stage, a launch date.",
+      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a change to what a plant shares, a new stage, a launch date.",
     defaults: { email: true, in_app: true },
   },
   digest: {
@@ -390,6 +392,22 @@ export function isOwnRelationshipType(type: string): boolean {
  */
 export const OVERSIGHT_SHARING_EXEMPT_TYPES = [
   "oversight.milestone.invitation_accepted",
+  /**
+   * #619 / CS-012 adds the FOURTH, on the same reasoning taken one step
+   * further. "They changed what they share with you" is the org's own
+   * relationship changing too, and gating it on the sharing toggle is
+   * CIRCULAR: turning the push toggle off would silence the notice that says
+   * it was turned off, so the one announcement a planter's decision makes
+   * necessary is the one that decision would suppress. It is the 2026-08-01
+   * ruling's "structurally unreachable control" objection exactly.
+   *
+   * It is NOT in `OVERSIGHT_OWN_RELATIONSHIP_TYPES` above, deliberately: that
+   * list relaxes the TENANCY gate for church-anchored rows whose FK has just
+   * gone. This one is ORG-anchored — the plant is still in the org's scope, so
+   * `recipientAdministersOrg` answers it on its own and the recorded-
+   * relationship fallback must stay unreachable for it.
+   */
+  "oversight.milestone.sharing_changed",
   ...OVERSIGHT_OWN_RELATIONSHIP_TYPES,
 ] as const;
 
@@ -441,8 +459,8 @@ export function oversightGateFor(
  * never reaches this: `canAccessFeatureData` returns true for them without
  * consulting a toggle.
  */
-export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
-  "oversight_activity";
+export const OVERSIGHT_SHARING_FEATURE =
+  "oversight_activity" satisfies PrivacyFeatureKey;
 
 /**
  * The plant-side toggle's copy — the single source of truth for what the
@@ -513,33 +531,9 @@ export const OVERSIGHT_SHARING_TOGGLE = {
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
     "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
-    "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends.",
+    "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing.",
   ],
 } as const;
-
-/**
- * The SAME consent promise, one sentence long, as `/settings` teases it.
- *
- * It lives here beside `OVERSIGHT_SHARING_TOGGLE` rather than inside
- * `src/app/(dashboard)/settings/page.tsx` because that is precisely how it went
- * stale. It was written in #258 when the exempt list held ONE type, and it read
- * "apart from being told you accepted their invitation … no updates about this
- * plant unless you turn sharing on". The list then grew to three, round 5 of
- * #304 corrected the sharing screen's own copy, and this sentence went on
- * telling a planter that a DECLINE and a DEPARTURE were covered by a switch
- * that has never gated either. The drift guard could not see it: a test that
- * inspects one constant while a sibling file hardcodes a competing sentence is
- * the hand-written-list problem one level up. Consent copy that lives in a page
- * is consent copy no guard can hold to the code.
- *
- * The clauses naming the exempt events are the ruled sentence's OWN words
- * (ruled 2026-08-10, round 5 of #304), reused rather than re-written. The
- * toggle's promise comes first and the exemptions have the last word, the same
- * order `detail` uses and for the same reason — a reader who meets "unless you
- * turn sharing on" AFTER the three exemptions reads it as covering them.
- */
-export const OVERSIGHT_SHARING_TEASER =
-  "Your sending church and network get no updates about this plant unless you turn sharing on — except for three things that reach them either way: when you accept their invitation, when you decline one, and when your association with them ends.";
 
 /**
  * THE ACCEPTANCE SCREENS' CONSENT COPY (CS-013, ruled 2026-08-15 §187).
@@ -571,19 +565,22 @@ export const OVERSIGHT_SHARING_TEASER =
  *     copy does. That list is true of the DIGEST; here `share_financials` is one
  *     of the toggles being turned on, so the honest limit is the shape of what
  *     oversight reads — totals, never the records behind them.
- *   * AND IT DOES NOT PROMISE A PER-PART CONTROL, because there is not one.
- *     Seven columns go on; exactly ONE of them has a switch anywhere in the
- *     product — `share_activity_with_oversight`, on `/settings/sharing`. The six
- *     pull toggles have no UI until #187's sharing panel ships
- *     (`@/lib/oversight/sections` says so in its own words), so an earlier draft
- *     of this line reading "any part of it, or all of it" described a screen the
- *     planter does not have. What IS real today is that one switch and the
- *     sever, and the copy names exactly those two. When #187 lands the six
- *     switches this line goes back to naming them.
+ *   * IT NOW PROMISES A PER-PART CONTROL, AND ONLY BECAUSE ONE EXISTS. When
+ *     this copy was written exactly ONE of the seven columns had a switch
+ *     anywhere in the product, so a draft reading "any part of it, or all of
+ *     it" described a screen the planter did not have and the line was cut back
+ *     to the one switch and the sever. #619 shipped the panel — six pull
+ *     switches and the push switch, in the Church section — and this comment
+ *     said in as many words that the line goes back to naming them when it
+ *     landed. It has. If the panel is ever taken away, this sentence comes back
+ *     out with it.
  *
  * ORDER IS LOAD-BEARING, as on every consent surface: the reversibility promise
- * comes before the three exemptions, so a reader does not meet "turn it off"
- * and take it as covering events it has never governed.
+ * comes before the exemptions, so a reader does not meet "turn it off" and take
+ * it as covering events it has never governed. There are FOUR of them since
+ * #619 — closing a toggle tells the org, coarsely, and a planter reading a
+ * promise about turning things off has to be told that turning one off is
+ * itself a thing they hear about.
  */
 export const INVITE_ORIGIN_SHARING_CONSENT = [
   "Accepting starts you off sharing with them: every sharing setting begins on.",
@@ -591,8 +588,8 @@ export const INVITE_ORIGIN_SHARING_CONSENT = [
   "Totals only, never the people behind them. No names, no notes, no messages, and no list of what you did.",
   "Once a day, on days something happened, they also get a summary of what changed, and they hear when you reach a new stage or set a launch date.",
   "One thing this does not cover. Your plant is listed on their dashboard with its name, current stage and launch date whether you share or not, and that listing stays as long as you belong to them.",
-  "The daily summary and those updates are yours to control: turn it off in Settings whenever you like, and sharing stops at the next update — nothing already sent is recalled. Leaving them stops the rest.",
-  "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends.",
+  "Every part of this is yours to change: each one has its own switch in Church settings, so turn it off whenever you like and sharing stops at the next update — nothing already sent is recalled. Leaving them stops the rest.",
+  "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing.",
 ] as const;
 
 /**
@@ -605,16 +602,25 @@ export const INVITE_ORIGIN_SHARING_CONSENT = [
  * than once for the place someone remembered. A new consent surface joins the
  * guard by being added here — which is the only way to add one, since the copy
  * itself has to live in this module to be added at all.
+ *
+ * THREE ENTRIES, TWO PROMISES. The plant-side one is made once, in the Church
+ * section (#619); the acceptance one is made on both screens a plant can accept
+ * from (CS-013), which is one promise keyed twice because it is one decision a
+ * planter meets by two routes.
  */
 export const OVERSIGHT_CONSENT_SURFACES: Readonly<
   Record<string, readonly string[]>
 > = {
-  "/settings/sharing": OVERSIGHT_SHARING_TOGGLE.detail,
-  // The teaser moved with the surface that draws it (#615): the old `/settings`
-  // index is gone, and the sentence — plus the link to the panel — now sits in
-  // the Church section of the settings modal, which is the plant Owner's own
-  // section and the same reader it always addressed.
-  "/settings/church": [OVERSIGHT_SHARING_TEASER],
+  // The panel itself (#619/CS-011), which renders `detail` whole. The plant-side
+  // promise used to be made TWICE — in full at `/settings/sharing`, and in one
+  // teased sentence on the index that linked to it — and that teaser is
+  // precisely the copy that went stale for two rulings: written in #258 when the
+  // exempt list held ONE type, it was still telling a planter that a DECLINE and
+  // a DEPARTURE were covered by a switch that has never gated either. The panel
+  // is now IN the Church section, so the teaser has nothing left to tease and
+  // both it and the sentence are deleted. A promise made in one place cannot
+  // fall behind the promise made in another.
+  "/settings/church": OVERSIGHT_SHARING_TOGGLE.detail,
   // The two screens a PLANT can accept an org invitation from (CS-013). Both
   // render the same lines, because it is the same decision reached twice — a
   // planter meets it at registration if they were invited by email, and on the

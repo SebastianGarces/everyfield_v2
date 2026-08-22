@@ -18,6 +18,7 @@ import {
   setChurchProfileField,
   setChurchTimeZone,
 } from "@/lib/churches/settings";
+import type { PrivacyFeatureKey } from "@/lib/auth/access";
 import { isValidTimeZone } from "@/lib/datetime";
 import {
   audienceMayReceiveCategory,
@@ -25,6 +26,10 @@ import {
   notificationCategories,
   notificationChannels,
 } from "@/lib/notifications/categories";
+import {
+  announceSharingChange,
+  setSharingToggle,
+} from "@/lib/notifications/oversight-sharing";
 import {
   clearAddressSuppression,
   SUPPRESSION_CLEAR_FAILED_MESSAGE,
@@ -42,6 +47,7 @@ import {
   setDigestCadence,
   setPreference,
 } from "@/lib/notifications/preferences";
+import { isSharingFeature } from "@/lib/sharing/toggles";
 
 // ============================================================================
 // The preferences screen's writes (N-006, Screen 2).
@@ -551,5 +557,105 @@ export async function setChurchInactivityThresholdsAction(
       error: "Unable to save. Please try again.",
       invalid: [],
     };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// What this plant shares with its sending church or network (CS-010/011/012)
+// ----------------------------------------------------------------------------
+//
+// ONE ACTION FOR ALL SEVEN TOGGLES. The six `share_*` pull columns and the
+// activity push column are the same decision made about different data — "who
+// may see this" — and one write path is one place the Owner check, the
+// upsert and the coarse notice each live. Seven near-identical actions would be
+// seven chances for one of them to skip the notice.
+//
+// WHOSE PLANT THIS IS, IS NOT AN ARGUMENT. The action takes a feature and a
+// boolean; the church comes from the session, so no form field, query string or
+// route param on this panel names a church. A planter can only ever change their
+// own plant's settings, and that is a property of the signature rather than a
+// check someone could delete.
+//
+// OWNER-ONLY, and it is `sharing.toggle` (OWNER_ONLY, ruling 185 (1)) — the same
+// capability the panel asks before it renders, so a control never appears beside
+// an action guaranteed to refuse it. An Admin is inside the plant, but what
+// leaves the plant is not their decision; a coach or an oversight admin deciding
+// it would be the setting authorising itself. `requireSeat` THROWS here rather
+// than returning an error string: a seat that may not write this has no business
+// receiving a sentence about it.
+//
+// SESSION FIRST, THEN THE PARSE (ruled 2026-08-10; extended repo-wide in round 8
+// of #304). The mint is the export's first statement, ahead of `safeParse` —
+// while it ran first, an anonymous POST of a bad feature came back with a
+// friendly error while a well-formed one threw, so the two answers told a
+// well-formed payload from a malformed one with no session at all.
+//
+// `refresh()` rather than `revalidatePath`, per memory/contracts/data-patterns.md:
+// each switch holds an optimistic value and the server reconciles behind it.
+
+export type SharingActionResult =
+  | { success: true; enabled: boolean }
+  | { success: false; error: string };
+
+const sharingToggleSchema = z.object({
+  // `isSharingFeature` is the ONE thing that turns a posted string into a
+  // `PrivacyFeatureKey`. The panel's six rows and the push row are the only
+  // features that exist, so a seventh column arriving with #62 is writable the
+  // moment it has a row in `SHARING_PULL_TOGGLES` and not one moment before.
+  feature: z.custom<PrivacyFeatureKey>(
+    (value) => typeof value === "string" && isSharingFeature(value)
+  ),
+  enabled: z.boolean(),
+});
+
+export async function setSharingToggleAction(
+  input: unknown
+): Promise<SharingActionResult> {
+  const session = await requireSeat("sharing.toggle");
+
+  const parsed = sharingToggleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "That is not a setting we can save" };
+  }
+
+  try {
+    if (!session.user.churchId) {
+      return { success: false, error: "Create your church plant first" };
+    }
+
+    const { feature, enabled } = parsed.data;
+
+    const { stored, changed } = await setSharingToggle({
+      churchId: session.user.churchId,
+      feature,
+      enabled,
+      updatedBy: session.user.id,
+    });
+
+    // ONLY ON A REAL FLIP TO OFF, and only once the write has committed (§187).
+    // An org told that a plant closed something it had not closed yet is a
+    // conversation the product started on a fact that was not true — and so is
+    // one told twice because a stale second tab re-posted `false` for a toggle
+    // that was already closed. `changed` is the write's own answer to that,
+    // decided by `setWhere` inside the statement rather than by a read.
+    //
+    // Turning one back ON sends nothing: the org sees the section reappear, and
+    // a notice for every flip would turn a settings panel into a broadcast and
+    // make a planter hesitate to reopen anything.
+    //
+    // Never allowed to fail the save: `announceSharingChange` swallows its own
+    // infrastructure errors, because consent is recorded whether or not the
+    // announcement lands.
+    if (changed && !stored) {
+      await announceSharingChange(session.user.churchId);
+    }
+
+    refresh();
+
+    return { success: true, enabled: stored };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving a sharing toggle failed:", error);
+    return { success: false, error: "We could not save that setting" };
   }
 }

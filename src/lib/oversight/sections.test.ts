@@ -10,6 +10,7 @@ import {
   sectionsIntro,
   withheldExplanation,
 } from "./sections";
+import { SHARING_PULL_TOGGLES } from "@/lib/sharing/toggles";
 
 // ----------------------------------------------------------------------------
 // Every section declares the toggle that gates it (OV-002)
@@ -19,14 +20,14 @@ import {
 // the exact thing the six `share_*` columns exist to prevent.
 // ----------------------------------------------------------------------------
 
-const PULL_TOGGLES = new Set([
-  "people",
-  "meetings",
-  "tasks",
-  "financials",
-  "ministry_teams",
-  "facilities",
-]);
+// THE SET IS THE PANEL'S OWN LIST (#619). It used to be six strings written
+// out here, which meant "the six pull toggles" existed twice — once as this
+// hand-written set and once as whatever gated the reads. `SHARING_PULL_TOGGLES`
+// is now the one list, and `share_wiki` (#62) joins it by failing the build in
+// `@/lib/sharing/toggles` until it has a row.
+const PULL_TOGGLES = new Set<string>(
+  SHARING_PULL_TOGGLES.map((toggle) => toggle.feature)
+);
 
 test("every section is gated by one of the six pull toggles", () => {
   assert.ok(OVERSIGHT_SECTIONS.length > 0);

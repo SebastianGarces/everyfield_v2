@@ -5,7 +5,6 @@ import { AccountSection } from "@/components/settings/sections/account-section";
 import { AssociationSection } from "@/components/settings/sections/association-section";
 import { ChurchSection } from "@/components/settings/sections/church-section";
 import { NotificationsSection } from "@/components/settings/sections/notifications-section";
-import { SharingSection } from "@/components/settings/sections/sharing-section";
 import { TeamSection } from "@/components/settings/sections/team-section";
 import { SettingsModal } from "@/components/settings/settings-modal";
 import { verifySession } from "@/lib/auth/session";
@@ -13,6 +12,7 @@ import { isOversightUser } from "@/lib/auth/tenancy";
 import {
   DEFAULT_SETTINGS_SECTION,
   isSettingsSectionId,
+  RETIRED_SETTINGS_SECTIONS,
   SETTINGS_SECTIONS,
   settingsSectionHref,
   settingsSectionsFor,
@@ -25,7 +25,9 @@ export type SettingsSectionParams = Promise<{ section: string }>;
 /**
  * The section a `/settings/<section>` URL names.
  *
- * An id the registry does not know is a REDIRECT to the default section, not a
+ * An id the registry does not know is a REDIRECT — to the section that absorbed
+ * it if it is a retired one (`RETIRED_SETTINGS_SECTIONS`), otherwise to the
+ * default — and never a
  * 404: a `notFound()` raised inside the modal's parallel slot escapes to the
  * root not-found boundary and replaces the whole screen the modal is supposed to
  * be sitting on top of. Bouncing corrects the address bar instead, which is what
@@ -36,7 +38,11 @@ export async function settingsSectionFromParams(
 ): Promise<SettingsSectionId> {
   const { section } = await params;
   if (!isSettingsSectionId(section)) {
-    redirect(settingsSectionHref(DEFAULT_SETTINGS_SECTION));
+    redirect(
+      settingsSectionHref(
+        RETIRED_SETTINGS_SECTIONS[section] ?? DEFAULT_SETTINGS_SECTION
+      )
+    );
   }
   return section;
 }
@@ -89,7 +95,6 @@ const SECTION_BODIES: Record<
   team: TeamSection,
   association: AssociationSection,
   notifications: NotificationsSection,
-  sharing: SharingSection,
 };
 
 export async function SettingsSurface({
