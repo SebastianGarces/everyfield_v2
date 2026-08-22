@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { MeetingCard } from "./meeting-card";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import {
   DEFAULT_LIST_MEETING_TYPE,
@@ -33,6 +34,9 @@ export function MeetingList({
 }: MeetingListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // AS-020: the empty state's CTA is a write affordance. A Member keeps the
+  // fact — there are no meetings — and loses the invitation to fix it.
+  const canWrite = useCan("meetings.write");
   const view =
     (searchParams.get("view") as "upcoming" | "past" | "all") || initialView;
   // The SAME parser the server page runs over `?type=`, not a cast: the page
@@ -114,12 +118,22 @@ export function MeetingList({
         <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
           <CalendarCheck className="text-muted-foreground/50 h-12 w-12" />
           <h3 className="mt-4 font-semibold">No meetings yet</h3>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Schedule your first meeting to start tracking attendance and growth.
-          </p>
-          <Button asChild className="mt-4 cursor-pointer">
-            <Link href="/meetings/new">Schedule Meeting</Link>
-          </Button>
+          {canWrite ? (
+            <>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Schedule your first meeting to start tracking attendance and
+                growth.
+              </p>
+              <Button asChild className="mt-4 cursor-pointer">
+                <Link href="/meetings/new">Schedule Meeting</Link>
+              </Button>
+            </>
+          ) : (
+            <p className="text-muted-foreground mt-1 text-sm">
+              Your plant&apos;s admins schedule meetings. Ones you are invited
+              to will show up here.
+            </p>
+          )}
         </div>
       ) : (
         <>

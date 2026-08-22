@@ -6,6 +6,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates } from "@/lib/communication/templates";
 import type { TemplateCategory } from "@/db/schema/communication";
@@ -26,6 +27,17 @@ const categoryLabels: Record<TemplateCategory, string> = {
 export default async function TemplatesPage() {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
+
+  // THE CATALOG IS A READ AND THE PAGE STAYS (AS-020, #499). What a template
+  // says is worth knowing to anybody in the plant; the two controls on each
+  // card are not. "Use" opens the compose form and "Edit" opens the editor —
+  // both routes are now refused on this same verb, so leaving the buttons up
+  // would only send a Member into a redirect.
+  //
+  // THERE IS NO "NEW TEMPLATE" CONTROL TO HIDE. `createTemplateAction` and
+  // `forkTemplateAction` have no UI call site at all: a church-owned template
+  // comes into being when somebody saves an edit to a system one.
+  const canSend = holdsSeatFor(user, "communication.send");
 
   const templates = await getTemplates(user.churchId);
 
@@ -88,26 +100,28 @@ export default async function TemplatesPage() {
                           {template.description}
                         </p>
                       )}
-                      <div className="flex items-center gap-2">
-                        <Button variant="default" size="sm" asChild>
-                          <Link
-                            href={`/communication/compose?templateId=${template.id}`}
-                            className="cursor-pointer"
-                          >
-                            <Mail className="mr-1 h-3 w-3" />
-                            Use
-                          </Link>
-                        </Button>
-                        <Button variant="outline" size="sm" asChild>
-                          <Link
-                            href={`/communication/templates/${template.id}/edit`}
-                            className="cursor-pointer"
-                          >
-                            <Pencil className="mr-1 h-3 w-3" />
-                            Edit
-                          </Link>
-                        </Button>
-                      </div>
+                      {canSend && (
+                        <div className="flex items-center gap-2">
+                          <Button variant="default" size="sm" asChild>
+                            <Link
+                              href={`/communication/compose?templateId=${template.id}`}
+                              className="cursor-pointer"
+                            >
+                              <Mail className="mr-1 h-3 w-3" />
+                              Use
+                            </Link>
+                          </Button>
+                          <Button variant="outline" size="sm" asChild>
+                            <Link
+                              href={`/communication/templates/${template.id}/edit`}
+                              className="cursor-pointer"
+                            >
+                              <Pencil className="mr-1 h-3 w-3" />
+                              Edit
+                            </Link>
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}

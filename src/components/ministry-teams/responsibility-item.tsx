@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Check, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,6 +60,11 @@ export function ResponsibilityItem({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Ticking, editing and deleting are all `teams.write` (AS-020, #499). Asked
+  // here rather than threaded from the tab: this file is where the three
+  // controls render, so a reviewer reads the verb and the control together.
+  const canWrite = useCan("teams.write");
+
   const complete = responsibility.completedAt !== null;
   const checkboxId = `responsibility-${responsibility.id}`;
 
@@ -100,119 +106,157 @@ export function ResponsibilityItem({
           target — so ticking an item off is a click anywhere on its text, with
           no dead zone between the two. The checkbox role announces the state;
           the strike-through is the sighted half of that same fact and never
-          the only cue. */}
-      <Checkbox
-        id={checkboxId}
-        checked={complete}
-        onCheckedChange={(checked) =>
-          onToggle(responsibility, checked === true)
-        }
-        className="cursor-pointer"
-      />
+          the only cue.
 
-      <Label
-        htmlFor={checkboxId}
-        className={cn(
-          "min-w-0 flex-1 cursor-pointer text-sm font-normal",
-          complete && "text-muted-foreground line-through"
-        )}
-      >
-        {responsibility.title}
-      </Label>
+          WHETHER IT IS DONE IS THE READ; TICKING IT IS THE WRITE, and AS-020
+          separates the two here rather than by disabling the box. The
+          read-only render keeps the same square in the same place with the
+          same tick in it, named through `role="img"` — so the state still
+          reaches the screen reader that no longer has a checkbox to hear it
+          from, and the label beside it becomes plain text, because a `<label>`
+          with no control to name is an affordance that does nothing. */}
+      {canWrite ? (
+        <Checkbox
+          id={checkboxId}
+          checked={complete}
+          onCheckedChange={(checked) =>
+            onToggle(responsibility, checked === true)
+          }
+          className="cursor-pointer"
+        />
+      ) : (
+        <span
+          role="img"
+          aria-label={complete ? "Complete" : "Not complete"}
+          className="text-muted-foreground inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] border"
+        >
+          {complete && <Check className="size-3.5" />}
+        </span>
+      )}
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-foreground h-8 w-8 cursor-pointer"
-            aria-label={`Edit ${responsibility.title}`}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-        </DialogTrigger>
-        <DialogContent>
-          <form action={handleEdit}>
-            <DialogHeader>
-              <DialogTitle>Edit responsibility</DialogTitle>
-              <DialogDescription>
-                Change what this team is on the hook for.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-2 py-4">
-              <Label htmlFor={`title-${responsibility.id}`}>
-                Responsibility
-              </Label>
-              <Input
-                id={`title-${responsibility.id}`}
-                name="title"
-                defaultValue={responsibility.title}
-                maxLength={255}
-                required
-              />
-            </div>
-            <DialogFooter>
+      {canWrite ? (
+        <Label
+          htmlFor={checkboxId}
+          className={cn(
+            "min-w-0 flex-1 cursor-pointer text-sm font-normal",
+            complete && "text-muted-foreground line-through"
+          )}
+        >
+          {responsibility.title}
+        </Label>
+      ) : (
+        // A `<label>` with nothing to label is a control that does nothing.
+        <span
+          className={cn(
+            "min-w-0 flex-1 text-sm",
+            complete && "text-muted-foreground line-through"
+          )}
+        >
+          {responsibility.title}
+        </span>
+      )}
+
+      {canWrite && (
+        <>
+          <Dialog open={editOpen} onOpenChange={setEditOpen}>
+            <DialogTrigger asChild>
               <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditOpen(false)}
-                className="cursor-pointer"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground h-8 w-8 cursor-pointer"
+                aria-label={`Edit ${responsibility.title}`}
               >
-                Cancel
+                <Pencil className="h-4 w-4" />
               </Button>
-              <Button
-                type="submit"
-                disabled={saving}
-                className="cursor-pointer"
-              >
-                {saving ? "Saving..." : "Save"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <form action={handleEdit}>
+                <DialogHeader>
+                  <DialogTitle>Edit responsibility</DialogTitle>
+                  <DialogDescription>
+                    Change what this team is on the hook for.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-2 py-4">
+                  <Label htmlFor={`title-${responsibility.id}`}>
+                    Responsibility
+                  </Label>
+                  <Input
+                    id={`title-${responsibility.id}`}
+                    name="title"
+                    defaultValue={responsibility.title}
+                    maxLength={255}
+                    required
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditOpen(false)}
+                    className="cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={saving}
+                    className="cursor-pointer"
+                  >
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-destructive h-8 w-8 cursor-pointer"
-            aria-label={`Delete ${responsibility.title}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this responsibility?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* The apostrophe is the CHARACTER, never `&apos;`. An HTML
+          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-destructive h-8 w-8 cursor-pointer"
+                aria-label={`Delete ${responsibility.title}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this responsibility?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {/* The apostrophe is the CHARACTER, never `&apos;`. An HTML
                   entity anywhere in a JSX text node makes SWC drop that node's
                   leading space, so the entity form rendered
                   "Curriculumwill be removed" (#593). Guarded by
                   `src/components/jsx-entity-whitespace.test.ts`. */}
-              <span className="font-medium">{responsibility.title}</span> will
-              be removed from this team’s checklist. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer" disabled={deleting}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                handleDelete();
-              }}
-              disabled={deleting}
-              className="cursor-pointer"
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                  <span className="font-medium">{responsibility.title}</span>{" "}
+                  will be removed from this team’s checklist. This cannot be
+                  undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  className="cursor-pointer"
+                  disabled={deleting}
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(event) => {
+                    event.preventDefault();
+                    handleDelete();
+                  }}
+                  disabled={deleting}
+                  className="cursor-pointer"
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </li>
   );
 }

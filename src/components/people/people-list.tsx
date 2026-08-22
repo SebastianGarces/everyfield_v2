@@ -1,6 +1,7 @@
 "use client";
 
 import { loadMorePeopleAction } from "@/app/(dashboard)/people/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import type { PeopleListSearchParams } from "@/lib/people/list-params";
 import { PersonForClient } from "@/lib/people/types";
@@ -42,6 +43,12 @@ export function PeopleList({
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  // AS-020: the empty state's call to action ends in a `people.write` action, so
+  // a plant Member keeps the FACT — nothing here — and loses the invitation to
+  // fix it. `useCan` fails closed with no provider, which is what the marketing
+  // embed wants: it renders a populated list and never reaches this branch.
+  const canWrite = useCan("people.write");
+
   if (people.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
@@ -49,17 +56,26 @@ export function PeopleList({
           <Users className="text-muted-foreground h-10 w-10" />
         </div>
         <h3 className="mt-4 text-lg font-medium">No people found</h3>
-        <p className="text-muted-foreground mt-2 max-w-sm text-sm">
-          No people match your current filters. Try adjusting your search or
-          filters, or add a new person.
-        </p>
-        <Button asChild className="mt-6">
-          {linkStatic ? (
-            <span>Add Person</span>
-          ) : (
-            <Link href="/people/new">Add Person</Link>
-          )}
-        </Button>
+        {canWrite ? (
+          <>
+            <p className="text-muted-foreground mt-2 max-w-sm text-sm">
+              No people match your current filters. Try adjusting your search or
+              filters, or add a new person.
+            </p>
+            <Button asChild className="mt-6">
+              {linkStatic ? (
+                <span>Add Person</span>
+              ) : (
+                <Link href="/people/new">Add Person</Link>
+              )}
+            </Button>
+          </>
+        ) : (
+          <p className="text-muted-foreground mt-2 max-w-sm text-sm">
+            No people match your current filters. Try adjusting your search or
+            filters. Your plant&apos;s admins add people to the directory.
+          </p>
+        )}
       </div>
     );
   }

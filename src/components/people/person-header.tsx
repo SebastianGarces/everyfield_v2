@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,14 @@ export function PersonHeader({
   onOptimisticStatusChange,
 }: PersonHeaderProps) {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+
+  // AS-020: every control in this header writes — edit the profile, change the
+  // status, delete the person — and all three are `people.write`. One gate
+  // covers the lot, because a Member is left with no control at all rather than
+  // with an overflow menu that opens onto nothing. The identity above it (name,
+  // status badge, household, join date) is a read and stays.
+  const canWrite = useCan("people.write");
+
   const initials = `${person.firstName[0]}${person.lastName[0]}`.toUpperCase();
   const fullName = `${person.firstName} ${person.lastName}`;
 
@@ -120,68 +129,74 @@ export function PersonHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={onEdit}>
-          <Pencil className="mr-2 h-4 w-4" />
-          Edit
-        </Button>
+      {canWrite && (
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <MoreHorizontal className="h-4 w-4" />
-              <span className="sr-only">More actions</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem onClick={onEdit}>
-              <Pencil className="mr-2 h-4 w-4" />
-              Edit Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setIsStatusModalOpen(true)}>
-              <ArrowRightLeft className="mr-2 h-4 w-4" />
-              Change Status
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <DropdownMenuItem
-                  onSelect={(e) => e.preventDefault()}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash className="mr-2 h-4 w-4" />
-                  Delete Person
-                </DropdownMenuItem>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete{" "}
-                    <span className="font-semibold">{fullName}</span> and remove
-                    their data from our servers.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={onDelete} variant="destructive">
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="sr-only">More actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsStatusModalOpen(true)}>
+                <ArrowRightLeft className="mr-2 h-4 w-4" />
+                Change Status
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <DropdownMenuItem
+                    onSelect={(e) => e.preventDefault()}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete Person
+                  </DropdownMenuItem>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Are you absolutely sure?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action cannot be undone. This will permanently delete{" "}
+                      <span className="font-semibold">{fullName}</span> and
+                      remove their data from our servers.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={onDelete} variant="destructive">
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-      {/* Status Change Modal */}
-      <StatusChangeModal
-        person={person}
-        open={isStatusModalOpen}
-        onOpenChange={setIsStatusModalOpen}
-        onOptimisticUpdate={onOptimisticStatusChange}
-      />
+          {/* Status Change Modal — opened only by the menu item above, so it
+              lives inside the same gate rather than mounting for a viewer with
+              no way to reach it. */}
+          <StatusChangeModal
+            person={person}
+            open={isStatusModalOpen}
+            onOpenChange={setIsStatusModalOpen}
+            onOptimisticUpdate={onOptimisticStatusChange}
+          />
+        </div>
+      )}
     </div>
   );
 }

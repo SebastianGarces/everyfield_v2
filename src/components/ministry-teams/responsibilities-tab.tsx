@@ -4,6 +4,7 @@ import { useOptimistic, useRef, useState, useTransition } from "react";
 import { ListChecks, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,11 @@ export function ResponsibilitiesTab({
   const formRef = useRef<HTMLFormElement>(null);
   const [adding, setAdding] = useState(false);
   const [, startTransition] = useTransition();
+
+  // Add, tick, edit and delete are one verb — `teams.write` (AS-020, #499).
+  // The PROGRESS is the read and it stays; the row's own two controls ask the
+  // same question again in `responsibility-item.tsx`, where they render.
+  const canWrite = useCan("teams.write");
 
   const [items, applyToggle] = useOptimistic(
     responsibilities,
@@ -106,8 +112,9 @@ export function ResponsibilitiesTab({
             <ListChecks className="text-muted-foreground h-10 w-10" />
             <h3 className="mt-3 font-medium">No responsibilities yet</h3>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-              Add what this team owns. Each one can be ticked off as the team
-              gets it done.
+              {canWrite
+                ? "Add what this team owns. Each one can be ticked off as the team gets it done."
+                : "Your plant's admins record what this team owns."}
             </p>
           </CardContent>
         </Card>
@@ -123,23 +130,25 @@ export function ResponsibilitiesTab({
         </ul>
       )}
 
-      <form
-        ref={formRef}
-        action={handleAdd}
-        className="flex items-center gap-2"
-      >
-        <Input
-          name="title"
-          placeholder="Add a responsibility..."
-          maxLength={255}
-          required
-          aria-label="New responsibility"
-        />
-        <Button type="submit" disabled={adding} className="cursor-pointer">
-          <Plus className="mr-2 h-4 w-4" />
-          {adding ? "Adding..." : "Add"}
-        </Button>
-      </form>
+      {canWrite && (
+        <form
+          ref={formRef}
+          action={handleAdd}
+          className="flex items-center gap-2"
+        >
+          <Input
+            name="title"
+            placeholder="Add a responsibility..."
+            maxLength={255}
+            required
+            aria-label="New responsibility"
+          />
+          <Button type="submit" disabled={adding} className="cursor-pointer">
+            <Plus className="mr-2 h-4 w-4" />
+            {adding ? "Adding..." : "Add"}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

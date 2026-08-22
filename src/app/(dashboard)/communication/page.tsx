@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DeliveryOverview } from "@/components/communication/delivery-overview";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import {
   countCommunications,
@@ -32,6 +33,12 @@ export const dynamic = "force-dynamic";
 export default async function CommunicationPage() {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
+
+  // Every route out of this hub that is not a read ends at the compose form,
+  // and composing is `communication.send` (AS-020, #499). A server component
+  // with the session in hand asks the table directly — same table `requireSeat`
+  // refuses the send with, one hop fewer than the client transport.
+  const canSend = holdsSeatFor(user, "communication.send");
 
   // One `now` per render: every row's relative label is measured against the
   // same instant, so a list can never show times that disagree with each other.
@@ -85,12 +92,14 @@ export default async function CommunicationPage() {
                 Send messages and track communication with your people
               </p>
             </div>
-            <Button asChild>
-              <Link href="/communication/compose">
-                <Plus className="mr-2 h-4 w-4" />
-                New Message
-              </Link>
-            </Button>
+            {canSend && (
+              <Button asChild>
+                <Link href="/communication/compose">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Message
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -154,8 +163,11 @@ export default async function CommunicationPage() {
             <DeliveryOverview totals={deliveryTotals} />
           </div>
 
-          {/* Quick Actions */}
-          {quickActions.length > 0 && (
+          {/* Quick Actions — every card is a link INTO the compose form with a
+              template preloaded, so the whole block is one write affordance
+              wearing four faces. The templates themselves stay readable at
+              /communication/templates. */}
+          {canSend && quickActions.length > 0 && (
             <div className="mt-6">
               <h2 className="mb-3 text-lg font-semibold">Quick Actions</h2>
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -197,15 +209,22 @@ export default async function CommunicationPage() {
                   <p className="text-muted-foreground text-lg font-medium">
                     No messages yet
                   </p>
+                  {/* The fact is the same for everybody; the sentence under it
+                      states who sends messages rather than asking a viewer who
+                      cannot to send one. */}
                   <p className="text-muted-foreground mt-1 text-sm">
-                    Send your first message to get started
+                    {canSend
+                      ? "Send your first message to get started"
+                      : "Your plant's admins send messages to your people."}
                   </p>
-                  <Button asChild className="mt-4">
-                    <Link href="/communication/compose">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Compose Message
-                    </Link>
-                  </Button>
+                  {canSend && (
+                    <Button asChild className="mt-4">
+                      <Link href="/communication/compose">
+                        <Plus className="mr-2 h-4 w-4" />
+                        Compose Message
+                      </Link>
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ) : (

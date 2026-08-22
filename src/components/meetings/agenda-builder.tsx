@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -113,6 +114,12 @@ export function AgendaBuilder({
   defaultSections,
   saveAction,
 }: AgendaBuilderProps) {
+  // AS-020. Every path out of this card lands on `saveAgendaAction` —
+  // `meetings.write` — so a Member reads the running order and edits none of
+  // it: the name and length fields become text, and the reorder, remove, add
+  // and "start from the standard agenda" controls are absent. The order and the
+  // totals are the READ, and they stay.
+  const canWrite = useCan("meetings.write");
   const [isPending, startTransition] = useTransition();
   const [optimisticSections, setOptimisticSections] = useOptimistic(
     sections,
@@ -254,10 +261,11 @@ export function AgendaBuilder({
             />
             <p className="mt-3 text-sm font-medium">No agenda yet</p>
             <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-sm">
-              Plan the running order so everyone in the room knows what happens
-              next — and how long it gets.
+              {canWrite
+                ? "Plan the running order so everyone in the room knows what happens next — and how long it gets."
+                : "Your plant's admins set the running order. It shows up here once they do."}
             </p>
-            {defaultSections && defaultSections.length > 0 && (
+            {canWrite && defaultSections && defaultSections.length > 0 && (
               <Button
                 type="button"
                 variant="outline"
@@ -287,160 +295,186 @@ export function AgendaBuilder({
                   </span>
 
                   <div className="min-w-0 flex-1">
-                    <Label
-                      htmlFor={`agenda-title-${section.id}`}
-                      className="sr-only"
-                    >
-                      Section {index + 1} name
-                    </Label>
-                    <Input
-                      id={`agenda-title-${section.id}`}
-                      defaultValue={section.title}
-                      disabled={isPending}
-                      maxLength={MAX_SECTION_TITLE_LENGTH}
-                      data-testid="agenda-section-title"
-                      onBlur={(event) =>
-                        handleRename(section, event.target.value)
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
+                    {canWrite ? (
+                      <>
+                        <Label
+                          htmlFor={`agenda-title-${section.id}`}
+                          className="sr-only"
+                        >
+                          Section {index + 1} name
+                        </Label>
+                        <Input
+                          id={`agenda-title-${section.id}`}
+                          defaultValue={section.title}
+                          disabled={isPending}
+                          maxLength={MAX_SECTION_TITLE_LENGTH}
+                          data-testid="agenda-section-title"
+                          onBlur={(event) =>
+                            handleRename(section, event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <p
+                        className="truncate text-sm font-medium"
+                        data-testid="agenda-section-title"
+                      >
+                        {section.title}
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end sm:gap-3">
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <Label
-                      htmlFor={`agenda-minutes-${section.id}`}
-                      className="sr-only"
-                    >
-                      Section {index + 1} length in minutes
-                    </Label>
-                    <Input
-                      id={`agenda-minutes-${section.id}`}
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={MAX_SECTION_MINUTES}
-                      defaultValue={section.minutes}
-                      disabled={isPending}
-                      className="w-20 tabular-nums"
-                      data-testid="agenda-section-minutes"
-                      onBlur={(event) => {
-                        const clamped = clampAgendaMinutes(
-                          Number(event.target.value)
-                        );
-                        // Show what was actually stored, not what was typed.
-                        event.target.value = String(clamped);
-                        handleRetime(section, event.target.value);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
+                    {canWrite ? (
+                      <>
+                        <Label
+                          htmlFor={`agenda-minutes-${section.id}`}
+                          className="sr-only"
+                        >
+                          Section {index + 1} length in minutes
+                        </Label>
+                        <Input
+                          id={`agenda-minutes-${section.id}`}
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={MAX_SECTION_MINUTES}
+                          defaultValue={section.minutes}
+                          disabled={isPending}
+                          className="w-20 tabular-nums"
+                          data-testid="agenda-section-minutes"
+                          onBlur={(event) => {
+                            const clamped = clampAgendaMinutes(
+                              Number(event.target.value)
+                            );
+                            // Show what was actually stored, not what was typed.
+                            event.target.value = String(clamped);
+                            handleRetime(section, event.target.value);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <span
+                        className="text-muted-foreground text-sm tabular-nums"
+                        data-testid="agenda-section-minutes"
+                      >
+                        {section.minutes}
+                      </span>
+                    )}
                     <span className="text-muted-foreground text-sm">min</span>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={isPending || index === 0}
-                      onClick={() => handleMove(index, -1)}
-                      aria-label={`Move ${section.title} up`}
-                      className="cursor-pointer"
-                      data-testid="agenda-move-up"
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={
-                        isPending || index === optimisticSections.length - 1
-                      }
-                      onClick={() => handleMove(index, 1)}
-                      aria-label={`Move ${section.title} down`}
-                      className="cursor-pointer"
-                      data-testid="agenda-move-down"
-                    >
-                      <ArrowDown className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={isPending}
-                      onClick={() => handleRemove(section)}
-                      aria-label={`Remove ${section.title}`}
-                      className="text-muted-foreground hover:text-destructive cursor-pointer"
-                      data-testid="agenda-remove"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {canWrite && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={isPending || index === 0}
+                        onClick={() => handleMove(index, -1)}
+                        aria-label={`Move ${section.title} up`}
+                        className="cursor-pointer"
+                        data-testid="agenda-move-up"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={
+                          isPending || index === optimisticSections.length - 1
+                        }
+                        onClick={() => handleMove(index, 1)}
+                        aria-label={`Move ${section.title} down`}
+                        className="cursor-pointer"
+                        data-testid="agenda-move-down"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={isPending}
+                        onClick={() => handleRemove(section)}
+                        aria-label={`Remove ${section.title}`}
+                        className="text-muted-foreground hover:text-destructive cursor-pointer"
+                        data-testid="agenda-remove"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
           </ol>
         )}
 
-        <form
-          onSubmit={handleAdd}
-          className="flex flex-wrap items-end gap-2 border-t pt-4"
-        >
-          <div className="min-w-40 flex-1">
-            <Label htmlFor="agenda-new-title" className="sr-only">
-              New section name
-            </Label>
-            <Input
-              id="agenda-new-title"
-              value={newTitle}
-              onChange={(event) => setNewTitle(event.target.value)}
-              placeholder="Add a section — Welcome, Worship, Q&A…"
-              maxLength={MAX_SECTION_TITLE_LENGTH}
-              disabled={isPending || isFull}
-              data-testid="agenda-add-title"
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Label htmlFor="agenda-new-minutes" className="sr-only">
-              New section length in minutes
-            </Label>
-            <Input
-              id="agenda-new-minutes"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={MAX_SECTION_MINUTES}
-              value={newMinutes}
-              onChange={(event) => setNewMinutes(event.target.value)}
-              className="w-20 tabular-nums"
-              disabled={isPending || isFull}
-              data-testid="agenda-add-minutes"
-            />
-            <span className="text-muted-foreground text-sm">min</span>
-          </div>
-          <Button
-            type="submit"
-            variant="outline"
-            disabled={isPending || isFull}
-            className="cursor-pointer"
-            data-testid="agenda-add-submit"
+        {canWrite && (
+          <form
+            onSubmit={handleAdd}
+            className="flex flex-wrap items-end gap-2 border-t pt-4"
           >
-            <Plus className="mr-2 h-4 w-4" />
-            Add section
-          </Button>
-        </form>
+            <div className="min-w-40 flex-1">
+              <Label htmlFor="agenda-new-title" className="sr-only">
+                New section name
+              </Label>
+              <Input
+                id="agenda-new-title"
+                value={newTitle}
+                onChange={(event) => setNewTitle(event.target.value)}
+                placeholder="Add a section — Welcome, Worship, Q&A…"
+                maxLength={MAX_SECTION_TITLE_LENGTH}
+                disabled={isPending || isFull}
+                data-testid="agenda-add-title"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="agenda-new-minutes" className="sr-only">
+                New section length in minutes
+              </Label>
+              <Input
+                id="agenda-new-minutes"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={MAX_SECTION_MINUTES}
+                value={newMinutes}
+                onChange={(event) => setNewMinutes(event.target.value)}
+                className="w-20 tabular-nums"
+                disabled={isPending || isFull}
+                data-testid="agenda-add-minutes"
+              />
+              <span className="text-muted-foreground text-sm">min</span>
+            </div>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={isPending || isFull}
+              className="cursor-pointer"
+              data-testid="agenda-add-submit"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add section
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );

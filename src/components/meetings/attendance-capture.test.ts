@@ -6,6 +6,8 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
+
 import {
   AttendanceCapture,
   attendanceCheckboxLabel,
@@ -66,18 +68,30 @@ function guest(overrides: Partial<Guest> & { id: string }): Guest {
   };
 }
 
+/**
+ * The PLANTER's render — every assertion in this file is about the controls a
+ * viewer who may capture attendance is offered.
+ *
+ * The provider is not decoration since #499: `useCan` fails closed with none,
+ * so an unwrapped render is now the read-only screen and every checkbox
+ * assertion below would be asserting the absence it is meant to prove present.
+ * What a Member sees instead is `meetings-read-only.test.ts`, next door.
+ */
 function renderCapture(guests: Guest[], finalized = false): string {
   return renderToStaticMarkup(
-    createElement(AttendanceCapture, {
-      meetingId: "meeting-1",
-      guests,
-      summary: {
-        total: guests.length,
-        firstTime: 0,
-        returning: 0,
-        coreGroup: 0,
-      },
-      finalized,
+    createElement(ViewerCapabilitiesProvider, {
+      capabilities: ["meetings.write"],
+      children: createElement(AttendanceCapture, {
+        meetingId: "meeting-1",
+        guests,
+        summary: {
+          total: guests.length,
+          firstTime: 0,
+          returning: 0,
+          coreGroup: 0,
+        },
+        finalized,
+      }),
     })
   );
 }

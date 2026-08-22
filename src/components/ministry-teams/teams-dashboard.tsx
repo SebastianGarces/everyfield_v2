@@ -3,6 +3,7 @@
 import { Activity, Network, UsersRound } from "lucide-react";
 import Link from "next/link";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type {
@@ -22,6 +23,11 @@ export function TeamsDashboard({
   teams,
   staffingSummary,
 }: TeamsDashboardProps) {
+  // Every control on this screen creates a team — `initializeTeamsAction` and
+  // `createTeamAction` are both `teams.write` (AS-020, #499). A Member reads
+  // the roster and the staffing numbers; nothing here is theirs to press.
+  const canWrite = useCan("teams.write");
+
   if (teams.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
@@ -29,14 +35,20 @@ export function TeamsDashboard({
           <UsersRound className="text-muted-foreground h-10 w-10" />
         </div>
         <h3 className="mt-4 text-lg font-medium">No ministry teams yet</h3>
+        {/* The FACT is the same either way — there are no teams. What changes
+            is the sentence under it: an invitation for the viewer who can act
+            on it, and who does the thing for the viewer who cannot. */}
         <p className="text-muted-foreground mt-2 max-w-sm text-sm">
-          Set up the 10 core ministry teams to start organizing your launch
-          team. You can also create custom teams.
+          {canWrite
+            ? "Set up the 10 core ministry teams to start organizing your launch team. You can also create custom teams."
+            : "Your plant's admins set up the ministry teams."}
         </p>
-        <div className="mt-6 flex gap-3">
-          <InitializeTeamsButton />
-          <CreateTeamDialog />
-        </div>
+        {canWrite && (
+          <div className="mt-6 flex gap-3">
+            <InitializeTeamsButton />
+            <CreateTeamDialog />
+          </div>
+        )}
       </div>
     );
   }
@@ -67,7 +79,7 @@ export function TeamsDashboard({
               Health Dashboard
             </Link>
           </Button>
-          <CreateTeamDialog />
+          {canWrite && <CreateTeamDialog />}
         </div>
       </div>
 

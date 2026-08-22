@@ -70,6 +70,7 @@ import {
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { isChurchLevelUser, isPlantOwner } from "@/lib/auth/tenancy";
 
 export const dynamic = "force-dynamic";
@@ -275,7 +276,18 @@ export default async function LaunchPage() {
               historyCount={history.length}
               tasks={
                 hasReadiness && readiness ? (
-                  <MilestoneBoard readiness={readiness} canEdit />
+                  <MilestoneBoard
+                    readiness={readiness}
+                    // AS-020, and NARROWER THAN IT LOOKS. This was `canEdit`
+                    // hardcoded true. `launch.milestone` is SEATED, not
+                    // Owner-only — LS-007 split it from `launch.schedule` so
+                    // milestone ticks follow ordinary task rules — so a plant
+                    // Member still ticks, which is the point. What the
+                    // capability adds is the refusal the hardcoded `true` could
+                    // not make: a coach and an oversight account hold no seat
+                    // here, and `setLaunchTaskCompleteAction` says so anyway.
+                    canEdit={holdsSeatFor(user, "launch.milestone")}
+                  />
                 ) : (
                   <div className="bg-card rounded-xl border border-dashed p-6 text-center shadow-sm">
                     <p className="font-medium">

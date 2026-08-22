@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates, getTemplate } from "@/lib/communication/templates";
 import { meetingInvitationTemplate } from "@/lib/communication/system-templates";
@@ -20,6 +21,17 @@ interface ComposePageProps {
 export default async function ComposePage({ searchParams }: ComposePageProps) {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
+
+  // THE ROUTE EXISTS ONLY TO WRITE (AS-020, recipe rule 3). Hiding "New
+  // Message" while /communication/compose stayed reachable by URL is a screen a
+  // Member walks into, picks recipients on, writes a message in, and is refused
+  // at send — so the door shuts on the same verb `sendCommunicationAction`
+  // refuses with. It also stops the six deep links from elsewhere in the app
+  // (the guest list's Send Email, a person's Email button) landing anybody here
+  // who cannot finish.
+  if (!holdsSeatFor(user, "communication.send")) {
+    redirect("/communication");
+  }
 
   const params = await searchParams;
   const templateId =

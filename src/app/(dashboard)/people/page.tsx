@@ -14,6 +14,7 @@ import {
   ViewToggle,
 } from "@/components/people";
 import { Button } from "@/components/ui/button";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getCurrentUserChurch } from "@/lib/auth/session";
 import {
@@ -37,6 +38,18 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
   if (!user.churchId) {
     redirect("/dashboard");
   }
+
+  // AS-020: the three create affordances in this header — import, quick add and
+  // Add Person — all end in a `people.write` action, so a plant Member is shown
+  // none of them. This is a server component holding the session, so it asks
+  // the same table `requireSeat` refuses the POST with; the empty state's own
+  // call to action is gated in `PeopleList`, and the pipeline's drag in
+  // `PipelineView` / `PipelineCard`.
+  //
+  // EXPORT IS NOT IN THIS SET, deliberately. `exportPeopleAction` is `read`, so
+  // hiding it would make this page stricter than the server — the over-hide the
+  // sweep must not commit. Search, filters and the view toggle are reads too.
+  const canWrite = holdsSeatFor(user, "people.write");
 
   // Parsed, never cast — and parsed in the module "Load more" reads too, so
   // the appended pages are answers to the same query (`src/lib/people/
@@ -84,15 +97,17 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <ImportWizard />
+              {canWrite && <ImportWizard />}
               <ExportButton />
-              <QuickAddForm />
-              <Button asChild>
-                <Link href="/people/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Person
-                </Link>
-              </Button>
+              {canWrite && <QuickAddForm />}
+              {canWrite && (
+                <Button asChild>
+                  <Link href="/people/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Person
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
 

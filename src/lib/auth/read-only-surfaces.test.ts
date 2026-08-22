@@ -301,6 +301,9 @@ test("no checklist surface gates a control on `disabled` instead of hiding it", 
 
   const offenders: string[] = [];
   for (const row of READ_ONLY_SURFACE_CHECKLIST) {
+    // A deferred row names no files, by type — its owner sweeps them, and this
+    // suite claims nothing about what they contain.
+    if (row.verdict === "deferred") continue;
     for (const file of row.gatedIn ?? []) {
       const full = path.join(process.cwd(), file);
       if (!existsSync(full)) continue;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CalendarDays, Clock, ExternalLink, MapPin, Plus } from "lucide-react";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -61,6 +62,12 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
 
+  // `teams.write`, NOT `meetings.write` (AS-020, #499). The action this dialog
+  // posts to is the ministry-teams one — `createMeetingAction` in
+  // `@/app/(dashboard)/teams/actions` — so the control asks for the verb the
+  // server will refuse it with, not the one the noun suggests.
+  const canWrite = useCan("teams.write");
+
   const now = new Date();
   const upcomingMeetings = meetings.filter((m) => new Date(m.datetime) >= now);
   const pastMeetings = meetings.filter((m) => new Date(m.datetime) < now);
@@ -81,86 +88,92 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Meetings</h2>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="cursor-pointer">
-              <Plus className="mr-2 h-4 w-4" />
-              Schedule Meeting
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <form action={handleCreate}>
-              <DialogHeader>
-                <DialogTitle>Schedule Meeting</DialogTitle>
-                <DialogDescription>
-                  Create a new team meeting.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="title">Title</Label>
-                  <Input
-                    id="title"
-                    name="title"
-                    placeholder="e.g., Weekly Team Meeting"
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="meetingType">Type</Label>
-                  <Select name="meetingType" defaultValue="regular">
-                    <SelectTrigger className="cursor-pointer">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="regular" className="cursor-pointer">
-                        Regular Team Meeting
-                      </SelectItem>
-                      <SelectItem value="training" className="cursor-pointer">
-                        Training Session
-                      </SelectItem>
-                      <SelectItem value="planning" className="cursor-pointer">
-                        Planning Meeting
-                      </SelectItem>
-                      <SelectItem value="special" className="cursor-pointer">
-                        Special Event
-                      </SelectItem>
-                      <SelectItem value="rehearsal" className="cursor-pointer">
-                        Pre-Launch Rehearsal
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="datetime">Date & Time</Label>
-                  <Input
-                    id="datetime"
-                    name="datetime"
-                    type="datetime-local"
-                    required
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+        {canWrite && (
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="cursor-pointer">
+                <Plus className="mr-2 h-4 w-4" />
+                Schedule Meeting
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <form action={handleCreate}>
+                <DialogHeader>
+                  <DialogTitle>Schedule Meeting</DialogTitle>
+                  <DialogDescription>
+                    Create a new team meeting.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="durationMinutes">Duration (minutes)</Label>
+                    <Label htmlFor="title">Title</Label>
                     <Input
-                      id="durationMinutes"
-                      name="durationMinutes"
-                      type="number"
-                      placeholder="60"
-                      min={1}
+                      id="title"
+                      name="title"
+                      placeholder="e.g., Weekly Team Meeting"
+                      required
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="locationName">Location</Label>
+                    <Label htmlFor="meetingType">Type</Label>
+                    <Select name="meetingType" defaultValue="regular">
+                      <SelectTrigger className="cursor-pointer">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="regular" className="cursor-pointer">
+                          Regular Team Meeting
+                        </SelectItem>
+                        <SelectItem value="training" className="cursor-pointer">
+                          Training Session
+                        </SelectItem>
+                        <SelectItem value="planning" className="cursor-pointer">
+                          Planning Meeting
+                        </SelectItem>
+                        <SelectItem value="special" className="cursor-pointer">
+                          Special Event
+                        </SelectItem>
+                        <SelectItem
+                          value="rehearsal"
+                          className="cursor-pointer"
+                        >
+                          Pre-Launch Rehearsal
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="datetime">Date & Time</Label>
                     <Input
-                      id="locationName"
-                      name="locationName"
-                      placeholder="e.g., Room 201"
+                      id="datetime"
+                      name="datetime"
+                      type="datetime-local"
+                      required
                     />
                   </div>
-                </div>
-                {/*
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="durationMinutes">
+                        Duration (minutes)
+                      </Label>
+                      <Input
+                        id="durationMinutes"
+                        name="durationMinutes"
+                        type="number"
+                        placeholder="60"
+                        min={1}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="locationName">Location</Label>
+                      <Input
+                        id="locationName"
+                        name="locationName"
+                        placeholder="e.g., Room 201"
+                      />
+                    </div>
+                  </div>
+                  {/*
                   Notes, NOT the agenda (ruled 2026-08-10, #312). This field
                   posts to `church_meetings.notes`; the structured agenda is a
                   separate concept the meeting detail page builds and renders.
@@ -169,36 +182,37 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
                   them "No agenda yet" over their own words. Neither the label
                   nor the placeholder may say "agenda" again.
                 */}
-                <div className="grid gap-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    name="notes"
-                    placeholder="Anything to remember about this meeting..."
-                    rows={3}
-                  />
+                  <div className="grid gap-2">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      name="notes"
+                      placeholder="Anything to remember about this meeting..."
+                      rows={3}
+                    />
+                  </div>
                 </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setAddOpen(false)}
-                  className="cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={addLoading}
-                  className="cursor-pointer"
-                >
-                  {addLoading ? "Scheduling..." : "Schedule Meeting"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setAddOpen(false)}
+                    className="cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={addLoading}
+                    className="cursor-pointer"
+                  >
+                    {addLoading ? "Scheduling..." : "Schedule Meeting"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       {meetings.length === 0 ? (
@@ -207,7 +221,9 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
             <CalendarDays className="text-muted-foreground h-10 w-10" />
             <h3 className="mt-3 font-medium">No meetings scheduled</h3>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-              Schedule team meetings to coordinate and track attendance.
+              {canWrite
+                ? "Schedule team meetings to coordinate and track attendance."
+                : "Your plant's admins schedule this team's meetings."}
             </p>
           </CardContent>
         </Card>

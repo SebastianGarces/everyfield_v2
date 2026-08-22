@@ -31,6 +31,8 @@ import path from "node:path";
 import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
+import type { Capability } from "@/lib/auth/seat-rules";
 import {
   buildPhaseTemplatePrompt,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
@@ -102,11 +104,33 @@ export async function noopDismiss(): Promise<PhaseTemplateDismissOutcome> {
  * real component with no session, no database and no phase transition.
  */
 export function render(prompt: PhaseTemplatePromptData = promptData()): string {
-  return renderToStaticMarkup(
+  return renderAnswerer(
     createElement(PhaseTemplatePromptView, {
       prompt,
       importAction: noopImport,
       dismissAction: noopDismiss,
+    })
+  );
+}
+
+/**
+ * The viewer the panel is DRAWN for — somebody who can answer it (#499).
+ *
+ * The two buttons gate on the verbs they invoke (`tasks.write` for Import,
+ * `phase.signal` for "Not now"), and `useCan` fails closed with no provider —
+ * so a bare `renderToStaticMarkup` here would render the panel with no answers
+ * in it and quietly turn every control assertion in the two suites above into a
+ * statement about nothing. The panel's own loader refuses a viewer holding
+ * neither verb, so this is the only viewer these fixtures describe; the absence
+ * for everybody else is asserted in `tasks-read-only.test.ts`.
+ */
+const ANSWERER: readonly Capability[] = ["tasks.write", "phase.signal"];
+
+function renderAnswerer(element: ReactNode): string {
+  return renderToStaticMarkup(
+    createElement(ViewerCapabilitiesProvider, {
+      capabilities: ANSWERER,
+      children: element,
     })
   );
 }
@@ -125,7 +149,7 @@ export function render(prompt: PhaseTemplatePromptData = promptData()): string {
  * `phaseTemplatePromptAlert`, asserted as the pure function it is.
  */
 export function renderIsland(overrides: { offerCount?: number } = {}): string {
-  return renderToStaticMarkup(
+  return renderAnswerer(
     createElement(PhaseTemplatePromptForm, {
       transitionId: TRANSITION_ID,
       offerCount: overrides.offerCount ?? 2,

@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,6 +68,11 @@ export function SkillsList({ personId, skills }: SkillsListProps) {
     null
   );
 
+  // AS-020: add, edit and remove are all `people.write`. A Member reads the
+  // inventory — the names and their proficiency badges — and is offered none of
+  // the three, so the per-row hover controls and both Add buttons go together.
+  const canWrite = useCan("people.write");
+
   const groupedSkills = groupSkillsByCategory(skills);
   const categories = Object.keys(groupedSkills) as SkillCategory[];
 
@@ -117,10 +123,12 @@ export function SkillsList({ personId, skills }: SkillsListProps) {
               <p className="text-muted-foreground text-sm">
                 No skills recorded yet
               </p>
-              <Button variant="outline" size="sm" onClick={handleOpenForm}>
-                <Plus className="mr-1 h-3 w-3" />
-                Add Skill
-              </Button>
+              {canWrite && (
+                <Button variant="outline" size="sm" onClick={handleOpenForm}>
+                  <Plus className="mr-1 h-3 w-3" />
+                  Add Skill
+                </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -152,39 +160,45 @@ export function SkillsList({ personId, skills }: SkillsListProps) {
                             </Badge>
                           )}
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleEdit(skill)}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive h-7 w-7"
-                            onClick={() => handleDelete(skill)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
+                        {canWrite && (
+                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              aria-label={`Edit ${skill.skillName}`}
+                              onClick={() => handleEdit(skill)}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive h-7 w-7"
+                              aria-label={`Remove ${skill.skillName}`}
+                              onClick={() => handleDelete(skill)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
               ))}
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOpenForm}
-                className="mt-2"
-              >
-                <Plus className="mr-1 h-3 w-3" />
-                Add Skill
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenForm}
+                  className="mt-2"
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Add Skill
+                </Button>
+              )}
             </div>
           )}
         </CardContent>

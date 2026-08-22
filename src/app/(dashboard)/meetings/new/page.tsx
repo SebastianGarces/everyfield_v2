@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { MeetingForm } from "@/components/meetings/meeting-form";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { listLocations } from "@/lib/meetings/locations";
 import { listTeams } from "@/lib/ministry-teams/service";
@@ -21,6 +22,14 @@ export default async function NewMeetingPage({
 
   if (!user.churchId) {
     redirect("/dashboard");
+  }
+
+  // AS-020, and the route half of it: this page exists only to CREATE a
+  // meeting, so hiding the button that links here is not enough — a Member who
+  // types the URL would otherwise fill a form that `requireSeat` refuses at
+  // submit. Same verb, same table, refused one screen earlier.
+  if (!holdsSeatFor(user, "meetings.write")) {
+    redirect("/meetings");
   }
 
   const params = await searchParams;

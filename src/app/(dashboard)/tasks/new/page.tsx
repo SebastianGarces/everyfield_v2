@@ -4,6 +4,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskForm } from "@/components/tasks";
 import { users } from "@/db/schema";
 import { db } from "@/db";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { listPrerequisiteCandidates } from "@/lib/tasks/dependencies";
 import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
@@ -16,6 +17,14 @@ export default async function NewTaskPage() {
 
   if (!user.churchId) {
     redirect("/dashboard");
+  }
+
+  // THE ROUTE EXISTS ONLY TO WRITE (AS-020, recipe rule 3). Hiding the "New
+  // Task" button while leaving /tasks/new reachable by URL is a screen a Member
+  // walks into, fills in and is refused at submit — so the door is shut where
+  // the button was hidden, on the same verb `createTaskAction` refuses with.
+  if (!holdsSeatFor(user, "tasks.write")) {
+    redirect("/tasks");
   }
 
   // Fetch church users for the assignee selector, plus the subset of them a

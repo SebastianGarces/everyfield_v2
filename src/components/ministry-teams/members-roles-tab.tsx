@@ -3,6 +3,7 @@
 import { Mail, Phone, Shield, User } from "lucide-react";
 
 import { BackgroundCheckBadge } from "@/components/people/background-check-badge";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,16 +33,30 @@ export function MembersRolesTab({
 }: MembersRolesTabProps) {
   const showsBackgroundChecks = teamRequiresBackgroundCheck(team.templateKey);
 
+  // THE ONE GATE FOR THIS TAB (AS-020, #499). All five controls below —
+  // template import, role create, role edit, role delete, member assign and
+  // member remove — reach the same `teams.write` verb, and each of the five
+  // components is mounted HERE and nowhere else in the app, so asking once at
+  // this level is asking at every site.
+  //
+  // SETTING THE TEAM'S LEADER IS AMONG THEM, implicitly:
+  // `assignTeamLeaderAction` has no UI caller, and a leader is named by giving
+  // somebody a role whose "leadership role" box is ticked. Both halves of that
+  // are `RoleFormDialog` and `MemberAssignDialog`, which go with the rest.
+  const canWrite = useCan("teams.write");
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Roles ({team.roles.length})</h2>
-        <div className="flex items-center gap-2">
-          {team.type === "predefined" && (
-            <RoleTemplateImport teamId={team.id} teamName={team.name} />
-          )}
-          <RoleFormDialog teamId={team.id} />
-        </div>
+        {canWrite && (
+          <div className="flex items-center gap-2">
+            {team.type === "predefined" && (
+              <RoleTemplateImport teamId={team.id} teamName={team.name} />
+            )}
+            <RoleFormDialog teamId={team.id} />
+          </div>
+        )}
       </div>
 
       {showsBackgroundChecks && (
@@ -57,8 +72,9 @@ export function MembersRolesTab({
             <User className="text-muted-foreground h-10 w-10" />
             <h3 className="mt-3 font-medium">No roles defined</h3>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-              Import role templates for this team or add custom roles to get
-              started.
+              {canWrite
+                ? "Import role templates for this team or add custom roles to get started."
+                : "Your plant's admins define this team's roles."}
             </p>
           </CardContent>
         </Card>
@@ -144,24 +160,28 @@ export function MembersRolesTab({
                     >
                       Filled
                     </Badge>
-                    <MemberRemoveButton
-                      membershipId={role.assignedPerson.membershipId}
-                      personName={`${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`}
-                      roleName={role.name}
-                    />
+                    {canWrite && (
+                      <MemberRemoveButton
+                        membershipId={role.assignedPerson.membershipId}
+                        personName={`${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`}
+                        roleName={role.name}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="text-orange-600">
                       Open
                     </Badge>
-                    <MemberAssignDialog
-                      teamId={team.id}
-                      roleId={role.id}
-                      roleName={role.name}
-                      people={people}
-                      teamCounts={teamCounts}
-                    />
+                    {canWrite && (
+                      <MemberAssignDialog
+                        teamId={team.id}
+                        roleId={role.id}
+                        roleName={role.name}
+                        people={people}
+                        teamCounts={teamCounts}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -172,19 +192,24 @@ export function MembersRolesTab({
                     beside "remove this person from the role" — two adjacent
                     icon buttons that both look like removal and mean different
                     things. The divider says which pair belongs to whom; the
-                    aria-labels say it again in words. */}
-                <div className="ml-1 flex items-center gap-1 border-l pl-2">
-                  <RoleFormDialog teamId={team.id} role={role} />
-                  <RoleRemoveButton
-                    roleId={role.id}
-                    roleName={role.name}
-                    assigneeName={
-                      role.assignedPerson
-                        ? `${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`
-                        : undefined
-                    }
-                  />
-                </div>
+                    aria-labels say it again in words.
+                    AND THE WHOLE FENCE GOES WITH THEM, not just the two
+                    buttons: a divider with nothing behind it draws a boundary
+                    around an empty space. */}
+                {canWrite && (
+                  <div className="ml-1 flex items-center gap-1 border-l pl-2">
+                    <RoleFormDialog teamId={team.id} role={role} />
+                    <RoleRemoveButton
+                      roleId={role.id}
+                      roleName={role.name}
+                      assigneeName={
+                        role.assignedPerson
+                          ? `${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

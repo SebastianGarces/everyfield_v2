@@ -43,6 +43,11 @@ import {
 } from "@/app/(dashboard)/meetings/actions";
 import { searchPeopleAction } from "@/app/(dashboard)/communication/actions";
 import { ResponsePicker } from "@/components/meetings/response-picker";
+import { useCan } from "@/components/shared/viewer-capabilities";
+import {
+  responseCardLabel,
+  RESPONSE_NOT_RECORDED_LABEL,
+} from "@/lib/meetings/response-card";
 import type { ResponseCardType } from "@/db/schema/meetings";
 
 // ---------------------------------------------------------------------------
@@ -185,6 +190,12 @@ export function AttendanceCapture({
 }: AttendanceCaptureProps) {
   const [isPending, startTransition] = useTransition();
 
+  // AS-020. Every write on this screen is `meetings.write`: the register's
+  // ticks, the walk-in card, the response cards and the finalize. A Member
+  // keeps the register as a READ — who was invited, who came, what they handed
+  // in — and is offered none of the controls that change it.
+  const canWrite = useCan("meetings.write");
+
   // Walk-in search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<PersonResult[]>([]);
@@ -316,162 +327,165 @@ export function AttendanceCapture({
         </Card>
       </div>
 
-      {/* Walk-in Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Add Walk-in</CardTitle>
-            <div className="flex items-center gap-2">
-              <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="cursor-pointer"
-                  >
-                    <UserPlus className="mr-2 h-4 w-4" />
-                    Quick Add Person
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Quick Add Walk-in</DialogTitle>
-                    <DialogDescription>
-                      Create a new person and mark them as attended.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleQuickAdd} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="firstName">First Name *</Label>
-                        <Input
-                          id="firstName"
-                          name="firstName"
-                          required
-                          placeholder="John"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lastName">Last Name *</Label>
-                        <Input
-                          id="lastName"
-                          name="lastName"
-                          required
-                          placeholder="Doe"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        name="email"
-                        type="email"
-                        placeholder="john@example.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        name="phone"
-                        type="tel"
-                        placeholder="(555) 123-4567"
-                      />
-                    </div>
-                    {quickAddError && (
-                      <p className="text-destructive text-sm">
-                        {quickAddError}
-                      </p>
-                    )}
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setQuickAddOpen(false)}
-                        className="cursor-pointer"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={isPending}
-                        className="cursor-pointer"
-                      >
-                        {isPending && (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        )}
-                        Add & Mark Attended
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowWalkIn(!showWalkIn)}
-                className="cursor-pointer"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Existing
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        {showWalkIn && (
-          <CardContent>
-            <div className="relative">
-              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search by name..."
-                className="pl-10"
-              />
-              {searchResults.length > 0 && (
-                <div className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-white shadow-sm dark:bg-gray-900">
-                  {searchResults.map((person) => (
-                    <button
-                      key={person.id}
-                      type="button"
-                      className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                      onClick={() => handleAddWalkIn(person)}
-                      disabled={isPending}
+      {/* Walk-in Section — the whole card is a write, so it is absent rather
+          than emptied. */}
+      {canWrite && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Add Walk-in</CardTitle>
+              <div className="flex items-center gap-2">
+                <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="cursor-pointer"
                     >
-                      <div>
-                        <span className="font-medium">
-                          {person.firstName} {person.lastName}
-                        </span>
-                        {person.email && (
-                          <span className="text-muted-foreground ml-2 text-xs">
-                            {person.email}
-                          </span>
-                        )}
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Quick Add Person
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Quick Add Walk-in</DialogTitle>
+                      <DialogDescription>
+                        Create a new person and mark them as attended.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleQuickAdd} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="firstName">First Name *</Label>
+                          <Input
+                            id="firstName"
+                            name="firstName"
+                            required
+                            placeholder="John"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="lastName">Last Name *</Label>
+                          <Input
+                            id="lastName"
+                            name="lastName"
+                            required
+                            placeholder="Doe"
+                          />
+                        </div>
                       </div>
-                      <Plus className="text-muted-foreground h-4 w-4" />
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searching && (
-                <p className="text-muted-foreground mt-1 text-xs">
-                  Searching...
-                </p>
-              )}
-              {searchQuery.length >= 2 &&
-                !searching &&
-                searchResults.length === 0 && (
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Email</Label>
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          placeholder="john@example.com"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Phone</Label>
+                        <Input
+                          id="phone"
+                          name="phone"
+                          type="tel"
+                          placeholder="(555) 123-4567"
+                        />
+                      </div>
+                      {quickAddError && (
+                        <p className="text-destructive text-sm">
+                          {quickAddError}
+                        </p>
+                      )}
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setQuickAddOpen(false)}
+                          className="cursor-pointer"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="submit"
+                          disabled={isPending}
+                          className="cursor-pointer"
+                        >
+                          {isPending && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          )}
+                          Add & Mark Attended
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowWalkIn(!showWalkIn)}
+                  className="cursor-pointer"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Existing
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          {showWalkIn && (
+            <CardContent>
+              <div className="relative">
+                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Search by name..."
+                  className="pl-10"
+                />
+                {searchResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-white shadow-sm dark:bg-gray-900">
+                    {searchResults.map((person) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                        onClick={() => handleAddWalkIn(person)}
+                        disabled={isPending}
+                      >
+                        <div>
+                          <span className="font-medium">
+                            {person.firstName} {person.lastName}
+                          </span>
+                          {person.email && (
+                            <span className="text-muted-foreground ml-2 text-xs">
+                              {person.email}
+                            </span>
+                          )}
+                        </div>
+                        <Plus className="text-muted-foreground h-4 w-4" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {searching && (
                   <p className="text-muted-foreground mt-1 text-xs">
-                    No results found. Use &quot;Quick Add Person&quot; to create
-                    a new one.
+                    Searching...
                   </p>
                 )}
-            </div>
-          </CardContent>
-        )}
-      </Card>
+                {searchQuery.length >= 2 &&
+                  !searching &&
+                  searchResults.length === 0 && (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      No results found. Use &quot;Quick Add Person&quot; to
+                      create a new one.
+                    </p>
+                  )}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Attendance List */}
       <Card>
@@ -483,8 +497,9 @@ export function AttendanceCapture({
         <CardContent>
           {guests.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center text-sm">
-              No guests on the list yet. Add people from the Guest List tab or
-              add walk-ins above.
+              {canWrite
+                ? "No guests on the list yet. Add people from the Guest List tab or add walk-ins above."
+                : "No guests on the list yet. Your plant's admins build the guest list for a meeting."}
             </p>
           ) : (
             /* A real table, not a grid of divs (#361): "Here", "RSVP" and
@@ -499,12 +514,16 @@ export function AttendanceCapture({
               </TableCaption>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead
-                    scope="col"
-                    className="text-muted-foreground w-16 text-center text-xs uppercase"
-                  >
-                    Here
-                  </TableHead>
+                  {/* The column goes with the checkbox in it. "Here" over an
+                      empty cell names a control the viewer does not have. */}
+                  {canWrite && (
+                    <TableHead
+                      scope="col"
+                      className="text-muted-foreground w-16 text-center text-xs uppercase"
+                    >
+                      Here
+                    </TableHead>
+                  )}
                   <TableHead
                     scope="col"
                     className="text-muted-foreground text-xs uppercase"
@@ -549,17 +568,22 @@ export function AttendanceCapture({
 
                   return (
                     <TableRow key={guest.id}>
-                      <TableCell className="text-center">
-                        <Checkbox
-                          checked={isAttended}
-                          onCheckedChange={() =>
-                            handleToggle(guest.personId, guest.attendanceStatus)
-                          }
-                          disabled={isPending}
-                          aria-label={attendanceCheckboxLabel(guestName)}
-                          className="cursor-pointer"
-                        />
-                      </TableCell>
+                      {canWrite && (
+                        <TableCell className="text-center">
+                          <Checkbox
+                            checked={isAttended}
+                            onCheckedChange={() =>
+                              handleToggle(
+                                guest.personId,
+                                guest.attendanceStatus
+                              )
+                            }
+                            disabled={isPending}
+                            aria-label={attendanceCheckboxLabel(guestName)}
+                            className="cursor-pointer"
+                          />
+                        </TableCell>
+                      )}
 
                       <TableHead
                         scope="row"
@@ -611,14 +635,27 @@ export function AttendanceCapture({
                               in. The control is disabled rather than absent so
                               the column keeps its shape down the table, and the
                               reason is the row's own attendance state, which is
-                              already on screen beside it. */}
-                          <ResponsePicker
-                            meetingId={meetingId}
-                            personId={guest.personId}
-                            personName={guestName}
-                            value={responseCards[guest.personId] ?? null}
-                            disabled={!isAttended || isPending}
-                          />
+                              already on screen beside it. THAT disabled is a
+                              business rule and stays; AS-020's hide is the
+                              branch around it — a Member reads what was handed
+                              in and is offered no picker to change it. */}
+                          {canWrite ? (
+                            <ResponsePicker
+                              meetingId={meetingId}
+                              personId={guest.personId}
+                              personName={guestName}
+                              value={responseCards[guest.personId] ?? null}
+                              disabled={!isAttended || isPending}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground text-sm">
+                              {responseCards[guest.personId]
+                                ? responseCardLabel(
+                                    responseCards[guest.personId]
+                                  )
+                                : RESPONSE_NOT_RECORDED_LABEL}
+                            </span>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
@@ -631,7 +668,7 @@ export function AttendanceCapture({
       </Card>
 
       {/* Finalize Button */}
-      {guests.length > 0 && (
+      {canWrite && guests.length > 0 && (
         <div className="space-y-3">
           {finalizeError && (
             <p role="alert" className="text-destructive text-sm">

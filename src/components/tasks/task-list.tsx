@@ -1,6 +1,7 @@
 "use client";
 
 import { loadMoreTasksAction } from "@/app/(dashboard)/tasks/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
 import type { SearchParamValue } from "@/lib/tasks/list-params";
@@ -164,6 +165,9 @@ interface TaskListProps {
    * heading above them across a midnight.
    */
   now: Date;
+  /** The viewer's own `users.id`, for the per-row own-task rule. See
+   *  `TaskCardProps.currentUserId`. */
+  currentUserId: string;
 }
 
 export function TaskList({
@@ -173,7 +177,13 @@ export function TaskList({
   personNotes,
   searchParams,
   now,
+  currentUserId,
 }: TaskListProps) {
+  // Only the empty state reads this. Every control in the list below gates
+  // itself — the row checkbox in `task-card.tsx`, the selection machinery in
+  // `bulk-actions.tsx` — so what is left here is the COPY, which must state a
+  // fact rather than ask for an action the viewer cannot take.
+  const canWrite = useCan("tasks.write");
   // Pagination state — UI state, the shape `ActivityFeed` already uses
   // (`memory/invariants.md` → Client/Server Data Synchronization). The FIRST
   // page still comes from the server on every render and is never copied here.
@@ -216,7 +226,9 @@ export function TaskList({
         </div>
         <h3 className="mt-4 text-lg font-medium">No tasks found</h3>
         <p className="text-muted-foreground mt-2 max-w-sm text-sm">
-          No tasks match your current filters. Add a new task to get started.
+          {canWrite
+            ? "No tasks match your current filters. Add a new task to get started."
+            : "No tasks match your current filters. Your plant's admins create tasks and assign them."}
         </p>
       </div>
     );
@@ -262,6 +274,7 @@ export function TaskList({
                   <TaskCard
                     task={task}
                     now={now}
+                    currentUserId={currentUserId}
                     personNote={
                       task.relatedType === "person" && task.relatedId
                         ? (notes[task.relatedId] ?? null)

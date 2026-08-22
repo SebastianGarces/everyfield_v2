@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { resendToNonOpenersAction } from "@/app/(dashboard)/communication/actions";
 import {
@@ -54,8 +55,18 @@ export function ResendNonOpeners({
   eligibility,
 }: ResendNonOpenersProps) {
   const router = useRouter();
+  const canSend = useCan("communication.send");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // A RESEND IS A SEND, so the whole card is one write affordance and it goes
+  // whole (AS-020, #499). Not just the button: the "not yet available" branch
+  // below renders a DISABLED one, which is exactly the shape this issue exists
+  // to remove — a control announcing a power the viewer does not have, with a
+  // 24-hour countdown beside it that will never become theirs to act on. The
+  // reads this card sits next to — who opened it, who did not, the delivery
+  // tiles — are the page's own and are untouched.
+  if (!canSend) return null;
 
   // A draft has no send to resend; there is nothing useful to show at all.
   if (eligibility.reason === "notSent") return null;

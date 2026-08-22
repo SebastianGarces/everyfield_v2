@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskTemplatePicker } from "@/components/tasks/template-picker";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import type { PhaseNumber } from "@/lib/constants";
 import { PHASES } from "@/lib/constants";
 import { TEMPLATES_LINK_LABEL } from "@/lib/tasks/templates";
@@ -50,6 +51,14 @@ export default async function TaskTemplatesPage() {
 
   if (!user.churchId) {
     redirect("/dashboard");
+  }
+
+  // A WRITE-ONLY ROUTE (AS-020, recipe rule 3). The catalog is a list of things
+  // to CREATE — every row's only control is Import, which is `tasks.write` — so
+  // a viewer who cannot import has nothing to do here and is sent back to the
+  // list, rather than shown nineteen checklists with no way to take one.
+  if (!holdsSeatFor(user, "tasks.write")) {
+    redirect("/tasks");
   }
 
   // Church-scoped by construction: `getCurrentUserChurch` selects by the

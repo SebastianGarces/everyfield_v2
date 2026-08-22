@@ -30,6 +30,7 @@ import { incompleteOnboardingItems } from "./incomplete-onboarding";
 import { IncompleteOnboardingIndicator } from "./incomplete-onboarding-indicator";
 import { PastorConfirmationPrompt } from "./pastor-confirmation-prompt";
 import { isPlantOwner, type SeatFields } from "@/lib/auth/tenancy";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 
 /** The signed-in user, as far as the finished dashboard is concerned. */
 export type PlantDashboardViewer = SeatFields & {
@@ -169,6 +170,20 @@ export async function PlantDashboard({
   const phaseLabel =
     PHASES[(church?.currentPhase ?? 0) as PhaseNumber] ?? "Pre-Phase 1";
 
+  // AS-020: two of the four quick-action tiles are CREATE verbs — Add Person
+  // and Schedule Meeting — and a plant Member holds neither. This is a server
+  // component with the session in hand, so it asks `holdsSeatFor` directly,
+  // which is the same table `requireSeat` refuses the POST with; the tile is
+  // absent rather than dimmed, per the FRD.
+  //
+  // The other two tiles are reads and are not named here at all. Nothing else
+  // on this dashboard needs a gate: the association reminder is Owner-gated at
+  // its data read above, and the leadership prompts by
+  // `canAnswerLeadershipQuestion`.
+  const quickActionCapabilities = (
+    ["people.write", "meetings.write"] as const
+  ).filter((capability) => holdsSeatFor(viewer, capability));
+
   return (
     <div className="p-6">
       {showConfetti && <ChurchCreatedConfetti />}
@@ -261,7 +276,7 @@ export async function PlantDashboard({
                   : undefined
               }
             />
-            <QuickActions />
+            <QuickActions capabilities={quickActionCapabilities} />
           </div>
         </div>
       </div>

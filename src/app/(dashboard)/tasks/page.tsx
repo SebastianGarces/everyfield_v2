@@ -8,6 +8,7 @@ import { FollowUpAssignments } from "@/components/tasks/follow-up-assignments";
 import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
 import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
@@ -41,6 +42,12 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   const params = await searchParams;
   const parsed = parseTaskListSearchParams(params);
   const { view, showCompleted } = parsed;
+
+  // AS-020: creating a task and importing a checklist are `tasks.write`, so a
+  // Member is not OFFERED either — the server refuses both anyway. Asked here
+  // rather than in the client, because this component already holds the session
+  // (`@/components/shared/viewer-capabilities` — two transports, one table).
+  const canWrite = holdsSeatFor(user, "tasks.write");
 
   // ONE clock read for the page. Every relative due date under it — the group
   // headings and each card's "2 days overdue" — is measured against this
@@ -114,18 +121,22 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
                 declined it — or who wants an earlier stage's list — has no way
                 back to the catalog at all.
               */}
-              <Button asChild variant="outline" className="cursor-pointer">
-                <Link href={TEMPLATES_ROUTE}>
-                  <ListChecks className="mr-2 h-4 w-4" />
-                  {TEMPLATES_LINK_LABEL}
-                </Link>
-              </Button>
-              <Button asChild className="cursor-pointer">
-                <Link href="/tasks/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  New Task
-                </Link>
-              </Button>
+              {canWrite && (
+                <Button asChild variant="outline" className="cursor-pointer">
+                  <Link href={TEMPLATES_ROUTE}>
+                    <ListChecks className="mr-2 h-4 w-4" />
+                    {TEMPLATES_LINK_LABEL}
+                  </Link>
+                </Button>
+              )}
+              {canWrite && (
+                <Button asChild className="cursor-pointer">
+                  <Link href="/tasks/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Task
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -225,6 +236,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
               personNotes={result.personNotes}
               searchParams={params}
               now={now}
+              currentUserId={user.id}
             />
           )}
         </div>

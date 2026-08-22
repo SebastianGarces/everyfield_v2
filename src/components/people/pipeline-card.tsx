@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { PersonWithTags } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
@@ -127,7 +128,15 @@ export function PipelineCard({
   const ref = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<CardState>(idle);
 
+  // AS-020: dragging a card changes the person's stage — `people.write`. For a
+  // viewer without it the card registers neither the drag source nor the drop
+  // target, so there is no handle to grab and no edge to drop against: the card
+  // is a link to the person and nothing else.
+  const canWrite = useCan("people.write");
+
   useEffect(() => {
+    if (!canWrite) return;
+
     const el = ref.current;
     invariant(el);
 
@@ -184,7 +193,7 @@ export function PipelineCard({
         },
       })
     );
-  }, [person, columnId]);
+  }, [canWrite, person, columnId]);
 
   const isDragging = state.type === "dragging";
   const inactivity = getInactivityInfo(person, inactivityThresholds);
@@ -215,7 +224,12 @@ export function PipelineCard({
           <div
             className={cn(
               "bg-card text-card-foreground rounded-lg border px-3 py-2.5 shadow-xs transition-all duration-150",
-              "cursor-grab active:cursor-grabbing",
+              // The cursor is the affordance: a grab hand promises a move this
+              // viewer cannot make, so a read-only card gets the link's own
+              // pointer instead.
+              canWrite
+                ? "cursor-grab active:cursor-grabbing"
+                : "cursor-pointer",
               "hover:border-foreground/15 hover:shadow-sm",
               isDragging && "ring-primary/30 ring-2"
             )}

@@ -4,6 +4,7 @@ import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { importTaskTemplateAction } from "@/app/(dashboard)/tasks/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 // `@/lib/tasks/templates` ONLY — never `@/lib/tasks/import`, which imports
@@ -72,6 +73,11 @@ export function TaskTemplatePicker({
    */
   headingLevel?: "h1" | "h2";
 }) {
+  // `importTaskTemplateAction` is `tasks.write` (AS-020). The ROUTE that mounts
+  // this catalog turns a Member away at the door — importing is the only thing
+  // it is for — so this gate is what keeps the component honest wherever it is
+  // embedded next, rather than the primary refusal.
+  const canImport = useCan("tasks.write");
   const [pending, startTransition] = useTransition();
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<{
@@ -198,23 +204,25 @@ export function TaskTemplatePicker({
                       )}
                     </div>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer sm:w-auto"
-                      onClick={() => importTemplate(template)}
-                      disabled={pending}
-                      aria-busy={busy}
-                      aria-describedby={failedHere ? errorId : undefined}
-                      // Nineteen buttons reading "Import" are nineteen
-                      // identical accessible names in a screen reader's
-                      // control list. The visible word starts the accessible
-                      // name, so label-in-name still holds.
-                      aria-label={`Import ${template.name}`}
-                    >
-                      {busy ? "Importing…" : "Import"}
-                    </Button>
+                    {canImport && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="cursor-pointer sm:w-auto"
+                        onClick={() => importTemplate(template)}
+                        disabled={pending}
+                        aria-busy={busy}
+                        aria-describedby={failedHere ? errorId : undefined}
+                        // Nineteen buttons reading "Import" are nineteen
+                        // identical accessible names in a screen reader's
+                        // control list. The visible word starts the accessible
+                        // name, so label-in-name still holds.
+                        aria-label={`Import ${template.name}`}
+                      >
+                        {busy ? "Importing…" : "Import"}
+                      </Button>
+                    )}
                   </li>
                 );
               })}
