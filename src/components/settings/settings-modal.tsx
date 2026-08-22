@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
 import {
+  cachedSectionView,
   closeSettings,
   sectionRequest,
   settingsHashServerSnapshot,
@@ -119,11 +120,27 @@ type SettingsModalProps = {
    * before the read moved. See `readSection` in `@/lib/settings/settings-hash`.
    */
   serverRenderId: string;
+  /**
+   * WHOSE ANSWERS THE CACHE IS HOLDING — the signed-in account, and nothing else
+   * is read from it (#673).
+   *
+   * `serverRenderId` says WHEN an answer was true and is deliberately ignored
+   * when a cached section is painted, because painting an older render's answer
+   * is the whole feature. So it cannot also say WHO it was true for, and this
+   * does. Without it, one account's settings were painted for the next account
+   * to sign in on the same tab: signing out is a server action ending in
+   * `redirect()`, which is a CLIENT-SIDE navigation, so the document — and the
+   * module-scope cache in it — outlives the session. Measured on the preview: a
+   * coach opened settings and the first painted frame carried the previous
+   * reader's name and email address.
+   */
+  scope: string;
 };
 
 export function SettingsModal({
   visibleIds,
   serverRenderId,
+  scope,
 }: SettingsModalProps) {
   const hash = useSyncExternalStore(
     subscribeToSettingsHash,
@@ -151,6 +168,7 @@ export function SettingsModal({
       activeId={activeId}
       visibleIds={visibleIds}
       serverRenderId={serverRenderId}
+      scope={scope}
     />
   );
 }
@@ -168,12 +186,25 @@ function SettingsDialog({
   activeId,
   visibleIds,
   serverRenderId,
+  scope,
 }: SettingsModalProps & { activeId: SettingsSectionId }) {
   const [query, setQuery] = useState("");
   // The Retry count, which is UI state and nothing else: it is part of the read
   // key, so bumping it is what makes a retry a NEW request rather than a replay
   // of the cached failure.
-  const [attempt, setAttempt] = useState(0);
+  //
+  // ONE COUNT PER SECTION, because a retry BELONGS to the section it was pressed
+  // in. As a single number for the whole dialog it was a segment of a per-section
+  // key that a different section could move: after one Try again anywhere,
+  // everything asked for attempt 1 — a key nothing had prefetched — and every
+  // later switch paid a fresh read, which is the acceptance criterion this issue
+  // exists for, quietly undone by its own error path.
+  const [attempts, setAttempts] = useState<
+    Partial<Record<SettingsSectionId, number>>
+  >({});
+  const attempt = attempts[activeId] ?? 0;
+  const retry = () =>
+    setAttempts((held) => ({ ...held, [activeId]: (held[activeId] ?? 0) + 1 }));
   const searchId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -190,10 +221,39 @@ function SettingsDialog({
   );
   const searching = query.trim() !== "";
 
-  // The read, keyed by the section, the last server render and the retry count —
-  // see `sectionRequest`, which holds it OUTSIDE React because a suspended
-  // render is replayed and a replay would mint a second promise.
-  const request = sectionRequest(activeId, serverRenderId, attempt);
+  // The read, keyed by the account, the section, the last server render and this
+  // section's retry count — see `sectionRequest`, which holds it OUTSIDE React
+  // because a suspended render is replayed and a replay would mint a second
+  // promise.
+  const request = sectionRequest(scope, activeId, serverRenderId, attempt);
+
+  // WHAT THIS ACCOUNT ALREADY KNOWS about this section, which is what stands in
+  // while the read above is in flight (#673). `null` on a first visit, so a
+  // first open still draws the skeleton.
+  const stale = cachedSectionView(scope, activeId);
+
+  // PREFETCH EVERY VISIBLE SECTION, ONCE PER OPENING (#673). There are at most
+  // five and each is small, so the switch a reader makes next has its values
+  // already in hand — that is the whole of "no spinner per switch". They are
+  // idempotent: `sectionRequest` is keyed, so this asks for the active section's
+  // read the render above already started, and a StrictMode double-invoke costs
+  // nothing.
+  //
+  // AN EFFECT, AND ON PURPOSE. This is not data SYNC — the read is keyed and the
+  // answer never reaches React state (`memory/contracts/data-patterns.md`) — it
+  // is a WARM, and "when settings opens" is exactly the moment an effect names.
+  // Spelling it during render would fire five reads on every `serverRenderId`
+  // change instead, which is the burst after a write that #673 rules against:
+  // the section on screen refetches, the other four revalidate when they are
+  // next looked at.
+  //
+  // MOUNT IS THE WHOLE TRIGGER, so the dependency list is empty and says so. A
+  // list naming the values the body happens to read would be a promise to
+  // re-prefetch when they move, which is exactly what must not happen.
+  useEffect(() => {
+    for (const id of visibleIds) sectionRequest(scope, id, serverRenderId, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Dialog
@@ -366,16 +426,57 @@ function SettingsDialog({
               section's own values are ever pending, which is why the frame does
               not flicker on the way in.
 
-              KEYED BY SECTION so a switch shows the skeleton (a new boundary
-              suspends into its fallback) while a `refresh()`-driven re-read does
-              not (the same boundary, updated inside the router's transition,
-              keeps what is on screen until the new values arrive). */}
+              KEYED BY SECTION so a switch shows the fallback (a new boundary
+              suspends into it) while a `refresh()`-driven re-read does not (the
+              same boundary, updated inside the router's transition, keeps what
+              is on screen until the new values arrive). The key must NOT gain
+              `serverRenderId`: that would turn every write into a new boundary,
+              and a new boundary drops what the reader is looking at.
+
+              AND THE FALLBACK IS THE LAST ANSWER THIS ACCOUNT HOLDS, not a
+              skeleton, whenever there is one (#673). That is the
+              stale-while-revalidate half of the mechanism in one expression: the
+              cached values paint instantly and `use(request)` below replaces
+              them with the fresh ones — so the pane is never blank for a section
+              this reader has already opened. It is on screen ONLY while the read
+              for the current `serverRenderId` is in flight, which is what keeps
+              a cached value presentation rather than state.
+
+              THE STALE COPY IS `inert`, AND THAT IS NOT CAUTION. A fallback is a
+              SECOND TREE: React never carries state from it into the children,
+              so the moment the revalidation lands this instance is unmounted and
+              a fresh one takes its place. The sections are forms — a password
+              being typed, an email being changed, an optimistic toggle mid-flight
+              — so an interactive stale copy hands the reader controls that are
+              about to be thrown away, and a write that lands a few hundred
+              milliseconds later takes their typing with it. `inert` costs
+              nothing the skeleton did not already cost (this is the moment that
+              USED to be a skeleton, which is no more clickable) and it settles
+              the duplicate-`id` question with it: a re-suspended boundary keeps
+              its children mounted and hidden beside the fallback, and only one of
+              the two answers to a label.
+
+              The right end state is one tree rather than two — the settled answer
+              read through the store the fragment already uses, with no fallback
+              and no second instance. That is a larger change than this issue,
+              and it is written down rather than half-done. */}
           <div className="flex-1 px-5 py-5 md:px-6 md:py-6">
-            <Suspense key={activeId} fallback={<SectionSkeleton />}>
+            <Suspense
+              key={activeId}
+              fallback={
+                stale ? (
+                  <div inert aria-hidden="true">
+                    <SectionView activeId={activeId} view={stale} />
+                  </div>
+                ) : (
+                  <SectionSkeleton />
+                )
+              }
+            >
               <SectionBody
                 activeId={activeId}
                 request={request}
-                onRetry={() => setAttempt((n) => n + 1)}
+                onRetry={retry}
               />
             </Suspense>
           </div>
@@ -430,16 +531,37 @@ function SectionBody({
   // THE TAG IS CHECKED, NOT ASSUMED. The view carries the section it belongs to
   // and the server answered the id we asked for, so this is never false — but it
   // is what makes the pairing below sound rather than merely likely, and it is
-  // the only place the tag and the map meet. Without it the cast would be a
-  // promise that a body and a view model match, kept by nobody.
-  const view = result.view;
-  if (view.section !== activeId) {
+  // the only place the answer OFF THE WIRE and the body map meet. Without it the
+  // cast would be a promise that a body and a view model match, kept by nobody.
+  if (result.view.section !== activeId) {
     return <SectionRefused activeId={activeId} retry={onRetry} />;
   }
-  const Body = SECTION_BODIES[activeId] as (props: {
-    view: typeof view;
-  }) => React.ReactNode;
 
+  return <SectionView activeId={activeId} view={result.view} />;
+}
+
+/**
+ * A section drawn from values already in hand.
+ *
+ * TWO CALLERS, AND THAT IS THE POINT (#673): the read's answer, and — as the
+ * Suspense fallback — the last answer this tab holds for the section while the
+ * current read is in flight. Both draw the identical component from the
+ * identical view model, so a revalidation is invisible unless something changed.
+ *
+ * The cast is the one `SECTION_BODIES` has always needed: the map is total over
+ * the id, the view is tagged with it, and the two are paired by whoever checked
+ * that tag — `SectionBody` for the wire, `cachedSectionView` for the cache.
+ */
+function SectionView<Id extends SettingsSectionId>({
+  activeId,
+  view,
+}: {
+  activeId: Id;
+  view: SettingsSectionViewOf<Id>;
+}) {
+  const Body = SECTION_BODIES[activeId] as (props: {
+    view: SettingsSectionViewOf<Id>;
+  }) => React.ReactNode;
   return <Body view={view} />;
 }
 
