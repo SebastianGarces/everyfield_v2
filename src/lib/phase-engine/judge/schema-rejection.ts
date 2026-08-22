@@ -26,21 +26,78 @@ import { NoObjectGeneratedError } from "ai";
 
 import { JUDGE_RULES, type JudgeRule } from "./schema";
 
-/** What the judge's own rules said about one draft. */
-export interface DraftRejection {
+/** One thing wrong with a draft. */
+export interface DraftIssue {
   /**
-   * The rules that rejected it, deduplicated and in the order they fired.
-   * Empty when the draft failed the object SHAPE rather than a named rule (a
-   * body under the minimum length, an unparseable response) — those still get
-   * their messages, they just have no rule to be counted under.
+   * The rule that raised it, or null for a plain SHAPE violation (a body under
+   * the minimum length, an unparseable response) — those still get a message,
+   * they just have no rule to be counted under.
    */
-  rules: JudgeRule[];
+  rule: JudgeRule | null;
   /**
-   * The validation messages, verbatim. These are written FOR the model — each
+   * The validation message, verbatim. These are written FOR the model — each
    * one states the rule and what to do instead — so they are what the retry
    * feeds back into the prompt.
    */
-  messages: string[];
+  message: string;
+}
+
+/** What the judge's own rules said about one draft. */
+export interface DraftRejection {
+  /** Everything wrong with it, one entry per validation issue. */
+  issues: DraftIssue[];
+  /**
+   * The named rules among those issues, deduplicated and in the order they
+   * fired. Derived at construction and never mutated — it is what the run log,
+   * the summary and `SchemaRejectionError` all count.
+   */
+  rules: JudgeRule[];
+}
+
+/**
+ * What a retry is told, once more than one draft has been rejected.
+ *
+ * A draft is told to fix ONE thing and often fixes it by breaking another. The
+ * eval fleet showed it exactly: EVAL-05 was told its network language delivered
+ * a verdict, softened it, and came back over the observation budget; told about
+ * the budget, it dropped a planter item and left a network concern unpaired.
+ * Every correction was right, every draft was rejected, and the plant was lost
+ * — because the model was only ever holding the last message.
+ *
+ * So the correction carries both halves.
+ */
+export interface DraftCorrection {
+  /** What the latest draft broke. Fix these. */
+  fix: DraftIssue[];
+  /**
+   * What EARLIER drafts broke and the latest one did not. Keep these satisfied
+   * — this is the half that stops the model trading one rule for another.
+   */
+  keep: DraftIssue[];
+}
+
+/**
+ * Fold the newest rejection into what earlier drafts already broke.
+ *
+ * A rule leaves `keep` only by being broken again (it moves back to `fix`), so
+ * a rule the model has been warned about stays in front of it for the rest of
+ * the ladder. Shape issues are never carried: they are specific to the draft
+ * that produced them and read as nonsense against the next one.
+ */
+export function carryCorrectionForward(
+  previous: DraftCorrection | null,
+  latest: DraftRejection
+): DraftCorrection {
+  // Keyed by rule, so "one entry per rule" and "never more than JUDGE_RULES
+  // entries" are properties of the structure rather than of this loop — a
+  // ladder cannot accumulate a growing list however many drafts it takes.
+  const carried = new Map<JudgeRule, DraftIssue>();
+  for (const issue of [...(previous?.keep ?? []), ...(previous?.fix ?? [])]) {
+    if (issue.rule !== null) carried.set(issue.rule, issue);
+  }
+  for (const rule of latest.rules) carried.delete(rule);
+
+  return { fix: latest.issues, keep: [...carried.values()] };
 }
 
 /**
@@ -56,6 +113,32 @@ export function isDraftRejection(error: unknown): boolean {
 }
 
 /**
+ * What a rejected draft cost, so the token pacer can still meter it.
+ *
+ * A rejection is a completed, billed call: the SDK hangs the provider's
+ * response metadata and usage off the error rather than discarding them. Both
+ * are `undefined` when the provider gave none, which `observeResponse` already
+ * treats as "learned nothing".
+ */
+export function draftCost(error: unknown): {
+  headers: Record<string, string> | undefined;
+  totalTokens: number | undefined;
+} {
+  if (!NoObjectGeneratedError.isInstance(error)) {
+    return { headers: undefined, totalTokens: undefined };
+  }
+  return {
+    headers: error.response?.headers,
+    totalTokens: error.usage?.totalTokens,
+  };
+}
+
+/** Did the token cap end this draft rather than the model finishing it? */
+function isTruncated(error: NoObjectGeneratedError): boolean {
+  return error.finishReason === "length";
+}
+
+/**
  * Read a rejected draft's error for the rules that rejected it.
  *
  * @returns null when `error` is not a rejected draft at all — a 429, a socket
@@ -65,25 +148,44 @@ export function isDraftRejection(error: unknown): boolean {
 export function describeDraftRejection(error: unknown): DraftRejection | null {
   if (!isDraftRejection(error)) return null;
 
-  const issues = findIssues(error);
-  if (issues.length === 0) {
-    // The SDK refused the response without a validation error behind it — an
-    // unparseable body, or a provider-side refusal. There is no rule to name,
-    // but the model can still be told what was wrong with what it sent.
-    return { rules: [], messages: [(error as Error).message] };
+  // A DRAFT THE TOKEN CAP CUT OFF IS NOT WORTH RE-PROMPTING. The correction
+  // block makes the next prompt LONGER than the one that already overflowed, so
+  // all three drafts are guaranteed to fail and the plant pays for three
+  // completions to learn nothing. Refusing the ladder here sends the provider's
+  // own error up as itself, which reads correctly in the run log.
+  if (NoObjectGeneratedError.isInstance(error) && isTruncated(error)) {
+    return null;
   }
+
+  const found = findIssues(error);
+  if (found.length === 0) {
+    // The SDK refused the response without a validation error behind it — an
+    // unparseable body, or a provider-side refusal. There is no RULE to name,
+    // so the message says so rather than being rendered as one: telling a model
+    // it "broke the rule" quoted below, when the text below is "could not parse
+    // the response", is an instruction it cannot act on.
+    return {
+      issues: [
+        {
+          rule: null,
+          message: `Your previous response could not be read as the required object and was discarded: ${(error as Error).message} Return only the object the schema describes.`,
+        },
+      ],
+      rules: [],
+    };
+  }
+
+  const issues: DraftIssue[] = found.map((issue) => {
+    const path = issue.path?.length ? `${issue.path.join(".")}: ` : "";
+    return { rule: ruleOf(issue), message: `${path}${issue.message}` };
+  });
 
   const rules: JudgeRule[] = [];
-  const messages: string[] = [];
-
   for (const issue of issues) {
-    const rule = ruleOf(issue);
-    if (rule && !rules.includes(rule)) rules.push(rule);
-    const path = issue.path?.length ? `${issue.path.join(".")}: ` : "";
-    messages.push(`${path}${issue.message}`);
+    if (issue.rule && !rules.includes(issue.rule)) rules.push(issue.rule);
   }
 
-  return { rules, messages };
+  return { issues, rules };
 }
 
 /** The shape a Zod error presents, without importing Zod's internals. */
@@ -137,7 +239,7 @@ export interface SchemaRejectionEvent {
   attempt: number;
   maxAttempts: number;
   rules: JudgeRule[];
-  messages: string[];
+  issues: DraftIssue[];
   /** True when this was the last draft and the assessment is being failed. */
   exhausted: boolean;
 }
@@ -160,7 +262,7 @@ export interface SchemaRejectionEvent {
 export class SchemaRejectionError extends Error {
   readonly name = "SchemaRejectionError";
   readonly rules: JudgeRule[];
-  readonly messages: string[];
+  readonly issues: DraftIssue[];
   /** Drafts the model produced, all of them rejected. */
   readonly attempts: number;
   readonly reason: SchemaRejectionReason;
@@ -182,11 +284,11 @@ export class SchemaRejectionError extends Error {
         (reason === "run_budget"
           ? "; the run's time budget stopped further attempts"
           : "") +
-        `. Last rejection: ${rejection.messages.join(" | ")}`,
+        `. Last rejection: ${rejection.issues.map((issue) => issue.message).join(" | ")}`,
       { cause }
     );
     this.rules = rejection.rules;
-    this.messages = rejection.messages;
+    this.issues = rejection.issues;
     this.attempts = attempts;
     this.reason = reason;
   }

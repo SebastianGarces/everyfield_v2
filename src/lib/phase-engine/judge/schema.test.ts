@@ -99,3 +99,56 @@ test("the cap counts the PLANTER's list, not the network's", () => {
 test("the budget is one primary plus two", () => {
   assert.equal(PLANTER_FOCUS_BUDGET, 3);
 });
+
+// --- The budget and the pairing rule do not actually collide (#605) ---------
+//
+// They look like they do — pairing wants a planter insight per network concern,
+// the budget allows three planter work items — and a first draft of this fix
+// told the model so, in a sentence claiming "at most 3 non-positive network
+// categories can ever be paired". That is false, and it contradicted the
+// pairing message sitting in the SAME prompt. The budget counts only
+// NON-POSITIVE planter insights, so a positive planter insight pairs a network
+// concern for free. These two tests are the claim and its proof.
+
+test("a positive planter insight pairs a network concern at no cost to the budget", () => {
+  const CATEGORIES = [
+    "critical_mass",
+    "cohesion",
+    "prayer",
+    "generosity",
+    "emerging_leadership",
+  ] as const;
+
+  const result = output([
+    // Three planter work items — the budget, spent in full.
+    insight(),
+    insight(),
+    insight(),
+    // Five network concerns, each paired with a POSITIVE planter insight.
+    ...CATEGORIES.flatMap((category) => [
+      insight({ category, severity: "positive" }),
+      insight({ audience: "network", category }),
+    ]),
+  ]);
+
+  assert.equal(result.success, true);
+});
+
+test("when both rules fail, the correction names the free fix rather than a cap", () => {
+  const result = output([
+    insight(),
+    insight(),
+    insight(),
+    insight(), // over budget
+    insight({ audience: "network", category: "prayer" }), // unpaired
+  ]);
+
+  assert.equal(result.success, false);
+  const combined = result.error!.issues.map((i) => i.message).join("\n");
+  assert.match(combined, /one primary focus and at most 2 supplements/);
+  assert.match(combined, /pairing rule failed too, and the two are not/);
+  assert.match(combined, /costs nothing against it/);
+  // The retracted claim must never come back: it is the one sentence that made
+  // two messages in one prompt disagree.
+  assert.doesNotMatch(combined, /can ever be paired/);
+});

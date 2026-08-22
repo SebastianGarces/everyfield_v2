@@ -37,7 +37,7 @@ import {
   retryAfterMsFromError,
   type HeaderLike,
 } from "./rate-limit";
-import { isDraftRejection } from "./schema-rejection";
+import { draftCost, isDraftRejection } from "./schema-rejection";
 import { TokenPacer } from "./token-pacer";
 
 /** What a paced call hands back: the value plus the metering signals. */
@@ -259,7 +259,21 @@ export async function runPacedCall<T>(
       // `NoObjectGeneratedError` carries no status code, so the stand-down is
       // stated ahead of it rather than hidden inside it. Re-prompting with the
       // rule that rejected the draft is `runAssessment`'s ladder.
-      if (isDraftRejection(error)) throw error;
+      //
+      // IT IS STILL A PAID COMPLETION, THOUGH, and the metering has to happen
+      // on the way out. A rejected draft spent tokens and came back with the
+      // same `x-ratelimit-*` headers a good one would; dropping them would let
+      // a plant burn three completions while the pacer re-learned its per-call
+      // cost from at most one of them — and the re-prompt is the LONGEST of the
+      // three, so the estimate would drift low exactly where it matters. This
+      // module owns metering, so it keeps owning it on both exits.
+      if (isDraftRejection(error)) {
+        const cost = draftCost(error);
+        pacer.observeResponse(cost.headers, {
+          totalTokens: cost.totalTokens,
+        });
+        throw error;
+      }
 
       const rateLimited = isRateLimitError(error);
 

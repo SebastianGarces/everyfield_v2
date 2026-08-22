@@ -143,7 +143,7 @@ async function generateAll(): Promise<void> {
       // The message names the rejecting rule when the judge's rules are what
       // failed, so this line is wide enough to carry it (AC-3).
       console.log(
-        `   ${pad(church.name.slice(0, 34), 34)} FAILED     ${(error as Error).message.slice(0, 120)}`
+        `   ${pad(church.name.slice(0, 34), 34)} FAILED     ${(error as Error).message.slice(0, 200)}`
       );
     }
   }

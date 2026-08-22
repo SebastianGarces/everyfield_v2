@@ -44,8 +44,10 @@ import {
   buildUserPrompt,
 } from "./prompt";
 import {
+  carryCorrectionForward,
   describeDraftRejection,
   SchemaRejectionError,
+  type DraftCorrection,
   type SchemaRejectionEvent,
 } from "./schema-rejection";
 import { judgeOutputSchema, type AssessmentResult } from "./schema";
@@ -158,6 +160,9 @@ export async function runAssessment(
     userPrompt: prompt,
   });
 
+  // Everything earlier drafts broke, carried forward (see the catch below).
+  let correction: DraftCorrection | null = null;
+
   const maxSchemaAttempts = Math.max(
     1,
     options.maxSchemaAttempts ?? DEFAULT_MAX_SCHEMA_ATTEMPTS
@@ -253,7 +258,7 @@ export async function runAssessment(
           attempt,
           maxAttempts: maxSchemaAttempts,
           rules: rejection.rules,
-          messages: rejection.messages,
+          issues: rejection.issues,
           exhausted,
         });
 
@@ -267,7 +272,12 @@ export async function runAssessment(
           );
         }
 
-        prompt = buildUserPrompt(snapshot, passages, rejection);
+        // Every rule broken SO FAR goes back, not just this draft's. A model
+        // holding only the newest message fixes it by breaking the rule it was
+        // corrected on two drafts ago, and the ladder runs out while each draft
+        // was an honest attempt at what it was last told (#605).
+        correction = carryCorrectionForward(correction, rejection);
+        prompt = buildUserPrompt(snapshot, passages, correction);
       }
     }
   } catch (error) {

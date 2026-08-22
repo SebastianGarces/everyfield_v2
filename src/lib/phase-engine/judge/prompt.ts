@@ -18,7 +18,7 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 import type { Rubric } from "@/lib/phase-engine/rubric";
 
-import type { DraftRejection } from "./schema-rejection";
+import type { DraftCorrection } from "./schema-rejection";
 
 /** One flattened, citable fact: a dotted path and its primitive value. */
 export interface FactLine {
@@ -97,6 +97,7 @@ GROUNDING RULES — these are absolute:
    - "planter": direct, encouraging, actionable coaching — the next concrete step.
    - "network": conservative, observational health reads in aggregate only. Never reference individual people by name or id to the network audience. Frame as observation, not verdict.
    You MUST include at least one planter insight AND at least one network insight.
+   WRITE THE PLANTER'S LIST FIRST, THEN CHOOSE THE NETWORK'S CATEGORIES FROM IT. Every network insight that is not severity "positive" must sit in a category you have already given the planter an insight in — the planter must never learn of a concern through their overseer. If a network concern has no planter counterpart, either add a planter insight in that category (a "positive" one counts, and does not consume the planter's focus budget) or leave the concern out.
 6. Prioritize through the lens of the plant's CURRENT PHASE (see Part B). What matters most right now leads.
 7. Be concise and specific. Reinforce what is going well (severity "positive") as well as flagging risks.
 8. Cover the Critical Success Factors for the planter: for each CSF (Part A) where the FACTS carry any signal, include one planter-audience insight in that CSF's category — severity "positive" when the factor is healthy, not only when something needs attention. Omit a CSF the facts are genuinely silent about rather than inventing a read. Cross-cutting findings (follow-up hygiene, launch readiness, phase progress, onboarding) keep their own categories and do not replace CSF coverage.
@@ -115,24 +116,37 @@ ${rubric.body}
  * should be holding when it starts writing. The messages are the validation
  * messages verbatim — each one already names the rule and what to do instead,
  * which is why the rubric and the refinements share their wording (#538).
+ *
+ * The `keep` half is the other lesson from the eval fleet: a model shown only
+ * the newest rejection fixes it by breaking the rule it was corrected on two
+ * drafts ago, and the ladder runs out while every individual draft was an
+ * honest attempt at what it was last told.
  */
-function renderRejection(rejection: DraftRejection): string {
+function renderCorrection(correction: DraftCorrection): string {
+  const keep =
+    correction.keep.length === 0
+      ? ""
+      : `
+
+Earlier drafts of this assessment broke the rules below. They are satisfied now — do not fix the points above by breaking one of them again:
+${correction.keep.map((issue) => `- ${issue.message}`).join("\n")}`;
+
   return `
 
 === YOUR PREVIOUS RESPONSE WAS REJECTED ===
 It broke the rules below. These are not preferences: a response that breaks any of them is discarded, not stored. Produce the WHOLE assessment again with every one of them fixed.
-${rejection.messages.map((message) => `- ${message}`).join("\n")}
+${correction.fix.map((issue) => `- ${issue.message}`).join("\n")}${keep}
 === END REJECTION ===`;
 }
 
 /**
  * Per-plant user message: the phase, the fact ledger, and the RAG passages —
- * plus, on a retry, the rules that rejected the previous draft.
+ * plus, on a retry, the rules that rejected the previous drafts.
  */
 export function buildUserPrompt(
   snapshot: PlantFactSnapshot,
   passages: RetrievedPassage[],
-  rejection?: DraftRejection | null
+  correction?: DraftCorrection | null
 ): string {
   const coldStart = snapshot.isColdStart
     ? "\nNOTE: This plant is at COLD START (little or no activity yet). Favor onboarding guidance over numeric analysis; do not imply numbers that aren't in the FACTS.\n"
@@ -149,7 +163,7 @@ ${renderFactLedger(snapshot)}
 ${renderPassages(passages)}
 === END METHODOLOGY ===
 
-Produce the assessment now. Remember: cite real facts only, no invented numbers, and include both planter and network insights.${rejection ? renderRejection(rejection) : ""}`;
+Produce the assessment now. Remember: cite real facts only, no invented numbers, and include both planter and network insights.${correction ? renderCorrection(correction) : ""}`;
 }
 
 /**

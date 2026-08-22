@@ -175,12 +175,25 @@ export const judgeOutputSchema = z
       (insight) =>
         insight.audience === "planter" && insight.severity !== "positive"
     );
+    const unpaired = findUnpairedNetworkCategories(output.insights);
 
     if (work.length > PLANTER_FOCUS_BUDGET) {
       ctx.addIssue(
         ruleIssue(
           "observation_budget",
-          `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.`
+          `The planter gets one primary focus and at most ${PLANTER_FOCUS_BUDGET - 1} supplements — ${work.length} actionable planter insights were returned. Positive observations are exempt; everything else belongs in the drill-down.` +
+            // THE TWO RULES LOOK LIKE THEY PULL AGAINST EACH OTHER AND ONLY
+            // THIS FUNCTION CAN SEE THAT THEY DO NOT (#605). Pairing wants a
+            // planter insight in every network concern's category; the budget
+            // counts only NON-POSITIVE planter insights. So a positive planter
+            // insight pairs a network concern for free, and the two rules never
+            // actually collide. A model told about each separately cannot know
+            // that: EVAL-05 softened its verdict language, came back over
+            // budget, dropped a planter item, and came back unpaired. The way
+            // out is stated here, where both counts are in hand.
+            (unpaired.length > 0
+              ? ` The pairing rule failed too, and the two are not in conflict: this budget counts only NON-POSITIVE planter insights, so pairing a network concern with a "positive" planter insight in the same category costs nothing against it. Reach for that before dropping anything.`
+              : "")
         )
       );
     }
@@ -203,12 +216,25 @@ export const judgeOutputSchema = z
       );
     }
 
-    const unpaired = findUnpairedNetworkCategories(output.insights);
     if (unpaired.length > 0) {
+      // BOTH SIDES OF THE COMPARISON, AND THE WAYS OUT (#605). The message used
+      // to name only the offending categories, and EVAL-11 broke this rule on
+      // three drafts running: it could see what was wrong and kept guessing at
+      // the remedy, rewriting the network insight instead of pairing it. A model
+      // cannot close a gap it is shown one side of, so the planter's categories
+      // are listed too and the two legal fixes are named.
+      const planterCategories = [
+        ...new Set(
+          output.insights
+            .filter((insight) => insight.audience === "planter")
+            .map((insight) => insight.category)
+        ),
+      ].sort();
+
       ctx.addIssue(
         ruleIssue(
           "planter_first_pairing",
-          `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Different wording for each audience is expected; a concern the planter was never shown is not.`
+          `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Your planter insights currently cover: ${planterCategories.join(", ") || "(none)"}. Fix it one of two ways: ADD a planter insight in each missing category (any severity counts, including "positive"), or, if it is not really a concern, mark the network insight "positive" or drop it. Different wording for each audience is expected; a concern the planter was never shown is not.`
         )
       );
     }

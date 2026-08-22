@@ -51,6 +51,25 @@
 // The old MAX_BATCH of 25 needed 27×25 − 60 + 10 = 625s: more than twice the
 // ceiling, which is exactly why the tail of every batch was lost.
 //
+// A PLANT IS NO LONGER ONE CALL (#605). A draft rejected by the judge's own
+// rules is re-prompted, so a plant costs 1–3 completions, each larger than the
+// last, and the arithmetic above is the BEST case rather than the expected one:
+//
+//     tokens(N) = 13500 · N · E[drafts]
+//
+// The eval fleet measured E[drafts] ≈ 1.4 after the correction carries every
+// broken rule forward, which puts N = 10 around 318s of pacing — past the soft
+// budget. MAX_BATCH stays at 10 anyway, and that is a decision rather than an
+// oversight: RUN_BUDGET_MS already stops the run with LIVE pacer numbers, which
+// beat any constant derived from an average, and a deferred plant is lossless
+// (still dirty, first in line next tick). Lowering the constant would move the
+// same truncation earlier and decide it with worse information.
+//
+// What it does cost is throughput: the tail of a full batch now defers more
+// often than it did. That is the trade — per-plant success bought with batch
+// depth — and it is the right way round, because a deferred plant comes back in
+// twelve hours whereas a `failed` one used to come back with nothing at all.
+//
 // None of those constants are load-bearing at runtime: RUN_BUDGET_MS is the
 // real guard, and the pacer re-derives the ceiling and the per-call cost from
 // the provider's own `x-ratelimit-*` headers, so a tier upgrade to 150k TPM
@@ -388,7 +407,10 @@ export async function runAssessmentBatch(
     };
 
     const onSchemaRejection = (event: SchemaRejectionEvent) => {
-      schemaRetried++;
+      // The exhausting draft was rejected but never re-prompted, and it is
+      // already counted as `schemaRejected`. Counting it here too would make a
+      // plant that failed after three drafts report two retries it never got.
+      if (!event.exhausted) schemaRetried++;
       // Warn, not error, and only until the ladder is spent: a re-prompted
       // draft that then lands is a working assessment, and the line exists so
       // the RATE is visible before it becomes a failure (#605).

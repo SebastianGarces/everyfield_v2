@@ -313,31 +313,52 @@ test("§1b the same chain, with the clock out of the way, is an unmarked failure
 // have to reverse-engineer the requirement from.
 // ----------------------------------------------------------------------------
 
-// Both anchors are the same at both sites, so a site is just its path: the
-// span runs from the catch that receives the judge's throw to the rethrow that
-// hands it on. `span` resolves BOTH ends through the reader, so the mutation
-// this test exists to catch — a `throw new Error(msg, { cause: error })` in
-// place of the bare rethrow — deletes the end anchor and the reader THROWS
+// The span runs from the catch that receives the judge's throw to the rethrow
+// that hands it on. `span` resolves BOTH ends through the reader, so the
+// mutation this test exists to catch — a `throw new Error(msg, { cause: error })`
+// in place of the bare rethrow — deletes the end anchor and the reader THROWS
 // "<file> (comments stripped) no longer contains: throw error;". A hand-cut
 // tail plus a bare `indexOf` would instead have degraded into a claim about
 // the whole file, which is the rot `source-span.ts` exists to stop.
-const RETHROW_SITES: readonly string[] = [
-  "src/lib/phase-engine/judge/run-assessment.ts",
-  "src/lib/phase-engine/assessment/generate-assessment.ts",
+//
+// EACH SITE NAMES ITS OWN OPENING ANCHOR, and reads it in two steps (#605).
+// `span` resolves each end as a FIRST occurrence, so while both sites shared
+// `"} catch (error) {"` the schema ladder's inner catch — added inside
+// `runAssessment` ABOVE the outer one — silently stole the opening anchor and
+// shrank the guarded block to six lines containing no rethrow of record. The
+// assertion went on passing, about the wrong code.
+//
+// `trace.fail(error);` is the line that can only be the outer catch, so that is
+// what run-assessment anchors on. Cutting the tail with `after` FIRST is the
+// other half: `throw error;` also occurs in the inner catch, earlier in the
+// file, and `span` rightly refuses two anchors in that order rather than
+// guessing. Narrowing to the tail makes the first match the intended one.
+//
+// (The inner catch does construct an error with `{ cause }`, and legally: it
+// runs only when `describeDraftRejection` returned non-null, which a
+// deadline-truncated 5xx never is — that path rethrows bare and keeps its mark.)
+const RETHROW_SITES: readonly { file: string; from: string }[] = [
+  {
+    file: "src/lib/phase-engine/judge/run-assessment.ts",
+    from: "trace.fail(error);",
+  },
+  {
+    file: "src/lib/phase-engine/assessment/generate-assessment.ts",
+    from: "} catch (error) {",
+  },
 ];
 
 test("§2 every link between the judge and the runner rethrows the IDENTICAL object", async () => {
   const { readFileSync } = await import("node:fs");
   const path = await import("node:path");
 
-  for (const file of RETHROW_SITES) {
+  for (const { file, from } of RETHROW_SITES) {
+    const label = `${file} (comments stripped)`;
     const code = stripComments(
       readFileSync(path.join(process.cwd(), file), "utf8")
     );
-    const block = sourceReader(code, `${file} (comments stripped)`).span(
-      "} catch (error) {",
-      "throw error;"
-    );
+    const tail = sourceReader(code, label).after(from);
+    const block = sourceReader(tail, label).span(from, "throw error;");
 
     assert.doesNotMatch(
       block,

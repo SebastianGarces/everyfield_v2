@@ -9,6 +9,7 @@ import { makeSnapshot } from "@/lib/phase-engine/signals/testing";
 import { runPacedCall } from "./paced-call";
 import { runAssessment } from "./run-assessment";
 import {
+  carryCorrectionForward,
   describeDraftRejection,
   isSchemaRejection,
   SchemaRejectionError,
@@ -175,7 +176,11 @@ test("describeDraftRejection names the rule, not just the prose", async () => {
   const rejection = describeDraftRejection(error);
   assert.ok(rejection, "a NoObjectGeneratedError is a draft rejection");
   assert.deepEqual(rejection.rules, ["planter_first_pairing"]);
-  assert.match(rejection.messages.join(" "), /never discover a concern/);
+  assert.match(
+    rejection.issues.map((issue) => issue.message).join(" "),
+    /never discover a concern/
+  );
+  assert.equal(rejection.issues[0].rule, "planter_first_pairing");
 });
 
 test("describeDraftRejection ignores anything that is not a rejected draft", () => {
@@ -212,12 +217,121 @@ test("missing audience coverage is a schema rule, so it is retried too", async (
   assert.match(run.prompts[1], /at least one planter AND one network insight/);
 });
 
+// --- Not trading one rule for another ---------------------------------------
+
+/** Breaks the verdict register: a network insight delivering a judgement. */
+const VERDICT_DRAFT = draft([
+  insight(),
+  insight({
+    audience: "network",
+    title: "Vision cadence is failing",
+    body: "The plant is behind on its vision meeting cadence and this needs to be addressed.",
+  }),
+]);
+
+test("a rule stays in the correction until a draft stops breaking it", async () => {
+  // The EVAL-05 sequence, as measured on the fleet: told its network language
+  // delivered a verdict, the model softened it and came back unpaired. If the
+  // second correction only carried the pairing message, the third draft is free
+  // to reach for verdict language again — which is how a plant burned its whole
+  // ladder while every draft honestly fixed what it was last told.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock });
+  const run = await assess([VERDICT_DRAFT, UNPAIRED_DRAFT, GOOD_DRAFT], {
+    pacer,
+  });
+
+  assert.equal(run.error, null);
+  assert.equal(run.calls, 3);
+
+  // Draft 2 is told about the verdict register.
+  assert.match(run.prompts[1], /must coach, never deliver a verdict/);
+  // Draft 3 is told to fix the pairing AND to keep the verdict register it has
+  // just satisfied — both, in one prompt.
+  assert.match(run.prompts[2], /never discover a concern/);
+  assert.match(run.prompts[2], /must coach, never deliver a verdict/);
+  assert.match(run.prompts[2], /do not fix the points above by breaking one/);
+});
+
+test("carryCorrectionForward drops a rule the newest draft broke again", () => {
+  const first = {
+    rule: "network_verdict_register" as const,
+    message: "verdict",
+  };
+  const second = { rule: "planter_first_pairing" as const, message: "pairing" };
+
+  const one = carryCorrectionForward(null, {
+    issues: [first],
+    rules: ["network_verdict_register"],
+  });
+  assert.deepEqual(one, { fix: [first], keep: [] });
+
+  const two = carryCorrectionForward(one, {
+    issues: [second],
+    rules: ["planter_first_pairing"],
+  });
+  assert.deepEqual(two, { fix: [second], keep: [first] });
+
+  // Broken again: it is something to FIX now, never both at once.
+  const three = carryCorrectionForward(two, {
+    issues: [first],
+    rules: ["network_verdict_register"],
+  });
+  assert.deepEqual(three, { fix: [first], keep: [second] });
+});
+
+test("carryCorrectionForward never carries a shape issue", () => {
+  const shape = { rule: null, message: "insights.0.body: Too small" };
+  const rule = { rule: "observation_budget" as const, message: "budget" };
+
+  const one = carryCorrectionForward(null, { issues: [shape], rules: [] });
+  const two = carryCorrectionForward(one, {
+    issues: [rule],
+    rules: ["observation_budget"],
+  });
+
+  // A shape complaint names a specific insight in a specific draft; repeating
+  // it against the next one is noise the model cannot act on.
+  assert.deepEqual(two.keep, []);
+});
+
+test("a truncated draft is never re-prompted — a longer prompt cannot fix it", async () => {
+  const model = new MockLanguageModelV3({
+    doGenerate: async () => ({
+      // Valid as far as it goes, but the token cap ended it. The correction
+      // block only makes the next prompt longer, so re-prompting would spend
+      // three completions on a draft that cannot come back shorter.
+      content: [{ type: "text" as const, text: PLANTER_ONLY_DRAFT }],
+      finishReason: { unified: "length" as const, raw: "length" },
+      usage: {
+        inputTokens: { total: 100, noCache: 100, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 200, text: 200, reasoning: 0 },
+      },
+      warnings: [],
+    }),
+  });
+
+  const events: SchemaRejectionEvent[] = [];
+  await assert.rejects(
+    runAssessment(makeSnapshot(), 1, {
+      passages: [],
+      model,
+      maxAttempts: 1,
+      onSchemaRejection: (event) => events.push(event),
+    }),
+    (error: unknown) => NoObjectGeneratedError.isInstance(error)
+  );
+
+  // The provider's own error travels up as itself; the ladder never engages.
+  assert.deepEqual(events, []);
+});
+
 test("a model that never complies fails with the rejecting rule named", async () => {
   // A virtual clock, because a re-prompt is a WHOLE EXTRA CALL against the run's
-  // shared TPM budget: on the real clock this plant's third draft waits ~21s for
-  // the bucket to refill. That is the ladder behaving — a retry queues like any
-  // other call rather than jumping the batch — and it is why `deadlineAt` has to
-  // bound this loop as well as the throttle one.
+  // shared TPM budget: against the real per-call estimate this plant's third
+  // draft waits ~21s for the bucket to refill. That is the ladder behaving — a
+  // retry queues like any other call rather than jumping the batch — and it is
+  // why `deadlineAt` has to bound this loop as well as the throttle one.
   const clock = virtualClock();
   const pacer = new TokenPacer({ clock });
 
@@ -232,8 +346,13 @@ test("a model that never complies fails with the rejecting rule named", async ()
   // AC-3: the rule is in the message, so the operator reading a `failed` row's
   // log line never has to reproduce the run to learn which rule rejected it.
   assert.match(error.message, /planter_first_pairing/);
-  // The drafts really did queue behind the token bucket rather than bypass it.
-  assert.ok(clock.now() > 0, "a re-prompt is paced like any other call");
+
+  // A REJECTED DRAFT IS A PAID COMPLETION AND THE PACER MUST SEE IT. The mock
+  // reports 300 tokens; the pacer keeps 10% headroom over what it measures. If
+  // the rejection path skipped `observeResponse`, this would still read the
+  // built-in estimate, and a plant burning three completions would be metered
+  // as one — the re-prompt being the longest of the three.
+  assert.equal(pacer.estimatedTokensPerCall, 330);
 
   assert.equal(run.events.length, 3);
   assert.equal(run.events[2].exhausted, true);
