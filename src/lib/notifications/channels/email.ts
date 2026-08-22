@@ -1,4 +1,5 @@
 import { notificationBatchEmail } from "@/lib/email/templates/notification-batch";
+import { settingsSectionUrl } from "@/lib/settings/sections";
 
 import {
   NOTIFICATION_CATEGORIES,
@@ -47,19 +48,23 @@ export const UNSUBSCRIBE_CONFIRMATION_PATH = "/unsubscribe";
  * The full preference screen (N-006), linked from every email and from
  * /unsubscribe.
  *
- * A REAL PATH, NOT A FRAGMENT (#615, ruled 2026-08-21 §187). This was
- * `/settings#notification-preferences` while `/settings` was one long page and
- * the matrix had to be scrolled to (#467); it also needed a matching `<h2 id>`
- * on that page, and an exported id so the two could not drift. Settings is a
- * modal addressed by section now, so the preference matrix has a URL the SERVER
- * can see — which is the whole point of the ruling's "real paths, never a hash".
- * Both the fragment and the id it pointed at are gone.
+ * A PATH AND A FRAGMENT NAMING THE SECTION (#657, ruled 2026-08-22, which
+ * reverses the "real paths, never a hash" half of 2026-08-21 §187). Settings is
+ * client state over the current screen, so the section is named where the client
+ * can read it and the path is the screen it opens over.
  *
- * Mail already in the wild still carries the old fragment. It resolves to
- * `/settings`, which opens the modal at Account rather than at Notifications —
- * one section off, never a dead link.
+ * It is NOT the `/settings#notification-preferences` of #467, which pointed a
+ * browser at an `<h2 id>` to scroll to on a long page. Nothing here scrolls to
+ * anything: the modal parses this fragment and opens on the section, so there is
+ * still no heading anchor in the product to keep in step with a link.
+ *
+ * Mail already in the wild carries `/settings/notifications`, which
+ * `src/app/(dashboard)/settings/[section]/page.tsx` permanently redirects
+ * straight here. Older mail still carries #467's fragment, which resolves to
+ * `/settings` and lands one section off, on Account — never a dead link.
  */
-export const NOTIFICATION_PREFERENCES_PATH = "/settings/notifications";
+export const NOTIFICATION_PREFERENCES_PATH =
+  settingsSectionUrl("notifications");
 
 /**
  * Absolute base for links that have to work from an inbox.

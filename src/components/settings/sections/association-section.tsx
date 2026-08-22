@@ -1,5 +1,6 @@
+"use client";
+
 import { Building2, Inbox } from "lucide-react";
-import { redirect } from "next/navigation";
 
 import {
   Card,
@@ -7,33 +8,24 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
-import { verifySession } from "@/lib/auth/session";
-import { isOrgOwner, isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
-import { formatDate } from "@/lib/datetime";
-import { INVITE_ORIGIN_SHARING_CONSENT } from "@/lib/notifications/categories";
+import type {
+  AssociationSectionView,
+  CurrentAssociationRow,
+  PendingInvitationRow,
+} from "@/lib/settings/section-view";
 
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import { LeaveNetworkDialog } from "@/app/(dashboard)/settings/association/leave-network-dialog";
 import { LeaveOrgDialog } from "@/app/(dashboard)/settings/association/leave-org-dialog";
-import {
-  getCurrentAssociations,
-  getCurrentNetworkAssociation,
-  getPendingInvitationsForPlant,
-  getPendingInvitationsForSendingChurch,
-  type CurrentAssociationView,
-  type PendingInvitationView,
-} from "@/app/(dashboard)/settings/association/queries";
 
 // ============================================================================
 // The association area (#304 — OV-004, OV-006, OV-007a; WS3 2026-08-09).
 //
-// A SECTION OF THE SETTINGS MODAL SINCE #615, at its unchanged URL
-// `/settings/association` — the URL is in sent email, so it could not move. What
-// moved is the chrome: the breadcrumbs, the `<h1>` and the two role-specific
-// intro sentences are the modal's own title and description now, and the cards
-// below carry the role-specific facts they always did ("A plant can belong to a
-// sending church and to a network", "A sending church belongs to at most one
-// church planting network").
+// A SECTION OF THE SETTINGS MODAL SINCE #615. The breadcrumbs, the `<h1>` and
+// the two role-specific intro sentences became the modal's own title and
+// description then, and the cards below carry the role-specific facts they
+// always did ("A plant can belong to a sending church and to a network", "A
+// sending church belongs to at most one church planting network").
 //
 // ----------------------------------------------------------------------------
 // TWO ROLES, ONE SURFACE (#304 WS3, ruled 2026-08-09)
@@ -52,24 +44,24 @@ import {
 // `sending_church_admin` targetable with nowhere in the product to answer — the
 // dead end HR4 found on 2026-08-09. Sebastian ruled it closed by BUILDING this
 // second view rather than by re-gating the invitation path, so the two live on
-// one route: the question ("who does my organization belong to, and who is
-// asking?") is the same question, and a second URL would be a second place to
-// forget.
+// one surface: the question ("who does my organization belong to, and who is
+// asking?") is the same question, and a second address would be a second place
+// to forget.
 //
-// NEITHER VIEW IS THE CONTROL. Whoever cannot act on either is redirected,
-// because there would be nothing on the screen for them — but every write
-// behind it refuses them again, server-side (`association/actions.ts`,
-// `verifyInvitationAuthority`, OV-010 / ruled #274), so a forged POST that never
-// loaded this surface meets the same statement the buttons do. In particular a
-// non-admin member of a sending church is refused by the invitation's own
-// authority rule, not by this redirect. The registry now asks the same union
-// (`canManageAssociation` in `@/lib/settings/sections`), so the side navigation
-// cannot list a section that would redirect its reader away.
+// WHICH ROLE IS READING IS A TAG ON THE VIEW, not a pair of nullable halves
+// (#657). A planter has associations and no network field; a sending church
+// Owner has one network and no list. Whoever can act on neither never reaches
+// this component — `readAssociation` answers `{ ok: false }` and the modal
+// falls back to the default section, which is what the old `redirect("/settings")`
+// did. Every write behind it refuses them again, server-side
+// (`association/actions.ts`, `verifyInvitationAuthority`, OV-010 / ruled #274),
+// so a forged POST that never opened this section meets the same statement the
+// buttons do.
 //
-// EVERY SECTION IS ANSWERED FROM THE SERVER. The reads run per request
-// (`force-dynamic` on the routes); nothing is cached and nothing is copied into
-// client state, so the moment an invitation is answered `refresh()` re-renders
-// this tree and the row is simply gone (`memory/contracts/data-patterns.md`).
+// NOTHING HERE IS COPIED INTO CLIENT STATE. The reads run per call, and the
+// moment an invitation is answered `refresh()` re-renders the layout, the modal
+// re-reads this view, and the row is simply gone
+// (`memory/contracts/data-patterns.md`).
 //
 // ----------------------------------------------------------------------------
 // WHY EACH SECTION IS A CARD (design pass, #304 "UI ruling round 3")
@@ -91,25 +83,92 @@ import {
 // modal's own title that the reference surface does not have.
 // ============================================================================
 
-export async function AssociationSection() {
-  const { user } = await verifySession();
+export function AssociationSection({ view }: { view: AssociationSectionView }) {
+  if (view.answerer === "plant") {
+    return (
+      <div className="space-y-6">
+        <PendingInvitations
+          invitations={view.pending}
+          subjectNoun="your plant"
+          emptyDetail="A sending church or network invites you by email. Their invitation appears here for you to accept or decline."
+          // REWRITTEN BY CS-013, because the old sentence became false. It read
+          // "What else they hear about stays yours to decide, on the sharing
+          // screen" — true while an accepted plant started out sharing nothing,
+          // and a misdescription of an accept that now turns every toggle on.
+          //
+          // The replacement states the listing and nothing else. It carries NO
+          // reversibility clause, deliberately: the first draft said "all of
+          // which you can change afterwards", which is false of the listing (it
+          // is ungated and lasts as long as the association) and false of six of
+          // the seven toggles (no switch exists for them yet). Reversibility is
+          // the consent copy's to state, where it is stated precisely.
+          consequence="Accepting lists your plant in their directory with its name, stage and launch date."
+          consent={view.consent}
+        />
 
-  if (isPlantOwner(user) && user.churchId) {
-    return <PlantAssociation churchId={user.churchId} />;
+        <section aria-labelledby="current-associations">
+          <Card className="shadow-sm">
+            <CardHeader>
+              <SectionTitle id="current-associations">
+                Who you belong to
+              </SectionTitle>
+              <CardDescription className="text-pretty">
+                A plant can belong to a sending church and to a network. Leaving
+                one leaves the other standing.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              {view.associations.length === 0 ? (
+                <EmptySection
+                  icon={Building2}
+                  title="Your plant is independent"
+                  detail="It belongs to no sending church or network."
+                />
+              ) : (
+                <ul className="divide-border divide-y">
+                  {view.associations.map((association) => (
+                    <li
+                      key={`${association.orgType}:${association.orgId}`}
+                      className="py-4 first:pt-0 last:pb-0"
+                    >
+                      <AssociationRow
+                        orgName={association.orgName}
+                        roleLabel={
+                          association.orgType === "sending_church"
+                            ? "Your sending church"
+                            : "Your network"
+                        }
+                        action={
+                          <LeaveOrgDialog
+                            orgType={association.orgType}
+                            orgName={association.orgName}
+                          />
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      </div>
+    );
   }
 
-  // BOTH HALVES, LIKE `isPlantOwner` ABOVE (#500). This asked the tenancy alone
-  // while a sending church had exactly one account, so "has a sending church"
-  // and "is its Owner" were the same row. An org now has Admins and Members
-  // (AS-005), and every write on this surface — accept, decline, leave — is
-  // Owner-only by ruling 185 (1), so the tenancy alone would render three
-  // controls whose own guards are guaranteed to refuse the reader.
-  const org = oversightOrgOf(user);
-  if (org?.type === "sending_church" && isOrgOwner(user)) {
-    return <SendingChurchAssociation sendingChurchId={org.id} />;
-  }
+  return (
+    <div className="space-y-6">
+      <PendingInvitations
+        invitations={view.pending}
+        subjectNoun="your sending church"
+        emptyDetail="A church planting network invites you by email. Their invitation appears here for you to accept or decline."
+        consequence="Accepting lists your sending church in that network's directory. It does not change what your own church plants share with you, or with anyone else."
+      />
 
-  redirect("/settings");
+      <NetworkAssociation network={view.network} />
+    </div>
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -181,7 +240,7 @@ function PendingInvitations({
   consequence,
   consent = null,
 }: {
-  invitations: PendingInvitationView[];
+  invitations: readonly PendingInvitationRow[];
   /** What is being invited, so the row names it: "your plant", "your sending church". */
   subjectNoun: string;
   emptyDetail: string;
@@ -235,9 +294,9 @@ function PendingInvitations({
                         ? "A sending church"
                         : "A church planting network"}
                       {" · sent "}
-                      {formatDate(invitation.createdAt, "short")}
-                      {invitation.expiresAt
-                        ? ` · expires ${formatDate(invitation.expiresAt, "short")}`
+                      {invitation.sentLabel}
+                      {invitation.expiresLabel
+                        ? ` · expires ${invitation.expiresLabel}`
                         : ""}
                     </p>
                   </div>
@@ -304,124 +363,6 @@ function AssociationRow({
   );
 }
 
-// ----------------------------------------------------------------------------
-// The PLANTER's view (OV-004, OV-006, OV-007a)
-// ----------------------------------------------------------------------------
-
-async function PlantAssociation({ churchId }: { churchId: string }) {
-  const [pending, associations] = await Promise.all([
-    getPendingInvitationsForPlant(churchId),
-    getCurrentAssociations(churchId),
-  ]);
-
-  return (
-    <div className="space-y-6">
-      <PendingInvitations
-        invitations={pending}
-        subjectNoun="your plant"
-        emptyDetail="A sending church or network invites you by email. Their invitation appears here for you to accept or decline."
-        // REWRITTEN BY CS-013, because the old sentence became false. It read
-        // "What else they hear about stays yours to decide, on the sharing
-        // screen" — true while an accepted plant started out sharing nothing,
-        // and a misdescription of an accept that now turns every toggle on.
-        //
-        // The replacement states the listing and nothing else. It carries NO
-        // reversibility clause, deliberately: the first draft said "all of
-        // which you can change afterwards", which is false of the listing (it
-        // is ungated and lasts as long as the association) and false of six of
-        // the seven toggles (no switch exists for them yet). Reversibility is
-        // the consent copy's to state, where it is stated precisely.
-        consequence="Accepting lists your plant in their directory with its name, stage and launch date."
-        // ONLY WHERE THE COPY IS TRUE. It says accepting "starts you off
-        // sharing", and the write behind it fires only for a plant whose two
-        // oversight FKs are still null — a plant that already has an overseer
-        // has already made this decision, and its toggles are left alone. Same
-        // condition, stated where the reader is; `associations` is already
-        // loaded above, so this costs no query.
-        consent={
-          associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null
-        }
-      />
-
-      <section aria-labelledby="current-associations">
-        <Card className="shadow-sm">
-          <CardHeader>
-            <SectionTitle id="current-associations">
-              Who you belong to
-            </SectionTitle>
-            <CardDescription className="text-pretty">
-              A plant can belong to a sending church and to a network. Leaving
-              one leaves the other standing.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            {associations.length === 0 ? (
-              <EmptySection
-                icon={Building2}
-                title="Your plant is independent"
-                detail="It belongs to no sending church or network."
-              />
-            ) : (
-              <ul className="divide-border divide-y">
-                {associations.map((association) => (
-                  <li
-                    key={`${association.orgType}:${association.orgId}`}
-                    className="py-4 first:pt-0 last:pb-0"
-                  >
-                    <AssociationRow
-                      orgName={association.orgName}
-                      roleLabel={
-                        association.orgType === "sending_church"
-                          ? "Your sending church"
-                          : "Your network"
-                      }
-                      action={
-                        <LeaveOrgDialog
-                          orgType={association.orgType}
-                          orgName={association.orgName}
-                        />
-                      }
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-    </div>
-  );
-}
-
-// ----------------------------------------------------------------------------
-// The SENDING CHURCH ADMIN's view (#304 WS3)
-// ----------------------------------------------------------------------------
-
-async function SendingChurchAssociation({
-  sendingChurchId,
-}: {
-  sendingChurchId: string;
-}) {
-  const [pending, network] = await Promise.all([
-    getPendingInvitationsForSendingChurch(sendingChurchId),
-    getCurrentNetworkAssociation(sendingChurchId),
-  ]);
-
-  return (
-    <div className="space-y-6">
-      <PendingInvitations
-        invitations={pending}
-        subjectNoun="your sending church"
-        emptyDetail="A church planting network invites you by email. Their invitation appears here for you to accept or decline."
-        consequence="Accepting lists your sending church in that network's directory. It does not change what your own church plants share with you, or with anyone else."
-      />
-
-      <NetworkAssociation network={network} />
-    </div>
-  );
-}
-
 /**
  * The sending church's own network, with the Leave control (OV-013).
  *
@@ -439,7 +380,7 @@ async function SendingChurchAssociation({
 function NetworkAssociation({
   network,
 }: {
-  network: CurrentAssociationView | null;
+  network: CurrentAssociationRow | null;
 }) {
   return (
     <section aria-labelledby="current-associations">

@@ -70,11 +70,19 @@ const SEAT = sourceReader(
   stripComments(read("lib", "invitations", "seat.ts")),
   "seat.ts (stripped)"
 );
-// `/settings/team` is a SECTION of the settings modal since #615 — same URL,
-// same reads, same controls; the sibling page that drew them is gone.
+// `/settings/team` is a SECTION of the settings modal, and since #657 that
+// section is TWO FILES: `readTeam` in `section-data.ts` resolves the tenancy and
+// issues the reads, and `team-section.tsx` draws the controls. They are read
+// together here because every claim below is about the SURFACE — "the coach
+// sections are the plant's alone" is half a read that is not issued and half a
+// block that is not rendered, and splitting them would let either half be
+// gutted while the other still passed.
 const TEAM_PAGE = sourceReader(
-  stripComments(read("components", "settings", "sections", "team-section.tsx")),
-  "settings team-section.tsx (stripped)"
+  stripComments(
+    read("lib", "settings", "section-data.ts") +
+      read("components", "settings", "sections", "team-section.tsx")
+  ),
+  "the team section: section-data.ts + team-section.tsx (stripped)"
 );
 const ORG_INVITATIONS_PAGE = stripComments(
   read("app", "(dashboard)", "oversight", "invitations", "page.tsx")
@@ -92,10 +100,11 @@ const ACCESS = stripComments(read("lib", "auth", "access.ts"));
 const ACCOUNT_ENTITIES = stripComments(
   read("app", "(auth)", "register", "account-entities.ts")
 );
-// `/settings/association` is a SECTION of the settings modal since #615 — same
-// URL, same two views, same gates; the sibling page that drew them is gone.
+// The association section, on the same two-file reading as the team one above:
+// `readAssociation` owns the gates, the component owns the views.
 const ASSOCIATION_PAGE = stripComments(
-  read("components", "settings", "sections", "association-section.tsx")
+  read("lib", "settings", "section-data.ts") +
+    read("components", "settings", "sections", "association-section.tsx")
 );
 
 const PLANT = "11111111-1111-4111-8111-111111111111";
@@ -848,14 +857,16 @@ test("the coach sections are the plant's alone, and absent for an org (AC 5)", (
     /const isPlant = tenancy\.type === "church";/,
     "the page must decide plant-only sections from the resolved tenancy"
   );
+  // `view.isPlant` since #657 — the same flag, resolved in the read above and
+  // carried to the section rather than re-derived there.
   assert.match(
     page,
-    /\{isPlant && <CoachInviteForm/,
+    /\{view\.isPlant && <CoachInviteForm/,
     "the coach invite form is plant-only"
   );
   assert.match(
     page,
-    /\{isPlant && \(\s*<PlantCoachList/,
+    /\{view\.isPlant && \(\s*<PlantCoachList/,
     "and so is the coach list"
   );
   assert.match(
@@ -865,7 +876,7 @@ test("the coach sections are the plant's alone, and absent for an org (AC 5)", (
   );
   assert.match(
     page,
-    /\{isPlant && coachRows\.length > 0 && \(/,
+    /\{view\.isPlant && view\.coachInvitations\.length > 0 && \(/,
     "and neither is the coach invitation list"
   );
 
@@ -874,7 +885,7 @@ test("the coach sections are the plant's alone, and absent for an org (AC 5)", (
   // none of them may sit behind `isPlant`.
   for (const section of ["SeatInviteForm", "SeatRoster"]) {
     assert.ok(
-      !page.includes(`{isPlant && <${section}`),
+      !page.includes(`{view.isPlant && <${section}`),
       `${section} must render for every tenancy`
     );
     assert.match(
@@ -888,7 +899,7 @@ test("the coach sections are the plant's alone, and absent for an org (AC 5)", (
   // only the second (the coach one) is plant-gated.
   assert.match(
     page,
-    /\n\s*<InvitationsList\n\s*rows=\{seatRows\}/,
+    /\n\s*<InvitationsList\n\s*rows=\{view\.seatInvitations\}/,
     "the pending seat list must render for every tenancy"
   );
 });

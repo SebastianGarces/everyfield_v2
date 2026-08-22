@@ -620,13 +620,13 @@ export const OVERSIGHT_CONSENT_SURFACES: Readonly<
   // is now IN the Church section, so the teaser has nothing left to tease and
   // both it and the sentence are deleted. A promise made in one place cannot
   // fall behind the promise made in another.
-  "/settings/church": OVERSIGHT_SHARING_TOGGLE.detail,
+  "#settings/church": OVERSIGHT_SHARING_TOGGLE.detail,
   // The two screens a PLANT can accept an org invitation from (CS-013). Both
   // render the same lines, because it is the same decision reached twice — a
   // planter meets it at registration if they were invited by email, and on the
   // association screen if they were invited after their plant existed.
   "/register?invitation=": INVITE_ORIGIN_SHARING_CONSENT,
-  "/settings/association": INVITE_ORIGIN_SHARING_CONSENT,
+  "#settings/association": INVITE_ORIGIN_SHARING_CONSENT,
 };
 
 // ----------------------------------------------------------------------------

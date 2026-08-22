@@ -349,11 +349,15 @@ test("the email links to the full preference screen as well as the one-category 
   // constant the renderer uses, so it follows that constant wherever it goes —
   // including back to a bare `/settings`. This one goes red.
   //
-  // It is a ROUTE and no longer a `#notification-preferences` fragment (#615,
-  // ruled 2026-08-21 §187): settings is a modal addressed by section, so the
-  // matrix has a URL the server can see. The claim is unchanged — the reader
-  // must land ON the preference matrix, never at the top of Settings.
-  assert.ok(sent[0].html.includes(`${BASE_URL}/settings/notifications`));
+  // A PATH PLUS A SECTION FRAGMENT since #657 (ruled 2026-08-22): settings is
+  // client state over the current screen, so the section is named where the
+  // browser reads it and the path is the screen it opens over. It is still not
+  // #467's `#notification-preferences`, which pointed at a heading to scroll to.
+  // The claim is unchanged through all three spellings — the reader must land ON
+  // the preference matrix, never at the top of Settings.
+  assert.ok(
+    sent[0].html.includes(`${BASE_URL}/dashboard#settings/notifications`)
+  );
 });
 
 test("an email cannot be composed without a working unsubscribe link", async (t) => {

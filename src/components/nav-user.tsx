@@ -1,7 +1,6 @@
 "use client";
 
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
-import Link from "next/link";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -20,6 +19,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { logout } from "@/lib/auth/actions";
+import { SettingsLink } from "@/components/settings/settings-link";
+import { DEFAULT_SETTINGS_SECTION } from "@/lib/settings/sections";
 
 type NavUserProps = {
   user: {
@@ -105,16 +106,19 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                {/* The section, not the bare route (#615). This is an in-app
-                    navigation, so it is INTERCEPTED: the modal opens over
-                    whatever screen the reader is on and the screen stays
-                    mounted behind it. Naming the section means the URL that
-                    lands in history is the one the modal is actually showing,
-                    which is what Escape has to return from. */}
-                <Link href="/settings/account">
+                {/* A FRAGMENT, NOT A ROUTE (#657): following this is not a
+                    navigation at all, so the modal appears over whatever screen
+                    the reader is on, that screen is never re-rendered, and
+                    Escape takes the one history entry back off again.
+                    `SettingsLink` carries the anchor and the reason its click is
+                    handled rather than followed.
+
+                    The SECTION is named rather than a bare `#settings`, so the
+                    address the reader can copy is the one they are looking at. */}
+                <SettingsLink section={DEFAULT_SETTINGS_SECTION}>
                   <Settings />
                   Settings
-                </Link>
+                </SettingsLink>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

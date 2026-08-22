@@ -414,7 +414,7 @@ test("both acceptance screens carry the consent copy", async () => {
   const { OVERSIGHT_CONSENT_SURFACES, INVITE_ORIGIN_SHARING_CONSENT } =
     await import("@/lib/notifications/categories");
 
-  for (const route of ["/register?invitation=", "/settings/association"]) {
+  for (const route of ["/register?invitation=", "#settings/association"]) {
     assert.equal(
       OVERSIGHT_CONSENT_SURFACES[route],
       INVITE_ORIGIN_SHARING_CONSENT,
@@ -422,6 +422,11 @@ test("both acceptance screens carry the consent copy", async () => {
     );
   }
 
+  // THE ASSOCIATION SCREEN IS TWO FILES SINCE #657, and the claim splits with
+  // it: the section is a `"use client"` component, so the copy is SOURCED in
+  // `readAssociation` (which imports it from `categories.ts` and puts it in the
+  // view) and RENDERED in the section. Each file is asked for its own half —
+  // asking the component to import `categories.ts` would only prove it can.
   const screens = [
     path.join(
       process.cwd(),
@@ -431,14 +436,7 @@ test("both acceptance screens carry the consent copy", async () => {
       "register",
       "register-form.tsx"
     ),
-    path.join(
-      process.cwd(),
-      "src",
-      "components",
-      "settings",
-      "sections",
-      "association-section.tsx"
-    ),
+    path.join(process.cwd(), "src", "lib", "settings", "section-data.ts"),
   ];
 
   for (const screen of screens) {
@@ -467,7 +465,7 @@ test("both acceptance screens carry the consent copy", async () => {
     assert.match(
       body,
       /INVITE_ORIGIN_SHARING_CONSENT/,
-      `${path.basename(screen)} imports the consent copy but renders nothing`
+      `${path.basename(screen)} imports the consent copy but passes it nowhere`
     );
   }
 });
@@ -475,9 +473,34 @@ test("both acceptance screens carry the consent copy", async () => {
 test("the consent copy is shown only to a plant that has no overseer yet", async () => {
   // The copy says accepting "starts you off sharing", which is true of the
   // plant the write actually fires for and false of one that already has an
-  // overseer — the same condition, stated where the reader is. The association
-  // page already loads `getCurrentAssociations`, so this costs no query.
-  const page = readFileSync(
+  // overseer — the same condition, stated where the reader is. The read already
+  // loads `getCurrentAssociations`, so this costs no query.
+  const readModule = readFileSync(
+    path.join(process.cwd(), "src", "lib", "settings", "section-data.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    readModule,
+    /associations\.length === 0\s*\?\s*INVITE_ORIGIN_SHARING_CONSENT/,
+    "the consent copy is not gated on the plant having no association yet"
+  );
+
+  // And the sending-church answerer never gets it — which since #657 is a fact
+  // about the TYPE rather than about a branch anybody remembered to write.
+  // `AssociationSectionView` is a union on `answerer`, and only the `"plant"`
+  // arm has a `consent` field at all, so a sending church cannot be handed the
+  // copy even by mistake. This pins the read's own half: the second branch
+  // never names it.
+  const sendingChurchBranch = readModule.slice(
+    readModule.indexOf('answerer: "sending_church"')
+  );
+  assert.doesNotMatch(sendingChurchBranch, /INVITE_ORIGIN_SHARING_CONSENT/);
+
+  // …AND THE SECTION STILL DRAWS WHAT IT IS HANDED. Gating the copy correctly
+  // and then rendering none of it is the same failure with a cleaner diff, and
+  // the component no longer names the constant, so nothing above can see it.
+  const section = readFileSync(
     path.join(
       process.cwd(),
       "src",
@@ -488,18 +511,19 @@ test("the consent copy is shown only to a plant that has no overseer yet", async
     ),
     "utf8"
   );
+  const body = section
+    .replace(/^import[\s\S]*?from\s+"[^"]+";$/gm, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/.*$/gm, " ");
 
   assert.match(
-    page,
-    /associations\.length === 0\s*\?\s*INVITE_ORIGIN_SHARING_CONSENT/,
-    "the consent copy is not gated on the plant having no association yet"
+    body,
+    /consent=\{view\.consent\}/,
+    "the plant view does not pass the consent copy to the invitations card"
   );
-
-  // And the sending-church view never shows it: a sending church joining a
-  // network has no privacy row in the question and the accept writes it no
-  // toggles, so the notice would describe a consequence that does not happen.
-  const sendingChurchView = page.slice(
-    page.indexOf("function SendingChurchAssociation")
+  assert.match(
+    body,
+    /consent\.map\(/,
+    "the invitations card takes the consent copy and renders none of it"
   );
-  assert.doesNotMatch(sendingChurchView, /INVITE_ORIGIN_SHARING_CONSENT/);
 });

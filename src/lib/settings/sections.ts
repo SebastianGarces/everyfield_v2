@@ -16,25 +16,31 @@ import {
 // on, and "one settings registry — section id, label, icon, entry keywords,
 // required capability — drives the side nav, the search, and which sections
 // render for which account shape, so the section list is data, not per-page
-// conditionals".
+// conditionals". Ruled again 2026-08-22 (#657): its address is a FRAGMENT, and
+// the grammar of that fragment is at the foot of this file.
 //
 // This module is that list, and it is the ONLY one. Three consumers read it and
 // none of them keeps a copy:
 //
-//   * the side navigation and the search box (`settings-modal.tsx`), which is a
-//     CLIENT component — so nothing here may reach `@/db`. Both value imports
-//     are the import-free leaves that exist for exactly this (`./seat-rules`
-//     carries the argument in its own header);
-//   * the routes, which resolve `/settings/<section>` through
-//     `isSettingsSectionId` and refuse anything else;
+//   * the modal (`settings-modal.tsx`), which is a CLIENT component — so
+//     nothing here may reach `@/db`. Both value imports are the import-free
+//     leaves that exist for exactly this (`./seat-rules` carries the argument in
+//     its own header). It reads the nav, the search, and `#settings/<id>`;
+//   * `loadSettingsSection` (`./section-data.ts`), which resolves the id the
+//     browser asks for through `isSettingsSectionId` and refuses anything else;
 //   * `settingsSectionsFor`, which is the ONE answer to "which sections does
 //     this account see" — the gates below are the same predicates the old
-//     sibling pages redirected on, moved here rather than re-derived.
+//     sibling pages redirected on, moved here rather than re-derived. It is
+//     asked TWICE, and that is deliberate: the layout asks it to build the nav,
+//     and the loader asks it again before reading a row, so the visible list and
+//     the served section cannot disagree.
 //
 // A NEW SECTION IS A NEW ENTRY AND NOTHING ELSE. It appears in the nav, becomes
-// searchable, gains a URL and gains its gate by being added to the array; the
-// only other file it needs is the component that draws its body
-// (`@/components/settings/sections/`), wired in `settings-surface.tsx`.
+// searchable, gains an address and gains its gate by being added to the array;
+// the only other files it needs are its view model (`./section-view.ts`), the
+// read that fills it (`./section-data.ts`) and the component that draws it
+// (`@/components/settings/sections/`) — each of which is a total map over this
+// type, so the build names all three the moment an id is added.
 // ============================================================================
 
 export type SettingsSectionId =
@@ -240,8 +246,93 @@ export function isSettingsSectionId(value: string): value is SettingsSectionId {
   return SETTINGS_SECTIONS.some((section) => section.id === value);
 }
 
+// ----------------------------------------------------------------------------
+// THE ADDRESS — a fragment, not a route (#657, ruled 2026-08-22)
+//
+// Settings is client state layered over whatever screen the reader is on, so its
+// address is the part of the URL that never reaches the server:
+// `/meetings#settings/church`. Everything below is the whole grammar of it, and
+// it lives beside the registry because the set of legal addresses IS the section
+// list.
+//
+// This reverses the "real paths, never a hash" half of ruling 2026-08-21 §187.
+// That ruling's reason — the server must be able to see which section to render
+// — stopped applying when the sections became client-rendered: they are fed by
+// `loadSettingsSection`, which the browser calls with the id it read here.
+// ----------------------------------------------------------------------------
+
+/** What marks a fragment as a settings address, before the section id. */
+const SETTINGS_HASH_PREFIX = "settings";
+
+/**
+ * The fragment for a section — what a link on a dashboard screen points at.
+ *
+ * Relative on purpose: settings opens over the CURRENT page, so the href carries
+ * no path and following it changes no route.
+ */
 export function settingsSectionHref(id: SettingsSectionId): string {
-  return `/settings/${id}`;
+  return `#${SETTINGS_HASH_PREFIX}/${id}`;
+}
+
+/**
+ * Where the dashboard opens a settings section from OUTSIDE the app — mail, a
+ * bookmark, the old `/settings/*` redirects.
+ *
+ * A fragment needs a page to sit on, and `/dashboard` is the one every account
+ * can reach: an oversight account is bounced from it to `/oversight` by the
+ * page's own redirect, carrying the fragment with it, because a browser
+ * re-applies a fragment across a redirect whose Location carries none.
+ */
+export const SETTINGS_HOST_PATH = "/dashboard";
+
+export function settingsSectionUrl(id: SettingsSectionId): string {
+  return `${SETTINGS_HOST_PATH}${settingsSectionHref(id)}`;
+}
+
+/**
+ * The section a fragment names, or `null` when it names no settings at all.
+ *
+ * Total on purpose — every string a browser can put in `location.hash` has an
+ * answer, and only two of them are interesting:
+ *
+ *   * `#settings` and `#settings/<unknown>` open the DEFAULT section rather than
+ *     closing, so a typo or a retired id lands somewhere real. This is the same
+ *     correction the deleted routes made with a redirect;
+ *   * `#settings/sharing` is the one retired id in the wild
+ *     (`RETIRED_SETTINGS_SECTIONS`) and goes where its panel went.
+ *
+ * `settings-modal.tsx` rewrites the fragment to `settingsSectionHref` of what
+ * comes back, so the address bar cannot keep saying something the modal is not
+ * showing — a bookmarked `#settings/sharing` corrects itself to Church on the
+ * way in.
+ */
+export function settingsSectionFromHash(
+  hash: string
+): SettingsSectionId | null {
+  const fragment = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (
+    fragment !== SETTINGS_HASH_PREFIX &&
+    !fragment.startsWith(`${SETTINGS_HASH_PREFIX}/`)
+  ) {
+    return null;
+  }
+  return resolveSettingsSection(
+    fragment.slice(SETTINGS_HASH_PREFIX.length + 1)
+  );
+}
+
+/**
+ * The section an id NAMES, corrected — total, so it never needs a `!`.
+ *
+ * Split from the parse above because the retired `/settings/*` redirects ask
+ * exactly this and have already established that they are looking at a settings
+ * address. One spelling of "what does this id mean", read by the fragment parser
+ * and by the two redirect pages, so a retired id cannot go one place from the
+ * address bar and another from a mailed link.
+ */
+export function resolveSettingsSection(id: string): SettingsSectionId {
+  if (isSettingsSectionId(id)) return id;
+  return RETIRED_SETTINGS_SECTIONS[id] ?? DEFAULT_SETTINGS_SECTION;
 }
 
 /**

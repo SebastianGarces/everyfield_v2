@@ -109,6 +109,22 @@ test("the panel's write is guarded by the capability the panel asks for", () => 
     "sharing.toggle"
   );
 
+  // THE GATE MOVED INTO THE READ (#657) and became a SHAPE. `readChurch` asks
+  // `holdsSeatFor(user, "sharing.toggle")` and hands the section
+  // `sharing: null` when the answer is no, so the section has nothing to
+  // evaluate — there is no view reaching it that carries toggle state an Admin
+  // could be shown.
+  const read = readFileSync(
+    path.join(process.cwd(), "src/lib/settings/section-data.ts"),
+    "utf8"
+  );
+  assert.match(read, /holdsSeatFor\(user, "sharing\.toggle"\)/);
+  assert.match(
+    read,
+    /sharing: mayShare\s*\?/,
+    "the sharing block must be absent from the view, not merely unrendered"
+  );
+
   const section = readFileSync(
     path.join(
       process.cwd(),
@@ -116,7 +132,6 @@ test("the panel's write is guarded by the capability the panel asks for", () => 
     ),
     "utf8"
   );
-  assert.match(section, /holdsSeatFor\(user, "sharing\.toggle"\)/);
 
   // …and the panel is ABSENT rather than disabled for anyone else (ruling
   // 185 (7)). A `disabled` switch beside consent copy reads as "we decided this

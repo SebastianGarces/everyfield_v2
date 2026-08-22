@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { SettingsModal } from "@/components/settings/settings-modal";
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
@@ -16,6 +17,7 @@ import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
 import { accountInitials, userAvatarSrc } from "@/lib/profile-photo";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
+import { settingsSectionsFor } from "@/lib/settings/sections";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
 import {
   notificationViewer,
@@ -46,19 +48,8 @@ async function NotificationBellSlot({
 
 export default async function DashboardLayout({
   children,
-  settings,
 }: {
   children: React.ReactNode;
-  /**
-   * The settings modal's parallel slot (#615, ruled 2026-08-21 §187).
-   *
-   * It renders BESIDE `children`, never instead of it, which is the whole
-   * mechanism: `@settings/(.)settings/…` intercepts an in-app navigation to a
-   * settings URL, so this slot fills while the screen the reader was on stays
-   * mounted underneath with its state intact. On every other route the slot's
-   * `default.tsx` renders nothing.
-   */
-  settings: React.ReactNode;
 }) {
   const { user } = await getCurrentSession();
   const headersList = await headers();
@@ -203,11 +194,23 @@ export default async function DashboardLayout({
             >
               {children}
             </main>
-            {/* Beside `children`, not inside `<main>`: the modal is a sibling of
-              the screen it covers, and Radix portals it to the document body
-              regardless. Rendered here so it sits inside the router and sidebar
-              providers it reads. */}
-            {settings}
+            {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
+              (#657). It draws nothing until `location.hash` names a section, so
+              this costs one client component and no read; it lives beside
+              `<main>` rather than inside it because the modal covers the screen
+              rather than belonging to it, and Radix portals it to the document
+              body regardless.
+
+              Both props come from the session this layout already holds, so
+              opening settings costs no extra work here. `visibleIds` is the
+              NAV's list — `loadSettingsSection` asks the same gate again on the
+              server before it reads anything. */}
+            <SettingsModal
+              visibleIds={settingsSectionsFor(user).map(
+                (section) => section.id
+              )}
+              serverRenderId={crypto.randomUUID()}
+            />
             {!org && <WikiGuide />}
           </HeaderProvider>
         </SidebarInset>

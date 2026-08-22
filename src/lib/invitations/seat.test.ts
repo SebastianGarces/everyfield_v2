@@ -80,10 +80,16 @@ const TEAM_ACTIONS = sourceReader(
   stripComments(read("app", "(dashboard)", "settings", "team", "actions.ts")),
   "settings/team/actions.ts (stripped)"
 );
-// `/settings/team` is a SECTION of the settings modal since #615 — same URL,
-// same reads, same controls; the sibling page that drew them is gone.
+// `/settings/team` is a SECTION of the settings modal, and since #657 that
+// section is TWO FILES: `readTeam` in `section-data.ts` resolves the tenancy and
+// issues the reads, and `team-section.tsx` draws the controls. They are read
+// together here because every claim below is about the SURFACE — "the coach
+// sections are the plant's alone" is half a read that is not issued and half a
+// block that is not rendered, and splitting them would let either half be
+// gutted while the other still passed.
 const TEAM_PAGE = stripComments(
-  read("components", "settings", "sections", "team-section.tsx")
+  read("lib", "settings", "section-data.ts") +
+    read("components", "settings", "sections", "team-section.tsx")
 );
 const ORG_ACTIONS = sourceReader(
   stripComments(
