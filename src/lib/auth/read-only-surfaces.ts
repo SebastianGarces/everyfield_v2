@@ -174,6 +174,22 @@ export type ChecklistRow =
  * word that is also a verb, and a check that cries wolf gets deleted by the
  * next person. Every entry here is a verb this product's own write affordances
  * actually use.
+ *
+ * THREE DELIBERATE ABSENCES, each a decision rather than an oversight:
+ *
+ *   * "Generate" — the Documents row's whole verdict is that generating is a
+ *     `read` (`GET /api/documents/[templateId]`), so /documents telling every
+ *     seat to "Generate print-ready documents…" is correct. Adding the verb
+ *     would flag the one row this file says must stay ungated.
+ *   * "View", "Monitor" — reads. /teams/org-chart and /teams/health address
+ *     everybody honestly.
+ *   * "Manage", "Organize" — softer, and they cover /people, /teams and
+ *     /tasks, whose subtitles ("Manage your contacts and pipeline",
+ *     "Organize, staff, and track your ministry teams", "Manage your tasks and
+ *     follow-ups") are the same defect in a lower register. They are NOT
+ *     widened in here, because widening the list without fixing those pages
+ *     just moves the debt into an allowlist. #668 owns them, and adding the two
+ *     verbs is one of its acceptance criteria.
  */
 const WRITE_IMPERATIVES = [
   "Add",
@@ -212,11 +228,14 @@ const WRITE_IMPERATIVES = [
  * and asks for none; "Send messages and track communication" is an instruction
  * whichever clause follows.
  *
- * Written for a presentation module's test, not for a scan of JSX: every
- * capability-conditional sentence in this product lives in a pure `.ts` helper
- * so the repo's DOM-less `node:test` harness can read it (`launch/presentation.ts`,
- * `communication/presentation.ts`), and each of those tests asks this of the
- * copy its non-holder gets.
+ * APPLIED IN TWO PLACES, and both are needed. `read-only-surfaces.test.ts`
+ * scans every `(dashboard)` page's subtitle with it, which is what turns the
+ * fourth instance into a failing test instead of a fourth issue — it found
+ * /meetings' "Schedule, track, and analyze all your meetings" while this very
+ * fix was being written. And each surface's presentation module tests its own
+ * two branches with it (`launch/presentation.ts`, `communication/presentation.ts`,
+ * `meetings/copy.ts`), because a closed verb list cannot police a sentence it
+ * has never seen and those tests pin the exact strings.
  */
 export function readsAsAnImperative(copy: string): boolean {
   const firstWord = copy.trimStart().split(/[^A-Za-z']/, 1)[0];
@@ -291,6 +310,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "src/app/(dashboard)/meetings/page.tsx",
       "src/components/meetings/meeting-list.tsx",
     ],
+    note: 'THE SUBTITLE WAS STILL ASKING (#666, found by the scan rather than by a person). The page hid its Schedule Meeting button and /meetings/new redirects a Member, and the header underneath the h1 went on reading "Schedule, track, and analyze all your meetings" to every seat — three verbs a Member holds none of. It is `meetingsListSubtitle` in `src/lib/meetings/copy.ts` now, matched to `meetings.write`. This row is why the scan exists: the first sweep read the checklist as being about buttons, so a second surface kept the defect after the row was marked fixed.',
   },
   {
     surface:
@@ -365,7 +385,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
       "src/components/communication/resend-non-openers.tsx",
     ],
-    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. There is no 'new template' control to hide — templates are forked server-side on first edit. THE HEADER IS PART OF THE ROW TOO (#666): the hub's subtitle read \"Send messages and track communication with your people\" to every seat, which is the Dashboard row's #659 finding on a second surface — a call to action is a write affordance in sentence form, and the sweep's first pass read this row as being about buttons. Both capability-matched sentences now live in `src/lib/communication/presentation.ts`, tested, and `readsAsAnImperative` (below the types in this file) is the shared rule the launch surfaces read too. History and Templates were checked and left alone: their subtitles state a count and describe the list, and name no verb.",
+    note: "The compose and template-edit ROUTES are refused, not merely unlinked: a hidden button that leaves a reachable URL is a screen a Member still walks into and is refused at submit. There is no 'new template' control to hide — templates are forked server-side on first edit. THE HEADER IS PART OF THE ROW TOO (#666): the hub's subtitle read \"Send messages and track communication with your people\" to every seat, which is the Dashboard row's #659 finding on a second surface — a call to action is a write affordance in sentence form, and the sweep's first pass read this row as being about buttons. Both capability-matched sentences now live in `src/lib/communication/presentation.ts`, tested, and `readsAsAnImperative` (below the types in this file) is the shared rule — applied by a scan over every dashboard page's subtitle, which is what stops the next surface being found by hand. History and Templates come out clean under it: their subtitles state a count and describe the list, and name no verb.",
   },
   {
     surface: "Documents",

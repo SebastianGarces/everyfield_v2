@@ -240,7 +240,7 @@ test("all three of the hub's routes into compose are gated, not just the header 
     // track communication…". Both branch on the same flag rather than growing a
     // second.
     8,
-    "eight sites: `canSend` is declared once and read at every affordance — a new link into /compose, or a new sentence naming the verb, that does not read it is the drift this count catches"
+    "eight sites: `canSend` is declared once and read at every affordance — a new link into /compose that does not read it is the drift this count catches. A count catches an ADDED read, never an omitted one: a subtitle that hard-coded the imperative back would leave this at 8, and the scan in read-only-surfaces.test.ts is what covers that half."
   );
 });
 

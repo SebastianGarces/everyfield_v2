@@ -3,8 +3,10 @@
 //
 // WHY A MODULE AND NOT A TERNARY IN THE PAGE. The repo's harness runs
 // `src/**/*.test.ts` under node:test with no DOM, so copy that lives inside a
-// `.tsx` is copy no test can read. `launch/presentation.ts` was extracted for
-// the same reason and for the same defect (#659); this is that file's sibling.
+// `.tsx` is copy no test can read. `src/components/launch/presentation.ts` was
+// extracted for the same reason and for the same defect (#659); this one sits
+// under `lib/` rather than beside its components because its only consumer is
+// an `async` server page, matching `status-display.ts` next door.
 //
 // Keep it free of `@/db` and of anything a client component cannot import.
 // ============================================================================
@@ -32,10 +34,13 @@ export const ADMINS_SEND_THE_MESSAGES =
  * the recent list are all readable — rather than naming a verb they do not
  * hold.
  */
+export const HUB_SUBTITLE_FOR_A_READER =
+  "What your plant has sent, and how it was delivered";
+
 export function communicationHubSubtitle(canSend: boolean): string {
   return canSend
     ? "Send messages and track communication with your people"
-    : "What your plant has sent, and how it was delivered";
+    : HUB_SUBTITLE_FOR_A_READER;
 }
 
 /**

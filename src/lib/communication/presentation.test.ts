@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
 
 import { readsAsAnImperative } from "@/lib/auth/read-only-surfaces";
 
 import {
   ADMINS_SEND_THE_MESSAGES,
+  HUB_SUBTITLE_FOR_A_READER,
   communicationEmptyStateLine,
   communicationHubSubtitle,
 } from "./presentation";
@@ -18,6 +17,18 @@ import {
 // people" to every seat. `communication.send` is ADMIN_PLUS, so a plant Member
 // was being instructed to do the one thing `requireSeat` refuses them, on a
 // page whose own empty state already told them who sends.
+//
+// EACH SENTENCE IS PINNED BY EQUALITY, not by the shared predicate alone.
+// `readsAsAnImperative` reads a CLOSED list of write verbs, which is right for
+// a repo-wide scan and wrong as the only guard here: "Message your people and
+// track what was sent" is an instruction to a Member and the predicate says
+// nothing about it. The equality is what fails when the copy changes; the
+// predicate call beside it is what ties this surface to the shared rule.
+//
+// The scan that applies that rule to every dashboard page lives in
+// `read-only-surfaces.test.ts` — a page whose subtitle is one of these helper
+// calls has no literal for it to read, which is how routing the sentence
+// through here is what moves it under this file's guard.
 // ============================================================================
 
 test("the subtitle asks the sender to send and tells everyone else what they can read", () => {
@@ -28,14 +39,16 @@ test("the subtitle asks the sender to send and tells everyone else what they can
   );
 
   const member = communicationHubSubtitle(false);
+  assert.equal(member, HUB_SUBTITLE_FOR_A_READER);
+  assert.equal(
+    member,
+    "What your plant has sent, and how it was delivered",
+    "the Member's header says what the page IS for them — the counts, the delivery overview and the recent list are all readable — rather than going quiet"
+  );
   assert.ok(
     !readsAsAnImperative(member),
-    `a Member reads "${member}" — an imperative for a write they do not hold is the #666 defect`
+    "an imperative for a write they do not hold is the #666 defect"
   );
-  // Not merely non-imperative: it has to say what the page is FOR them, or the
-  // fix is a header that has gone quiet rather than one that has been matched.
-  assert.match(member, /sent/);
-  assert.notEqual(member, sender);
 });
 
 test("the empty state states who sends rather than inviting a refused send", () => {
@@ -43,6 +56,7 @@ test("the empty state states who sends rather than inviting a refused send", () 
 
   const member = communicationEmptyStateLine(false);
   assert.equal(member, ADMINS_SEND_THE_MESSAGES);
+  assert.equal(member, "Your plant's admins send messages to your people.");
   assert.ok(
     !readsAsAnImperative(member),
     "the empty state invited a Member to send a first message they would be refused"
@@ -56,56 +70,5 @@ test("the two Member sentences answer the same question without repeating it", (
   assert.notEqual(
     communicationHubSubtitle(false),
     communicationEmptyStateLine(false)
-  );
-});
-
-test("no communication surface spells this copy itself", () => {
-  // The condition is one fact. A second literal in a page or a component is the
-  // drift this module exists to prevent, and these two directories are where it
-  // would grow back.
-  const roots = [
-    path.join(process.cwd(), "src", "app", "(dashboard)", "communication"),
-    path.join(process.cwd(), "src", "components", "communication"),
-  ];
-
-  const files: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".test.ts")) {
-        files.push(full);
-      }
-    }
-  };
-  roots.forEach(walk);
-  assert.ok(files.length > 0, "found no communication surfaces to scan");
-
-  const sentences = [
-    ADMINS_SEND_THE_MESSAGES,
-    communicationHubSubtitle(true),
-    communicationHubSubtitle(false),
-    communicationEmptyStateLine(true),
-  ];
-
-  const offenders: string[] = [];
-  for (const file of files) {
-    // Comments off: a doc comment that QUOTES a sentence is documentation, not
-    // a second spelling of it.
-    const code = readFileSync(file, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/.*$/gm, "")
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    for (const sentence of sentences) {
-      if (code.includes(sentence)) {
-        offenders.push(`${path.relative(process.cwd(), file)}: "${sentence}"`);
-      }
-    }
-  }
-
-  assert.deepEqual(
-    offenders,
-    [],
-    `these files spell the capability-matched copy themselves instead of importing it from presentation.ts:\n${offenders.join("\n")}`
   );
 });

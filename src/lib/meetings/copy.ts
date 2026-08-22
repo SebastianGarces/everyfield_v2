@@ -131,3 +131,22 @@ export function meetingLinkedTaskProgressCopy(
 ): string {
   return `${completed} of ${total} ${total === 1 ? "task" : "tasks"} complete`;
 }
+
+/**
+ * The meetings list's subtitle — matched to the reader's seat (#666).
+ *
+ * It read "Schedule, track, and analyze all your meetings" to every seat, on a
+ * page that hides its Schedule Meeting button from anybody without
+ * `meetings.write` and whose /meetings/new route redirects them. That is the
+ * same defect as the Communication Hub's header and the Launch Sunday card
+ * before it: a call to action is a write affordance in sentence form, and a
+ * Member holds none of the three verbs this one named.
+ *
+ * `readsAsAnImperative` (`@/lib/auth/read-only-surfaces`) is the shared rule,
+ * and the scan in `read-only-surfaces.test.ts` is what found this line.
+ */
+export function meetingsListSubtitle(canWrite: boolean): string {
+  return canWrite
+    ? "Schedule, track, and analyze all your meetings"
+    : "Your plant's meetings, upcoming and past";
+}
