@@ -324,10 +324,23 @@ async function PlantAssociation({ churchId }: { churchId: string }) {
         // "What else they hear about stays yours to decide, on the sharing
         // screen" — true while an accepted plant started out sharing nothing,
         // and a misdescription of an accept that now turns every toggle on.
-        // What stays true is that the planter can change all of it afterwards,
-        // which is the consent copy's closing promise rather than this line's.
-        consequence="Accepting lists your plant in their directory and starts it sharing with them — all of which you can change afterwards."
-        consent={INVITE_ORIGIN_SHARING_CONSENT}
+        //
+        // The replacement states the listing and nothing else. It carries NO
+        // reversibility clause, deliberately: the first draft said "all of
+        // which you can change afterwards", which is false of the listing (it
+        // is ungated and lasts as long as the association) and false of six of
+        // the seven toggles (no switch exists for them yet). Reversibility is
+        // the consent copy's to state, where it is stated precisely.
+        consequence="Accepting lists your plant in their directory with its name, stage and launch date."
+        // ONLY WHERE THE COPY IS TRUE. It says accepting "starts you off
+        // sharing", and the write behind it fires only for a plant whose two
+        // oversight FKs are still null — a plant that already has an overseer
+        // has already made this decision, and its toggles are left alone. Same
+        // condition, stated where the reader is; `associations` is already
+        // loaded above, so this costs no query.
+        consent={
+          associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null
+        }
       />
 
       <section aria-labelledby="current-associations">

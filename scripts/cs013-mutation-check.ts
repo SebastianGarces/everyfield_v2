@@ -11,6 +11,13 @@
  * Every mutation is a string replacement that must match exactly once — a
  * mutation whose needle has drifted FAILS the run rather than quietly testing
  * nothing, which is the failure mode a mutation harness is most prone to.
+ *
+ * IT REFUSES TO RUN AGAINST A DIRTY TREE, and that is not tidiness. The restore
+ * reads the file's own contents as the thing to put back, so a run that starts
+ * on an already-mutated file would restore the MUTATION permanently — while the
+ * needle check might still find its one match and report "caught". Combined with
+ * the signal handlers below (a `finally` does not run on SIGINT), that is what
+ * makes "safe to rerun" true rather than merely claimed.
  */
 
 import { execFileSync } from "node:child_process";
@@ -27,68 +34,98 @@ type Mutation = {
   suite: string;
 };
 
+const DEFAULTS = "src/lib/privacy/sharing-defaults.ts";
+const CORE = "src/lib/invitations/core.ts";
+const COPY = "src/lib/notifications/categories.ts";
+
+const DEFAULTS_SUITE = "src/lib/privacy/sharing-defaults.test.ts";
+const ACCEPT_SUITE = "src/lib/invitations/association.test.ts";
+const COPY_SUITE = "src/lib/notifications/oversight.test.ts";
+
 const MUTATIONS: Mutation[] = [
   {
     claim: "the ON write covers every toggle the schema has",
-    file: "src/lib/auth/sharing-columns.ts",
+    file: DEFAULTS,
     from: '.filter(([, column]) => column.dataType === "boolean")\n  .map(([name]) => name as PrivacyColumn);',
     to: '.filter(([, column]) => column.dataType === "boolean")\n  .filter(([name]) => name !== "shareFinancials")\n  .map(([name]) => name as PrivacyColumn);',
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    suite: DEFAULTS_SUITE,
   },
   {
     claim: "the ON write is gated on the claim the accept won",
-    file: "src/lib/invitations/core.ts",
-    from: 'eq(organizationInvitations.status, "accepted"),\n              eq(\n                organizationInvitations.targetChurchId,',
-    to: "eq(\n                organizationInvitations.targetChurchId,",
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    file: DEFAULTS,
+    from: '            eq(organizationInvitations.status, "accepted"),\n',
+    to: "",
+    suite: DEFAULTS_SUITE,
   },
   {
-    claim: "the ON write reaches only the plant the invitation names",
-    file: "src/lib/invitations/core.ts",
-    from:
-      "eq(\n                organizationInvitations.targetChurchId,\n" +
-      "                churchPrivacySettings.churchId\n              )",
-    to: "eq(organizationInvitations.id, invitationId)",
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    claim: "an already-associated plant keeps the toggles it turned off",
+    file: DEFAULTS,
+    from: "            isNull(churches.sendingChurchId),\n            isNull(churches.sendingNetworkId)\n",
+    to: "",
+    suite: DEFAULTS_SUITE,
+  },
+  {
+    claim: "a plant with no privacy row still gets one",
+    file: DEFAULTS,
+    from: "    .onConflictDoUpdate({\n      target: churchPrivacySettings.churchId,",
+    to: "    .onConflictDoNothing({\n      target: churchPrivacySettings.churchId,",
+    suite: DEFAULTS_SUITE,
   },
   {
     claim: "the DB column defaults stay FALSE",
     file: "src/db/schema/church-privacy-settings.ts",
     from: 'sharePeople: boolean("share_people").default(false).notNull()',
     to: 'sharePeople: boolean("share_people").default(true).notNull()',
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    suite: DEFAULTS_SUITE,
   },
   {
     claim: "the sharing write is IN the acceptance batch",
-    file: "src/lib/invitations/core.ts",
-    from: "    audit,\n    sharing,\n  ]);",
-    to: "    audit,\n  ]);\n  await sharing;",
-    suite: "src/lib/invitations/association.test.ts",
+    file: CORE,
+    from: "    claim,\n    sharing,\n    association,",
+    to: "    claim,\n    association,",
+    suite: ACCEPT_SUITE,
+  },
+  {
+    claim:
+      "the sharing write reads the plant BEFORE the association sets its FK",
+    file: CORE,
+    from: "    claim,\n    sharing,\n    association,\n    audit,",
+    to: "    claim,\n    association,\n    audit,\n    sharing,",
+    suite: DEFAULTS_SUITE,
   },
   {
     claim: "the registration screen states the consent before accepting",
     file: "src/app/(auth)/register/register-form.tsx",
     from: "{INVITE_ORIGIN_SHARING_CONSENT.map((line) => (",
     to: "{[].map((line: string) => (",
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    suite: DEFAULTS_SUITE,
   },
   {
     claim: "the association screen states the consent before accepting",
     file: "src/app/(dashboard)/settings/association/page.tsx",
-    from: "consent={INVITE_ORIGIN_SHARING_CONSENT}",
-    to: "",
-    suite: "src/lib/invitations/sharing-defaults.test.ts",
+    from: "          associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null\n",
+    to: "          null\n",
+    suite: DEFAULTS_SUITE,
+  },
+  {
+    claim: "no screen invents a reversibility promise of its own",
+    file: "src/app/(dashboard)/settings/association/page.tsx",
+    from: 'consequence="Accepting lists your plant in their directory with its name, stage and launch date."',
+    to: 'consequence="Accepting lists your plant in their directory — all of which you can change afterwards."',
+    suite: COPY_SUITE,
   },
   {
     claim: "the consent copy names every consent-exempt event",
-    file: "src/lib/notifications/categories.ts",
+    file: COPY,
     from:
       '  "Three things reach them either way, because the relationship itself is theirs too:' +
       ' when you accept their invitation, when you decline one, and when your association with them ends.",\n] as const;',
     to: "] as const;",
-    suite: "src/lib/notifications/oversight.test.ts",
+    suite: COPY_SUITE,
   },
 ];
+
+const TOUCHED = [...new Set(MUTATIONS.map((m) => m.file))];
 
 function runSuite(suite: string): boolean {
   try {
@@ -108,10 +145,45 @@ function runSuite(suite: string): boolean {
   }
 }
 
+// A DIRTY TREE IS REFUSED, not warned about — see the header. Uncommitted work
+// in one of these files is indistinguishable from a mutation a killed run left
+// behind, and restoring over it would destroy real edits.
+try {
+  execFileSync("git", ["diff", "--quiet", "--", ...TOUCHED], {
+    cwd: process.cwd(),
+    stdio: "pipe",
+  });
+} catch {
+  console.error(
+    "REFUSING: uncommitted changes in a file this harness rewrites.\n" +
+      "Commit or stash them first — the restore would overwrite them.\n" +
+      TOUCHED.map((file) => `  ${file}`).join("\n")
+  );
+  process.exit(1);
+}
+
+/** Files currently holding a mutation, so a signal can put them back. */
+const inFlight = new Map<string, string>();
+
+function restoreAll(): void {
+  for (const [file, original] of inFlight) writeFileSync(file, original);
+  inFlight.clear();
+}
+
+// `finally` does not run on a signal, and an interrupted run that left a
+// deliberate bug in a checked-in file is the worst thing this script could do.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    restoreAll();
+    console.error(`\n${signal} — restored ${TOUCHED.length} file(s), exiting`);
+    process.exit(130);
+  });
+}
+
 let failures = 0;
 
-// The baseline first: a mutation harness reporting "caught" against an already
-// red suite proves nothing at all.
+// The baseline first: a harness reporting "caught" against an already red suite
+// proves nothing at all.
 for (const suite of new Set(MUTATIONS.map((m) => m.suite))) {
   if (!runSuite(suite)) {
     console.error(`BASELINE RED — ${suite} fails before any mutation`);
@@ -134,12 +206,15 @@ for (const mutation of MUTATIONS) {
     continue;
   }
 
+  inFlight.set(file, original);
   writeFileSync(file, original.replace(mutation.from, mutation.to));
+
   let caught: boolean;
   try {
     caught = !runSuite(mutation.suite);
   } finally {
     writeFileSync(file, original);
+    inFlight.delete(file);
   }
 
   console.log(

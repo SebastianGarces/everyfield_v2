@@ -466,6 +466,14 @@ test("no page hardcodes its own version of the consent promise", () => {
       /unless you turn sharing on/i,
       /get no updates/i,
       /reach them either way/i,
+      // ADDED BY #620's REVIEW. A page-local reversibility promise is the
+      // specific drift CS-013 nearly shipped: the association screen's own
+      // prose said accepting starts the plant sharing "all of which you can
+      // change afterwards", while six of the seven toggles have no switch and
+      // the directory listing is ungated. The three regexes above catch a page
+      // rewriting the SHARING promise; this one catches a page inventing a
+      // CONTROL promise, which is the same failure aimed at a different claim.
+      /you can change/i,
     ]) {
       assert.doesNotMatch(
         rendered,

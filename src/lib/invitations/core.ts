@@ -56,7 +56,6 @@ import { db } from "@/db";
 import {
   associationEvents,
   churches,
-  churchPrivacySettings,
   organizationInvitations,
   sendingChurches,
   sendingNetworks,
@@ -71,7 +70,6 @@ import type {
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
 import type { AssociationOrgType } from "@/db/schema";
-import { allSharingOn } from "@/lib/auth/sharing-columns";
 import {
   isOrgOwner,
   isOversightUser,
@@ -81,6 +79,7 @@ import {
   type TenancyFields,
 } from "@/lib/auth/tenancy";
 import { redactForLog } from "@/lib/email/redact";
+import { sharingDefaultsStatement } from "@/lib/privacy/sharing-defaults";
 import {
   announceAssociationEnded,
   announceInvitationAccepted,
@@ -1614,7 +1613,7 @@ export async function acceptInvitationAs(
   // later edit could make reachable.
   //
   // CS-013's sharing write joins the batch on the same terms and for the same
-  // reason (#620): TOTAL rather than conditional, so the count stayed a fact
+  // reason (#620): TOTAL rather than conditional, so the count stays a fact
   // about this function instead of becoming a thing that depends on the
   // invitation's type. It is five statements now, and still one shape.
   const audit = acceptedAssociationEventStatement(actor, {
@@ -1633,19 +1632,23 @@ export async function acceptInvitationAs(
   // so the toggles and the association commit together (ruling 2026-08-15
   // §187). It is TOTAL over the three invitation types and writes nothing for
   // the one with no plant in it, so this batch still has exactly ONE shape —
-  // see `sharingDefaultsStatement`, which carries the whole argument.
+  // `sharingDefaultsStatement` (`@/lib/privacy/sharing-defaults`) carries the
+  // whole argument, and this file stays ignorant of `church_privacy_settings`
+  // the way it is of `coach_assignments`.
   //
-  // LAST, after the audit, because it is the only statement here that neither
-  // gates nor is gated by another: the OV-008 ordering above (lock, claim,
-  // association, audit) is untouched and reads exactly as it did.
-  const sharing = sharingDefaultsStatement(actor, invitationId);
+  // BEFORE THE ASSOCIATION, and that placement is the rule rather than a
+  // preference: it fires only for a plant whose two oversight FKs are still
+  // NULL, so it has to read the row before the association write sets one.
+  // Batched after it, every re-accept from an org a plant already belongs to
+  // would reset toggles the planter had deliberately turned off.
+  const sharing = sharingDefaultsStatement(actor.id, invitationId);
 
-  const [, claimed, associated] = await db.batch([
+  const [, claimed, , associated] = await db.batch([
     lock,
     claim,
+    sharing,
     association,
     audit,
-    sharing,
   ]);
 
   const [updated] = claimed;
@@ -3239,90 +3242,6 @@ export function associationStatement(
         .returning({ id: sendingChurches.id });
     }
   }
-}
-
-/**
- * CS-013 — the invite-origin sharing defaults, written BY the acceptance.
- *
- * A plant that joins an org through an invitation starts sharing everything;
- * a self-started plant starts sharing nothing, and the DB column defaults stay
- * FALSE either way (ruled 2026-08-15, §187). The rationale is #193: the sending
- * org pays per plant, and paying while seeing nothing is the failure mode. What
- * keeps that from being consent nobody gave is the ACCEPTANCE SCREEN, which
- * states what the overseer will see before the planter presses Accept
- * (`INVITE_ORIGIN_SHARING_CONSENT`, `@/lib/notifications/categories`).
- *
- * THE WRITE LIVES HERE, IN THE ACCEPT'S OWN BATCH, AND THAT IS THE WHOLE
- * DESIGN. Both acceptance paths run through `acceptInvitationAs` — a planter
- * answering on `/settings/association`, and an INVITED planter registering,
- * whose registration hands off to `redeemRegistrationInvitation`
- * (`(auth)/register/actions.ts`) the moment their church exists. So one
- * statement in one batch serves both, and the toggles flip exactly when the
- * association commits: never before it, never without it.
- *
- * Writing it at REGISTRATION instead was considered and rejected (#620). The
- * redemption that follows the register batch is best-effort by construction —
- * it never throws, because an invitation that cannot be redeemed must not cost
- * somebody their account — so a plant whose redemption failed would have been
- * left sharing everything with an org it had not joined, holding an invitation
- * it could still DECLINE. Consent stated on an acceptance screen has to be
- * bought by the acceptance.
- *
- * *** IT IS TOTAL, NOT CONDITIONAL, AND THAT IS WHY IT NAMES NO TYPE. *** Only
- * two of the three invitation types have a plant to share: a sending church
- * joining a network has no `church_privacy_settings` row anywhere in the
- * question. Rather than branch — which would give `acceptInvitationAs` a second
- * batch shape, the thing the OV-008 audit rule spent a round removing — the
- * WHERE correlates the privacy row to the invitation's OWN `target_church_id`.
- * That column is NULL for `sending_church_to_network`, and `NULL = church_id`
- * is never true, so the statement matches no row and writes nothing without a
- * ternary anyone can later make reachable.
- *
- * *** AND IT RE-ASSERTS THE CLAIM, for the same reason `associationStatement`
- * does. *** `db.batch` is all-or-nothing on FAILURE only — a zero-row UPDATE is
- * a success — so a LOST claim rolls nothing back: the association matches
- * nothing, `acceptInvitationAs` throws, and this batch has already committed.
- * Without `status = 'accepted'` in the predicate, a planter whose accept was
- * refused would be told so while their plant quietly started sharing. The
- * predicate is the same `EXISTS` the association carries, extended by the
- * correlation, so the two statements cannot disagree about what "accepted"
- * means.
- *
- * Idempotent: re-running it sets true where true already is.
- */
-export function sharingDefaultsStatement(
-  actor: InvitationActor,
-  invitationId: string
-) {
-  return db
-    .update(churchPrivacySettings)
-    .set({
-      // Every toggle the schema HAS, never a list typed here (CS-013 AC5).
-      ...allSharingOn(),
-      // The planter who accepted. `updated_by` is the only provenance this
-      // table keeps, and the honest answer is the person who read the consent
-      // copy and pressed Accept — not null, which reads as "the system did it".
-      updatedBy: actor.id,
-      updatedAt: new Date(),
-    })
-    .where(
-      exists(
-        db
-          .select({ id: organizationInvitations.id })
-          .from(organizationInvitations)
-          .where(
-            and(
-              eq(organizationInvitations.id, invitationId),
-              eq(organizationInvitations.status, "accepted"),
-              eq(
-                organizationInvitations.targetChurchId,
-                churchPrivacySettings.churchId
-              )
-            )
-          )
-      )
-    )
-    .returning({ churchId: churchPrivacySettings.churchId });
 }
 
 /**

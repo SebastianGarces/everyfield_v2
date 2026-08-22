@@ -7,15 +7,15 @@ import { getTableColumns } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 
 import { churchPrivacySettings } from "@/db/schema";
+import { createAccountEntities } from "@/app/(auth)/register/account-entities";
+import { churchCreationStatements } from "@/lib/onboarding/create-church";
+import { sourceReader } from "@/lib/testing/source-span";
+
 import {
   SHARING_TOGGLE_COLUMNS,
   allSharingOn,
-} from "@/lib/auth/sharing-columns";
-import { churchCreationStatements } from "@/lib/onboarding/create-church";
-import { createAccountEntities } from "@/app/(auth)/register/account-entities";
-import { sourceReader } from "@/lib/testing/source-span";
-
-import { sharingDefaultsStatement, type InvitationActor } from "./core";
+  sharingDefaultsStatement,
+} from "./sharing-defaults";
 
 // ============================================================================
 // CS-013 (#620) — invite-origin sharing defaults.
@@ -33,17 +33,18 @@ import { sharingDefaultsStatement, type InvitationActor } from "./core";
 //      never off a list in this file — a hand-written expectation here would go
 //      stale the same way the write it is checking would.
 //
-// The two ACCEPTANCE PATHS are one statement, which is the design: an invited
+// THE TWO ACCEPTANCE PATHS ARE ONE STATEMENT, which is the design: an invited
 // planter's registration hands off to `redeemRegistrationInvitation`, which
 // calls the same `acceptInvitationAs` the association screen does. §4 pins that
 // hand-off, because it is the only thing making one statement enough for two
 // paths.
+//
+// §2 also carries the two properties #620's review added, both of which are
+// about a write that must NOT happen: an already-associated plant's toggles are
+// left alone, and a plant with no privacy row still gets one.
 // ============================================================================
 
-const ACTOR = {
-  id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-} as unknown as InvitationActor;
-
+const ACTOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const INVITATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const REGISTER = sourceReader(
@@ -62,6 +63,11 @@ const CORE = sourceReader(
   "invitations/core.ts"
 );
 
+const DEFAULTS = readFileSync(
+  path.join(process.cwd(), "src", "lib", "privacy", "sharing-defaults.ts"),
+  "utf8"
+);
+
 /**
  * A batched statement, read as the SQL it will send.
  *
@@ -77,6 +83,8 @@ const asQuery = (statement: BatchItem<"pg">) =>
 const DB_TOGGLE_COLUMNS = Object.values(getTableColumns(churchPrivacySettings))
   .filter((column) => column.dataType === "boolean")
   .map((column) => column.name);
+
+const rendered = () => sharingDefaultsStatement(ACTOR, INVITATION_ID).toSQL();
 
 // ----------------------------------------------------------------------------
 // §1 — the column set is the SCHEMA's (AC5)
@@ -95,8 +103,7 @@ test("the toggle set is every boolean column the privacy table has", () => {
   );
 
   // The non-toggle columns are excluded by their TYPE, so nothing has to
-  // remember to exclude them. Asserted positively: a `boolean` added to any of
-  // these names would be a real toggle and should join the set.
+  // remember to exclude them.
   for (const notAToggle of ["id", "churchId", "updatedAt", "updatedBy"]) {
     assert.ok(
       !SHARING_TOGGLE_COLUMNS.includes(notAToggle as never),
@@ -104,9 +111,9 @@ test("the toggle set is every boolean column the privacy table has", () => {
     );
   }
 
-  // Seven today: the six pull toggles and the push toggle. Stated as a floor
-  // rather than an equality so a new toggle does not fail this line for
-  // existing — the deepEqual above is what holds the set to the schema.
+  // Seven today: the six pull toggles and the push toggle. A floor rather than
+  // an equality, so a new toggle does not fail this line for existing — the
+  // deepEqual above is what holds the set to the schema.
   assert.ok(SHARING_TOGGLE_COLUMNS.length >= 7);
 });
 
@@ -136,82 +143,124 @@ test("all-on means all of them, every time it is asked", () => {
 // ----------------------------------------------------------------------------
 
 test("the acceptance turns every sharing column on", () => {
-  const { sql, params } = sharingDefaultsStatement(
-    ACTOR,
-    INVITATION_ID
-  ).toSQL();
+  const { sql, params } = rendered();
+
+  // BOTH HALVES OF THE UPSERT. The insert arm is what a plant with no privacy
+  // row gets; the conflict arm is what every ordinary plant gets. A toggle
+  // missing from either is a plant sharing part of itself.
+  const [insertArm, updateArm] = sql.split("do update set");
+  assert.ok(updateArm, "the statement is not an upsert");
 
   for (const column of DB_TOGGLE_COLUMNS) {
     assert.match(
-      sql,
+      insertArm,
+      new RegExp(`true as "${column}"`),
+      `the insert arm never writes ${column}`
+    );
+    assert.match(
+      updateArm,
       new RegExp(`"${column}" = \\$\\d+`),
-      `the accept never writes ${column}`
+      `the conflict arm never writes ${column}`
     );
   }
 
-  // …and it writes TRUE, not merely something. One bound `true` per toggle,
-  // ahead of the timestamp and the actor — a `false` slipping into this list
-  // would still match every assertion above.
-  assert.deepEqual(
-    params.slice(0, DB_TOGGLE_COLUMNS.length),
-    DB_TOGGLE_COLUMNS.map(() => true)
+  // …and it writes TRUE, not merely something: one bound `true` per toggle in
+  // the conflict arm. A `false` slipping into that list would satisfy every
+  // assertion above.
+  assert.equal(
+    params.filter((value) => value === true).length,
+    DB_TOGGLE_COLUMNS.length
   );
+  assert.ok(!params.includes(false), "the accept binds a false");
 
   // The planter who accepted, so the table's one piece of provenance names the
   // person who read the consent copy rather than reading as "the system did it".
-  assert.ok(params.includes(ACTOR.id), "the accept records no author");
+  assert.ok(params.includes(ACTOR), "the accept records no author");
 });
 
 test("the write is gated on the claim, so a lost accept shares nothing", () => {
-  const { sql, params } = sharingDefaultsStatement(
-    ACTOR,
-    INVITATION_ID
-  ).toSQL();
+  const { sql, params } = rendered();
 
-  // `db.batch` is all-or-nothing on FAILURE only — a zero-row UPDATE is a
+  // `db.batch` is all-or-nothing on FAILURE only — a zero-row write is a
   // success — so a lost claim rolls NOTHING back. Without this predicate a
   // planter whose accept was refused would be told so while their plant quietly
   // started sharing, which is the one outcome the consent copy cannot survive.
-  assert.match(sql, /exists \(/);
   assert.match(sql, /"organization_invitations"\."status" = \$\d+/);
   assert.ok(params.includes("accepted"), "the claim is not re-asserted");
   assert.ok(params.includes(INVITATION_ID));
 });
 
 test("the write reaches only the plant THIS invitation names", () => {
-  const { sql } = sharingDefaultsStatement(ACTOR, INVITATION_ID).toSQL();
+  const { sql } = rendered();
 
-  // The correlation is the whole tenancy guard AND the reason the statement
-  // needs no type switch: the privacy row is joined to the invitation's own
-  // `target_church_id`. An uncorrelated EXISTS would turn every plant in the
-  // database on the moment any invitation was accepted.
+  // The plant is READ OUT OF the invitation row through the join, never passed
+  // in, so there is no parameter for a caller to get wrong and no way to name a
+  // church the invitation did not target.
   assert.match(
     sql,
-    /"organization_invitations"\."target_church_id" = "church_privacy_settings"\."church_id"/
+    /inner join "churches" on "churches"\."id" = "organization_invitations"\."target_church_id"/
+  );
+  assert.match(sql, /select "churches"\."id"|, "churches"\."id",/);
+});
+
+test("only a plant that is actually starting out gets the defaults", () => {
+  // THE FINDING THIS CLOSES (#620 review). An accepted association does not
+  // block a later invitation — `assertNoDuplicatePending` refuses only a second
+  // PENDING one — and `unboundTargetSlot` deliberately lets an accept re-bind
+  // the org it already holds. So without this gate: a plant joins sending
+  // church A, the planter turns sharing off, A invites them again, they press
+  // Accept, and all seven toggles come back on, silently reversing an explicit
+  // withdrawal.
+  const { sql } = rendered();
+
+  assert.match(sql, /"churches"\."sending_church_id" is null/);
+  assert.match(sql, /"churches"\."sending_network_id" is null/);
+});
+
+test("the gate reads the plant BEFORE the association write sets its FK", () => {
+  // The gate above is only meaningful while the plant's row still says who it
+  // belonged to when the planter pressed Accept. Batched after the association,
+  // the FK it tests has already been written by this same transaction and the
+  // gate is dead — it would never match, and NO plant would get the defaults.
+  //
+  // Read off the batch, because the order is the whole property and nothing
+  // else in the suite can see it.
+  const accept = CORE.span(
+    "export async function acceptInvitationAs",
+    "async function announceSendingChurchAcceptedFor"
   );
 
-  // No unqualified UPDATE. The WHERE is the EXISTS and nothing else, so there is
-  // no second predicate to get wrong — but there must be one.
-  assert.match(sql, /where exists \(/);
+  assert.match(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*sharing,\s*association,\s*audit,?\s*\]\)/,
+    "the sharing write is not batched between the claim and the association"
+  );
 });
 
 test("an invitation with no plant in it is TOTAL, not skipped", () => {
-  // `sending_church_to_network` names no church, so `target_church_id` is NULL
-  // and `NULL = church_id` is never true: the statement matches no row and
-  // writes nothing, with no branch anybody can later make reachable.
+  // `sending_church_to_network` names no church, so `target_church_id` is NULL,
+  // the inner join matches nothing and the SELECT is empty — the statement
+  // writes nothing with no branch anybody can later make reachable.
   //
-  // Read off the SOURCE because that is where the property lives — the rendered
-  // SQL is identical for all three types, which IS the claim. A type switch here
-  // would give `acceptInvitationAs` a second batch shape, the thing the OV-008
-  // audit rule spent a round removing.
-  const builder = CORE.span(
-    "export function sharingDefaultsStatement",
-    "* Verify the actor has authority"
-  );
+  // Read off the SOURCE because that is where the property lives: the rendered
+  // SQL is identical for all three types, which IS the claim. A type switch
+  // here would give `acceptInvitationAs` a second batch shape, the thing the
+  // OV-008 audit rule spent a round removing.
+  assert.doesNotMatch(DEFAULTS, /switch \(/);
+  assert.doesNotMatch(DEFAULTS, /requireAssociationPair/);
+  assert.doesNotMatch(DEFAULTS, /case "church_to/);
+});
 
-  assert.doesNotMatch(builder, /switch \(/);
-  assert.doesNotMatch(builder, /requireAssociationPair/);
-  assert.doesNotMatch(builder, /case "church_to/);
+test("a plant with no privacy row still gets one", () => {
+  // THE OTHER FINDING (#620 review). A plain UPDATE matches nothing for a
+  // church whose privacy row was never written — `scripts/seed-dev-db.ts`
+  // creates churches without one — so the ruling would go silently unapplied
+  // on exactly the plants nobody notices. `ensureSharingRow` is an upsert for
+  // this reason; so is this.
+  const { sql } = rendered();
+
+  assert.match(sql, /^insert into "church_privacy_settings"/);
+  assert.match(sql, /on conflict \("church_id"\) do update set/);
 });
 
 // ----------------------------------------------------------------------------
@@ -221,7 +270,7 @@ test("an invitation with no plant in it is TOTAL, not skipped", () => {
 test("a self-started plant is created sharing nothing", () => {
   const statements = churchCreationStatements({
     churchId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    plantedBy: ACTOR.id,
+    plantedBy: ACTOR,
     plantedByName: "A Planter",
     plantedByEmail: "planter@example.com",
     name: "Grace Plant",
@@ -238,10 +287,11 @@ test("a self-started plant is created sharing nothing", () => {
 
   // EVERY toggle takes the COLUMN DEFAULT. Drizzle names each column in the
   // insert and writes the literal `default` where no value was supplied, so the
-  // assertion is on the VALUE at each toggle's own position — checking only that
-  // the column name is absent would pass against an insert that binds `true`
+  // assertion is on the VALUE at each toggle's own position — checking only
+  // that the column name is absent would pass against an insert binding `true`
   // into all seven.
-  for (const [column, value] of insertedValues(privacyInsert.sql)) {
+  const values = insertedValues(privacyInsert.sql);
+  for (const [column, value] of values) {
     if (!DB_TOGGLE_COLUMNS.includes(column)) continue;
     assert.equal(
       value,
@@ -256,7 +306,7 @@ test("a self-started plant is created sharing nothing", () => {
 
   // …and every toggle was actually seen, so a parse that matched nothing cannot
   // pass the loop above by being empty.
-  const covered = insertedValues(privacyInsert.sql).map(([column]) => column);
+  const covered = values.map(([column]) => column);
   for (const column of DB_TOGGLE_COLUMNS) {
     assert.ok(
       covered.includes(column),
@@ -313,7 +363,7 @@ test("an invited planter's registration writes the same privacy row", () => {
   const account = createAccountEntities(
     "planter",
     "Grace Plant",
-    ACTOR.id,
+    ACTOR,
     { name: "A Planter", email: "planter@example.com" },
     true
   );
@@ -347,6 +397,7 @@ test("an invited planter's registration accepts through the ordinary path", () =
   // invited planter silently stops getting the defaults and NOTHING else in the
   // suite notices — the association would still be written, and the plant would
   // simply share nothing.
+  //
   // `.after`, not `.span`: the redemption is the last function in the file, so
   // there is no anchor below it to bound a span with.
   const redeem = REGISTER.after("async function redeemRegistrationInvitation");
@@ -409,15 +460,48 @@ test("both acceptance screens carry the consent copy", async () => {
     // import that no longer feeds anything still names it. A consent notice
     // that is imported and never rendered is precisely the failure this test
     // exists to see.
-    const rendered = source
+    const body = source
       .replace(/^import[\s\S]*?from\s+"[^"]+";$/gm, " ")
       .replace(/\/\*[\s\S]*?\*\//g, " ")
       .replace(/^\s*\/\/.*$/gm, " ");
 
     assert.match(
-      rendered,
+      body,
       /INVITE_ORIGIN_SHARING_CONSENT/,
       `${path.basename(screen)} imports the consent copy but renders nothing`
     );
   }
+});
+
+test("the consent copy is shown only to a plant that has no overseer yet", async () => {
+  // The copy says accepting "starts you off sharing", which is true of the
+  // plant the write actually fires for and false of one that already has an
+  // overseer — the same condition, stated where the reader is. The association
+  // page already loads `getCurrentAssociations`, so this costs no query.
+  const page = readFileSync(
+    path.join(
+      process.cwd(),
+      "src",
+      "app",
+      "(dashboard)",
+      "settings",
+      "association",
+      "page.tsx"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    page,
+    /associations\.length === 0\s*\?\s*INVITE_ORIGIN_SHARING_CONSENT/,
+    "the consent copy is not gated on the plant having no association yet"
+  );
+
+  // And the sending-church view never shows it: a sending church joining a
+  // network has no privacy row in the question and the accept writes it no
+  // toggles, so the notice would describe a consequence that does not happen.
+  const sendingChurchView = page.slice(
+    page.indexOf("function SendingChurchAssociation")
+  );
+  assert.doesNotMatch(sendingChurchView, /INVITE_ORIGIN_SHARING_CONSENT/);
 });

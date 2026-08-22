@@ -341,15 +341,19 @@ test("the accept batches the audit rather than following it with a second call",
     "async function announceInvitationAcceptedForChurch"
   );
 
-  // FIVE STATEMENTS SINCE CS-013 (#620), and the sharing write is LAST. The
-  // audit's position in the sequence is what this test has always been about,
-  // and appending after it is what leaves that untouched: `sharing` gates
-  // nothing and is gated by nothing here — its own WHERE re-asserts the claim,
-  // exactly as the association's does — so no argument above depends on where
-  // it sits, while the four that DO depend on each other keep their order.
+  // FIVE STATEMENTS SINCE CS-013 (#620), and the sharing write sits BETWEEN the
+  // claim and the association. Its own gate is that the plant's two oversight
+  // FKs are still NULL — "this plant is starting out" — so it has to read the
+  // row before the association write sets one. Batched after, the gate could
+  // never match and no plant would get the defaults; `sharing-defaults.test.ts`
+  // pins that placement from the other side.
+  //
+  // The audit stays LAST and the three statements it has always followed keep
+  // their order relative to each other, so every argument this test was written
+  // about is untouched.
   assert.match(
     accept,
-    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,\s*sharing,?\s*\]\)/
+    /db\.batch\(\[\s*lock,\s*claim,\s*sharing,\s*association,\s*audit,?\s*\]\)/
   );
   // …and there is exactly ONE batch here. The audit-less spelling is GUARDED
   // AGAINST rather than guarded: it used to survive behind `audit ? … : …` for a

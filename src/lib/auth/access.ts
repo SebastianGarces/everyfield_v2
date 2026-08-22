@@ -6,7 +6,7 @@ import {
   type User,
   type ChurchPrivacySettings,
 } from "@/db/schema";
-import type { PrivacyColumn } from "@/lib/auth/sharing-columns";
+import type { PrivacyColumn } from "@/lib/privacy/sharing-defaults";
 // Imported for this module's OWN rules below, never re-served: `@/lib/auth/tenancy`
 // is the one place these come from, and a re-export from here — whose first
 // statement is `import { db } from "@/db"` — would give one authority policy two
@@ -129,7 +129,7 @@ export type PrivacyFeatureKey =
   | "facilities"
   | "oversight_activity";
 
-// The toggle column set is `./sharing-columns`'s, imported rather than declared
+// The toggle column set is `@/lib/privacy/sharing-defaults`'s, imported rather than declared
 // twice: CS-013's accept writes exactly the columns this map gates, so a second
 // spelling of "which columns are toggles" is the drift that would let the two
 // disagree about #62's wiki row.

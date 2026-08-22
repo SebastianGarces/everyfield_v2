@@ -571,6 +571,15 @@ export const OVERSIGHT_SHARING_TEASER =
  *     copy does. That list is true of the DIGEST; here `share_financials` is one
  *     of the toggles being turned on, so the honest limit is the shape of what
  *     oversight reads — totals, never the records behind them.
+ *   * AND IT DOES NOT PROMISE A PER-PART CONTROL, because there is not one.
+ *     Seven columns go on; exactly ONE of them has a switch anywhere in the
+ *     product — `share_activity_with_oversight`, on `/settings/sharing`. The six
+ *     pull toggles have no UI until #187's sharing panel ships
+ *     (`@/lib/oversight/sections` says so in its own words), so an earlier draft
+ *     of this line reading "any part of it, or all of it" described a screen the
+ *     planter does not have. What IS real today is that one switch and the
+ *     sever, and the copy names exactly those two. When #187 lands the six
+ *     switches this line goes back to naming them.
  *
  * ORDER IS LOAD-BEARING, as on every consent surface: the reversibility promise
  * comes before the three exemptions, so a reader does not meet "turn it off"
@@ -581,8 +590,8 @@ export const INVITE_ORIGIN_SHARING_CONSENT = [
   "They see totals — how many people sit at each stage, how often you meet and how attendance is running, how much work is open or finished, and how many ministry teams have a leader.",
   "Totals only, never the people behind them. No names, no notes, no messages, and no list of what you did.",
   "Once a day, on days something happened, they also get a summary of what changed, and they hear when you reach a new stage or set a launch date.",
-  "One thing this does not cover. Your plant is listed on their dashboard with its name, current stage and launch date whether you share or not.",
-  "Turn it off whenever you like, in Settings — any part of it, or all of it. Sharing stops at the next update, and nothing already sent is recalled.",
+  "One thing this does not cover. Your plant is listed on their dashboard with its name, current stage and launch date whether you share or not, and that listing stays as long as you belong to them.",
+  "The daily summary and those updates are yours to control: turn it off in Settings whenever you like, and sharing stops at the next update — nothing already sent is recalled. Leaving them stops the rest.",
   "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends.",
 ] as const;
 
