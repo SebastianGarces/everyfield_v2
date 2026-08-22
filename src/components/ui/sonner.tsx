@@ -30,12 +30,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
           // paints this control as a bordered 20px circle from its own
           // stylesheet, so unlike the dialog and sheet X — invisible until it
           // is hovered — growing the box here would be a visible change to
-          // every toast in the product. The painted circle keeps its 20px and a
-          // centred `::after` carries the hit area instead. Nothing else sits
-          // within 2px of the corner, so the larger target collides with
-          // nothing.
-          closeButton:
-            "after:absolute after:top-1/2 after:left-1/2 after:size-6 after:-translate-1/2",
+          // every toast in the product. The painted circle keeps its 20px and
+          // `hit-area-6` (globals.css) extends the target with a centred
+          // `::after`. The overlay's far edge lands 15px in and the toast pads
+          // its content to 16px, so it collides with nothing.
+          closeButton: "hit-area-6",
         },
       }}
       style={

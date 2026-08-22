@@ -134,6 +134,17 @@ test("every shared dismiss control compiles to a target of at least 24x24", asyn
         ? "its own border-box"
         : "the ::after that extends its hit area";
 
+    // Size alone is not the property for an overlay. A 24x24 `::after` that is
+    // not positioned is an ordinary child: it enlarges nothing, and because a
+    // close button is `display: flex` it becomes a flex item and shoves the
+    // glyph off centre — a visible regression the size check would call green.
+    if (control.mechanism === "overlay") {
+      assert.ok(
+        resolved.after.centred,
+        `${control.file} › ${control.control}: the ::after is not absolutely positioned and centred on the control, so it is sitting INSIDE the control rather than over it. It enlarges no target, and on a flex control it pushes the glyph off centre. Use the \`hit-area-*\` utility from globals.css rather than assembling the positioning by hand.`
+      );
+    }
+
     for (const axis of ["width", "height"] as const) {
       const measured = box[axis];
 
@@ -164,6 +175,13 @@ Measured by compiling "${classes}" through the project's own Tailwind.`
  * `showCloseButton` is deliberately NOT a tell: `command.tsx` forwards that prop
  * to `DialogContent` and owns no control of its own, which is the difference
  * between passing the flag and painting the button.
+ *
+ * WHAT THIS DOES NOT REACH: a call site that targets the control as a
+ * DESCENDANT. Neither Close takes a `className` prop, a `cn()` merge or a
+ * `{...props}` spread, so no consumer can shrink one directly — but a content
+ * class can still select it, and one does: `sidebar.tsx` passes
+ * `[&>button]:hidden` to `SheetContent` to remove its Close entirely.
+ * `[&>button]:size-4` would be the same move and nothing here would see it.
  */
 const DISMISS_TELL = /sr-only">(?:Close|Dismiss)|(?<![A-Za-z])closeButton\b/;
 

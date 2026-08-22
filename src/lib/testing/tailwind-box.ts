@@ -1,5 +1,15 @@
 /**
- * THE BOX A TAILWIND CLASS STRING ACTUALLY PAINTS, RESOLVED BY TAILWIND ITSELF.
+ * THE BOX A TAILWIND CLASS STRING DECLARES, RESOLVED BY TAILWIND ITSELF.
+ *
+ * DECLARES, not "renders", and the difference is the module's one limitation:
+ * what gets measured is an explicit `width`/`height` (`size-*`, or `w-*` with
+ * `h-*`), never a box that emerges from padding around an intrinsically sized
+ * child. `resolveTargetBox("p-2")` reports `null`, not 16-plus-padding, because
+ * answering that needs the glyph's intrinsic size and a layout engine. So a
+ * control whose target comes from padding is NOT measurable here — convert it
+ * to an explicit box or an `::after` overlay, which is the fix anyway. It fails
+ * closed: the unmeasurable case reports `null` and every caller reads that as
+ * under the floor.
  *
  * A target-size test can be written two ways, and only one of them is evidence.
  * The cheap way asserts on the CLASS NAME — `assert.match(classes, /size-6/)` —
@@ -164,25 +174,75 @@ export interface Box {
   readonly height: number | null;
 }
 
-/** The element's own box, and the box of any `::after` hit-area overlay. */
+/**
+ * An `::after` hit-area overlay: its box, and whether it is actually laid over
+ * the control.
+ *
+ * Size alone is not the property. An `::after` that is 24x24 but not positioned
+ * is a flex or block child INSIDE the control — it enlarges nothing, and on a
+ * `display: flex` control it shoves the glyph off centre. So the two halves are
+ * reported together and a caller has to check both.
+ */
+export interface Overlay extends Box {
+  /** Absolutely positioned and centred on the control. */
+  readonly centred: boolean;
+}
+
+/** The element's own box, and any `::after` hit-area overlay. */
 export interface TargetBox {
   readonly self: Box;
-  readonly after: Box;
+  readonly after: Overlay;
+}
+
+/**
+ * Read one declaration across the candidates that contributed to a block.
+ *
+ * A property declared TWICE is a throw, not a winner. Resolving it would mean
+ * reproducing Tailwind's cascade, and the obvious shortcut — last one in the
+ * class attribute wins — is simply false: Tailwind sorts utilities into its own
+ * emitted order, so `w-4 size-6` paints 16px wide while the attribute order says
+ * `size-6` is last. Reporting 24 there would be a FALSE PASS in the one
+ * direction this module must never fail. `prettier-plugin-tailwindcss` hides the
+ * problem for `className` literals by rewriting them into emitted order, but it
+ * does not touch object property values, so a class string in a `classNames`
+ * map keeps whatever order it was typed in.
+ */
+function readOnce(blocks: string[], property: string): string | null {
+  const values = blocks
+    .map((block) => declaration(block, property))
+    .filter((value): value is string => value !== null);
+
+  if (values.length > 1) {
+    throw new Error(
+      `tailwind-box: "${property}" is declared ${values.length} times (${values.join(
+        ", "
+      )}). Which one wins is Tailwind's sort order, not the class attribute's, so this module refuses to guess. Declare it once.`
+    );
+  }
+
+  return values.length === 0 ? null : values[0].trim() || null;
 }
 
 function measure(blocks: string[], spacing: string): Box {
   const read = (property: string): number | null => {
-    const values = blocks
-      .map((block) => declaration(block, property))
-      .filter((value): value is string => value !== null);
+    const value = readOnce(blocks, property);
 
-    // Last wins, as it does in the emitted stylesheet.
-    return values.length === 0
-      ? null
-      : toPx(values[values.length - 1], spacing);
+    return value === null ? null : toPx(value, spacing);
   };
 
   return { width: read("width"), height: read("height") };
+}
+
+/** Laid over the control, rather than sitting inside it as an ordinary child. */
+function isCentred(blocks: string[]): boolean {
+  const at = (property: string) => readOnce(blocks, property);
+
+  return (
+    at("position") === "absolute" &&
+    at("top") === "50%" &&
+    at("left") === "50%" &&
+    at("translate") === "-50% -50%"
+  );
 }
 
 /**
@@ -219,6 +279,9 @@ export async function resolveTargetBox(classes: string): Promise<TargetBox> {
 
   return {
     self: measure(selfBlocks, spacing),
-    after: measure(afterBlocks, spacing),
+    after: {
+      ...measure(afterBlocks, spacing),
+      centred: isCentred(afterBlocks),
+    },
   };
 }
