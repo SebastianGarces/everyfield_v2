@@ -102,14 +102,14 @@ const MUTATIONS: Mutation[] = [
   },
   {
     claim: "the association screen states the consent before accepting",
-    file: "src/app/(dashboard)/settings/association/page.tsx",
+    file: "src/components/settings/sections/association-section.tsx",
     from: "          associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null\n",
     to: "          null\n",
     suite: DEFAULTS_SUITE,
   },
   {
     claim: "no screen invents a reversibility promise of its own",
-    file: "src/app/(dashboard)/settings/association/page.tsx",
+    file: "src/components/settings/sections/association-section.tsx",
     from: 'consequence="Accepting lists your plant in their directory with its name, stage and launch date."',
     to: 'consequence="Accepting lists your plant in their directory — all of which you can change afterwards."',
     suite: COPY_SUITE,

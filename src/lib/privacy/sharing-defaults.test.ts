@@ -434,11 +434,10 @@ test("both acceptance screens carry the consent copy", async () => {
     path.join(
       process.cwd(),
       "src",
-      "app",
-      "(dashboard)",
+      "components",
       "settings",
-      "association",
-      "page.tsx"
+      "sections",
+      "association-section.tsx"
     ),
   ];
 
@@ -482,11 +481,10 @@ test("the consent copy is shown only to a plant that has no overseer yet", async
     path.join(
       process.cwd(),
       "src",
-      "app",
-      "(dashboard)",
+      "components",
       "settings",
-      "association",
-      "page.tsx"
+      "sections",
+      "association-section.tsx"
     ),
     "utf8"
   );
