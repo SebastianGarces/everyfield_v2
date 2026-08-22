@@ -113,28 +113,71 @@ function isSettingsHash(hash: string): boolean {
   return settingsSectionFromHash(hash) !== null;
 }
 
-function onHashChange() {
+/**
+ * Re-read the address bar and tell the store.
+ *
+ * `pushedHere` is decided HERE rather than by whoever moved the URL, because
+ * only a transition can answer it: a fragment that was absent a moment ago and
+ * is present now arrived on a NEW history entry — the rail replaces, and a cold
+ * load makes no transition at all. Forward after a Back-close lands here too,
+ * and it is a push in every sense that matters, because there is an entry behind
+ * it again.
+ */
+function onUrlChange() {
   const nowOpen = isSettingsHash(window.location.hash);
-  // A `hashchange` that OPENS settings can only have come from a push: the rail
-  // replaces, and a cold load fires no event at all. Forward after a Back-close
-  // lands here too, and it is a push in every sense that matters — there is an
-  // entry behind it again.
   if (nowOpen && !wasOpen) openedByPush = true;
   if (!nowOpen) openedByPush = false;
   wasOpen = nowOpen;
   for (const listener of listeners) listener();
 }
 
+/**
+ * WATCH THE HISTORY API, NOT ONLY `hashchange` — measured on the preview.
+ *
+ * `pushState` and `replaceState` fire NOTHING, and Next's client router writes
+ * every URL it navigates to with them. So an arrival that LANDS on a settings
+ * fragment through the router left this store holding the fragment the document
+ * had booted with, and the modal stayed shut with `#settings/notifications` in
+ * the address bar. Two shipped paths do exactly that: the login round trip,
+ * which follows a mailed `/settings/notifications` through its redirect to
+ * `/dashboard#settings/notifications`, and "Back to settings" on the
+ * verify-email screen.
+ *
+ * Patched once, never unpatched, and it DELEGATES rather than replaces — the
+ * original is called with the original arguments and its return value passed
+ * back, so the router is unaffected. `showSection` and `closeSettings` call
+ * `onUrlChange` themselves as well, which is a harmless second notification:
+ * re-reading the address bar is idempotent.
+ */
+let historyWatched = false;
+function watchHistory() {
+  if (historyWatched) return;
+  historyWatched = true;
+  for (const method of ["pushState", "replaceState"] as const) {
+    const original = window.history[method];
+    window.history[method] = function (...args: Parameters<typeof original>) {
+      const result = original.apply(window.history, args);
+      onUrlChange();
+      return result;
+    };
+  }
+}
+
 function subscribe(onStoreChange: () => void): () => void {
   if (listeners.size === 0) {
     wasOpen = isSettingsHash(window.location.hash);
-    window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("hashchange", onUrlChange);
+    // Back and Forward through a router-driven entry, which reports as a pop
+    // rather than as a fragment change.
+    window.addEventListener("popstate", onUrlChange);
+    watchHistory();
   }
   listeners.add(onStoreChange);
   return () => {
     listeners.delete(onStoreChange);
     if (listeners.size === 0) {
-      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("hashchange", onUrlChange);
+      window.removeEventListener("popstate", onUrlChange);
     }
   };
 }
@@ -145,12 +188,14 @@ const getServerSnapshot = () => "";
 /**
  * Show a section without touching the history stack.
  *
- * `replaceState` fires no `hashchange`, so the store is notified by hand — which
- * also keeps `openedByPush` correct, because a switch is not an opening.
+ * `replaceState` fires no `hashchange`. The store watches the history API too
+ * (`watchHistory`), so this is already noticed; the explicit call keeps this
+ * function correct on its own terms rather than by a side effect of a patch
+ * somewhere above it.
  */
 function showSection(id: SettingsSectionId) {
   window.history.replaceState(null, "", settingsSectionHref(id));
-  onHashChange();
+  onUrlChange();
 }
 
 function closeSettings() {
@@ -166,7 +211,7 @@ function closeSettings() {
     "",
     window.location.pathname + window.location.search
   );
-  onHashChange();
+  onUrlChange();
 }
 
 // ----------------------------------------------------------------------------
