@@ -10,7 +10,7 @@ import { beforeEach, test } from "node:test";
 // three are about what happens WHEN, and the only way to see that is to run it:
 //
 //   * Close walked the reader off the page when the arrival changed the page and
-//     the fragment in one entry (`verify-email-confirm.tsx` does exactly that);
+//     the fragment in one entry (`verify-email/confirmed` does exactly that);
 //   * a read outlived the visit, so reopening a section showed the previous
 //     visit's rows;
 //   * a failed read was cached under a key nothing moved, so a retry replayed it.
@@ -209,7 +209,7 @@ test("switching sections replaces, so settings is ONE entry however far you roam
 });
 
 test("an arrival that changes PAGE and fragment together closes in place", async () => {
-  // THE REGRESSION, and it shipped once. `verify-email-confirm.tsx` links to
+  // THE REGRESSION, and it shipped once. `verify-email/confirmed` links to
   // `/dashboard#settings/account` from `/verify-email`, which is inside the
   // dashboard group — so the modal is already mounted and the router's push
   // moves the page and the fragment in ONE entry. A latch that watched only the

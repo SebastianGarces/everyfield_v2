@@ -35,9 +35,10 @@ import type { SettingsSectionLoad } from "@/lib/settings/section-view";
 //          the page rather than close the modal.
 //
 // THE PAGE HALF OF THAT LAST RULE IS LOAD-BEARING and was missed on the first
-// pass. `verify-email-confirm.tsx` links to `/dashboard#settings/account` from
-// `/verify-email`, which is inside the dashboard group — so the modal is already
-// mounted, the router's push changes path AND fragment in one entry, and a
+// pass. `verify-email/confirmed/page.tsx` links to `/dashboard#settings/account`
+// and sits inside the dashboard group — so the modal is already mounted when the
+// reader presses it, the router's push changes path AND fragment in one entry,
+// and a
 // latch that watched only the fragment concluded "this document pushed it" and
 // closed by walking the reader back to a consumed token screen.
 //
