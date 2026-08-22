@@ -6,6 +6,7 @@ import {
   type User,
   type ChurchPrivacySettings,
 } from "@/db/schema";
+import type { PrivacyColumn } from "@/lib/auth/sharing-columns";
 // Imported for this module's OWN rules below, never re-served: `@/lib/auth/tenancy`
 // is the one place these come from, and a re-export from here — whose first
 // statement is `import { db } from "@/db"` — would give one authority policy two
@@ -128,16 +129,10 @@ export type PrivacyFeatureKey =
   | "facilities"
   | "oversight_activity";
 
-/**
- * The names of the boolean toggle columns on church_privacy_settings — the
- * mapped type rejects `id`, `churchId`, `updatedAt` etc. at compile time, so a
- * mapped column is a boolean by construction and needs no runtime cast.
- */
-type PrivacyColumn = {
-  [K in keyof ChurchPrivacySettings]: ChurchPrivacySettings[K] extends boolean
-    ? K
-    : never;
-}[keyof ChurchPrivacySettings];
+// The toggle column set is `./sharing-columns`'s, imported rather than declared
+// twice: CS-013's accept writes exactly the columns this map gates, so a second
+// spelling of "which columns are toggles" is the drift that would let the two
+// disagree about #62's wiki row.
 
 /** Maps feature keys to their corresponding column in church_privacy_settings */
 const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
