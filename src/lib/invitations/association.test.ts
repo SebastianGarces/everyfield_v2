@@ -341,22 +341,37 @@ test("the accept batches the audit rather than following it with a second call",
     "async function announceInvitationAcceptedForChurch"
   );
 
+  // FIVE STATEMENTS SINCE CS-013 (#620), and the sharing write is LAST. The
+  // audit's position in the sequence is what this test has always been about,
+  // and appending after it is what leaves that untouched: `sharing` gates
+  // nothing and is gated by nothing here — its own WHERE re-asserts the claim,
+  // exactly as the association's does — so no argument above depends on where
+  // it sits, while the four that DO depend on each other keep their order.
   assert.match(
     accept,
-    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,?\s*\]\)/
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,\s*sharing,?\s*\]\)/
   );
-  // …and there is exactly ONE batch here. The audit-less three-statement
-  // spelling is GUARDED AGAINST rather than guarded: it used to survive behind
-  // `audit ? … : …` for a row whose type-implied ids were missing, documented as
-  // unreachable because `associationStatement` throws on the same id pairs
-  // fifteen lines earlier. "Unreachable because another function happens to run
-  // first" is not a guarantee — it is one refactor away from being an
-  // association committed with no `association_events` row, which OV-008
-  // forbids. `auditableAssociationOrg` is total now, so the shorter batch has no
-  // spelling in the file for a later edit to reach.
+  // …and there is exactly ONE batch here. The audit-less spelling is GUARDED
+  // AGAINST rather than guarded: it used to survive behind `audit ? … : …` for a
+  // row whose type-implied ids were missing, documented as unreachable because
+  // `associationStatement` throws on the same id pairs fifteen lines earlier.
+  // "Unreachable because another function happens to run first" is not a
+  // guarantee — it is one refactor away from being an association committed with
+  // no `association_events` row, which OV-008 forbids. `auditableAssociationOrg`
+  // is total now, so the shorter batch has no spelling in the file for a later
+  // edit to reach.
+  //
+  // BOTH shorter spellings are refused, because CS-013 added a second way to
+  // write one: dropping `sharing` for the invitation type that has no plant
+  // would be the ternary `sharingDefaultsStatement` was made total to avoid, and
+  // it would read here as the four-statement batch this line already forbids.
   assert.doesNotMatch(
     accept,
     /db\.batch\(\[\s*lock,\s*claim,\s*association,?\s*\]\)/
+  );
+  assert.doesNotMatch(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,?\s*\]\)/
   );
   assert.equal(accept.match(/db\.batch\(\[/g)?.length, 1);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
