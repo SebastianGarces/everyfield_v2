@@ -38,24 +38,36 @@ function optionalTokensOn(line: string): string[] {
 }
 
 test("an optional token is the ONLY thing on its line, in every seeded template", () => {
-  // The prefix belongs INSIDE the value (`merge.ts`). Anything else sharing the
-  // line — a 📍, an "Agenda:", a "Where:" — survives the value it introduces,
-  // because the merge engine has no conditionals and the drop rule can only
-  // delete a whole line.
+  // Anything else sharing the line — a 📍, an "Agenda:", a "Where:" — survives
+  // the value it introduces, because the merge engine has no conditionals and
+  // the drop rule can only delete a whole line. Two ways out: give the token its
+  // own line, or fold the prefix into the value the way `formatLocationForEmail`
+  // and `formatAgendaForEmail` do.
+  assert.ok(
+    OPTIONAL_TOKENS.size >= 2,
+    "no merge field is marked `optional` — this walk would assert nothing"
+  );
+
+  let linesChecked = 0;
   for (const template of SYSTEM_TEMPLATES) {
     for (const line of template.body.split("\n")) {
       const optional = optionalTokensOn(line);
       if (optional.length === 0) continue;
+      linesChecked += 1;
 
       assert.equal(
         line.trim(),
         `{{${optional[0]}}}`,
         `"${template.name}" writes more than {{${optional[0]}}} on one line: ` +
-          `"${line}" — that text outlives an empty value. Move it into the ` +
-          `value (see formatLocationForEmail / formatAgendaForEmail).`
+          `"${line}" — that text outlives an empty value.`
       );
     }
   }
+
+  assert.ok(
+    linesChecked > 0,
+    "the walk examined no line holding an optional token"
+  );
 });
 
 test("no seeded template names a merge field that does not exist", () => {

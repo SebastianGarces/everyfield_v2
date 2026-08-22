@@ -10,7 +10,12 @@
 import { formatDateTime } from "@/lib/datetime";
 import { meetingTypeLabel } from "@/lib/meetings/labels";
 import { parseAgenda, type AgendaSection } from "@/lib/meetings/agenda";
-import { escapeMergeValues } from "@/lib/rich-text/format";
+import {
+  escapeMergeValues,
+  isRichTextEmpty,
+  richTextToPlainText,
+} from "@/lib/rich-text/format";
+import { VOID_TAGS } from "@/lib/rich-text/sanitize";
 
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
@@ -27,11 +32,16 @@ export interface MergeFieldDefinition {
    * This field's value can be the EMPTY STRING — the fact is one a meeting or a
    * church may simply not have.
    *
-   * The flag lives on the definition rather than in a list beside it, so the two
-   * rules that depend on it read the same source: `renderEmailBodyHtml` deletes
-   * the line such a field emptied, and `system-templates.test.ts` fails a
-   * template body that writes anything else on that line. Both are unsound for a
-   * field that ALWAYS renders — dropping the date's line would delete the date.
+   * SO IT MUST OWN ITS LINE in any template body that uses it: text sharing that
+   * line survives the value, which is how a meeting with no location shipped a
+   * bare 📍 (#625) and one with no agenda a bare "Agenda:" (#612). That is what
+   * `system-templates.test.ts` walks the catalog to enforce, and this flag is
+   * where it reads the list — on the definition rather than beside it, so a
+   * field added to `MERGE_FIELDS` is covered without anyone remembering.
+   *
+   * It is NOT what `renderEmailBodyHtml` consults. The drop there is decided by
+   * the VALUE (`""`), because a body may carry a token this registry has never
+   * heard of — a church's own field — and the rule is the same for it.
    */
   optional?: true;
 }
@@ -334,7 +344,10 @@ export function buildMeetingMergeData(meeting: {
   const typeLabel = meetingTypeLabel(meeting.type);
 
   return {
-    meeting_title: meeting.title ?? typeLabel,
+    // `||`, not `??`: the column is nullable AND its validator accepts "",
+    // so a meeting saved with a blank title must still fall back to the label
+    // rather than rendering an empty subject.
+    meeting_title: meeting.title || typeLabel,
     meeting_type: typeLabel,
     // Zone-pinned: this runs both on the server (sending mail) and inside the
     // client preview on /meetings/[id]. A locale-default format would put a
@@ -402,50 +415,98 @@ function withNormalisedNewlines(
  * including ones with no meeting and no merge field in them. Asking the
  * template which line belongs to which token keeps the rule where the intent is.
  */
-const TOKEN_ONLY_LINE = /^(?:\s|&nbsp;)*\{\{(\w+)\}\}(?:\s|&nbsp;)*$/;
-
-/** One `<p …>`, what it holds, and its `</p>`. */
-const PARAGRAPH = /(<p\b[^>]*>)([\s\S]*?)(<\/p>)/gi;
-
-/** The break BETWEEN two lines of one paragraph. */
-const LINE_BREAK = /<br\s*\/?>/gi;
-
-/** Nothing a recipient would see — whitespace and non-breaking spaces only. */
-const INVISIBLE = /^(?:\s|&nbsp;)*$/;
-
-/** `TOKEN_ONLY_LINE` for the text/plain half, where a line break is `\n`. */
-const TOKEN_ONLY_TEXT_LINE = /^\s*\{\{(\w+)\}\}\s*$/;
+const TOKEN_ONLY = /^\s*\{\{(\w+)\}\}\s*$/;
 
 /**
- * Delete every line an emptied token would have filled, and the paragraph if
- * that was all it held.
+ * ONE block, opened and closed by the SAME tag — `<p>` or `<li>`, the two things
+ * the sanitiser allows that hold a line of prose.
+ *
+ * The backreference is load-bearing: without it a lazy `<p>|<li>` open could
+ * pair with the other's close, and `<li><p>x</p></li>` would "close" the `<li>`
+ * at `</p>` and rebuild across a tag boundary.
+ */
+const BLOCK = /(<(p|li)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi;
+
+/** The break BETWEEN two lines of one block. */
+const LINE_BREAK = /<br\s*\/?>/gi;
+
+/** `<name`, `</name`, or `<name attr …>`, for the balance check below. */
+const ANY_TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g;
+
+/**
+ * Does every tag this run opens also close inside it?
+ *
+ * Deleting a run of markup is only safe if the run is self-contained. A wrapper
+ * that spans a line break — `<em>a<br>{{x}}</em>` — puts its `</em>` in the
+ * SECOND line, so dropping that line alone would leave `<em>` open and hand the
+ * sanitiser's output to an inbox unbalanced. Such a line is kept instead; the
+ * fact renders empty inside its wrapper, which is a cosmetic miss rather than
+ * broken markup.
+ */
+function selfContained(run: string): boolean {
+  const open: string[] = [];
+  for (const [, closing, rawName] of run.matchAll(ANY_TAG)) {
+    const name = rawName.toLowerCase();
+    if (VOID_TAGS.has(name)) continue;
+    if (closing) {
+      if (open.pop() !== name) return false;
+    } else {
+      open.push(name);
+    }
+  }
+  return open.length === 0;
+}
+
+/**
+ * Delete every line an emptied token would have filled, and the block if that
+ * was all it held.
+ *
+ * WHAT COUNTS AS "the line is only this token" IS ITS VISIBLE TEXT, not its
+ * markup, and that is the same question the text/plain half asks — one predicate
+ * (`TOKEN_ONLY`) against `richTextToPlainText` here and against the raw line
+ * there, so the two halves of one email break in the same places by
+ * construction. Matching the raw HTML instead let any inline wrapper hide the
+ * token: a planter who bolds `{{meeting_location}}` in a forked invitation got
+ * `<em></em>` and a dangling `<br>` in the HTML half while the text half
+ * dropped the line — the exact artifact this rule exists to prevent.
+ *
+ * The match is against the TEMPLATE, before substitution. The first spelling of
+ * this rule ran over the RENDERED body looking for `<p></p>`, which cannot tell
+ * a paragraph a token emptied from a blank line the planter typed — and
+ * `<p><br></p>` is exactly what this repo calls an author's blank line
+ * (`format.ts`, `isRichTextEmpty`). So a change scoped to "an absent agenda
+ * leaves no gap" silently restyled every outgoing email, including ones with no
+ * merge field in them. Asking the template which line belongs to which token
+ * keeps the rule where the intent is.
  *
  * A token with NO VALUE AT ALL is not this case — it is left in place, so the
- * compose preview can still draw its red "nothing resolved this" pill around it.
- * Only a token whose value is the empty STRING marks a fact the meeting does
- * not have.
+ * compose preview can still draw its red "nothing resolved this" pill around
+ * it. Only a token whose value is the empty STRING marks a fact the meeting
+ * does not have.
  *
- * A paragraph nothing was dropped from comes back byte-identical, which is what
- * keeps the planter's own blank line (`<p><br></p>`, `<p>&nbsp;</p>`) untouched:
- * its lines are empty but neither of them is a token, so the rule never fires.
+ * A block nothing was dropped from comes back byte-identical, which is what
+ * keeps the planter's own blank line untouched: its lines are empty but neither
+ * of them is a token, so the rule never fires.
  */
 function dropEmptiedLines(
   bodyHtml: string,
   values: Record<string, string>
 ): string {
   return bodyHtml.replace(
-    PARAGRAPH,
-    (paragraph, open: string, held: string, close: string) => {
+    BLOCK,
+    (block, open: string, _name: string, held: string, close: string) => {
       const lines = held.split(LINE_BREAK);
       const kept = lines.filter((line) => {
-        const token = TOKEN_ONLY_LINE.exec(line)?.[1];
-        return token === undefined || values[token] !== "";
+        const token = TOKEN_ONLY.exec(richTextToPlainText(line))?.[1];
+        return (
+          token === undefined || values[token] !== "" || !selfContained(line)
+        );
       });
 
-      if (kept.length === lines.length) return paragraph;
+      if (kept.length === lines.length) return block;
 
       const rebuilt = kept.join("<br />");
-      return INVISIBLE.test(rebuilt) ? "" : open + rebuilt + close;
+      return isRichTextEmpty(rebuilt) ? "" : open + rebuilt + close;
     }
   );
 }
@@ -503,7 +564,7 @@ export function renderEmailBodyText(
     .replace(NEWLINES, "\n")
     .split("\n")
     .filter((line) => {
-      const token = TOKEN_ONLY_TEXT_LINE.exec(line)?.[1];
+      const token = TOKEN_ONLY.exec(line)?.[1];
       return token === undefined || values[token] !== "";
     });
 
