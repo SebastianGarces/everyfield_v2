@@ -32,6 +32,7 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import { EmptyPortfolio } from "@/components/oversight/empty-portfolio";
 import { PlantFacts } from "@/components/oversight/plant-facts";
 import { formatPhase } from "@/lib/oversight/presentation";
 import type { OversightPlantSummary } from "@/lib/oversight/types";
@@ -74,7 +75,11 @@ export function PlantsDirectory({
       </header>
 
       {plants.length === 0 ? (
-        <EmptyDirectory scopeLabel={scopeLabel} canInvite={canInvite} />
+        // The words and the seat gate live in `EmptyPortfolio`, shared with the
+        // `/oversight` index (#636); the dashed card is this surface's own.
+        <div className="bg-card rounded-xl border border-dashed p-10 text-center">
+          <EmptyPortfolio scopeLabel={scopeLabel} canInvite={canInvite} />
+        </div>
       ) : (
         <ul className="grid gap-4">
           {plants.map((plant) => (
@@ -123,35 +128,5 @@ function PlantRow({ plant }: { plant: OversightPlantSummary }) {
 
       <PlantFacts plant={plant} />
     </li>
-  );
-}
-
-function EmptyDirectory({
-  scopeLabel,
-  canInvite,
-}: {
-  scopeLabel: string;
-  canInvite: boolean;
-}) {
-  return (
-    <div className="bg-card rounded-xl border border-dashed p-10 text-center">
-      <h2 className="font-semibold">No plants yet</h2>
-      <p className="text-muted-foreground mx-auto mt-2 max-w-md text-sm text-pretty">
-        A plant appears here once its planter accepts an invitation from your{" "}
-        {scopeLabel}.
-      </p>
-      {/* The sentence above is true for everyone; the call to action is only
-          offered to whoever can answer it. */}
-      {canInvite && (
-        <p className="mt-4 text-sm">
-          <Link
-            href="/oversight/invitations"
-            className="text-primary cursor-pointer font-medium underline underline-offset-4"
-          >
-            Invite a planter
-          </Link>
-        </p>
-      )}
-    </div>
   );
 }
