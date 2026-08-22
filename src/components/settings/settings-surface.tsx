@@ -89,9 +89,17 @@ const SECTION_BODIES: Record<
 
 export async function SettingsSurface({
   sectionId,
+  ownPath,
   overlaid,
 }: {
   sectionId: SettingsSectionId;
+  /**
+   * The path the route was matched at — `/settings/church`, or the bare
+   * `/settings`. It is NOT derivable from `sectionId`, because the bare route
+   * renders the default section: those two paths name the same section and are
+   * different addresses, and the modal has to tell them apart.
+   */
+  ownPath: string;
   /**
    * True when an intercepting route put this modal over a live screen, false
    * when the URL was loaded cold. The ROUTE knows which it is; nothing here can
@@ -114,19 +122,13 @@ export async function SettingsSurface({
     <SettingsModal
       activeId={sectionId}
       visibleIds={visible.map((section) => section.id)}
-      dismissal={
-        overlaid
-          ? { kind: "back" }
-          : // Nothing is behind a cold load, so closing goes to the account's
-            // own home rather than out of the app. Resolved here rather than
-            // pushed at `/dashboard` and letting its redirect fire, because an
-            // oversight account bouncing through a plant dashboard is a visible
-            // flash on the way to the screen it was always going to reach.
-            {
-              kind: "replace",
-              href: isOversightUser(user) ? "/oversight" : "/dashboard",
-            }
-      }
+      ownPath={ownPath}
+      overlaid={overlaid}
+      // Where Close goes when there is nothing behind the modal. Resolved here
+      // rather than pushing `/dashboard` and letting its own redirect fire,
+      // because an oversight account bouncing through a plant dashboard is a
+      // visible flash on the way to the screen it was always going to reach.
+      home={isOversightUser(user) ? "/oversight" : "/dashboard"}
     >
       <Body />
     </SettingsModal>

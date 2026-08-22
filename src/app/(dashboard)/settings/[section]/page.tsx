@@ -4,6 +4,7 @@ import {
   SettingsSurface,
   type SettingsSectionParams,
 } from "@/components/settings/settings-surface";
+import { settingsSectionHref } from "@/lib/settings/sections";
 
 // ============================================================================
 // `/settings/<section>` — the COLD-LOAD half (CS-001, #615).
@@ -34,9 +35,11 @@ export default async function SettingsSectionPage({
 }: {
   params: SettingsSectionParams;
 }) {
+  const sectionId = await settingsSectionFromParams(params);
   return (
     <SettingsSurface
-      sectionId={await settingsSectionFromParams(params)}
+      sectionId={sectionId}
+      ownPath={settingsSectionHref(sectionId)}
       overlaid={false}
     />
   );

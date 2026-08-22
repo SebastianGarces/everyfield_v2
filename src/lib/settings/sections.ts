@@ -195,19 +195,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
  */
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "account";
 
-/**
- * The dashboard's main region, which the modal focuses when it closes.
- *
- * It lives here rather than beside the layout because the modal is the only
- * reason it is needed, and because both ends of it — the `(dashboard)` layout
- * that stamps the id, and the client modal that focuses it — can import this
- * module. Settings is usually opened from a Settings item inside the avatar
- * dropdown, and that item is gone by the time the modal closes, so restoring
- * focus to "the trigger" lands on `<body>` and a keyboard reader has to tab
- * from the top of the document.
- */
-export const DASHBOARD_MAIN_ID = "dashboard-main";
-
 export function isSettingsSectionId(value: string): value is SettingsSectionId {
   return SETTINGS_SECTIONS.some((section) => section.id === value);
 }
@@ -238,8 +225,12 @@ export function sectionMatchesQuery(
 ): boolean {
   const needle = query.trim().toLowerCase();
   if (needle === "") return true;
+  // BOTH SIDES ARE LOWERCASED. Every keyword above happens to be lowercase
+  // today, so folding only the needle would work — right up to the first entry
+  // that writes "Sunday" or "UTC", which would then be silently unsearchable
+  // with nothing to fail.
   return (
     section.label.toLowerCase().includes(needle) ||
-    section.keywords.some((keyword) => keyword.includes(needle))
+    section.keywords.some((keyword) => keyword.toLowerCase().includes(needle))
   );
 }

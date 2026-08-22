@@ -3,6 +3,7 @@ import {
   SettingsSurface,
   type SettingsSectionParams,
 } from "@/components/settings/settings-surface";
+import { settingsSectionHref } from "@/lib/settings/sections";
 
 // ============================================================================
 // `/settings/<section>` INTERCEPTED — the overlay half (#615).
@@ -24,9 +25,11 @@ export default async function InterceptedSettingsSectionPage({
 }: {
   params: SettingsSectionParams;
 }) {
+  const sectionId = await settingsSectionFromParams(params);
   return (
     <SettingsSurface
-      sectionId={await settingsSectionFromParams(params)}
+      sectionId={sectionId}
+      ownPath={settingsSectionHref(sectionId)}
       overlaid={true}
     />
   );

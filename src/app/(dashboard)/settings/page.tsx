@@ -24,6 +24,10 @@ export const metadata: Metadata = {
 
 export default function SettingsPage() {
   return (
-    <SettingsSurface sectionId={DEFAULT_SETTINGS_SECTION} overlaid={false} />
+    <SettingsSurface
+      sectionId={DEFAULT_SETTINGS_SECTION}
+      ownPath="/settings"
+      overlaid={false}
+    />
   );
 }

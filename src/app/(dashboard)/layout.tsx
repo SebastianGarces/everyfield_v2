@@ -13,7 +13,7 @@ import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
-import { DASHBOARD_MAIN_ID } from "@/lib/settings/sections";
+import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
 import {
   notificationViewer,
   type NotificationViewer,

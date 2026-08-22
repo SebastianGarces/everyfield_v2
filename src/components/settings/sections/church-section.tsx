@@ -59,9 +59,14 @@ export async function ChurchSection() {
         </h2>
         <p className="text-muted-foreground text-sm text-pretty">
           {OVERSIGHT_SHARING_TEASER}{" "}
+          {/* A PLAIN PUSH, never `replace`. The modal owns the history policy
+              for the section navigation it draws; a section body spelling its
+              own gets it wrong, because it cannot see whether anything is
+              behind the modal. `replace` here overwrote the only entry a
+              cold-loaded reader had, and Close — a `back()` into an empty stack
+              — then did nothing at all, leaving them shut inside the modal. */}
           <Link
             href="/settings/sharing"
-            replace
             className="cursor-pointer font-medium underline underline-offset-4"
           >
             Choose what you share
