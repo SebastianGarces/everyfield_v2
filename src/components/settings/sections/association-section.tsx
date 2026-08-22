@@ -1,8 +1,6 @@
-import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { Building2, Inbox } from "lucide-react";
+import { redirect } from "next/navigation";
 
-import { HeaderBreadcrumbs } from "@/components/header";
 import {
   Card,
   CardContent,
@@ -13,9 +11,9 @@ import { verifySession } from "@/lib/auth/session";
 import { isOrgOwner, isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
 
-import { InvitationAnswer } from "./invitation-answer";
-import { LeaveNetworkDialog } from "./leave-network-dialog";
-import { LeaveOrgDialog } from "./leave-org-dialog";
+import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
+import { LeaveNetworkDialog } from "@/app/(dashboard)/settings/association/leave-network-dialog";
+import { LeaveOrgDialog } from "@/app/(dashboard)/settings/association/leave-org-dialog";
 import {
   getCurrentAssociations,
   getCurrentNetworkAssociation,
@@ -23,20 +21,21 @@ import {
   getPendingInvitationsForSendingChurch,
   type CurrentAssociationView,
   type PendingInvitationView,
-} from "./queries";
+} from "@/app/(dashboard)/settings/association/queries";
 
 // ============================================================================
 // The association area (#304 — OV-004, OV-006, OV-007a; WS3 2026-08-09).
 //
-// Its own screen rather than a section of `/settings`, on the same reasoning as
-// `/settings/sharing`: `/settings` is about how EveryField reaches YOU and is
-// per user; this is about who your organization belongs to, and it is the one
-// person's who may answer for it. Folding a decision that changes who can see
-// your plant into a list of personal notification preferences would make it
-// read as one more switch about email volume.
+// A SECTION OF THE SETTINGS MODAL SINCE #615, at its unchanged URL
+// `/settings/association` — the URL is in sent email, so it could not move. What
+// moved is the chrome: the breadcrumbs, the `<h1>` and the two role-specific
+// intro sentences are the modal's own title and description now, and the cards
+// below carry the role-specific facts they always did ("A plant can belong to a
+// sending church and to a network", "A sending church belongs to at most one
+// church planting network").
 //
 // ----------------------------------------------------------------------------
-// TWO ROLES, ONE SCREEN (#304 WS3, ruled 2026-08-09)
+// TWO ROLES, ONE SURFACE (#304 WS3, ruled 2026-08-09)
 // ----------------------------------------------------------------------------
 //
 // `memory/invariants.md` → Multi-Tenancy: no invitation that cannot be
@@ -58,16 +57,18 @@ import {
 //
 // NEITHER VIEW IS THE CONTROL. Whoever cannot act on either is redirected,
 // because there would be nothing on the screen for them — but every write
-// behind it refuses them again, server-side (`./actions.ts`,
+// behind it refuses them again, server-side (`association/actions.ts`,
 // `verifyInvitationAuthority`, OV-010 / ruled #274), so a forged POST that never
-// loaded this page meets the same statement the buttons do. In particular a
+// loaded this surface meets the same statement the buttons do. In particular a
 // non-admin member of a sending church is refused by the invitation's own
-// authority rule, not by this redirect.
+// authority rule, not by this redirect. The registry now asks the same union
+// (`canManageAssociation` in `@/lib/settings/sections`), so the side navigation
+// cannot list a section that would redirect its reader away.
 //
 // EVERY SECTION IS ANSWERED FROM THE SERVER. The reads run per request
-// (`force-dynamic`); nothing is cached and nothing is copied into client state,
-// so the moment an invitation is answered `refresh()` re-renders this tree and
-// the row is simply gone (`memory/contracts/data-patterns.md`).
+// (`force-dynamic` on the routes); nothing is cached and nothing is copied into
+// client state, so the moment an invitation is answered `refresh()` re-renders
+// this tree and the row is simply gone (`memory/contracts/data-patterns.md`).
 //
 // ----------------------------------------------------------------------------
 // WHY EACH SECTION IS A CARD (design pass, #304 "UI ruling round 3")
@@ -85,17 +86,11 @@ import {
 //
 // The semantics do NOT come from the card. `CardTitle` is a `div`; the section
 // headings here stay real `<h2>` elements owned by their `<section
-// aria-labelledby=…>`, so the page keeps a navigable outline that the
-// reference surface does not have.
+// aria-labelledby=…>`, so the section keeps a navigable outline under the
+// modal's own title that the reference surface does not have.
 // ============================================================================
 
-export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  title: "Association",
-};
-
-export default async function AssociationSettingsPage() {
+export async function AssociationSection() {
   const { user } = await verifySession();
 
   if (isPlantOwner(user) && user.churchId) {
@@ -105,7 +100,7 @@ export default async function AssociationSettingsPage() {
   // BOTH HALVES, LIKE `isPlantOwner` ABOVE (#500). This asked the tenancy alone
   // while a sending church had exactly one account, so "has a sending church"
   // and "is its Owner" were the same row. An org now has Admins and Members
-  // (AS-005), and every write on this screen — accept, decline, leave — is
+  // (AS-005), and every write on this surface — accept, decline, leave — is
   // Owner-only by ruling 185 (1), so the tenancy alone would render three
   // controls whose own guards are guaranteed to refuse the reader.
   const org = oversightOrgOf(user);
@@ -117,48 +112,15 @@ export default async function AssociationSettingsPage() {
 }
 
 // ----------------------------------------------------------------------------
-// Shared shell + sections
+// Shared pieces
 // ----------------------------------------------------------------------------
-
-function AssociationShell({
-  intro,
-  children,
-}: {
-  intro: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Settings", href: "/settings" },
-          { label: "Association" },
-        ]}
-      />
-
-      {/*
-        Two spacing steps, not one. The page header sits 32px above the stack of
-        cards and the cards sit 24px apart, while the gaps inside a card are
-        8px and under — so every gap is at least double the gap one level down
-        and the grouping reads without a single separator line.
-      */}
-      <div className="mx-auto w-full max-w-3xl space-y-8 p-4 md:p-6">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Association</h1>
-          <p className="text-muted-foreground text-sm text-pretty">{intro}</p>
-        </div>
-
-        <div className="space-y-6">{children}</div>
-      </div>
-    </>
-  );
-}
 
 /**
  * The section title, styled like `CardTitle` but kept a real heading.
  *
- * `CardTitle` renders a `div`, which would leave this page with an `h1` and no
- * sections under it. The id is what its `<section aria-labelledby>` points at.
+ * `CardTitle` renders a `div`, which would leave this pane with the modal's
+ * title and no sections under it. The id is what its `<section aria-labelledby>`
+ * points at.
  */
 function SectionTitle({ id, children }: { id: string; children: string }) {
   return (
@@ -316,7 +278,7 @@ async function PlantAssociation({ churchId }: { churchId: string }) {
   ]);
 
   return (
-    <AssociationShell intro="The sending church or network your plant belongs to, and any invitation waiting on your answer.">
+    <div className="space-y-6">
       <PendingInvitations
         invitations={pending}
         subjectNoun="your plant"
@@ -371,7 +333,7 @@ async function PlantAssociation({ churchId }: { churchId: string }) {
           </CardContent>
         </Card>
       </section>
-    </AssociationShell>
+    </div>
   );
 }
 
@@ -390,7 +352,7 @@ async function SendingChurchAssociation({
   ]);
 
   return (
-    <AssociationShell intro="The network your sending church belongs to, and any invitation waiting on your answer.">
+    <div className="space-y-6">
       <PendingInvitations
         invitations={pending}
         subjectNoun="your sending church"
@@ -399,7 +361,7 @@ async function SendingChurchAssociation({
       />
 
       <NetworkAssociation network={network} />
-    </AssociationShell>
+    </div>
   );
 }
 

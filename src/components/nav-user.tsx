@@ -75,7 +75,13 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/settings">
+                {/* The section, not the bare route (#615). This is an in-app
+                    navigation, so it is INTERCEPTED: the modal opens over
+                    whatever screen the reader is on and the screen stays
+                    mounted behind it. Naming the section means the URL that
+                    lands in history is the one the modal is actually showing,
+                    which is what Escape has to return from. */}
+                <Link href="/settings/account">
                   <Settings />
                   Settings
                 </Link>

@@ -329,6 +329,15 @@ Conventions and examples: [`contracts/data-patterns.md`](contracts/data-patterns
 - Legitimate client state is UI state only: pagination cursors, drag-and-drop, open/closed (`PipelineView`).
 - A message that a `router.refresh()` accompanies must NOT live inside the subtree that refresh re-renders — the refusal that fires the refresh unmounts its own `<Alert>` mid-read. Raise it through the root `<Toaster>`, a sibling nothing below can unmount, and never delay the refresh for it.
 
+## Settings — the URL-driven modal
+
+Applies to every `/settings/*` path, `src/lib/settings/sections.ts` and the `@settings` slot under `src/app/(dashboard)/`.
+
+- ⚖ Settings is a MODAL over the screen the reader is on, addressed by REAL PATHS and never a `#fragment` (ruled 2026-08-21 §187, CS-001): the server never sees a hash, so seat guards and server rendering would not hold. `@settings/(.)settings/[section]` intercepts an IN-APP navigation, so the layout's `children` — the screen behind — is never unmounted and Close is one `router.back()`. A COLD load is not intercepted, so the real `settings/[section]` route draws the same modal itself; both halves render `SettingsSurface` and differ only in what Close does.
+- EVERY `/settings/*` PATH MUST BE A REGISTRY ENTRY, because the slot's `[section]` matches the whole prefix and an unknown id would open as a bounce inside the modal. `SETTINGS_SECTIONS` — never a second list — decides the side navigation, the search and each section's own gate, and `sections.test.ts` pins the section list every account shape gets back, which is where the four deleted pages' `redirect()` guards now live. The registry is imported by a CLIENT component, so it may never gain an edge that reaches `@/db`.
+- THE MODAL OWNS THE HISTORY POLICY, never a section body: a section switch always REPLACES, so settings occupies exactly one entry and Close is one step. Whether Close is `back()` or a replace to the account's home turns on whether the DOCUMENT booted into settings, which `overlaid` cannot answer — after a cold load every later switch is intercepted and reports an overlay with nothing behind it. A `replace` spelled at a link inside a section is what shut a cold-loaded reader inside the modal with a `back()` into an empty stack.
+- Accepted residual: `/settings/sharing` is a registry entry with `inNav: false`, addressable at its unchanged URL and reached only by the Church section's link, so its reader sees no active navigation item. Retired when CS-011 folds the sharing panel into the Church section.
+
 ## Design Tokens — Contrast
 
 The guards are four suites under `src/app/`: `theme-tokens.test.ts`, `text-contrast.test.ts`, `focus-ring.test.ts`, `status-badge-scale.test.ts`.
