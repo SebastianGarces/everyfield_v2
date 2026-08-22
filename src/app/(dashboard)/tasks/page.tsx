@@ -10,7 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
-import { parseTaskListSearchParams } from "@/lib/tasks/list-params";
+import {
+  parseTaskListSearchParams,
+  type TaskListView,
+} from "@/lib/tasks/list-params";
 import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
 import { getTaskCounts } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
@@ -22,6 +25,12 @@ import {
   listOpenFollowUpTasks,
   selectUnownedContacts,
 } from "@/lib/tasks/follow-up-ownership";
+
+/**
+ * The one hand-written view link in the app, typed so it cannot drift from the
+ * contract the toggle and the parser share (#660).
+ */
+const ASSIGNMENTS_VIEW: TaskListView = "assignments";
 
 export const dynamic = "force-dynamic";
 
@@ -193,7 +202,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           */}
           {needsOwnerCount > 0 && view !== "assignments" && (
             <Link
-              href="/tasks?view=assignments#needs-owner"
+              href={`/tasks?view=${ASSIGNMENTS_VIEW}#needs-owner`}
               className="border-destructive/30 bg-destructive/5 hover:bg-destructive/10 flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors"
             >
               <AlertCircle className="text-destructive h-4 w-4 shrink-0" />
