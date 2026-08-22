@@ -442,3 +442,28 @@ export function outcomeSummary(outcome: {
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
+
+/**
+ * What the dashboard card says under "No date yet" — an INSTRUCTION only for
+ * the seat that can follow it (#659).
+ *
+ * The card still links for both: `/launch` is readable by a Member, and #499's
+ * rule is about write affordances, not destinations.
+ */
+export function launchDateInvitation(canSchedule: boolean): string {
+  return canSchedule
+    ? "Name the day and we'll build your readiness list."
+    : PLANTER_NAMES_THE_DAY;
+}
+
+/**
+ * WHO NAMES THE DAY, IN ONE PLACE — what a reader without `launch.schedule`
+ * gets instead of an imperative.
+ *
+ * The dashboard card and `/launch`'s date card both read it, because those two
+ * disagreeing IS #659: the page said this while the card pointing at it said
+ * "Name the day" to everyone. Their invitations still differ on purpose — the
+ * page has room to name the Playbook and the compact card does not — but the
+ * condition is one fact and reads the same wherever a reader meets it.
+ */
+export const PLANTER_NAMES_THE_DAY = "Your planter names the day.";
