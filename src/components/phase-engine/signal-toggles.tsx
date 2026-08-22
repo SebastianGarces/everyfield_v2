@@ -84,7 +84,7 @@ export function SignalToggles({
  * ONE switch, whose state is `useOptimistic` OVER THE SERVER PROP — never
  * `useState` seeded from it (memory/invariants.md → Client/Server Data
  * Synchronization; the reference shape is
- * `components/settings/oversight-sharing-switch.tsx`).
+ * `components/settings/sharing-panel.tsx`).
  *
  * The old `useState(initialChecked)` was server data in local state, and it went
  * stale in the way that state always does: `setManualSignalAction` calls

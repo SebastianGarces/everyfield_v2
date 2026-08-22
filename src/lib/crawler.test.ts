@@ -151,7 +151,7 @@ const NOT_PREVIEWABLE = [
   "/people",
   "/people/abc-123",
   "/settings",
-  "/settings/sharing",
+  "/settings/church",
   "/tasks",
   "/teams",
   "/teams/org-chart",

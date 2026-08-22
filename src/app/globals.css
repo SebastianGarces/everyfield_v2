@@ -247,6 +247,33 @@ body {
   --attention-medium-ink: oklch(0.86 0.11 82);
 }
 
+/* A 24x24 hit target on a control that must stay painted smaller (#639).
+   WCAG 2.5.8's Level AA floor is 24x24, and the usual way to reach it is to
+   give the control that box. Some controls cannot take one: sonner draws its
+   toast close button as a bordered 20px circle from its own stylesheet, so
+   growing the box would redraw every toast in the product. For those, the
+   painted size stays and a centred `::after` carries the hit area.
+
+   ONE utility rather than the four classes this replaces
+   (`after:absolute after:top-1/2 after:left-1/2 after:size-6
+   after:-translate-1/2`). That string is an incantation: drop any one of the
+   four and the hit area silently reverts to the painted size, and dropping
+   `after:absolute` is worse than a no-op — a close button is `display: flex`,
+   so an in-flow `::after` becomes a flex item and shoves the glyph off centre.
+   `dismiss-target-size.test.ts` can measure a name; it cannot measure that
+   four separate classes are all still present and mutually consistent. */
+@utility hit-area-6 {
+  &::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: --spacing(6);
+    height: --spacing(6);
+    translate: -50% -50%;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

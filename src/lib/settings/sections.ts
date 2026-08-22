@@ -1,12 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import {
-  Bell,
-  Building2,
-  Church,
-  Share2,
-  UserRound,
-  Users,
-} from "lucide-react";
+import { Bell, Building2, Church, UserRound, Users } from "lucide-react";
 
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import {
@@ -49,8 +42,7 @@ export type SettingsSectionId =
   | "church"
   | "team"
   | "association"
-  | "notifications"
-  | "sharing";
+  | "notifications";
 
 export type SettingsSection = {
   id: SettingsSectionId;
@@ -67,7 +59,12 @@ export type SettingsSection = {
   keywords: readonly string[];
   /**
    * Whether the side navigation lists it. `false` means addressable by URL and
-   * reachable by a link, but absent from the nav — see `sharing` below.
+   * reachable by a link, but absent from the nav.
+   *
+   * Every section is in the nav today. The flag stays because the ruled nav is
+   * a list of five and the registry is the only place a sixth could be added
+   * unlisted — `sharing` was exactly that, from #615 until #619 folded its
+   * panel into Church and deleted the entry.
    */
   inNav: boolean;
   /** Who may open it. The same question the section's own writes are guarded with. */
@@ -150,8 +147,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: "church",
     label: "Church",
     description:
-      "Where this plant is and what to call it, how its dates and times are shown, and when its digest arrives.",
+      "Where this plant is and what to call it, how its dates and times are shown, and what it shares with its sending church or network.",
     icon: Church,
+    // The sharing words are entry keywords rather than a section of their own
+    // since #619 folded the panel in here. A planter looking for "privacy" was
+    // one of the readers `/settings/sharing` served, and the search box is now
+    // the only way that word reaches them.
     keywords: [
       "name",
       "address",
@@ -170,6 +171,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
       "inactivity",
       "inactive",
       "quiet",
+      "sharing",
+      "privacy",
+      "consent",
+      "oversight",
+      "sending church",
+      "network",
     ],
     inNav: true,
     isVisibleTo: isPlantAdminOrAbove,
@@ -203,32 +210,31 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     inNav: true,
     isVisibleTo: everyAccount,
   },
-  {
-    id: "sharing",
-    label: "Sharing",
-    /**
-     * ABSENT FROM THE NAV, DELIBERATELY (#615). The ruled section list is the
-     * five above; CS-011 folds the sharing panel into the Church section, and
-     * until it does this entry keeps `/settings/sharing` — a URL that is in
-     * emails and in `OVERSIGHT_CONSENT_SURFACES` — working unchanged, reached
-     * by the link the Church section already draws.
-     *
-     * It is an ENTRY rather than a surviving sibling route because the modal
-     * intercepts every `/settings/*` path: a route the registry did not know
-     * about would open as a 404 inside the modal.
-     */
-    description: "What your sending church or network hears about this plant.",
-    icon: Share2,
-    keywords: ["oversight", "consent", "privacy", "sending church", "network"],
-    inNav: false,
-    isVisibleTo: isPlanterWithPlant,
-  },
 ];
 
 /**
  * Where `/settings` with no section lands — the one section every account has.
  */
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "account";
+
+/**
+ * IDS THAT WERE REAL, AND THE SECTION THAT ABSORBED THEM.
+ *
+ * An unknown id bounces to the default section, which is right for a typo and
+ * wrong for `/settings/sharing`: that was the consent panel's own address for
+ * two releases, it is the one id in the product guaranteed to be in somebody's
+ * history, and dropping its reader on Account tells a planter their privacy
+ * controls were removed. #619 folded the panel into Church, so that is where the
+ * URL goes.
+ *
+ * It is a REDIRECT, not a surviving route — the entry is deleted, the registry
+ * is five, and nothing renders under the old id.
+ */
+export const RETIRED_SETTINGS_SECTIONS: Readonly<
+  Record<string, SettingsSectionId>
+> = {
+  sharing: "church",
+};
 
 export function isSettingsSectionId(value: string): value is SettingsSectionId {
   return SETTINGS_SECTIONS.some((section) => section.id === value);

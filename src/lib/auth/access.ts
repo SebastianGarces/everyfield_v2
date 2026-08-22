@@ -132,7 +132,9 @@ export type PrivacyFeatureKey =
 // The toggle column set is `@/lib/privacy/sharing-defaults`'s, imported rather than declared
 // twice: CS-013's accept writes exactly the columns this map gates, so a second
 // spelling of "which columns are toggles" is the drift that would let the two
-// disagree about #62's wiki row.
+// disagree about #62's wiki row. #619's panel WRITES those same columns through
+// `privacyColumnFor` below, so all three — the accept, the panel and this gate —
+// now name one set.
 
 /** Maps feature keys to their corresponding column in church_privacy_settings */
 const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
@@ -144,6 +146,19 @@ const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
   facilities: "shareFacilities",
   oversight_activity: "shareActivityWithOversight",
 };
+
+/**
+ * The column a feature key gates on — the read gate's own answer, exported so
+ * the WRITE side cannot keep a second opinion.
+ *
+ * `setSharingToggle` (`@/lib/notifications/oversight-sharing`) flips exactly the
+ * column `canAccessFeatureData` will read back, because both ask this. A write
+ * path with its own feature→column map is how a toggle comes to save the wrong
+ * consent.
+ */
+export function privacyColumnFor(feature: PrivacyFeatureKey): PrivacyColumn {
+  return PRIVACY_COLUMN_MAP[feature];
+}
 
 /**
  * Get privacy settings for a church.

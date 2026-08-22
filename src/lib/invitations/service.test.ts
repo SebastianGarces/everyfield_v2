@@ -907,7 +907,9 @@ test("the session mint is the FIRST statement of every invitation-domain action"
 // rest of the repository and found five endpoints that still parsed first:
 //
 //   settings/actions.ts          setNotificationPreferenceAction, setDigestCadenceAction
-//   settings/sharing/actions.ts  setOversightSharingAction
+//   settings/sharing/actions.ts  setOversightSharingAction  (absorbed by #619 —
+//                                the panel's write is now settings/actions.ts →
+//                                setSharingToggleAction, measured below)
 //   notifications/actions.ts     markNotificationReadAction, loadMoreNotificationsAction
 //
 // None was exploitable in the sense of writing anything — but each answered an
@@ -999,20 +1001,14 @@ const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
         wellFormed: [{ warningDays: 7, alertDays: 14 }],
         malformed: [{ warningDays: 30, alertDays: 14 }],
       },
-    ],
-  },
-  {
-    label: "src/app/(dashboard)/settings/sharing/actions.ts",
-    load: async () =>
-      (await import("@/app/(dashboard)/settings/sharing/actions")) as unknown as Record<
-        string,
-        unknown
-      >,
-    exports: [
       {
-        name: "setOversightSharingAction",
-        wellFormed: [true],
-        malformed: ["yes"],
+        // CS-010 (#619). The sharing panel's one write, moved here when the
+        // panel absorbed `/settings/sharing`. The malformed case names a
+        // feature no `share_*` column exists for, which is the shape an
+        // anonymous caller would probe the column set with.
+        name: "setSharingToggleAction",
+        wellFormed: [{ feature: "people", enabled: true }],
+        malformed: [{ feature: "everything", enabled: true }],
       },
     ],
   },
