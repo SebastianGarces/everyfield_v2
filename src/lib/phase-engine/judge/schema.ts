@@ -26,6 +26,7 @@ import { z } from "zod";
 import {
   findNetworkRegisterViolations,
   findUnpairedNetworkCategories,
+  NETWORK_VERDICT_PHRASES,
 } from "./network-register";
 
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
@@ -211,7 +212,16 @@ export const judgeOutputSchema = z
       ctx.addIssue(
         ruleIssue(
           "network_verdict_register",
-          `Network-audience language must coach, never deliver a verdict. Found ${found}. Name the measured pattern and point at a coaching conversation — "Core-group momentum has slowed. This may be worth a coaching conversation" — never an organisational judgement.`
+          // THE WHOLE BAN-LIST, NOT JUST THE WORD THAT WAS CAUGHT (#605). The
+          // message used to name only the phrase found, so a corrected draft
+          // dropped that one and reached for the next entry: EVAL-09, the
+          // fleet's most troubled plant, spent all three drafts swapping one
+          // banned word for another. Interpolated from `NETWORK_VERDICT_PHRASES`
+          // rather than retyped, which is the same rule the rubric body follows
+          // (#538) and for the same reason — a hand-kept second copy went short
+          // by two phrases and the judge was rejected for a word it was never
+          // shown.
+          `Network-audience language must coach, never deliver a verdict. Found ${found}. NONE of these phrases may appear in network-audience text, so swapping the one above for another of them will be rejected again: ${NETWORK_VERDICT_PHRASES.join(", ")}. Name the measured pattern and point at a coaching conversation — "Core-group momentum has slowed. This may be worth a coaching conversation" — never an organisational judgement.`
         )
       );
     }

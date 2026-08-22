@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { NETWORK_VERDICT_PHRASES } from "./network-register";
 import {
   PLANTER_FOCUS_BUDGET,
   judgeOutputSchema,
@@ -132,6 +133,32 @@ test("a positive planter insight pairs a network concern at no cost to the budge
   ]);
 
   assert.equal(result.success, true);
+});
+
+test("the verdict correction shows the WHOLE ban-list, interpolated (#538/#605)", () => {
+  const result = output([
+    insight({
+      audience: "network",
+      title: "Core-group growth is failing",
+      body: "The plant is behind and this needs to be addressed by the network.",
+    }),
+  ]);
+
+  assert.equal(result.success, false);
+  const message = result.error!.issues.map((i) => i.message).join("\n");
+
+  // EVERY phrase, from the one array. Naming only the word that was caught let
+  // a corrected draft reach for the next entry instead — EVAL-09, the fleet's
+  // most troubled plant, spent all three drafts swapping banned words. The list
+  // is interpolated rather than retyped, so it can never go short the way the
+  // hand-kept rubric copy did (#538).
+  for (const phrase of NETWORK_VERDICT_PHRASES) {
+    assert.ok(
+      message.includes(phrase),
+      `the correction must name "${phrase}" — a phrase the model is held to but never shown is #538's exact failure`
+    );
+  }
+  assert.match(message, /swapping the one above for another of them/);
 });
 
 test("when both rules fail, the correction names the free fix rather than a cap", () => {
