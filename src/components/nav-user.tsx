@@ -19,10 +19,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { logout } from "@/lib/auth/actions";
-import {
-  DEFAULT_SETTINGS_SECTION,
-  settingsSectionHref,
-} from "@/lib/settings/sections";
+import { SettingsLink } from "@/components/settings/settings-modal";
+import { DEFAULT_SETTINGS_SECTION } from "@/lib/settings/sections";
 
 type NavUserProps = {
   user: {
@@ -108,21 +106,19 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                {/* A PLAIN ANCHOR AT A FRAGMENT (#657), and deliberately not a
-                    `<Link>`: following it is not a navigation at all. The
-                    browser writes `#settings/account`, pushes exactly one
-                    history entry and fires `hashchange`, which is precisely the
-                    opening `settings-modal.tsx` is listening for — so the modal
-                    appears over whatever screen the reader is on, that screen is
-                    never re-rendered, and Escape takes the one entry back off
-                    again. It also works with no JavaScript.
+                {/* A FRAGMENT, NOT A ROUTE (#657): following this is not a
+                    navigation at all, so the modal appears over whatever screen
+                    the reader is on, that screen is never re-rendered, and
+                    Escape takes the one history entry back off again.
+                    `SettingsLink` carries the anchor and the reason its click is
+                    handled rather than followed.
 
                     The SECTION is named rather than a bare `#settings`, so the
                     address the reader can copy is the one they are looking at. */}
-                <a href={settingsSectionHref(DEFAULT_SETTINGS_SECTION)}>
+                <SettingsLink section={DEFAULT_SETTINGS_SECTION}>
                   <Settings />
                   Settings
-                </a>
+                </SettingsLink>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

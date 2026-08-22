@@ -2,7 +2,7 @@ import { MailQuestion } from "lucide-react";
 
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import type { PendingInvitationView } from "@/app/(dashboard)/settings/association/queries";
-import { settingsSectionHref } from "@/lib/settings/sections";
+import { SettingsLink } from "@/components/settings/settings-modal";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
@@ -85,17 +85,17 @@ export function AssociationReminder({
           ))}
         </ul>
 
-        {/* A FRAGMENT, AND A PLAIN ANCHOR (#657). This alert only ever draws on
-            `/dashboard`, so `#settings/association` opens the modal over the
-            dashboard the reader is already reading — no navigation, and this
-            card is still behind it when they close. A `<Link>` here would hand
-            a fragment to the router, which has nothing to do with it. */}
-        <a
-          href={settingsSectionHref("association")}
+        {/* A FRAGMENT (#657). This alert only ever draws on `/dashboard`, so
+            `#settings/association` opens the modal over the dashboard the reader
+            is already reading — no navigation, and this card is still behind it
+            when they close. `SettingsLink` is a client component so this one can
+            stay a server component and still cancel the click. */}
+        <SettingsLink
+          section="association"
           className="cursor-pointer text-sm font-medium underline underline-offset-4"
         >
           See the details first
-        </a>
+        </SettingsLink>
       </AlertDescription>
     </Alert>
   );

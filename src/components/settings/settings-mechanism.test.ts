@@ -224,3 +224,39 @@ test("the section read is a route handler, never a server action", () => {
   assert.match(route, /status: 401/);
   assert.match(route, /no-store/);
 });
+
+test("every in-app settings link goes through SettingsLink", () => {
+  // A BARE `<a href="#settings/…">` OPENS THE MODAL AND THEN LOSES IT, which is
+  // the worst kind of wrong: it works until the reader saves something. A native
+  // fragment navigation is invisible to Next's client router, so the router's
+  // copy of the URL still says `/dashboard` — and the first `refresh()` after
+  // that (every settings write calls one) rewrites the address bar from that
+  // copy and takes the fragment with it. Measured on the preview: toggle one
+  // notification preference and the modal closed under the reader's hands.
+  //
+  // `SettingsLink` is the anchor and the cancelled click together, so no caller
+  // can have one without the other.
+  const offenders: string[] = [];
+  for (const file of FILES) {
+    if (file === MODAL) continue;
+    const source = stripComments(read(file));
+    if (/href=\{?\s*settingsSectionHref\(/.test(source))
+      offenders.push(rel(file));
+    if (/href="#settings\//.test(source)) offenders.push(rel(file));
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "a settings fragment in a raw href is invisible to the router — use <SettingsLink>"
+  );
+
+  // `settingsSectionUrl` — path AND fragment — is a different thing and stays
+  // allowed in an href: it is a real navigation to another page, which the
+  // router performs itself and therefore knows the fragment of.
+  assert.match(
+    stripComments(read(MODAL)),
+    /export function SettingsLink/,
+    "SettingsLink lives with the history policy it depends on"
+  );
+});

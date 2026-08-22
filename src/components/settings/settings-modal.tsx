@@ -65,8 +65,12 @@ import {
 // THE HISTORY POLICY, WHICH THIS FILE OWNS ENTIRELY
 // ----------------------------------------------------------------------------
 //
-//   OPEN   pushes exactly ONE entry — a plain `<a href="#settings/account">` in
-//          the avatar menu is enough, and needs no JavaScript to work.
+//   OPEN   pushes exactly ONE entry, through `openSettings`. The avatar menu
+//          still spells a real `<a href="#settings/account">` — so the address
+//          is copyable, and the modal opens with no JavaScript at all — but a
+//          plain click is cancelled and routed here, because a NATIVE fragment
+//          navigation is invisible to Next's router and the first `refresh()`
+//          afterwards wipes the fragment (see `openSettings`).
 //   SWITCH replaces. However many sections a reader opens from the rail,
 //          settings occupies that one entry: no back-through-every-section.
 //   CLOSE  goes BACK when this document pushed the entry, so the reader lands
@@ -195,6 +199,84 @@ const getServerSnapshot = () => "";
 function showSection(id: SettingsSectionId) {
   window.history.replaceState(null, "", settingsSectionHref(id));
   onUrlChange();
+}
+
+/**
+ * OPEN SETTINGS — the one way in, and it must go through `pushState`.
+ *
+ * A plain `<a href="#settings/account">` opens the modal on its own and needs no
+ * JavaScript, which is why the avatar menu still spells one. It is not enough by
+ * itself: a NATIVE fragment navigation is invisible to Next's client router, so
+ * the router's idea of the current URL keeps saying `/dashboard` — and the first
+ * `refresh()` after that (every settings write calls one) rewrites the address
+ * bar from the router's copy and takes the fragment with it. Measured on the
+ * preview: toggle one notification preference and the modal closed under the
+ * reader's hands.
+ *
+ * `pushState` is the documented way to hand the App Router a URL it did not
+ * navigate to, so this keeps the two in step. The anchors keep their `href` —
+ * the address is real, copyable and middle-clickable — and cancel their own
+ * default so this runs instead.
+ *
+ * ONE ENTRY, which is what makes Close one step back. See the header.
+ */
+export function openSettings(id: SettingsSectionId) {
+  window.history.pushState(null, "", settingsSectionHref(id));
+  onUrlChange();
+}
+
+/**
+ * Should this click be handled by the app, or by the browser?
+ *
+ * A modified click is the reader asking the BROWSER for something — a new tab, a
+ * download, a saved link — so it is left alone, and the `href` is what serves it.
+ */
+function isPlainClick(event: React.MouseEvent): boolean {
+  return (
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.button === 0
+  );
+}
+
+/**
+ * THE ONE WAY TO LINK TO A SETTINGS SECTION from anywhere in the app.
+ *
+ * A real anchor at a real address, whose plain click is cancelled and sent to
+ * `openSettings`. Both halves matter and neither is enough alone: the `href` is
+ * what a reader can copy, middle-click and follow with JavaScript off, and the
+ * handler is what keeps Next's router in step with the fragment (see
+ * `openSettings`).
+ *
+ * It exists so the two callers — the avatar menu and the dashboard's
+ * association reminder — cannot spell that pair differently, and so a SERVER
+ * component can link to settings without becoming a client one for the sake of
+ * an `onClick`.
+ */
+export function SettingsLink({
+  section,
+  className,
+  children,
+}: {
+  section: SettingsSectionId;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={settingsSectionHref(section)}
+      className={className}
+      onClick={(event) => {
+        if (!isPlainClick(event)) return;
+        event.preventDefault();
+        openSettings(section);
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 function closeSettings() {
@@ -469,18 +551,7 @@ function SettingsDialog({
                   href={settingsSectionHref(section.id)}
                   aria-current={isActive ? "page" : undefined}
                   onClick={(event) => {
-                    // A modified click is the reader asking the BROWSER for
-                    // something — a new tab, a download, a saved link. Leave it
-                    // alone.
-                    if (
-                      event.metaKey ||
-                      event.ctrlKey ||
-                      event.shiftKey ||
-                      event.altKey ||
-                      event.button !== 0
-                    ) {
-                      return;
-                    }
+                    if (!isPlainClick(event)) return;
                     event.preventDefault();
                     showSection(section.id);
                   }}
