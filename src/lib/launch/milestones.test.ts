@@ -236,6 +236,38 @@ test("a failed converge yields an empty board, never a broken page", () => {
   );
 });
 
+test("the repair is attributed to the plant's Owner, not to whoever opened the page", () => {
+  // `/launch` admits a team member, and `tasks.created_by_id` is NOT NULL — so a
+  // converge that used the reader would make the first Member to open a stranded
+  // plant the recorded author of its whole launch-prep list, which
+  // `launch.schedule` (Owner-only, LS-007) never granted them. The reader is the
+  // FALLBACK, because a plant whose Owner seat was removed still deserves the
+  // repair.
+  const read = sourceReader(
+    readFileSync(
+      path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+      "utf8"
+    ),
+    "milestones.ts"
+  );
+  const converge = read.span(
+    "export async function convergeLaunchReadiness",
+    "export interface LaunchMilestoneCompletion"
+  );
+
+  assert.match(
+    converge,
+    /actorUserId: \(await plantOwnerId\(churchId\)\) \?\? readerId/
+  );
+
+  const owner = read.span(
+    "async function plantOwnerId",
+    "/**\n * The readiness board"
+  );
+  assert.match(owner, /eq\(users\.churchId, churchId\)/);
+  assert.match(owner, /eq\(users\.seat, "owner"\)/);
+});
+
 test("the converge asks the launch row for its tenant, never a second argument", () => {
   // The row came from `getLaunchForChurch(session.churchId)`, so it already
   // carries the tenant. A second church id parameter would be one more thing a

@@ -47,6 +47,8 @@
 
 import { redirect } from "next/navigation";
 
+import type { LaunchStatus } from "@/db/schema/launch";
+
 import { HeaderBreadcrumbs } from "@/components/header";
 import { LaunchDateCard } from "@/components/launch/launch-date-card";
 import { LaunchHistory } from "@/components/launch/launch-history";
@@ -65,13 +67,47 @@ import { getLaunchJournalEntries } from "@/lib/launch/journal";
 import {
   convergeLaunchReadiness,
   getLaunchMilestoneHistory,
-  launchExpectsReadiness,
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import { isChurchLevelUser, isPlantOwner } from "@/lib/auth/tenancy";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * What the readiness tab says when it has no rows to draw — one honest sentence
+ * per status, rather than one sentence stretched over four different facts
+ * (#614).
+ *
+ * A TOTAL MAP, so the compiler names this copy the day a fifth status is added.
+ * The bug this replaces was a boolean: "naming Launch Sunday seeds it" is true
+ * only while no day is named, and it was being shown to a `scheduled` plant
+ * whose seed had failed thirteen days earlier, and would have been shown to a
+ * `completed` one as advice about a day it had already launched.
+ *
+ * Only `scheduled` and `postponed` promise a retry, because they are the only
+ * two `convergeLaunchReadiness` tries for.
+ */
+const READINESS_EMPTY_STATE = {
+  planning: {
+    title: "No readiness list yet",
+    detail: "Naming Launch Sunday seeds it from the Launch Playbook.",
+  },
+  scheduled: {
+    title: "We could not build your readiness list",
+    detail:
+      "Reload the page to try again. If it stays empty, tell us with the Feedback button.",
+  },
+  postponed: {
+    title: "We could not build your readiness list",
+    detail:
+      "Reload the page to try again. If it stays empty, tell us with the Feedback button.",
+  },
+  completed: {
+    title: "No readiness list was kept for this launch",
+    detail: "The day itself is on the record above.",
+  },
+} satisfies Record<LaunchStatus, { title: string; detail: string }>;
 
 export const metadata = {
   title: "Launch Sunday",
@@ -126,25 +162,12 @@ export default async function LaunchPage() {
   const history = buildLaunchHistory(milestoneHistory, journal);
   const hasDateHistory = launchDateEvents(journal).length > 0;
   const hasReadiness = !!readiness && readiness.totalCount > 0;
-  // A launch with a day named is one whose readiness list exists or is owed —
-  // never one whose absence is left unexplained (#614).
-  const expectsReadiness = launchExpectsReadiness(status);
-
-  // THE TWO ZERO-ROWS MOMENTS ARE DIFFERENT FACTS, so one message cannot be true
-  // of both. Before a day is named, nothing is meant to be there and the copy
-  // says what names it. After one is named, the list is owed, the converge above
-  // has just failed to produce it, and telling that planter their list arrives
-  // when they name the day would be a lie about a day they already named.
-  const readinessEmptyState = expectsReadiness
-    ? {
-        title: "We could not build your readiness list",
-        detail:
-          "Reload the page to try again. If it stays empty, tell us with the Feedback button.",
-      }
-    : {
-        title: "No readiness list yet",
-        detail: "Naming Launch Sunday seeds it from the Launch Playbook.",
-      };
+  // "Has a day been named?" — which is `status !== "planning"` and nothing else,
+  // because `launches_target_date_check` makes `planning` the only status a null
+  // `target_date` is legal for. It is deliberately NOT `launchExpectsReadiness`:
+  // that predicate answers "should we SEED?", and the two part company on
+  // `completed`, where a day was named and nothing should be seeded (#614).
+  const dayIsNamed = status !== "planning";
 
   return (
     <>
@@ -240,15 +263,14 @@ export default async function LaunchPage() {
           )}
 
           {/* ---- The work, and the record of it -------------------------
-              `expectsReadiness` is the third arm, and it is what makes the
-              section unhideable for a launch with a day (#614). The empty state
-              below used to live INSIDE a guard that required readiness or
-              history, so the one plant that needed the explanation — a
-              scheduled launch with zero milestone rows — was the one plant the
-              explanation could never reach. A page that says "work the
-              readiness list" over a hidden list is a page the planter reads as
-              broken. */}
-          {(hasReadiness || history.length > 0 || expectsReadiness) && (
+              `dayIsNamed` is the third arm, and it is what makes the section
+              unhideable once a day exists (#614). The empty state below used to
+              live INSIDE a guard that required readiness or history, so the one
+              plant that needed the explanation — a scheduled launch with zero
+              milestone rows — was the one plant the explanation could never
+              reach. A page that says "work the readiness list" over a hidden
+              list is a page the planter reads as broken. */}
+          {(hasReadiness || history.length > 0 || dayIsNamed) && (
             <LaunchTabs
               historyCount={history.length}
               tasks={
@@ -256,9 +278,11 @@ export default async function LaunchPage() {
                   <MilestoneBoard readiness={readiness} canEdit />
                 ) : (
                   <div className="bg-card rounded-xl border border-dashed p-6 text-center shadow-sm">
-                    <p className="font-medium">{readinessEmptyState.title}</p>
+                    <p className="font-medium">
+                      {READINESS_EMPTY_STATE[status].title}
+                    </p>
                     <p className="text-muted-foreground mt-1 text-sm">
-                      {readinessEmptyState.detail}
+                      {READINESS_EMPTY_STATE[status].detail}
                     </p>
                   </div>
                 )

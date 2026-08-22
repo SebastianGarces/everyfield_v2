@@ -20,7 +20,6 @@ export {
   getLaunchMilestoneHistory,
   getLaunchReadiness,
   isLaunchTask,
-  launchExpectsReadiness,
   LAUNCH_MILESTONE_TEMPLATES,
   MILESTONE_HAS_OPEN_TASKS_MESSAGE,
   MILESTONE_NOT_FOUND_MESSAGE,

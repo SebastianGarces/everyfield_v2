@@ -575,6 +575,23 @@ export function launchExpectsReadiness(status: LaunchStatus): boolean {
 }
 
 /**
+ * The plant's Owner, or `null` for a plant that has none.
+ *
+ * At most one row can come back: `users_church_owner_unique_idx` is a partial
+ * unique on `church_id where seat = 'owner'` (AS-002), so "the Owner" is a row
+ * rather than a pick from a list.
+ */
+async function plantOwnerId(churchId: string): Promise<string | null> {
+  const [owner] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .limit(1);
+
+  return owner?.id ?? null;
+}
+
+/**
  * The readiness board — AND the repair for a launch that has none (#614).
  *
  * WHY THE REPAIR IS ON THE READ. Seeding runs after the durable date write and
@@ -601,10 +618,21 @@ export function launchExpectsReadiness(status: LaunchStatus): boolean {
  * answer, which is the honest thing to show and is what makes a second visit a
  * retry rather than a fresh 500. Throwing instead would turn a missing list
  * into a missing page.
+ *
+ * THE REPAIR IS THE PLANT'S, NOT THE READER'S, so the rows it writes are
+ * attributed to the plant's OWNER and are indistinguishable from the rows
+ * `scheduleLaunchAction` would have written. `/launch` admits a team member as
+ * well as the planter, and `tasks.created_by_id` is NOT NULL — so without this
+ * lookup the first Member to open a stranded plant's launch page would become
+ * the recorded author of its whole launch-prep list, which no capability ever
+ * granted them (`launch.schedule` is the Owner's alone, LS-007). `readerId` is
+ * the fallback and not the default: a plant can be left with no Owner seat
+ * (`removeSeat` clears the tenancy), and a repair refused for want of an author
+ * would strand exactly the plant this function exists for.
  */
 export async function convergeLaunchReadiness(
   launch: LaunchRecord,
-  actorUserId: string
+  readerId: string
 ): Promise<LaunchReadiness> {
   // The launch row carries its own tenant, so there is no second church id to
   // pass in and none to get wrong; it was resolved by `getLaunchForChurch`.
@@ -615,7 +643,11 @@ export async function convergeLaunchReadiness(
   if (!launchExpectsReadiness(launch.status)) return readiness;
 
   try {
-    await seedLaunchMilestones({ launchId: launch.id, churchId, actorUserId });
+    await seedLaunchMilestones({
+      launchId: launch.id,
+      churchId,
+      actorUserId: (await plantOwnerId(churchId)) ?? readerId,
+    });
   } catch (error) {
     console.error(
       `launch readiness converge failed for launch ${launch.id}:`,

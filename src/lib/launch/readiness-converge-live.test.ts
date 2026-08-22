@@ -10,6 +10,7 @@ import {
   launchMilestoneTasks,
   launches,
   tasks,
+  users,
 } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 import {
@@ -266,6 +267,77 @@ test(
       .where(eq(tasks.id, ticked.id));
     assert.equal(kept.title, "Order the projector, not the truss");
     assert.equal(kept.status, "complete");
+    assert.equal((await taskRows(plant.churchId)).length, TASK_COUNT);
+  }
+);
+
+test(
+  "a member's visit repairs the plant, and the Owner is still the author",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    // `/launch` admits a team member, so after #614 the repair can be triggered
+    // by somebody `launch.schedule` refuses (LS-007). The ROWS must not record
+    // that: they have to be indistinguishable from the ones the schedule action
+    // would have written, or the first Member to open a stranded page becomes
+    // the author of the plant's whole launch-prep list.
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const launch = await scratchLaunch(plant);
+
+    const [member] = await db
+      .insert(users)
+      .values({
+        email: `${crypto.randomUUID()}@scratch.invalid`,
+        passwordHash: "scratch",
+        name: SCRATCH_NAME,
+        seat: "member",
+        churchId: plant.churchId,
+      })
+      .returning({ id: users.id });
+
+    const readiness = await convergeLaunchReadiness(launch, member.id);
+    assert.equal(readiness.totalCount, MILESTONE_COUNT);
+
+    const authors = await db
+      .selectDistinct({ createdById: tasks.createdById })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, plant.churchId),
+          eq(tasks.category, "launch_prep")
+        )
+      );
+    assert.deepEqual(
+      authors.map((row) => row.createdById),
+      [plant.actorId],
+      "the repaired tasks must be the Owner's, not the reader's"
+    );
+  }
+);
+
+test(
+  "a plant with no Owner is still repaired, by the reader",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    // `removeSeat` clears a tenancy, so a plant CAN be left with no Owner. The
+    // author lookup is a preference, never a precondition: refusing the repair
+    // for want of an author would strand exactly the plant this exists for, and
+    // `tasks.created_by_id` is NOT NULL so somebody has to be named.
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const launch = await scratchLaunch(plant);
+    await db
+      .update(users)
+      .set({ seat: "member" })
+      .where(eq(users.id, plant.actorId));
+
+    const readiness = await convergeLaunchReadiness(launch, plant.actorId);
+
+    assert.equal(readiness.totalCount, MILESTONE_COUNT);
     assert.equal((await taskRows(plant.churchId)).length, TASK_COUNT);
   }
 );

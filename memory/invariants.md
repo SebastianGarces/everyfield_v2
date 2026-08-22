@@ -216,6 +216,16 @@ Applies to `persons.photo_url`, `src/app/api/people/[personId]/photo/route.ts` a
 - Every bridged issue carries the `feedback` label, never `feature` — that one marks an FRD's parent issue on the board. The category adds at most one more (`bug`, `enhancement`, `question`); `other` adds none.
 - Both of a submission's side effects — the Resend email and the bridge — run inside `after` from `next/server`, not as floating promises. A promise the action does not await is free to be dropped the moment the response returns, which loses sends silently.
 
+## Launch Sunday
+
+Applies to `src/lib/launch/**` and `/launch`. The countdown's own rule lives under Hierarchical Access Control.
+
+- ⚖ THE `/launch` READ REPAIRS THE LAUNCH IT READS (#614): `convergeLaunchReadiness` re-runs the idempotent seed when a launch that expects a readiness list has zero `launch_milestones`, so a failed seed heals on the next visit. It is the ONLY repair path — `scheduleLaunchAction`'s docblock used to call an unchanged save one, which `ScheduleLaunchForm` makes unreachable by disabling both buttons until a DIFFERENT day is picked, and Riverside sat scheduled with zero milestones for thirteen days behind that contradiction.
+- Its arbiter is ROW-KEYED on (launch_id, template_key) and the repair is gated on ZERO rows — which MT-002b rejects by name for responsibilities and which is legal HERE for the reason MT-002b's is not: nothing in `src/lib/launch/**` deletes a `launch_milestones` row, so the resurrection failure mode ("the first seeded item a planter deletes comes back on the next page load") is unreachable. A delete path added later retires this and needs a team-style claim column.
+- The seed's failure is CAUGHT and renders the readiness empty state, never a 500: it writes during a Server Component render, so a throw would turn a missing list into a missing page. Legal at all only because `/launch` is `force-dynamic` and nothing on the path revalidates — the same two conditions `listResponsibilities` rests on.
+- ⚖ The repair is attributed to the plant's OWNER (`plantOwnerId`), falling back to the reader. `/launch` admits a team member and `tasks.created_by_id` is NOT NULL, so without the lookup the first Member to open a stranded page becomes the recorded author of the plant's whole launch-prep list — a write `launch.schedule` (Owner-only, LS-007) never granted them.
+- ⚖ WHICH statuses expect a list and WHAT the empty tab says are two different questions, and conflating them is the #614 bug one status further along. `EXPECTS_READINESS` (seed: `scheduled`/`postponed` only) and `READINESS_EMPTY_STATE` (copy: one sentence per status) are both TOTAL maps over `LaunchStatus`; the page's render guard asks a third question, `status !== "planning"` ("is a day named"), which is what keeps the tabs from ever vanishing for a launch that has one.
+
 ## Meetings
 
 - ⚖ `finalizeAttendance` runs its downstream generation on EVERY call, not only the first (#323): the `actual_attendance` marker decides what the call REPORTS (`finalized` / `reconciled` / `already_finalized`) and whether the count needs refreshing, never whether the work happens. Gating the work on the marker is what dropped a late-added attendee's follow-up; gating it on the count has the same hole one step in.
