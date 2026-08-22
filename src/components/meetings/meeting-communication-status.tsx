@@ -11,7 +11,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import {
-  renderTemplate,
+  renderSubject,
   buildChurchMergeData,
   buildMeetingMergeData,
 } from "@/lib/communication/merge";
@@ -36,7 +36,6 @@ interface CommunicationSummary {
 }
 
 interface MeetingCommunicationStatusProps {
-  meetingId: string;
   communications: CommunicationSummary[];
   church: { name: string };
   timeZone: string;
@@ -46,15 +45,32 @@ interface MeetingCommunicationStatusProps {
     datetime: string;
     locationName: string | null;
     locationAddress: string | null;
+    /** `church_meetings.agenda` as stored — parsed by `buildMeetingMergeData`. */
+    agenda: unknown;
   };
+  /**
+   * Where Send Email goes — `meetingComposeUrl`, built by the page.
+   *
+   * A URL and not the guest list, though this card is the reason the guests are
+   * read at all: the page is a server component that already holds them, and
+   * handing a `"use client"` component every guest's ADDRESS so it can compute
+   * one string puts those addresses in the RSC payload for nothing. The guest
+   * list's own button takes the guests, because it renders them.
+   *
+   * This link used to carry `meetingId` alone while that button one tab away
+   * carried `meetingId` AND `recipientIds` — two Send Email buttons on one
+   * meeting, one of which opened an empty compose screen (#612). Both ends of
+   * the same builder now, so the difference cannot come back.
+   */
+  composeUrl: string;
 }
 
 export function MeetingCommunicationStatus({
-  meetingId,
   communications,
   church,
   timeZone,
   meeting,
+  composeUrl,
 }: MeetingCommunicationStatusProps) {
   const mergeData = {
     ...buildChurchMergeData(church),
@@ -71,10 +87,7 @@ export function MeetingCommunicationStatus({
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Communications</CardTitle>
             <Button variant="outline" size="sm" asChild>
-              <Link
-                href={`/communication/compose?meetingId=${meetingId}`}
-                className="cursor-pointer"
-              >
+              <Link href={composeUrl} className="cursor-pointer">
                 <Send className="mr-2 h-4 w-4" />
                 Send Email
               </Link>
@@ -98,10 +111,7 @@ export function MeetingCommunicationStatus({
             Communications ({communications.length})
           </CardTitle>
           <Button variant="outline" size="sm" asChild>
-            <Link
-              href={`/communication/compose?meetingId=${meetingId}`}
-              className="cursor-pointer"
-            >
+            <Link href={composeUrl} className="cursor-pointer">
               <Send className="mr-2 h-4 w-4" />
               New Email
             </Link>
@@ -111,7 +121,7 @@ export function MeetingCommunicationStatus({
       <CardContent className="space-y-3">
         {communications.map((comm) => {
           const resolvedSubject = comm.subject
-            ? renderTemplate(comm.subject, mergeData)
+            ? renderSubject(comm.subject, mergeData)
             : "(No subject)";
           const issues = comm.stats.bounced + comm.stats.failed;
 

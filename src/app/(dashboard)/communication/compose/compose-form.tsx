@@ -55,6 +55,13 @@ interface MeetingOption {
   datetime: string;
   locationName: string | null;
   locationAddress: string | null;
+  /**
+   * `church_meetings.agenda` as stored. Carried so the live preview can render
+   * `{{meeting_agenda}}` from the meeting actually selected, rather than
+   * leaving the sample agenda on screen while the rest of the preview switches
+   * to real data.
+   */
+  agenda: unknown;
 }
 
 interface ComposeFormProps {
@@ -78,38 +85,12 @@ export function ComposeForm({
 }: ComposeFormProps) {
   const router = useRouter();
 
-  // Auto-suggest a template when coming from a meeting context without an explicit template
-  const autoTemplate = useMemo(() => {
-    if (initialTemplate || !initialMeetingId) return null;
-    const meeting = meetings.find((m) => m.id === initialMeetingId);
-    if (!meeting) return null;
-
-    // Map meeting type to template name patterns
-    const typePatterns: Record<string, string[]> = {
-      vision_meeting: ["Vision Meeting Invitation"],
-      orientation: ["Orientation Invitation"],
-      team_meeting: ["Team Meeting Invitation"],
-    };
-    const patterns = typePatterns[meeting.type] ?? [];
-
-    // Find a matching invitation template
-    return (
-      templates.find(
-        (t) =>
-          t.category === "meeting_invitation" &&
-          patterns.some((p) => t.name.includes(p))
-      ) ?? null
-    );
-  }, [initialTemplate, initialMeetingId, meetings, templates]);
-
-  const effectiveTemplate = initialTemplate ?? autoTemplate;
-
-  const [subject, setSubject] = useState(effectiveTemplate?.subject ?? "");
+  const [subject, setSubject] = useState(initialTemplate?.subject ?? "");
   const [body, setBody] = useState(() =>
-    toRichTextHtml(effectiveTemplate?.body ?? "")
+    toRichTextHtml(initialTemplate?.body ?? "")
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    effectiveTemplate?.id ?? ""
+    initialTemplate?.id ?? ""
   );
   const [selectedMeetingId, setSelectedMeetingId] = useState(
     initialMeetingId ?? ""
@@ -155,6 +136,7 @@ export function ComposeForm({
           datetime: new Date(meeting.datetime),
           locationName: meeting.locationName,
           locationAddress: meeting.locationAddress,
+          agenda: meeting.agenda,
         });
         Object.assign(base, meetingData);
       }

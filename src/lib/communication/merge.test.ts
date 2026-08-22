@@ -1,0 +1,384 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import { test } from "node:test";
+
+import { TS_FILES, codeOf, rel } from "@/lib/auth/server-action-surface";
+
+import {
+  buildMeetingMergeData,
+  formatAgendaForEmail,
+  formatLocationForEmail,
+  renderEmailBodyHtml,
+  renderEmailBodyText,
+  renderSubject,
+} from "@/lib/communication/merge";
+import { SYSTEM_TEMPLATES } from "@/lib/communication/system-templates";
+import { toRichTextHtml } from "@/lib/rich-text/format";
+
+// ----------------------------------------------------------------------------
+// #612 — `{{meeting_agenda}}`
+//
+// The agenda has always been on the meeting (`church_meetings.agenda`) and has
+// never been able to reach an email: the meeting merge group carried title,
+// type, date, location and the RSVP buttons and nothing else. These tests cover
+// the field itself and the two properties that make it usable in a template a
+// planter did not write conditionals for — an empty agenda leaves no heading
+// and no gap.
+// ----------------------------------------------------------------------------
+
+const MEETING = {
+  title: "Worship Team Sync",
+  type: "team_meeting",
+  datetime: new Date("2026-09-08T23:00:00.000Z"),
+  locationName: "Room 2",
+  locationAddress: null,
+};
+
+// ============================================================================
+// The agenda, formatted
+// ============================================================================
+
+test("the agenda renders as a list under its own heading", () => {
+  const value = formatAgendaForEmail([
+    { id: "1", title: "Welcome", minutes: 10 },
+    { id: "2", title: "Set list", minutes: 25 },
+  ]);
+
+  assert.equal(value, "Agenda:\n• Welcome (10 min)\n• Set list (25 min)");
+});
+
+test("a section with no timing prints its title alone", () => {
+  // 0 is what `clampAgendaMinutes` returns for a timing it cannot read, so
+  // "(0 min)" would print a parse failure to a guest as if it were the plan.
+  assert.equal(
+    formatAgendaForEmail([{ id: "1", title: "Open floor", minutes: 0 }]),
+    "Agenda:\n• Open floor"
+  );
+});
+
+test("no agenda renders nothing at all — not even the heading", () => {
+  assert.equal(formatAgendaForEmail([]), "");
+});
+
+test("an unreadable agenda column sends an email without an agenda", () => {
+  // `parseAgenda` is total, so none of these throws on the way to a send.
+  for (const agenda of [null, undefined, "", "[]", 7, {}, [null], [{}]]) {
+    assert.equal(
+      buildMeetingMergeData({ ...MEETING, agenda }).meeting_agenda,
+      "",
+      JSON.stringify(agenda) ?? "undefined"
+    );
+  }
+});
+
+test("the meeting merge group carries the agenda beside the date", () => {
+  const data = buildMeetingMergeData({
+    ...MEETING,
+    agenda: [{ id: "1", title: "Welcome", minutes: 10 }],
+  });
+
+  assert.equal(data.meeting_agenda, "Agenda:\n• Welcome (10 min)");
+  assert.equal(data.meeting_title, "Worship Team Sync");
+  assert.equal(data.meeting_type, "Team Meeting");
+  // Zone-pinned through `@/lib/datetime`, so this is the same string the email
+  // and the on-page preview both show.
+  assert.match(data.meeting_date, /September 8, 2026/);
+});
+
+// ============================================================================
+// Rendering a body
+// ============================================================================
+
+test("merge values reach the HTML body as text, never as markup", () => {
+  const html = renderEmailBodyHtml("<p>Hi {{first_name}}</p>", {
+    first_name: "Bobby <script>alert(1)</script>",
+  });
+
+  assert.ok(!html.includes("<script>"), html);
+  assert.ok(html.includes("&lt;script&gt;"), html);
+});
+
+test("a multi-line value keeps its lines in the HTML body", () => {
+  // A bare `\n` inside a `<p>` is whitespace, so without this the whole agenda
+  // arrives on one line.
+  const html = renderEmailBodyHtml("<p>{{meeting_agenda}}</p>", {
+    meeting_agenda: "Agenda:\n• Welcome (10 min)",
+  });
+
+  assert.equal(html, "<p>Agenda:<br />• Welcome (10 min)</p>");
+});
+
+test("a field that resolves to nothing leaves no empty paragraph", () => {
+  const html = renderEmailBodyHtml(
+    "<p>Before</p><p>{{meeting_agenda}}</p><p>After</p>",
+    { meeting_agenda: "" }
+  );
+
+  assert.equal(html, "<p>Before</p><p>After</p>");
+});
+
+test("a blank line the planter typed is NOT an emptied paragraph", () => {
+  // `<p><br></p>` is what an emptied contentEditable leaves behind, and it is
+  // how this product spells an author's deliberate blank line (`format.ts`,
+  // `isRichTextEmpty`). The first spelling of the drop ran over the RENDERED
+  // body looking for `<p></p>`, which cannot tell the two apart — so a change
+  // scoped to "an absent agenda leaves no gap" silently restyled every outgoing
+  // email, including ones with no merge field in them at all.
+  assert.equal(
+    renderEmailBodyHtml("<p>Hi Sarah,</p><p><br></p><p>See you Sunday.</p>", {
+      first_name: "Sarah",
+    }),
+    "<p>Hi Sarah,</p><p><br></p><p>See you Sunday.</p>"
+  );
+  assert.equal(
+    renderEmailBodyHtml("<p>A</p><p>&nbsp;</p><p>B</p>", {}),
+    "<p>A</p><p>&nbsp;</p><p>B</p>"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// #625 — the unit is the LINE, not the paragraph
+//
+// The date and the location are two lines of ONE paragraph: an author separates
+// them with Enter, so `toRichTextHtml` gives `<p>📅 …<br>📍 …</p>`. The first
+// spelling of the drop was paragraph-scoped and could only take them together
+// or not at all — it took neither, and a meeting with no location shipped a
+// bare 📍.
+// ----------------------------------------------------------------------------
+
+test("an emptied line disappears with its break, not with its paragraph", () => {
+  assert.equal(
+    renderEmailBodyHtml("<p>📅 {{meeting_date}}<br>{{meeting_location}}</p>", {
+      meeting_date: "Tuesday",
+      meeting_location: "",
+    }),
+    "<p>📅 Tuesday</p>"
+  );
+});
+
+test("a paragraph whose lines ALL empty goes away whole", () => {
+  // The #612 agenda case, now falling out of the line rule rather than needing
+  // one of its own.
+  assert.equal(
+    renderEmailBodyHtml("<p>A</p><p>{{x}}<br>{{y}}</p><p>B</p>", {
+      x: "",
+      y: "",
+    }),
+    "<p>A</p><p>B</p>"
+  );
+});
+
+test("the surviving lines of a mixed paragraph keep their order", () => {
+  assert.equal(
+    renderEmailBodyHtml("<p>one<br>{{gone}}<br>three</p>", { gone: "" }),
+    "<p>one<br />three</p>"
+  );
+});
+
+test("the text half drops the same line, not just the blank run", () => {
+  // Without the line drop the `\n{3,}` collapse turns a single line break into
+  // a paragraph break, and the two halves of one email break in different
+  // places.
+  assert.equal(
+    renderEmailBodyText("📅 {{meeting_date}}\n{{meeting_location}}\nRSVP", {
+      meeting_date: "Tuesday",
+      meeting_location: "",
+    }),
+    "📅 Tuesday\nRSVP"
+  );
+});
+
+test("a FORMATTED token is still the only thing on its line", () => {
+  // The editor has bold and italic, so a planter can wrap the token. Matching
+  // the raw HTML let any inline tag hide it: the HTML half kept `<em></em>` and
+  // a dangling `<br>` while the text half dropped the line, so one email broke
+  // in two different places. The predicate is the line's VISIBLE TEXT.
+  assert.equal(
+    renderEmailBodyHtml(
+      "<p>📅 {{meeting_date}}<br><em>{{meeting_location}}</em></p>",
+      { meeting_date: "Tuesday", meeting_location: "" }
+    ),
+    "<p>📅 Tuesday</p>"
+  );
+  assert.equal(
+    renderEmailBodyHtml("<p><strong>{{meeting_agenda}}</strong></p><p>B</p>", {
+      meeting_agenda: "",
+    }),
+    "<p>B</p>"
+  );
+});
+
+test("a wrapper spanning the break is KEPT — dropping it would unbalance the markup", () => {
+  // `</em>` lives on the second line, so deleting that line alone would leave
+  // `<em>` open all the way to the inbox. A fact rendering empty inside its
+  // wrapper is a cosmetic miss; unbalanced markup is a broken email.
+  assert.equal(
+    renderEmailBodyHtml("<p><em>a<br>{{gone}}</em></p>", { gone: "" }),
+    "<p><em>a<br></em></p>"
+  );
+});
+
+test("a list item is a line too", () => {
+  // `<li>` is on the sanitiser's allow-list, and the rule's whole claim is that
+  // the unit is the line a fact is written on.
+  assert.equal(
+    renderEmailBodyHtml("<ul><li>{{gone}}</li><li>kept</li></ul>", {
+      gone: "",
+    }),
+    "<ul><li>kept</li></ul>"
+  );
+});
+
+test("a nested block does not let one tag close another", () => {
+  // A lazy `<p>|<li>` match without the backreference would pair the `<li>`
+  // opener with `</p>` and rebuild across the tag boundary.
+  const nested = "<ul><li><p>text</p></li></ul>";
+  assert.equal(renderEmailBodyHtml(nested, { gone: "" }), nested);
+});
+
+test("the location value carries its own pin, or nothing at all", () => {
+  assert.equal(
+    formatLocationForEmail("Fellowship Hall", "400 Oak St"),
+    "📍 Fellowship Hall, 400 Oak St"
+  );
+  // Either column alone still gets a pin — they are one line to a reader.
+  assert.equal(formatLocationForEmail("Room 2", null), "📍 Room 2");
+  assert.equal(formatLocationForEmail(null, "400 Oak St"), "📍 400 Oak St");
+  assert.equal(formatLocationForEmail(null, null), "");
+  assert.equal(formatLocationForEmail("", ""), "");
+});
+
+test("the meeting merge group carries the pin, so no template has to", () => {
+  assert.equal(
+    buildMeetingMergeData({ ...MEETING, agenda: null }).meeting_location,
+    "📍 Room 2"
+  );
+  assert.equal(
+    buildMeetingMergeData({
+      ...MEETING,
+      locationName: null,
+      locationAddress: null,
+      agenda: null,
+    }).meeting_location,
+    ""
+  );
+});
+
+test("a token nothing resolved keeps its paragraph, for the preview to flag", () => {
+  // An UNKNOWN field is not an empty one. The compose preview draws a red pill
+  // around whatever token is left, and dropping the paragraph would delete
+  // exactly the warning it exists to give.
+  assert.equal(
+    renderEmailBodyHtml("<p>{{custom_field}}</p>", { first_name: "Sarah" }),
+    "<p>{{custom_field}}</p>"
+  );
+});
+
+test("a lone CR is a line break like any other", () => {
+  // Every rule here is written against `\n`, so a value carrying `\r` slips
+  // past all of them — and in a SUBJECT that is a bare CR in an email header.
+  assert.equal(
+    renderEmailBodyHtml("<p>{{meeting_agenda}}</p>", {
+      meeting_agenda: "Agenda:\r\n• Welcome\r• Worship",
+    }),
+    "<p>Agenda:<br />• Welcome<br />• Worship</p>"
+  );
+  assert.equal(
+    renderSubject("Hi {{name}}", { name: "x\rBcc: someone@example.com" }),
+    "Hi x Bcc: someone@example.com"
+  );
+  assert.equal(renderEmailBodyText("{{a}}", { a: "x\r\n\r\n\r\ny" }), "x\n\ny");
+});
+
+test("the text half collapses the gap the same way", () => {
+  assert.equal(
+    renderEmailBodyText("Before\n\n{{meeting_agenda}}\n\nAfter", {
+      meeting_agenda: "",
+    }),
+    "Before\n\nAfter"
+  );
+});
+
+test("a subject is one line however many the value has", () => {
+  // A subject is an email HEADER, and `{{meeting_agenda}}` is the first merge
+  // value with newlines in it.
+  assert.equal(
+    renderSubject("{{meeting_title}}: {{meeting_agenda}}", {
+      meeting_title: "Sync",
+      meeting_agenda: "Agenda:\n• Welcome (10 min)",
+    }),
+    "Sync: Agenda: • Welcome (10 min)"
+  );
+});
+
+// ============================================================================
+// The whole path, on the template a team meeting actually opens with
+// ============================================================================
+
+const teamInvitation = SYSTEM_TEMPLATES.find(
+  (t) => t.invitesMeetingType === "team_meeting"
+);
+
+test("the team-meeting invitation puts the agenda in the body", () => {
+  assert.ok(teamInvitation, "the team-meeting invitation is seeded");
+
+  const html = renderEmailBodyHtml(toRichTextHtml(teamInvitation.body), {
+    ...buildMeetingMergeData({
+      ...MEETING,
+      agenda: [
+        { id: "1", title: "Welcome", minutes: 10 },
+        { id: "2", title: "Set list", minutes: 25 },
+      ],
+    }),
+    first_name: "Sarah",
+    church_name: "New Life",
+  });
+
+  assert.ok(html.includes("Agenda:"), html);
+  assert.ok(html.includes("• Welcome (10 min)<br />• Set list (25 min)"), html);
+});
+
+test("…and leaves no agenda section behind when there is no agenda", () => {
+  assert.ok(teamInvitation);
+
+  const html = renderEmailBodyHtml(toRichTextHtml(teamInvitation.body), {
+    ...buildMeetingMergeData({ ...MEETING, agenda: null }),
+    first_name: "Sarah",
+    church_name: "New Life",
+  });
+
+  assert.ok(!html.includes("Agenda"), html);
+  assert.ok(!/<p>\s*<\/p>/.test(html), html);
+  // The rest of the email is untouched — this is a section that is absent, not
+  // a body that lost its middle.
+  assert.ok(html.includes("Hi Sarah"), html);
+  assert.ok(html.includes("Room 2"), html);
+});
+
+// ============================================================================
+// The sent-message detail page draws the email that was sent
+// ============================================================================
+
+test("RichText's merge branch IS renderEmailBodyHtml, not a third spelling", () => {
+  // `communications.body_html` stores the body UNRENDERED (`send.ts`), so the
+  // detail page re-substitutes what the recipient already received. While
+  // `RichText` carried `renderTemplate(sanitized, escapeMergeValues(…))` inline
+  // it had neither the line breaks nor the emptied-paragraph drop: an agenda
+  // arrived in the inbox as a list and rendered on that page as one run-on
+  // line. A source-text assertion, because rendering the component here would
+  // pull React into a unit suite for a property about which FUNCTION is called.
+  const file = TS_FILES.find(
+    (candidate) =>
+      rel(candidate) ===
+      path.join("src", "components", "shared", "rich-text.tsx")
+  );
+  assert.ok(file, "the walk did not find rich-text.tsx");
+
+  const code = codeOf(file);
+  assert.match(code, /renderEmailBodyHtml\(sanitized, mergeData\)/);
+  assert.doesNotMatch(
+    code,
+    /escapeMergeValues|renderTemplate/,
+    "rich-text.tsx is substituting merge values itself again — call renderEmailBodyHtml"
+  );
+});
