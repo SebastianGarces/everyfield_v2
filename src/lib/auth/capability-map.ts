@@ -199,7 +199,11 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/settings/account/actions.ts → confirmEmailChangeAction":
     "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → removeAvatarAction":
+    "self.write",
   "src/app/(dashboard)/settings/account/actions.ts → requestEmailChangeAction":
+    "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → uploadAvatarAction":
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → clearMyEmailSuppressionAction":
     "self.write",

@@ -1,0 +1,37 @@
+-- #617 (CS-004): the account's own profile picture.
+--
+-- ONE NULLABLE COLUMN, holding a PRIVATE-BUCKET STORAGE KEY and never a URL.
+-- The name says `key` on purpose: `persons.photo_url` holds a key too and its
+-- name says otherwise, which has cost every reader of that column a docblock
+-- explaining that it does not mean what it says. NULL is "no picture", and the
+-- initials fallback is what renders for it -- which is why there is no default
+-- and no NOT NULL to backfill against.
+--
+-- 500 IS `persons.photo_url`'s WIDTH, deliberately the same. The keys are the
+-- same shape from the same generator (`avatars/{userId}/{uuid}.{ext}` against
+-- `people/{churchId}/{personId}/{uuid}.{ext}`), and an account key is the
+-- SHORTER of the two -- one uuid segment rather than two -- so a width that has
+-- held every person photo cannot be tight here.
+--
+-- NO INDEX. Nothing looks an account up BY its picture; the column is only ever
+-- read on a row already found by id, off the session join. An index here would
+-- be write cost for a query that does not exist.
+--
+-- PURELY ADDITIVE, in the cheapest shape Postgres has: one nullable column with
+-- no default, which is a catalog-only change -- no table rewrite, no lock held
+-- for the length of a scan, nothing to backfill. Safe to apply AHEAD of the code
+-- that reads it, and safe for the code to ship first too: a read of a column
+-- that is not there fails loudly rather than answering wrong.
+--
+-- ORDERING. `when` is the tail (0063) plus ONE SECOND (#566), stamped by
+-- `scripts/restamp-migration.ts` through `pnpm db:generate`. No sibling below it
+-- to reconcile forward, and this migration has never been renumbered -- minted
+-- as 0064 and shipping as 0064 -- so no operator reconcile is owed
+-- (memory/invariants.md → Migrations).
+--
+-- ROLLBACK is `ALTER TABLE "users" DROP COLUMN "avatar_key";`, and it is
+-- lossless in the only sense that matters here: the bucket objects survive it
+-- as garbage a sweep collects, and no other column or row depends on this one.
+-- Nothing reads `avatar_key` except the avatar route and its one writer.
+
+ALTER TABLE "users" ADD COLUMN "avatar_key" varchar(500);

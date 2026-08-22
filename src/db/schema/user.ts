@@ -34,6 +34,24 @@ export const users = pgTable(
     email: varchar("email", { length: 255 }).notNull().unique(),
     passwordHash: varchar("password_hash", { length: 255 }).notNull(),
     name: varchar("name", { length: 255 }),
+    /**
+     * The account's profile picture, as a PRIVATE-BUCKET STORAGE KEY (CS-004,
+     * #617) — never a URL, and the column is named for what it holds.
+     * `persons.photo_url` next door holds a key too and its name says
+     * otherwise, which has cost every reader of it a docblock; this one does
+     * not repeat the lie.
+     *
+     * NULL is "no picture", and the initials fallback is what renders for it.
+     * The only address a browser ever gets is `/api/account/avatar`, which
+     * checks the session before it reads a byte — so nothing outside this
+     * server holds a key or a signed URL, because a signed URL is a bearer
+     * token anybody who copied it out of the markup could use.
+     *
+     * ONE WRITER: `setUserAvatar` (`@/lib/auth/avatar`). A removal is that same
+     * writer with a null key, which is what keeps upload, replace and remove on
+     * one spelling of the P-024 ordering.
+     */
+    avatarKey: varchar("avatar_key", { length: 500 }),
     seat: varchar("seat", { length: 20 }).$type<UserSeat>(),
     churchId: uuid("church_id").references(() => churches.id),
     sendingChurchId: uuid("sending_church_id").references(

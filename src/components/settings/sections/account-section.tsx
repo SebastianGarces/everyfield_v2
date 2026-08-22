@@ -1,7 +1,9 @@
+import { AvatarField } from "@/components/settings/avatar-field";
 import { ChangeEmailForm } from "@/components/settings/change-email-form";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { liveEmailChangeRequest } from "@/lib/auth/email-change";
 import { verifySession } from "@/lib/auth/session";
+import { accountInitials, userAvatarSrc } from "@/lib/profile-photo";
 
 // ============================================================================
 // Account — who you are signed in as, and the two credentials you can change
@@ -12,6 +14,12 @@ import { verifySession } from "@/lib/auth/session";
 // below repeat the address — it is the answer to "which account is this?", which
 // is the question that brought most readers here, and a form is a worse way to
 // read a value than a value is.
+//
+// THE PICTURE IS PART OF THE FIRST BLOCK, not a fourth one (CS-004, #617). It
+// belongs to the same question the name and the address answer — who is this —
+// and a section of its own would have been a heading saying "Profile picture"
+// above a control already labelled by the button inside it. So it opens the
+// identity block, above the list, and the block's heading covers all three.
 //
 // THE SECTION RE-STATES ITS OWN GATE BY NOT NEEDING ONE. Every signed-in
 // account may edit its own credentials, including a coach holding no seat in
@@ -24,8 +32,10 @@ import { verifySession } from "@/lib/auth/session";
 // calls `refresh()`, and this read is what "check your inbox" reconciles
 // against.
 //
-// CS-004's profile picture is still its own issue. Nothing here promises it —
-// the control arrives by appearing.
+// THE PICTURE'S KEY STOPS HERE. `AvatarField` is a client component, so every
+// prop it takes is in the payload the browser can read — which is why it takes
+// the resolved ROUTE and never the stored key. The same resolution happens in
+// the dashboard layout for the sidebar, and for the same reason.
 // ============================================================================
 
 export async function AccountSection() {
@@ -41,6 +51,12 @@ export async function AccountSection() {
         >
           Signed in
         </h2>
+
+        <AvatarField
+          avatarSrc={userAvatarSrc(user.avatarKey)}
+          initials={accountInitials(user.name, user.email)}
+          name={user.name ?? user.email}
+        />
 
         <dl className="divide-border divide-y rounded-lg border">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-4 py-3">

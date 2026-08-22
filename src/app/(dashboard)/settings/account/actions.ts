@@ -5,6 +5,11 @@ import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 
 import {
+  removeUserAvatar,
+  uploadUserAvatar,
+  type AvatarOutcome,
+} from "@/lib/auth/avatar";
+import {
   confirmEmailChange,
   requestEmailChange,
   type EmailChangeConfirmOutcome,
@@ -17,24 +22,32 @@ import {
 import { getRequestIp } from "@/lib/auth/rate-limit";
 
 // ============================================================================
-// The Account section's writes — CS-002 / CS-003 / CS-005 (#616).
+// The Account section's writes — CS-002 / CS-003 / CS-004 / CS-005 (#616, #617).
 //
 // ----------------------------------------------------------------------------
 // WHOSE ACCOUNT THIS IS IS NOT AN ARGUMENT
 // ----------------------------------------------------------------------------
 //
 // No export here accepts a user id, an address to change FROM, or a password
-// hash. Every one takes the values the reader TYPED and nothing else; the actor
-// is minted from `requireSeat("self.write")` and handed to the logic layer as
-// one object. That is the whole ownership story, and it is a property of the
-// signatures rather than a check somebody could delete — the same shape the
-// preference writes next door take, and the same reason
-// (`memory/invariants.md` → Authentication: an entity implied by the actor is
-// not an argument either).
+// hash. Every one takes the values the reader TYPED — or, for the picture, the
+// bytes they CHOSE — and nothing else; the actor is minted from
+// `requireSeat("self.write")` and handed to the logic layer as one object. That
+// is the whole ownership story, and it is a property of the signatures rather
+// than a check somebody could delete — the same shape the preference writes next
+// door take, and the same reason (`memory/invariants.md` → Authentication: an
+// entity implied by the actor is not an argument either).
 //
-// `self.write` IS THE VERB for all three: "a write whose row is keyed by the
+// The picture is the sharpest case: `uploadAvatarAction` takes a `FormData` bag
+// whose keys a POST chooses, and the only thing it reads out of one is the file.
+// A storage key from that bag would be a client-supplied key, and the avatar
+// route trusts the stored key precisely because nothing client-supplied can
+// reach it — the same reason `personUpdateSchema` deliberately has no
+// `photoUrl` field (P-024a).
+//
+// `self.write` IS THE VERB for all five: "a write whose row is keyed by the
 // caller's own user id and reaches no other account" (`@/lib/auth/seat-rules`)
-// describes an account's own address and its own password exactly. It carries
+// describes an account's own address, its own password and its own picture
+// exactly — the picture's write is one UPDATE on `users` by id. It carries
 // no seat set and `tenancy: "any"`, which is what the Account section needs —
 // it is the one section every account sees, including a coach who holds no seat
 // in any tenancy at all.
@@ -68,9 +81,72 @@ import { getRequestIp } from "@/lib/auth/rate-limit";
 //
 // The Account section renders the signed-in identity, and the sidebar renders
 // it too. `refresh()` re-renders the current tree INCLUDING its layouts, so the
-// address in the chrome reconciles with the same server state the write just
-// produced (memory/contracts/data-patterns.md).
+// address in the chrome — and the picture beside it — reconciles with the same
+// server state the write just produced (memory/contracts/data-patterns.md).
+// Nothing here renders in a layout only, so there is no `revalidatePath` that
+// would do the job: the picture in the sidebar and the picture in the modal are
+// one render away from each other.
 // ============================================================================
+
+/**
+ * Put a chosen image on this account, replacing whatever was there (CS-004).
+ *
+ * ONE ACTION FOR UPLOAD AND REPLACE, because they are one write. "Replace"
+ * differs only in whether a row already named an object, which is something the
+ * writer discovers rather than something the caller declares — and a caller who
+ * declared it could declare it wrongly.
+ *
+ * The `FormData` carries the file and nothing else that is read. See the header:
+ * a storage key in that bag would be a key the client chose.
+ */
+export async function uploadAvatarAction(
+  formData: FormData
+): Promise<AvatarOutcome> {
+  const { user } = await requireSeat("self.write");
+
+  try {
+    const file = formData.get("avatar");
+    if (!(file instanceof File)) {
+      return { ok: false, message: "Choose an image to upload." };
+    }
+
+    const outcome = await uploadUserAvatar({ actor: user, file });
+
+    // The sidebar shows the picture too, so the whole tree re-reads.
+    if (outcome.ok) refresh();
+
+    return outcome;
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[ACCOUNT] uploading a profile picture failed:", error);
+    return { ok: false, message: "We could not save that picture" };
+  }
+}
+
+/**
+ * Take the picture off this account, so the initials render in its place
+ * (CS-004).
+ *
+ * IT TAKES NOTHING AT ALL. Which account loses its picture comes from the
+ * session, and the key of the object to delete comes from the row — never from
+ * the caller, who could otherwise name an object that is not theirs and have the
+ * server delete it.
+ */
+export async function removeAvatarAction(): Promise<AvatarOutcome> {
+  const { user } = await requireSeat("self.write");
+
+  try {
+    const outcome = await removeUserAvatar({ actor: user });
+
+    if (outcome.ok) refresh();
+
+    return outcome;
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[ACCOUNT] removing a profile picture failed:", error);
+    return { ok: false, message: "We could not remove that picture" };
+  }
+}
 
 /**
  * Ask to move this account to a new address (CS-002).

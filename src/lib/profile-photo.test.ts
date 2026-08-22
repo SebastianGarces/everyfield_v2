@@ -4,14 +4,15 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  PERSON_PHOTO_MAX_BYTES,
-  PERSON_PHOTO_MIME_TYPES,
-  personPhotoRefusal,
+  PROFILE_PHOTO_MAX_BYTES,
+  PROFILE_PHOTO_MIME_TYPES,
   personPhotoSrc,
-} from "./photo";
+  profilePhotoRefusal,
+  userAvatarSrc,
+} from "./profile-photo";
 
 // ----------------------------------------------------------------------------
-// WHAT A PERSON PHOTO MAY BE, AND WHO SAYS SO (#320, P-024a).
+// WHAT A PROFILE PHOTO MAY BE, AND WHO SAYS SO (#320, P-024a; #617).
 //
 // The size limit is not a taste decision. A server action's payload is one
 // request body, and two caps sit over it: Next's own `serverActions
@@ -28,30 +29,33 @@ import {
 const ok = { type: "image/png", size: 200_000 };
 
 test("an image inside the limit is accepted", () => {
-  assert.equal(personPhotoRefusal(ok), null);
-  for (const type of PERSON_PHOTO_MIME_TYPES) {
-    assert.equal(personPhotoRefusal({ type, size: 1000 }), null, type);
+  assert.equal(profilePhotoRefusal(ok), null);
+  for (const type of PROFILE_PHOTO_MIME_TYPES) {
+    assert.equal(profilePhotoRefusal({ type, size: 1000 }), null, type);
   }
 });
 
 test("a non-image is refused by type, whatever its size", () => {
   assert.equal(
-    personPhotoRefusal({ type: "application/pdf", size: 100 }),
+    profilePhotoRefusal({ type: "application/pdf", size: 100 }),
     "That file is not an image. Use a JPG, PNG or WebP."
   );
   assert.equal(
-    personPhotoRefusal({ type: "text/html", size: 10 }),
+    profilePhotoRefusal({ type: "text/html", size: 10 }),
     "That file is not an image. Use a JPG, PNG or WebP."
   );
 });
 
 test("an oversized image is refused by size, and named as such", () => {
   assert.equal(
-    personPhotoRefusal({ type: "image/png", size: PERSON_PHOTO_MAX_BYTES + 1 }),
+    profilePhotoRefusal({
+      type: "image/png",
+      size: PROFILE_PHOTO_MAX_BYTES + 1,
+    }),
     "That image is too large. The limit is 3MB."
   );
   assert.equal(
-    personPhotoRefusal({ type: "image/png", size: PERSON_PHOTO_MAX_BYTES }),
+    profilePhotoRefusal({ type: "image/png", size: PROFILE_PHOTO_MAX_BYTES }),
     null,
     "the limit itself is allowed"
   );
@@ -59,17 +63,17 @@ test("an oversized image is refused by size, and named as such", () => {
 
 test("an empty file is not a photo", () => {
   assert.equal(
-    personPhotoRefusal({ type: "image/png", size: 0 }),
+    profilePhotoRefusal({ type: "image/png", size: 0 }),
     "That file is not an image. Use a JPG, PNG or WebP."
   );
 });
 
 test("the refusal message names the limit it enforces", () => {
-  const message = personPhotoRefusal({
+  const message = profilePhotoRefusal({
     type: "image/png",
-    size: PERSON_PHOTO_MAX_BYTES + 1,
+    size: PROFILE_PHOTO_MAX_BYTES + 1,
   });
-  const mb = PERSON_PHOTO_MAX_BYTES / (1024 * 1024);
+  const mb = PROFILE_PHOTO_MAX_BYTES / (1024 * 1024);
   assert.ok(
     message?.includes(`${mb}MB`),
     `the message must say ${mb}MB, not: ${message}`
@@ -92,7 +96,7 @@ test("the promised limit fits inside the body caps above it", () => {
   const PLATFORM_BODY_CAP = 4.5 * 1024 * 1024; // Vercel; not raisable from here
 
   assert.ok(
-    PERSON_PHOTO_MAX_BYTES < nextLimitBytes,
+    PROFILE_PHOTO_MAX_BYTES < nextLimitBytes,
     "a file at the promised limit must reach the action, or the refusal is a 413"
   );
   assert.ok(
@@ -124,4 +128,39 @@ test("the photo src is the app route, never a key or a bucket URL", () => {
     personPhotoSrc("person-1", "people/church-1/person-1/def-456.png"),
     src
   );
+});
+
+// ----------------------------------------------------------------------------
+// The account's own picture (CS-004, #617).
+// ----------------------------------------------------------------------------
+
+test("an account with no picture has no src at all — the initials fallback renders", () => {
+  assert.equal(userAvatarSrc(null), undefined);
+  assert.equal(userAvatarSrc(undefined), undefined);
+  assert.equal(userAvatarSrc(""), undefined);
+});
+
+test("the avatar src names NO account — the session is the whole address", () => {
+  const userId = "44444444-4444-4444-4444-444444444444";
+  const src = userAvatarSrc(`avatars/${userId}/abc-123.png`);
+
+  assert.ok(src, "a stored key must resolve to a route");
+  assert.ok(src.startsWith("/api/account/avatar?v="));
+  assert.ok(
+    !src.includes(userId),
+    "there is no id in this address to forge or to enumerate — the route answers for whoever holds the session"
+  );
+  assert.ok(
+    !src.includes("avatars/"),
+    "the key must not ride to the browser — the route resolves it server-side"
+  );
+});
+
+test("replacing the picture changes the src, or the browser keeps the old face", () => {
+  const before = userAvatarSrc("avatars/user-1/abc-123.png");
+  const after = userAvatarSrc("avatars/user-1/def-456.png");
+
+  // Same route, new object. Without the buster there is no request for the
+  // route to answer — the browser serves the replaced picture from its cache.
+  assert.notEqual(before, after);
 });
