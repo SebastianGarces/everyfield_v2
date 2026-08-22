@@ -7,7 +7,11 @@ import {
   findVerdictLanguage,
 } from "./network-register";
 import { RUBRICS } from "../rubric";
-import { judgeOutputSchema, type Insight } from "./schema";
+import type { Insight } from "./schema";
+import { FIXTURE_JUDGE_SCHEMA } from "./testing";
+
+/** The fixture plant's schema — this suite is not about the evidence rule. */
+const judgeOutputSchema = FIXTURE_JUDGE_SCHEMA;
 
 // ----------------------------------------------------------------------------
 // The network register (#482, C15/C16/C24/C25).

@@ -11,7 +11,7 @@ export { runAssessment } from "./run-assessment";
 export type { RunAssessmentOptions } from "./run-assessment";
 
 export {
-  judgeOutputSchema,
+  judgeOutputSchemaFor,
   insightSchema,
   insightAudienceSchema,
   insightCategorySchema,

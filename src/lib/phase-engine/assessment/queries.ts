@@ -423,6 +423,42 @@ export function standingForSeverity(
   return SEVERITY_STANDING[severity] ?? "noted";
 }
 
+/**
+ * A HEALTHY READ ON A LENS THAT KNOWS NOTHING IS NOT AN OBSERVATION (#635).
+ *
+ * `strength` is the word GOING WELL on the tile — a verdict — and a lens with
+ * nothing measured and nothing attested has not earned one. The judge can no
+ * longer write one (`unknown_lens_not_healthy`, judge/schema.ts), but this
+ * projection reads every assessment STORED BEFORE that rule existed, and those
+ * still hand the cold-start plant a "Going well · Based on no activity recorded
+ * yet" tile.
+ *
+ * SO IT IS DROPPED FROM THE FACTOR, NOT RELABELLED. Demoting the standing was
+ * the first fix and it was half a fix: the badge changed and the encouraging
+ * sentence stayed on the tile, which is the half the planter actually reads.
+ * With the row gone the factor falls to `not_raised`, and `isInsufficientEvidence`
+ * (csf-scorecard.tsx) then renders what this lens is owed — "we don't have
+ * enough information to assess vision casting yet".
+ *
+ * NOTHING IS HIDDEN FROM THE PLANTER. `/phase` builds its Focus list from
+ * `latest.insights` directly, not through this projection, so the insight is
+ * still on the page; what it loses is a standing on the eight-tile reference
+ * frame, which is the one place it read as a verdict.
+ *
+ * The docblock on `isInsufficientEvidence` is the sibling of this one: an
+ * insufficient-evidence state written over a REAL observation would be a worse
+ * blank than the one #483 removed. A pass resting on an absence is not one.
+ */
+function isUnearnedPass(
+  insight: PlantInsight,
+  evidence: LensEvidence
+): boolean {
+  return (
+    standingForSeverity(insight.severity) === "strength" &&
+    evidence.quality === "unknown"
+  );
+}
+
 /** Scan order: what warrants attention reaches the eye before what does not. */
 const STANDING_URGENCY: Record<CsfStanding, number> = {
   attention: 0,
@@ -543,7 +579,12 @@ export function buildCsfScorecard(
     // arrive resolved: `getLatestAssessment` already did it, but a caller
     // handing in a privacy-gated payload it assembled itself has not, and the
     // scorecard's voice must not depend on which door its rows came through.
+    const lensEvidence = evidence[definition.category];
+
     const insights = [...(byCategory.get(definition.category) ?? [])]
+      // A pass this lens never had the evidence to give is not a finding it can
+      // lead with (#635). See `isUnearnedPass`.
+      .filter((insight) => !isUnearnedPass(insight, lensEvidence))
       .sort(compareInsightUrgency)
       .map((insight) => withCitedFactSignals(insight, snapshot));
 
@@ -553,7 +594,7 @@ export function buildCsfScorecard(
         ? standingForSeverity(insights[0].severity)
         : ("not_raised" as const),
       insights,
-      evidence: evidence[definition.category],
+      evidence: lensEvidence,
     } satisfies CsfFactorStanding;
   });
 

@@ -15,8 +15,12 @@ import {
   SchemaRejectionError,
   type SchemaRejectionEvent,
 } from "./schema-rejection";
-import { judgeOutputSchema, type Insight } from "./schema";
-import { virtualClock } from "./testing";
+import { type Insight } from "./schema";
+
+/** The fixture plant's schema — this suite is not about the evidence rule. */
+const judgeOutputSchema = FIXTURE_JUDGE_SCHEMA;
+
+import { FIXTURE_JUDGE_SCHEMA, virtualClock } from "./testing";
 import { TokenPacer } from "./token-pacer";
 
 // ----------------------------------------------------------------------------

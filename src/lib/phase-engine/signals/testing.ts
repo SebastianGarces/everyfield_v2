@@ -15,7 +15,39 @@
 // re-exported from `index.ts`.
 // ============================================================================
 
+import {
+  buildEvidenceProfile,
+  EVIDENCE_LENSES,
+  type EvidenceLens,
+  type EvidenceProfile,
+  type EvidenceQuality,
+} from "./evidence";
 import type { PlantFactSnapshot } from "./types";
+
+/**
+ * The evidence profile of the fixture snapshot, plus whatever a suite overrides.
+ *
+ * DERIVED FROM `makeSnapshot`, NOT HAND-WRITTEN, because a hand-written default
+ * describes a plant that cannot exist: `prayer` and `generosity` are never
+ * `measured` (nothing counts them — signals/evidence.ts), so an all-measured
+ * default quietly switches off the rule that refuses a healthy read on a blind
+ * lens (#635), in exactly the two lenses that rule was written for. A suite
+ * that wants a different plant says which lens and how blind:
+ * `makeEvidence({ vision_casting: "unknown" })`.
+ */
+export function makeEvidence(
+  overrides: Partial<Record<EvidenceLens, EvidenceQuality>> = {}
+): EvidenceProfile {
+  const base = buildEvidenceProfile(makeSnapshot());
+  return Object.fromEntries(
+    EVIDENCE_LENSES.map((lens) => [
+      lens,
+      overrides[lens]
+        ? { quality: overrides[lens], attestedDaysAgo: null }
+        : base[lens],
+    ])
+  ) as EvidenceProfile;
+}
 
 /** A minimal but complete snapshot: every signal present, nothing extreme. */
 export function makeSnapshot(
