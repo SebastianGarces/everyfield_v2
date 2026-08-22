@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +19,35 @@ import type { PreviewAccount } from "./preview-accounts";
 
 const initialState: LoginState = {};
 
+const readHash = () => window.location.hash;
+
+function subscribeToHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+
 /**
  * `redirectTo` arrives as a prop, already through `safeRedirectPath` on the
  * page. The form used to read `?redirect=` itself with `useSearchParams`, which
  * made it a SECOND reader of the param and the only ungated one — harmless
  * because the action re-checks the field it submits, but it is one round trip
  * and it should have one gate (#503).
+ *
+ * THE FRAGMENT IS CARRIED BACK BY THIS COMPONENT, because nothing else can
+ * (#657). A browser never sends one to a server, so `loginPathFor` writes a
+ * path-and-query `?redirect=` and says in its own header that preserving a
+ * fragment is a client-side job — this is that job. It matters now that settings
+ * is addressed by one: a notification email links to
+ * `/dashboard#settings/notifications`, and a recipient who is signed out reaches
+ * `/login?redirect=%2Fdashboard` with `#settings/notifications` still on THIS
+ * document's URL. Without re-attaching it they sign in and land on the dashboard
+ * with no modal, one section short of where the mail sent them.
+ *
+ * `useSyncExternalStore` with an empty server snapshot, and never `useEffect`:
+ * the fragment is browser-only state, so the server renders the bare path and
+ * the client corrects it on hydration with no mismatch. It subscribes to
+ * `hashchange` for the same reason anything reading `location.hash` does — the
+ * value can change under a mounted form.
  *
  * `previewAccounts` is empty everywhere but a Vercel preview, where it carries
  * the seeded QA roster (`preview-accounts.ts`). The picker it feeds only WRITES
@@ -45,6 +68,7 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [picked, setPicked] = useState<PreviewAccount | null>(null);
+  const hash = useSyncExternalStore(subscribeToHash, readHash, () => "");
 
   return (
     <>
@@ -56,7 +80,11 @@ export function LoginForm({
           </CardDescription>
         </CardHeader>
         <form action={formAction}>
-          <input type="hidden" name="redirect" value={redirectTo} />
+          {/* `safeRedirectPath` has already gated the path half on the server
+              and gates it again on the way back; a fragment adds nothing it can
+              refuse, since it must still start with `/` and carry no control
+              characters. */}
+          <input type="hidden" name="redirect" value={`${redirectTo}${hash}`} />
           <CardContent className="space-y-4">
             {state.error && (
               <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">

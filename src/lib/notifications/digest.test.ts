@@ -479,7 +479,11 @@ test("the digest email carries a link into the app for every line it reports", a
     "List-Unsubscribe=One-Click"
   );
   assert.match(message.html, /Unsubscribe from digest emails/);
-  assert.ok(message.html.includes("https://app.everyfield.test/settings"));
+  assert.ok(
+    message.html.includes(
+      "https://app.everyfield.test/dashboard#settings/notifications"
+    )
+  );
 });
 
 test("a body with no recognisable lines still composes a valid email", async () => {

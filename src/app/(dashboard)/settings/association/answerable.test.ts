@@ -47,15 +47,13 @@ const REMINDER = read("dashboard", "association-reminder.tsx");
 // two halves on 2026-08-12 (PR #408); the banner belongs to the plant half.
 const DASHBOARD = read("dashboard", "plant-dashboard.tsx");
 const ANSWER = read("settings", "association", "invitation-answer.tsx");
-// The association surface is a SECTION of the settings modal since #615. The
-// URL `/settings/association` is unchanged; the sibling page that used to serve
-// it is gone and its body is this component, drawn by `settings/[section]`.
+// The association surface is a SECTION of the settings modal since #615, and
+// since #657 that section is a `"use client"` component whose GATE lives in the
+// read that feeds it. The question this file asks — who is admitted, and what
+// happens to everyone else — is the read's, so that is what it reads.
 const PAGE = code(
   readFileSync(
-    path.join(
-      process.cwd(),
-      "src/components/settings/sections/association-section.tsx"
-    ),
+    path.join(process.cwd(), "src/lib/settings/section-data.ts"),
     "utf8"
   )
 );
@@ -151,14 +149,17 @@ test("the settings surface redirects anyone who could not act on it", () => {
   // admitted by forgetting to add it to a negation.
   assert.match(PAGE, /isPlantOwner\(user\) && user\.churchId/);
   assert.match(PAGE, /org\?\.type === "sending_church"/);
-  assert.match(PAGE, /redirect\("\/settings"\)/);
 
-  // The redirect is the LAST thing, so it cannot be reached by a tenancy that
-  // has a view above it.
-  assert.ok(
-    PAGE.indexOf('redirect("/settings")') >
-      PAGE.indexOf('org?.type === "sending_church"'),
-    "the redirect must be the fall-through, not a gate in front of a view"
+  // The refusal is `return null` since #657, not `redirect("/settings")`: there
+  // is no settings route left to bounce to. It reaches the reader as the same
+  // correction it always was — the modal puts them on the section every account
+  // can open — but it is now a value the read returns rather than a throw, so
+  // `readAssociation`'s LAST statement is what this asserts.
+  const refusal = PAGE.slice(PAGE.indexOf('org?.type === "sending_church"'));
+  assert.match(
+    refusal,
+    /return null;/,
+    "the refusal must be the fall-through, not a gate in front of a view"
   );
 });
 

@@ -1,27 +1,11 @@
-import { redirect } from "next/navigation";
+"use client";
 
 import { InvitationsList } from "@/components/oversight/invitations-list";
 import { CoachInviteForm } from "@/components/settings/coach-invite-form";
 import { PlantCoachList } from "@/components/settings/plant-coach-list";
 import { SeatInviteForm } from "@/components/settings/seat-invite-form";
 import { SeatRoster } from "@/components/settings/seat-roster";
-import { holdsSeatFor } from "@/lib/auth/seat-rules";
-import { verifySession } from "@/lib/auth/session";
-import { tenancyOf } from "@/lib/auth/tenancy";
-import { formatDate } from "@/lib/datetime";
-import { INVITATION_EXPIRY_DAYS } from "@/lib/invitations/core";
-import { invitationActorFromSession } from "@/lib/invitations/core";
-import { toSeatInvitationListRow } from "@/lib/invitations/list-row";
-import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
-import {
-  expireLapsedUserInvitations,
-  listUserInvitationsFor,
-} from "@/lib/invitations/seat";
-import {
-  listPlantCoaches,
-  listSeatRoster,
-  seatActorFromSession,
-} from "@/lib/seats/roster";
+import type { TeamSectionView } from "@/lib/settings/section-view";
 
 import {
   appointAdminAction,
@@ -33,12 +17,13 @@ import {
 } from "@/app/(dashboard)/settings/team/actions";
 
 // ============================================================================
-// `/settings/team` — a TENANCY's own staffing surface (AS-014, #495, #497, #500).
+// The Team section — a TENANCY's own staffing surface (AS-014, #495, #497, #500).
 //
-// A SECTION OF THE SETTINGS MODAL SINCE #615, at its unchanged URL. The page
-// that used to serve it is gone; what moved is the chrome (breadcrumbs, the
-// `<h1>`, the page's own gate) and nothing else — the reads, the guards and
-// every control below are the ones that screen has always drawn.
+// A SECTION OF THE SETTINGS MODAL SINCE #615. What moved then was the chrome
+// (breadcrumbs, the `<h1>`, the page's own gate); what moved in #657 is the
+// READS, into `readTeam` in `@/lib/settings/section-data`. Every control below
+// is the one this screen has always drawn, and every guard behind them is
+// unchanged.
 //
 // ONE SCREEN FOR ALL THREE TENANCIES, not a second one for orgs (#500). A
 // sending church and a network staff themselves with the same two seats over
@@ -53,19 +38,18 @@ import {
 // one, and `listPlantCoaches` refuses one outright. Rendering an empty "Coaches"
 // card to a network would offer a section that can never fill.
 //
-// TWO CAPABILITIES ARE ASKED, NOT ONE, and neither is the section's own gate.
-// The gate is `seat.invitation.manage` — which the registry now asks
-// (`@/lib/settings/sections`), so the nav cannot list a section the reader is
-// then redirected out of. What the two extra questions decide is which CONTROLS
-// render: `seat.manage` is Owner-only (AS-015), `coach.assignment.manage` is an
-// Admin's (AS-018). Asking `holdsSeatFor` here rather than comparing a seat is
-// what keeps the surface and its actions reading one table — a control can never
-// appear beside an action that would refuse it.
+// THE CAPABILITY ANSWERS ARRIVE RESOLVED, and neither is the section's own gate.
+// The gate is `seat.invitation.manage`, asked by the registry and again by the
+// loader. `canManageSeats` (`seat.manage`, Owner-only, AS-015) and
+// `canEndAssignments` (`coach.assignment.manage`, an Admin's, AS-018) decide
+// which CONTROLS render — and both were read from the same capability table the
+// actions guard on, so a control can never appear beside an action that would
+// refuse it.
 //
-// THE JOIN AND ASSIGNED DATES ARE FORMATTED HERE, on the server, against
-// `APP_TIME_ZONE`: a `Date` formatted in the visitor's zone and again on the
-// server is a hydration mismatch (`memory/invariants.md` → Date & Time
-// Rendering), which is why both view rows carry a string.
+// THE JOIN AND ASSIGNED DATES ARRIVE AS STRINGS, formatted on the server against
+// `APP_TIME_ZONE`. This file is `"use client"`, so a `Date` on the wire would be
+// formatted in the visitor's zone (`memory/invariants.md` → Date & Time
+// Rendering).
 //
 // SCOPING IS THE LEAK GUARD, exactly as on `/oversight/invitations`:
 // `listUserInvitationsFor` puts the actor's OWN `church_id` in the WHERE, so
@@ -78,76 +62,12 @@ import {
 // are written once (`@/components/oversight/invitations-list`).
 // ============================================================================
 
-export async function TeamSection() {
-  const session = await verifySession();
-
-  // THE SAME QUESTION THE REGISTRY ASKED, re-asked. It is unreachable — the
-  // section does not render for an account the registry gated out — and it
-  // stays because the refusal that matters is the actions', and this keeps the
-  // surface stating its own gate rather than trusting a caller to have asked.
-  if (!holdsSeatFor(session.user, "seat.invitation.manage")) {
-    redirect("/settings");
-  }
-
-  // WHICH TEAM THIS IS. The gate above is `seat.invitation.manage`, which is
-  // `tenancy: "tenancy"` — so every account past it names exactly one tenancy
-  // and this cannot be null. It is read rather than asserted because the same
-  // resolution is what every query below is scoped by.
-  const tenancy = tenancyOf(session.user);
-  if (!tenancy) {
-    redirect("/settings");
-  }
-
-  const noun = TENANCY_NOUN[tenancy.type];
-  const isPlant = tenancy.type === "church";
-
-  const actor = invitationActorFromSession(session);
-
-  // LAZY EXPIRY, and it is idempotent: it only moves `pending` rows whose window
-  // has closed, so a second look changes nothing the first did. Without it a
-  // lapsed invitation keeps its Resend and Revoke controls — offering an action
-  // whose own guard is guaranteed to refuse it.
-  await expireLapsedUserInvitations(actor);
-
-  // PARTITIONED BY KIND, NOT MIXED (#496). `listUserInvitationsFor` returns both
-  // kinds because the plant owns both, but an Admin reading one list of pending
-  // addresses could not tell which of them was being offered a seat and which a
-  // coaching assignment — and `InvitationListRow` deliberately carries no `kind`
-  // to tell them with. Two lists under two headings answers it without widening
-  // the row.
-  const invitations = await listUserInvitationsFor(actor);
-  const seatRows = invitations
-    .filter((row) => row.kind === "seat")
-    .map(toSeatInvitationListRow);
-  const coachRows = invitations
-    .filter((row) => row.kind === "coach")
-    .map(toSeatInvitationListRow);
-
-  // Safe to mint: `seat.invitation.manage` is `tenancy: "tenancy"`, so the
-  // redirect above already refused every account that names no tenancy.
-  const seatActor = seatActorFromSession(session);
-  const canManageSeats = holdsSeatFor(session.user, "seat.manage");
-  // `coach.assignment.manage` is `tenancy: "plant"`, so this reads false for an
-  // org account — which is why the coach sections below can key off `isPlant`
-  // and never off this flag alone.
-  const canEndAssignments = holdsSeatFor(
-    session.user,
-    "coach.assignment.manage"
-  );
-
-  const [roster, coaches] = await Promise.all([
-    listSeatRoster(seatActor),
-    // NOT CALLED FOR AN ORG. `listPlantCoaches` throws for a tenancy that is not
-    // a plant, deliberately — a coach list scoped by a network's id against
-    // `coach_assignments.church_id` would read as an answer and be none.
-    isPlant ? listPlantCoaches(seatActor) : Promise.resolve([]),
-  ]);
-
+export function TeamSection({ view }: { view: TeamSectionView }) {
   return (
     <div className="space-y-6">
       <SeatInviteForm
-        expiryDays={INVITATION_EXPIRY_DAYS}
-        tenancyType={tenancy.type}
+        expiryDays={view.expiryDays}
+        tenancyType={view.tenancyType}
       />
 
       {/*
@@ -158,19 +78,12 @@ export async function TeamSection() {
         `tenancy: "plant"` — so the section is now keyed on the tenancy that can
         actually hold a coach.
       */}
-      {isPlant && <CoachInviteForm expiryDays={INVITATION_EXPIRY_DAYS} />}
+      {view.isPlant && <CoachInviteForm expiryDays={view.expiryDays} />}
 
       <SeatRoster
-        rows={roster.map((row) => ({
-          userId: row.userId,
-          name: row.name,
-          email: row.email,
-          seat: row.seat,
-          joinedLabel: formatDate(row.joinedAt, "short"),
-          isSelf: row.userId === session.user.id,
-        }))}
-        canManageSeats={canManageSeats}
-        tenancyType={tenancy.type}
+        rows={view.roster}
+        canManageSeats={view.canManageSeats}
+        tenancyType={view.tenancyType}
         actions={{
           appoint: appointAdminAction,
           demote: demoteToMemberAction,
@@ -178,32 +91,27 @@ export async function TeamSection() {
         }}
       />
 
-      {isPlant && (
+      {view.isPlant && (
         <PlantCoachList
-          rows={coaches.map((row) => ({
-            assignmentId: row.assignmentId,
-            name: row.name,
-            email: row.email,
-            assignedLabel: formatDate(row.assignedAt, "short"),
-          }))}
-          canEndAssignments={canEndAssignments}
+          rows={view.coaches}
+          canEndAssignments={view.canEndAssignments}
           endAssignment={endCoachAssignmentAction}
         />
       )}
 
       <InvitationsList
-        rows={seatRows}
+        rows={view.seatInvitations}
         actions={{
           resend: resendSeatInvitationEmailAction,
           revoke: revokeSeatInvitationAction,
         }}
-        pendingDescription={`Waiting for them to sign up. Anyone who can invite for this ${noun} can resend the email or revoke the invitation — revoking closes it immediately, and the link stops working.`}
-        answeredDescription={`Every invitation this ${noun} has sent that is no longer open.`}
+        pendingDescription={`Waiting for them to sign up. Anyone who can invite for this ${view.noun} can resend the email or revoke the invitation — revoking closes it immediately, and the link stops working.`}
+        answeredDescription={`Every invitation this ${view.noun} has sent that is no longer open.`}
       />
 
-      {isPlant && coachRows.length > 0 && (
+      {view.isPlant && view.coachInvitations.length > 0 && (
         <InvitationsList
-          rows={coachRows}
+          rows={view.coachInvitations}
           actions={{
             resend: resendSeatInvitationEmailAction,
             revoke: revokeSeatInvitationAction,
