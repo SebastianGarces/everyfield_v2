@@ -301,8 +301,10 @@ export function settingsSectionUrl(id: SettingsSectionId): string {
  *   * `#settings/sharing` is the one retired id in the wild
  *     (`RETIRED_SETTINGS_SECTIONS`) and goes where its panel went.
  *
- * The caller rewrites the fragment to `settingsSectionHref` of what comes back,
- * so the address bar cannot keep saying something the modal is not showing.
+ * `settings-modal.tsx` rewrites the fragment to `settingsSectionHref` of what
+ * comes back, so the address bar cannot keep saying something the modal is not
+ * showing — a bookmarked `#settings/sharing` corrects itself to Church on the
+ * way in.
  */
 export function settingsSectionFromHash(
   hash: string

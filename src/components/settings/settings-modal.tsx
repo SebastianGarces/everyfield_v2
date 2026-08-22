@@ -24,7 +24,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
+import {
+  closeSettings,
+  sectionRequest,
+  settingsHashServerSnapshot,
+  settingsHashSnapshot,
+  showSection,
+  subscribeToSettingsHash,
+} from "@/lib/settings/settings-hash";
 import type {
   SettingsSectionLoad,
   SettingsSectionViewOf,
@@ -62,310 +72,19 @@ import {
 // the server, on the read and on every write.
 //
 // ----------------------------------------------------------------------------
-// THE HISTORY POLICY, WHICH THIS FILE OWNS ENTIRELY
+// WHAT THIS FILE IS NOT
 // ----------------------------------------------------------------------------
 //
-//   OPEN   pushes exactly ONE entry, through `openSettings`. The avatar menu
-//          still spells a real `<a href="#settings/account">` — so the address
-//          is copyable, and the modal opens with no JavaScript at all — but a
-//          plain click is cancelled and routed here, because a NATIVE fragment
-//          navigation is invisible to Next's router and the first `refresh()`
-//          afterwards wipes the fragment (see `openSettings`).
-//   SWITCH replaces. However many sections a reader opens from the rail,
-//          settings occupies that one entry: no back-through-every-section.
-//   CLOSE  goes BACK when this document pushed the entry, so the reader lands
-//          exactly where they were with the fragment gone. When the document was
-//          COLD-LOADED on a settings URL there is nothing behind it, so Close
-//          strips the fragment in place instead — `/phase#settings/church` closes
-//          to `/phase`, still mounted, never reloaded and never bounced to some
-//          account's home.
+// The fragment, the history policy (open pushes one entry, a switch replaces,
+// close goes back or strips in place) and the in-flight read all live in
+// `@/lib/settings/settings-hash`, which is a plain module a test can drive.
+// Three review findings were defects in exactly that logic and none of them was
+// visible to a source guard, so it is separated from the chrome below and held
+// by `settings-hash.test.ts` instead.
 //
-// Which of the two Close is turns on a fact about the DOCUMENT, and the store
-// below is what knows it: only a PUSH can take a document from "no settings
-// fragment" to "settings fragment" while it is running, because switches
-// replace. So the transition itself is the evidence, and no component has to be
-// told how it was opened. This is the same question `bootedIntoSettings` used to
-// answer by asking which route had matched.
+// What is left here is a component: the frame, the rail, the search box, and
+// which body draws.
 // ============================================================================
-
-// ----------------------------------------------------------------------------
-// The hash store
-//
-// `useSyncExternalStore` rather than an effect, so the modal has no "opening"
-// frame it renders wrongly and no state to keep in step with the address bar.
-// The SERVER snapshot is always "no fragment" — a fragment never reaches a
-// server — which is exactly right: a cold load renders the page normally and the
-// modal opens over it on hydration.
-// ----------------------------------------------------------------------------
-
-const listeners = new Set<() => void>();
-
-/**
- * Did THIS document push the entry the settings fragment sits on?
- *
- * Module scope is the honest scope for a per-document fact, and it is only ever
- * read or written from the browser, so a server render never touches it (module
- * state in a `"use client"` file is shared across requests on the server).
- */
-let openedByPush = false;
-
-/** The open-ness the last transition left, so the next one can be compared to it. */
-let wasOpen = false;
-
-function isSettingsHash(hash: string): boolean {
-  return settingsSectionFromHash(hash) !== null;
-}
-
-/**
- * Re-read the address bar and tell the store.
- *
- * `pushedHere` is decided HERE rather than by whoever moved the URL, because
- * only a transition can answer it: a fragment that was absent a moment ago and
- * is present now arrived on a NEW history entry — the rail replaces, and a cold
- * load makes no transition at all. Forward after a Back-close lands here too,
- * and it is a push in every sense that matters, because there is an entry behind
- * it again.
- */
-function onUrlChange() {
-  const nowOpen = isSettingsHash(window.location.hash);
-  if (nowOpen && !wasOpen) openedByPush = true;
-  if (!nowOpen) openedByPush = false;
-  wasOpen = nowOpen;
-  for (const listener of listeners) listener();
-}
-
-/**
- * WATCH THE HISTORY API, NOT ONLY `hashchange` — measured on the preview.
- *
- * `pushState` and `replaceState` fire NOTHING, and Next's client router writes
- * every URL it navigates to with them. So an arrival that LANDS on a settings
- * fragment through the router left this store holding the fragment the document
- * had booted with, and the modal stayed shut with `#settings/notifications` in
- * the address bar. Two shipped paths do exactly that: the login round trip,
- * which follows a mailed `/settings/notifications` through its redirect to
- * `/dashboard#settings/notifications`, and "Back to settings" on the
- * verify-email screen.
- *
- * Patched once, never unpatched, and it DELEGATES rather than replaces — the
- * original is called with the original arguments and its return value passed
- * back, so the router is unaffected. `showSection` and `closeSettings` call
- * `onUrlChange` themselves as well, which is a harmless second notification:
- * re-reading the address bar is idempotent.
- */
-let historyWatched = false;
-function watchHistory() {
-  if (historyWatched) return;
-  historyWatched = true;
-  for (const method of ["pushState", "replaceState"] as const) {
-    const original = window.history[method];
-    window.history[method] = function (...args: Parameters<typeof original>) {
-      const result = original.apply(window.history, args);
-      onUrlChange();
-      return result;
-    };
-  }
-}
-
-function subscribe(onStoreChange: () => void): () => void {
-  if (listeners.size === 0) {
-    wasOpen = isSettingsHash(window.location.hash);
-    window.addEventListener("hashchange", onUrlChange);
-    // Back and Forward through a router-driven entry, which reports as a pop
-    // rather than as a fragment change.
-    window.addEventListener("popstate", onUrlChange);
-    watchHistory();
-  }
-  listeners.add(onStoreChange);
-  return () => {
-    listeners.delete(onStoreChange);
-    if (listeners.size === 0) {
-      window.removeEventListener("hashchange", onUrlChange);
-      window.removeEventListener("popstate", onUrlChange);
-    }
-  };
-}
-
-const getSnapshot = () => window.location.hash;
-const getServerSnapshot = () => "";
-
-/**
- * Show a section without touching the history stack.
- *
- * `replaceState` fires no `hashchange`. The store watches the history API too
- * (`watchHistory`), so this is already noticed; the explicit call keeps this
- * function correct on its own terms rather than by a side effect of a patch
- * somewhere above it.
- */
-function showSection(id: SettingsSectionId) {
-  window.history.replaceState(null, "", settingsSectionHref(id));
-  onUrlChange();
-}
-
-/**
- * OPEN SETTINGS — the one way in, and it must go through `pushState`.
- *
- * A plain `<a href="#settings/account">` opens the modal on its own and needs no
- * JavaScript, which is why the avatar menu still spells one. It is not enough by
- * itself: a NATIVE fragment navigation is invisible to Next's client router, so
- * the router's idea of the current URL keeps saying `/dashboard` — and the first
- * `refresh()` after that (every settings write calls one) rewrites the address
- * bar from the router's copy and takes the fragment with it. Measured on the
- * preview: toggle one notification preference and the modal closed under the
- * reader's hands.
- *
- * `pushState` is the documented way to hand the App Router a URL it did not
- * navigate to, so this keeps the two in step. The anchors keep their `href` —
- * the address is real, copyable and middle-clickable — and cancel their own
- * default so this runs instead.
- *
- * ONE ENTRY, which is what makes Close one step back. See the header.
- */
-export function openSettings(id: SettingsSectionId) {
-  window.history.pushState(null, "", settingsSectionHref(id));
-  onUrlChange();
-}
-
-/**
- * Should this click be handled by the app, or by the browser?
- *
- * A modified click is the reader asking the BROWSER for something — a new tab, a
- * download, a saved link — so it is left alone, and the `href` is what serves it.
- */
-function isPlainClick(event: React.MouseEvent): boolean {
-  return (
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.altKey &&
-    event.button === 0
-  );
-}
-
-/**
- * THE ONE WAY TO LINK TO A SETTINGS SECTION from anywhere in the app.
- *
- * A real anchor at a real address, whose plain click is cancelled and sent to
- * `openSettings`. Both halves matter and neither is enough alone: the `href` is
- * what a reader can copy, middle-click and follow with JavaScript off, and the
- * handler is what keeps Next's router in step with the fragment (see
- * `openSettings`).
- *
- * It exists so the two callers — the avatar menu and the dashboard's
- * association reminder — cannot spell that pair differently, and so a SERVER
- * component can link to settings without becoming a client one for the sake of
- * an `onClick`.
- */
-export function SettingsLink({
-  section,
-  className,
-  children,
-}: {
-  section: SettingsSectionId;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <a
-      href={settingsSectionHref(section)}
-      className={className}
-      onClick={(event) => {
-        if (!isPlainClick(event)) return;
-        event.preventDefault();
-        openSettings(section);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
-function closeSettings() {
-  if (openedByPush) {
-    // One entry was pushed, so one step removes it — and the fragment change
-    // that follows is a real `hashchange`, which resets the latch for the next
-    // opening.
-    window.history.back();
-    return;
-  }
-  window.history.replaceState(
-    null,
-    "",
-    window.location.pathname + window.location.search
-  );
-  onUrlChange();
-}
-
-// ----------------------------------------------------------------------------
-// The read
-// ----------------------------------------------------------------------------
-
-/**
- * Ask the server for a section's values.
- *
- * A ROUTE HANDLER, NOT A SERVER ACTION, and that is load-bearing rather than
- * stylistic. Every server-action response carries a fresh RSC render of the
- * current route, which regenerates `serverRenderId` — the value this read is
- * keyed by. As an action it therefore asked for itself again on its own answer,
- * for ever. JSON over `fetch` re-renders nothing, so that chain terminates.
- *
- * A failed read is `{ ok: false }`, the same answer a refusal gives, because the
- * remedy is the same one: show the reader a section that works. A network blip
- * while switching sections must not leave a dialog with a permanent skeleton in
- * it.
- */
-async function readSection(
-  id: SettingsSectionId
-): Promise<SettingsSectionLoad> {
-  try {
-    const response = await fetch(`/api/settings/sections/${id}`);
-    if (!response.ok) return { ok: false };
-    return (await response.json()) as SettingsSectionLoad;
-  } catch {
-    return { ok: false };
-  }
-}
-
-/**
- * THE IN-FLIGHT READ, CACHED OUTSIDE REACT — and it has to be outside.
- *
- * The section is unwrapped with `use()`, so the promise has to exist before the
- * render that consumes it. A promise minted during render is the documented
- * hazard React warns about, and this is what it looks like in practice
- * (measured on the preview): a render that SUSPENDS is discarded and replayed,
- * a replay re-runs `useMemo`, a re-run mints a second promise, and consuming
- * that one suspends again — a loop at about six reads a second, for as long as
- * the modal stayed open. A `useMemo` cannot hold this because React is free to
- * drop it; module scope is not React's to drop.
- *
- * KEYED BY THE TWO THINGS A READ DEPENDS ON: the section asked for, and the last
- * server render. That is the whole read policy — ask again when the reader picks
- * a different section, ask again when a write has changed the server, ask at no
- * other time.
- *
- * ONE ENTRY, NOT A MAP. A second section is a new key, and the answer to the old
- * one is of no further use — caching it would be caching server data, which is
- * the thing `memory/invariants.md` → Client/Server Data Synchronization
- * forbids. What is held here is an in-flight REQUEST, which cannot go stale: it
- * is replaced the moment either input moves.
- *
- * Module scope is safe here for the same reason `openedByPush` above is: nothing
- * renders `SettingsDialog` on the server — the store's server snapshot is always
- * "no fragment" — so no server request can reach this.
- */
-let cachedKey: string | null = null;
-let cachedRequest: Promise<SettingsSectionLoad> | null = null;
-
-function sectionRequest(
-  id: SettingsSectionId,
-  serverRenderId: string
-): Promise<SettingsSectionLoad> {
-  const key = `${id} ${serverRenderId}`;
-  if (cachedKey !== key || cachedRequest === null) {
-    cachedKey = key;
-    cachedRequest = readSection(id);
-  }
-  return cachedRequest;
-}
 
 // ----------------------------------------------------------------------------
 // The modal
@@ -397,7 +116,7 @@ type SettingsModalProps = {
    * carries a fresh RSC render of the current route, so a read spelled as an
    * action regenerates this value and asks for itself again, for ever — an
    * unbounded loop at about seven requests a second, measured on the preview
-   * before the read moved. See `readSection` above.
+   * before the read moved. See `readSection` in `@/lib/settings/settings-hash`.
    */
   serverRenderId: string;
 };
@@ -406,8 +125,25 @@ export function SettingsModal({
   visibleIds,
   serverRenderId,
 }: SettingsModalProps) {
-  const hash = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const hash = useSyncExternalStore(
+    subscribeToSettingsHash,
+    settingsHashSnapshot,
+    settingsHashServerSnapshot
+  );
   const activeId = settingsSectionFromHash(hash);
+
+  // THE ADDRESS BAR IS CORRECTED TO WHAT IS ON SCREEN. `#settings`,
+  // `#settings/sharing` and a typo all resolve to a real section, and without
+  // this the URL would go on naming something the modal is not showing — which
+  // is the one thing a mechanism whose whole state is the URL cannot afford. It
+  // converges in one pass: the rewrite makes the fragment canonical, so the
+  // change it triggers finds nothing left to do.
+  useEffect(() => {
+    if (activeId === null) return;
+    if (window.location.hash !== settingsSectionHref(activeId)) {
+      showSection(activeId);
+    }
+  }, [activeId, hash]);
 
   if (activeId === null) return null;
   return (
@@ -434,6 +170,10 @@ function SettingsDialog({
   serverRenderId,
 }: SettingsModalProps & { activeId: SettingsSectionId }) {
   const [query, setQuery] = useState("");
+  // The Retry count, which is UI state and nothing else: it is part of the read
+  // key, so bumping it is what makes a retry a NEW request rather than a replay
+  // of the cached failure.
+  const [attempt, setAttempt] = useState(0);
   const searchId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -450,10 +190,10 @@ function SettingsDialog({
   );
   const searching = query.trim() !== "";
 
-  // The read, keyed by the section and by the last server render — see
-  // `sectionRequest`, which holds it OUTSIDE React because a suspended render is
-  // replayed and a replay would mint a second promise.
-  const request = sectionRequest(activeId, serverRenderId);
+  // The read, keyed by the section, the last server render and the retry count —
+  // see `sectionRequest`, which holds it OUTSIDE React because a suspended
+  // render is replayed and a replay would mint a second promise.
+  const request = sectionRequest(activeId, serverRenderId, attempt);
 
   return (
     <Dialog
@@ -551,7 +291,18 @@ function SettingsDialog({
                   href={settingsSectionHref(section.id)}
                   aria-current={isActive ? "page" : undefined}
                   onClick={(event) => {
-                    if (!isPlainClick(event)) return;
+                    // A modified click is the reader asking the BROWSER for
+                    // something — a new tab, a saved link — so it is left alone
+                    // and the `href` is what serves it.
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0
+                    ) {
+                      return;
+                    }
                     event.preventDefault();
                     showSection(section.id);
                   }}
@@ -621,7 +372,11 @@ function SettingsDialog({
               keeps what is on screen until the new values arrive). */}
           <div className="flex-1 px-5 py-5 md:px-6 md:py-6">
             <Suspense key={activeId} fallback={<SectionSkeleton />}>
-              <SectionBody activeId={activeId} request={request} />
+              <SectionBody
+                activeId={activeId}
+                request={request}
+                onRetry={() => setAttempt((n) => n + 1)}
+              />
             </Suspense>
           </div>
         </div>
@@ -653,13 +408,23 @@ const SECTION_BODIES: {
 function SectionBody({
   activeId,
   request,
+  onRetry,
 }: {
   activeId: SettingsSectionId;
   request: Promise<SettingsSectionLoad>;
+  onRetry: () => void;
 }) {
   const result = use(request);
 
-  if (!result.ok) return <SectionRefused />;
+  // THREE FAILURES, THREE REMEDIES, and collapsing them was a review finding
+  // whose worst case was silent: a 401 answered as a refusal bounced the reader
+  // to the default section, whose read had already failed and was cached, and
+  // the pane showed grey rectangles for ever with no way out.
+  if (!result.ok) {
+    if (result.reason === "unauthorized") return <SectionSignedOut />;
+    if (result.reason === "failed") return <SectionUnavailable retry={onRetry} />;
+    return <SectionRefused activeId={activeId} retry={onRetry} />;
+  }
 
   // THE TAG IS CHECKED, NOT ASSUMED. The view carries the section it belongs to
   // and the server answered the id we asked for, so this is never false — but it
@@ -667,7 +432,9 @@ function SectionBody({
   // the only place the tag and the map meet. Without it the cast would be a
   // promise that a body and a view model match, kept by nobody.
   const view = result.view;
-  if (view.section !== activeId) return <SectionRefused />;
+  if (view.section !== activeId) {
+    return <SectionRefused activeId={activeId} retry={onRetry} />;
+  }
   const Body = SECTION_BODIES[activeId] as (props: {
     view: typeof view;
   }) => React.ReactNode;
@@ -680,14 +447,73 @@ function SectionBody({
  *
  * The correction is the same one the deleted `/settings/*` routes made with a
  * `redirect()` — an account that may not open this section is put on the one
- * every account can. It cannot loop: `account` is visible to every signed-in
- * account and its read has no gate of its own to fail.
+ * every account can.
+ *
+ * UNLESS IT IS ALREADY ON THAT SECTION, which is the case that has nowhere to
+ * go: rewriting the fragment to the section it already names changes nothing, so
+ * the reader would sit under a skeleton with no way out. Account is visible to
+ * every signed-in account and its read has no gate of its own, so reaching this
+ * is a fault rather than a permission — and it is answered as one.
  */
-function SectionRefused() {
+function SectionRefused({
+  activeId,
+  retry,
+}: {
+  activeId: SettingsSectionId;
+  retry: () => void;
+}) {
+  const correctable = activeId !== DEFAULT_SETTINGS_SECTION;
   useEffect(() => {
-    showSection(DEFAULT_SETTINGS_SECTION);
-  }, []);
+    if (correctable) showSection(DEFAULT_SETTINGS_SECTION);
+  }, [correctable]);
+  if (!correctable) return <SectionUnavailable retry={retry} />;
   return <SectionSkeleton />;
+}
+
+/**
+ * The session ended while the modal was open.
+ *
+ * It sends the reader to sign in and come back HERE, which is the answer the
+ * rest of the product gives a stale session (`loginPathFor`, the same builder
+ * the proxy and the dashboard layout use). A settings modal that invented its
+ * own answer would be the one surface where an expired session looks like a bug.
+ *
+ * The `assign` is in an effect rather than in render because it is a navigation,
+ * and the message is what a reader sees in the moment before it happens.
+ */
+function SectionSignedOut() {
+  useEffect(() => {
+    window.location.assign(
+      loginPathFor(window.location.pathname + window.location.search)
+    );
+  }, []);
+  return (
+    <p className="text-muted-foreground text-sm text-pretty">
+      Your session has ended. Taking you to sign in…
+    </p>
+  );
+}
+
+/**
+ * The read did not come back — a dropped connection, or a server that answered
+ * with something other than this section.
+ *
+ * A NAMED FAILURE AND A WAY OUT, never a skeleton that never resolves. Retry
+ * bumps the read key, so it is a fresh request rather than a replay of the
+ * cached failure — which is the only reason a button here is worth anything.
+ */
+function SectionUnavailable({ retry }: { retry: () => void }) {
+  return (
+    <div role="status" className="space-y-3">
+      <p className="text-sm text-pretty">
+        We could not load this section just now. Nothing you have saved is
+        affected.
+      </p>
+      <Button variant="outline" className="cursor-pointer" onClick={retry}>
+        Try again
+      </Button>
+    </div>
+  );
 }
 
 /**

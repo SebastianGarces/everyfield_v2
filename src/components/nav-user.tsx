@@ -19,7 +19,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { logout } from "@/lib/auth/actions";
-import { SettingsLink } from "@/components/settings/settings-modal";
+import { SettingsLink } from "@/components/settings/settings-link";
 import { DEFAULT_SETTINGS_SECTION } from "@/lib/settings/sections";
 
 type NavUserProps = {

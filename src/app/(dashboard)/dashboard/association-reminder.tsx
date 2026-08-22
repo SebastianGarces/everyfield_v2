@@ -2,7 +2,7 @@ import { MailQuestion } from "lucide-react";
 
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import type { PendingInvitationView } from "@/app/(dashboard)/settings/association/queries";
-import { SettingsLink } from "@/components/settings/settings-modal";
+import { SettingsLink } from "@/components/settings/settings-link";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 

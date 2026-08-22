@@ -64,6 +64,8 @@ function stripComments(source: string): string {
 }
 
 const MODAL = path.join(SRC, "components", "settings", "settings-modal.tsx");
+const STORE = path.join(SRC, "lib", "settings", "settings-hash.ts");
+const LINK = path.join(SRC, "components", "settings", "settings-link.tsx");
 const LAYOUT = path.join(SRC, "app", "(dashboard)", "layout.tsx");
 const SETTINGS_ROUTES = path.join(SRC, "app", "(dashboard)", "settings");
 
@@ -169,8 +171,20 @@ test("the history policy has one author", () => {
 
   assert.deepEqual(
     authors,
-    [rel(MODAL)],
-    "only settings-modal.tsx may write the settings fragment or move history for it"
+    [rel(STORE)],
+    "only settings-hash.ts may write the settings fragment or move history for it"
+  );
+
+  // …and it is DRIVEN, not merely located. Every assertion in this file reads
+  // source text, and three defects lived in that module's timing where no source
+  // guard could see them.
+  assert.ok(
+    FILES.length &&
+      readFileSync(
+        path.join(SRC, "lib", "settings", "settings-hash.test.ts"),
+        "utf8"
+      ).includes("closes IN PLACE"),
+    "the history policy must keep a behavioural test, not only a topological one"
   );
 });
 
@@ -195,16 +209,16 @@ test("the section read is a route handler, never a server action", () => {
 
   // …and the modal must REACH it over HTTP rather than by importing it, because
   // importing it back into a client component is how it becomes an action again.
-  const modal = stripComments(read(MODAL));
+  const store = stripComments(read(STORE));
   assert.doesNotMatch(
-    modal,
+    store,
     /from "@\/lib\/settings\/section-data"/,
-    "the modal must fetch the read endpoint, not import the read"
+    "the client must fetch the read endpoint, not import the read"
   );
   assert.match(
-    modal,
+    store,
     /fetch\(`\/api\/settings\/sections\//,
-    "the modal reads its section over the route handler"
+    "the section is read over the route handler"
   );
 
   // The endpoint exists, refuses a sessionless caller, and is not cached — one
@@ -238,7 +252,7 @@ test("every in-app settings link goes through SettingsLink", () => {
   // can have one without the other.
   const offenders: string[] = [];
   for (const file of FILES) {
-    if (file === MODAL) continue;
+    if (file === MODAL || file === LINK) continue;
     const source = stripComments(read(file));
     if (/href=\{?\s*settingsSectionHref\(/.test(source))
       offenders.push(rel(file));
@@ -254,9 +268,16 @@ test("every in-app settings link goes through SettingsLink", () => {
   // `settingsSectionUrl` — path AND fragment — is a different thing and stays
   // allowed in an href: it is a real navigation to another page, which the
   // router performs itself and therefore knows the fragment of.
+  // …and `SettingsLink` FORWARDS what it is handed. Its first caller is
+  // `<DropdownMenuItem asChild>`, and Radix composes by cloning the child with
+  // the item's own props — `ref`, `role="menuitem"`, the roving-focus wiring,
+  // the handler that closes the menu. A component taking three named props drops
+  // all of it, and the menu quietly stops being a menu.
+  const link = stripComments(read(LINK));
   assert.match(
-    stripComments(read(MODAL)),
-    /export function SettingsLink/,
-    "SettingsLink lives with the history policy it depends on"
+    link,
+    /ComponentPropsWithRef<"a">/,
+    "SettingsLink must accept and forward every anchor prop, for `asChild`"
   );
+  assert.match(link, /\{\.\.\.props\}/, "…and actually spread them");
 });

@@ -98,13 +98,13 @@ export async function loadSettingsSection(
 ): Promise<SettingsSectionLoad> {
   const session = await verifySession();
 
-  if (!isSettingsSectionId(sectionId)) return { ok: false };
+  if (!isSettingsSectionId(sectionId)) return { ok: false, reason: "refused" };
   if (!settingsSectionsFor(session.user).some((s) => s.id === sectionId)) {
-    return { ok: false };
+    return { ok: false, reason: "refused" };
   }
 
   const view = await SECTION_READS[sectionId](session);
-  return view ? { ok: true, view } : { ok: false };
+  return view ? { ok: true, view } : { ok: false, reason: "refused" };
 }
 
 /**

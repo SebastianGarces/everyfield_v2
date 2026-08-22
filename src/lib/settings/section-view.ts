@@ -50,18 +50,28 @@ export type SettingsSectionViewOf<Id extends SettingsSectionId> = Extract<
 >;
 
 /**
- * What `loadSettingsSection` answers.
+ * What the read endpoint answers.
  *
- * The refusal carries no reason and no destination beyond "not this one". Every
- * way to be refused — a section the registry does not list for this account, a
- * body whose own re-stated gate says no, a plant that is not there — has the
- * same remedy, which is the section every account can open. The modal corrects
- * the fragment to it, exactly as the deleted routes corrected the address bar
- * with a redirect.
+ * THE REFUSAL CARRIES A REASON, because the three ways to fail have nothing in
+ * common but their shape:
+ *
+ *   - `refused` — a section the registry does not list for this account, a body
+ *     whose own re-stated gate says no, or a plant that is not there. The remedy
+ *     is the section every account can open, and the modal corrects the fragment
+ *     to it exactly as the deleted routes corrected the address bar with a
+ *     redirect. This is the only reason the SERVER ever sends.
+ *   - `unauthorized` — the session ended. The remedy is `/login`, which is what
+ *     the rest of the product does.
+ *   - `failed` — the read did not come back. The remedy is to say so and offer
+ *     a retry.
+ *
+ * They were one value at first, and the collapse had a silent worst case: a 401
+ * read as a refusal bounced to the default section, whose read had already
+ * failed and was cached, leaving a skeleton that never resolved.
  */
 export type SettingsSectionLoad =
   | { ok: true; view: SettingsSectionView }
-  | { ok: false };
+  | { ok: false; reason: "refused" | "unauthorized" | "failed" };
 
 // ----------------------------------------------------------------------------
 // Account (CS-001 shell, CS-002 / CS-003 / CS-004)
