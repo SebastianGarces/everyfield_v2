@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import { renderTemplate } from "@/lib/communication/merge";
-import { escapeMergeValues, toRichTextHtml } from "@/lib/rich-text/format";
+import { renderEmailBodyHtml } from "@/lib/communication/merge";
+import { toRichTextHtml } from "@/lib/rich-text/format";
 
 import { RICH_TEXT_PROSE_CLASS } from "./rich-text-editor-controls";
 
@@ -30,9 +30,15 @@ import { RICH_TEXT_PROSE_CLASS } from "./rich-text-editor-controls";
  *    sanitised first and let this component sanitise again is the shape that
  *    corrupted the message detail page: two passes over an escaping sanitiser
  *    turned `Bob & Sue` into `Bob &amp; Sue`. The sanitiser is idempotent now,
- *    but one pass in one place is the property worth keeping — and it preserves
- *    the send path's order, sanitise THEN substitute escaped values, so a
- *    person named `Bobby <script>` is a name here as well.
+ *    but one pass in one place is the property worth keeping.
+ *
+ * The substitution itself is NOT this component's — it is `renderEmailBodyHtml`,
+ * the same door the send path and the compose preview use. `communications.body_html`
+ * stores the body UNRENDERED, so this page re-substitutes what the recipient
+ * already received; a spelling of its own here is a page that draws a different
+ * email from the one that went out. It did: while this component carried
+ * `renderTemplate(sanitized, escapeMergeValues(…))` inline, an agenda arrived in
+ * the inbox as a list and rendered here as one run-on line (#612).
  */
 export function RichText({
   body,
@@ -45,7 +51,7 @@ export function RichText({
 }) {
   const sanitized = toRichTextHtml(body);
   const html = mergeData
-    ? renderTemplate(sanitized, escapeMergeValues(mergeData))
+    ? renderEmailBodyHtml(sanitized, mergeData)
     : sanitized;
 
   if (!html) {
