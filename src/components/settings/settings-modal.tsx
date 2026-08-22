@@ -2,7 +2,7 @@
 
 import { Search } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
   settingsSectionHref,
@@ -28,17 +29,16 @@ import {
 // reads — the modal never learns what a section contains, and a section never
 // learns it is in a modal.
 //
-// THE NAV IS `<Link replace>`, NOT A PUSH, AND THAT IS THE CLOSE BEHAVIOUR'S
-// OTHER HALF. Closing an overlaid modal is `router.back()`; if switching
-// sections pushed, a reader who looked at three sections would need three
-// presses of Escape to get back to the screen they opened settings from, and
-// the two in between would be sections they had already left. Replacing keeps
-// exactly one settings entry in history, so Escape always lands on the screen
-// behind — which is what "closing returns to the screen behind" means.
-//
 // The screen behind is never re-rendered by any of this: the modal lives in a
 // parallel slot that intercepts `/settings/*`, so `children` of the dashboard
 // layout is still the route the reader was on, mounted, with its state intact.
+//
+// TWO COPIES OF THIS COMPONENT EXIST, and three things below turn on which one
+// is rendering: whether it draws at all, how a section switch enters history,
+// and what Close does. The overlaid copy comes from the intercepting slot; the
+// cold-load copy comes from the real `/settings/*` route under `children`, for a
+// URL somebody pasted. `dismissal` is the one prop that tells them apart, and
+// each rule that reads it carries its own reason at the point of use.
 // ============================================================================
 
 /**
@@ -71,8 +71,36 @@ export function SettingsModal({
   children,
 }: SettingsModalProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [query, setQuery] = useState("");
   const searchId = useId();
+
+  // WHICH OF THE TWO INSTANCES THIS IS, and everything below turns on it.
+  //
+  // `replace` is only ever passed by the REAL `/settings/*` route — the one that
+  // draws the modal on a cold load, under the layout's `children`. `back` is only
+  // ever passed by the intercepting slot. So this reads "am I the cold-load
+  // copy?" without the routes having to say it twice.
+  const isColdLoad = dismissal.kind === "replace";
+
+  // THE COLD-LOAD COPY STANDS DOWN ONCE THE SLOT TAKES OVER.
+  //
+  // After a pasted `/settings/church`, `children` is pinned at that route for as
+  // long as the document lives — a client-side move to another section is
+  // INTERCEPTED into the `@settings` slot and never re-renders `children`. Both
+  // trees would then be holding a modal, and two of them stack: one showing
+  // Church, one showing Team, each with its own search box.
+  //
+  // The URL settles it. This copy was rendered for exactly one section; if the
+  // address bar no longer names that section, the slot owns the modal and this
+  // one must draw nothing. The intercepted copy re-renders on every navigation,
+  // so its pathname always matches and this can never hide it — which is why it
+  // is gated on `isColdLoad` as well, rather than left to that coincidence.
+  const ownHref = settingsSectionHref(activeId);
+  const stillMine =
+    pathname === ownHref ||
+    (pathname === "/settings" && activeId === DEFAULT_SETTINGS_SECTION);
+  if (isColdLoad && !stillMine) return null;
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 
@@ -86,6 +114,24 @@ export function SettingsModal({
     sectionMatchesQuery(section, query)
   );
   const searching = query.trim() !== "";
+
+  // HOW A SECTION SWITCH ENTERS HISTORY, and it is not the same in both copies.
+  //
+  // Overlaid: REPLACE. There is one settings entry sitting on top of the screen
+  // the reader came from, and every section reuses it — so Escape is always
+  // exactly one `back()` to that screen, however many sections were opened.
+  //
+  // Cold-loaded: PUSH. There is nothing behind the modal, so an entry that
+  // replaced the first one would leave `back()` pointing out of the app
+  // entirely. Pushing means the section switch is a step the reader can take
+  // back, and it lands on the cold-load copy again, whose Close is the
+  // `replace` below.
+  const navReplaces = !isColdLoad;
+
+  function goToSection(href: string) {
+    if (navReplaces) router.replace(href);
+    else router.push(href);
+  }
 
   function dismiss() {
     if (dismissal.kind === "back") {
@@ -134,7 +180,7 @@ export function SettingsModal({
                   const first = matches[0];
                   if (!first) return;
                   event.preventDefault();
-                  router.replace(settingsSectionHref(first.id));
+                  goToSection(settingsSectionHref(first.id));
                 }}
               />
             </div>
@@ -151,7 +197,7 @@ export function SettingsModal({
                 <Link
                   key={section.id}
                   href={settingsSectionHref(section.id)}
-                  replace
+                  replace={navReplaces}
                   aria-current={isActive ? "page" : undefined}
                   className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors md:shrink ${
                     isActive
