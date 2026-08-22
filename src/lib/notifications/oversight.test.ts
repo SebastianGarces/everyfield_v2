@@ -432,10 +432,19 @@ test("no page hardcodes its own version of the consent promise", () => {
   // sharing panel keeps its URL and the teaser moved from the deleted
   // `/settings` index into the Church section; each is now one component file,
   // and both still take their copy from `categories.ts`.
+  //
+  // The two ACCEPTANCE screens joined them in #620 (CS-013). They make the same
+  // promise at the moment it is most load-bearing — the planter is about to
+  // consent — so they are the surfaces least able to afford a hand-written
+  // second version of it. The association one is a modal section too; only the
+  // registration form is still a route of its own.
   const surfaces = {
     "/settings/church": "../../components/settings/sections/church-section.tsx",
     "/settings/sharing":
       "../../components/settings/sections/sharing-section.tsx",
+    "/register?invitation=": "../../app/(auth)/register/register-form.tsx",
+    "/settings/association":
+      "../../components/settings/sections/association-section.tsx",
   } as const;
 
   for (const [route, relative] of Object.entries(surfaces)) {

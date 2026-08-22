@@ -10,6 +10,7 @@ import {
 import { verifySession } from "@/lib/auth/session";
 import { isOrgOwner, isPlantOwner, oversightOrgOf } from "@/lib/auth/tenancy";
 import { formatDate } from "@/lib/datetime";
+import { INVITE_ORIGIN_SHARING_CONSENT } from "@/lib/notifications/categories";
 
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import { LeaveNetworkDialog } from "@/app/(dashboard)/settings/association/leave-network-dialog";
@@ -178,12 +179,26 @@ function PendingInvitations({
   subjectNoun,
   emptyDetail,
   consequence,
+  consent = null,
 }: {
   invitations: PendingInvitationView[];
   /** What is being invited, so the row names it: "your plant", "your sending church". */
   subjectNoun: string;
   emptyDetail: string;
   consequence: string;
+  /**
+   * CS-013's consent copy, or `null` for an answerer with no sharing to consent
+   * to.
+   *
+   * A PLANT accepting turns every sharing toggle on, so its planter reads what
+   * that means before the buttons. A SENDING CHURCH joining a network has no
+   * `church_privacy_settings` row in the question at all — the accept writes no
+   * toggles for it (`sharingDefaultsStatement` matches no row) — so showing
+   * this copy there would describe a consequence that does not happen. The
+   * prop is the same decision the statement's WHERE makes, made once more where
+   * the reader is.
+   */
+  consent?: readonly string[] | null;
 }) {
   return (
     <section aria-labelledby="pending-invitations">
@@ -226,6 +241,28 @@ function PendingInvitations({
                         : ""}
                     </p>
                   </div>
+                  {/*
+                    BEFORE THE BUTTONS, not beside them (CS-013). The planter
+                    has to be able to read what accepting shares while the
+                    control that does it is still below the copy — a consent
+                    notice under the button it qualifies is a notice read after
+                    the decision.
+                  */}
+                  {consent && (
+                    <div className="bg-muted/40 space-y-2 rounded-md p-3">
+                      <p className="text-sm font-medium">
+                        What {invitation.orgName} will see
+                      </p>
+                      {consent.map((line) => (
+                        <p
+                          key={line}
+                          className="text-muted-foreground max-w-prose text-sm text-pretty"
+                        >
+                          {line}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <InvitationAnswer
                     invitationId={invitation.id}
                     orgName={invitation.orgName}
@@ -283,7 +320,14 @@ async function PlantAssociation({ churchId }: { churchId: string }) {
         invitations={pending}
         subjectNoun="your plant"
         emptyDetail="A sending church or network invites you by email. Their invitation appears here for you to accept or decline."
-        consequence="Accepting lists your plant in their directory with its name, stage and launch date. What else they hear about stays yours to decide, on the sharing screen."
+        // REWRITTEN BY CS-013, because the old sentence became false. It read
+        // "What else they hear about stays yours to decide, on the sharing
+        // screen" — true while an accepted plant started out sharing nothing,
+        // and a misdescription of an accept that now turns every toggle on.
+        // What stays true is that the planter can change all of it afterwards,
+        // which is the consent copy's closing promise rather than this line's.
+        consequence="Accepting lists your plant in their directory and starts it sharing with them — all of which you can change afterwards."
+        consent={INVITE_ORIGIN_SHARING_CONSENT}
       />
 
       <section aria-labelledby="current-associations">
