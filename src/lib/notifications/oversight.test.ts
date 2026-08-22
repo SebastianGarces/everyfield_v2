@@ -454,52 +454,72 @@ test("no page hardcodes its own version of the consent promise", () => {
   // one. If the panel is ever extracted into a child component it must be added
   // here — a surface this map cannot see is a surface the drift guard cannot
   // hold.
-  // WHERE EACH SURFACE'S COPY COMES FROM, which since #657 is not always the
-  // file the reader looks at. The section components are `"use client"` now, so
-  // the association promise is sourced in `section-data.ts` and travels to the
-  // section as data; the Church panel still imports its own copy directly, and
-  // the registration form always did. The claim is unchanged — no surface writes
-  // the promise itself — so each is read where writing it would happen.
+  // A SURFACE MAY BE TWO FILES SINCE #657, and the two assertions below go to
+  // different halves of it. The section components are `"use client"` now, so
+  // the association promise is SOURCED in `section-data.ts` — that is where
+  // "imports it rather than writing it" can be asked — and RENDERED in the
+  // section. The Church panel still imports its own copy directly and the
+  // registration form always did, so for those the two halves are one file.
+  //
+  // THE SECOND ASSERTION GOES TO EVERY FILE, and a red check is why. Pointing
+  // this loop at the loader alone stopped it reading the section, and
+  // `scripts/cs013-mutation-check.ts` immediately reported a MISS: the
+  // reversibility promise the association section nearly shipped could be
+  // written back into the component with nothing looking. A file that RENDERS
+  // any of this is a file that can invent it.
   const surfaces = {
-    "#settings/church":
-      "../../components/settings/sections/church-section.tsx",
-    "/register?invitation=": "../../app/(auth)/register/register-form.tsx",
-    "#settings/association": "../settings/section-data.ts",
+    "#settings/church": {
+      copyFrom: "../../components/settings/sections/church-section.tsx",
+      renders: ["../../components/settings/sections/church-section.tsx"],
+    },
+    "/register?invitation=": {
+      copyFrom: "../../app/(auth)/register/register-form.tsx",
+      renders: ["../../app/(auth)/register/register-form.tsx"],
+    },
+    "#settings/association": {
+      copyFrom: "../settings/section-data.ts",
+      renders: [
+        "../settings/section-data.ts",
+        "../../components/settings/sections/association-section.tsx",
+      ],
+    },
   } as const;
 
-  for (const [route, relative] of Object.entries(surfaces)) {
-    const source = readFileSync(new URL(relative, import.meta.url), "utf8");
-
+  for (const [route, surface] of Object.entries(surfaces)) {
     assert.match(
-      source,
+      readFileSync(new URL(surface.copyFrom, import.meta.url), "utf8"),
       /from "@\/lib\/notifications\/categories"/,
       `${route} does not take its consent copy from categories.ts`
     );
 
-    // Comments explain the copy and legitimately quote the old sentence, so
-    // strip them before looking for prose the page would RENDER.
-    const rendered = source
-      .replace(/\/\*[\s\S]*?\*\//g, " ")
-      .replace(/^\s*\/\/.*$/gm, " ");
+    for (const relative of surface.renders) {
+      const source = readFileSync(new URL(relative, import.meta.url), "utf8");
 
-    for (const claim of [
-      /unless you turn sharing on/i,
-      /get no updates/i,
-      /reach them either way/i,
-      // ADDED BY #620's REVIEW. A page-local reversibility promise is the
-      // specific drift CS-013 nearly shipped: the association screen's own
-      // prose said accepting starts the plant sharing "all of which you can
-      // change afterwards", while six of the seven toggles have no switch and
-      // the directory listing is ungated. The three regexes above catch a page
-      // rewriting the SHARING promise; this one catches a page inventing a
-      // CONTROL promise, which is the same failure aimed at a different claim.
-      /you can change/i,
-    ]) {
-      assert.doesNotMatch(
-        rendered,
-        claim,
-        `${route} hardcodes consent copy (${claim}) instead of importing it`
-      );
+      // Comments explain the copy and legitimately quote the old sentence, so
+      // strip them before looking for prose the page would RENDER.
+      const rendered = source
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/^\s*\/\/.*$/gm, " ");
+
+      for (const claim of [
+        /unless you turn sharing on/i,
+        /get no updates/i,
+        /reach them either way/i,
+        // ADDED BY #620's REVIEW. A page-local reversibility promise is the
+        // specific drift CS-013 nearly shipped: the association screen's own
+        // prose said accepting starts the plant sharing "all of which you can
+        // change afterwards", while six of the seven toggles have no switch and
+        // the directory listing is ungated. The three regexes above catch a page
+        // rewriting the SHARING promise; this one catches a page inventing a
+        // CONTROL promise, which is the same failure aimed at a different claim.
+        /you can change/i,
+      ]) {
+        assert.doesNotMatch(
+          rendered,
+          claim,
+          `${route} hardcodes consent copy (${claim}) in ${relative} instead of importing it`
+        );
+      }
     }
   }
 });
