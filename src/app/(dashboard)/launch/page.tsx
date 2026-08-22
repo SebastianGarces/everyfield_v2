@@ -63,8 +63,8 @@ import { verifySession } from "@/lib/auth/session";
 import { daysUntilTarget } from "@/lib/launch/countdown";
 import { getLaunchJournalEntries } from "@/lib/launch/journal";
 import {
+  convergeLaunchReadiness,
   getLaunchMilestoneHistory,
-  getLaunchReadiness,
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
@@ -98,9 +98,15 @@ export default async function LaunchPage() {
   const now = new Date();
   const daysUntil = daysUntilTarget(launch?.targetDate ?? null, now);
 
+  // THE READINESS READ REPAIRS WHAT IT READS (#614). A launch whose seed failed
+  // keeps its date and loses its list, and the schedule form cannot re-seed it —
+  // both its buttons stay disabled until a DIFFERENT day is picked. So the retry
+  // lives here, on the visit that would otherwise show the damage. It is safe on
+  // every render: the seed is idempotent by unique index, and this page is
+  // `force-dynamic` (see the header), so nothing caches the write away.
   const [readiness, journal, milestoneHistory] = launch
     ? await Promise.all([
-        getLaunchReadiness(launch.id, churchId),
+        convergeLaunchReadiness(launch, user.id),
         getLaunchJournalEntries(launch.id, churchId),
         getLaunchMilestoneHistory(launch.id, churchId),
       ])

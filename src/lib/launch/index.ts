@@ -16,9 +16,11 @@ export {
 } from "./milestone-areas";
 export {
   completeLaunchMilestone,
+  convergeLaunchReadiness,
   getLaunchMilestoneHistory,
   getLaunchReadiness,
   isLaunchTask,
+  launchExpectsReadiness,
   LAUNCH_MILESTONE_TEMPLATES,
   MILESTONE_HAS_OPEN_TASKS_MESSAGE,
   MILESTONE_NOT_FOUND_MESSAGE,

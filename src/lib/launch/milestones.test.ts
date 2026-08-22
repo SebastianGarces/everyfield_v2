@@ -7,10 +7,13 @@ import { PgDialect } from "drizzle-orm/pg-core";
 
 import { sourceReader } from "@/lib/testing/source-span";
 
+import { launchStatuses } from "@/db/schema/launch";
+
 import { LAUNCH_MILESTONE_AREA_ORDER } from "./milestone-areas";
 import {
   completeLaunchMilestoneStatement,
   LAUNCH_MILESTONE_TEMPLATES,
+  launchExpectsReadiness,
   reopenLaunchMilestoneStatement,
   seedLaunchMilestonesStatement,
 } from "./milestones";
@@ -181,6 +184,74 @@ test("the seed is church-scoped on every table it writes", () => {
     query.params.filter((param) => param === CHURCH_ID).length >= 3,
     "every inserted row must carry church_id"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Converging on read (#614)
+// ---------------------------------------------------------------------------
+
+test("exactly the launches with a day named expect their readiness list", () => {
+  // Read off `launchStatuses` rather than a list typed here, so a fifth status
+  // arrives in this assertion instead of slipping past it. The two answers are
+  // the ruling: a `planning` launch has no day and nothing is seeded until one
+  // is named, and seeding a `completed` launch would hand a plant twenty-two
+  // open tasks the Monday after it launched.
+  assert.deepEqual(launchStatuses.filter(launchExpectsReadiness), [
+    "scheduled",
+    "postponed",
+  ]);
+});
+
+test("a failed converge yields an empty board, never a broken page", () => {
+  // The seed runs during a Server Component render, so a throw here is a 500 on
+  // `/launch` — strictly worse than the missing list it was trying to repair.
+  // The caller renders the readiness empty state on a zero-rows answer, which is
+  // what makes the next visit a retry rather than a second crash.
+  const read = sourceReader(
+    readFileSync(
+      path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+      "utf8"
+    ),
+    "milestones.ts"
+  );
+  const converge = read.span(
+    "export async function convergeLaunchReadiness",
+    "export interface LaunchMilestoneCompletion"
+  );
+
+  assert.match(converge, /catch \(error\)/);
+  assert.match(
+    converge,
+    /console\.error\(/,
+    "a silent seed failure is the bug"
+  );
+  assert.doesNotMatch(converge, /throw/);
+  // And it RE-READS after seeding. Building the board from the seed's own
+  // counts would show nothing to the visit that lost the insert to a second tab,
+  // even though that tab's rows are the plant's readiness list.
+  assert.match(
+    converge,
+    /return getLaunchReadiness\(launch\.id, churchId\);\s*}\s*$/,
+    "the converge must end by re-reading what is now stored"
+  );
+});
+
+test("the converge asks the launch row for its tenant, never a second argument", () => {
+  // The row came from `getLaunchForChurch(session.churchId)`, so it already
+  // carries the tenant. A second church id parameter would be one more thing a
+  // caller could pass wrong on a path that writes three tables.
+  const read = sourceReader(
+    readFileSync(
+      path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+      "utf8"
+    ),
+    "milestones.ts"
+  );
+  const converge = read.span(
+    "export async function convergeLaunchReadiness",
+    "export interface LaunchMilestoneCompletion"
+  );
+  assert.match(converge, /const churchId = launch\.churchId;/);
 });
 
 // ---------------------------------------------------------------------------
