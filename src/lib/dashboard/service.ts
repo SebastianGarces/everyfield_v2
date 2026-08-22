@@ -94,7 +94,7 @@ export async function getDashboardMetrics(
         .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt))),
 
       // Overdue Tasks (existing function)
-      getTaskCounts(churchId, userId),
+      getTaskCounts(churchId, { assignedToId: userId }),
 
       // Vision Meetings Held (completed)
       db
