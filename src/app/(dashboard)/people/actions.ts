@@ -1,7 +1,7 @@
 "use server";
 
 import { checkForDuplicates } from "@/lib/people/duplicates";
-import { personPhotoRefusal } from "@/lib/people/photo";
+import { profilePhotoRefusal } from "@/lib/profile-photo";
 import { emitPersonStatusChanged } from "@/lib/people/events";
 import {
   parsePeopleListSearchParams,
@@ -248,7 +248,7 @@ export async function uploadPersonPhotoAction(
 
       // THE GATE, and the same rule the picker applied before sending. A POST
       // that never saw the picker meets it here for the first time.
-      const refusal = personPhotoRefusal(file);
+      const refusal = profilePhotoRefusal(file);
       if (refusal) {
         return { success: false, error: refusal };
       }

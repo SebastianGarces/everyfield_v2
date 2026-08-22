@@ -174,7 +174,7 @@ export function personPhotoStorageKey(
   return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
 }
 
-// What a photo MAY be lives in `@/lib/people/photo` instead, and deliberately:
+// What a photo MAY be lives in `@/lib/profile-photo` instead, and deliberately:
 // the picker in the browser applies the same rule before it sends, and this
 // module pulls in the AWS SDK, so it can never be imported there.
 

@@ -19,10 +19,10 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
-  PERSON_PHOTO_MIME_TYPES,
-  personPhotoRefusal,
+  PROFILE_PHOTO_MIME_TYPES,
+  profilePhotoRefusal,
   personPhotoSrc,
-} from "@/lib/people/photo";
+} from "@/lib/profile-photo";
 import type { PersonForClient } from "@/lib/people/types";
 import { Loader2, Trash, Upload } from "lucide-react";
 import { useRef, useState, useTransition } from "react";
@@ -101,7 +101,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
     // and it is here because a file over the body cap never reaches the
     // action: the platform answers 413 and the planter gets a console error
     // where a sentence belongs.
-    const refusal = personPhotoRefusal(file);
+    const refusal = profilePhotoRefusal(file);
     if (refusal) {
       setError(refusal);
       toast.error(refusal);
@@ -171,7 +171,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
           ref={inputRef}
           type="file"
           name="photo"
-          accept={PERSON_PHOTO_MIME_TYPES.join(",")}
+          accept={PROFILE_PHOTO_MIME_TYPES.join(",")}
           className="sr-only"
           data-testid="person-photo-input"
           disabled={isBusy}
