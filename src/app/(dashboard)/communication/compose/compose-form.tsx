@@ -34,6 +34,7 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
+import { meetingInvitationTemplate } from "@/lib/communication/meeting-compose";
 // The body is rich text (COM-017). Templates and drafts written before it are
 // plain text; `toRichTextHtml` is the one door that converts them on the way in.
 import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
@@ -55,6 +56,13 @@ interface MeetingOption {
   datetime: string;
   locationName: string | null;
   locationAddress: string | null;
+  /**
+   * `church_meetings.agenda` as stored. Carried so the live preview can render
+   * `{{meeting_agenda}}` from the meeting actually selected, rather than
+   * leaving the sample agenda on screen while the rest of the preview switches
+   * to real data.
+   */
+  agenda: unknown;
 }
 
 interface ComposeFormProps {
@@ -78,28 +86,17 @@ export function ComposeForm({
 }: ComposeFormProps) {
   const router = useRouter();
 
-  // Auto-suggest a template when coming from a meeting context without an explicit template
+  // Auto-suggest a template when coming from a meeting context without an
+  // explicit one. WHICH template each type invites with is decided in
+  // `meeting-compose.ts`, where a test holds the names to the seeded catalog —
+  // the map that lived here named a "Team Meeting Invitation" nothing seeds, so
+  // every team meeting opened this form blank and said nothing (#612).
   const autoTemplate = useMemo(() => {
     if (initialTemplate || !initialMeetingId) return null;
     const meeting = meetings.find((m) => m.id === initialMeetingId);
     if (!meeting) return null;
 
-    // Map meeting type to template name patterns
-    const typePatterns: Record<string, string[]> = {
-      vision_meeting: ["Vision Meeting Invitation"],
-      orientation: ["Orientation Invitation"],
-      team_meeting: ["Team Meeting Invitation"],
-    };
-    const patterns = typePatterns[meeting.type] ?? [];
-
-    // Find a matching invitation template
-    return (
-      templates.find(
-        (t) =>
-          t.category === "meeting_invitation" &&
-          patterns.some((p) => t.name.includes(p))
-      ) ?? null
-    );
+    return meetingInvitationTemplate(meeting.type, templates);
   }, [initialTemplate, initialMeetingId, meetings, templates]);
 
   const effectiveTemplate = initialTemplate ?? autoTemplate;
@@ -155,6 +152,7 @@ export function ComposeForm({
           datetime: new Date(meeting.datetime),
           locationName: meeting.locationName,
           locationAddress: meeting.locationAddress,
+          agenda: meeting.agenda,
         });
         Object.assign(base, meetingData);
       }

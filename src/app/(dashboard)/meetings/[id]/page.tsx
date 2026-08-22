@@ -13,6 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { listLocations } from "@/lib/meetings/locations";
+import { getGuestList } from "@/lib/meetings/guest-list";
 import { getMeetingCommunications } from "@/lib/communication/service";
 import { notFound } from "next/navigation";
 import { MeetingDetails } from "./meeting-details-client";
@@ -38,14 +39,19 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   }
 
   const { id } = await params;
-  const [meeting, locations, comms, churchRows, followUp] = await Promise.all([
-    getMeeting(user.churchId, id),
-    listLocations(user.churchId),
-    getMeetingCommunications(user.churchId, id),
-    db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
-    // VM-020. `null` until attendance is finalized — see `getFollowUpCompletion`.
-    getFollowUpCompletion(user.churchId, id),
-  ]);
+  const [meeting, locations, comms, churchRows, followUp, guests] =
+    await Promise.all([
+      getMeeting(user.churchId, id),
+      listLocations(user.churchId),
+      getMeetingCommunications(user.churchId, id),
+      db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
+      // VM-020. `null` until attendance is finalized — see `getFollowUpCompletion`.
+      getFollowUpCompletion(user.churchId, id),
+      // Read for the Send Email link alone: the card preloads the meeting's
+      // guests as recipients, the same way the Invitations tab's own button
+      // does (#612).
+      getGuestList(user.churchId, id),
+    ]);
 
   if (!meeting) {
     notFound();
@@ -146,7 +152,12 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
               datetime: meeting.datetime.toISOString(),
               locationName: meeting.locationName,
               locationAddress: meeting.locationAddress,
+              agenda: meeting.agenda,
             }}
+            guests={guests.map((guest) => ({
+              personId: guest.personId,
+              email: guest.email,
+            }))}
           />
         </div>
       )}

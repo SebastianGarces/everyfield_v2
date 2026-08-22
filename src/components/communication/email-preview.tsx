@@ -1,8 +1,11 @@
 "use client";
 
-import { renderTemplate, getSampleData } from "@/lib/communication/merge";
 import {
-  escapeMergeValues,
+  getSampleData,
+  renderEmailBodyHtml,
+  renderSubject,
+} from "@/lib/communication/merge";
+import {
   highlightUnresolvedMergeTokens,
   isRichTextEmpty,
   toRichTextHtml,
@@ -65,20 +68,18 @@ function RsvpButtons() {
  *
  * COM-017: the body is rich text, and this preview shows the FORMATTING, not
  * the markup — it is the only place a planter sees what the recipient will get
- * before they send it. It runs the same two steps the send path runs, in the
- * same order: sanitise the body, then substitute merge values with those values
- * escaped. Anything else here would preview a different email from the one that
- * goes out — including WHERE the RSVP buttons land, which is why the body is
- * cut by `parseRichEmailBody`, the same splitter the email template uses, and
- * not by a second rule of this component's own.
+ * before they send it. So it CALLS the send path's own steps rather than
+ * repeating them: `toRichTextHtml` sanitises, `renderEmailBodyHtml` substitutes
+ * (escaping the values, breaking their lines, dropping the paragraphs a field
+ * that resolved to nothing emptied). Anything else here would preview a
+ * different email from the one that goes out — including WHERE the RSVP buttons
+ * land, which is why the body is cut by `parseRichEmailBody`, the same splitter
+ * the email template uses, and not by a second rule of this component's own.
  */
 export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
   const data = mergeData ?? getSampleData();
-  const renderedSubject = subject ? renderTemplate(subject, data) : "";
-  const renderedBody = renderTemplate(
-    toRichTextHtml(body),
-    escapeMergeValues(data)
-  );
+  const renderedSubject = subject ? renderSubject(subject, data) : "";
+  const renderedBody = renderEmailBodyHtml(toRichTextHtml(body), data);
 
   // The subject is plain text going into innerHTML, so it is escaped first —
   // the body arrives already sanitised, the subject never was.

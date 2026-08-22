@@ -15,6 +15,10 @@ import {
   buildChurchMergeData,
   buildMeetingMergeData,
 } from "@/lib/communication/merge";
+import {
+  meetingComposeUrl,
+  type MeetingGuestContact,
+} from "@/lib/communication/meeting-compose";
 // date-fns `format` renders in the runtime's zone, which differs between the
 // SSR pass and the browser — one more React #418 on this page. See
 // src/lib/datetime.ts.
@@ -46,7 +50,18 @@ interface MeetingCommunicationStatusProps {
     datetime: string;
     locationName: string | null;
     locationAddress: string | null;
+    /** `church_meetings.agenda` as stored — parsed by `buildMeetingMergeData`. */
+    agenda: unknown;
   };
+  /**
+   * The meeting's guest list, so Send Email opens with them already loaded.
+   *
+   * This card's link used to carry `meetingId` alone while the guest list's own
+   * button one tab away carried `meetingId` AND `recipientIds` — two Send Email
+   * buttons on one meeting, one of which opened an empty compose screen (#612).
+   * Both call `meetingComposeUrl` now, so the difference cannot come back.
+   */
+  guests: MeetingGuestContact[];
 }
 
 export function MeetingCommunicationStatus({
@@ -55,6 +70,7 @@ export function MeetingCommunicationStatus({
   church,
   timeZone,
   meeting,
+  guests,
 }: MeetingCommunicationStatusProps) {
   const mergeData = {
     ...buildChurchMergeData(church),
@@ -64,6 +80,8 @@ export function MeetingCommunicationStatus({
     }),
   };
 
+  const composeUrl = meetingComposeUrl(meetingId, guests);
+
   if (communications.length === 0) {
     return (
       <Card>
@@ -71,10 +89,7 @@ export function MeetingCommunicationStatus({
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Communications</CardTitle>
             <Button variant="outline" size="sm" asChild>
-              <Link
-                href={`/communication/compose?meetingId=${meetingId}`}
-                className="cursor-pointer"
-              >
+              <Link href={composeUrl} className="cursor-pointer">
                 <Send className="mr-2 h-4 w-4" />
                 Send Email
               </Link>
@@ -98,10 +113,7 @@ export function MeetingCommunicationStatus({
             Communications ({communications.length})
           </CardTitle>
           <Button variant="outline" size="sm" asChild>
-            <Link
-              href={`/communication/compose?meetingId=${meetingId}`}
-              className="cursor-pointer"
-            >
+            <Link href={composeUrl} className="cursor-pointer">
               <Send className="mr-2 h-4 w-4" />
               New Email
             </Link>

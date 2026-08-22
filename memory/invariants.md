@@ -188,6 +188,7 @@ Applies to `persons.photo_url`, `src/app/api/people/[personId]/photo/route.ts` a
 
 - The SERVER is the gate, never the editor — every compose/task action is a POSTable endpoint that never saw the toolbar — and there is ONE sanitiser, `sanitizeRichText`, allow-list only.
 - ONE door converts a stored value for reading or editing, `toRichTextHtml`, and ONE read-only renderer draws it, `RichText`. A hand-rolled `dangerouslySetInnerHTML` is a second copy of both.
+- ONE door substitutes merge values into an email body, `renderEmailBodyHtml` (`communication/merge.ts`) — escape the values, turn their newlines into `<br>`, then drop the paragraphs a field that resolved to nothing emptied. The send path and the compose preview both call it, which is what makes the preview the email; a second spelling previews a different message from the one that goes out.
 
 ## Tasks, Subtasks & Recurrence
 
@@ -221,6 +222,8 @@ Applies to `persons.photo_url`, `src/app/api/people/[personId]/photo/route.ts` a
 - ⚖ `finalizeAttendance` runs its downstream generation on EVERY call, not only the first (#323): the `actual_attendance` marker decides what the call REPORTS (`finalized` / `reconciled` / `already_finalized`) and whether the count needs refreshing, never whether the work happens. Gating the work on the marker is what dropped a late-added attendee's follow-up; gating it on the count has the same hole one step in.
 - `meeting.attendance.finalized` is emitted STRICTLY, and strictness is a property of the EMIT: EVERY subscriber to it is load-bearing and can fail a planter's finalize. A third subscriber must be safe to fail one, or the flag has to become handler-scoped first.
 - The meeting-title lookup inside the task generator is tenant-filtered (`eq(churchMeetings.churchId, churchId)`); the id reaches it from a route parameter, and there is no RLS behind it.
+- EVERY Send Email control on a meeting surface builds its URL with `meetingComposeUrl` (`communication/meeting-compose.ts`): the meeting AND the guests who have an address, from ONE definition of emailable, so the count on the button is the recipient list that opens. Two hand-built spellings on one page is what left the Communications card dropping the guest list the Invitations tab beside it carried (#612); `meeting-compose.test.ts` walks `src/` for a third.
+- ⚖ `{{meeting_agenda}}` carries its own "Agenda:" heading INSIDE the value. The merge engine has no conditionals, so a heading written into a template body outlives the list it introduces and a meeting with no agenda delivers a bare "Agenda:". Which template each meeting type invites with is `MEETING_INVITATION_TEMPLATE_NAMES`, keyed by `MeetingType` and held to the seeded catalog by a test — a name pointing at nothing opens compose blank and reports no failure.
 - Accepted residual: the meetings client boundary — no `"use client"` module reaching a meetings DB module (`service.ts`, `response-queries.ts`), directly or transitively — is a TEST (`client-boundary.test.ts`), not the compiler. `import "server-only"` is unresolvable under `pnpm test`, and `--conditions=react-server` breaks every email-rendering test. Retired by a `react-server` lane.
 
 ## People — Contacts, Import & Households

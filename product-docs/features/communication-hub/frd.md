@@ -677,6 +677,7 @@ General notes attached to any entity.
 | `{{meeting_type}}` | Meeting type label (Vision Meeting, Orientation, Team Meeting) | ChurchMeeting.type |
 | `{{meeting_date}}` | Meeting date and time | ChurchMeeting.datetime |
 | `{{meeting_location}}` | Meeting location name and address | ChurchMeeting.location_name |
+| `{{meeting_agenda}}` | The running order as a list, heading included. Renders nothing when the meeting has no agenda, so a template needs no heading of its own | ChurchMeeting.agenda |
 | `{{confirm_link}}` | Recipient-specific RSVP confirm link (`/rsvp/[token]`) | MeetingConfirmationToken |
 | `{{decline_link}}` | Recipient-specific RSVP decline link (`/rsvp/[token]`) | MeetingConfirmationToken |
 

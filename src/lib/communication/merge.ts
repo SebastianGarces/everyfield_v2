@@ -9,6 +9,8 @@
 
 import { formatDateTime } from "@/lib/datetime";
 import { meetingTypeLabel } from "@/lib/meetings/labels";
+import { parseAgenda, type AgendaSection } from "@/lib/meetings/agenda";
+import { escapeMergeValues } from "@/lib/rich-text/format";
 
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
@@ -21,6 +23,48 @@ export interface MergeFieldDefinition {
   group: "person" | "church" | "meeting";
   /** Sample value used in previews */
   sampleValue: string;
+}
+
+// ---------------------------------------------------------------------------
+// The agenda, as an email says it
+// ---------------------------------------------------------------------------
+
+/**
+ * The heading `{{meeting_agenda}}` carries WITH the list, not above it.
+ *
+ * It is inside the VALUE deliberately. The merge engine has no conditionals, so
+ * a heading written into the template body outlives the list it introduces: a
+ * meeting with no agenda would deliver "Agenda:" and then nothing. Making the
+ * whole block one value means an empty agenda renders an empty string and the
+ * section is simply absent (#612).
+ */
+const AGENDA_HEADING = "Agenda:";
+
+/**
+ * The running order as plain text, or `""` when there is none.
+ *
+ * PLAIN TEXT with newlines, not markup: every merge value is escaped before it
+ * is substituted into an HTML body (`escapeMergeValues`), and an exemption for
+ * this one would put planter-typed section titles into the email unescaped.
+ * `renderEmailBodyHtml` turns the newlines into `<br>` on the HTML side, so one
+ * text value serves both halves of the email.
+ *
+ * A section with 0 minutes prints its title alone. Zero is what
+ * `clampAgendaMinutes` returns for a timing it cannot read, so "(0 min)" would
+ * be printing a parse failure to a guest as if it were the plan.
+ */
+export function formatAgendaForEmail(
+  sections: readonly AgendaSection[]
+): string {
+  if (sections.length === 0) return "";
+
+  const lines = sections.map((section) =>
+    section.minutes > 0
+      ? `• ${section.title} (${section.minutes} min)`
+      : `• ${section.title}`
+  );
+
+  return [AGENDA_HEADING, ...lines].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +151,14 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Meeting venue name and address",
     group: "meeting",
     sampleValue: "Community Center, 123 Main St",
+  },
+  {
+    name: "meeting_agenda",
+    label: "Meeting Agenda",
+    description:
+      "The running order, heading included. Renders nothing when the meeting has no agenda — do not write a heading above it.",
+    group: "meeting",
+    sampleValue: AGENDA_HEADING + "\n• Welcome (10 min)\n• Vision (25 min)",
   },
   // Confirmation buttons (auto-injected when sending for a meeting)
   // These render as styled CTA buttons in the email — place on their own line
@@ -217,6 +269,18 @@ export function buildMeetingMergeData(meeting: {
   datetime: Date;
   locationName: string | null;
   locationAddress: string | null;
+  /**
+   * `church_meetings.agenda` AS STORED — the raw `jsonb`, parsed here.
+   *
+   * REQUIRED and `unknown`, never optional. Three of this function's callers
+   * hand it a whole `churchMeetings` row and satisfy it for free; the other two
+   * project a narrow shape by hand, and while the field was absent they would
+   * have type-checked and silently sent an email with no agenda in it. Optional
+   * makes a forgotten column invisible; required makes it a compile error at
+   * the projection. Same rule and same reason as `MeetingTitleFacts`
+   * (`@/lib/meetings/labels`).
+   */
+  agenda: unknown;
 }): Record<string, string> {
   // Canonical map (407-4-1): the type may have arrived from an older row,
   // so the accessor falls back to the raw token exactly as the local copy did.
@@ -233,5 +297,78 @@ export function buildMeetingMergeData(meeting: {
     meeting_location: [meeting.locationName, meeting.locationAddress]
       .filter(Boolean)
       .join(", "),
+    // `parseAgenda` is total — a null column, a legacy string or an array of
+    // junk all yield sections, possibly none — so an unreadable row sends an
+    // email without an agenda rather than failing the send.
+    meeting_agenda: formatAgendaForEmail(parseAgenda(meeting.agenda)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering a body
+// ---------------------------------------------------------------------------
+
+/**
+ * `<p>` holding nothing a recipient can see — what a merge token that resolved
+ * to an empty string leaves behind on its own line.
+ */
+const EMPTY_PARAGRAPH = /<p\b[^>]*>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi;
+
+/**
+ * Substitute merge values into a sanitised rich-text body — the ONE door, used
+ * by the send path and by the compose preview so the two cannot differ.
+ *
+ * Three steps, and they were spelled out at both call sites before this
+ * function existed:
+ *
+ * 1. ESCAPE the values. A person called `Bobby <script>` is a name, not markup,
+ *    and so is an agenda section a planter typed.
+ * 2. Newlines become `<br>`. Merge values are TEXT — the agenda is a list of
+ *    lines — and a bare `\n` inside a `<p>` is whitespace, so without this the
+ *    whole agenda arrives on one line.
+ * 3. Drop the paragraphs the substitution EMPTIED. A field that resolves to
+ *    nothing on its own line leaves `<p></p>` — a blank gap where the section
+ *    was. `{{meeting_agenda}}` on a meeting with no agenda is the case this was
+ *    written for (#612), but `{{pastor_name}}` and `{{launch_date}}` render
+ *    empty today and left the same gap.
+ */
+export function renderEmailBodyHtml(
+  bodyHtml: string,
+  data: Record<string, string>
+): string {
+  const escaped: Record<string, string> = {};
+  for (const [name, value] of Object.entries(escapeMergeValues(data))) {
+    escaped[name] = value.replace(/\r?\n/g, "<br />");
+  }
+
+  return renderTemplate(bodyHtml, escaped).replace(EMPTY_PARAGRAPH, "");
+}
+
+/**
+ * The same substitution for the text/plain half. No escaping — it is not markup
+ * — but the same collapse, so a field that rendered nothing does not leave three
+ * blank lines where the HTML half leaves none.
+ */
+export function renderEmailBodyText(
+  bodyText: string,
+  data: Record<string, string>
+): string {
+  return renderTemplate(bodyText, data)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * A subject line, rendered onto ONE line.
+ *
+ * The collapse is the boundary's, not a nicety: a subject is an email HEADER,
+ * and `{{meeting_agenda}}` is a merge value with newlines in it, so a planter
+ * who puts that token in the subject field would otherwise hand the provider a
+ * multi-line header value.
+ */
+export function renderSubject(
+  subject: string,
+  data: Record<string, string>
+): string {
+  return renderTemplate(subject, data).replace(/\s*\n\s*/g, " ");
 }

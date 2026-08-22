@@ -77,6 +77,10 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
     datetime: m.datetime.toISOString(),
     locationName: m.locationName,
     locationAddress: m.locationAddress,
+    // Plain JSON out of the `jsonb` column — it crosses to the client as it is
+    // and `buildMeetingMergeData` parses it there, the same call the send path
+    // makes on the server.
+    agenda: m.agenda,
   }));
 
   const churchName = churchRows[0]?.name ?? "";
