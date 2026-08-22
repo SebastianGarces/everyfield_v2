@@ -18,6 +18,6 @@ export const dynamic = "force-dynamic";
 
 export default function InterceptedSettingsPage() {
   return (
-    <SettingsSurface sectionId={DEFAULT_SETTINGS_SECTION} overlaid={true} />
+    <SettingsSurface sectionId={DEFAULT_SETTINGS_SECTION} intercepted={true} />
   );
 }

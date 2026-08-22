@@ -2,7 +2,10 @@
 // `@settings` slot (Next 16 fails the build without a `default.tsx` for every
 // slot, `children` included).
 //
-// IT IS WHAT A COLD LOAD OF A SETTINGS URL RENDERS BEHIND THE MODAL (#640,
+// It is reached whenever Next cannot recover which route `children` was on —
+// which is every route in this group, not only the settings ones.
+//
+// AND IT IS WHAT A COLD LOAD OF A SETTINGS URL RENDERS BEHIND THE MODAL (#640,
 // #646). No `/settings/*` page lives under `children` any more — every route
 // that draws the modal is in the `@settings` slot — so a pasted
 // `/settings/church` leaves `children` with no match and lands here. Rendering

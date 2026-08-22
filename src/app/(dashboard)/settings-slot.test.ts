@@ -74,24 +74,25 @@ test("each settings URL has both an intercepted and a cold-load route", () => {
 });
 
 test("only the intercepting half claims an overlay", () => {
-  // `overlaid` is the ONE argument the four routes differ in, and it decides the
+  // `intercepted` is the ONE argument the four routes differ in, and it decides the
   // one thing they disagree about: whether Close goes back to a live screen or
   // to the account's home. The interceptor matched means a screen is behind.
   for (const page of MODAL_PAGES) {
     const source = readFileSync(path.join(GROUP, page), "utf8");
     const intercepting = page.includes("(.)settings");
     assert.ok(
-      source.includes(`overlaid={${intercepting}}`),
-      `${page} must pass overlaid={${intercepting}}`
+      source.includes(`intercepted={${intercepting}}`),
+      `${page} must pass intercepted={${intercepting}}`
     );
   }
 });
 
 test("the modal never decides whether to render from the address bar", () => {
-  // THE #646 DEFECT ITSELF. `if (!overlaid && pathname !== ownPath) return null`
-  // was the stand-down rule, and a rule is what the topology above replaced. A
-  // component that can render nothing depending on the URL is a component that
-  // can render TWICE depending on the URL.
+  // THE #646 DEFECT ITSELF, verbatim as it stood:
+  // `if (!overlaid && pathname !== ownPath) return null`. That was the
+  // stand-down rule, and a rule is what the topology above replaced. A component
+  // that can render nothing depending on the URL is a component that can render
+  // TWICE depending on the URL.
   const modal = readFileSync(
     path.join(SRC, "components", "settings", "settings-modal.tsx"),
     "utf8"
@@ -99,5 +100,34 @@ test("the modal never decides whether to render from the address bar", () => {
   assert.ok(
     !modal.includes("usePathname"),
     "the settings modal reads the pathname again — the stand-down rule is back"
+  );
+});
+
+test("the two files the topology leans on still say what it needs", () => {
+  // Neither of these is visible as a change in a settings diff, and both are
+  // load-bearing now in a way they were not before.
+
+  // `children` has no settings page any more, so THIS is the screen behind the
+  // modal on every mailed link. Anything it draws is a flash of a screen the
+  // reader did not ask for, under a dialog they did.
+  const childrenDefault = readFileSync(
+    path.join(GROUP, "default.tsx"),
+    "utf8"
+  ).replace(/\/\/.*$/gm, "");
+  assert.match(
+    childrenDefault,
+    /return null;/,
+    "(dashboard)/default.tsx must render nothing — it is the ground under a cold-loaded modal"
+  );
+
+  // The catch-all is what dismisses the modal when the reader navigates out of
+  // settings, and it now sits beside a static `settings/` segment. Next declines
+  // to push a catch-all into an intercepting route, and the OPTIONAL form
+  // (`[[...catchAll]]`) its own header warns about is not supported by the slot
+  // normalizer at all.
+  const slotEntries = readdirSync(path.join(GROUP, "@settings"));
+  assert.ok(
+    slotEntries.includes("[...catchAll]"),
+    `the @settings catch-all is gone or optional — the modal will strand itself on the next screen (saw ${slotEntries.join(", ")})`
   );
 });

@@ -54,7 +54,7 @@ export async function settingsSectionMetadata(
 // THE SETTINGS SURFACE — one server component, four routes (#615).
 //
 // `/settings`, `/settings/<section>` and their two intercepted twins all render
-// this. What differs between them is ONE argument, `overlaid`, and it decides
+// this. What differs between them is ONE argument, `intercepted`, and it decides
 // exactly one thing: what closing does. Everything else — the session, the gate,
 // which sections the side navigation lists, which body draws — is resolved once,
 // here, so the four route files stay three lines each and cannot drift.
@@ -94,15 +94,16 @@ const SECTION_BODIES: Record<
 
 export async function SettingsSurface({
   sectionId,
-  overlaid,
+  intercepted,
 }: {
   sectionId: SettingsSectionId;
   /**
-   * True when an intercepting route put this modal over a live screen, false
-   * when the URL was loaded cold. The ROUTE knows which it is; nothing here can
-   * work it out, and history length is not an answer.
+   * Which of the slot's two halves matched: the interceptor, or its
+   * non-intercepting twin. Only the ROUTE knows, and history length is not an
+   * answer. It is NOT "is a screen behind this modal" — after a cold load every
+   * later section switch is intercepted too; `bootedIntoSettings` holds that.
    */
-  overlaid: boolean;
+  intercepted: boolean;
 }) {
   const { user } = await verifySession();
 
@@ -119,7 +120,7 @@ export async function SettingsSurface({
     <SettingsModal
       activeId={sectionId}
       visibleIds={visible.map((section) => section.id)}
-      overlaid={overlaid}
+      intercepted={intercepted}
       // Where Close goes when there is nothing behind the modal. Resolved here
       // rather than pushing `/dashboard` and letting its own redirect fire,
       // because an oversight account bouncing through a plant dashboard is a

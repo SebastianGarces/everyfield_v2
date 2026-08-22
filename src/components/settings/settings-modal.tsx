@@ -36,9 +36,9 @@ import {
 // ONE COPY, ALWAYS (#640, #646). Every route that draws this component lives in
 // the `@settings` slot — the interceptor for an in-app navigation, its
 // non-intercepting twin for a cold load — and a slot holds at most one match, so
-// a second copy is unrepresentable rather than ruled out. `overlaid` no longer
-// tells two copies apart; it says which of the two routes matched, which is the
-// same question as "was this document already showing a screen".
+// no two of them can draw. A `/settings/*` page under the layout's `children`
+// is the only way to get a second modal beside this one, and
+// `settings-slot.test.ts` is what forbids one.
 // ============================================================================
 
 type SettingsModalProps = {
@@ -47,7 +47,7 @@ type SettingsModalProps = {
   /** The sections this account may open, in registry order. */
   visibleIds: readonly SettingsSectionId[];
   /** True only when the intercepting route matched — an in-app opening. */
-  overlaid: boolean;
+  intercepted: boolean;
   /**
    * Where Close goes when nothing is behind the modal. Resolved on the server,
    * because only it knows whether this account's home is the plant dashboard or
@@ -62,9 +62,9 @@ type SettingsModalProps = {
  * Did this document boot straight into settings, with no app screen behind it?
  *
  * A fact about the DOCUMENT, not about the route rendering right now — which is
- * why it cannot be `overlaid`. After a cold load every later section switch is
- * intercepted, so the slot reports `overlaid: true` while there is still nothing
- * to go back to; closing on that answer walks the reader out of the app.
+ * why `intercepted` cannot answer it. After a cold load every later section
+ * switch is intercepted too, so the slot says `true` while there is still
+ * nothing to go back to; closing on that answer walks the reader out of the app.
  *
  * Module scope is the honest scope for a per-document fact, and it is only ever
  * touched from an effect, so a server render never reads or writes it — module
@@ -80,7 +80,7 @@ let bootedIntoSettings: boolean | null = null;
 export function SettingsModal({
   activeId,
   visibleIds,
-  overlaid,
+  intercepted,
   home,
   children,
 }: SettingsModalProps) {
@@ -94,8 +94,8 @@ export function SettingsModal({
   // intercepted and reports one. Every later mount is a section switch, which is
   // always intercepted and so always says `true`.
   useEffect(() => {
-    if (bootedIntoSettings === null) bootedIntoSettings = !overlaid;
-  }, [overlaid]);
+    if (bootedIntoSettings === null) bootedIntoSettings = !intercepted;
+  }, [intercepted]);
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 
@@ -125,8 +125,8 @@ export function SettingsModal({
     // One entry means `back()` is right whenever an app screen is behind that
     // entry, and wrong when the document booted into settings — there, `back()`
     // leaves the app. `bootedIntoSettings` is the only thing that knows which,
-    // because `overlaid` goes stale the moment a cold load switches section.
-    const nothingBehind = bootedIntoSettings ?? !overlaid;
+    // because `intercepted` goes stale the moment a cold load switches section.
+    const nothingBehind = bootedIntoSettings ?? !intercepted;
     bootedIntoSettings = null;
     if (nothingBehind) router.replace(home);
     else router.back();

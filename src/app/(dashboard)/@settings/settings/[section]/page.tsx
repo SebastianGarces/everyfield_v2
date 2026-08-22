@@ -18,7 +18,7 @@ import {
 // pinned at the URL the document booted on, so returning to that section made
 // its copy match again and a second dialog appeared beside the slot's.
 //
-// `overlaid: false` — nothing is behind a URL somebody pasted, so Close goes to
+// `intercepted: false` — nothing is behind a URL somebody pasted, so Close goes to
 // the account's home instead of out of the app.
 // ============================================================================
 
@@ -38,5 +38,5 @@ export default async function SettingsSectionPage({
   params: SettingsSectionParams;
 }) {
   const sectionId = await settingsSectionFromParams(params);
-  return <SettingsSurface sectionId={sectionId} overlaid={false} />;
+  return <SettingsSurface sectionId={sectionId} intercepted={false} />;
 }

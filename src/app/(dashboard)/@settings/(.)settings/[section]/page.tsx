@@ -25,5 +25,5 @@ export default async function InterceptedSettingsSectionPage({
   params: SettingsSectionParams;
 }) {
   const sectionId = await settingsSectionFromParams(params);
-  return <SettingsSurface sectionId={sectionId} overlaid={true} />;
+  return <SettingsSurface sectionId={sectionId} intercepted={true} />;
 }
