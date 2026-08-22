@@ -17,6 +17,7 @@ export {
   insightCategorySchema,
   insightSeveritySchema,
   hasBothAudiences,
+  JUDGE_RULES,
 } from "./schema";
 export type {
   Insight,
@@ -25,7 +26,22 @@ export type {
   InsightSeverity,
   JudgeOutput,
   AssessmentResult,
+  JudgeRule,
 } from "./schema";
+
+// The judge's own rules refusing its own output (#605). `isSchemaRejection` is
+// how the batch runner tells "the judge would not follow a rule" apart from
+// "the provider would not talk to us" (`isRateLimitDeferral`) and from a plain
+// broken call — three different sentences in the 07:00 log.
+//
+// The PREDICATE and the event shape are the whole surface, on purpose. The
+// error class, `describeDraftRejection` and `draftCost` stay directory-internal
+// so nothing outside this module can start classifying rejections for itself —
+// the vocabulary has one owner, the way the ban-list does (#538).
+export {
+  isSchemaRejection,
+  type SchemaRejectionEvent,
+} from "./schema-rejection";
 
 export { JUDGE_MODEL_ID } from "./provider";
 

@@ -27,12 +27,63 @@
 // Anything else that must reach a local Postgres through neon-http — the eval
 // seed, a one-off script — sets `NEON_HTTP_PROXY_URL` and makes the same move
 // deliberately. Never import this module from `src/`.
+//
+// AND WHICH DATABASE IT SENDS THEM TO (#594). node:test runs each suite file in
+// its own CHILD PROCESS, and this module is preloaded into every one of them —
+// which makes it the only place that knows both "this is a live run" and "this
+// process is running THAT file". So it is also where each suite is pointed at
+// its own database: one `DATABASE_URL` rewrite, before `src/db/index.ts` reads
+// the variable, and the fourteen suites stop sharing a write target.
+// `scripts/live-db-names.ts` carries the derivation and the why.
+//
+// THE REWRITE RIDES THE ONE THING THE PROXY HONOURS. neon-http puts the
+// connection string in a `Neon-Connection-String` header per request;
+// `local-neon-http-proxy` reads the user, password and DATABASE out of it and
+// takes the host from its own env. So changing the database component is
+// enough, and changing anything else would be theatre.
 // ============================================================================
 
 import { neonConfig } from "@neondatabase/serverless";
+
+import { databaseForSuite, suiteForPath } from "./live-db-names";
 
 /** Where `local-neon-http-proxy` listens by default (docker-compose and CI). */
 export const DEFAULT_NEON_HTTP_PROXY_URL = "http://localhost:4444/sql";
 
 neonConfig.fetchEndpoint =
   process.env.NEON_HTTP_PROXY_URL ?? DEFAULT_NEON_HTTP_PROXY_URL;
+
+// WHICH SUITE THIS PROCESS IS. node:test gives the child `process.argv[1]` as
+// the test file it is about to run, and `suiteForPath` answers from the
+// `LIVE_SUITES` LIST — never from the shape of the path. Both halves matter:
+//
+//   · A shape test (`src/…​.test.ts`) matches some 250 files, three of which are
+//     live suites deliberately left out of this lane. Preloading one of those
+//     would hand it a database nobody created, and it would SKIP and pass.
+//   · `suiteForPath` resolves against a repo root derived from this file rather
+//     than `process.cwd()`, so a run started from a subdirectory cannot fail
+//     the match, leave every child on the shared base URL, and quietly restore
+//     the #594 race with the lane green.
+//
+// The parent runner and the preflight both land here with argv[1] pointing at
+// something that is not a suite; they reach no database of their own, so
+// leaving their `DATABASE_URL` alone is correct rather than merely harmless.
+const suite = process.argv[1] ? suiteForPath(process.argv[1]) : null;
+
+if (suite) {
+  const base = process.env.DATABASE_URL;
+
+  // Fail closed and say so. The alternative — carry on against whatever the
+  // variable happened to hold — is how fourteen suites shared one database in
+  // the first place.
+  if (!base) {
+    throw new Error(
+      `${suite} is a live suite, but DATABASE_URL is unset, so there is no ` +
+        `base connection to point at its own database.`
+    );
+  }
+
+  const url = new URL(base);
+  url.pathname = `/${databaseForSuite(suite)}`;
+  process.env.DATABASE_URL = url.toString();
+}

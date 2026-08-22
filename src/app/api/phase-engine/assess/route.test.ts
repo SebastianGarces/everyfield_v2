@@ -11,6 +11,7 @@ import {
   type PlantSelectionInput,
 } from "@/lib/phase-engine/assessment/dirty";
 import type { SelectedPlant } from "@/lib/phase-engine/assessment";
+import { SchemaRejectionError } from "@/lib/phase-engine/judge/schema-rejection";
 
 import {
   GET,
@@ -326,6 +327,148 @@ test("a failing plant is recorded but does not abort the run", async () => {
   const failed = summary.outcomes.find((o) => o.status === "failed");
   assert.equal(failed?.churchId, "boom");
   assert.match(failed?.error ?? "", /openai exploded/);
+});
+
+// ----------------------------------------------------------------------------
+// A judge that would not follow its own rule reads differently from a provider
+// that would not talk to us (#605, AC-3).
+//
+// `failed` had one meaning and one sentence. It now has a third reading, and it
+// is the only one that says what to CHANGE: a run reporting
+// `planter_first_pairing` on four plants is telling you the rubric teaches that
+// rule badly, which no amount of re-running will fix. So the rule has to reach
+// the summary and the log, not just the row an operator would have to go and
+// query.
+// ----------------------------------------------------------------------------
+
+test("a plant whose every draft was rejected names the rule in the summary and the log", async () => {
+  const calls: string[] = [];
+  const plants: PlantSelectionInput[] = [
+    { churchId: "ok-1", lastMaterialEventAt: null, latestAssessmentAt: null },
+    {
+      churchId: "stubborn",
+      lastMaterialEventAt: null,
+      latestAssessmentAt: null,
+    },
+  ];
+
+  const errors: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => void errors.push(args.join(" "));
+
+  let summary;
+  try {
+    summary = await runAssessmentBatch(
+      depsFor(plants, calls, {
+        async generateAssessment(churchId: string, _deps, run) {
+          calls.push(churchId);
+          if (churchId !== "stubborn") {
+            return {} as Awaited<
+              ReturnType<
+                typeof import("@/lib/phase-engine/assessment").generateAssessment
+              >
+            >;
+          }
+          // Two drafts re-prompted, the third exhausting the ladder — the
+          // sequence the runner has to render as one failure and two retries.
+          for (const attempt of [1, 2, 3]) {
+            run?.onSchemaRejection?.({
+              label: churchId,
+              attempt,
+              maxAttempts: 3,
+              rules: ["planter_first_pairing"],
+              issues: [
+                { rule: "planter_first_pairing", message: "unpaired: prayer" },
+              ],
+              exhausted: attempt === 3,
+            });
+          }
+          throw new SchemaRejectionError(
+            churchId,
+            3,
+            {
+              issues: [
+                { rule: "planter_first_pairing", message: "unpaired: prayer" },
+              ],
+              rules: ["planter_first_pairing"],
+            },
+            new Error("no object generated")
+          );
+        },
+      })
+    );
+  } finally {
+    console.error = realError;
+  }
+
+  // Still a failure, and still not fatal to the run.
+  assert.equal(summary.assessed, 1);
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.attempted, 2);
+
+  // …but a failure that says WHICH rule, and how much the ladder was carrying.
+  assert.equal(summary.schemaRejected, 1);
+  // Two, not three: the exhausting draft was rejected and never re-prompted.
+  assert.equal(summary.schemaRetried, 2);
+
+  const failed = summary.outcomes.find((o) => o.status === "failed");
+  assert.deepEqual(failed?.schemaRules, ["planter_first_pairing"]);
+  assert.equal(failed?.truncatedByDeadline, false);
+
+  assert.ok(
+    errors.some((line) => /planter_first_pairing/.test(line)),
+    "the rejecting rule must be in the log line, or a `failed` row can only be read by reproducing the run"
+  );
+});
+
+test("a rejection the run's clock cut short warns instead of paging", async () => {
+  const calls: string[] = [];
+  const plants: PlantSelectionInput[] = [
+    {
+      churchId: "out-of-time",
+      lastMaterialEventAt: null,
+      latestAssessmentAt: null,
+    },
+  ];
+
+  const warns: string[] = [];
+  const errors: string[] = [];
+  const realWarn = console.warn;
+  const realError = console.error;
+  console.warn = (...args: unknown[]) => void warns.push(args.join(" "));
+  console.error = (...args: unknown[]) => void errors.push(args.join(" "));
+
+  let summary;
+  try {
+    summary = await runAssessmentBatch(
+      depsFor(plants, calls, {
+        async generateAssessment(churchId: string) {
+          calls.push(churchId);
+          throw new SchemaRejectionError(
+            churchId,
+            1,
+            {
+              issues: [{ rule: "observation_budget", message: "over budget" }],
+              rules: ["observation_budget"],
+            },
+            new Error("no object generated"),
+            "run_budget"
+          );
+        },
+      })
+    );
+  } finally {
+    console.warn = realWarn;
+    console.error = realError;
+  }
+
+  // The status stays `failed` — the provider answered and the answer broke a
+  // rule, whatever stopped the ladder (the 2026-08-10 ruling, #374/#375). Only
+  // the CHANNEL differs, so a run truncated by its own clock never pages.
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.outcomes[0].truncatedByDeadline, true);
+  assert.deepEqual(errors, []);
+  assert.ok(warns.some((line) => /observation_budget/.test(line)));
 });
 
 // ----------------------------------------------------------------------------

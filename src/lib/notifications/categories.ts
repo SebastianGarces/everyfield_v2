@@ -556,7 +556,11 @@ export const OVERSIGHT_CONSENT_SURFACES: Readonly<
   Record<string, readonly string[]>
 > = {
   "/settings/sharing": OVERSIGHT_SHARING_TOGGLE.detail,
-  "/settings": [OVERSIGHT_SHARING_TEASER],
+  // The teaser moved with the surface that draws it (#615): the old `/settings`
+  // index is gone, and the sentence — plus the link to the panel — now sits in
+  // the Church section of the settings modal, which is the plant Owner's own
+  // section and the same reader it always addressed.
+  "/settings/church": [OVERSIGHT_SHARING_TEASER],
 };
 
 // ----------------------------------------------------------------------------

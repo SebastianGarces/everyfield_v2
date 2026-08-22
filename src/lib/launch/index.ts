@@ -16,6 +16,7 @@ export {
 } from "./milestone-areas";
 export {
   completeLaunchMilestone,
+  convergeLaunchReadiness,
   getLaunchMilestoneHistory,
   getLaunchReadiness,
   isLaunchTask,

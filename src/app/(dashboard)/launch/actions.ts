@@ -173,10 +173,18 @@ export interface ScheduleLaunchActionResult {
  * SEEDING RUNS AFTER THE DURABLE DATE WRITE, and it is not part of it. The date
  * is what the oversight notification, the countdown and the journal are about;
  * a failure to seed must not lose it. That is safe because seeding is
- * idempotent by unique index (`seedLaunchMilestonesStatement`), so the retry —
- * the planter saving again, or scheduling later — completes it. Seeding also
- * runs on an UNCHANGED save for exactly that reason: it is the cheap repair
- * path for a launch whose seed failed, and it inserts nothing when there is
+ * idempotent by unique index (`seedLaunchMilestonesStatement`), so a retry
+ * completes it.
+ *
+ * THE RETRY IS THE NEXT VISIT TO `/launch`, NOT A SECOND SAVE HERE (#614). This
+ * comment used to call an unchanged save "the cheap repair path for a launch
+ * whose seed failed" — which the form makes unreachable: `ScheduleLaunchForm`
+ * disables both buttons until a DIFFERENT day is picked, so the only planter who
+ * needed that path could not take it, and Riverside sat scheduled with zero
+ * milestones for thirteen days. `convergeLaunchReadiness` is the repair now, and
+ * it runs on the READ, where no planter has to know it exists. Seeding still
+ * runs on an unchanged save, because a postponed launch may be re-committed to
+ * the same Sunday and that is a real write; it inserts nothing when there is
  * nothing to insert.
  */
 export async function scheduleLaunchAction(
