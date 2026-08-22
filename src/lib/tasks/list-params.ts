@@ -25,6 +25,7 @@
  */
 
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
+import { isTaskListView, type TaskListView } from "@/lib/tasks/list-url";
 import {
   taskCategorySchema,
   taskPrioritySchema,
@@ -37,12 +38,11 @@ export type SearchParamValue = string | string[] | undefined;
 
 export interface TaskListSearchParams {
   /**
-   * `"my_tasks"` unless the URL says otherwise. `"assignments"` is the
-   * group-by-owner view of the open follow-ups (#470 AC-3) — it reads the same
-   * unfiltered set as `"all"`, so every consumer that asks "whose tasks" gets
-   * the same answer for both.
+   * `"my_tasks"` unless the URL says otherwise — and the list of what it may
+   * otherwise say lives in `./list-url`, with the code that WRITES these URLs
+   * (#660). Two halves of one contract, round-tripped in this module's test.
    */
-  view: "all" | "my_tasks" | "assignments";
+  view: TaskListView;
   showCompleted: boolean;
   status?: TaskStatus[];
   priority?: TaskPriority[];
@@ -87,10 +87,9 @@ export function parseTaskListSearchParams(params: {
   [key: string]: SearchParamValue;
 }): TaskListSearchParams {
   return {
-    view:
-      params.view === "all" || params.view === "assignments"
-        ? params.view
-        : "my_tasks",
+    // The same list the toggle writes from, so a view can never be writable
+    // and unreadable — which is exactly what `all` was (#660).
+    view: isTaskListView(params.view) ? params.view : "my_tasks",
     showCompleted: params.completed === "true",
     status: parseEnumParam(params.status, taskStatusSchema),
     priority: parseEnumParam(params.priority, taskPrioritySchema),

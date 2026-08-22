@@ -17,6 +17,7 @@
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { TaskListRow } from "@/lib/tasks/service";
+import { mayActOnTaskRow } from "@/lib/tasks/own-duty.shared";
 import { Check } from "lucide-react";
 import { useTransition } from "react";
 import {
@@ -68,8 +69,14 @@ export function TaskCard({
   // checks the subject half server-side. Gating this on `tasks.write` alone
   // would hide a Member's own assigned work from them, which is the over-hide
   // AS-020 forbids just as firmly as an under-hide.
-  const canComplete =
-    useCan("tasks.write") || task.assignedToId === currentUserId;
+  // ONE RULE, not a second spelling of it (#660): `mayActOnTaskRow` is what
+  // `mayActOnTask` in the service asks too, so what this card offers and what
+  // the action accepts cannot drift.
+  const canComplete = mayActOnTaskRow({
+    canWrite: useCan("tasks.write"),
+    assignedToId: task.assignedToId,
+    viewerId: currentUserId,
+  });
 
   function handleToggleComplete() {
     startTransition(async () => {

@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { taskCategories, taskPriorities, taskStatuses } from "@/db/schema";
+import { taskListParamsWith, type TaskListView } from "@/lib/tasks/list-url";
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -50,7 +51,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 // ============================================================================
 
 interface TaskFiltersProps {
-  currentView: "all" | "my_tasks" | "assignments";
+  currentView: TaskListView;
   showCompleted: boolean;
 }
 
@@ -59,16 +60,15 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // The URL this pushes is built by `taskListParamsWith`, next door to the
+  // parser that reads it back (#660). It used to be spelled here, with a rule
+  // that dropped the key for `"all"` — which made the All Tasks tab push
+  // `/tasks`, the same URL as My Tasks, and left the tab unselectable. Each
+  // select below still maps its own "All" OPTION to `null`, which is where that
+  // sentinel belongs.
   const updateParam = useCallback(
     (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (value === null || value === "" || value === "all") {
-        params.delete(key);
-      } else {
-        params.set(key, value);
-      }
-      // Reset cursor on filter change
-      params.delete("cursor");
+      const params = taskListParamsWith(searchParams.toString(), key, value);
       router.push(`${pathname}?${params.toString()}`);
     },
     [router, pathname, searchParams]

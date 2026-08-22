@@ -14,6 +14,7 @@ import {
   planBulkTaskOperation,
   type BulkTaskCandidate,
 } from "./service";
+import { mayActOnTaskRow } from "./own-duty.shared";
 
 // ============================================================================
 // THE SUBJECT HALF OF `tasks.own` (AS-006) — "their own task", enforced.
@@ -238,4 +239,64 @@ test("an already-complete row is reported as such, not as somebody else's", () =
   assert.deepEqual(plan.failures, [
     { taskId: "done", title: "Task done", reason: "Task is already complete" },
   ]);
+});
+
+// ----------------------------------------------------------------------------
+// THE SURVIVOR, IN A MIXED LIST — #655's owed assertion, unblocked by #660.
+//
+// #655 closed with one thing it could not show: "the survivor — your own task
+// keeps its checkbox while the row beside it does not — could not be shown in
+// the browser". The reason was #660: no view rendered a Member's own task and
+// somebody else's in ONE list. My Tasks showed only your own, and the All Tasks
+// tab pushed the My Tasks URL, so it could not be selected at all.
+//
+// With `?view=all` reachable, that list exists — and this is the rule it is
+// rendered through. The card asks `mayActOnTaskRow` and so does the service
+// (#660 made them one function), so a row-by-row assertion here is an assertion
+// about what the list SHOWS, not a paraphrase of it.
+// ----------------------------------------------------------------------------
+
+test("in one list, a Member acts on their own row and not on the one beside it", () => {
+  const list = [task(MEMBER_ID), task(OTHER_ID), task(null)];
+
+  assert.deepEqual(
+    list.map((row) => mayActOnTask(member, row)),
+    [true, false, false],
+    "the All Tasks view puts these three rows on one screen: the Member's own keeps its checkbox, somebody else's does not, and an unassigned row is nobody's own"
+  );
+});
+
+test("the same list is fully actionable for an Admin, so the hide is about ownership", () => {
+  const list = [task(MEMBER_ID), task(OTHER_ID), task(null)];
+
+  assert.deepEqual(
+    list.map((row) => mayActOnTask(admin, row)),
+    [true, true, true],
+    "`tasks.write` is the other half of the rule — an Admin's list has a checkbox on every row, which is what makes the Member's list a HIDE and not a broken render"
+  );
+});
+
+test("the card and the service ask ONE function, so the checkbox and the action agree", () => {
+  // The card cannot import the service (`@/db` would cross into the bundle), so
+  // the rule lives in `own-duty.shared` and both call it. This asserts the
+  // client's call shape against the same answers the service gives above.
+  const asTheCardAsks = (assignedToId: string | null) =>
+    mayActOnTaskRow({
+      canWrite: false, // a Member: `useCan("tasks.write")` is false
+      assignedToId,
+      viewerId: MEMBER_ID,
+    });
+
+  assert.deepEqual(
+    [MEMBER_ID, OTHER_ID, null].map(asTheCardAsks),
+    [true, false, false],
+    "what the checkbox is drawn from must equal what `assertMayActOnTask` will accept"
+  );
+
+  // The card may be handed no viewer id at all. An unassigned row must not
+  // become everybody's just because both sides are null.
+  assert.equal(
+    mayActOnTaskRow({ canWrite: false, assignedToId: null, viewerId: null }),
+    false
+  );
 });
