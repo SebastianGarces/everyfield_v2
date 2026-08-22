@@ -5,7 +5,7 @@ import { generateAssessment } from "@/lib/phase-engine/assessment";
 import { runAssessment, TokenPacer } from "@/lib/phase-engine/judge";
 import { isDeadlineTruncatedFailure } from "@/lib/phase-engine/judge/paced-call";
 import { virtualClock } from "@/lib/phase-engine/judge/testing";
-import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
+import { makeSnapshot } from "@/lib/phase-engine/signals/testing";
 import { captureConsole } from "@/lib/testing/console-capture";
 import { sourceReader, stripComments } from "@/lib/testing/source-span";
 
@@ -51,99 +51,6 @@ import {
 // neither `sleeps` nor `advance` — it asserts the OUTCOME of the ladder, not
 // its shape.
 
-/** A minimal but complete snapshot fixture (the `judge.test.ts` shape). */
-function makeSnapshot(churchId: string): PlantFactSnapshot {
-  return {
-    snapshotVersion: "1.0.0",
-    churchId,
-    currentPhase: 1,
-    generatedAt: "2026-06-22T00:00:00.000Z",
-    isColdStart: false,
-    coreGroup: {
-      committedCount: 22,
-      launchTeamCount: 0,
-      growthDelta: 2,
-      growthWindowDays: 7,
-      daysSinceLastNewCommitment: 30,
-      slowedThresholdDays: 21,
-      stalledThresholdDays: 28,
-      sourceComposition: {},
-      unknownSourceCount: 0,
-      isEmpty: false,
-    },
-    visionMeetings: {
-      totalCompleted: 4,
-      lastMeetingAt: "2026-06-01",
-      daysSinceLastMeeting: 21,
-      averageCadenceDays: 14,
-      latestAttendance: 30,
-      previousAttendance: 30,
-      attendanceTrend: "flat",
-      cadenceWatchDays: 21,
-      cadenceDirectDays: 28,
-      isEmpty: false,
-    },
-    followUp: {
-      openCount: 10,
-      stalestDays: 20,
-      staleCount: 7,
-      staleThresholdDays: 14,
-      unownedCount: 0,
-      staleUnownedCount: 0,
-      distinctOwnerCount: 0,
-      planterOwnedCount: 0,
-      warmCount: 0,
-      staleWarmCount: 0,
-      seriouslyStaleWarmCount: 0,
-      staleColdCount: 0,
-      warmWindowDays: 14,
-      warmStaleThresholdDays: 7,
-      isEmpty: false,
-    },
-    ministryRoles: {
-      filledCount: 2,
-      totalRoles: 8,
-      roles: [
-        { key: "worship", label: "Worship", teamPresent: false, filled: false },
-      ],
-      isEmpty: false,
-    },
-    leadership: {
-      candidates: [],
-      candidateThresholdDays: 60,
-      isEmpty: true,
-    },
-    training: {
-      programCount: 0,
-      requiredProgramCount: 0,
-      completionCount: 0,
-      requiredCompletionRate: null,
-      isEmpty: true,
-    },
-    launch: {
-      launchDate: "2026-10-12",
-      daysUntilLaunch: 112,
-      isPastDue: false,
-      isEmpty: false,
-    },
-    cohesion: {
-      activeCommittedCount: 0,
-      disengagedCount: 0,
-      disengagedShare: null,
-      disengagedIncludesLeader: false,
-      disengagedShareThreshold: 0.2,
-      disengagedMinimumCount: 3,
-      windowDays: 28,
-      isEmpty: true,
-    },
-    manual: {
-      attestations: [],
-      byKey: {},
-      reaffirmWindowDays: 30,
-      isEmpty: true,
-    },
-  };
-}
 
 // ----------------------------------------------------------------------------
 // The one stub: the process's own `fetch`.
@@ -261,7 +168,7 @@ function realChainDeps(
         return await generateAssessment(
           churchId,
           {
-            buildFactSnapshot: async () => makeSnapshot(churchId),
+            buildFactSnapshot: async () => makeSnapshot({ churchId }),
             // THE LINK UNDER TEST. Replacing this with a stub is what every
             // other suite does, and it is why the rethrow contract was untested.
             runAssessment,

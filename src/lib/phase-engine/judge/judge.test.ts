@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
+import { makeSnapshot } from "@/lib/phase-engine/signals/testing";
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 import {
   ACTIVE_RUBRIC,
@@ -28,126 +28,6 @@ import {
 // generateObject pipeline is integration-tested separately against the real
 // provider.
 // ----------------------------------------------------------------------------
-
-// A minimal but complete snapshot fixture. Mirrors the PlantFactSnapshot
-// contract from the signal layer.
-function makeSnapshot(
-  overrides: Partial<PlantFactSnapshot> = {}
-): PlantFactSnapshot {
-  return {
-    snapshotVersion: "1.0.0",
-    churchId: "church-123",
-    currentPhase: 1,
-    generatedAt: "2026-06-22T00:00:00.000Z",
-    isColdStart: false,
-    coreGroup: {
-      committedCount: 22,
-      launchTeamCount: 0,
-      growthDelta: 2,
-      growthWindowDays: 7,
-      daysSinceLastNewCommitment: 30,
-      slowedThresholdDays: 21,
-      stalledThresholdDays: 28,
-      sourceComposition: {},
-      unknownSourceCount: 0,
-      isEmpty: false,
-    },
-    visionMeetings: {
-      totalCompleted: 4,
-      lastMeetingAt: "2026-06-01",
-      daysSinceLastMeeting: 21,
-      averageCadenceDays: 14,
-      latestAttendance: 30,
-      previousAttendance: 30,
-      attendanceTrend: "flat",
-      cadenceWatchDays: 21,
-      cadenceDirectDays: 28,
-      isEmpty: false,
-    },
-    followUp: {
-      openCount: 10,
-      stalestDays: 20,
-      staleCount: 7,
-      staleThresholdDays: 14,
-      unownedCount: 0,
-      staleUnownedCount: 0,
-      distinctOwnerCount: 0,
-      planterOwnedCount: 0,
-      warmCount: 0,
-      staleWarmCount: 0,
-      seriouslyStaleWarmCount: 0,
-      staleColdCount: 0,
-      warmWindowDays: 14,
-      warmStaleThresholdDays: 7,
-      isEmpty: false,
-    },
-    ministryRoles: {
-      filledCount: 2,
-      totalRoles: 8,
-      roles: [
-        { key: "worship", label: "Worship", teamPresent: false, filled: false },
-        {
-          key: "childrens",
-          label: "Children's",
-          teamPresent: true,
-          filled: true,
-        },
-      ],
-      isEmpty: false,
-    },
-    leadership: {
-      candidates: [
-        {
-          personId: "p-1",
-          status: "core_group",
-          tenureDays: 70,
-          meetingsAttended: 6,
-          activeMemberships: 1,
-          hasCommitment: true,
-          leadsTeam: false,
-          interviewCount: 0,
-          lastInterviewResult: null,
-          lastInterviewDate: null,
-          assessmentCount: 0,
-          lastAssessmentTotal: null,
-          lastAssessmentDate: null,
-        },
-      ],
-      candidateThresholdDays: 60,
-      isEmpty: false,
-    },
-    training: {
-      programCount: 0,
-      requiredProgramCount: 0,
-      completionCount: 0,
-      requiredCompletionRate: null,
-      isEmpty: true,
-    },
-    launch: {
-      launchDate: "2026-10-12",
-      daysUntilLaunch: 112,
-      isPastDue: false,
-      isEmpty: false,
-    },
-    cohesion: {
-      activeCommittedCount: 0,
-      disengagedCount: 0,
-      disengagedShare: null,
-      disengagedIncludesLeader: false,
-      disengagedShareThreshold: 0.2,
-      disengagedMinimumCount: 3,
-      windowDays: 28,
-      isEmpty: true,
-    },
-    manual: {
-      attestations: [],
-      byKey: {},
-      reaffirmWindowDays: 30,
-      isEmpty: true,
-    },
-    ...overrides,
-  };
-}
 
 function validInsight(over: Partial<Insight> = {}): Insight {
   return {
