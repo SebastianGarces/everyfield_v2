@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { listLocations } from "@/lib/meetings/locations";
 import { getGuestList } from "@/lib/meetings/guest-list";
+import { meetingComposeUrl } from "@/lib/communication/meeting-compose";
 import { getMeetingCommunications } from "@/lib/communication/service";
 import { notFound } from "next/navigation";
 import { MeetingDetails } from "./meeting-details-client";
@@ -142,7 +143,6 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
       {church && (
         <div className="mx-auto max-w-3xl">
           <MeetingCommunicationStatus
-            meetingId={meeting.id}
             communications={serializedComms}
             church={{ name: church.name }}
             timeZone={church.timeZone}
@@ -154,10 +154,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
               locationAddress: meeting.locationAddress,
               agenda: meeting.agenda,
             }}
-            guests={guests.map((guest) => ({
-              personId: guest.personId,
-              email: guest.email,
-            }))}
+            composeUrl={meetingComposeUrl(meeting.id, guests)}
           />
         </div>
       )}

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
+
+import { TS_FILES, codeOf, rel } from "@/lib/auth/server-action-surface";
 
 import {
   buildMeetingMergeData,
@@ -8,7 +11,6 @@ import {
   renderEmailBodyText,
   renderSubject,
 } from "@/lib/communication/merge";
-import { MEETING_INVITATION_TEMPLATE_NAMES } from "@/lib/communication/meeting-compose";
 import { SYSTEM_TEMPLATES } from "@/lib/communication/system-templates";
 import { toRichTextHtml } from "@/lib/rich-text/format";
 
@@ -114,6 +116,51 @@ test("a field that resolves to nothing leaves no empty paragraph", () => {
   assert.equal(html, "<p>Before</p><p>After</p>");
 });
 
+test("a blank line the planter typed is NOT an emptied paragraph", () => {
+  // `<p><br></p>` is what an emptied contentEditable leaves behind, and it is
+  // how this product spells an author's deliberate blank line (`format.ts`,
+  // `isRichTextEmpty`). The first spelling of the drop ran over the RENDERED
+  // body looking for `<p></p>`, which cannot tell the two apart — so a change
+  // scoped to "an absent agenda leaves no gap" silently restyled every outgoing
+  // email, including ones with no merge field in them at all.
+  assert.equal(
+    renderEmailBodyHtml("<p>Hi Sarah,</p><p><br></p><p>See you Sunday.</p>", {
+      first_name: "Sarah",
+    }),
+    "<p>Hi Sarah,</p><p><br></p><p>See you Sunday.</p>"
+  );
+  assert.equal(
+    renderEmailBodyHtml("<p>A</p><p>&nbsp;</p><p>B</p>", {}),
+    "<p>A</p><p>&nbsp;</p><p>B</p>"
+  );
+});
+
+test("a token nothing resolved keeps its paragraph, for the preview to flag", () => {
+  // An UNKNOWN field is not an empty one. The compose preview draws a red pill
+  // around whatever token is left, and dropping the paragraph would delete
+  // exactly the warning it exists to give.
+  assert.equal(
+    renderEmailBodyHtml("<p>{{custom_field}}</p>", { first_name: "Sarah" }),
+    "<p>{{custom_field}}</p>"
+  );
+});
+
+test("a lone CR is a line break like any other", () => {
+  // Every rule here is written against `\n`, so a value carrying `\r` slips
+  // past all of them — and in a SUBJECT that is a bare CR in an email header.
+  assert.equal(
+    renderEmailBodyHtml("<p>{{meeting_agenda}}</p>", {
+      meeting_agenda: "Agenda:\r\n• Welcome\r• Worship",
+    }),
+    "<p>Agenda:<br />• Welcome<br />• Worship</p>"
+  );
+  assert.equal(
+    renderSubject("Hi {{name}}", { name: "x\rBcc: someone@example.com" }),
+    "Hi x Bcc: someone@example.com"
+  );
+  assert.equal(renderEmailBodyText("{{a}}", { a: "x\r\n\r\n\r\ny" }), "x\n\ny");
+});
+
 test("the text half collapses the gap the same way", () => {
   assert.equal(
     renderEmailBodyText("Before\n\n{{meeting_agenda}}\n\nAfter", {
@@ -140,7 +187,7 @@ test("a subject is one line however many the value has", () => {
 // ============================================================================
 
 const teamInvitation = SYSTEM_TEMPLATES.find(
-  (t) => t.name === MEETING_INVITATION_TEMPLATE_NAMES.team_meeting
+  (t) => t.invitesMeetingType === "team_meeting"
 );
 
 test("the team-meeting invitation puts the agenda in the body", () => {
@@ -177,4 +224,32 @@ test("…and leaves no agenda section behind when there is no agenda", () => {
   // a body that lost its middle.
   assert.ok(html.includes("Hi Sarah"), html);
   assert.ok(html.includes("Room 2"), html);
+});
+
+// ============================================================================
+// The sent-message detail page draws the email that was sent
+// ============================================================================
+
+test("RichText's merge branch IS renderEmailBodyHtml, not a third spelling", () => {
+  // `communications.body_html` stores the body UNRENDERED (`send.ts`), so the
+  // detail page re-substitutes what the recipient already received. While
+  // `RichText` carried `renderTemplate(sanitized, escapeMergeValues(…))` inline
+  // it had neither the line breaks nor the emptied-paragraph drop: an agenda
+  // arrived in the inbox as a list and rendered on that page as one run-on
+  // line. A source-text assertion, because rendering the component here would
+  // pull React into a unit suite for a property about which FUNCTION is called.
+  const file = TS_FILES.find(
+    (candidate) =>
+      rel(candidate) ===
+      path.join("src", "components", "shared", "rich-text.tsx")
+  );
+  assert.ok(file, "the walk did not find rich-text.tsx");
+
+  const code = codeOf(file);
+  assert.match(code, /renderEmailBodyHtml\(sanitized, mergeData\)/);
+  assert.doesNotMatch(
+    code,
+    /escapeMergeValues|renderTemplate/,
+    "rich-text.tsx is substituting merge values itself again — call renderEmailBodyHtml"
+  );
 });

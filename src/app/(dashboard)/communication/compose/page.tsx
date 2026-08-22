@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates, getTemplate } from "@/lib/communication/templates";
+import { meetingInvitationTemplate } from "@/lib/communication/system-templates";
 import { listRecipientTeams } from "@/lib/communication/recipient-groups";
 import { listMeetings } from "@/lib/meetings/service";
 import { db } from "@/db";
@@ -85,6 +86,19 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
 
   const churchName = churchRows[0]?.name ?? "";
 
+  // Arriving from a meeting with no template named? Open with the invitation
+  // that meeting type calls for. RESOLVED HERE, on the server, and handed on as
+  // `initialTemplate` — the relation lives on the system catalog
+  // (`invitesMeetingType`), and a client component that read that catalog would
+  // ship every template body to the browser. The form takes a template or none
+  // and no longer decides anything about meeting types (#612).
+  const composingForMeeting = meetings.find((m) => m.id === meetingId);
+  const autoTemplate =
+    selectedTemplate || !composingForMeeting
+      ? undefined
+      : (meetingInvitationTemplate(composingForMeeting.type, templates) ??
+        undefined);
+
   return (
     <>
       <HeaderBreadcrumbs
@@ -95,7 +109,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
       />
       <ComposeForm
         templates={templates}
-        initialTemplate={selectedTemplate}
+        initialTemplate={selectedTemplate ?? autoTemplate}
         meetingId={meetingId}
         meetings={meetings}
         initialRecipients={preloadedRecipients}

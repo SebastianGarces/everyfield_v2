@@ -4,12 +4,13 @@ import { test } from "node:test";
 import { meetingTypes } from "@/db/schema/meetings";
 import { TS_FILES, codeOf, rel } from "@/lib/auth/server-action-surface";
 import {
-  MEETING_INVITATION_TEMPLATE_NAMES,
   emailableGuests,
   meetingComposeUrl,
-  meetingInvitationTemplate,
 } from "@/lib/communication/meeting-compose";
-import { SYSTEM_TEMPLATES } from "@/lib/communication/system-templates";
+import {
+  SYSTEM_TEMPLATES,
+  meetingInvitationTemplate,
+} from "@/lib/communication/system-templates";
 
 // ----------------------------------------------------------------------------
 // #612 — Meeting → Send Email
@@ -18,50 +19,65 @@ import { SYSTEM_TEMPLATES } from "@/lib/communication/system-templates";
 // `team_meeting` to a template named "Team Meeting Invitation", the seed
 // catalog had never contained one, the lookup matched nothing and returned
 // null, and the planter got an empty subject and an empty body with no way to
-// tell that a template had been meant. A name pointing at nothing is exactly
-// the kind of mistake a `Record<MeetingType, string>` cannot catch: the KEYS
-// are the compiler's, the VALUES are strings.
+// tell that a template had been meant.
+//
+// HALF OF THAT IS NOW UNREPRESENTABLE. The relation lives on the catalog entry
+// (`SystemTemplate.invitesMeetingType`), so there is no name in one file that
+// can point at a row in another and miss. What a test still has to hold is the
+// direction a field cannot: a meeting type that NO template claims, which is
+// the shape `team_meeting` was in.
 // ----------------------------------------------------------------------------
 
 // ============================================================================
-// The invitation map names templates that exist
+// Every meeting type has an invitation
 // ============================================================================
 
-test("every meeting type invites with a template the catalog seeds", () => {
-  const seeded = new Map(SYSTEM_TEMPLATES.map((t) => [t.name, t]));
-
+test("every meeting type is invited by exactly one seeded template", () => {
+  // A NAME can point at nothing; a field on the catalog entry cannot, which is
+  // why the relation moved onto `SystemTemplate.invitesMeetingType`. What is
+  // left to check is the other direction — a meeting type nothing claims. That
+  // is the #612 bug exactly: `team_meeting` was mapped by compose and owned by
+  // no template, so it opened blank and reported nothing.
   for (const type of meetingTypes) {
-    const name = MEETING_INVITATION_TEMPLATE_NAMES[type];
-    const template = seeded.get(name);
-
-    assert.ok(
-      template,
-      `${type} invites with "${name}", which no entry in SYSTEM_TEMPLATES seeds — ` +
-        `add it to system-templates.ts or point the map at a template that exists`
+    const claiming = SYSTEM_TEMPLATES.filter(
+      (template) => template.invitesMeetingType === type
     );
-    // The lookup filters on the category as well as the name, so a template
-    // seeded under any other category is as invisible as a missing one.
+
     assert.equal(
-      template.category,
+      claiming.length,
+      1,
+      `${type} is invited by ${claiming.length} seeded templates (${claiming
+        .map((t) => t.name)
+        .join(
+          ", "
+        )}) — set invitesMeetingType on exactly one entry in system-templates.ts`
+    );
+    // The lookup filters on the category too, so an entry seeded under any
+    // other category is as invisible as a missing one.
+    assert.equal(
+      claiming[0].category,
       "meeting_invitation",
-      `"${name}" is seeded as ${template.category}; meetingInvitationTemplate only looks at meeting_invitation`
+      `"${claiming[0].name}" is seeded as ${claiming[0].category}; meetingInvitationTemplate only looks at meeting_invitation`
     );
   }
 });
 
-test("the map covers the enum and nothing else", () => {
-  // `Record<MeetingType, string>` already makes a missing key a compile error.
-  // This is the runtime half: a type added to the schema and forgotten here
-  // fails the suite rather than opening compose blank.
-  assert.deepEqual(
-    Object.keys(MEETING_INVITATION_TEMPLATE_NAMES).sort(),
-    [...meetingTypes].sort()
+test("no template claims a meeting type the schema does not have", () => {
+  const claimed = SYSTEM_TEMPLATES.map((t) => t.invitesMeetingType).filter(
+    (type): type is (typeof meetingTypes)[number] => type !== undefined
   );
+
+  for (const type of claimed) {
+    assert.ok(
+      meetingTypes.includes(type),
+      `a template claims "${type}", which is not a meeting type`
+    );
+  }
 });
 
-test("a seeded invitation is found by the lookup that names it", () => {
-  // The two halves above are about the catalog. This is the whole path: the
-  // rows a church would see, looked up the way compose looks them up.
+test("a seeded invitation is found by the lookup", () => {
+  // The whole path: the rows a church would see, looked up the way the compose
+  // page looks them up.
   const asRows = SYSTEM_TEMPLATES.map((t) => ({
     name: t.name,
     category: t.category,
@@ -69,7 +85,10 @@ test("a seeded invitation is found by the lookup that names it", () => {
 
   for (const type of meetingTypes) {
     const found = meetingInvitationTemplate(type, asRows);
-    assert.equal(found?.name, MEETING_INVITATION_TEMPLATE_NAMES[type], type);
+    const expected = SYSTEM_TEMPLATES.find(
+      (t) => t.invitesMeetingType === type
+    );
+    assert.equal(found?.name, expected?.name, type);
   }
 });
 
@@ -105,9 +124,10 @@ test("an unrecognised meeting type suggests nothing", () => {
 });
 
 test("a prototype member is not a meeting type", () => {
-  // A bare index would reach `Object.prototype` and hand `name` a native
-  // FUNCTION, which `.includes` on a template name would then be compared
-  // against. Same gate and same reason as `meetingTypeLabel`.
+  // The lookup scans the catalog rather than indexing a map, so a forged key
+  // cannot reach `Object.prototype` and hand `name` a native FUNCTION — the bug
+  // `meetingTypeLabel`'s `Object.hasOwn` gate exists for. Pinned here because
+  // the scan is what makes it true, and a scan is one refactor from a `Record`.
   for (const key of ["constructor", "toString", "__proto__"]) {
     assert.equal(
       meetingInvitationTemplate(key, [
@@ -149,7 +169,13 @@ test("the compose URL carries the meeting even with nobody to write to", () => {
     meetingComposeUrl("m1", [{ personId: "p1", email: null }]),
     "/communication/compose?meetingId=m1"
   );
-  assert.equal(meetingComposeUrl("m1"), "/communication/compose?meetingId=m1");
+  // `guests` has no default — a Send Email control with nobody to write to
+  // passes `[]` and says so, rather than silently omitting the argument and
+  // reopening #612 through a call the walk below cannot see.
+  assert.equal(
+    meetingComposeUrl("m1", []),
+    "/communication/compose?meetingId=m1"
+  );
 });
 
 test("ids are encoded, not interpolated", () => {

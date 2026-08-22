@@ -309,51 +309,98 @@ export function buildMeetingMergeData(meeting: {
 // ---------------------------------------------------------------------------
 
 /**
- * `<p>` holding nothing a recipient can see — what a merge token that resolved
- * to an empty string leaves behind on its own line.
+ * CRLF and a lone CR are the same line break as LF.
+ *
+ * NORMALISED FIRST, before any rule below counts lines or collapses them. Every
+ * one of those rules is written against `\n`, so a value carrying `\r` slips
+ * past all three: the subject collapse leaves a bare CR in an email HEADER,
+ * which is the character that carries injection weight; the text half's blank-
+ * line collapse never fires on a CRLF run. The values are planter-typed —
+ * meeting titles, agenda section titles, names — so this is untrusted input on
+ * its way to an external API.
  */
-const EMPTY_PARAGRAPH = /<p\b[^>]*>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi;
+const NEWLINES = /\r\n?/g;
+
+/** Each value with its line breaks normalised, leaving the keys alone. */
+function withNormalisedNewlines(
+  data: Record<string, string>
+): Record<string, string> {
+  const normalised: Record<string, string> = {};
+  for (const [name, value] of Object.entries(data)) {
+    normalised[name] = value.replace(NEWLINES, "\n");
+  }
+  return normalised;
+}
 
 /**
- * Substitute merge values into a sanitised rich-text body — the ONE door, used
- * by the send path and by the compose preview so the two cannot differ.
+ * A `<p>` holding ONE merge token and nothing else — a template's way of saying
+ * "this section goes here".
  *
- * Three steps, and they were spelled out at both call sites before this
- * function existed:
+ * The match is against the TEMPLATE, before substitution, and that is the whole
+ * point. The first spelling of this rule ran over the RENDERED body looking for
+ * `<p></p>`, which cannot tell a paragraph a token emptied from a blank line
+ * the planter typed — and `<p><br></p>` is exactly what this repo calls an
+ * author's blank line (`format.ts`, `isRichTextEmpty`). So a change scoped to
+ * "an absent agenda leaves no gap" silently restyled every outgoing email,
+ * including ones with no meeting and no merge field in them. Asking the
+ * template which paragraph belongs to which token keeps the rule where the
+ * intent is.
+ */
+const TOKEN_ONLY_PARAGRAPH =
+  /<p\b[^>]*>(?:\s|&nbsp;|<br\s*\/?>)*\{\{(\w+)\}\}(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi;
+
+/**
+ * Substitute merge values into a sanitised rich-text body — the ONE door, for
+ * the send path, the compose preview and the sent-message detail page, so no
+ * two of them can draw a different email.
+ *
+ * Three steps, and they were spelled out at each call site before this function
+ * existed:
  *
  * 1. ESCAPE the values. A person called `Bobby <script>` is a name, not markup,
  *    and so is an agenda section a planter typed.
  * 2. Newlines become `<br>`. Merge values are TEXT — the agenda is a list of
  *    lines — and a bare `\n` inside a `<p>` is whitespace, so without this the
  *    whole agenda arrives on one line.
- * 3. Drop the paragraphs the substitution EMPTIED. A field that resolves to
- *    nothing on its own line leaves `<p></p>` — a blank gap where the section
- *    was. `{{meeting_agenda}}` on a meeting with no agenda is the case this was
- *    written for (#612), but `{{pastor_name}}` and `{{launch_date}}` render
- *    empty today and left the same gap.
+ * 3. Drop the paragraph a field that resolved to NOTHING would have filled, so
+ *    the section is absent rather than a blank gap. `{{meeting_agenda}}` on a
+ *    meeting with no agenda is the case this was written for (#612);
+ *    `{{pastor_name}}` and `{{launch_date}}` render empty today and left the
+ *    same gap. A token with no value at all is NOT this case — it is left in
+ *    place, so the preview can still draw its red "nothing resolved this" pill.
  */
 export function renderEmailBodyHtml(
   bodyHtml: string,
   data: Record<string, string>
 ): string {
   const escaped: Record<string, string> = {};
-  for (const [name, value] of Object.entries(escapeMergeValues(data))) {
-    escaped[name] = value.replace(/\r?\n/g, "<br />");
+  for (const [name, value] of Object.entries(
+    escapeMergeValues(withNormalisedNewlines(data))
+  )) {
+    escaped[name] = value.replace(/\n/g, "<br />");
   }
 
-  return renderTemplate(bodyHtml, escaped).replace(EMPTY_PARAGRAPH, "");
+  const withoutEmptied = bodyHtml.replace(
+    TOKEN_ONLY_PARAGRAPH,
+    (paragraph, name: string) => (escaped[name] === "" ? "" : paragraph)
+  );
+
+  return renderTemplate(withoutEmptied, escaped);
 }
 
 /**
  * The same substitution for the text/plain half. No escaping — it is not markup
- * — but the same collapse, so a field that rendered nothing does not leave three
+ * — but the same intent: a field that rendered nothing does not leave three
  * blank lines where the HTML half leaves none.
  */
 export function renderEmailBodyText(
   bodyText: string,
   data: Record<string, string>
 ): string {
-  return renderTemplate(bodyText, data)
+  return renderTemplate(
+    bodyText.replace(NEWLINES, "\n"),
+    withNormalisedNewlines(data)
+  )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -362,13 +409,13 @@ export function renderEmailBodyText(
  * A subject line, rendered onto ONE line.
  *
  * The collapse is the boundary's, not a nicety: a subject is an email HEADER,
- * and `{{meeting_agenda}}` is a merge value with newlines in it, so a planter
- * who puts that token in the subject field would otherwise hand the provider a
- * multi-line header value.
+ * and `{{meeting_agenda}}` is the first merge value with line breaks in it, so
+ * a planter who puts that token in the subject field would otherwise hand the
+ * provider a multi-line header value.
  */
 export function renderSubject(
   subject: string,
   data: Record<string, string>
 ): string {
-  return renderTemplate(subject, data).replace(/\s*\n\s*/g, " ");
+  return renderTemplate(subject, data).replace(/\s+/g, " ").trim();
 }

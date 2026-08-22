@@ -34,7 +34,6 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
-import { meetingInvitationTemplate } from "@/lib/communication/meeting-compose";
 // The body is rich text (COM-017). Templates and drafts written before it are
 // plain text; `toRichTextHtml` is the one door that converts them on the way in.
 import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
@@ -86,27 +85,12 @@ export function ComposeForm({
 }: ComposeFormProps) {
   const router = useRouter();
 
-  // Auto-suggest a template when coming from a meeting context without an
-  // explicit one. WHICH template each type invites with is decided in
-  // `meeting-compose.ts`, where a test holds the names to the seeded catalog —
-  // the map that lived here named a "Team Meeting Invitation" nothing seeds, so
-  // every team meeting opened this form blank and said nothing (#612).
-  const autoTemplate = useMemo(() => {
-    if (initialTemplate || !initialMeetingId) return null;
-    const meeting = meetings.find((m) => m.id === initialMeetingId);
-    if (!meeting) return null;
-
-    return meetingInvitationTemplate(meeting.type, templates);
-  }, [initialTemplate, initialMeetingId, meetings, templates]);
-
-  const effectiveTemplate = initialTemplate ?? autoTemplate;
-
-  const [subject, setSubject] = useState(effectiveTemplate?.subject ?? "");
+  const [subject, setSubject] = useState(initialTemplate?.subject ?? "");
   const [body, setBody] = useState(() =>
-    toRichTextHtml(effectiveTemplate?.body ?? "")
+    toRichTextHtml(initialTemplate?.body ?? "")
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    effectiveTemplate?.id ?? ""
+    initialTemplate?.id ?? ""
   );
   const [selectedMeetingId, setSelectedMeetingId] = useState(
     initialMeetingId ?? ""

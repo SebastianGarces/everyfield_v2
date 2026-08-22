@@ -491,20 +491,10 @@ const LABELS = path.join("src", "lib", "meetings", "labels.ts");
  * FILTER table — plural captions ("Vision Meetings") bound to the `?type=`
  * param, a different concern with its own invariant, and it is keyed by
  * `value:`/`label:` rather than by the type names.
- *
- * `meeting-compose.ts` is keyed by the type and holds strings, so the pattern
- * below cannot tell it apart — but its values are TEMPLATE NAMES, not display
- * copy. Nothing renders them: they are the join key onto `message_templates.name`
- * that decides which invitation compose opens with, and a planter sees the
- * name the TEMPLATE carries (their own fork's, where they renamed it), never
- * the string in that map. Its own guard is the one that matters —
- * `meeting-compose.test.ts` holds every name to the seeded catalog, which is a
- * property this walk has no way to check.
  */
 const ALLOWED = new Set([
   LABELS,
   path.join("src", "lib", "meetings", "meeting-type-filter.ts"),
-  path.join("src", "lib", "communication", "meeting-compose.ts"),
 ]);
 
 /**

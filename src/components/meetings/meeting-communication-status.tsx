@@ -11,14 +11,10 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import {
-  renderTemplate,
+  renderSubject,
   buildChurchMergeData,
   buildMeetingMergeData,
 } from "@/lib/communication/merge";
-import {
-  meetingComposeUrl,
-  type MeetingGuestContact,
-} from "@/lib/communication/meeting-compose";
 // date-fns `format` renders in the runtime's zone, which differs between the
 // SSR pass and the browser — one more React #418 on this page. See
 // src/lib/datetime.ts.
@@ -40,7 +36,6 @@ interface CommunicationSummary {
 }
 
 interface MeetingCommunicationStatusProps {
-  meetingId: string;
   communications: CommunicationSummary[];
   church: { name: string };
   timeZone: string;
@@ -54,23 +49,28 @@ interface MeetingCommunicationStatusProps {
     agenda: unknown;
   };
   /**
-   * The meeting's guest list, so Send Email opens with them already loaded.
+   * Where Send Email goes — `meetingComposeUrl`, built by the page.
    *
-   * This card's link used to carry `meetingId` alone while the guest list's own
-   * button one tab away carried `meetingId` AND `recipientIds` — two Send Email
-   * buttons on one meeting, one of which opened an empty compose screen (#612).
-   * Both call `meetingComposeUrl` now, so the difference cannot come back.
+   * A URL and not the guest list, though this card is the reason the guests are
+   * read at all: the page is a server component that already holds them, and
+   * handing a `"use client"` component every guest's ADDRESS so it can compute
+   * one string puts those addresses in the RSC payload for nothing. The guest
+   * list's own button takes the guests, because it renders them.
+   *
+   * This link used to carry `meetingId` alone while that button one tab away
+   * carried `meetingId` AND `recipientIds` — two Send Email buttons on one
+   * meeting, one of which opened an empty compose screen (#612). Both ends of
+   * the same builder now, so the difference cannot come back.
    */
-  guests: MeetingGuestContact[];
+  composeUrl: string;
 }
 
 export function MeetingCommunicationStatus({
-  meetingId,
   communications,
   church,
   timeZone,
   meeting,
-  guests,
+  composeUrl,
 }: MeetingCommunicationStatusProps) {
   const mergeData = {
     ...buildChurchMergeData(church),
@@ -79,8 +79,6 @@ export function MeetingCommunicationStatus({
       datetime: new Date(meeting.datetime),
     }),
   };
-
-  const composeUrl = meetingComposeUrl(meetingId, guests);
 
   if (communications.length === 0) {
     return (
@@ -123,7 +121,7 @@ export function MeetingCommunicationStatus({
       <CardContent className="space-y-3">
         {communications.map((comm) => {
           const resolvedSubject = comm.subject
-            ? renderTemplate(comm.subject, mergeData)
+            ? renderSubject(comm.subject, mergeData)
             : "(No subject)";
           const issues = comm.stats.bounced + comm.stats.failed;
 

@@ -4,26 +4,32 @@
 //
 // The platform's own templates, as DATA. `scripts/seed-system-templates.ts` is
 // the shell that writes them into a database; this is what it writes, and it is
-// importable without opening a connection or reading `.env.local` — which is
-// what lets `meeting-compose.test.ts` hold the invitation map to the catalog
-// instead of to a comment.
+// importable without opening a connection or reading `.env.local`.
 //
-// The split matters in one direction only: nothing in the app READS this at
-// runtime. Templates are rows, and `getTemplates` returns the church's view of
-// them (its forks in place of the originals). A surface that reached for this
-// array would be looking at what the catalog SAID at deploy time, not at what
-// the church actually has.
+// NOTHING HERE IS A SUBSTITUTE FOR THE ROWS. Templates live in
+// `message_templates`, and `getTemplates` returns the church's view of them —
+// its copy-on-write forks in place of the originals. A surface that rendered a
+// body out of this array would be showing what the catalog SAID at deploy time,
+// not what the church actually has. The one thing read at runtime is the
+// INVITATION RELATION (`invitesMeetingType`), which is a fact about the platform
+// catalog rather than about any church's rows; `meetingInvitationTemplate` reads
+// it to get a NAME and then looks the church's own row up by that name.
+//
+// SERVER SIDE ONLY, and deliberately: a `"use client"` module that imported this
+// would ship every template body to the browser. `/communication/compose`
+// resolves the auto-suggested template in its PAGE for exactly that reason.
 // ============================================================================
 
 import type {
   CommunicationChannel,
   TemplateCategory,
 } from "@/db/schema/communication";
+import type { MeetingType } from "@/db/schema/meetings";
 
 /**
  * One catalog entry. `name` is the IDENTITY — the seed matches on it plus
  * `is_system`, so renaming an entry seeds a second template rather than
- * updating the first, and `MEETING_INVITATION_TEMPLATE_NAMES` points at it.
+ * updating the first.
  */
 export interface SystemTemplate {
   name: string;
@@ -33,6 +39,24 @@ export interface SystemTemplate {
   subject: string;
   body: string;
   mergeFields: string[];
+  /**
+   * The meeting type this template is the invitation FOR — the one place that
+   * relation is written down.
+   *
+   * IT LIVES ON THE ENTRY, not in a map beside it, and that is what makes "the
+   * invitation for this type exists" true by construction rather than by a
+   * test. Its predecessor was a `Record<string, string[]>` of template-name
+   * patterns inside `compose-form.tsx` naming `"Team Meeting Invitation"`, a
+   * template this catalog had never held: a team meeting reached compose with
+   * its `meetingId` set, matched nothing, and handed the planter an empty
+   * subject and an empty body. Nothing failed, so nothing said why (#612). A
+   * name in one file pointing at a row in another can always be wrong; a field
+   * on the row itself cannot.
+   *
+   * Absent on every template that is not an invitation. `meeting-compose.test.ts`
+   * holds the other half — that every `MeetingType` is claimed exactly once.
+   */
+  invitesMeetingType?: MeetingType;
 }
 
 export const SYSTEM_TEMPLATES: readonly SystemTemplate[] = [
@@ -41,6 +65,7 @@ export const SYSTEM_TEMPLATES: readonly SystemTemplate[] = [
   // ---------------------------------------------------------------------------
   {
     name: "Vision Meeting Invitation",
+    invitesMeetingType: "vision_meeting",
     description:
       "Invite someone to a vision meeting. Includes RSVP confirmation links.",
     category: "meeting_invitation",
@@ -149,6 +174,7 @@ Just reply to this email — we'd love to hear from you!
   // ---------------------------------------------------------------------------
   {
     name: "Orientation Invitation",
+    invitesMeetingType: "orientation",
     description: "Invite core group members to an orientation session.",
     category: "meeting_invitation",
     channel: "email",
@@ -198,6 +224,7 @@ See you there!
   // ---------------------------------------------------------------------------
   {
     name: "Team Meeting Invitation",
+    invitesMeetingType: "team_meeting",
     description:
       "Invite a ministry team to their next meeting. Includes the agenda and RSVP links.",
     category: "meeting_invitation",
@@ -250,3 +277,47 @@ Thanks for serving!
     mergeFields: ["first_name", "church_name"],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Which template invites which meeting type
+// ---------------------------------------------------------------------------
+
+/** What the lookup below needs off a template row. */
+export interface InvitationTemplateCandidate {
+  name: string;
+  category: string;
+}
+
+/**
+ * The invitation template to open a meeting's email with, or `null`.
+ *
+ * TWO STEPS, and only the first touches this catalog: the platform decides
+ * which template is the invitation for a meeting type (`invitesMeetingType`),
+ * and the CHURCH's own rows decide which template that name resolves to.
+ *
+ * `includes`, not equality, for the second step: a church that edits a system
+ * template gets a FORK (`templates.ts`, copy-on-write) which it may rename
+ * around the original, and `getTemplates` returns the fork in the original's
+ * place. Matching on a substring keeps the church's own copy of
+ * "Vision Meeting Invitation" winning over the platform's.
+ *
+ * A type nothing claims — a meeting type added to the schema before its
+ * template — resolves to `null` and compose opens blank. That is the #612 bug,
+ * and `meeting-compose.test.ts` is what stops it reaching a planter again.
+ */
+export function meetingInvitationTemplate<
+  T extends InvitationTemplateCandidate,
+>(meetingType: string, templates: readonly T[]): T | null {
+  const name = SYSTEM_TEMPLATES.find(
+    (template) => template.invitesMeetingType === meetingType
+  )?.name;
+  if (!name) return null;
+
+  return (
+    templates.find(
+      (template) =>
+        template.category === "meeting_invitation" &&
+        template.name.includes(name)
+    ) ?? null
+  );
+}
