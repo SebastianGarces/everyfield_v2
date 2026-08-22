@@ -221,6 +221,16 @@ Applies to `persons.photo_url`, `src/app/api/people/[personId]/photo/route.ts` a
 - Every bridged issue carries the `feedback` label, never `feature` — that one marks an FRD's parent issue on the board. The category adds at most one more (`bug`, `enhancement`, `question`); `other` adds none.
 - Both of a submission's side effects — the Resend email and the bridge — run inside `after` from `next/server`, not as floating promises. A promise the action does not await is free to be dropped the moment the response returns, which loses sends silently.
 
+## Launch Sunday
+
+Applies to `src/lib/launch/**` and `/launch`. The countdown's own rule lives under Hierarchical Access Control.
+
+- ⚖ THE `/launch` READ REPAIRS THE LAUNCH IT READS (#614): `convergeLaunchReadiness` re-runs the idempotent seed when a launch that expects a readiness list has zero `launch_milestones`, so a failed seed heals on the next visit. It is the ONLY repair path — `scheduleLaunchAction`'s docblock used to call an unchanged save one, which `ScheduleLaunchForm` makes unreachable by disabling both buttons until a DIFFERENT day is picked, and Riverside sat scheduled with zero milestones for thirteen days behind that contradiction.
+- Its arbiter is ROW-KEYED on (launch_id, template_key) and the repair is gated on ZERO rows — which MT-002b rejects by name for responsibilities and which is legal HERE for the reason MT-002b's is not: nothing in `src/lib/launch/**` deletes a `launch_milestones` row, so the resurrection failure mode ("the first seeded item a planter deletes comes back on the next page load") is unreachable. A delete path added later retires this and needs a team-style claim column.
+- The seed's failure is CAUGHT and renders the readiness empty state, never a 500: it writes during a Server Component render, so a throw would turn a missing list into a missing page. Legal at all only because `/launch` is `force-dynamic` and nothing on the path revalidates — the same two conditions `listResponsibilities` rests on.
+- ⚖ The repair is attributed to the plant's OWNER (`plantOwnerId`), falling back to the reader. `/launch` admits a team member and `tasks.created_by_id` is NOT NULL, so without the lookup the first Member to open a stranded page becomes the recorded author of the plant's whole launch-prep list — a write `launch.schedule` (Owner-only, LS-007) never granted them.
+- ⚖ WHICH statuses expect a list and WHAT the empty tab says are two different questions, and conflating them is the #614 bug one status further along. `EXPECTS_READINESS` (seed: `scheduled`/`postponed` only) and `READINESS_EMPTY_STATE` (copy: one sentence per status) are both TOTAL maps over `LaunchStatus`; the page's render guard asks a third question, `status !== "planning"` ("is a day named"), which is what keeps the tabs from ever vanishing for a launch that has one.
+
 ## Meetings
 
 - ⚖ `finalizeAttendance` runs its downstream generation on EVERY call, not only the first (#323): the `actual_attendance` marker decides what the call REPORTS (`finalized` / `reconciled` / `already_finalized`) and whether the count needs refreshing, never whether the work happens. Gating the work on the marker is what dropped a late-added attendee's follow-up; gating it on the count has the same hole one step in.
@@ -299,6 +309,15 @@ Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies
 - ⚖ A credential removed from the repo needs a ROUTE, or the fixture it opens becomes unreachable: `SEED_ADMIN_PASSWORD` is recorded in `.env.local` — gitignored, machine-local, and read by a verifier BEFORE seeding rather than re-chosen.
 - The seed's sentinel probe proves ONE thing: the three `PROTECTED_ACCOUNTS` addresses are absent. It does NOT prove every account is fixture, so widening the seed's fixed oversight pair needs a ruling.
 
+## Live DB Suites
+
+Applies to `pnpm test:live`, `scripts/live-db-*`, and every suite that opts into `LIVE_DB_TESTS`.
+
+- EVERY LIVE SUITE OWNS ITS OWN DATABASE (#594). node:test runs the files as parallel CHILD PROCESSES, so one shared database made each suite's fixtures visible to every sibling's queries mid-write: `seat-owner-uniqueness`'s whole-table census went red on the two-tenancy row `auth/access.test.ts` commits and does not sweep until its own `after()` — red at head, green on a re-run of the identical commit (#586). `scripts/live-db-names.ts` is the ONE derivation, read by BOTH the preload that rewrites `DATABASE_URL` per child and the prepare script that creates the databases, so the set that is created and the set that is run cannot drift.
+- `search_path` IS NOT REACHABLE THROUGH THIS STACK, so schema-per-suite is not the lighter option it looks like: neon-http is STATELESS (every query is its own HTTP request, so a `SET` never survives to the next statement) and `local-neon-http-proxy` drops `?options=…`, reading only the user, password and DATABASE out of the `Neon-Connection-String` header. The honoured database component is what per-suite isolation rides, and `CREATE DATABASE … TEMPLATE` applies the migrations ONCE.
+- …and the proxy reads its MOCK CONTROL PLANE out of the database named in its OWN `PG_CONNECTION_STRING`, never the requested one. `neon_control_plane.endpoints` goes THERE; seeded anywhere else every query is an HTTP 500 "Control plane request failed", which reads like a connection problem and is not.
+- A LIVE SUITE SKIPS ITSELF ON AN UNREACHABLE DATABASE — right for a laptop with no Postgres, and a silent green for a lane whose per-suite databases were never created. So `test:live` runs `scripts/live-db-preflight.ts` BEFORE the runner and exits non-zero naming every missing database: without it a broken setup reports success having asserted nothing, which is #411's "assertions written, never executed" by another door.
+
 ## Date & Time Rendering
 
 → [dates-times](invariants/dates-times.md) — anything rendering or parsing a date.
@@ -321,6 +340,15 @@ Conventions and examples: [`contracts/data-patterns.md`](contracts/data-patterns
 - …and the rule is SWEPT, not spot-fixed (#529): `src/components/navigating-clicks.test.ts` is a TABLE of every handler that ends in a `router.push`, asserting each owns no transition and no `router.refresh()`, plus that the actions reached only by a leaving caller carry no server `refresh()` either. A new leaving handler is a new ROW. Two things it caught: `<form action={fn}>` runs `fn` inside a transition REACT owns, so a leaving submit must be wired through `onSubmit` (`TaskForm`); and an action whose ONLY caller leaves should keep `revalidatePath` (it freshens the destination) and drop `refresh()`.
 - Legitimate client state is UI state only: pagination cursors, drag-and-drop, open/closed (`PipelineView`).
 - A message that a `router.refresh()` accompanies must NOT live inside the subtree that refresh re-renders — the refusal that fires the refresh unmounts its own `<Alert>` mid-read. Raise it through the root `<Toaster>`, a sibling nothing below can unmount, and never delay the refresh for it.
+
+## Settings — the URL-driven modal
+
+Applies to every `/settings/*` path, `src/lib/settings/sections.ts` and the `@settings` slot under `src/app/(dashboard)/`.
+
+- ⚖ Settings is a MODAL over the screen the reader is on, addressed by REAL PATHS and never a `#fragment` (ruled 2026-08-21 §187, CS-001): the server never sees a hash, so seat guards and server rendering would not hold. `@settings/(.)settings/[section]` intercepts an IN-APP navigation, so the layout's `children` — the screen behind — is never unmounted and Close is one `router.back()`. A COLD load is not intercepted, so the real `settings/[section]` route draws the same modal itself; both halves render `SettingsSurface` and differ only in what Close does.
+- EVERY `/settings/*` PATH MUST BE A REGISTRY ENTRY, because the slot's `[section]` matches the whole prefix and an unknown id would open as a bounce inside the modal. `SETTINGS_SECTIONS` — never a second list — decides the side navigation, the search and each section's own gate, and `sections.test.ts` pins the section list every account shape gets back, which is where the four deleted pages' `redirect()` guards now live. The registry is imported by a CLIENT component, so it may never gain an edge that reaches `@/db`.
+- THE MODAL OWNS THE HISTORY POLICY, never a section body: a section switch always REPLACES, so settings occupies exactly one entry and Close is one step. Whether Close is `back()` or a replace to the account's home turns on whether the DOCUMENT booted into settings, which `overlaid` cannot answer — after a cold load every later switch is intercepted and reports an overlay with nothing behind it. A `replace` spelled at a link inside a section is what shut a cold-loaded reader inside the modal with a `back()` into an empty stack.
+- Accepted residual: `/settings/sharing` is a registry entry with `inNav: false`, addressable at its unchanged URL and reached only by the Church section's link, so its reader sees no active navigation item. Retired when CS-011 folds the sharing panel into the Church section.
 
 ## Design Tokens — Contrast
 

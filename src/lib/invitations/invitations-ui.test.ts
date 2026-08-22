@@ -114,7 +114,16 @@ const LIST_ROW = read("lib", "invitations", "list-row.ts");
 // a third one (the org-side seat invites, the coach invites) is a row.
 // ----------------------------------------------------------------------------
 const SEAT_INVITE_FORM = read("components", "settings", "seat-invite-form.tsx");
-const TEAM_PAGE = read("app", "(dashboard)", "settings", "team", "page.tsx");
+// `/settings/team` is a SECTION of the settings modal since #615. The URL is
+// unchanged and so is everything this guard is about; what moved is the file
+// that draws it — the page under `app/(dashboard)/settings/team/` is gone and
+// its body is this component, rendered by `settings/[section]`.
+const TEAM_PAGE = read(
+  "components",
+  "settings",
+  "sections",
+  "team-section.tsx"
+);
 const TEAM_ACTIONS = read(
   "app",
   "(dashboard)",

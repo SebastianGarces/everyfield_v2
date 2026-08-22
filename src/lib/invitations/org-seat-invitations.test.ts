@@ -70,9 +70,11 @@ const SEAT = sourceReader(
   stripComments(read("lib", "invitations", "seat.ts")),
   "seat.ts (stripped)"
 );
+// `/settings/team` is a SECTION of the settings modal since #615 — same URL,
+// same reads, same controls; the sibling page that drew them is gone.
 const TEAM_PAGE = sourceReader(
-  stripComments(read("app", "(dashboard)", "settings", "team", "page.tsx")),
-  "settings/team/page.tsx (stripped)"
+  stripComments(read("components", "settings", "sections", "team-section.tsx")),
+  "settings team-section.tsx (stripped)"
 );
 const ORG_INVITATIONS_PAGE = stripComments(
   read("app", "(dashboard)", "oversight", "invitations", "page.tsx")
@@ -90,8 +92,10 @@ const ACCESS = stripComments(read("lib", "auth", "access.ts"));
 const ACCOUNT_ENTITIES = stripComments(
   read("app", "(auth)", "register", "account-entities.ts")
 );
+// `/settings/association` is a SECTION of the settings modal since #615 — same
+// URL, same two views, same gates; the sibling page that drew them is gone.
 const ASSOCIATION_PAGE = stripComments(
-  read("app", "(dashboard)", "settings", "association", "page.tsx")
+  read("components", "settings", "sections", "association-section.tsx")
 );
 
 const PLANT = "11111111-1111-4111-8111-111111111111";

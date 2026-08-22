@@ -53,8 +53,27 @@ const APP = path.join(process.cwd(), "src", "app", "(dashboard)");
 const read = (...segments: string[]) =>
   readFileSync(path.join(APP, ...segments), "utf8");
 
-const ASSOCIATION_PAGE = read("settings", "association", "page.tsx");
-const SETTINGS_PAGE = read("settings", "page.tsx");
+// SETTINGS IS A MODAL OF SECTIONS SINCE #615 (ruled 2026-08-21 §187), so the
+// two files this guard reads moved — the URLs did not.
+//
+// `/settings/association` is drawn by a section component now instead of a
+// sibling page, and the gate that decides whether a reader REACHES it moved
+// further than that: it is an entry in the settings registry, which is the one
+// list driving the side navigation, the search and the section's own
+// visibility. So the "…and `/settings` links the screen for it" half of this
+// contract is asked of the registry, which is where a link that must exist for
+// an answering account now either exists or does not.
+const ASSOCIATION_PAGE = readFileSync(
+  path.join(
+    process.cwd(),
+    "src/components/settings/sections/association-section.tsx"
+  ),
+  "utf8"
+);
+const SETTINGS_PAGE = readFileSync(
+  path.join(process.cwd(), "src/lib/settings/sections.ts"),
+  "utf8"
+);
 // The FINISHED dashboard. `/dashboard` split into `page.tsx` (session,
 // `?step=`, the onboarding fork) and two halves on 2026-08-12 (PR #408); the
 // OV-005 reminder is a plant surface, so it lives in the plant half.
@@ -443,15 +462,16 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
       `/settings/association does not admit ${contract.answeredBy} (${contract.pageGate})`
     );
 
-    // …and `/settings` links the screen for it. A surface nobody can navigate
-    // to is the visible half of the dead end this whole test exists for.
+    // …and the settings registry offers the section to it. A surface nobody
+    // can navigate to is the visible half of the dead end this whole test
+    // exists for.
     assert.ok(
       SETTINGS_PAGE.includes(contract.settingsGate),
-      `/settings has no ${contract.settingsGate} gate`
+      `the settings registry has no ${contract.settingsGate} gate`
     );
     assert.ok(
       SETTINGS_PAGE.includes("canManageAssociation"),
-      "the association link is gated on the union of the answering accounts"
+      "the Association section is gated on the union of the answering accounts"
     );
   });
 }

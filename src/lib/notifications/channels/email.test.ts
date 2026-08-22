@@ -28,7 +28,6 @@ import {
 import {
   batchSubject,
   composeBatchEmail,
-  NOTIFICATION_PREFERENCES_HEADING_ID,
   notificationPreferencesUrl,
   type OutboundEmail,
 } from "./email";
@@ -346,14 +345,15 @@ test("the email links to the full preference screen as well as the one-category 
   // preference matrix (#467).
   assert.ok(sent[0].html.includes(notificationPreferencesUrl(BASE_URL)));
 
-  // And the deep link's fragment, spelled out. The line above is composed from
-  // the same constant the renderer uses, so it follows that constant wherever
-  // it goes — including back to a bare `/settings`. This one goes red.
-  assert.ok(
-    sent[0].html.includes(
-      `${BASE_URL}/settings#${NOTIFICATION_PREFERENCES_HEADING_ID}`
-    )
-  );
+  // And the deep link, spelled out. The line above is composed from the same
+  // constant the renderer uses, so it follows that constant wherever it goes —
+  // including back to a bare `/settings`. This one goes red.
+  //
+  // It is a ROUTE and no longer a `#notification-preferences` fragment (#615,
+  // ruled 2026-08-21 §187): settings is a modal addressed by section, so the
+  // matrix has a URL the server can see. The claim is unchanged — the reader
+  // must land ON the preference matrix, never at the top of Settings.
+  assert.ok(sent[0].html.includes(`${BASE_URL}/settings/notifications`));
 });
 
 test("an email cannot be composed without a working unsubscribe link", async (t) => {
