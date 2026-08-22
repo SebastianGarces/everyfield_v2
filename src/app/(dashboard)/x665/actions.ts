@@ -19,3 +19,13 @@ export async function probeWithRefresh(): Promise<ProbeOutcome> {
   refresh();
   return { ok: true, stamp: new Date().toISOString() };
 }
+
+/**
+ * `refresh()` behind real latency — the shape `confirmEmailChange` has, which
+ * awaits an outbound Resend send and a rate-limiter write before returning.
+ */
+export async function probeSlowWithRefresh(): Promise<ProbeOutcome> {
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  refresh();
+  return { ok: true, stamp: new Date().toISOString() };
+}
