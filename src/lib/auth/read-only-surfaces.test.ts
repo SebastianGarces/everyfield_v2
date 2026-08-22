@@ -13,6 +13,7 @@ import {
   READ_ONLY_SURFACE_CHECKLIST,
   REACH,
   WALL_IS_NOT_THE_WHOLE_STORY,
+  readsAsAnImperative,
   type ChecklistRow,
 } from "@/lib/auth/read-only-surfaces";
 import {
@@ -391,6 +392,82 @@ test("no checklist surface gates a control on `disabled` instead of hiding it", 
     offenders,
     [],
     `these files spend a capability on \`disabled\` instead of on whether the control renders — a disabled button is a failed hide (AS-020):\n${offenders.join("\n")}`
+  );
+});
+
+// ----------------------------------------------------------------------------
+// 4b. NO PAGE TELLS ITS READER TO DO A THING ITS READER MAY NOT DO.
+// ----------------------------------------------------------------------------
+
+/**
+ * The one-line subtitle under a page's `<h1>`, when it is a plain literal.
+ *
+ * A page whose subtitle is a HELPER CALL has no literal here and is skipped —
+ * which is the point rather than a gap: a capability-conditional sentence
+ * cannot be a literal, so routing it through a presentation module is exactly
+ * what makes it disappear from this scan and appear in that module's own test,
+ * where both branches get checked (`communication/presentation.test.ts`,
+ * `meetings/copy.ts` via `ruled-copy.test.ts`).
+ */
+function headerSubtitle(code: string): string | null {
+  // `[\s{}]*` because `stripComments` reduces a `{/* … */}` between the two
+  // elements to a bare `{}` rather than removing it.
+  const match =
+    /<h1[^>]*>[\s\S]*?<\/h1>[\s{}]*<p className="text-muted-foreground[^"]*">\s*([A-Za-z][^<{}]*?)\s*<\/p>/.exec(
+      code
+    );
+  return match ? match[1].replace(/\s+/g, " ") : null;
+}
+
+test("no dashboard page's subtitle instructs a reader who may not act", () => {
+  // THE RULE THE LAST THREE FIXES EACH RE-LEARNED BY HAND. #655, #659 and #666
+  // were one defect on three surfaces, and each was found by a person opening
+  // the page as a Member. `readsAsAnImperative` is the rule those three share;
+  // this is the scan that applies it, so the fourth is a failing test rather
+  // than a fourth issue.
+  //
+  // WHY page.tsx AND NOT EVERY COMPONENT. A page's subtitle is the surface's
+  // own claim about itself, sits in one predictable place, and is the shape all
+  // three instances took. A scan of every muted paragraph in `src` would also
+  // read empty states, card bodies and helper text, and a check that cries wolf
+  // gets deleted by the next person (the command-palette case above says the
+  // same thing).
+  const dashboard = path.join(SRC, "app/(dashboard)");
+
+  const pages: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "page.tsx") pages.push(full);
+    }
+  };
+  walk(dashboard);
+  assert.ok(
+    pages.length >= 15,
+    `only ${pages.length} pages found — scan broke`
+  );
+
+  const offenders: string[] = [];
+  for (const file of pages) {
+    const code = codeOf(file);
+
+    // A ROUTE THAT REFUSES THE VERB MAY USE ITS IMPERATIVE FREELY. `/meetings/new`
+    // redirects unless `meetings.write`, so everybody who ever reads "Set a date,
+    // time, and location…" holds the verb it names. Flagging it would be asking
+    // an author to justify a correct line.
+    if (/if \(!holdsSeatFor\(/.test(code) && /redirect\(/.test(code)) continue;
+
+    const subtitle = headerSubtitle(code);
+    if (subtitle && readsAsAnImperative(subtitle)) {
+      offenders.push(`${rel(file)}: "${subtitle}"`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these pages tell every seat to perform a write, and a Member holds almost none of them:\n${offenders.join("\n")}\n\nMatch the sentence to the capability — put both branches in the surface's presentation module, the way src/lib/communication/presentation.ts does (#666).`
   );
 });
 

@@ -17,6 +17,10 @@ import {
   resolveSubjects,
 } from "@/lib/communication/service";
 import {
+  communicationEmptyStateLine,
+  communicationHubSubtitle,
+} from "@/lib/communication/presentation";
+import {
   communicationStatusBadgeClass,
   communicationStatusLabel,
 } from "@/lib/communication/status-display";
@@ -88,8 +92,11 @@ export default async function CommunicationPage() {
               <h1 className="text-3xl font-bold tracking-tight">
                 Communication Hub
               </h1>
+              {/* The header is capability-matched too (#666): a Member holds no
+                  `communication.send`, and "Send messages…" is an instruction
+                  for a write the server refuses them. */}
               <p className="text-muted-foreground">
-                Send messages and track communication with your people
+                {communicationHubSubtitle(canSend)}
               </p>
             </div>
             {canSend && (
@@ -213,9 +220,7 @@ export default async function CommunicationPage() {
                       states who sends messages rather than asking a viewer who
                       cannot to send one. */}
                   <p className="text-muted-foreground mt-1 text-sm">
-                    {canSend
-                      ? "Send your first message to get started"
-                      : "Your plant's admins send messages to your people."}
+                    {communicationEmptyStateLine(canSend)}
                   </p>
                   {canSend && (
                     <Button asChild className="mt-4">

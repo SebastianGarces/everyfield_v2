@@ -232,27 +232,33 @@ test("all three of the hub's routes into compose are gated, not just the header 
 
   assert.equal(
     HUB.code.split("canSend").length - 1,
-    // The declaration, the header CTA, the quick actions, the empty state's
-    // copy and its button, and the two for `DeliveryOverview` — the prop and
-    // its value. That card carries no control, but its empty state SAID "Send
-    // your first message…" to a reader who cannot, which the browser pass
-    // caught; the copy branches on the same flag rather than growing a second.
-    7,
-    "seven sites: `canSend` is declared once and read at every affordance — a new link into /compose that does not read it is the drift this count catches"
+    // The declaration, the SUBTITLE (#666), the header CTA, the quick actions,
+    // the empty state's copy and its button, and the two for `DeliveryOverview`
+    // — the prop and its value. Two of those eight are sentences rather than
+    // controls: that card's empty state SAID "Send your first message…" to a
+    // reader who cannot, and the page's own subtitle said "Send messages and
+    // track communication…". Both branch on the same flag rather than growing a
+    // second.
+    8,
+    "eight sites: `canSend` is declared once and read at every affordance — a new link into /compose that does not read it is the drift this count catches. A count catches an ADDED read, never an omitted one: a subtitle that hard-coded the imperative back would leave this at 8, and the scan in read-only-surfaces.test.ts is what covers that half."
   );
 });
 
-test("the hub's empty state EXPLAINS instead of inviting", () => {
-  assert.match(
-    HUB.code,
-    /admins send messages to your people/,
-    "the read-only sentence names who sends messages rather than asking a viewer who cannot"
-  );
-  assert.match(
-    HUB.code,
-    /Send your first message to get started/,
-    "and the inviting copy is KEPT for the viewer who can act on it — both branches, never one"
-  );
+test("the hub's two capability-matched sentences come from the presentation module", () => {
+  // WHAT THEY SAY is `presentation.test.ts`'s subject, because the repo's
+  // node:test harness has no DOM and cannot reach an `async` server component's
+  // markup — which is the whole reason the copy is a pure `.ts` helper at all.
+  // What THIS file pins is that the page still calls them, and still passes the
+  // seat: a page that inlined either sentence back would go quiet here.
+  for (const helper of [
+    "communicationHubSubtitle(canSend)",
+    "communicationEmptyStateLine(canSend)",
+  ]) {
+    assert.ok(
+      HUB.code.includes(helper),
+      `the hub no longer reads ${helper} — its copy is capability-matched in src/lib/communication/presentation.ts (#666), and inlining it here is how the header came to tell a Member to send messages`
+    );
+  }
 });
 
 test("the compose ROUTE is refused, not merely unlinked", () => {
