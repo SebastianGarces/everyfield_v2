@@ -111,8 +111,9 @@ const FENCES: KeyFence[] = [
     allowed: [
       // The column itself.
       { file: "src/db/schema/people.ts" },
-      // The one read and the one writer of the column.
-      { file: "src/lib/people/service.ts" },
+      // The one read, the one writer, and the effects seam between them — all
+      // in one small module, so this entry is as narrow as the avatar's.
+      { file: "src/lib/people/person-photo.ts" },
       // The boundary: where the key stops and the route starts.
       { file: "src/lib/people/types.ts" },
       // The resolver, as above — the key is its parameter.
@@ -240,19 +241,30 @@ test("every surface that draws a picture takes a route, and it is not a key", ()
   // The positive half. The fences above say where a key may NOT appear; this
   // says what the drawing surfaces hold INSTEAD, so a component that stopped
   // drawing a picture altogether cannot pass by having nothing at all.
-  for (const [relative, resolved] of [
-    ["src/components/picture-field.tsx", "src"],
-    ["src/components/settings/avatar-field.tsx", "avatarSrc"],
-    ["src/components/nav-user.tsx", "avatarSrc"],
-    ["src/components/people/person-photo-field.tsx", "photoSrc"],
-    ["src/components/people/person-header.tsx", "photoSrc"],
-    ["src/components/people/person-card.tsx", "photoSrc"],
-  ]) {
+  // EACH PATTERN IS THE DECLARATION, not the word. The first row shipped as a
+  // bare /src/ — satisfied by any `src=` attribute in the file, so deleting the
+  // control's route prop outright left it green. A guard that cannot go red is
+  // the failure mode this whole file exists to prevent, one level up.
+  for (const [relative, declaration] of [
+    ["src/components/picture-field.tsx", /src: string \| undefined;/],
+    ["src/components/picture-field.tsx", /storedSrc: src,/],
+    [
+      "src/components/settings/avatar-field.tsx",
+      /avatarSrc: string \| undefined;/,
+    ],
+    ["src/components/nav-user.tsx", /avatarSrc/],
+    [
+      "src/components/people/person-photo-field.tsx",
+      /src=\{person\.photoSrc\}/,
+    ],
+    ["src/components/people/person-header.tsx", /src=\{person\.photoSrc\}/],
+    ["src/components/people/person-card.tsx", /src=\{person\.photoSrc\}/],
+  ] as [string, RegExp][]) {
     const code = stripComments(readFileSync(path.join(ROOT, relative), "utf8"));
 
     assert.match(
       code,
-      new RegExp(`\\b${resolved}\\b`),
+      declaration,
       `${relative} must take the resolved route — it is the only thing about the picture a client component may hold`
     );
   }

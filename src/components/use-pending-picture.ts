@@ -9,10 +9,12 @@ import { profilePhotoRefusal } from "@/lib/profile-photo";
 // THE HALF OF A PICTURE CONTROL A REVIEWER CANNOT CHECK BY EYE (P-024).
 //
 // Two surfaces let somebody change a picture — a person's photo on the profile
-// form, an account's own in settings — and the markup of each is its own. What
-// is NOT its own is this: an optimistic preview, the object URL behind it, and
-// the rule that every such URL is revoked exactly once. That logic shipped
-// twice in #617, and the copies had drifted before the branch was even reviewed.
+// form, an account's own in settings — and since #654 they render ONE control,
+// `picture-field.tsx`, which is this hook's only consumer. What lives here
+// rather than there is the half a reviewer cannot check by eye: an optimistic
+// preview, the object URL behind it, and the rule that every such URL is
+// revoked exactly once. That logic shipped twice in #617 and had drifted before
+// the branch was even reviewed; the markup did the same, one issue later.
 //
 // THREE THINGS IT GETS RIGHT THAT ARE EASY TO GET WRONG:
 //
@@ -43,12 +45,13 @@ export type PictureOutcome = { ok: true } | { ok: false; message: string };
 /**
  * THREE OPTIONS, AND IT STARTED AS FIVE.
  *
- * The two that went are the two that were the same at both call sites: the gate
- * (always `profilePhotoRefusal` — it is one rule by design, so letting a caller
- * choose it invites a second) and announcing the outcome (both spelled the same
- * toast, so the hook now spells it once). A broad interface that hides little is
- * a reader learning the surface AND the implementation; what actually varies is
- * only what is shown, what to call, and what to call it.
+ * The two that went were the same at both of the call sites there were then:
+ * the gate (always `profilePhotoRefusal` — it is one rule by design, so letting
+ * a caller choose it invites a second) and announcing the outcome (both spelled
+ * the same toast, so the hook spells it once). A broad interface that hides
+ * little is a reader learning the surface AND the implementation; what actually
+ * varies is only what is shown, what to call, and what to call it — and since
+ * #654 the one caller reads all three off `picture-field.tsx`'s subject table.
  */
 type PendingPictureOptions = {
   /** The route the SERVER says the picture is at, or undefined for none. */

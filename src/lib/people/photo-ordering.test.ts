@@ -5,7 +5,7 @@ import type { Person } from "@/db/schema";
 
 import { personPhotoSrc } from "@/lib/profile-photo";
 
-import { setPersonPhoto, type PersonPhotoEffects } from "./service";
+import { setPersonPhoto, type PersonPhotoEffects } from "./person-photo";
 
 // ----------------------------------------------------------------------------
 // THE ROW STOPS NAMING THE OBJECT BEFORE THE OBJECT GOES (P-024a, P-024b).

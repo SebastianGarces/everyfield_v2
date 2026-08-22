@@ -678,7 +678,7 @@ This feature owns the `Person` entity. The stable contract fields (`id`, `church
 | source | Enum | No | Feature-owned | How they were reached |
 | source_details | String | No | Feature-owned | Referrer name or specifics |
 | notes | Text | No | Feature-owned | General notes |
-| photo_url | String | No | Feature-owned | URL to profile photo |
+| photo_url | String | No | Feature-owned | Private-bucket storage KEY, never a URL — the name is historical. A browser's only address is `/api/people/{id}/photo`, and the key never crosses to it (P-024a). |
 | household_id | UUID (FK) | No | Feature-owned | Reference to Household |
 | household_role | Enum | No | Feature-owned | Role in household |
 | created_at | Timestamp | Yes | Feature-owned | Creation timestamp |

@@ -11,6 +11,7 @@ export * from "./household";
 export * from "./import";
 // metrics.ts exists but is not wired up yet -- needs design revisit (see FRD P-020)
 export * from "./pipeline";
+export * from "./person-photo";
 export * from "./service";
 export * from "./skills";
 export * from "./status";

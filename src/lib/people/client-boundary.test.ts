@@ -3,6 +3,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { getTableColumns } from "drizzle-orm";
+
+import { persons } from "@/db/schema";
 import { stripComments } from "@/lib/testing/source-span";
 import { personPhotoSrc } from "@/lib/profile-photo";
 
@@ -257,6 +260,63 @@ test("the people boundary hands out PersonForClient, not Person", () => {
     offenders,
     SERVER_ONLY_READS,
     `a read that crosses to a client surface must return PersonForClient and strip through toPersonForClient — a server-only read belongs in SERVER_ONLY_READS with its reason:\n${offenders.join("\n")}`
+  );
+});
+
+/**
+ * EVERY COLUMN `persons` HAS, pinned — because the strip fails OPEN.
+ *
+ * `PersonForClient` is an `Omit`, and since #654 every read in this domain is
+ * `db.select()` followed by `toPersonForClient`. That is one decision in one
+ * place, which is what makes it readable — but it also means the NEXT column
+ * added to `persons` reaches the browser automatically, with no compile error
+ * and no failing test. The hand-written pipeline projection this branch deleted
+ * was the last thing in the domain that failed closed: a new column did not
+ * cross until somebody typed its name.
+ *
+ * A projection is the wrong way to buy that back — a silent omission and a
+ * deliberate strip look identical in a diff, and only one of them says why. So
+ * the default stays "the row crosses" and the ratchet moves here: add a column
+ * to `persons` and CI fails until somebody edits this list, which is exactly the
+ * moment to ask whether the browser should have it.
+ *
+ * Adding a name here is not a rubber stamp. It is the answer to "does this cross
+ * to the browser?" — and if the answer is no, it belongs in the `Omit` above it.
+ */
+const PERSONS_COLUMNS = [
+  "addressLine1",
+  "addressLine2",
+  "backgroundCheckStatus",
+  "churchId",
+  "city",
+  "country",
+  "createdAt",
+  "createdBy",
+  "deletedAt",
+  "email",
+  "firstName",
+  "householdId",
+  "householdRole",
+  "id",
+  "lastName",
+  "notes",
+  "phone",
+  "photoUrl",
+  "pipelineSortOrder",
+  "postalCode",
+  "source",
+  "sourceDetails",
+  "state",
+  "status",
+  "updatedAt",
+  "userId",
+];
+
+test("a new persons column cannot reach the browser unnoticed", () => {
+  assert.deepEqual(
+    Object.keys(getTableColumns(persons)).sort(),
+    PERSONS_COLUMNS,
+    "`persons` gained or lost a column. Every read in this domain selects the whole row and narrows it in toPersonForClient, so a new column crosses to the browser by default — decide whether it should, add it to the Omit in types.ts if not, and then update this list"
   );
 });
 

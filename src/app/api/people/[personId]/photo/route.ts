@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
-import { getPersonPhotoKey } from "@/lib/people/service";
+import { getPersonPhotoKey } from "@/lib/people/person-photo";
 import { storedImageResponse } from "@/lib/stored-image-response";
 
 // The S3 client needs the Node.js runtime.

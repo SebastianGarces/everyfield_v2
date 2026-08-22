@@ -7,7 +7,6 @@ import {
   type PersonSource,
   type PersonStatus,
 } from "@/db/schema";
-import { deleteFile } from "@/lib/storage";
 import type {
   PersonCreateInput,
   PersonUpdateInput,
@@ -102,47 +101,6 @@ export const getPerson = cache(
     return result[0] ? toPersonForClient(result[0]) : null;
   }
 );
-
-/**
- * The stored photo KEY for a person in this church, or `null` when there is no
- * such person. A person who simply has no photo answers `{ photoKey: null }`.
- *
- * THE ONE READ OF `photo_url`, and the reason `getPerson` above no longer
- * offers it (#654). That read hands its row straight to `"use client"`
- * components, so `toPersonForClient` trades the key for the route it resolves
- * to — and the two callers that genuinely need the KEY ask for it by name here
- * instead. Both are server-only and both are the key's whole business: the
- * photo route, which turns one into pixels, and `setPersonPhoto`, which needs
- * the OLD key to know which object to drop.
- *
- * TWO NULLS, NOT ONE, because the callers want different things from them. A
- * missing person is a 404 the route must answer; a person with no photo is the
- * initials fallback. Collapsing both into a bare `string | null` would make
- * those indistinguishable, and the route would answer the same 404 for a
- * foreign `personId` by accident rather than by rule.
- *
- * CHURCH-SCOPED like every other read here, so a foreign `personId` reads as
- * MISSING rather than forbidden — the same answer a person with no photo gets,
- * and the same shape the generated-documents read uses.
- */
-export async function getPersonPhotoKey(
-  churchId: string,
-  personId: string
-): Promise<{ photoKey: string | null } | null> {
-  const [row] = await db
-    .select({ photoKey: persons.photoUrl })
-    .from(persons)
-    .where(
-      and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
-      )
-    )
-    .limit(1);
-
-  return row ?? null;
-}
 
 /**
  * Assert that `personId` names a live person in `churchId`.
@@ -587,99 +545,6 @@ export async function updatePerson(
 
   return toPersonForClient(updated);
 }
-
-/**
- * The three effects `setPersonPhoto` sequences, injectable so the ordering
- * contract can be asserted by RUNNING the function against a forced failure
- * instead of by reading its source — the same seam `recordGeneratedDocument`
- * carries, for the same invariant. Production never passes this; the defaults
- * below are the church-scoped read, the church-scoped update and the real
- * bucket.
- */
-export type PersonPhotoEffects = {
-  /**
-   * The OLD key, so the tail of the sequence knows what to drop — `null` when
-   * there is no such person. Deliberately not `getPerson`: that read strips the
-   * key on its way out (#654), and this is the one moment the writer needs it.
-   */
-  load: (
-    churchId: string,
-    personId: string
-  ) => Promise<{ photoKey: string | null } | null>;
-  write: (
-    churchId: string,
-    personId: string,
-    key: string | null
-  ) => Promise<Person | undefined>;
-  remove: (key: string) => Promise<unknown>;
-};
-
-const LIVE_PHOTO_EFFECTS: PersonPhotoEffects = {
-  load: getPersonPhotoKey,
-  write: async (churchId, personId, key) => {
-    const [updated] = await db
-      .update(persons)
-      .set({ photoUrl: key, updatedAt: new Date() })
-      .where(
-        and(
-          eq(persons.churchId, churchId),
-          eq(persons.id, personId),
-          isNull(persons.deletedAt)
-        )
-      )
-      .returning();
-
-    return updated;
-  },
-  remove: deleteFile,
-};
-
-/**
- * Point a person at a stored photo object, or at none (P-024a, P-024b).
- *
- * THE ONE WRITER OF `photo_url`, and separate from `updatePerson` on purpose.
- * That function takes a `PersonUpdateInput` parsed out of the profile form's
- * `FormData` — a bag whose keys a POST chooses — so a photo field there would
- * be a client-supplied storage key, and the photo route trusts the stored key
- * precisely because nothing client-supplied can reach it. `key` here is always
- * one `personPhotoStorageKey` just built on this server, or `null`.
- *
- * A REMOVAL IS THIS WRITE WITH A NULL KEY, not a second writer, and the object
- * the row stops naming is dropped HERE rather than by the caller. Upload,
- * replace and remove therefore share ONE spelling of the ordering the invariant
- * demands — a caller cannot forget the tail, and cannot invent a `deleteFile`
- * above the row write instead.
- *
- * The ordering is the whole rule: an object no row names is garbage a sweep
- * collects, while a row naming an object that is gone is an avatar the photo
- * route answers 404 for and nothing inside the app can repair. So the removal
- * comes last and its failure is logged, never propagated — it must not fail a
- * write that has already landed.
- */
-export async function setPersonPhoto(
-  churchId: string,
-  personId: string,
-  key: string | null,
-  effects: PersonPhotoEffects = LIVE_PHOTO_EFFECTS
-): Promise<PersonForClient | null> {
-  const existing = await effects.load(churchId, personId);
-  if (!existing) return null;
-
-  const updated = await effects.write(churchId, personId, key);
-  if (!updated) return null;
-
-  // The row has stopped naming it, so it is now garbage rather than an avatar.
-  if (existing.photoKey && existing.photoKey !== key) {
-    try {
-      await effects.remove(existing.photoKey);
-    } catch (error) {
-      console.error("[people] failed to delete replaced photo object:", error);
-    }
-  }
-
-  return toPersonForClient(updated);
-}
-
 /**
  * Soft delete a person by setting deleted_at
  * Does not actually delete the row
