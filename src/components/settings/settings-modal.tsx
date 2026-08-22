@@ -166,7 +166,13 @@ export function SettingsModal({
             the two panes sit side by side, so the seam always separates the
             navigation from the section rather than floating. */}
         <div className="bg-muted/40 flex shrink-0 flex-col border-b md:w-56 md:border-r md:border-b-0 lg:w-64">
-          <div className="p-3">
+          {/* `pr-12` ONLY while the panes are stacked. The dialog's Close sits
+              at the content's top-right corner, which on a phone is directly
+              over this search field — measured at 375px, the two boxes
+              overlapped and Close covered the field's own clear button. Once
+              the rail moves beside the section (`md`), the corner belongs to
+              the section pane and the rail needs no reservation. */}
+          <div className="p-3 pr-12 md:pr-3">
             {/* A real label, visually hidden: the placeholder is an example of
                 what to type and disappears the moment anything is typed. */}
             <label htmlFor={searchId} className="sr-only">
