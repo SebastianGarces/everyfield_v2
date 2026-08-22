@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { readsAsAnImperative } from "@/lib/auth/read-only-surfaces";
 import { daysUntilTarget } from "@/lib/launch/countdown";
 import type { LaunchReadiness } from "@/lib/launch/milestones";
 
@@ -578,8 +579,12 @@ test("the no-date line asks the Owner to act and tells everyone else who does", 
     "Your planter names the day.",
     "a Member reads the CONDITION, in the destination page's own words"
   );
+  // The rule is shared with the communication hub's header (#666), because it
+  // was the same defect a third time: `readsAsAnImperative` lives beside the
+  // read-only checklist that owns it, so neither surface keeps a private list
+  // of write verbs that could fall behind the other's.
   assert.ok(
-    !/^(Name|Add|Set|Choose|Pick)\b/.test(member),
+    !readsAsAnImperative(member),
     "an imperative addressed to a reader who cannot perform it is the #659 defect — a link that quietly does nothing is worse than no link"
   );
 });

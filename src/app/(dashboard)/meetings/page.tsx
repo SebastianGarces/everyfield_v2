@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
+import { meetingsListSubtitle } from "@/lib/meetings/copy";
 import { listMeetings } from "@/lib/meetings/service";
 import {
   analyticsMeetingTypeArg,
@@ -80,7 +81,7 @@ export default async function MeetingsPage({
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Meetings</h1>
               <p className="text-muted-foreground">
-                Schedule, track, and analyze all your meetings
+                {meetingsListSubtitle(canWrite)}
               </p>
             </div>
             {canWrite && (

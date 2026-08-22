@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { readsAsAnImperative } from "@/lib/auth/read-only-surfaces";
 import {
   evaluationComparisonDenominatorCopy,
   meetingLinkedTaskProgressCopy,
+  meetingsListSubtitle,
   EVALUATION_COMPARISON_EMPTY_COPY,
   MEETING_EVALUATION_TASK_CARD_TITLE,
 } from "@/lib/meetings/copy";
@@ -706,4 +708,27 @@ test("no db-free sibling is named after one of the two surfaces it serves", () =
       `${file} is imported by non-analytics surfaces — name it for what it holds, not for one of its callers`
     );
   }
+});
+
+// ----------------------------------------------------------------------------
+// #666 — the list's subtitle is matched to the reader's seat.
+// ----------------------------------------------------------------------------
+
+test("the meetings list asks a writer to schedule and tells a Member what they can read", () => {
+  const writer = meetingsListSubtitle(true);
+  assert.equal(writer, "Schedule, track, and analyze all your meetings");
+  assert.ok(
+    readsAsAnImperative(writer),
+    "the seat that holds `meetings.write` is the one the header may address"
+  );
+
+  const member = meetingsListSubtitle(false);
+  assert.equal(member, "Your plant's meetings, upcoming and past");
+  assert.ok(
+    !readsAsAnImperative(member),
+    "a Member holds none of schedule/track/analyze, and the page already hides the button and refuses /meetings/new — the subtitle was the last thing still asking them"
+  );
+  // The page's two tabs are what the read-only sentence names, so it describes
+  // the surface rather than merely going quiet.
+  assert.match(member, /upcoming and past/);
 });
