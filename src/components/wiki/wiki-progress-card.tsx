@@ -3,10 +3,14 @@
 //
 // Presentational server component. It does NO data access: everything it draws
 // arrives as props, projected by whoever renders it. The dashboard page
-// (app/(dashboard)/wiki/progress/page.tsx) projects it from `getArticles`,
-// `getProgressStats` and `getLastInProgress`; the marketing site projects the
-// same shape from a static fixture, so the landing page shows the real app
-// surface rather than a redrawn imitation of it (#296).
+// (app/(dashboard)/wiki/progress/page.tsx) projects it from `getProgressStats`
+// and `getLastInProgress`; the marketing site projects the same shape from a
+// static fixture, so the landing page shows the real app surface rather than a
+// redrawn imitation of it (#296).
+//
+// `totalArticles` and `totalCompleted` arrive already counted from ONE
+// population (#631) — this view divides them and must not second-guess the
+// result, so there is no clamp here and no need for one.
 //
 // Constraints this file is written against:
 //

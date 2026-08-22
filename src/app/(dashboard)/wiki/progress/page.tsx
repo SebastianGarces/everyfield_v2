@@ -1,5 +1,4 @@
-import { getCurrentSession } from "@/lib/auth";
-import { getArticles, getProgressStats, getLastInProgress } from "@/lib/wiki";
+import { getProgressStats, getLastInProgress } from "@/lib/wiki";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { WikiProgressCard } from "@/components/wiki/wiki-progress-card";
 
@@ -28,66 +27,52 @@ const CATEGORY_NAMES: Record<
 };
 
 export default async function WikiProgressPage() {
-  // Scoped to the reader's church (#317). The denominators on this page are
-  // counts of articles, so an unscoped read would measure progress against a
-  // corpus the user cannot see: a church with its own articles would show a
-  // percentage that can never reach 100.
-  const { user } = await getCurrentSession();
-
-  const [articles, progressStats, lastInProgress] = await Promise.all([
-    getArticles(user?.churchId ?? null),
+  // One read, one population (#631). `getProgressStats` counts the reader's
+  // progress against the corpus its own church-scoped list can show, so the
+  // totals below and the counts inside them cannot describe different sets of
+  // articles — which is what let this page render "12 of 10 completed / 120%".
+  const [progressStats, lastInProgress] = await Promise.all([
     getProgressStats(),
     getLastInProgress(),
   ]);
 
-  // Group articles by category to get totals
-  const articlesByCategory: Record<string, number> = {};
-  for (const article of articles) {
-    const category = article.slug.split("/")[0] ?? "other";
-    articlesByCategory[category] = (articlesByCategory[category] ?? 0) + 1;
-  }
-
-  // Calculate overall stats
-  const totalArticles = articles.length;
-  let totalCompleted = 0;
-  let totalInProgress = 0;
-
-  if (progressStats) {
-    for (const stats of Object.values(progressStats)) {
-      totalCompleted += stats.completed;
-      totalInProgress += stats.inProgress;
-    }
-  }
-
-  const overallPercentage =
-    totalArticles > 0 ? Math.round((totalCompleted / totalArticles) * 100) : 0;
-
   // Build category rows for display
-  const categoryRows = Object.entries(articlesByCategory)
-    .map(([category, total]) => {
-      const stats = progressStats?.[category] ?? {
-        completed: 0,
-        inProgress: 0,
-      };
+  const categoryRows = Object.entries(progressStats)
+    .map(([category, stats]) => {
       const info = CATEGORY_NAMES[category] ?? {
         name: category,
         sortOrder: 99,
       };
       const percentage =
-        total > 0 ? Math.round((stats.completed / total) * 100) : 0;
+        stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
       return {
         category,
         name: info.name,
         phase: info.phase,
         sortOrder: info.sortOrder,
-        total,
+        total: stats.total,
         completed: stats.completed,
         inProgress: stats.inProgress,
         percentage,
       };
     })
     .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  // The overall numbers are the category rows summed, so the header and the
+  // "By Section" list are the same arithmetic at two grains.
+  let totalArticles = 0;
+  let totalCompleted = 0;
+  let totalInProgress = 0;
+
+  for (const row of categoryRows) {
+    totalArticles += row.total;
+    totalCompleted += row.completed;
+    totalInProgress += row.inProgress;
+  }
+
+  const overallPercentage =
+    totalArticles > 0 ? Math.round((totalCompleted / totalArticles) * 100) : 0;
 
   const breadcrumbs = [
     { label: "Wiki", href: "/wiki" },

@@ -35,6 +35,8 @@ import {
 import { getCurrentSession } from "@/lib/auth";
 
 import { getArticle } from "./get-article";
+import { getArticles } from "./get-articles";
+import { summariseProgress, type WikiProgressStats } from "./progress-stats";
 
 // ----------------------------------------------------------------------------
 // Bookmarks
@@ -210,42 +212,50 @@ export async function getRecentlyViewed(limit: number = 5) {
 }
 
 /**
- * Get progress stats (counts per category) — lightweight query.
- * Returns completed/in_progress counts per category based on user progress.
+ * Progress per category, counted against the corpus the reader can see (#631).
+ *
+ * TOTALS AND COUNTS COME FROM ONE READ. `getArticles` is the same call the
+ * article list, the sidebar and prev/next resolve against — church scope,
+ * `published`, and the church-override rule, all three — so the denominator
+ * here IS the population of the surface these numbers sit on, and the
+ * `inArray` below keeps the numerator inside it in the statement rather than
+ * after the fact. This read used to be scoped to `user_id` alone, which is how
+ * "12 of 10 completed" became reachable; `summariseProgress` is where the
+ * property is pinned.
+ *
+ * The corpus read costs nothing extra on `/wiki/progress`: `getArticles` is
+ * `React.cache`d and the wiki layout above has already called it for the
+ * sidebar.
+ *
+ * Never null. A session-less caller — the crawler `/wiki` is previewable for —
+ * gets the corpus with zero progress against it, which is what the page
+ * rendered for an anonymous reader before and the honest answer to "how far has
+ * nobody read".
  */
-export async function getProgressStats() {
+export async function getProgressStats(): Promise<WikiProgressStats> {
   const session = await getCurrentSession();
-  if (!session?.user) return null;
 
-  // Get all user progress
+  const articles = await getArticles(session?.user?.churchId ?? null);
+  const slugs = articles.map((article) => article.slug);
+
+  if (!session?.user || slugs.length === 0) {
+    return summariseProgress(articles, []);
+  }
+
   const userProgress = await db
     .select({
       articleSlug: wikiProgress.articleSlug,
       status: wikiProgress.status,
     })
     .from(wikiProgress)
-    .where(eq(wikiProgress.userId, session.user.id));
+    .where(
+      and(
+        eq(wikiProgress.userId, session.user.id),
+        inArray(wikiProgress.articleSlug, slugs)
+      )
+    );
 
-  // Group by extracting category from slug
-  // Slugs are like "discovery/article-name" or "core-group/section/article"
-  const statsByCategory: Record<
-    string,
-    { completed: number; inProgress: number }
-  > = {};
-
-  for (const p of userProgress) {
-    const category = p.articleSlug.split("/")[0] ?? "other";
-    if (!statsByCategory[category]) {
-      statsByCategory[category] = { completed: 0, inProgress: 0 };
-    }
-    if (p.status === "completed") {
-      statsByCategory[category].completed++;
-    } else if (p.status === "in_progress") {
-      statsByCategory[category].inProgress++;
-    }
-  }
-
-  return statsByCategory;
+  return summariseProgress(articles, userProgress);
 }
 
 /** Get the last in-progress article for "Continue Reading". */
