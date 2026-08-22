@@ -29,7 +29,7 @@ import {
 import { getNonOpenerSummary } from "@/lib/communication/send";
 import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
 import {
-  renderTemplate,
+  renderSubject,
   buildChurchMergeData,
   buildMeetingMergeData,
   buildPersonMergeData,
@@ -121,7 +121,7 @@ export default async function MessageDetailPage({
 
   // Resolve variables
   const resolvedSubject = comm.subject
-    ? renderTemplate(comm.subject, mergeData)
+    ? renderSubject(comm.subject, mergeData)
     : "(No subject)";
   // The body is NOT resolved here. `RichText` runs the same two steps, in
   // the same order, as the send path and the compose preview — sanitise, then
