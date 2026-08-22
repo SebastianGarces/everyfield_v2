@@ -6,7 +6,6 @@ import {
   use,
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -223,18 +222,18 @@ function closeSettings() {
  *
  * A ROUTE HANDLER, NOT A SERVER ACTION, and that is load-bearing rather than
  * stylistic. Every server-action response carries a fresh RSC render of the
- * current route, which regenerates `serverRenderId` — the prop this read
- * re-runs on. As an action it therefore re-triggered itself: measured on the
- * preview, one notification toggle produced an unbounded loop at about seven
- * requests a second. JSON over `fetch` re-renders nothing, so the chain
- * terminates.
+ * current route, which regenerates `serverRenderId` — the value this read is
+ * keyed by. As an action it therefore asked for itself again on its own answer,
+ * for ever. JSON over `fetch` re-renders nothing, so that chain terminates.
  *
  * A failed read is `{ ok: false }`, the same answer a refusal gives, because the
  * remedy is the same one: show the reader a section that works. A network blip
  * while switching sections must not leave a dialog with a permanent skeleton in
  * it.
  */
-async function readSection(id: SettingsSectionId): Promise<SettingsSectionLoad> {
+async function readSection(
+  id: SettingsSectionId
+): Promise<SettingsSectionLoad> {
   try {
     const response = await fetch(`/api/settings/sections/${id}`);
     if (!response.ok) return { ok: false };
@@ -242,6 +241,48 @@ async function readSection(id: SettingsSectionId): Promise<SettingsSectionLoad> 
   } catch {
     return { ok: false };
   }
+}
+
+/**
+ * THE IN-FLIGHT READ, CACHED OUTSIDE REACT — and it has to be outside.
+ *
+ * The section is unwrapped with `use()`, so the promise has to exist before the
+ * render that consumes it. A promise minted during render is the documented
+ * hazard React warns about, and this is what it looks like in practice
+ * (measured on the preview): a render that SUSPENDS is discarded and replayed,
+ * a replay re-runs `useMemo`, a re-run mints a second promise, and consuming
+ * that one suspends again — a loop at about six reads a second, for as long as
+ * the modal stayed open. A `useMemo` cannot hold this because React is free to
+ * drop it; module scope is not React's to drop.
+ *
+ * KEYED BY THE TWO THINGS A READ DEPENDS ON: the section asked for, and the last
+ * server render. That is the whole read policy — ask again when the reader picks
+ * a different section, ask again when a write has changed the server, ask at no
+ * other time.
+ *
+ * ONE ENTRY, NOT A MAP. A second section is a new key, and the answer to the old
+ * one is of no further use — caching it would be caching server data, which is
+ * the thing `memory/invariants.md` → Client/Server Data Synchronization
+ * forbids. What is held here is an in-flight REQUEST, which cannot go stale: it
+ * is replaced the moment either input moves.
+ *
+ * Module scope is safe here for the same reason `openedByPush` above is: nothing
+ * renders `SettingsDialog` on the server — the store's server snapshot is always
+ * "no fragment" — so no server request can reach this.
+ */
+let cachedKey: string | null = null;
+let cachedRequest: Promise<SettingsSectionLoad> | null = null;
+
+function sectionRequest(
+  id: SettingsSectionId,
+  serverRenderId: string
+): Promise<SettingsSectionLoad> {
+  const key = `${id} ${serverRenderId}`;
+  if (cachedKey !== key || cachedRequest === null) {
+    cachedKey = key;
+    cachedRequest = readSection(id);
+  }
+  return cachedRequest;
 }
 
 // ----------------------------------------------------------------------------
@@ -327,26 +368,10 @@ function SettingsDialog({
   );
   const searching = query.trim() !== "";
 
-  // THE REQUEST, STARTED ONCE PER THING IT DEPENDS ON — the section asked for,
-  // and the last server render. Those two are the whole read policy: ask again
-  // when the reader picks a different section, ask again when a write has
-  // changed the server, ask at no other time.
-  //
-  // What is remembered is the PROMISE, never its result. Server data reaching
-  // `useState` is what `memory/invariants.md` → Client/Server Data
-  // Synchronization forbids, and for the reason this shape avoids: a value
-  // parked in state goes stale the moment the server moves, while an in-flight
-  // request cannot — it is replaced whenever either input does.
-  const request = useMemo(
-    () => readSection(activeId),
-    // `serverRenderId` is a DEPENDENCY WITHOUT BEING AN ARGUMENT, and the rule
-    // cannot see that from the callback body: the endpoint has no use for the
-    // value, while a new value is precisely the event this must re-run on. It is
-    // not passed down to be ignored on the server — that would be a parameter
-    // that lies about what the read depends on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeId, serverRenderId]
-  );
+  // The read, keyed by the section and by the last server render — see
+  // `sectionRequest`, which holds it OUTSIDE React because a suspended render is
+  // replayed and a replay would mint a second promise.
+  const request = sectionRequest(activeId, serverRenderId);
 
   return (
     <Dialog
