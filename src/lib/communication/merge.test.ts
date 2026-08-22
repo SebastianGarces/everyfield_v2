@@ -7,6 +7,7 @@ import { TS_FILES, codeOf, rel } from "@/lib/auth/server-action-surface";
 import {
   buildMeetingMergeData,
   formatAgendaForEmail,
+  formatLocationForEmail,
   renderEmailBodyHtml,
   renderEmailBodyText,
   renderSubject,
@@ -132,6 +133,86 @@ test("a blank line the planter typed is NOT an emptied paragraph", () => {
   assert.equal(
     renderEmailBodyHtml("<p>A</p><p>&nbsp;</p><p>B</p>", {}),
     "<p>A</p><p>&nbsp;</p><p>B</p>"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// #625 — the unit is the LINE, not the paragraph
+//
+// The date and the location are two lines of ONE paragraph: an author separates
+// them with Enter, so `toRichTextHtml` gives `<p>📅 …<br>📍 …</p>`. The first
+// spelling of the drop was paragraph-scoped and could only take them together
+// or not at all — it took neither, and a meeting with no location shipped a
+// bare 📍.
+// ----------------------------------------------------------------------------
+
+test("an emptied line disappears with its break, not with its paragraph", () => {
+  assert.equal(
+    renderEmailBodyHtml("<p>📅 {{meeting_date}}<br>{{meeting_location}}</p>", {
+      meeting_date: "Tuesday",
+      meeting_location: "",
+    }),
+    "<p>📅 Tuesday</p>"
+  );
+});
+
+test("a paragraph whose lines ALL empty goes away whole", () => {
+  // The #612 agenda case, now falling out of the line rule rather than needing
+  // one of its own.
+  assert.equal(
+    renderEmailBodyHtml("<p>A</p><p>{{x}}<br>{{y}}</p><p>B</p>", {
+      x: "",
+      y: "",
+    }),
+    "<p>A</p><p>B</p>"
+  );
+});
+
+test("the surviving lines of a mixed paragraph keep their order", () => {
+  assert.equal(
+    renderEmailBodyHtml("<p>one<br>{{gone}}<br>three</p>", { gone: "" }),
+    "<p>one<br />three</p>"
+  );
+});
+
+test("the text half drops the same line, not just the blank run", () => {
+  // Without the line drop the `\n{3,}` collapse turns a single line break into
+  // a paragraph break, and the two halves of one email break in different
+  // places.
+  assert.equal(
+    renderEmailBodyText("📅 {{meeting_date}}\n{{meeting_location}}\nRSVP", {
+      meeting_date: "Tuesday",
+      meeting_location: "",
+    }),
+    "📅 Tuesday\nRSVP"
+  );
+});
+
+test("the location value carries its own pin, or nothing at all", () => {
+  assert.equal(
+    formatLocationForEmail("Fellowship Hall", "400 Oak St"),
+    "📍 Fellowship Hall, 400 Oak St"
+  );
+  // Either column alone still gets a pin — they are one line to a reader.
+  assert.equal(formatLocationForEmail("Room 2", null), "📍 Room 2");
+  assert.equal(formatLocationForEmail(null, "400 Oak St"), "📍 400 Oak St");
+  assert.equal(formatLocationForEmail(null, null), "");
+  assert.equal(formatLocationForEmail("", ""), "");
+});
+
+test("the meeting merge group carries the pin, so no template has to", () => {
+  assert.equal(
+    buildMeetingMergeData({ ...MEETING, agenda: null }).meeting_location,
+    "📍 Room 2"
+  );
+  assert.equal(
+    buildMeetingMergeData({
+      ...MEETING,
+      locationName: null,
+      locationAddress: null,
+      agenda: null,
+    }).meeting_location,
+    ""
   );
 });
 
