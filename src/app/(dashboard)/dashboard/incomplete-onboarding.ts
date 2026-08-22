@@ -28,6 +28,7 @@ import {
   type OnboardingStepId,
 } from "@/lib/onboarding/steps";
 import { LEADERSHIP_STEP_HREF } from "@/lib/onboarding/leadership";
+import type { Capability } from "@/lib/auth/seat-rules";
 
 /**
  * The steps this indicator can list.
@@ -47,6 +48,21 @@ export type IncompleteOnboardingItem = {
   href: string;
   /** The link's label. A verb, so the row reads as a next action. */
   cta: string;
+  /**
+   * THE VERB THIS ROW ASKS THE READER TO PERFORM (AS-020, #499).
+   *
+   * The module already applied this rule to `leadership` alone — "dropped for
+   * anybody whose answer would be refused (a link that quietly does nothing is
+   * worse than no link)" — and the other two rows went out to everybody. On a
+   * plant Member's dashboard that produced exactly the failure that sentence
+   * describes: "Set your stage" pointing at `/phase`, which redirects them
+   * straight back, under a card offering to dismiss the reminder.
+   *
+   * So the rule becomes the table's, not one row's. `leadership` still carries
+   * its own predicate rather than a capability, because `church.claim` GRANTS a
+   * seat rather than spending one and its rule is not an authority rule.
+   */
+  requires: Capability;
 };
 
 /**
@@ -73,6 +89,9 @@ export const INCOMPLETE_ONBOARDING_ITEMS: Record<
       "We never got an answer about who the lead planter/pastor is, so follow-ups and reminders have nobody to name.",
     href: LEADERSHIP_STEP_HREF,
     cta: "Answer this",
+    // Never consulted: `canAnswerLeadership` decides this row, below. Named so
+    // the table has no hole for a reader to wonder about.
+    requires: "church.claim",
   },
   journey: {
     id: "journey",
@@ -81,6 +100,8 @@ export const INCOMPLETE_ONBOARDING_ITEMS: Record<
       "Your stage and target launch date are still unset, so guidance, the countdown and your phase all assume you are starting from zero.",
     href: "/phase",
     cta: "Set your stage",
+    // `/phase` itself redirects anyone who is not the plant's Owner.
+    requires: "phase.declare",
   },
   people: {
     id: "people",
@@ -89,6 +110,9 @@ export const INCOMPLETE_ONBOARDING_ITEMS: Record<
       "Nobody is on your list yet, so the pipeline, meeting attendance and follow-ups have nothing to work with.",
     href: "/people",
     cta: "Add your people",
+    // ADMIN_PLUS, so an Admin keeps this row — the gate refuses the Member, not
+    // everyone who is not the Owner.
+    requires: "people.write",
   },
 };
 
@@ -111,6 +135,13 @@ export type IncompleteOnboardingVisibility = {
   canAnswerLeadership: boolean;
   /** Is the pastor-confirmation prompt already asking on this render? */
   pastorPromptShowing: boolean;
+  /**
+   * Does this viewer hold a verb? `holdsSeatFor(viewer, …)` at the call site.
+   *
+   * A PREDICATE RATHER THAN THE SEAT, so this module keeps the property its
+   * docblock claims — pure, and unit testable without a database or a session.
+   */
+  holds: (capability: Capability) => boolean;
 };
 
 /**
@@ -122,12 +153,20 @@ export function incompleteOnboardingItems(
   facts: OnboardingFacts,
   visibility: IncompleteOnboardingVisibility
 ): IncompleteOnboardingItem[] {
-  return incompleteOnboardingSteps(facts)
-    .filter(isSkippedStep)
-    .filter(
-      (id) =>
-        id !== "leadership" ||
-        (visibility.canAnswerLeadership && !visibility.pastorPromptShowing)
-    )
-    .map((id) => INCOMPLETE_ONBOARDING_ITEMS[id]);
+  return (
+    incompleteOnboardingSteps(facts)
+      .filter(isSkippedStep)
+      .filter(
+        (id) =>
+          id !== "leadership" ||
+          (visibility.canAnswerLeadership && !visibility.pastorPromptShowing)
+      )
+      .map((id) => INCOMPLETE_ONBOARDING_ITEMS[id])
+      // AS-020: a row whose action this viewer would be refused is not shown at
+      // all. `leadership` has already been decided above and is exempt here — its
+      // rule is a grant, not a capability.
+      .filter(
+        (item) => item.id === "leadership" || visibility.holds(item.requires)
+      )
+  );
 }

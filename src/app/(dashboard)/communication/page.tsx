@@ -160,7 +160,7 @@ export default async function CommunicationPage() {
 
           {/* Delivery performance (COM-019) */}
           <div className="mt-6">
-            <DeliveryOverview totals={deliveryTotals} />
+            <DeliveryOverview totals={deliveryTotals} canSend={canSend} />
           </div>
 
           {/* Quick Actions — every card is a link INTO the compose form with a

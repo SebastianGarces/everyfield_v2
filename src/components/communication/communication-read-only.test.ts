@@ -232,10 +232,13 @@ test("all three of the hub's routes into compose are gated, not just the header 
 
   assert.equal(
     HUB.code.split("canSend").length - 1,
-    // The declaration, the header CTA, the quick actions, and the empty state's
-    // copy and its button.
-    5,
-    "five sites: `canSend` is declared once and read at every affordance — a new link into /compose that does not read it is the drift this count catches"
+    // The declaration, the header CTA, the quick actions, the empty state's
+    // copy and its button, and the two for `DeliveryOverview` — the prop and
+    // its value. That card carries no control, but its empty state SAID "Send
+    // your first message…" to a reader who cannot, which the browser pass
+    // caught; the copy branches on the same flag rather than growing a second.
+    7,
+    "seven sites: `canSend` is declared once and read at every affordance — a new link into /compose that does not read it is the drift this count catches"
   );
 });
 

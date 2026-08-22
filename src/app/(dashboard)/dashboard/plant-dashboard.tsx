@@ -165,6 +165,10 @@ export async function PlantDashboard({
   const incompleteSteps = incompleteOnboardingItems(onboardingFacts, {
     canAnswerLeadership,
     pastorPromptShowing: showPastorPrompt,
+    // AS-020: each row is a call to action, so a row this viewer would be
+    // refused is dropped rather than shown and bounced. A Member loses every
+    // row and the card with them; an Admin keeps "Add your people".
+    holds: (capability) => holdsSeatFor(viewer, capability),
   });
 
   const phaseLabel =
