@@ -3,7 +3,24 @@ import { persons, type PersonStatus } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import { changeStatus } from "./status";
-import type { PersonForClient } from "./types";
+
+/**
+ * The three fields an emission reads off a person, and nothing else.
+ *
+ * IT USED TO SAY `PersonForClient`, which was a claim this module has no
+ * business making: the event bus is server-side, both call sites hand it the
+ * FULL row they just wrote, and neither ever intended a client-safe one. The
+ * old type let that pass only because `Person` was structurally assignable to
+ * it — the same hole #378 documents. `photoSrc` closed the hole (#654) and the
+ * compiler then pointed straight at these two calls, which is how a mislabelled
+ * boundary finally became visible. Naming the fields makes both rows valid and
+ * says what an event actually carries.
+ */
+type PersonForEvent = {
+  id: string;
+  churchId: string;
+  status: PersonStatus;
+};
 
 // ============================================================================
 // Event Types
@@ -39,9 +56,7 @@ export interface PersonStatusChangedEvent {
 /**
  * Emit an event when a person is created.
  */
-export async function emitPersonCreated(
-  person: PersonForClient
-): Promise<void> {
+export async function emitPersonCreated(person: PersonForEvent): Promise<void> {
   await eventBus.emit<PersonCreatedEvent>({
     type: "person.created",
     personId: person.id,
@@ -55,7 +70,7 @@ export async function emitPersonCreated(
  * Emit an event when a person's status changes.
  */
 export async function emitPersonStatusChanged(
-  person: PersonForClient,
+  person: PersonForEvent,
   oldStatus: PersonStatus,
   newStatus: PersonStatus
 ): Promise<void> {

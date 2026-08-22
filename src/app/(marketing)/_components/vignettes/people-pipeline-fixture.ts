@@ -50,7 +50,7 @@ const BLANK = {
   country: "US",
   sourceDetails: null,
   backgroundCheckStatus: "not_started",
-  photoUrl: null,
+  photoSrc: undefined,
   householdId: null,
   householdRole: null,
   pipelineSortOrder: 0,

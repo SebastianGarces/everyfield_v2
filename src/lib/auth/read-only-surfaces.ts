@@ -176,11 +176,11 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface: "Dashboard",
     mustNotRender:
       'Quick-action tiles, "add" cards, inline phase-advance controls, dismiss and edit affordances on cards',
-    governedBy: ["people.write", "meetings.write"],
+    governedBy: ["people.write", "meetings.write", "launch.schedule"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: ["src/app/(dashboard)/dashboard/plant-dashboard.tsx"],
-    note: "The two create tiles (Add Person, Schedule Meeting) rendered for every seat. There is no inline phase-advance control on this surface — the phase is a text label, and the declaration lives on /phase. The association Accept/Decline reminder was already Owner-gated at its data read (`isPlantOwner(viewer)`), and the leadership prompts were already gated by `canAnswerLeadershipQuestion`.",
+    note: 'The two create tiles (Add Person, Schedule Meeting) rendered for every seat. There is no inline phase-advance control on this surface — the phase is a text label, and the declaration lives on /phase. The association Accept/Decline reminder was already Owner-gated at its data read (`isPlantOwner(viewer)`), and the leadership prompts were already gated by `canAnswerLeadershipQuestion`. `launch.schedule` joined the row for #659: the Launch Sunday card\'s no-date line read "Name the day and we\'ll build your readiness list" to every seat — an imperative for a write only an Owner holds, on a card whose own destination already told a Member "Your planter names the day". A sweep that reads this row as being about BUTTONS misses it; a call to action is a write affordance in sentence form, and the FRD\'s "affordances on cards" covers it.',
   },
   {
     surface: "People directory (list)",
@@ -317,12 +317,12 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface: "Launch",
     mustNotRender:
       "Schedule launch, edit launch date, edit milestones, record outcome",
-    governedBy: ["launch.milestone"],
+    governedBy: ["launch.milestone", "launch.schedule"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: ["src/app/(dashboard)/launch/page.tsx"],
     survives:
-      "TICKING A MILESTONE STAYS FOR A MEMBER, and this row is narrowed against the FRD's wording deliberately (ruled for #499). Scheduling, changing the date and recording the outcome are `launch.schedule` (OWNER_ONLY) and were already gated on `isPlanter`. Milestone completion is a DIFFERENT verb — `launch.milestone`, SEATED — which LS-007 split off on purpose so that milestone ticks follow ordinary task rules and a Member may do them. Hiding it would refuse in the UI what the server allows, which is the over-hide the sweep must not commit. What the board's `canEdit` was is `true`, hardcoded; what it is now is that capability, which refuses a coach and an org account and admits the Member.",
+      "TICKING A MILESTONE STAYS FOR A MEMBER, and this row is narrowed against the FRD's wording deliberately (ruled for #499). Scheduling, changing the date and recording the outcome are `launch.schedule` (OWNER_ONLY), gated on `holdsSeatFor(user, \"launch.schedule\")` since #659 — it was `isPlantOwner`, which resolves to the same answer and was a second spelling of one question in a file already asking the table for the sibling verb. Milestone completion is a DIFFERENT verb — `launch.milestone`, SEATED — which LS-007 split off on purpose so that milestone ticks follow ordinary task rules and a Member may do them. Hiding it would refuse in the UI what the server allows, which is the over-hide the sweep must not commit. What the board's `canEdit` was is `true`, hardcoded; what it is now is that capability, which refuses a coach and an org account and admits the Member.",
   },
   {
     surface: "Phase",

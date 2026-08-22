@@ -71,7 +71,7 @@ import {
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
-import { isChurchLevelUser, isPlantOwner } from "@/lib/auth/tenancy";
+import { isChurchLevelUser } from "@/lib/auth/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +128,14 @@ export default async function LaunchPage() {
   }
 
   const churchId = user.churchId;
-  const isPlanter = isPlantOwner(user);
+  // THE CAPABILITY TABLE, not the seat shape (#659). `isPlantOwner` resolves to
+  // the same answer today — `launch.schedule` is OWNER_ONLY on a plant — but it
+  // is a second spelling of one question, in a file that already asks
+  // `holdsSeatFor` for the sibling verb below. The three affordances gated on
+  // this are the three writes `requireChurchSession("launch.schedule")`
+  // refuses, so the question the screen asks is now the string the server
+  // answers.
+  const canSchedule = holdsSeatFor(user, "launch.schedule");
   const launch = await getLaunchForChurch(churchId);
 
   // ONE clock read for the whole render, so every number on the page is about
@@ -151,14 +158,14 @@ export default async function LaunchPage() {
     : [null, [], []];
 
   const status = launch?.status ?? "planning";
-  const showOutcomeForm = isPlanter && canRecordOutcome(launch, now);
+  const showOutcomeForm = canSchedule && canRecordOutcome(launch, now);
   // A recorded outcome stays correctable by the planter, with every correction
   // journalled (LS-006, ruled 2026-08-04) — the record is the plant's own
   // account of its day, and getting a headcount right on Monday is normal.
-  const showOutcomeEditor = isPlanter && canEditOutcome(launch);
+  const showOutcomeEditor = canSchedule && canEditOutcome(launch);
   // A completed launch's date is frozen (`recordLaunchOutcome` is what freezes
   // it), so the planter is offered no date control once the day is recorded.
-  const canChangeDate = isPlanter && status !== "completed";
+  const canChangeDate = canSchedule && status !== "completed";
 
   const history = buildLaunchHistory(milestoneHistory, journal);
   const hasDateHistory = launchDateEvents(journal).length > 0;

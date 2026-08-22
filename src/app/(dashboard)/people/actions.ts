@@ -13,10 +13,10 @@ import {
   deletePerson,
   getPerson,
   listPeople,
-  setPersonPhoto,
   updatePerson,
   type ListPeopleResult,
 } from "@/lib/people/service";
+import { getPersonPhotoKey, setPersonPhoto } from "@/lib/people/person-photo";
 import { changeStatus, recordStatusChange } from "@/lib/people/status";
 import { isCommittedStatus } from "@/lib/people/status.shared";
 import {
@@ -255,7 +255,13 @@ export async function uploadPersonPhotoAction(
 
       // Never write against a personId the caller's church does not own —
       // checked BEFORE the upload so no file lands for a foreign person.
-      const existing = await getPerson(churchId, personId);
+      //
+      // A SCOPED EXISTENCE CHECK, not a person. This read used to be
+      // `getPerson`, whose answer was thrown away except for its truthiness —
+      // and since #654 that answer also runs the strip and builds a photo route
+      // for nobody. `getPersonPhotoKey` asks the question this line is actually
+      // asking, and it is the same read `setPersonPhoto` makes next.
+      const existing = await getPersonPhotoKey(churchId, personId);
       if (!existing) {
         return {
           success: false,
