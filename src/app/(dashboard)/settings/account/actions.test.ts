@@ -224,8 +224,14 @@ test("the confirmation ends in a redirect, and the redirect sits OUTSIDE the try
 
   assert.match(
     body,
-    /if \(outcome\.ok\) redirect\("\/verify-email\/confirmed"\);/,
+    /redirect\("\/verify-email\/confirmed"\);/,
     "a swap that committed must leave the spent `?token=` URL — the reader who reloads it is told the link is dead about a change that succeeded, and the pane that used to say otherwise waited on a transition that never committed (#658)"
+  );
+
+  assert.match(
+    body,
+    /revalidatePath\("\/", "layout"\);/,
+    "the redirect is a CLIENT-SIDE navigation, which reuses the layout segments both routes share — without this the reader lands on `you now sign in as <new>` beside a sidebar still rendering the old address (measured on #658's preview)"
   );
 
   const code = stripComments(body);

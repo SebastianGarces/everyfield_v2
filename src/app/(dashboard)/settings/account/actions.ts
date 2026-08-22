@@ -1,7 +1,7 @@
 "use server";
 
 import { requireSeat } from "@/lib/auth/seats";
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 
 import {
@@ -236,10 +236,23 @@ export async function confirmEmailChangeAction(
   // it does not revalidate). A redirect is rendered by the server, so no
   // sentence a reader depends on waits on a transition to commit.
   //
+  // …AND THE DESTINATION IS FRESHENED RATHER THAN THE ROUTE BEING LEFT. A
+  // client-side navigation REUSES the layout segments both routes share, and
+  // the sidebar that renders the address is in exactly such a layout — measured
+  // on this branch's preview, the redirect alone landed on a page reading "you
+  // now sign in as 658-gate@…" beside a sidebar still showing
+  // planter1@everyfield.app. `"layout"` because the identity is chrome: it is
+  // on every screen this account can reach, not on the one it landed on
+  // (`memory/invariants.md` → Client/Server Data Synchronization: an action
+  // whose only caller LEAVES keeps the revalidate and drops the refresh).
+  //
   // OUTSIDE THE `try` ON PURPOSE: `redirect()` reports itself by throwing, and
   // the catch above would classify it as a failed confirmation — the one answer
   // this endpoint must never give about a change that committed.
-  if (outcome.ok) redirect("/verify-email/confirmed");
+  if (outcome.ok) {
+    revalidatePath("/", "layout");
+    redirect("/verify-email/confirmed");
+  }
 
   return outcome;
 }
