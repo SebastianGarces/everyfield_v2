@@ -26,14 +26,14 @@
 // struggling" back to somebody is not a feature this product will ship.
 // ============================================================================
 
-import { and, desc, eq, gte } from "drizzle-orm";
+// BROWSER-SAFE BY CONSTRUCTION. The `"use client"` card imports this module
+// for its dimensions, levels and nudge math, so nothing here may reach `@/db`
+// (whose module scope calls `neon()` and throws in a browser). The two
+// database touches live in `planter-checkin-db.ts`; the type-only import
+// below erases at compile time. `client-boundary.bundle.test.ts` holds the
+// line for every client module at once.
 
-import { db } from "@/db";
-import {
-  planterCheckins,
-  type PlanterCheckin,
-  type PlanterCheckinLevel,
-} from "@/db/schema";
+import type { PlanterCheckin, PlanterCheckinLevel } from "@/db/schema";
 
 /** Bryan's four questions, verbatim and in his order. */
 export const CHECKIN_DIMENSIONS = [
@@ -122,79 +122,6 @@ export interface CheckinAnswer {
   financially: PlanterCheckinLevel;
   pace: PlanterCheckinLevel;
   note?: string | null;
-}
-
-/**
- * Record (or correct) this church's answer for one week.
- *
- * IDEMPOTENT BY THE UNIQUE INDEX. A planter who changes their mind on Thursday
- * updates Monday's row rather than writing a second, contradictory week — which
- * is also what lets the card be answered without a "have you already done this"
- * check in front of it.
- */
-export async function saveCheckin(
-  churchId: string,
-  answeredById: string,
-  weekStart: string,
-  answer: CheckinAnswer
-): Promise<PlanterCheckin> {
-  const now = new Date();
-
-  const [row] = await db
-    .insert(planterCheckins)
-    .values({
-      churchId,
-      weekStart,
-      answeredById,
-      spiritually: answer.spiritually,
-      marriageFamily: answer.marriageFamily,
-      financially: answer.financially,
-      pace: answer.pace,
-      note: answer.note ?? null,
-    })
-    .onConflictDoUpdate({
-      target: [planterCheckins.churchId, planterCheckins.weekStart],
-      set: {
-        spiritually: answer.spiritually,
-        marriageFamily: answer.marriageFamily,
-        financially: answer.financially,
-        pace: answer.pace,
-        note: answer.note ?? null,
-        answeredById,
-        updatedAt: now,
-      },
-    })
-    .returning();
-
-  return row;
-}
-
-/**
- * The last `weeks` weeks of check-ins for this church, oldest first.
- *
- * NO `answeredById` FILTER. The row is the PLANT's week, not one account's:
- * a co-planter answering while the lead is away is the same week, and the
- * unique index says so.
- */
-export async function listRecentCheckins(
-  churchId: string,
-  asOf: Date = new Date(),
-  weeks: number = CHECKIN_HISTORY_WEEKS
-): Promise<PlanterCheckin[]> {
-  const earliest = recentWeekStarts(asOf, weeks)[0];
-
-  const rows = await db
-    .select()
-    .from(planterCheckins)
-    .where(
-      and(
-        eq(planterCheckins.churchId, churchId),
-        gte(planterCheckins.weekStart, earliest)
-      )
-    )
-    .orderBy(desc(planterCheckins.weekStart));
-
-  return rows.reverse();
 }
 
 // ----------------------------------------------------------------------------

@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+
+import {
+  SRC,
+  codeOf,
+  declaresDirective,
+  rel,
+} from "@/lib/auth/server-action-surface";
+import { chainTo, clientClosure } from "@/lib/testing/client-bundle";
 
 // ============================================================================
 // WHAT THIS FILE EXISTS TO CATCH, and why the sibling suite could not.
@@ -38,118 +46,17 @@ import { test } from "node:test";
 //
 // It runs in `pnpm test`, a required CI step, so the class of bug now fails
 // before a preview exists rather than in a planter's browser.
+//
+// The walk itself lives in `@/lib/testing/client-bundle` since the same class
+// recurred on /phase (#602), and `src/db/client-boundary.bundle.test.ts`
+// sweeps EVERY `"use client"` entry with it. This file keeps the
+// track-specific rules: the named server modules and the re-export shape.
 // ============================================================================
 
-const SRC = path.join(process.cwd(), "src");
 const PICKER = path.join(SRC, "components/tasks/template-picker.tsx");
 
 /** The db handle whose module scope calls `neon()`. The thing to stay away from. */
 const DB_ENTRY = path.join(SRC, "db/index.ts");
-
-const CODE_CACHE = new Map<string, string>();
-
-/** A module with its comments removed — this file's own prose names `@/db`. */
-function codeOf(file: string): string {
-  const cached = CODE_CACHE.get(file);
-  if (cached !== undefined) return cached;
-
-  const code = readFileSync(file, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
-  CODE_CACHE.set(file, code);
-  return code;
-}
-
-/**
- * Specifiers whose module is actually EMITTED: value imports, side-effect
- * imports, re-exports and `import()`. `import type` is skipped because
- * TypeScript erases it — which is precisely why `templates.ts` may keep its
- * `import type { TaskCategory } from "@/db/schema/tasks"` and still be safe to
- * reach from the browser.
- */
-function valueSpecifiers(code: string): string[] {
-  const statement =
-    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm;
-  const sideEffect = /^\s*import\s*["']([^"']+)["']/gm;
-  const dynamic = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-
-  return [statement, sideEffect, dynamic].flatMap((pattern) =>
-    [...code.matchAll(pattern)].map(([, specifier]) => specifier)
-  );
-}
-
-/** The file a specifier names, or `null` for a bare package. */
-function resolveModule(from: string, specifier: string): string | null {
-  const base = specifier.startsWith("@/")
-    ? path.join(SRC, specifier.slice(2))
-    : specifier.startsWith(".")
-      ? path.resolve(path.dirname(from), specifier)
-      : null;
-  if (base === null) return null;
-
-  for (const candidate of [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    path.join(base, "index.ts"),
-    path.join(base, "index.tsx"),
-  ]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-  }
-  return null;
-}
-
-/**
- * A module's directive prologue — the run of string literals at the top.
- * Anchored there so `"use server"` inside an array or a regex further down
- * cannot be mistaken for a directive, and written without requiring the
- * semicolon: `"use server"` without one is the same directive (#265 r2).
- */
-const PROLOGUE = /^(?:\s*(?:"[^"\n]*"|'[^'\n]*')\s*;?)*/;
-
-function declaresDirective(code: string, directive: string): boolean {
-  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
-  return new RegExp(`["']${directive}["']`).test(prologue);
-}
-
-const rel = (full: string) => path.relative(process.cwd(), full);
-
-/**
- * Every module the browser would load for `entry`, with the parent that pulled
- * each one in so a failure can print the chain rather than just the verdict.
- *
- * A `"use server"` module is a BOUNDARY, not an import: the client receives a
- * reference and the body stays on the server. So picker →
- * `app/(dashboard)/tasks/actions.ts` → `@/db` is not a bundle path, and
- * traversing it would make this test fail on correct code.
- */
-function clientClosure(entry: string): {
-  seen: Set<string>;
-  parents: Map<string, string>;
-} {
-  const seen = new Set<string>();
-  const parents = new Map<string, string>();
-  const queue = [entry];
-
-  while (queue.length > 0) {
-    const full = queue.pop()!;
-    if (seen.has(full)) continue;
-    seen.add(full);
-
-    if (full !== entry && declaresDirective(codeOf(full), "use server")) {
-      continue;
-    }
-
-    for (const specifier of valueSpecifiers(codeOf(full))) {
-      const resolved = resolveModule(full, specifier);
-      if (resolved === null || seen.has(resolved)) continue;
-      parents.set(resolved, full);
-      queue.push(resolved);
-    }
-  }
-
-  return { seen, parents };
-}
 
 // ----------------------------------------------------------------------------
 
@@ -175,16 +82,7 @@ test("no client-bundle path from the template picker reaches the database", () =
     "the walk did not even reach templates.ts — the resolver is broken"
   );
 
-  /** picker → … → target, so a failure names the edge to delete. */
-  const chain = (target: string): string => {
-    const steps = [target];
-    let at = parents.get(target);
-    while (at !== undefined && !steps.includes(at)) {
-      steps.push(at);
-      at = parents.get(at);
-    }
-    return steps.reverse().map(rel).join("\n  → ");
-  };
+  const chain = (target: string): string => chainTo(target, parents);
 
   assert.ok(
     !seen.has(DB_ENTRY),
