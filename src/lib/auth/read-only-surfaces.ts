@@ -175,7 +175,7 @@ export type ChecklistRow =
  * next person. Every entry here is a verb this product's own write affordances
  * actually use.
  *
- * THREE DELIBERATE ABSENCES, each a decision rather than an oversight:
+ * TWO DELIBERATE ABSENCES, each a decision rather than an oversight:
  *
  *   * "Generate" — the Documents row's whole verdict is that generating is a
  *     `read` (`GET /api/documents/[templateId]`), so /documents telling every
@@ -183,13 +183,17 @@ export type ChecklistRow =
  *     would flag the one row this file says must stay ungated.
  *   * "View", "Monitor" — reads. /teams/org-chart and /teams/health address
  *     everybody honestly.
- *   * "Manage", "Organize" — softer, and they cover /people, /teams and
- *     /tasks, whose subtitles ("Manage your contacts and pipeline",
- *     "Organize, staff, and track your ministry teams", "Manage your tasks and
- *     follow-ups") are the same defect in a lower register. They are NOT
- *     widened in here, because widening the list without fixing those pages
- *     just moves the debt into an allowlist. #668 owns them, and adding the two
- *     verbs is one of its acceptance criteria.
+ *
+ * "MANAGE" AND "ORGANIZE" ARE IN THE LIST AND WERE NOT ALWAYS (#668). They are
+ * softer than the rest — an umbrella over a set of writes rather than the name
+ * of one — and they covered exactly three pages: /people ("Manage your contacts
+ * and pipeline"), /teams ("Organize, staff, and track your ministry teams") and
+ * /tasks ("Manage your tasks and follow-ups"), the same defect in a lower
+ * register. #666 left them OUT on purpose, because a verb list widened while
+ * the pages still say those words has to grow an allowlist to stay green, and
+ * an allowlist is where a defect goes to become permanent. They went in with
+ * the three fixes, in one change, so the scan holds the line from the commit it
+ * learned the words.
  */
 const WRITE_IMPERATIVES = [
   "Add",
@@ -201,8 +205,10 @@ const WRITE_IMPERATIVES = [
   "Edit",
   "Import",
   "Invite",
+  "Manage",
   "Name",
   "New",
+  "Organize",
   "Pick",
   "Record",
   "Remove",
@@ -232,10 +238,18 @@ const WRITE_IMPERATIVES = [
  * scans every `(dashboard)` page's subtitle with it, which is what turns the
  * fourth instance into a failing test instead of a fourth issue — it found
  * /meetings' "Schedule, track, and analyze all your meetings" while this very
- * fix was being written. And each surface's presentation module tests its own
- * two branches with it (`launch/presentation.ts`, `communication/presentation.ts`,
- * `meetings/copy.ts`), because a closed verb list cannot police a sentence it
- * has never seen and those tests pin the exact strings.
+ * fix was being written. And `CAPABILITY_MATCHED_SUBTITLES` in that same file
+ * tests both branches of every surface that HAS two, because a closed verb list
+ * cannot police a sentence it has never seen and that table pins the exact
+ * strings.
+ *
+ * THE TABLE IS NOT AN ADDENDUM TO THE SCAN — IT IS THE HALF THAT MAKES IT
+ * TOTAL (#668). Matching a sentence to a seat necessarily routes it through a
+ * helper, and a helper call is not a literal, so every surface this rule fixes
+ * DISAPPEARS from the scan by construction. Five had, by the end of #668. The
+ * scan therefore refuses a page whose subtitle is a helper call it cannot find
+ * in the table, which is what stops "extract it to a function" being the way to
+ * opt out of the rule.
  */
 export function readsAsAnImperative(copy: string): boolean {
   const firstWord = copy.trimStart().split(/[^A-Za-z']/, 1)[0];
@@ -276,7 +290,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
       "src/components/people/pipeline-view.tsx",
       "src/components/people/pipeline-card.tsx",
     ],
-    note: "Export stays: `exportPeopleAction` is `read`, so hiding it would be stricter than the server. There are no bulk actions and no per-row menu on this list — the row is a plain link — so those two clauses had nothing to hide.",
+    note: 'Export stays: `exportPeopleAction` is `read`, so hiding it would be stricter than the server. There are no bulk actions and no per-row menu on this list — the row is a plain link — so those two clauses had nothing to hide. THE HEADER IS PART OF THE ROW TOO (#668): the subtitle read "Manage your contacts and pipeline" to every seat, over a header whose import, quick add and Add Person controls were already hidden from a Member. "Manage" is the same defect as the hub\'s "Send" in a lower register — softer, naming no single write, which is why it survived two passes — and it is in `WRITE_IMPERATIVES` now. Both branches are `peopleDirectorySubtitle` in `src/lib/people/presentation.ts`.',
   },
   {
     surface:
@@ -351,6 +365,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     survives:
       "Completing and reopening a task ASSIGNED TO THE VIEWER. Those are `tasks.own` (SEATED), which a Member holds, and the subject half is checked server-side by `assertMayActOnTask`. The row's own complete control is therefore gated on `task.assignedToId === viewer`, not on the seat — the one place this sweep asks a question about WHOSE row it is rather than what the seat may do.",
+    note: 'THE HEADER IS PART OF THE ROW TOO (#668), and this is the one surface of the three where matching the sentence to the seat was a COPY DECISION rather than a translation. "Manage your tasks and follow-ups" was half wrong, not wholly wrong: "your tasks" is partly true of a Member, because of the survival above — so describing the list and stopping (the shape /people and /teams take) would UNDER-claim, telling a Member with three assigned tasks that this is a page to look at while the complete control sits on each of their own rows. An over-hide in sentence form is the same defect pointed the other way. The Member\'s subtitle therefore names the verb they hold, and its second clause is an imperative on purpose: the rule was never "no imperatives", it is "no imperative for a write this reader would be refused". WHICH LIST IT MAY NAME IS DECIDED BY THE DEFAULT VIEW, not by the page\'s scope — `parseTaskListSearchParams` defaults `view` to `my_tasks`, so a draft reading "Your plant\'s tasks and follow-ups" described a list one toggle away from the one on screen. It reads "Your tasks and your plant\'s — complete the ones assigned to you", naming the toggle\'s two views in its order. Both branches are `taskListSubtitle` in `src/lib/tasks/presentation.ts`, pinned in `CAPABILITY_MATCHED_SUBTITLES`; its own `presentation.test.ts` additionally asserts the PROMISE against `heldCapabilities` and `mayActOnTaskRow`, so a later narrowing of `tasks.own` fails there instead of leaving the sentence quietly offering a refused control.',
   },
   {
     surface:
@@ -361,12 +376,14 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: [
+      "src/app/(dashboard)/teams/page.tsx",
       "src/components/ministry-teams/teams-dashboard.tsx",
       "src/components/ministry-teams/members-roles-tab.tsx",
       "src/components/ministry-teams/responsibilities-tab.tsx",
       "src/components/ministry-teams/training-tab.tsx",
       "src/components/ministry-teams/meetings-tab.tsx",
     ],
+    note: 'THE HEADER IS PART OF THE ROW TOO (#668). The list page carried no capability read at all — every control on it belongs to `TeamsDashboard`, which asks `useCan("teams.write")` — while its subtitle told every seat to "Organize, staff, and track your ministry teams". A Member holds the third verb and neither of the first two, on a page whose New Team button they are already not shown. The page now asks `holdsSeatFor(user, "teams.write")` for its own header, and both branches are `teamsListSubtitle` in `src/lib/ministry-teams/presentation.ts`. The Member\'s sentence keeps the verb that was theirs: tracking is reading.',
     survives:
       "NOTHING, AND THE FRD'S THIRD EXCEPTION CANNOT SHIP YET — ruled here for #499. `ministry_teams.leader_id` references `persons.id`; a session names a `users.id`; and there is no column joining them until AS-013's registration link lands. So no rendered surface can ask 'am I this team's leader?', and writing `team.leaderId === user.id` would compare two different id spaces and be false for everyone forever. `seat-rules.ts` already records the server half of this residual — every teams write sits at `teams.write` (ADMIN_PLUS) for the same reason — so hiding all of them matches what the server does today. Retired by the account-to-person link, which restores both halves at once.",
   },

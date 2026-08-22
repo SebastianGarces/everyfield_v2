@@ -22,6 +22,7 @@ import {
   PEOPLE_PAGE_SIZE,
 } from "@/lib/people/list-params";
 import { getPipelineData } from "@/lib/people/pipeline";
+import { peopleDirectorySubtitle } from "@/lib/people/presentation";
 import { listPeople } from "@/lib/people/service";
 import { listTags } from "@/lib/people/tags";
 
@@ -92,8 +93,9 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">People</h1>
+              {/* Capability-matched header (#668). See @/lib/people/presentation. */}
               <p className="text-muted-foreground">
-                Manage your contacts and pipeline
+                {peopleDirectorySubtitle(canWrite)}
               </p>
             </div>
             <div className="flex items-center gap-2">

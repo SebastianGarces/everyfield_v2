@@ -15,6 +15,7 @@ import {
   type TaskListView,
 } from "@/lib/tasks/list-params";
 import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
+import { taskListSubtitle } from "@/lib/tasks/presentation";
 import { getTaskCounts } from "@/lib/tasks/service";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 import { FOLLOW_UP_STALE_THRESHOLD_DAYS } from "@/lib/phase-engine/signals/build-fact-snapshot";
@@ -117,8 +118,9 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
+              {/* Capability-matched header (#668). See @/lib/tasks/presentation. */}
               <p className="text-muted-foreground text-pretty">
-                Manage your tasks and follow-ups
+                {taskListSubtitle(canWrite)}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:shrink-0">

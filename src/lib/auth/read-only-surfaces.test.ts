@@ -22,6 +22,11 @@ import {
   requiresPlantTenancy,
   type Capability,
 } from "@/lib/auth/seat-rules";
+import { communicationHubSubtitle } from "@/lib/communication/presentation";
+import { meetingsListSubtitle } from "@/lib/meetings/copy";
+import { teamsListSubtitle } from "@/lib/ministry-teams/presentation";
+import { peopleDirectorySubtitle } from "@/lib/people/presentation";
+import { taskListSubtitle } from "@/lib/tasks/presentation";
 
 // ============================================================================
 // THE CHECKLIST IS WALKED BY A TEST, NOT BY A PERSON — AS-020 (#499).
@@ -402,12 +407,10 @@ test("no checklist surface gates a control on `disabled` instead of hiding it", 
 /**
  * The one-line subtitle under a page's `<h1>`, when it is a plain literal.
  *
- * A page whose subtitle is a HELPER CALL has no literal here and is skipped —
- * which is the point rather than a gap: a capability-conditional sentence
- * cannot be a literal, so routing it through a presentation module is exactly
- * what makes it disappear from this scan and appear in that module's own test,
- * where both branches get checked (`communication/presentation.test.ts`,
- * `meetings/copy.ts` via `ruled-copy.test.ts`).
+ * A page whose subtitle is a HELPER CALL has no literal here. That is not a
+ * gap and not an exemption: `headerSubtitleHelper` below reads the callee's
+ * name instead, and the scan requires it to appear in
+ * `CAPABILITY_MATCHED_SUBTITLES`, where both of its branches are pinned.
  */
 function headerSubtitle(code: string): string | null {
   // `[\s{}]*` because `stripComments` reduces a `{/* … */}` between the two
@@ -418,6 +421,183 @@ function headerSubtitle(code: string): string | null {
     );
   return match ? match[1].replace(/\s+/g, " ") : null;
 }
+
+/**
+ * The NAME of the function a page's subtitle calls, when it calls one.
+ *
+ * The counterpart to `headerSubtitle`, and the reason the scan is total.
+ * Matching a sentence to a seat necessarily makes it an expression, so every
+ * surface this rule fixes stops being a literal — five of them by the end of
+ * #668. Reading the callee is what lets the scan keep asking a question about a
+ * page it can no longer read the words of.
+ */
+function headerSubtitleHelper(code: string): string | null {
+  const match =
+    /<h1[^>]*>[\s\S]*?<\/h1>[\s{}]*<p className="text-muted-foreground[^"]*">\s*\{\s*([A-Za-z_$][\w$]*)\s*\(/.exec(
+      code
+    );
+  return match ? match[1] : null;
+}
+
+// ----------------------------------------------------------------------------
+// THE CAPABILITY-MATCHED SUBTITLES — every surface whose header has two
+// branches, with both of them pinned.
+// ----------------------------------------------------------------------------
+
+/**
+ * One row per surface that says a different sentence to a reader who may not
+ * write, and the whole of what this repo claims about each.
+ *
+ * WHY A TABLE AND NOT A TEST PER MODULE. #666 and #668 each fixed surfaces by
+ * hand and each wrote a per-module test that asserted the same three things,
+ * which made the shared rule something every surface re-implemented rather than
+ * inherited. Worse, a per-module test only covers the modules somebody
+ * remembered to write one for, and the scan above cannot see any of these pages
+ * at all — a helper call is not a literal. So a new surface could route its
+ * subtitle through a function, skip the test, and read "Manage your X" to every
+ * seat with the whole suite green. The table closes that: the scan REFUSES a
+ * page whose subtitle helper has no row here.
+ *
+ * WHAT A ROW PROVES, beyond the two strings:
+ *
+ *   * The writer's sentence reads as an imperative and the reader's does not,
+ *     which is the shared rule actually being run rather than described.
+ *   * The page passes the MATCHING capability in. Pinning the strings says
+ *     nothing about which reader gets which, so an inverted ternary or the
+ *     wrong boolean at the call site would otherwise fail nothing.
+ */
+const CAPABILITY_MATCHED_SUBTITLES = [
+  {
+    page: "src/app/(dashboard)/people/page.tsx",
+    helper: "peopleDirectorySubtitle",
+    capability: "people.write",
+    subtitle: peopleDirectorySubtitle,
+    writer: "Manage your contacts and pipeline",
+    reader: "Your plant's contacts, and where each one is in the pipeline",
+  },
+  {
+    page: "src/app/(dashboard)/teams/page.tsx",
+    helper: "teamsListSubtitle",
+    capability: "teams.write",
+    subtitle: teamsListSubtitle,
+    writer: "Organize, staff, and track your ministry teams",
+    reader: "Your plant's ministry teams, and how each one is staffed",
+  },
+  {
+    page: "src/app/(dashboard)/tasks/page.tsx",
+    helper: "taskListSubtitle",
+    capability: "tasks.write",
+    subtitle: taskListSubtitle,
+    writer: "Manage your tasks and follow-ups",
+    // NOT "your plant's tasks…": `parseTaskListSearchParams` defaults the view
+    // to `my_tasks`, so a Member lands on their own rows and the plant-wide
+    // list is one toggle away. The sentence names both, in the order the toggle
+    // offers them, and then the one verb a Member holds (`tasks.own`).
+    reader: "Your tasks and your plant's — complete the ones assigned to you",
+  },
+  {
+    page: "src/app/(dashboard)/meetings/page.tsx",
+    helper: "meetingsListSubtitle",
+    capability: "meetings.write",
+    subtitle: meetingsListSubtitle,
+    writer: "Schedule, track, and analyze all your meetings",
+    reader: "Your plant's meetings, upcoming and past",
+  },
+  {
+    page: "src/app/(dashboard)/communication/page.tsx",
+    helper: "communicationHubSubtitle",
+    capability: "communication.send",
+    subtitle: communicationHubSubtitle,
+    writer: "Send messages and track communication with your people",
+    reader: "What your plant has sent, and how it was delivered",
+  },
+] as const satisfies readonly {
+  page: string;
+  helper: string;
+  capability: Capability;
+  subtitle: (canWrite: boolean) => string;
+  writer: string;
+  reader: string;
+}[];
+
+test("every capability-matched subtitle asks the holder and tells everyone else", () => {
+  for (const row of CAPABILITY_MATCHED_SUBTITLES) {
+    assert.equal(
+      row.subtitle(true),
+      row.writer,
+      `${row.helper}: the writer's sentence changed — re-read whether it still matches ${row.capability}`
+    );
+    assert.ok(
+      readsAsAnImperative(row.writer),
+      `${row.helper}: the seat that holds ${row.capability} is the one this header may address, and its sentence names no write verb`
+    );
+
+    assert.equal(
+      row.subtitle(false),
+      row.reader,
+      `${row.helper}: the reader's sentence changed — re-read whether it still describes what they may do`
+    );
+    assert.ok(
+      !readsAsAnImperative(row.reader),
+      `${row.helper}: the reader's sentence instructs them in a write they do not hold — that is the #655/#659/#666/#668 defect`
+    );
+
+    assert.notEqual(
+      row.writer,
+      row.reader,
+      `${row.helper}: both branches say the same thing, so the boolean buys nothing`
+    );
+  }
+});
+
+test("every capability-matched subtitle is handed the capability it was matched to", () => {
+  // PINNING THE STRINGS SAYS NOTHING ABOUT WHICH READER GETS WHICH. The table
+  // above stays green with the ternary inverted, with `true` hardcoded at the
+  // call site, or with the page asking a DIFFERENT verb — and all three put the
+  // writer's imperative back in front of a Member, which is the whole defect.
+  //
+  // SO THE BOOLEAN IS TRACED, NOT JUST LOOKED FOR. "The page mentions
+  // `teams.write` somewhere and calls the helper somewhere" is satisfied by a
+  // page that reads the seat into a variable it then ignores — verified by
+  // mutation while writing this: `{teamsListSubtitle(true)}` passed that
+  // weaker check with the `holdsSeatFor` line still sitting above it. What is
+  // asserted is the edge: the identifier `holdsSeatFor(user, "<verb>")` is
+  // assigned to is the identifier the helper is called with.
+  const wrong: string[] = [];
+
+  for (const row of CAPABILITY_MATCHED_SUBTITLES) {
+    const full = path.join(process.cwd(), row.page);
+    if (!existsSync(full)) {
+      wrong.push(`${row.page} does not exist — repoint this row`);
+      continue;
+    }
+    const code = codeOf(full);
+
+    const asked = new RegExp(
+      `const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*holdsSeatFor\\([^,]+,\\s*["']${row.capability.replace(".", "\\.")}["']\\s*\\)`
+    ).exec(code);
+    if (!asked) {
+      wrong.push(
+        `${row.page}: no \`const … = holdsSeatFor(user, "${row.capability}")\` to hand ${row.helper}()`
+      );
+      continue;
+    }
+
+    if (
+      !new RegExp(`\\b${row.helper}\\s*\\(\\s*${asked[1]}\\s*\\)`).test(code)
+    ) {
+      wrong.push(
+        `${row.page}: ${row.helper}() is not called with \`${asked[1]}\`, the answer to ${row.capability}`
+      );
+    }
+  }
+
+  assert.deepEqual(
+    wrong,
+    [],
+    `a capability-matched subtitle is not wired to its capability:\n${wrong.join("\n")}\n\nThe page must read the verb into a const and pass THAT const to the helper — a sentence matched to a boolean nobody computed is not matched to anything.`
+  );
+});
 
 test("no dashboard page's subtitle instructs a reader who may not act", () => {
   // THE RULE THE LAST THREE FIXES EACH RE-LEARNED BY HAND. #655, #659 and #666
@@ -467,7 +647,29 @@ test("no dashboard page's subtitle instructs a reader who may not act", () => {
   assert.deepEqual(
     offenders,
     [],
-    `these pages tell every seat to perform a write, and a Member holds almost none of them:\n${offenders.join("\n")}\n\nMatch the sentence to the capability — put both branches in the surface's presentation module, the way src/lib/communication/presentation.ts does (#666).`
+    `these pages tell every seat to perform a write, and a Member holds almost none of them:\n${offenders.join("\n")}\n\nMatch the sentence to the capability — put both branches in the surface's presentation module, the way src/lib/communication/presentation.ts does (#666), and add a row to CAPABILITY_MATCHED_SUBTITLES in this file.`
+  );
+
+  // AND THE WAY OUT OF THE SCAN IS CLOSED. Fixing a subtitle makes it an
+  // expression, so the loop above stops being able to read it — five pages had
+  // vanished that way by the end of #668. A helper call is admitted only when
+  // the table upstairs pins both of its branches; otherwise "extract it to a
+  // function" is a green way to say "Manage your X" to every seat.
+  const unpinned: string[] = [];
+  const pinned = new Set<string>(
+    CAPABILITY_MATCHED_SUBTITLES.map((row) => row.helper)
+  );
+  for (const file of pages) {
+    const helper = headerSubtitleHelper(codeOf(file));
+    if (helper && !pinned.has(helper)) {
+      unpinned.push(`${rel(file)}: {${helper}(…)}`);
+    }
+  }
+
+  assert.deepEqual(
+    unpinned,
+    [],
+    `these pages compute their subtitle, so this scan cannot read the words — and no row pins them:\n${unpinned.join("\n")}\n\nAdd a row to CAPABILITY_MATCHED_SUBTITLES naming the page, the helper, the capability and both sentences.`
   );
 });
 
