@@ -3,7 +3,9 @@ import { test } from "node:test";
 
 import type { Person } from "@/db/schema";
 
-import { setPersonPhoto, type PersonPhotoEffects } from "./service";
+import { personPhotoSrc } from "@/lib/profile-photo";
+
+import { setPersonPhoto, type PersonPhotoEffects } from "./person-photo";
 
 // ----------------------------------------------------------------------------
 // THE ROW STOPS NAMING THE OBJECT BEFORE THE OBJECT GOES (P-024a, P-024b).
@@ -53,7 +55,9 @@ function effectHarness(
     async load() {
       calls.push({ kind: "load" });
       if (fails === "load") throw new Error("select … failed");
-      return personRow(stored);
+      // The KEY, not a row: `setPersonPhoto` needs the old key and nothing else,
+      // and since #654 the church-scoped read hands over exactly that.
+      return { photoKey: stored };
     },
     async write(_churchId, _personId, key) {
       calls.push({ kind: "write", key });
@@ -82,7 +86,10 @@ test("a replacement writes the row FIRST, then drops the object it stopped namin
   assert.deepEqual(harness.kinds(), ["load", "write", "remove"]);
   assert.deepEqual(harness.calls[1], { kind: "write", key: NEW_KEY });
   assert.deepEqual(harness.calls[2], { kind: "remove", key: OLD_KEY });
-  assert.equal(person?.photoUrl, NEW_KEY);
+  // What the CALLER gets back is the route, never the key it was built from
+  // (#654) — this value is a Server Action's return, so it is in the browser.
+  assert.equal(person?.photoSrc, personPhotoSrc(PERSON_A, NEW_KEY));
+  assert.equal(Object.hasOwn(person!, "photoUrl"), false);
 });
 
 test("a removal is the same writer with a null key, and still deletes last", async () => {
@@ -98,7 +105,8 @@ test("a removal is the same writer with a null key, and still deletes last", asy
   assert.deepEqual(harness.kinds(), ["load", "write", "remove"]);
   assert.deepEqual(harness.calls[1], { kind: "write", key: null });
   assert.deepEqual(harness.calls[2], { kind: "remove", key: OLD_KEY });
-  assert.equal(person?.photoUrl, null);
+  // No photo is `undefined`, which is what makes the initials fallback render.
+  assert.equal(person?.photoSrc, undefined);
 });
 
 test("a first upload deletes nothing — there is no object to strand", async () => {
@@ -129,7 +137,7 @@ test("a refused delete leaves garbage, NOT a failed write", async () => {
     harness.effects
   );
 
-  assert.equal(person?.photoUrl, null);
+  assert.equal(person?.photoSrc, undefined);
   assert.deepEqual(harness.kinds(), ["load", "write", "remove"]);
 });
 
@@ -148,7 +156,9 @@ test("a person the church does not own is never written to and never deletes", a
   const effects: PersonPhotoEffects = {
     async load() {
       calls.push({ kind: "load" });
-      // What the church-scoped read answers for another tenant's person.
+      // What the church-scoped read answers for another tenant's person — and
+      // it is a DIFFERENT null from `{ photoKey: null }`, which is a person of
+      // ours who simply has no photo.
       return null;
     },
     async write(_churchId, _personId, key) {

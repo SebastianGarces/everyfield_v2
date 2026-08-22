@@ -219,7 +219,7 @@ const PERSON: PersonForClient = {
   postalCode: null,
   country: "US",
   backgroundCheckStatus: "not_started",
-  photoUrl: null,
+  photoSrc: undefined,
   householdId: null,
   householdRole: null,
   pipelineSortOrder: 0,
