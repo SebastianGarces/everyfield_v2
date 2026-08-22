@@ -133,8 +133,11 @@ async function main() {
     );
     if (failures > 0) process.exitCode = 1;
   } finally {
-    await invalidateSession(hashToken(token));
+    await invalidateSession(await hashToken(token));
   }
 }
 
-await main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
