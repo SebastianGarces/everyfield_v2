@@ -199,6 +199,10 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → setChurchDigestScheduleAction":
     "church.profile",
+  "src/app/(dashboard)/settings/actions.ts → setChurchInactivityThresholdsAction":
+    "church.profile",
+  "src/app/(dashboard)/settings/actions.ts → setChurchProfileFieldAction":
+    "church.profile",
   "src/app/(dashboard)/settings/actions.ts → setChurchTimeZoneAction":
     "church.profile",
   "src/app/(dashboard)/settings/actions.ts → setDigestCadenceAction":
