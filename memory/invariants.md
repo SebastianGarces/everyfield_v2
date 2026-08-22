@@ -306,6 +306,15 @@ Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies
 - ⚖ A credential removed from the repo needs a ROUTE, or the fixture it opens becomes unreachable: `SEED_ADMIN_PASSWORD` is recorded in `.env.local` — gitignored, machine-local, and read by a verifier BEFORE seeding rather than re-chosen.
 - The seed's sentinel probe proves ONE thing: the three `PROTECTED_ACCOUNTS` addresses are absent. It does NOT prove every account is fixture, so widening the seed's fixed oversight pair needs a ruling.
 
+## Live DB Suites
+
+Applies to `pnpm test:live`, `scripts/live-db-*`, and every suite that opts into `LIVE_DB_TESTS`.
+
+- EVERY LIVE SUITE OWNS ITS OWN DATABASE (#594). node:test runs the files as parallel CHILD PROCESSES, so one shared database made each suite's fixtures visible to every sibling's queries mid-write: `seat-owner-uniqueness`'s whole-table census went red on the two-tenancy row `auth/access.test.ts` commits and does not sweep until its own `after()` — red at head, green on a re-run of the identical commit (#586). `scripts/live-db-names.ts` is the ONE derivation, read by BOTH the preload that rewrites `DATABASE_URL` per child and the prepare script that creates the databases, so the set that is created and the set that is run cannot drift.
+- `search_path` IS NOT REACHABLE THROUGH THIS STACK, so schema-per-suite is not the lighter option it looks like: neon-http is STATELESS (every query is its own HTTP request, so a `SET` never survives to the next statement) and `local-neon-http-proxy` drops `?options=…`, reading only the user, password and DATABASE out of the `Neon-Connection-String` header. The honoured database component is what per-suite isolation rides, and `CREATE DATABASE … TEMPLATE` applies the migrations ONCE.
+- …and the proxy reads its MOCK CONTROL PLANE out of the database named in its OWN `PG_CONNECTION_STRING`, never the requested one. `neon_control_plane.endpoints` goes THERE; seeded anywhere else every query is an HTTP 500 "Control plane request failed", which reads like a connection problem and is not.
+- A LIVE SUITE SKIPS ITSELF ON AN UNREACHABLE DATABASE — right for a laptop with no Postgres, and a silent green for a lane whose per-suite databases were never created. So `test:live` runs `scripts/live-db-preflight.ts` BEFORE the runner and exits non-zero naming every missing database: without it a broken setup reports success having asserted nothing, which is #411's "assertions written, never executed" by another door.
+
 ## Date & Time Rendering
 
 → [dates-times](invariants/dates-times.md) — anything rendering or parsing a date.
