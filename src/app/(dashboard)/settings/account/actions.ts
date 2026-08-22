@@ -2,7 +2,7 @@
 
 import { requireSeat } from "@/lib/auth/seats";
 import { refresh } from "next/cache";
-import { unstable_rethrow } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 
 import {
   removeUserAvatar,
@@ -86,6 +86,12 @@ import { getRequestIp } from "@/lib/auth/rate-limit";
 // Nothing here renders in a layout only, so there is no `revalidatePath` that
 // would do the job: the picture in the sidebar and the picture in the modal are
 // one render away from each other.
+//
+// ONE EXCEPTION, and it is the one whose reader LEAVES: `confirmEmailChangeAction`
+// redirects instead, so the tree it would refresh is the tree the redirect
+// replaces (`memory/invariants.md` → Client/Server Data Synchronization: an
+// action whose only caller leaves keeps the destination fresh and drops the
+// refresh). See its body for what the refresh cost when it was there.
 // ============================================================================
 
 /**
@@ -200,21 +206,42 @@ export async function confirmEmailChangeAction(
 ): Promise<EmailChangeConfirmOutcome> {
   const { user } = await requireSeat("self.write");
 
+  let outcome: EmailChangeConfirmOutcome;
+
   try {
-    const outcome = await confirmEmailChange({
+    outcome = await confirmEmailChange({
       actor: user,
       token: typeof token === "string" ? token : "",
       ip: await getRequestIp(),
     });
-
-    if (outcome.ok) refresh();
-
-    return outcome;
   } catch (error) {
     unstable_rethrow(error);
     console.error("[ACCOUNT] confirming an email change failed:", error);
     return { ok: false, message: "We could not confirm that address" };
   }
+
+  // SUCCESS LEAVES, AND THAT IS WHY THIS ONE DOES NOT `refresh()` (#658).
+  //
+  // The address has moved, so the URL the press came from is a spent token and
+  // the identity the tree was rendered for is gone. A redirect answers both:
+  // the reader lands on a page that reads the NEW address out of the session,
+  // and a reload of that page says the same thing instead of the dead-link
+  // sentence a spent `?token=` earns.
+  //
+  // It also takes the outcome off the client. `refresh()` here streamed a tree
+  // patch that had to be applied INSIDE the transition the press opened, and
+  // the transition never settled — the swap committed, the payload arrived
+  // carrying the new address, and the button sat on "Confirming…" forever
+  // (#658; the refusal branch cleared in ~2s, and its only difference is that
+  // it does not revalidate). A redirect is rendered by the server, so no
+  // sentence a reader depends on waits on a transition to commit.
+  //
+  // OUTSIDE THE `try` ON PURPOSE: `redirect()` reports itself by throwing, and
+  // the catch above would classify it as a failed confirmation — the one answer
+  // this endpoint must never give about a change that committed.
+  if (outcome.ok) redirect("/verify-email/confirmed");
+
+  return outcome;
 }
 
 /**

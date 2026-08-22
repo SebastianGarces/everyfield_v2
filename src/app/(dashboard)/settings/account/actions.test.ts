@@ -187,14 +187,14 @@ test("every catch defers to unstable_rethrow before it classifies", () => {
 
 test("every write that changes what the screen shows calls refresh(), and only those", () => {
   // The address and the picture BOTH appear in the Account section and in the
-  // chrome, so those four reconcile the whole tree. The password change
-  // deliberately does not: nothing on screen renders a password, so there is
-  // nothing to re-read and a refresh would be dead work on every rotation.
+  // chrome, so those three reconcile the whole tree. Two do not, for opposite
+  // reasons: the password change has nothing on screen to re-read, and the
+  // CONFIRMATION redirects, so the tree a refresh would patch is the tree the
+  // redirect replaces (the test below owns that one).
   const RECONCILES = new Set([
     "uploadAvatarAction",
     "removeAvatarAction",
     "requestEmailChangeAction",
-    "confirmEmailChangeAction",
   ]);
 
   for (const name of EXPORTS) {
@@ -209,10 +209,28 @@ test("every write that changes what the screen shows calls refresh(), and only t
       continue;
     }
 
+    // Comments off, for the reason the header gives: an endpoint that EXPLAINS
+    // why it does not refresh must be able to write the word.
     assert.equal(
-      body.includes("refresh()"),
+      stripComments(body).includes("refresh()"),
       false,
       `${name} has nothing on screen to reconcile — a refresh here is dead work on every call`
     );
   }
+});
+
+test("the confirmation ends in a redirect, and the redirect sits OUTSIDE the try (#658)", () => {
+  const body = bodyOf("confirmEmailChangeAction");
+
+  assert.match(
+    body,
+    /if \(outcome\.ok\) redirect\("\/verify-email\/confirmed"\);/,
+    "a swap that committed must leave the spent `?token=` URL — the reader who reloads it is told the link is dead about a change that succeeded, and the pane that used to say otherwise waited on a transition that never committed (#658)"
+  );
+
+  const code = stripComments(body);
+  assert.ok(
+    code.indexOf("redirect(") > code.indexOf("} catch (error)"),
+    "redirect() reports itself by THROWING, so a redirect inside the try is caught by the classifier above it and returned as `We could not confirm that address` — about a change that already happened"
+  );
 });

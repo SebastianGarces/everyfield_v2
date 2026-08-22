@@ -10,13 +10,17 @@
 // reading of a rule the server already owns, and it holds no token state to get
 // out of step with the URL that carried one.
 //
-// SUCCESS IS TERMINAL HERE. The address has moved, so the page it came from is
-// about an account identity that no longer holds — `refresh()` in the action
-// re-reads the chrome, and this pane then says what happened and points at
-// Settings rather than leaving a spent button on screen.
+// SUCCESS IS NOT RENDERED HERE AT ALL — the action redirects to
+// `/verify-email/confirmed`, which reads the new address out of the session
+// (#658). So the only state this holds is a REFUSAL, and the pending flag it
+// clears is the one a refusal clears. It used to hold the success sentence too,
+// and that sentence never appeared: the `refresh()` the action paired it with
+// streamed a tree patch into the press's own transition, the transition never
+// committed, and the button sat on "Confirming…" over a change that had
+// already happened. An outcome a reader depends on does not wait on a
+// transition.
 // ============================================================================
 
-import Link from "next/link";
 import { useActionState } from "react";
 
 import { confirmEmailChangeAction } from "@/app/(dashboard)/settings/account/actions";
@@ -37,24 +41,6 @@ export function VerifyEmailConfirm({
     EmailChangeConfirmOutcome | null,
     FormData
   >(async () => confirmEmailChangeAction(token), null);
-
-  if (state?.ok) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Your address is confirmed
-        </h1>
-        <p className="text-muted-foreground text-pretty">
-          You now sign in as <strong>{state.newEmail}</strong>.{" "}
-          <strong>{state.previousEmail}</strong> no longer works, and we have
-          told it about the change.
-        </p>
-        <Button asChild className="cursor-pointer">
-          <Link href="/settings/account">Back to settings</Link>
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <form action={formAction} className="space-y-4">
