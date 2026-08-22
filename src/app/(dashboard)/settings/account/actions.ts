@@ -204,24 +204,88 @@ export async function requestEmailChangeAction(input: {
  */
 export async function confirmEmailChangeAction(
   token: string
-): Promise<EmailChangeConfirmOutcome> {
+): Promise<EmailChangeConfirmRefusal> {
   const { user } = await requireSeat("self.write");
 
+  let outcome: EmailChangeConfirmOutcome;
+
   try {
-    const outcome = await confirmEmailChange({
+    outcome = await confirmEmailChange({
       actor: user,
       token: typeof token === "string" ? token : "",
       ip: await getRequestIp(),
     });
-
-    if (outcome.ok) refresh();
-
-    return outcome;
   } catch (error) {
     unstable_rethrow(error);
     console.error("[ACCOUNT] confirming an email change failed:", error);
     return { ok: false, message: "We could not confirm that address" };
   }
+
+  // SUCCESS LEAVES, AND THAT IS WHY THIS ONE DOES NOT `refresh()` (#658).
+  //
+  // The address has moved, so the URL the press came from is a spent token and
+  // the identity the tree was rendered for is gone. A redirect answers both:
+  // the reader lands on a page that reads the NEW address out of the session,
+  // and a reload of that page says the same thing instead of the dead-link
+  // sentence a spent `?token=` earns.
+  //
+  // It also takes the outcome off the client, which is the half that was
+  // BROKEN. The success sentence used to live in `useActionState`, and the
+  // update that would have shown it shared a transition with the tree patch
+  // `refresh()` streamed into this response — a transition that never
+  // committed. The swap landed, the payload arrived carrying the new address,
+  // and the button sat on "Confirming…" forever, while the refusal branch of
+  // the same component cleared in ~2s.
+  //
+  // …AND THAT WAS BISECTED, AND DID NOT REPRODUCE (#665). Read this before
+  // spending a day on the next one, because the obvious suspects are innocent
+  // and this comment used to point at them.
+  //
+  // Measured on a preview at Next 16.2.2 — the SAME version #658 shipped on, so
+  // no framework bump explains it away. First a 2x2 over the only two things
+  // that differed between this call site and `requestEmailChangeAction`'s:
+  // whether the action calls `refresh()`, and whether the success render keeps
+  // the `<form>` that is mid-submission or early-returns a tree without it
+  // (this component did the latter; `ChangeEmailForm` does not). All four cells
+  // committed, with the search-param and slow-action variants too. Then the
+  // real thing: the exact pre-#662 component and action restored and the whole
+  // flow driven with a live token. The success pane rendered — "You now sign in
+  // as …" — with `x-action-revalidated: 2` on the action response and the
+  // sidebar carrying the new address. It does not strand.
+  //
+  // SO THE RULE IS: no rule about `refresh()` and a press. What #658 hit is
+  // unreproducible on this code and this Next, and nothing here should be
+  // cargo-culted into a third call site — least of all "avoid `refresh()` from
+  // a `useActionState` press", which is what the old wording invited. The
+  // redirect below stays regardless: it is the better UX and it is what makes a
+  // reload honest.
+  //
+  // WHAT A THIRD STRANDED PRESS ACTUALLY WANTS is `memory/invariants.md` →
+  // Client/Server Data Synchronization, whose entries are the shapes that HAVE
+  // been measured to strand — a concurrent push under a transition (#308), and
+  // a message living inside the subtree its own refresh re-renders. This pair
+  // is not one of them, and comparing them again will cost a day and find
+  // nothing.
+  //
+  // …AND THE DESTINATION IS FRESHENED RATHER THAN THE ROUTE BEING LEFT. A
+  // client-side navigation REUSES the layout segments both routes share, and
+  // the sidebar that renders the address is in exactly such a layout — measured
+  // on this branch's preview, the redirect alone landed on a page reading "you
+  // now sign in as 658-gate@…" beside a sidebar still showing
+  // planter1@everyfield.app. `"layout"` because the identity is chrome: it is
+  // on every screen this account can reach, not on the one it landed on
+  // (`memory/invariants.md` → Client/Server Data Synchronization: an action
+  // whose only caller LEAVES keeps the revalidate and drops the refresh).
+  //
+  // OUTSIDE THE `try` ON PURPOSE: `redirect()` reports itself by throwing, and
+  // the catch above would classify it as a failed confirmation — the one answer
+  // this endpoint must never give about a change that committed.
+  if (outcome.ok) {
+    revalidatePath("/", "layout");
+    redirect("/verify-email/confirmed");
+  }
+
+  return outcome;
 }
 
 /**
