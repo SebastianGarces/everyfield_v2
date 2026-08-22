@@ -161,6 +161,7 @@ Applies to `src/lib/phase-engine/**` and the `/phase` surfaces rendering `plant_
 - `getArticles` is request-cached (`React.cache`) and its docblock does NOT say what that costs: a mutate-then-read inside ONE request goes stale. Revalidate and let the next request read, rather than reaching around the cache.
 - A church's published row for a slug overrides the global one in SQL and ONLY in SQL: a JS collapse cannot answer for a RANKED read, because it sees only the rows that survived the `ts_rank` cut and the church's rewritten copy need not be among them. The test pins the ABSENCE of a second implementation, never that reason.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose and never seeded: a prose link duplicating the column renders that link twice. No test catches a violation.
+- ⚖ 2026-08-22 (#631): an aggregate counts the population of the surface it sits on. `/wiki/progress` gets BOTH halves from one `getProgressStats()` — `summariseProgress` intersects the reader's `wiki_progress` rows with the corpus `getArticles` returned — so a completion on an article since unpublished or overridden away cannot outlive its denominator. Never clamp the percentage; the two numbers come from one read or the read is wrong.
 
 ## Generated Documents
 
