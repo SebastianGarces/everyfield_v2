@@ -51,6 +51,25 @@
 // The old MAX_BATCH of 25 needed 27×25 − 60 + 10 = 625s: more than twice the
 // ceiling, which is exactly why the tail of every batch was lost.
 //
+// A PLANT IS NO LONGER ONE CALL (#605). A draft rejected by the judge's own
+// rules is re-prompted, so a plant costs 1–3 completions, each larger than the
+// last, and the arithmetic above is the BEST case rather than the expected one:
+//
+//     tokens(N) = 13500 · N · E[drafts]
+//
+// The eval fleet measured E[drafts] ≈ 1.4 after the correction carries every
+// broken rule forward, which puts N = 10 around 318s of pacing — past the soft
+// budget. MAX_BATCH stays at 10 anyway, and that is a decision rather than an
+// oversight: RUN_BUDGET_MS already stops the run with LIVE pacer numbers, which
+// beat any constant derived from an average, and a deferred plant is lossless
+// (still dirty, first in line next tick). Lowering the constant would move the
+// same truncation earlier and decide it with worse information.
+//
+// What it does cost is throughput: the tail of a full batch now defers more
+// often than it did. That is the trade — per-plant success bought with batch
+// depth — and it is the right way round, because a deferred plant comes back in
+// twelve hours whereas a `failed` one used to come back with nothing at all.
+//
 // None of those constants are load-bearing at runtime: RUN_BUDGET_MS is the
 // real guard, and the pacer re-derives the ceiling and the per-call cost from
 // the provider's own `x-ratelimit-*` headers, so a tier upgrade to 150k TPM
@@ -87,8 +106,11 @@ import {
 } from "@/lib/phase-engine/assessment";
 import {
   isRateLimitDeferral,
+  isSchemaRejection,
   TokenPacer,
+  type JudgeRule,
   type RateLimitEvent,
+  type SchemaRejectionEvent,
 } from "@/lib/phase-engine/judge";
 // Imported from the module rather than the judge barrel: this predicate is
 // paired with `deadlineAt`, which only this runner passes. It joins the barrel
@@ -200,6 +222,14 @@ export interface AssessOutcome {
    * (warn, not error). It is the 5xx counterpart of `time_budget` on a deferral.
    */
   truncatedByDeadline?: boolean;
+  /**
+   * Set on a `failed` outcome the JUDGE'S OWN RULES caused: every draft it
+   * produced broke one, so this names which (#605). It is the third reading of
+   * `failed` and the only one that says what to change — a run reporting
+   * `planter_first_pairing` on four plants is telling you the rubric teaches
+   * that rule badly, which no amount of re-running will fix.
+   */
+  schemaRules?: JudgeRule[];
   error?: string;
 }
 
@@ -227,6 +257,20 @@ export interface AssessRunSummary {
   deferredUnattempted: number;
   /** Subset of `deferred` caused by provider throttling. */
   rateLimited: number;
+  /**
+   * Subset of `failed` the judge's own rules caused: every draft was rejected
+   * (#605). Counted apart from `failed` because the fix is different — a broken
+   * provider is waited out, a rule the judge will not follow is a rubric or
+   * schema problem and the next run will reproduce it exactly.
+   */
+  schemaRejected: number;
+  /**
+   * Drafts rejected and RE-PROMPTED across the whole run, successful ones
+   * included. This is the number that says whether the ladder is carrying the
+   * run: `schemaRejected: 0, schemaRetried: 9` means nine plants were saved by
+   * it, which is a healthy run and an unhealthy rubric.
+   */
+  schemaRetried: number;
   /** Milliseconds this run spent waiting on the token bucket. */
   pacedWaitMs: number;
   /** The TPM ceiling the run actually paced against (header-derived). */
@@ -316,6 +360,10 @@ export async function runAssessmentBatch(
   }
 
   const outcomes: AssessOutcome[] = [];
+  // Re-prompts across the whole run, not per plant: a rubric rule the judge
+  // keeps breaking shows up here as a run-level number even when every plant
+  // eventually complied and nothing failed.
+  let schemaRetried = 0;
 
   // Sequential on purpose: one slow plant must not blow the timeout via a
   // fan-out of concurrent OpenAI calls, and back-pressure is preferable here.
@@ -358,11 +406,29 @@ export async function runAssessmentBatch(
       );
     };
 
+    const onSchemaRejection = (event: SchemaRejectionEvent) => {
+      // The exhausting draft was rejected but never re-prompted, and it is
+      // already counted as `schemaRejected`. Counting it here too would make a
+      // plant that failed after three drafts report two retries it never got.
+      if (!event.exhausted) schemaRetried++;
+      // Warn, not error, and only until the ladder is spent: a re-prompted
+      // draft that then lands is a working assessment, and the line exists so
+      // the RATE is visible before it becomes a failure (#605).
+      console.warn(
+        `[phase-engine/assess] draft ${event.attempt}/${event.maxAttempts} rejected for church ${plant.churchId} ` +
+          `by ${event.rules.join(", ") || "the output schema"}` +
+          (event.exhausted
+            ? "; no drafts left"
+            : "; re-prompting with the rule")
+      );
+    };
+
     try {
       await deps.generateAssessment(plant.churchId, undefined, {
         pacer,
         maxAttempts,
         onRateLimit,
+        onSchemaRejection,
         // The same deadline the loop guard uses, handed to the retry ladder so
         // an in-plant hold can never outlive the run (see RUN_BUDGET_MS).
         deadlineAt,
@@ -395,6 +461,36 @@ export async function runAssessmentBatch(
           status: "deferred",
           attempted: true,
           deferralReason,
+          error: message,
+        });
+        continue;
+      }
+
+      // The judge's own rules refused every draft it wrote (#605). Still a
+      // failure, and deliberately a LOUD one: unlike a 5xx, the next run will
+      // reproduce it exactly, because nothing about the provider was wrong. The
+      // rules are named here and in the message so a `failed` row can be read
+      // without reproducing the run against a live model (AC-3).
+      if (isSchemaRejection(error)) {
+        const truncated = error.reason === "run_budget";
+        const named = error.rules.join(", ") || "the output schema";
+        const line =
+          `[phase-engine/assess] every draft rejected by ${named} for church ${plant.churchId} (${plant.reason}) ` +
+          `after ${error.attempts} draft(s): ${message}`;
+        if (truncated) {
+          // The clock stopped the ladder, so this says nothing about whether a
+          // further draft would have complied — same split as a truncated 5xx.
+          console.warn(`${line} The plant is retried on the next run.`);
+        } else {
+          console.error(line);
+        }
+        outcomes.push({
+          churchId: plant.churchId,
+          reason: plant.reason,
+          status: "failed",
+          attempted: true,
+          truncatedByDeadline: truncated,
+          schemaRules: error.rules,
           error: message,
         });
         continue;
@@ -455,6 +551,8 @@ export async function runAssessmentBatch(
     ).length,
     rateLimited: outcomes.filter((o) => o.deferralReason === "rate_limit")
       .length,
+    schemaRejected: outcomes.filter((o) => o.schemaRules !== undefined).length,
+    schemaRetried,
     pacedWaitMs: stats.totalWaitMs,
     tpmLimit: stats.limitTokens,
     tokensPerAssessment: stats.estimatedTokensPerCall,

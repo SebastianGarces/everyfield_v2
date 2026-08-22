@@ -530,6 +530,26 @@ const WIKI_READ_CALL_SITES = [
  */
 const UNSCOPED_SEARCH = /\bsearchArticles\(\s*[^,)]*\)/;
 
+/**
+ * Any wiki read that TAKES a church — the ones the `churchId` assertion is
+ * about.
+ *
+ * The assertion used to be flat: every file on the list must mention
+ * `churchId`. That was a proxy for "this file threads the session's church",
+ * and it stayed true only while every listed file called one of these. #631
+ * broke the proxy in the right direction: `/wiki/progress` used to scope its
+ * own `getArticles` call and count a SEPARATE unscoped progress read against
+ * it, and the two populations disagreed. The page now renders one per-reader
+ * read that mints the church from the session inside `reads.ts` — which is on
+ * this list and does thread it — so the page threads nothing and is correct.
+ *
+ * The rule is therefore stated as the rule: a file that calls a church-taking
+ * read must pass a church. A file that calls none is vacuously fine, and the
+ * two `doesNotMatch` guards below still cover it if one is ever added.
+ */
+const CHURCH_TAKING_READ =
+  /\b(?:getArticlesByPrefix|getArticleNavigation|getArticles|getWikiNavigation|getPublishedArticleRefs|getArticle|searchArticles)\s*\(/;
+
 /** Reads a repo file; `pnpm test` always runs from the repo root. */
 function readRepoFile(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -549,11 +569,14 @@ test("no wiki read is called without a church", () => {
       UNSCOPED_SLUG_READ,
       `${file} reads a wiki article by slug without passing a church — a church-scoped article resolves to null there (#317)`
     );
-    assert.match(
-      source,
-      /churchId/,
-      `${file} never mentions churchId, so it cannot be passing the session's church (#317)`
-    );
+
+    if (CHURCH_TAKING_READ.test(source)) {
+      assert.match(
+        source,
+        /churchId/,
+        `${file} calls a church-taking wiki read but never mentions churchId, so it cannot be passing the session's church (#317)`
+      );
+    }
   }
 });
 

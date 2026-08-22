@@ -18,6 +18,13 @@
 // SERVER SIDE ONLY, and deliberately: a `"use client"` module that imported this
 // would ship every template body to the browser. `/communication/compose`
 // resolves the auto-suggested template in its PAGE for exactly that reason.
+//
+// WRITE NO PREFIX BEFORE AN OPTIONAL TOKEN. `{{meeting_location}}` brings its
+// own 📍 and `{{meeting_agenda}}` its own "Agenda:", because the merge engine
+// has no conditionals: a prefix typed here survives the value it introduces,
+// and a meeting with no location delivered a bare 📍 (#625) exactly as one with
+// no agenda delivered a bare "Agenda:" (#612). The 📅 below is not that case —
+// a meeting always has a datetime. See `merge.ts`.
 // ============================================================================
 
 import type {
@@ -76,7 +83,7 @@ export const SYSTEM_TEMPLATES: readonly SystemTemplate[] = [
 You're invited to an upcoming {{meeting_type}} hosted by {{church_name}}!
 
 📅 {{meeting_date}}
-📍 {{meeting_location}}
+{{meeting_location}}
 
 {{meeting_agenda}}
 
@@ -113,7 +120,7 @@ Looking forward to seeing you!
 Just a friendly reminder that our {{meeting_type}} is coming up soon!
 
 📅 {{meeting_date}}
-📍 {{meeting_location}}
+{{meeting_location}}
 
 We're looking forward to having you there. If your plans have changed, please let us know:
 
@@ -184,7 +191,7 @@ Just reply to this email — we'd love to hear from you!
 You're invited to our next Orientation session at {{church_name}}!
 
 📅 {{meeting_date}}
-📍 {{meeting_location}}
+{{meeting_location}}
 
 {{meeting_agenda}}
 
@@ -235,7 +242,7 @@ See you there!
 Here are the details for our next {{meeting_type}}:
 
 📅 {{meeting_date}}
-📍 {{meeting_location}}
+{{meeting_location}}
 
 {{meeting_agenda}}
 

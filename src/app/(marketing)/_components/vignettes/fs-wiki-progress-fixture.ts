@@ -5,7 +5,7 @@
 // Source: Daniel Reyes' reading progress at Redemption Hill Church as of
 // 2026-08-04, read read-only from the dev database. The app's own read layer
 // for this page is session-scoped — `getProgressStats()` and
-// `getLastInProgress()` (src/lib/wiki/progress.ts) both start from
+// `getLastInProgress()` (src/lib/wiki/reads.ts) both start from
 // `getCurrentSession()`, which does not exist outside a request — so the
 // snapshot script ran their queries against that user's id directly and then
 // applied the page's projection verbatim: the CATEGORY_NAMES table, the

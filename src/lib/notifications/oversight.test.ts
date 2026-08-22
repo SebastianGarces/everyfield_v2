@@ -432,10 +432,19 @@ test("no page hardcodes its own version of the consent promise", () => {
   // sharing panel keeps its URL and the teaser moved from the deleted
   // `/settings` index into the Church section; each is now one component file,
   // and both still take their copy from `categories.ts`.
+  //
+  // The two ACCEPTANCE screens joined them in #620 (CS-013). They make the same
+  // promise at the moment it is most load-bearing — the planter is about to
+  // consent — so they are the surfaces least able to afford a hand-written
+  // second version of it. The association one is a modal section too; only the
+  // registration form is still a route of its own.
   const surfaces = {
     "/settings/church": "../../components/settings/sections/church-section.tsx",
     "/settings/sharing":
       "../../components/settings/sections/sharing-section.tsx",
+    "/register?invitation=": "../../app/(auth)/register/register-form.tsx",
+    "/settings/association":
+      "../../components/settings/sections/association-section.tsx",
   } as const;
 
   for (const [route, relative] of Object.entries(surfaces)) {
@@ -457,6 +466,14 @@ test("no page hardcodes its own version of the consent promise", () => {
       /unless you turn sharing on/i,
       /get no updates/i,
       /reach them either way/i,
+      // ADDED BY #620's REVIEW. A page-local reversibility promise is the
+      // specific drift CS-013 nearly shipped: the association screen's own
+      // prose said accepting starts the plant sharing "all of which you can
+      // change afterwards", while six of the seven toggles have no switch and
+      // the directory listing is ungated. The three regexes above catch a page
+      // rewriting the SHARING promise; this one catches a page inventing a
+      // CONTROL promise, which is the same failure aimed at a different claim.
+      /you can change/i,
     ]) {
       assert.doesNotMatch(
         rendered,

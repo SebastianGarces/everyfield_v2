@@ -1425,10 +1425,6 @@ async function cleanEvalData(): Promise<void> {
     .delete(organizationInvitations)
     .where(eq(organizationInvitations.sendingNetworkId, networkId));
 
-  if (evalUserIds.length > 0) {
-    await db.delete(users).where(inArray(users.id, evalUserIds));
-  }
-
   if (churchIds.length > 0) {
     // THE SWEEP THAT DOES NOT NEED MAINTAINING.
     //
@@ -1445,6 +1441,15 @@ async function cleanEvalData(): Promise<void> {
     // lap, so a dependency chain of any depth drains without anybody encoding
     // its order — and a table added next month is swept without a code change.
     await sweepChurchScopedRows(churchIds);
+
+    // THE EVAL USERS COME OUT AFTER THAT SWEEP, NOT BEFORE IT — same lesson one
+    // table further out. They used to be deleted up with the invitations, which
+    // worked for as long as nothing but seeded rows named them; the moment
+    // somebody sent a communication against the corpus, `communications
+    // .created_by_id` pointed at an eval user and a plain re-run of this seeder
+    // died on that FK. The row blocking it is CHURCH-scoped, so the generic
+    // sweep already clears it — the delete just has to happen on the far side.
+    await db.delete(users).where(inArray(users.id, evalUserIds));
 
     // A user pointing INTO an eval church but not carrying an eval email —
     // anyone who registered against the corpus — blocks the church delete on
