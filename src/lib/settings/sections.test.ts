@@ -228,7 +228,10 @@ test("the fragment grammar: what opens settings, and on what", () => {
   // interesting cases are the ones that must NOT be `null` and the ones that
   // must be.
   for (const section of SETTINGS_SECTIONS) {
-    assert.equal(settingsSectionFromHash(`#settings/${section.id}`), section.id);
+    assert.equal(
+      settingsSectionFromHash(`#settings/${section.id}`),
+      section.id
+    );
     // With and without the `#`, because `location.hash` carries one and the
     // redirect pages have already stripped theirs.
     assert.equal(settingsSectionFromHash(`settings/${section.id}`), section.id);

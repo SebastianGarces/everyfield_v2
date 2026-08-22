@@ -422,7 +422,8 @@ function SectionBody({
   // the pane showed grey rectangles for ever with no way out.
   if (!result.ok) {
     if (result.reason === "unauthorized") return <SectionSignedOut />;
-    if (result.reason === "failed") return <SectionUnavailable retry={onRetry} />;
+    if (result.reason === "failed")
+      return <SectionUnavailable retry={onRetry} />;
     return <SectionRefused activeId={activeId} retry={onRetry} />;
   }
 

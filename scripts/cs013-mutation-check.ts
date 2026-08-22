@@ -103,8 +103,7 @@ const MUTATIONS: Mutation[] = [
   {
     claim: "the association read states the consent before accepting",
     file: "src/lib/settings/section-data.ts",
-    from:
-      "      consent: associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null,\n",
+    from: "      consent: associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null,\n",
     to: "      consent: null,\n",
     suite: DEFAULTS_SUITE,
   },
@@ -137,7 +136,7 @@ const MUTATIONS: Mutation[] = [
     // and a quotation rots.
     from:
       '  "Four things reach them either way, because the relationship itself is theirs too:' +
-      ' when you accept their invitation, when you decline one, when your association with them ends,' +
+      " when you accept their invitation, when you decline one, when your association with them ends," +
       ' and when you close something you were sharing.",\n] as const;',
     to: "] as const;",
     suite: COPY_SUITE,
