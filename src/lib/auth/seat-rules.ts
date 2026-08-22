@@ -324,6 +324,23 @@ const CAPABILITIES = {
 export type Capability = keyof typeof CAPABILITIES;
 
 /**
+ * EVERY VERB, AS VALUES — read off the table rather than restated beside it.
+ *
+ * `heldCapabilities` below is the only caller, and it needs the keys at
+ * runtime. A hand-written array here would be a second declaration of the
+ * vocabulary that drifts the first time a verb is added, which is the whole
+ * failure mode `CAPABILITIES` exists to prevent; `Object.keys` cannot.
+ *
+ * The cast is the one `Object.keys` always needs — it is typed `string[]`
+ * because a JavaScript object may carry keys its type does not name. This one
+ * cannot: `CAPABILITIES` is an `as const` literal declared in this file and
+ * exported through nothing, so its keys ARE `Capability` by construction.
+ */
+export const ALL_CAPABILITIES: readonly Capability[] = Object.keys(
+  CAPABILITIES
+) as Capability[];
+
+/**
  * WHY AN EXPORT MAY REACH ITS WORK WITHOUT `requireSeat`.
  *
  * TWO DIFFERENT REASONS, and collapsing them was the bug. The set used to be
@@ -433,6 +450,51 @@ export function holdsSeatFor(
 
   if (seats === null) return true;
   return user.seat !== null && seats.includes(user.seat);
+}
+
+/**
+ * Does this verb demand a seat in a plant that EXISTS?
+ *
+ * The question behind it is "is this surface behind the `churchId` wall" — an
+ * account with no `church_id` is refused a `tenancy: "plant"` verb here, and
+ * refused the ROUTE that renders it by the same fact (AS-020's reach argument,
+ * `./read-only-surfaces`). Exposing the tenancy half rather than the whole
+ * `Authority` keeps the table's shape private while letting the checklist
+ * DERIVE which of its rows a coach and an org Member can never see, instead of
+ * restating that list beside it.
+ */
+export function requiresPlantTenancy(capability: Capability): boolean {
+  return CAPABILITIES[capability].tenancy === "plant";
+}
+
+/**
+ * WHICH VERBS THIS ACCOUNT HOLDS — the whole answer, once, for the browser.
+ *
+ * AS-020 makes a write affordance's presence a question about the VIEWER, not
+ * about the screen it sits on, and the screens that render one sit many layers
+ * below the server page, in trees whose shape that page does not know: the
+ * pipeline board's drag targets, a task row's own checkbox. Threading a
+ * `canWrite` boolean down each of those is the signal-threading the Laziness
+ * Protocol names outright, and it puts ONE decision in as many places as there
+ * are layers.
+ *
+ * So the decision is made HERE, once per request, and the client asks for it by
+ * name (`useCan`, `@/components/shared/viewer-capabilities`). A SERVER
+ * component that already holds the session keeps calling `holdsSeatFor`
+ * directly — same table, same answer, one hop fewer — and that split is the RSC
+ * boundary rather than two policies: nothing on this line decides anything, it
+ * only carries what `holdsSeatFor` already said.
+ *
+ * SAFE ON THE WIRE, and deliberately so. The list says what THIS account may
+ * do, which is a thing every control it can see already tells it; it names no
+ * other account, no tenancy id and no row. It is not authorization either —
+ * `requireSeat` refuses the POST — so a browser that edits the array in memory
+ * gets a button that fails.
+ */
+export function heldCapabilities(user: SeatFields): readonly Capability[] {
+  return ALL_CAPABILITIES.filter((capability) =>
+    holdsSeatFor(user, capability)
+  );
 }
 
 /**
