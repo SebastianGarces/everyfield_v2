@@ -1,52 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readsAsAnImperative } from "@/lib/auth/read-only-surfaces";
 import { heldCapabilities } from "@/lib/auth/seat-rules";
 
 import { mayActOnTaskRow } from "./own-duty";
-import { TASKS_SUBTITLE_FOR_A_READER, taskListSubtitle } from "./presentation";
+import { taskListSubtitle } from "./presentation";
 
 // ============================================================================
-// #668 — the Tasks header stops offering a Member the whole of `tasks.write`,
-// WITHOUT taking away the one verb they hold.
+// #668 — the one capability-matched subtitle that makes a CLAIM ABOUT THE
+// PRODUCT, and therefore needs more than a string comparison.
 //
-// This is the one of the three pages where the Member's sentence was a copy
-// decision. /people and /teams hand their non-holder nothing, so the honest
-// sentence describes the page; here `tasks.own` is SEATED, so a Member may
-// complete and reopen a task assigned to them — which means both a too-generous
-// sentence and a too-modest one are wrong, and the second test below is what
-// stops the modest one being written later as a "tidy-up".
+// Both branches of this sentence are pinned by equality in
+// `CAPABILITY_MATCHED_SUBTITLES` (`@/lib/auth/read-only-surfaces.test.ts`) with
+// the other four, and that is all the other four need: they describe a page.
+// This one PROMISES A CONTROL — "complete the ones assigned to you" — so the
+// promise is asserted against the rules that would have to keep it.
+//
+// The failure this exists to catch is the sentence going quietly wrong while
+// the string it is pinned to never changes: narrow `tasks.own` out of SEATED,
+// or stop `mayActOnTaskRow` admitting the assignee, and the subtitle starts
+// offering a Member a control the server refuses — the #668 defect pointing the
+// other way, and one no equality check upstairs would notice.
 // ============================================================================
-
-test("the subtitle asks the seat that may write to manage, and names the Member's own verb", () => {
-  const writer = taskListSubtitle(true);
-  assert.equal(writer, "Manage your tasks and follow-ups");
-  assert.ok(
-    readsAsAnImperative(writer),
-    "the seat that holds `tasks.write` is the one the header may address with it"
-  );
-
-  const member = taskListSubtitle(false);
-  assert.equal(member, TASKS_SUBTITLE_FOR_A_READER);
-  assert.equal(
-    member,
-    "Your plant's tasks and follow-ups — complete the ones assigned to you",
-    "the Member's header names the list AND the one verb they hold; #668's copy decision is this string"
-  );
-  assert.ok(
-    !readsAsAnImperative(member),
-    "'Manage' offered a Member the whole of `tasks.write` — that is the #668 defect"
-  );
-});
 
 test("the verb the Member's sentence promises is one a Member actually holds", () => {
-  // THE SENTENCE MAKES A CLAIM ABOUT THE PRODUCT, so the claim is asserted
-  // against the rules rather than trusted. If `tasks.own` were ever narrowed out
-  // of SEATED, or `mayActOnTaskRow` stopped admitting the assignee, this
-  // subtitle would be promising a Member a control the server refuses — the
-  // #668 defect pointing the other way — and this fails instead of the copy
-  // going quietly wrong.
   const member = {
     seat: "member" as const,
     churchId: "11111111-1111-4111-8111-111111111111",
@@ -64,13 +41,16 @@ test("the verb the Member's sentence promises is one a Member actually holds", (
     "a plant Member now holds `tasks.write` — the header can go back to one sentence for every seat"
   );
 
+  // The sentence a Member reads is the one that carries the promise.
+  assert.match(
+    taskListSubtitle(false),
+    /complete the ones assigned to you/,
+    "the Member's subtitle stopped naming the verb they hold — if that was deliberate, this test is what it has to argue with"
+  );
+
   // The subject half: their OWN row, and only their own.
   assert.ok(
-    mayActOnTaskRow({
-      canWrite: false,
-      assignedToId: "u1",
-      viewerId: "u1",
-    }),
+    mayActOnTaskRow({ canWrite: false, assignedToId: "u1", viewerId: "u1" }),
     "'complete the ones assigned to you' is what this rule must let them do"
   );
   assert.ok(

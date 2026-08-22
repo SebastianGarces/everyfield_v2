@@ -118,10 +118,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
-              {/* The header is capability-matched too (#668), and this is the
-                  one of the three where the Member's sentence had a decision in
-                  it: they hold `tasks.own`, so it names that verb rather than
-                  describing the list. See `@/lib/tasks/presentation`. */}
+              {/* Capability-matched header (#668). See @/lib/tasks/presentation. */}
               <p className="text-muted-foreground text-pretty">
                 {taskListSubtitle(canWrite)}
               </p>

@@ -175,7 +175,7 @@ export type ChecklistRow =
  * next person. Every entry here is a verb this product's own write affordances
  * actually use.
  *
- * THREE DELIBERATE ABSENCES, each a decision rather than an oversight:
+ * TWO DELIBERATE ABSENCES, each a decision rather than an oversight:
  *
  *   * "Generate" — the Documents row's whole verdict is that generating is a
  *     `read` (`GET /api/documents/[templateId]`), so /documents telling every
@@ -238,10 +238,18 @@ const WRITE_IMPERATIVES = [
  * scans every `(dashboard)` page's subtitle with it, which is what turns the
  * fourth instance into a failing test instead of a fourth issue — it found
  * /meetings' "Schedule, track, and analyze all your meetings" while this very
- * fix was being written. And each surface's presentation module tests its own
- * two branches with it (`launch/presentation.ts`, `communication/presentation.ts`,
- * `meetings/copy.ts`), because a closed verb list cannot police a sentence it
- * has never seen and those tests pin the exact strings.
+ * fix was being written. And `CAPABILITY_MATCHED_SUBTITLES` in that same file
+ * tests both branches of every surface that HAS two, because a closed verb list
+ * cannot police a sentence it has never seen and that table pins the exact
+ * strings.
+ *
+ * THE TABLE IS NOT AN ADDENDUM TO THE SCAN — IT IS THE HALF THAT MAKES IT
+ * TOTAL (#668). Matching a sentence to a seat necessarily routes it through a
+ * helper, and a helper call is not a literal, so every surface this rule fixes
+ * DISAPPEARS from the scan by construction. Five had, by the end of #668. The
+ * scan therefore refuses a page whose subtitle is a helper call it cannot find
+ * in the table, which is what stops "extract it to a function" being the way to
+ * opt out of the rule.
  */
 export function readsAsAnImperative(copy: string): boolean {
   const firstWord = copy.trimStart().split(/[^A-Za-z']/, 1)[0];
@@ -357,7 +365,7 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     ],
     survives:
       "Completing and reopening a task ASSIGNED TO THE VIEWER. Those are `tasks.own` (SEATED), which a Member holds, and the subject half is checked server-side by `assertMayActOnTask`. The row's own complete control is therefore gated on `task.assignedToId === viewer`, not on the seat — the one place this sweep asks a question about WHOSE row it is rather than what the seat may do.",
-    note: 'THE HEADER IS PART OF THE ROW TOO (#668), and this is the one surface of the three where matching the sentence to the seat was a COPY DECISION rather than a translation. "Manage your tasks and follow-ups" was half wrong, not wholly wrong: "your tasks" is partly true of a Member, because of the survival above — so describing the list and stopping (the shape /people and /teams take) would UNDER-claim, telling a Member with three assigned tasks that this is a page to look at while the complete control sits on each of their own rows. An over-hide in sentence form is the same defect pointed the other way. The Member\'s subtitle therefore names the list AND the verb they hold — "Your plant\'s tasks and follow-ups — complete the ones assigned to you" — and its second clause is an imperative on purpose: the rule was never "no imperatives", it is "no imperative for a write this reader would be refused". Both branches are `taskListSubtitle` in `src/lib/tasks/presentation.ts`, and its test asserts the promise against `heldCapabilities` and `mayActOnTaskRow` rather than only pinning the string, so a later narrowing of `tasks.own` fails here instead of leaving the sentence quietly wrong.',
+    note: 'THE HEADER IS PART OF THE ROW TOO (#668), and this is the one surface of the three where matching the sentence to the seat was a COPY DECISION rather than a translation. "Manage your tasks and follow-ups" was half wrong, not wholly wrong: "your tasks" is partly true of a Member, because of the survival above — so describing the list and stopping (the shape /people and /teams take) would UNDER-claim, telling a Member with three assigned tasks that this is a page to look at while the complete control sits on each of their own rows. An over-hide in sentence form is the same defect pointed the other way. The Member\'s subtitle therefore names the verb they hold, and its second clause is an imperative on purpose: the rule was never "no imperatives", it is "no imperative for a write this reader would be refused". WHICH LIST IT MAY NAME IS DECIDED BY THE DEFAULT VIEW, not by the page\'s scope — `parseTaskListSearchParams` defaults `view` to `my_tasks`, so a draft reading "Your plant\'s tasks and follow-ups" described a list one toggle away from the one on screen. It reads "Your tasks and your plant\'s — complete the ones assigned to you", naming the toggle\'s two views in its order. Both branches are `taskListSubtitle` in `src/lib/tasks/presentation.ts`, pinned in `CAPABILITY_MATCHED_SUBTITLES`; its own `presentation.test.ts` additionally asserts the PROMISE against `heldCapabilities` and `mayActOnTaskRow`, so a later narrowing of `tasks.own` fails there instead of leaving the sentence quietly offering a refused control.',
   },
   {
     surface:

@@ -1,11 +1,11 @@
 // ============================================================================
 // Ministry Teams — the sentences that depend on the reader's seat (AS-020).
 //
-// Same shape and same reason as `src/lib/people/presentation.ts` and
-// `src/lib/communication/presentation.ts`: the harness has no DOM, so copy
-// inside a `.tsx` is copy no test can read, and a capability-conditional
-// sentence has no literal for the repo-wide subtitle scan to check — it is
-// tested here, on both branches, instead.
+// Same shape and same reason as `src/lib/people/presentation.ts`: the harness
+// has no DOM, so copy inside a `.tsx` is copy no test can read. The rule lives
+// once, in `CAPABILITY_MATCHED_SUBTITLES` (`read-only-surfaces.test.ts`), which
+// pins both branches below by equality and checks the page passes `teams.write`
+// in.
 //
 // `membership-copy.ts` next door holds the two SEAT REFUSALS an assignment can
 // produce, which the service throws and the dialog reads back. These are the
@@ -36,11 +36,8 @@
  * door are all open to them, so the sentence describes the page they actually
  * have.
  */
-export const TEAMS_SUBTITLE_FOR_A_READER =
-  "Your plant's ministry teams, and how each one is staffed";
-
 export function teamsListSubtitle(canWrite: boolean): string {
   return canWrite
     ? "Organize, staff, and track your ministry teams"
-    : TEAMS_SUBTITLE_FOR_A_READER;
+    : "Your plant's ministry teams, and how each one is staffed";
 }

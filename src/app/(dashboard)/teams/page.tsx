@@ -17,12 +17,8 @@ export default async function TeamsPage() {
   }
 
   // AS-020: this page renders no control of its own — `TeamsDashboard` asks
-  // `useCan("teams.write")` for the create affordances — but the HEADER is a
-  // write affordance in sentence form (#668). "Organize, staff, and track"
-  // named three verbs and a Member holds only the third, on a page whose New
-  // Team button they are already not shown. Asked here rather than in the
-  // client because this component holds the session, which is the same table
-  // `requireSeat` refuses the POST with.
+  // `useCan("teams.write")` for those — but the HEADER is a write affordance in
+  // sentence form (#668). See @/lib/ministry-teams/presentation.
   const canWrite = holdsSeatFor(user, "teams.write");
 
   const [teams, staffingSummary] = await Promise.all([
