@@ -173,6 +173,40 @@ export function portfolioSpreadCaption(summary: PortfolioPhaseSummary): string {
 export const PRE_LAUNCH_CAPTION = `Before phase ${LAUNCH_PHASE} — still preparing to launch`;
 export const LAUNCHED_CAPTION = `Phase ${LAUNCH_PHASE} and beyond — launched or past it`;
 
+/**
+ * What an empty PLANT portfolio says — to a reader who may not be able to
+ * change it.
+ *
+ * IT STATES THE CONDITION, IT DOES NOT ISSUE AN INSTRUCTION (#636). "Send
+ * invitations to get started" is an order, and an org Member cannot follow it:
+ * #500 gave them a seat that reads the portfolio and changes nothing, so the
+ * page carries no invite control for them anywhere. Telling somebody to do a
+ * thing the screen does not let them do reads as a broken page, not as a
+ * suggestion.
+ *
+ * The sentence is true for an Owner and a Member alike, so it needs no seat
+ * branch of its own. The CALL TO ACTION is what turns on the seat, and
+ * `EmptyPortfolio` renders it gated on `org.invitation.manage`.
+ *
+ * WHICH SURFACES THESE SERVE, and which state their own condition on purpose.
+ * These two strings are for the empty PLANT portfolio: the `/oversight` index
+ * and the `/oversight/plants` directory, which said the same fact in three
+ * hand-typed wordings until #636 — and the copy is always the one that misses
+ * the fix, which is how the Owner's instruction outlived #500 on the index.
+ *
+ * The sending-church roster and `/oversight/health` are NOT behind these and
+ * should not be folded in. They are different subjects with different
+ * conditions — health adds "after each plant's first assessment" — and neither
+ * carries an imperative, so neither was ever this defect. A shared template
+ * that served all four would need a subject noun, a pronoun and a trailing
+ * condition slot, which is a worse trade than three similar sentences.
+ */
+export const EMPTY_PORTFOLIO_HEADLINE = "No plants yet";
+
+export function emptyPortfolioCaption(scopeLabel: string): string {
+  return `A plant appears here once its planter accepts an invitation from your ${scopeLabel}.`;
+}
+
 // THE COUNTDOWN ITSELF IS NOT HERE. This module carried a byte-for-byte copy
 // of `daysUntilTarget` (`src/lib/launch/countdown.ts`) — written first, in PR
 // #339, and left in place when the canon was extracted. It is gone: two

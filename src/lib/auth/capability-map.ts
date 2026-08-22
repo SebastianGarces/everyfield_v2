@@ -195,9 +195,19 @@ export const CAPABILITY_BY_EXPORT: Readonly<Record<string, string>> = {
     "self.write",
   "src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction":
     "phase.signal",
+  "src/app/(dashboard)/settings/account/actions.ts → changePasswordAction":
+    "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → confirmEmailChangeAction":
+    "self.write",
+  "src/app/(dashboard)/settings/account/actions.ts → requestEmailChangeAction":
+    "self.write",
   "src/app/(dashboard)/settings/actions.ts → clearMyEmailSuppressionAction":
     "self.write",
   "src/app/(dashboard)/settings/actions.ts → setChurchDigestScheduleAction":
+    "church.profile",
+  "src/app/(dashboard)/settings/actions.ts → setChurchInactivityThresholdsAction":
+    "church.profile",
+  "src/app/(dashboard)/settings/actions.ts → setChurchProfileFieldAction":
     "church.profile",
   "src/app/(dashboard)/settings/actions.ts → setChurchTimeZoneAction":
     "church.profile",

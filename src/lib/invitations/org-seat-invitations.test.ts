@@ -649,14 +649,17 @@ test("no empty state offers an invite the reader cannot send (AC 7)", () => {
   // thing on the page.
   for (const [what, code, marker] of [
     [
-      "the oversight index",
-      stripComments(read("app", "(dashboard)", "oversight", "page.tsx")),
-      /\{holdsSeatFor\(user, "org\.invitation\.manage"\) && \(/,
+      // The index and the directory render ONE empty state between them since
+      // #636 — the words and this gate were written out twice, and the copies
+      // had drifted. The component holds the gate for both.
+      "the empty plant portfolio",
+      stripComments(read("components", "oversight", "empty-portfolio.tsx")),
+      /\{canInvite && \(/,
     ],
     [
       "the plants directory",
       stripComments(read("components", "oversight", "plants-directory.tsx")),
-      /\{canInvite && \(/,
+      /canInvite=\{canInvite\}/,
     ],
     [
       "the sending-church roster",
@@ -672,6 +675,7 @@ test("no empty state offers an invite the reader cannot send (AC 7)", () => {
   // …and both pages feed that flag from the capability table rather than from a
   // seat comparison of their own.
   for (const [what, page] of [
+    ["/oversight", read("app", "(dashboard)", "oversight", "page.tsx")],
     [
       "/oversight/plants",
       read("app", "(dashboard)", "oversight", "plants", "page.tsx"),

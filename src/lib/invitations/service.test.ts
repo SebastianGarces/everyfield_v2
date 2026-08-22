@@ -981,6 +981,24 @@ const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
         wellFormed: [{ weekday: 0, hour: 16 }],
         malformed: [{ weekday: 7, hour: 24 }],
       },
+      {
+        // CS-006 (#618). This is the FIRST endpoint in the product that renames
+        // a church after creation, so an anonymous caller reaching it would be
+        // able to rename somebody else's plant — which is exactly why the
+        // sessionless call below matters more here than on a preference switch.
+        // The malformed case is a field the discriminated union has no arm for.
+        name: "setChurchProfileFieldAction",
+        wellFormed: [{ field: "city", value: "Austin" }],
+        malformed: [{ field: "launchDate", value: "2026-09-06" }],
+      },
+      {
+        // CS-009 (#618). The malformed case is the pair INVERTED — each number
+        // is in range on its own and the relationship is not, which is the one
+        // refusal two independent saves could never make.
+        name: "setChurchInactivityThresholdsAction",
+        wellFormed: [{ warningDays: 7, alertDays: 14 }],
+        malformed: [{ warningDays: 30, alertDays: 14 }],
+      },
     ],
   },
   {

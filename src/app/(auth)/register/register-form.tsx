@@ -19,6 +19,7 @@ import {
   type InvitedAs,
 } from "@/lib/invitations/seat-copy";
 import type { SeatTenancyType } from "@/lib/auth/tenancy";
+import { INVITE_ORIGIN_SHARING_CONSENT } from "@/lib/notifications/categories";
 import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
@@ -393,6 +394,44 @@ export function RegisterForm({
         </CardContent>
 
         <CardFooter className="flex flex-col gap-4">
+          {/*
+            CS-013 — WHAT FINISHING SIGN-UP SHARES, READ BEFORE THE BUTTON THAT
+            DOES IT.
+
+            An invited planter's registration IS an acceptance: the action
+            creates their plant and hands straight off to
+            `redeemRegistrationInvitation`, whose accept writes every sharing
+            toggle on (`sharingDefaultsStatement`). So this screen owes the same
+            consent notice `/settings/association` shows, and it sits in the
+            footer directly above "Create account" — the last thing read before
+            the press, rather than a paragraph in the banner at the top that a
+            planter scrolls past on their way to the password field.
+
+            `needsPlantName` is the condition and not a second reading of it:
+            an invited PLANTER is exactly the registrant whose plant is created
+            here and associated by the redemption. A seat invitee joins a plant
+            that already exists and accepts nothing; a cold planter creates no
+            church at all; neither has anything to consent to.
+          */}
+          {needsPlantName && (
+            <div
+              role="note"
+              aria-labelledby="sharing-consent-heading"
+              className="bg-muted/40 w-full space-y-2 rounded-md p-3"
+            >
+              <p id="sharing-consent-heading" className="text-sm font-medium">
+                What {invitation?.invitingOrgName} will see
+              </p>
+              {INVITE_ORIGIN_SHARING_CONSENT.map((line) => (
+                <p
+                  key={line}
+                  className="text-muted-foreground text-sm text-pretty"
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
           <Button
             type="submit"
             className="w-full cursor-pointer"

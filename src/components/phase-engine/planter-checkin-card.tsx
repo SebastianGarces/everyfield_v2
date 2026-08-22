@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import {
+  useEffect,
+  useOptimistic,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 
 import { saveCheckinAction } from "@/app/(dashboard)/phase/checkin-actions";
@@ -18,7 +24,12 @@ import type { PlanterCheckinLevel } from "@/db/schema";
 import {
   CHECKIN_DIMENSIONS,
   CHECKIN_LEVELS,
+  CHECKIN_NOTE_MAX,
+  checkinDraftFrom,
+  completeAnswer,
+  type CheckinAnswer,
   type CheckinDimension,
+  type CheckinDraft,
   type CheckinNudge,
 } from "@/lib/phase-engine/planter-checkin";
 import { cn } from "@/lib/utils";
@@ -38,6 +49,14 @@ import { cn } from "@/lib/utils";
 // THREE LEVELS, ONE TAP (#484 D1). A five-point scale invites deliberation, and
 // this is a question somebody answers honestly in four seconds or not at all.
 // The note is optional and stays optional.
+//
+// AND THE ANSWER CAN BE CHANGED (#634). "Spiritually: steady" typed on Monday
+// morning is a different sentence by Thursday, and a card that takes one
+// answer per week and then locks teaches a planter to answer carefully rather
+// than honestly — which is the one thing this card cannot afford. The write
+// was an upsert on `(church_id, week_start)` from the first commit, so the
+// capability was never missing; the card promised the change in prose and then
+// rendered no control that could make it.
 //
 // EVERY READING HERE IS DETERMINISTIC. The nudge is computed in TypeScript from
 // the planter's own answers (`checkinNudges`). No model reads these answers,
@@ -67,8 +86,8 @@ export interface CheckinWeek {
 }
 
 interface PlanterCheckinCardProps {
-  /** True when the current week has no answer yet — the card asks. */
-  needsAnswer: boolean;
+  /** This week's answer, or `null` when the week is unanswered — the card asks. */
+  thisWeek: CheckinAnswer | null;
   /** Oldest first. Weeks with no answer carry `levels: null`. */
   weeks: CheckinWeek[];
   /** Deterministic runs of three or more strained weeks. */
@@ -76,40 +95,73 @@ interface PlanterCheckinCardProps {
 }
 
 export function PlanterCheckinCard({
-  needsAnswer,
+  thisWeek,
   weeks,
   nudges,
 }: PlanterCheckinCardProps) {
-  const [answers, setAnswers] = useState<
-    Partial<Record<CheckinDimension, PlanterCheckinLevel>>
-  >({});
-  const [note, setNote] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [answered, setAnswered] = useState(!needsAnswer);
 
-  const complete = CHECKIN_DIMENSIONS.every(
-    (dimension) => answers[dimension.key] !== undefined
-  );
+  // `useOptimistic` OVER THE SERVER PROP, never `useState` seeded from it
+  // (invariants → Client/Server Data Synchronization; the reference shape is
+  // `SignalToggle` on this same page). Answering flips the card to its answered
+  // state on the tap, and `refresh()` inside the action reconciles it with the
+  // row that was actually written.
+  const [answeredWeek, setAnsweredWeek] = useOptimistic(thisWeek);
 
-  function submit() {
-    if (!complete) return;
+  // The ONLY local state is "the planter asked to edit". Whether the week is
+  // answered is `answeredWeek`, derived on every render — a latched flag would
+  // go stale the way the `answered` flag this replaces did, and on a page left
+  // open across a Monday it would claim a new week was already answered.
+  const [editing, setEditing] = useState<CheckinDraft | null>(null);
+  const draft = editing ?? (answeredWeek ? null : checkinDraftFrom(null));
 
+  const answer = draft && completeAnswer(draft);
+
+  // Focus is a DOM command, which is the one thing an effect is for — the
+  // repo's `useEffect` rule is about server data, and neither of these reads
+  // any. Both controls UNMOUNT THEMSELVES on click, and an unmounted element
+  // drops focus to `<body>`: a keyboard user who pressed Enter on "Change my
+  // answer" would be thrown to the top of the page, dozens of Tabs from the
+  // form they just opened. Same defect and same remedy as `ResendEmailButton`
+  // (invitations-list.tsx, PR #392 warning (b)); axe cannot see it, because
+  // losing focus is not itself a WCAG failure.
+  const formPanel = useRef<HTMLDivElement>(null);
+  const changeButton = useRef<HTMLButtonElement>(null);
+  const open = draft !== null;
+  const settled = useRef(false);
+
+  useEffect(() => {
+    // NOT ON MOUNT. An unanswered week opens into the form on its own, and a
+    // card that grabs focus from the top of a page nobody asked it to is worse
+    // than the defect. Only the SWITCH between the two panels moves focus.
+    if (!settled.current) {
+      settled.current = true;
+      return;
+    }
+    (open ? formPanel : changeButton).current?.focus();
+  }, [open]);
+
+  function submit(complete: CheckinAnswer) {
     startTransition(async () => {
-      const result = await saveCheckinAction({
-        spiritually: answers.spiritually!,
-        marriageFamily: answers.marriageFamily!,
-        financially: answers.financially!,
-        pace: answers.pace!,
-        note: note.trim() || null,
-      });
+      const changing = answeredWeek !== null;
+      setAnsweredWeek(complete);
+      setEditing(null);
+
+      const result = await saveCheckinAction(complete);
 
       if (!result.success) {
         toast.error(result.error);
+        // Hand the form back with their answers in it. The optimistic week
+        // reverts to server truth when this transition settles.
+        setEditing(checkinDraftFrom(complete));
         return;
       }
 
-      setAnswered(true);
-      toast.success("Thanks — that stays with you.");
+      toast.success(
+        changing
+          ? "Changed — that stays with you."
+          : "Thanks — that stays with you."
+      );
     });
   }
 
@@ -128,13 +180,36 @@ export function PlanterCheckinCard({
       </CardHeader>
 
       <CardContent className="space-y-5">
-        {answered ? (
-          <p className="text-muted-foreground text-sm">
-            You have answered this week. Come back next week — or change your
-            answer any time before then.
-          </p>
+        {draft === null ? (
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-sm">
+              You have answered this week. Come back next week — or change your
+              answer any time before then.
+            </p>
+            <Button
+              ref={changeButton}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setEditing(checkinDraftFrom(answeredWeek))}
+              className="cursor-pointer"
+            >
+              Change my answer
+            </Button>
+          </div>
         ) : (
-          <div className="space-y-4">
+          <div
+            ref={formPanel}
+            // Programmatically focusable, never in the tab order: a pointer
+            // user must not collect an extra Tab stop for a panel they can see.
+            // The focus ring is NOT suppressed — a keyboard user who just
+            // pressed Enter needs to see where focus went, and Tab can never
+            // land here, so the ring only ever appears right after that press.
+            tabIndex={-1}
+            role="group"
+            aria-label="This week's check-in"
+            className="space-y-4"
+          >
             {CHECKIN_DIMENSIONS.map((dimension) => (
               <div key={dimension.key} className="space-y-1.5">
                 <Label className="text-sm font-medium">
@@ -148,14 +223,21 @@ export function PlanterCheckinCard({
                     <button
                       key={level.value}
                       type="button"
-                      data-selected={answers[dimension.key] === level.value}
-                      aria-pressed={answers[dimension.key] === level.value}
+                      data-selected={
+                        draft.answers[dimension.key] === level.value
+                      }
+                      aria-pressed={
+                        draft.answers[dimension.key] === level.value
+                      }
                       disabled={isPending}
                       onClick={() =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [dimension.key]: level.value,
-                        }))
+                        setEditing({
+                          ...draft,
+                          answers: {
+                            ...draft.answers,
+                            [dimension.key]: level.value,
+                          },
+                        })
                       }
                       className={cn(
                         "cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
@@ -179,22 +261,46 @@ export function PlanterCheckinCard({
               </Label>
               <Textarea
                 id="checkin-note"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
+                value={draft.note}
+                onChange={(event) =>
+                  setEditing({ ...draft, note: event.target.value })
+                }
                 disabled={isPending}
                 rows={2}
+                // The server refuses a longer note, and its one refusal message
+                // is about the three levels. Stop it at the keyboard instead.
+                maxLength={CHECKIN_NOTE_MAX}
                 placeholder="Nobody else reads this."
               />
             </div>
 
-            <Button
-              type="button"
-              onClick={submit}
-              disabled={!complete || isPending}
-              className="cursor-pointer"
-            >
-              {isPending ? "Saving..." : "Save this week"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => answer && submit(answer)}
+                disabled={!answer || isPending}
+                className="cursor-pointer"
+              >
+                {isPending
+                  ? "Saving..."
+                  : answeredWeek
+                    ? "Save changes"
+                    : "Save this week"}
+              </Button>
+              {/* Cancel only exists once there is something to cancel BACK to.
+                  On an unanswered week the form is the card. */}
+              {answeredWeek && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setEditing(null)}
+                  disabled={isPending}
+                  className="cursor-pointer"
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
