@@ -89,7 +89,11 @@ function projectDesignSystem() {
         ? path.resolve(base, id)
         : stylesheetEntry(id);
 
-      return { base: path.dirname(file), content: readFileSync(file, "utf8") };
+      return {
+        path: file,
+        base: path.dirname(file),
+        content: readFileSync(file, "utf8"),
+      };
     },
     // No `@plugin` or `@config` in this project; a JS module reaching the
     // loader means one arrived, and an empty stub would hide it.

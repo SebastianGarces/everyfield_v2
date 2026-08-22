@@ -75,7 +75,11 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className="ring-offset-background focus-visible:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden disabled:pointer-events-none">
+          <SheetPrimitive.Close
+            // The same 24x24 target as `DialogContent`'s Close, for the same
+            // reason and at the same cost — see the note there (#639).
+            className="ring-offset-background focus-visible:ring-ring data-[state=open]:bg-secondary absolute top-3 right-3 grid size-6 place-items-center rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden disabled:pointer-events-none"
+          >
             <XIcon className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
