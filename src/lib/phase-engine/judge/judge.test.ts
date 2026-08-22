@@ -9,12 +9,12 @@ import {
   RUBRICS,
   getRubric,
 } from "@/lib/phase-engine/rubric";
-import {
-  insightSchema,
-  judgeOutputSchema,
-  hasBothAudiences,
-  type Insight,
-} from "./schema";
+import { insightSchema, hasBothAudiences, type Insight } from "./schema";
+import { FIXTURE_JUDGE_SCHEMA } from "./testing";
+
+/** The fixture plant's schema — this suite is not about the evidence rule. */
+const judgeOutputSchema = FIXTURE_JUDGE_SCHEMA;
+
 import {
   flattenFacts,
   buildSystemPrompt,

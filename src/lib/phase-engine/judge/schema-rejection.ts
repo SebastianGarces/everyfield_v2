@@ -1,10 +1,11 @@
 // ============================================================================
 // A REJECTED DRAFT, and the ladder that gives up on one (#605).
 //
-// The judge holds its own output to four rules (schema.ts): audience coverage,
-// the observation budget, the network verdict register, and planter-first
-// pairing. A draft that breaks one is refused by the parse, and `generateObject`
-// reports that as `NoObjectGeneratedError`.
+// The judge holds its own output to the rules in `JUDGE_RULES` (schema.ts):
+// audience coverage, the observation budget, the network verdict register,
+// planter-first pairing, and "unknown is not healthy". A draft that breaks one
+// is refused by the parse, and `generateObject` reports that as
+// `NoObjectGeneratedError`.
 //
 // THAT IS NOT A TRANSPORT FAILURE, and the distinction is the whole bug. The
 // provider answered; the answer broke a rule stated in the rubric. Re-sending

@@ -177,6 +177,24 @@ function longDateTimeFormatter(timeZone: string) {
   });
 }
 
+function zonedDateTimeFormatter(timeZone: string) {
+  return formatter(`dateTime:zoned:${timeZone}`, {
+    timeZone,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    // THE ZONE NAME COMES FROM `Intl`, NEVER FROM A HAND-APPENDED SUFFIX. A
+    // literal " UTC" beside a formatter whose `timeZone` somebody later changes
+    // is a label that lies, and `memory/invariants.md` → Date & Time Rendering
+    // puts every zone-bearing string in this module for exactly that reason.
+    timeZoneName: "short",
+  });
+}
+
 function tileFormatter(timeZone: string) {
   return formatter(`tile:${timeZone}`, {
     timeZone,
@@ -234,6 +252,24 @@ export function formatDateTime(
 ): string {
   if (variant === "long") return longDateTimeFormatter(timeZone).format(date);
   return `${shortDateWithoutWeekday(timeZone).format(date)} at ${formatTime(date, timeZone)}`;
+}
+
+/**
+ * `"Thursday, July 30, 2026 at 7:00 PM UTC"` — `formatDateTime` with the zone
+ * SAID OUT LOUD.
+ *
+ * For an instant a reader has to ACT on rather than merely recognise: when a
+ * credential stops working, when a change to their account was made. Every
+ * other surface in the product renders inside a page that already establishes
+ * whose clock it is; an email does not, so a bare "3:30 PM" is read as the
+ * reader's own afternoon and is wrong by up to a day's worth of offset — on a
+ * link that only lives for one day.
+ */
+export function formatDateTimeWithZone(
+  date: Date,
+  timeZone: string = APP_TIME_ZONE
+): string {
+  return zonedDateTimeFormatter(timeZone).format(date);
 }
 
 /**

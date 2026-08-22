@@ -29,6 +29,7 @@ import {
   type PlantInsight,
 } from "@/db/schema";
 import { privacyFeatureForCategory } from "@/lib/phase-engine/oversight/read";
+import { makeSnapshot } from "@/lib/phase-engine/signals/testing";
 
 import {
   assessmentReleasedToOversight,
@@ -202,19 +203,20 @@ test("PE-023: a factor's standing and evidence are the persisted insight rows th
   assert.equal(criticalMass.insights.length, 1);
   assert.equal(criticalMass.insights[0], persisted);
   assert.equal(criticalMass.insights[0].assessmentId, ASSESSMENT_ID);
-  // And the standing is a relabelling of the persisted severity, nothing else.
+  // And the standing is a relabelling of the persisted severity — the one
+  // qualification being #635's, which drops a pass a blind lens never earned.
   assert.equal(criticalMass.standing, standingForSeverity(persisted.severity));
 });
 
 test("PE-023: no standing is invented for a factor the assessment did not raise", () => {
   const scorecard = buildCsfScorecard(
-    makeLatest([makeInsight({ category: "prayer", severity: "info" })])
+    makeLatest([makeInsight({ category: "prayer", severity: "medium" })])
   )!;
 
   assert.equal(scorecard.raisedCount, 1);
   for (const factor of scorecard.factors) {
     if (factor.category === "prayer") {
-      assert.equal(factor.standing, "strength");
+      assert.equal(factor.standing, "watch");
       assert.equal(factor.insights.length, 1);
     } else {
       assert.equal(factor.standing, "not_raised");
@@ -426,4 +428,82 @@ test("the planter's own read is NOT gated", () => {
   const where = planterQuery.slice(planterQuery.indexOf(" where "));
   assert.doesNotMatch(where, /planter_seen_at/);
   assert.doesNotMatch(where, /interval/);
+});
+
+// ----------------------------------------------------------------------------
+// Unknown is not healthy, on the way OUT of storage too (#635).
+//
+// The judge can no longer write a positive insight into a lens that knows
+// nothing. Every assessment stored before that rule existed still can, and the
+// cold-start plant's CSF-1 tile read "Going well · Based on no activity
+// recorded yet" off exactly such a row.
+// ----------------------------------------------------------------------------
+
+test("#635: a positive insight on a lens that knows nothing is not a standing at all", () => {
+  // The fixture snapshot measures nothing, which is the cold-start plant: every
+  // lens `unknown`. `info` is where persistence puts the judge's "positive".
+  const scorecard = buildCsfScorecard(
+    makeLatest([
+      makeInsight({
+        category: "vision_casting",
+        severity: "info",
+        title: "Vision casting is going well",
+        citedFacts: ["isColdStart=true"],
+      }),
+    ])
+  )!;
+
+  const visionCasting = scorecard.factors.find(
+    (f) => f.category === "vision_casting"
+  )!;
+
+  assert.equal(visionCasting.evidence.quality, "unknown");
+  // `not_raised` + `unknown` is what `isInsufficientEvidence` reads, so the
+  // tile renders "we don't have enough information to assess vision casting
+  // yet" instead of the encouraging line. Demoting the standing to `noted` was
+  // the first attempt and left that line on the tile under a quieter badge.
+  assert.equal(visionCasting.standing, "not_raised");
+  assert.deepEqual(visionCasting.insights, []);
+  assert.equal(scorecard.raisedCount, 0);
+});
+
+test("#635: a real observation on a blind lens is untouched — only the pass goes", () => {
+  // The rule is about a verdict resting on an absence, not about blind lenses
+  // being unspeakable. Bryan's own sentence is severity `low` (judge "info").
+  const scorecard = buildCsfScorecard(
+    makeLatest([
+      makeInsight({
+        category: "prayer",
+        severity: "low",
+        title: "We can't see your prayer rhythm yet",
+      }),
+    ])
+  )!;
+
+  const prayer = scorecard.factors.find((f) => f.category === "prayer")!;
+
+  assert.equal(prayer.evidence.quality, "unknown");
+  assert.equal(prayer.standing, "noted");
+  assert.equal(prayer.insights.length, 1);
+});
+
+test("#635: the same insight on a lens that measures something stays a strength", () => {
+  const measured = makeAssessment({ factSnapshot: makeSnapshot() });
+  const scorecard = buildCsfScorecard({
+    assessment: measured,
+    insights: [
+      makeInsight({
+        category: "vision_casting",
+        severity: "info",
+        title: "Your vision-meeting rhythm is holding",
+      }),
+    ],
+  })!;
+
+  const visionCasting = scorecard.factors.find(
+    (f) => f.category === "vision_casting"
+  )!;
+
+  assert.equal(visionCasting.evidence.quality, "measured");
+  assert.equal(visionCasting.standing, "strength");
 });

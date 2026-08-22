@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { FactorTile } from "./csf-scorecard";
-import type { CsfFactorStanding } from "@/lib/phase-engine/assessment/queries";
+import {
+  buildCsfScorecard,
+  type CsfFactorStanding,
+} from "@/lib/phase-engine/assessment/queries";
 
 // ----------------------------------------------------------------------------
 // The tile that says it cannot see (#483, C17) — DOM level.
@@ -108,4 +111,66 @@ test("a measured lens claims nobody's word — it just reports", () => {
   assert.doesNotMatch(text(markup), /Your own answer/);
   assert.doesNotMatch(text(markup), /Insufficient evidence/);
   assert.match(markup, /data-evidence="measured"/);
+});
+
+// ----------------------------------------------------------------------------
+// The cold-start plant's CSF-1 tile (#635) — the reported bug, end to end.
+//
+// On a plant with no recorded activity, this tile rendered:
+//
+//   CSF 1 · Vision casting · GOING WELL · Explore the Launch Playbook ·
+//   Based on no activity recorded yet
+//
+// Seven sibling lenses rendered "Insufficient evidence" off the same absence.
+// The whole path is exercised — the persisted row, the projection, the tile —
+// because the report was about a rendered line, not about a standing.
+// ----------------------------------------------------------------------------
+
+test("#635: a cold-start plant is not told its vision casting is going well", () => {
+  const generatedAt = new Date("2026-08-21T07:00:00.000Z");
+  const scorecard = buildCsfScorecard({
+    // A snapshot that measures nothing: `isColdStart`, every lens unknown.
+    assessment: {
+      id: "assessment-635",
+      churchId: "church-635",
+      generatedAt,
+      phase: 0,
+      rubricVersion: "v1",
+      factSnapshot: { snapshotVersion: "1.0.0", isColdStart: true },
+      modelId: "test-model",
+      status: "complete",
+      createdAt: generatedAt,
+    } as never,
+    insights: [
+      {
+        id: "i-635",
+        assessmentId: "assessment-635",
+        churchId: "church-635",
+        audience: "planter",
+        category: "vision_casting",
+        // What persistence writes for the judge's "positive" (persist.ts).
+        severity: "info",
+        title: "Explore the Launch Playbook",
+        body: "Your vision casting is off to a good start.",
+        citedFacts: ["isColdStart=true"],
+        relatedArticleSlugs: [],
+        rank: 0,
+        createdAt: generatedAt,
+      } as never,
+    ],
+  })!;
+
+  const factor = scorecard.factors.find(
+    (f) => f.category === "vision_casting"
+  )!;
+  const rendered = text(renderToStaticMarkup(FactorTile({ factor }) as never));
+
+  assert.doesNotMatch(rendered, /Going well/);
+  assert.doesNotMatch(rendered, /no activity recorded yet/);
+  assert.doesNotMatch(rendered, /Explore the Launch Playbook/);
+  assert.match(rendered, /Insufficient evidence/);
+  assert.match(
+    rendered,
+    /We don't have enough information to assess vision casting yet/
+  );
 });

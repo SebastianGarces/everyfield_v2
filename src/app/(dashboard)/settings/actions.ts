@@ -6,7 +6,16 @@ import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import {
+  churchProfileWriteSchema,
+  firstIssueMessage,
+  inactivityRefusal,
+  inactivityThresholdsSchema,
+  type InactivityThresholdField,
+} from "@/lib/churches/profile";
+import {
   setChurchDigestSchedule,
+  setChurchInactivityThresholds,
+  setChurchProfileField,
   setChurchTimeZone,
 } from "@/lib/churches/settings";
 import { isValidTimeZone } from "@/lib/datetime";
@@ -419,5 +428,128 @@ export async function setChurchDigestScheduleAction(
     unstable_rethrow(error);
     console.error("[SETTINGS] saving the digest send time failed:", error);
     return { success: false, error: "We could not save that send time" };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The church profile — name and address (CS-006 / CS-015, #618)
+// ----------------------------------------------------------------------------
+//
+// The same ownership shape as the two above, and it is the shape that matters
+// most here: the church id is NOT a parameter. `church.profile` is ADMIN_PLUS
+// on a PLANT, so an Admin may rename their own plant and nobody may rename
+// anybody else's — a property of the signature rather than a check that could
+// be deleted.
+//
+// This is the FIRST endpoint in the product that writes `churches.name` after
+// creation. Until now the name was settable exactly once, at onboarding step 1,
+// which is why the oversight plants directory and the per-plant page can keep
+// reading `churches.name` directly: there is still one column and now exactly
+// two writers of it, and no surface mirrors a copy for either to disagree with.
+//
+// ONE FIELD PER CALL (CS-015). The failure sentence comes from the PARSER, so
+// it already names the field — "Enter a name for your church plant", not "we
+// could not save the form" — and the control renders it under the input that
+// caused it.
+
+export type ChurchProfileActionResult =
+  | { success: true; value: string | null }
+  | { success: false; error: string };
+
+export async function setChurchProfileFieldAction(
+  input: unknown
+): Promise<ChurchProfileActionResult> {
+  const session = await requireSeat("church.profile");
+
+  const parsed = churchProfileWriteSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: firstIssueMessage(parsed.error) };
+  }
+
+  try {
+    if (!session.user.churchId) {
+      return { success: false, error: "Create your church plant first" };
+    }
+
+    const stored = await setChurchProfileField(
+      session.user.churchId,
+      parsed.data
+    );
+
+    refresh();
+
+    return { success: true, value: stored };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving a church profile field failed:", error);
+    return { success: false, error: "Unable to save. Please try again." };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Inactivity thresholds (CS-009, #618)
+// ----------------------------------------------------------------------------
+//
+// BOTH COUNTS IN ONE CALL, for the reason the digest schedule takes both of its
+// halves: `warning` must stay below `alert`, so a planter widening the pair
+// from 7/14 to 30/60 would be refused mid-edit by two independent saves at a
+// moment when neither number is wrong on its own. The cross-field refusal is
+// carried on the WARNING field's path, so the control still shows it under an
+// input rather than over the card.
+
+export type InactivityThresholdsActionResult =
+  | { success: true; warningDays: number; alertDays: number }
+  | {
+      success: false;
+      error: string;
+      /**
+       * WHICH counts the control should mark `aria-invalid`. A bound refusal
+       * names one; the order refusal names both, because either can move to fix
+       * it. Decided by `inactivityRefusal` beside the schema that produced the
+       * issue, never by the control comparing message strings.
+       */
+      invalid: readonly InactivityThresholdField[];
+    };
+
+export async function setChurchInactivityThresholdsAction(
+  input: unknown
+): Promise<InactivityThresholdsActionResult> {
+  const session = await requireSeat("church.profile");
+
+  const parsed = inactivityThresholdsSchema.safeParse(input);
+  if (!parsed.success) {
+    const { message, invalid } = inactivityRefusal(parsed.error);
+    return { success: false, error: message, invalid };
+  }
+
+  try {
+    if (!session.user.churchId) {
+      return {
+        success: false,
+        error: "Create your church plant first",
+        invalid: [],
+      };
+    }
+
+    const stored = await setChurchInactivityThresholds(
+      session.user.churchId,
+      parsed.data
+    );
+
+    refresh();
+
+    return {
+      success: true,
+      warningDays: stored.warningDays,
+      alertDays: stored.alertDays,
+    };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving the inactivity thresholds failed:", error);
+    return {
+      success: false,
+      error: "Unable to save. Please try again.",
+      invalid: [],
+    };
   }
 }

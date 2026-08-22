@@ -18,6 +18,7 @@ export * from "./launch";
 export * from "./feedback";
 export * from "./notifications";
 export * from "./auth-attempts";
+export * from "./email-change-request";
 export * from "./phase-engine";
 export * from "./methodology-embeddings";
 export * from "./documents";

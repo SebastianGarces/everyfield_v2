@@ -20,10 +20,11 @@
 // Hard guarantees:
 //   - The judge consumes a snapshot; it NEVER recomputes facts (it doesn't even
 //     import buildFactSnapshot — the snapshot is passed in).
-//   - The model is constrained to `judgeOutputSchema`; the result is valid by
-//     construction, INCLUDING every product rule — audience coverage, the
-//     observation budget and the network register are all refinements on that
-//     schema, so nothing this file returns has skipped one.
+//   - The model is constrained to the schema `judgeOutputSchemaFor` builds for
+//     THIS plant; the result is valid by construction, INCLUDING every product
+//     rule — audience coverage, the observation budget, the network register
+//     and "unknown is not healthy" are all refinements on that schema, so
+//     nothing this file returns has skipped one.
 //   - The active rubric version is recorded on the result (changing the rubric
 //     version changes the recorded version — AC-PE-4).
 //   - Every run is traced in Langfuse when configured, and silently no-ops when
@@ -32,6 +33,7 @@
 
 import { generateObject, type LanguageModel } from "ai";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
+import { buildEvidenceProfile } from "@/lib/phase-engine/signals/evidence";
 import { retrieve, type RetrievedPassage } from "@/lib/phase-engine/rag";
 import { ACTIVE_RUBRIC, type Rubric } from "@/lib/phase-engine/rubric";
 import { startJudgeTrace } from "@/lib/phase-engine/observability";
@@ -50,7 +52,7 @@ import {
   type DraftCorrection,
   type SchemaRejectionEvent,
 } from "./schema-rejection";
-import { judgeOutputSchema, type AssessmentResult } from "./schema";
+import { judgeOutputSchemaFor, type AssessmentResult } from "./schema";
 
 /** Knobs for a run; all optional so the common call is `runAssessment(snapshot)`. */
 export interface RunAssessmentOptions {
@@ -145,7 +147,21 @@ export async function runAssessment(
   //    in the user message). `prompt` is rebuilt per draft: a retry carries the
   //    rule that rejected the previous one (step 5).
   const system = buildSystemPrompt(rubric);
-  let prompt = buildUserPrompt(snapshot, passages);
+
+  // WHAT EACH LENS KNOWS, COMPUTED ONCE AND USED FOR BOTH HALVES (#635). It is
+  // recomputed rather than read off `snapshot.evidence` for #483's D1 reason —
+  // the profile is derived from the facts beside it, so a snapshot written
+  // before that field existed still gets a real one — and the SAME value then
+  // grounds the prompt and holds the draft. Judging a model against a profile
+  // it was never shown is the shape #538 bans: the fact ledger flattens
+  // `evidence.<lens>.quality` out of the snapshot and the rubric tells the
+  // model to read exactly those keys, so a stale stored profile would have the
+  // judge told one thing and refused for another, with no way to see the gap.
+  const evidence = buildEvidenceProfile(snapshot);
+  const grounded: PlantFactSnapshot = { ...snapshot, evidence };
+  const schema = judgeOutputSchemaFor(evidence);
+
+  let prompt = buildUserPrompt(grounded, passages);
 
   // 3. Start tracing (no-op when Langfuse is unconfigured), tagged with rubric
   //    version + model id. The trace records what the run STARTED from; a
@@ -183,7 +199,7 @@ export async function runAssessment(
           async () => {
             const generated = await generateObject({
               model: options.model ?? getJudgeModel(),
-              schema: judgeOutputSchema,
+              schema,
               system,
               prompt: draftPrompt,
               // The retry policy lives in this file and `runPacedCall`, not in
@@ -223,8 +239,8 @@ export async function runAssessment(
         });
 
         // The output is valid by construction — every rule the assessment is
-        // held to is a refinement on `judgeOutputSchema`, so reaching here means
-        // all four passed. Attach the audit metadata; the rubric version
+        // held to is a refinement on this plant's schema, so reaching here means
+        // all of them passed. Attach the audit metadata; the rubric version
         // recorded is the version that produced it (AC-PE-4).
         return {
           ...object,
@@ -277,7 +293,7 @@ export async function runAssessment(
         // corrected on two drafts ago, and the ladder runs out while each draft
         // was an honest attempt at what it was last told (#605).
         correction = carryCorrectionForward(correction, rejection);
-        prompt = buildUserPrompt(snapshot, passages, correction);
+        prompt = buildUserPrompt(grounded, passages, correction);
       }
     }
   } catch (error) {

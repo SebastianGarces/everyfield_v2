@@ -79,6 +79,7 @@ import {
   type TenancyFields,
 } from "@/lib/auth/tenancy";
 import { redactForLog } from "@/lib/email/redact";
+import { sharingDefaultsStatement } from "@/lib/privacy/sharing-defaults";
 import {
   announceAssociationEnded,
   announceInvitationAccepted,
@@ -1606,10 +1607,15 @@ export async function acceptInvitationAs(
   // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
   // sending-church subject included, and the two functions are TOTAL between
   // them: a subject comes back, or one of them throws. So there is exactly ONE
-  // batch shape here — four statements, always audited. The shorter batch is not
-  // conditional, it does not exist: an unaudited association is the state OV-008
-  // forbids, so the spelling of it is absent from this file rather than guarded
-  // by a ternary a later edit could make reachable.
+  // batch shape here — always audited. The shorter batch is not conditional, it
+  // does not exist: an unaudited association is the state OV-008 forbids, so the
+  // spelling of it is absent from this file rather than guarded by a ternary a
+  // later edit could make reachable.
+  //
+  // CS-013's sharing write joins the batch on the same terms and for the same
+  // reason (#620): TOTAL rather than conditional, so the count stays a fact
+  // about this function instead of becoming a thing that depends on the
+  // invitation's type. It is five statements now, and still one shape.
   const audit = acceptedAssociationEventStatement(actor, {
     ...auditableAssociationOrg(requireAssociationPair(invitation)),
     invitationId,
@@ -1622,9 +1628,25 @@ export async function acceptInvitationAs(
     slotIsOurs
   );
 
-  const [, claimed, associated] = await db.batch([
+  // CS-013 — the invite-origin sharing defaults, in the acceptance's own batch
+  // so the toggles and the association commit together (ruling 2026-08-15
+  // §187). It is TOTAL over the three invitation types and writes nothing for
+  // the one with no plant in it, so this batch still has exactly ONE shape —
+  // `sharingDefaultsStatement` (`@/lib/privacy/sharing-defaults`) carries the
+  // whole argument, and this file stays ignorant of `church_privacy_settings`
+  // the way it is of `coach_assignments`.
+  //
+  // BEFORE THE ASSOCIATION, and that placement is the rule rather than a
+  // preference: it fires only for a plant whose two oversight FKs are still
+  // NULL, so it has to read the row before the association write sets one.
+  // Batched after it, every re-accept from an org a plant already belongs to
+  // would reset toggles the planter had deliberately turned off.
+  const sharing = sharingDefaultsStatement(actor.id, invitationId);
+
+  const [, claimed, , associated] = await db.batch([
     lock,
     claim,
+    sharing,
     association,
     audit,
   ]);

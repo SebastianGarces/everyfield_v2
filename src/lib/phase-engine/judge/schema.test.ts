@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { makeEvidence } from "@/lib/phase-engine/signals/testing";
+
 import { NETWORK_VERDICT_PHRASES } from "./network-register";
 import {
+  judgeOutputSchemaFor,
   PLANTER_FOCUS_BUDGET,
-  judgeOutputSchema,
   type Insight,
 } from "./schema";
+import { FIXTURE_JUDGE_SCHEMA } from "./testing";
+
+/** The fixture plant's schema — this suite is not about the evidence rule. */
+const judgeOutputSchema = FIXTURE_JUDGE_SCHEMA;
 
 // ----------------------------------------------------------------------------
 // The observation budget, enforced where a model cannot argue with it (#478).
@@ -112,11 +118,16 @@ test("the budget is one primary plus two", () => {
 // concern for free. These two tests are the claim and its proof.
 
 test("a positive planter insight pairs a network concern at no cost to the budget", () => {
+  // FIVE LENSES THE FIXTURE PLANT ACTUALLY MEASURES. This list used to name
+  // prayer and generosity, which NOTHING measures for any plant
+  // (signals/evidence.ts) — so the free-pairing device was proven only where
+  // #635 now refuses it, against a hand-written profile no plant could produce.
+  // The device is real; it just belongs to the lenses that know something.
   const CATEGORIES = [
     "critical_mass",
     "cohesion",
-    "prayer",
-    "generosity",
+    "vision_casting",
+    "shared_ownership",
     "emerging_leadership",
   ] as const;
 
@@ -178,4 +189,114 @@ test("when both rules fail, the correction names the free fix rather than a cap"
   // The retracted claim must never come back: it is the one sentence that made
   // two messages in one prompt disagree.
   assert.doesNotMatch(combined, /can ever be paired/);
+});
+
+// --- Unknown is not healthy (#483 C17, enforced by #635) --------------------
+//
+// The rubric has said this since v1: an unknown lens produces at most an
+// insufficient-evidence statement, "never a quiet pass, a blank, or an
+// encouraging remark". It said it in prose only, and on the fleet's cold-start
+// plant — where every one of the eight lenses is unknown at once — seven lenses
+// obeyed and CSF-1 did not. The tile read "Vision casting · GOING WELL · Based
+// on no activity recorded yet".
+
+/** The cold-start plant: nothing measured and nothing attested, anywhere. */
+const NOTHING_KNOWN = makeEvidence({
+  vision_casting: "unknown",
+  shared_ownership: "unknown",
+  critical_mass: "unknown",
+  cohesion: "unknown",
+  prayer: "unknown",
+  generosity: "unknown",
+  emerging_leadership: "unknown",
+  comprehensive_training: "unknown",
+});
+
+/**
+ * Audience coverage for a cold-start output, and nothing else. `onboarding` is
+ * not one of the eight lenses, and a "positive" network insight is exempt from
+ * the pairing rule — so this item cannot influence what these tests are about.
+ */
+const COLD_START_NETWORK_COVERAGE = insight({
+  audience: "network",
+  category: "onboarding",
+  severity: "positive",
+  title: "This plant has just finished setting up",
+  citedFacts: ["isColdStart=true"],
+});
+
+function coldStartOutput(insights: Insight[]) {
+  return judgeOutputSchemaFor(NOTHING_KNOWN).safeParse({
+    summary: "This plant has not recorded any activity yet.",
+    insights,
+  });
+}
+
+test("a positive insight in a lens that knows nothing is refused", () => {
+  const result = coldStartOutput([
+    insight({
+      category: "vision_casting",
+      severity: "positive",
+      title: "Vision casting is going well",
+      body: "Your vision casting looks healthy so far — keep the rhythm going.",
+      citedFacts: ["isColdStart=true"],
+    }),
+    COLD_START_NETWORK_COVERAGE,
+  ]);
+
+  assert.equal(result.success, false);
+  const message = result.error!.issues.map((i) => i.message).join("\n");
+  assert.match(message, /Absence of evidence is not evidence of health/);
+  // Both sides of the comparison and the way out (#605): the blind lenses, the
+  // insight that claimed otherwise, and the severity to reach for instead.
+  assert.match(message, /vision_casting/);
+  assert.match(message, /"Vision casting is going well"/);
+  assert.match(message, /at most an insufficient-evidence statement/);
+});
+
+test("an insufficient-evidence statement on the same lens is accepted", () => {
+  // The sentence #483 exists to produce is severity "info", not "positive".
+  // Refusing it too would trade a false pass for the blank it replaced.
+  const result = coldStartOutput([
+    insight({
+      category: "prayer",
+      severity: "info",
+      title: "We can't see your prayer rhythm yet",
+      body: "We don't have enough information to assess prayer health yet. Attesting your rhythm gives the next assessment something to read.",
+      citedFacts: ["manual.isEmpty=true"],
+    }),
+    COLD_START_NETWORK_COVERAGE,
+  ]);
+
+  assert.equal(result.success, true);
+});
+
+test("a positive insight in a lens that measures something is untouched", () => {
+  // The rule is about what the LENS knows, not about the word "positive".
+  const result = output([
+    insight({
+      category: "critical_mass",
+      severity: "positive",
+      title: "Core-group growth is steady",
+    }),
+  ]);
+
+  assert.equal(result.success, true);
+});
+
+test("cross-cutting categories are not lenses and keep their positives", () => {
+  // `onboarding`, `phase_progress`, `follow_up` and `launch_readiness` have no
+  // evidence profile of their own — they are not one of the eight — so a
+  // cold-start plant may still be encouraged about getting started (PE-018).
+  const result = coldStartOutput([
+    insight({
+      category: "onboarding",
+      severity: "positive",
+      title: "You've finished setting up your plant",
+      citedFacts: ["isColdStart=true"],
+    }),
+    COLD_START_NETWORK_COVERAGE,
+  ]);
+
+  assert.equal(result.success, true);
 });

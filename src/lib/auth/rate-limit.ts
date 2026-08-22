@@ -19,10 +19,44 @@ const LOGIN_MAX_PER_IP = 20; // >= 20 failed per IP per 15 min -> reject
 const REGISTER_WINDOW_MS = HOUR_MS;
 const REGISTER_MAX_PER_IP = 3; // >= 3 per IP per hour -> reject
 
+const EMAIL_CHANGE_WINDOW_MS = HOUR_MS;
+const EMAIL_CHANGE_MAX_PER_IDENTIFIER = 3; // >= 3 unverified per account per hour
+const EMAIL_CHANGE_MAX_PER_IP = 10; // >= 10 unverified per IP per hour
+
 /**
  * The whole policy as one table. A missing threshold means "no limit on that
  * axis" — register deliberately has no per-identifier limit, because the
  * failure mode it guards against (mass account creation) is per-IP.
+ *
+ * ----------------------------------------------------------------------------
+ * THE TWO SELF-SERVICE KINDS (CS-005, #616)
+ * ----------------------------------------------------------------------------
+ *
+ * `password_change` IS SHAPED EXACTLY LIKE `login`, and it is the same attack:
+ * a session somebody else's browser is holding, guessing at the current
+ * password until it lands. Same window, same thresholds, same axes — a second
+ * set of numbers would say the two guesses were worth different amounts.
+ *
+ * `email_change` COUNTS THE REQUEST, NOT THE REDEMPTION, and that is the one
+ * place these two kinds part company from the pair above. There is no secret to
+ * get wrong when asking for a new address, so a guard that counted only wrong
+ * answers would count nothing — and the thing worth capping here is a
+ * verification email sent to an address that never confirms it, which is mail
+ * this product put in a stranger's inbox on an account holder's say-so.
+ *
+ * So an email-change REQUEST is recorded as an attempt that has NOT SUCCEEDED
+ * (`recordAttempt(..., false)`) and the REDEMPTION records the success. That is
+ * not a lie told to reuse the guard: a change spans two steps and is not done
+ * until the second one, so an unredeemed request is precisely an attempt still
+ * outstanding. It also makes the cap self-clearing in the right direction —
+ * `recordAttempt` deletes the identifier's failed rows on success (ruled
+ * 405-4b), so an account that actually completes a change starts over, and only
+ * the account leaving unconfirmed requests behind walks into the limit.
+ *
+ * The identifier on both kinds is the account's OWN CURRENT address, never the
+ * address being asked for: the subject of the limit is the account doing the
+ * asking, and keying on the target would let one account spread its requests
+ * across many mailboxes and never meet a threshold.
  */
 const RATE_LIMITS: Record<
   AuthAttemptKind,
@@ -36,6 +70,16 @@ const RATE_LIMITS: Record<
   register: {
     windowMs: REGISTER_WINDOW_MS,
     perIp: REGISTER_MAX_PER_IP,
+  },
+  email_change: {
+    windowMs: EMAIL_CHANGE_WINDOW_MS,
+    perIdentifier: EMAIL_CHANGE_MAX_PER_IDENTIFIER,
+    perIp: EMAIL_CHANGE_MAX_PER_IP,
+  },
+  password_change: {
+    windowMs: LOGIN_WINDOW_MS,
+    perIdentifier: LOGIN_MAX_PER_IDENTIFIER,
+    perIp: LOGIN_MAX_PER_IP,
   },
 };
 
@@ -68,10 +112,46 @@ export async function getRequestIp(): Promise<string | null> {
 }
 
 /**
- * Count failed attempts in a window matching a single column predicate.
+ * WHICH AXIS A COUNT IS ABOUT — the two columns a threshold may be keyed on.
+ *
+ * Exported so a test can supply the count without a database (see
+ * `FailureCounter`), and named as a type rather than left inline so the seam
+ * and the real implementation are held to one signature by the compiler.
  */
-async function countFailures(
-  column: typeof authAttempts.identifier | typeof authAttempts.ip,
+export type RateLimitAxis =
+  | typeof authAttempts.identifier
+  | typeof authAttempts.ip;
+
+/**
+ * HOW FAILURES ARE COUNTED — the guard's ONE dependency, and its test seam.
+ *
+ * `checkRateLimit` is policy: which axes a kind is limited on, at what
+ * thresholds, over what window. That policy is what CS-005 asks to be provable,
+ * and it is not reachable from a unit test while the count is a query — a
+ * neon-http client cannot answer one without a live Postgres.
+ *
+ * So the count is a PARAMETER with the production query as its default. No
+ * caller changes, no branch inside the guard, and no second copy of the sliding
+ * window: `src/lib/auth/rate-limit.test.ts` drives the real policy by handing it
+ * a counter over an in-memory list of attempt timestamps.
+ */
+export type FailureCounter = (
+  column: RateLimitAxis,
+  value: string,
+  kind: AuthAttemptKind,
+  windowMs: number
+) => Promise<number>;
+
+/**
+ * Count failed attempts in a window matching a single column predicate — the
+ * PRODUCTION counter, and `checkRateLimit`'s default.
+ *
+ * Exported so `REAL_ATTEMPT_LIMITER` can name it: the self-service flows carry
+ * their store as a value rather than relying on the default, so what a test
+ * substitutes and what production uses are the same parameter.
+ */
+export async function countAuthAttemptFailures(
+  column: RateLimitAxis,
   value: string,
   kind: AuthAttemptKind,
   windowMs: number
@@ -103,7 +183,8 @@ async function countFailures(
 export async function checkRateLimit(
   identifier: string,
   ip: string | null,
-  kind: AuthAttemptKind
+  kind: AuthAttemptKind,
+  count: FailureCounter = countAuthAttemptFailures
 ): Promise<RateLimitResult> {
   const limit = RATE_LIMITS[kind];
 
@@ -122,7 +203,7 @@ export async function checkRateLimit(
     if (max === undefined || value === null) {
       continue;
     }
-    const failures = await countFailures(column, value, kind, limit.windowMs);
+    const failures = await count(column, value, kind, limit.windowMs);
     if (failures >= max) {
       return { limited: true };
     }
