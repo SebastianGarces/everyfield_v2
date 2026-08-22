@@ -21,15 +21,10 @@ import {
   usePendingPicture,
   type PictureOutcome,
 } from "@/components/use-pending-picture";
-import {
-  PROFILE_PHOTO_MIME_TYPES,
-  personPhotoSrc,
-  profilePhotoRefusal,
-} from "@/lib/profile-photo";
+import { PROFILE_PHOTO_MIME_TYPES, personPhotoSrc } from "@/lib/profile-photo";
 import type { PersonForClient } from "@/lib/people/types";
 import { Loader2, Trash, Upload } from "lucide-react";
-import { useCallback, useRef } from "react";
-import { toast } from "sonner";
+import { useRef } from "react";
 
 interface PersonPhotoFieldProps {
   person: PersonForClient;
@@ -62,12 +57,6 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
     `${person.firstName.charAt(0)}${person.lastName.charAt(0)}`.toUpperCase();
   const fullName = `${person.firstName} ${person.lastName}`;
 
-  const announce = useCallback(
-    ({ ok, message }: { ok: boolean; message: string }) =>
-      ok ? toast.success(message) : toast.error(message),
-    []
-  );
-
   /** The people actions answer in `ActionResult`; the hook speaks one shape. */
   const asOutcome = (result: {
     success: boolean;
@@ -79,7 +68,6 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
 
   const picture = usePendingPicture({
     storedSrc: personPhotoSrc(person.id, person.photoUrl),
-    refuse: profilePhotoRefusal,
     send: {
       upload: async (file) => {
         const formData = new FormData();
@@ -89,7 +77,6 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
       remove: async () => asOutcome(await removePersonPhotoAction(person.id)),
     },
     copy: { uploaded: "Photo updated", removed: "Photo removed" },
-    onSettled: announce,
   });
 
   const isBusy = picture.inFlight !== null;

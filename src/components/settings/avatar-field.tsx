@@ -24,8 +24,7 @@
 // ============================================================================
 
 import { Loader2, Trash, Upload } from "lucide-react";
-import { useCallback, useRef } from "react";
-import { toast } from "sonner";
+import { useRef } from "react";
 
 import {
   removeAvatarAction,
@@ -45,10 +44,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { usePendingPicture } from "@/components/use-pending-picture";
-import {
-  PROFILE_PHOTO_MIME_TYPES,
-  profilePhotoRefusal,
-} from "@/lib/profile-photo";
+import { PROFILE_PHOTO_MIME_TYPES } from "@/lib/profile-photo";
 
 type AvatarFieldProps = {
   /**
@@ -71,15 +67,8 @@ type AvatarFieldProps = {
 export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const announce = useCallback(
-    ({ ok, message }: { ok: boolean; message: string }) =>
-      ok ? toast.success(message) : toast.error(message),
-    []
-  );
-
   const picture = usePendingPicture({
     storedSrc: avatarSrc,
-    refuse: profilePhotoRefusal,
     send: {
       upload: (file) => {
         const formData = new FormData();
@@ -92,7 +81,6 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
       uploaded: "Profile picture updated",
       removed: "Profile picture removed",
     },
-    onSettled: announce,
   });
 
   const isBusy = picture.inFlight !== null;

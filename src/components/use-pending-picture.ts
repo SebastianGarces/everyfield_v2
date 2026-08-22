@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { toast } from "sonner";
+
+import { profilePhotoRefusal } from "@/lib/profile-photo";
 
 // ============================================================================
 // THE HALF OF A PICTURE CONTROL A REVIEWER CANNOT CHECK BY EYE (P-024).
@@ -37,19 +40,25 @@ type Pending = { kind: "uploaded"; objectUrl: string } | { kind: "removed" };
 /** What an action answers with, in the shape both surfaces' actions already have. */
 export type PictureOutcome = { ok: true } | { ok: false; message: string };
 
+/**
+ * THREE OPTIONS, AND IT STARTED AS FIVE.
+ *
+ * The two that went are the two that were the same at both call sites: the gate
+ * (always `profilePhotoRefusal` — it is one rule by design, so letting a caller
+ * choose it invites a second) and announcing the outcome (both spelled the same
+ * toast, so the hook now spells it once). A broad interface that hides little is
+ * a reader learning the surface AND the implementation; what actually varies is
+ * only what is shown, what to call, and what to call it.
+ */
 type PendingPictureOptions = {
   /** The route the SERVER says the picture is at, or undefined for none. */
   storedSrc: string | undefined;
-  /** Why this file cannot be a picture, or null — the gate, applied before the request exists. */
-  refuse: (file: File) => string | null;
   send: {
     upload: (file: File) => Promise<PictureOutcome>;
     remove: () => Promise<PictureOutcome>;
   };
-  /** What to say on success. The two surfaces name the thing differently. */
+  /** What to say on success. A person has a photo; an account has a profile picture. */
   copy: { uploaded: string; removed: string };
-  /** Announce an outcome — a toast at both call sites. */
-  onSettled: (outcome: { ok: boolean; message: string }) => void;
 };
 
 export type PendingPicture = {
@@ -65,10 +74,8 @@ export type PendingPicture = {
 
 export function usePendingPicture({
   storedSrc,
-  refuse,
   send,
   copy,
-  onSettled,
 }: PendingPictureOptions): PendingPicture {
   const [pending, setPending] = useState<Pending | null>(null);
   const [inFlight, setInFlight] = useState<"upload" | "remove" | null>(null);
@@ -137,12 +144,12 @@ export function usePendingPicture({
           // is what is actually stored.
           settle(null);
           setError(outcome.message);
-          onSettled({ ok: false, message: outcome.message });
+          toast.error(outcome.message);
           return;
         }
 
         settle(onOk());
-        onSettled({ ok: true, message: succeeded });
+        toast.success(succeeded);
       } catch {
         // The request never got an answer — a dropped connection, a 500 with no
         // body, a rejected transition. Silence here is a spinner that stops and
@@ -151,7 +158,7 @@ export function usePendingPicture({
         const message = "That did not reach us. Check your connection.";
         settle(null);
         setError(message);
-        onSettled({ ok: false, message });
+        toast.error(message);
       } finally {
         setInFlight(null);
       }
@@ -170,10 +177,10 @@ export function usePendingPicture({
       // is here because a file over the body cap never reaches the action: the
       // platform answers 413 and the reader gets a console error where a
       // sentence belongs.
-      const refusal = refuse(file);
+      const refusal = profilePhotoRefusal(file);
       if (refusal) {
         setError(refusal);
-        onSettled({ ok: false, message: refusal });
+        toast.error(refusal);
         return;
       }
 
