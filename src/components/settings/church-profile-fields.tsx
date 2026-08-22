@@ -6,7 +6,6 @@ import { setChurchProfileFieldAction } from "@/app/(dashboard)/settings/actions"
 import {
   commitOnEnter,
   FieldSaveStatus,
-  revertOnEscape,
   useFieldSave,
 } from "@/components/settings/field-save";
 import { Input } from "@/components/ui/input";
@@ -143,10 +142,7 @@ function ProfileFieldRow({
           aria-describedby={statusId}
           className="w-full max-w-md"
           onBlur={commit}
-          onKeyDown={(event) => {
-            commitOnEnter(event);
-            revertOnEscape(event, stored);
-          }}
+          onKeyDown={commitOnEnter}
         />
 
         <FieldSaveStatus id={statusId} state={state} />

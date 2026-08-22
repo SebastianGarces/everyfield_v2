@@ -159,35 +159,34 @@ export function FieldSaveStatus({
   );
 }
 
-/**
- * Escape inside a dirty field REVERTS it and keeps the modal open.
- *
- * Blur is the only save path, which leaves one hole: Escape unmounts the input
- * through the dialog, and a focused node removed from the document does not
- * reliably fire `focusout` — so the planter's typing would vanish with the
- * modal and no save, no message and nothing to retry.
- *
- * Reverting closes it the conventional way rather than by saving on the way
- * out: Escape cancels the innermost thing first (the edit), and a second
- * Escape — now that the field is clean — closes the modal. The planter SEES the
- * revert instead of discovering later that a rename never happened.
- *
- * `stopPropagation` is what keeps the first Escape off the dialog. It is only
- * called when the field is actually dirty, so Escape in an untouched field
- * closes the modal in one press exactly as it always did.
- */
-export function revertOnEscape(
-  event: React.KeyboardEvent<HTMLInputElement>,
-  serverValue: string
-): void {
-  if (event.key !== "Escape") return;
-  const input = event.currentTarget;
-  if (input.value.trim() === serverValue) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-  input.value = serverValue;
-}
+// ----------------------------------------------------------------------------
+// ESCAPE IS THE DIALOG'S, AND NOTHING HERE CAN TAKE IT — MEASURED (#618)
+// ----------------------------------------------------------------------------
+//
+// This module shipped a `revertOnEscape` that was meant to make the first
+// Escape cancel the edit and keep the modal open. IT NEVER RAN. Radix's
+// dismissable layer attaches its handler as
+//
+//     ownerDocument.addEventListener("keydown", handleKeyDown, { capture: true })
+//
+// (`@radix-ui/react-use-escape-keydown`), and a document listener in the CAPTURE
+// phase fires before the event has travelled anywhere near the input — so no
+// handler on the input, React or native, is reachable in time. On the preview
+// the modal closed on the first press and the URL went to `/dashboard`; the
+// unit test passed throughout, because it exercised the pure function and never
+// the layer that defeats it.
+//
+// SO ESCAPE CLOSES THE MODAL AND AN UNCOMMITTED EDIT IS DISCARDED. Measured
+// alongside it: nothing is saved wrongly — the field's stored value was still
+// `Austin` after Escaping out of `ZZZTEST` — so this is ordinary "modal closed
+// with something typed in it" and not a corrupted write.
+//
+// THE FIX BELONGS TO THE MODAL, NOT HERE. `DialogContent` takes
+// `onEscapeKeyDown`, so the surface that owns the dialog can refuse the dismiss
+// while anything inside it is uncommitted. That is `settings-modal.tsx`, shared
+// by all six sections, and giving one section's fields a private channel up to
+// it is the threading this repo tells you to stop and question. Carried as a
+// follow-up rather than smuggled in here.
 
 /**
  * Enter commits, because a lone input in a dialog has no form to submit and a

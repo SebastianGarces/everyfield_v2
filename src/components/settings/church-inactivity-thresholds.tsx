@@ -6,7 +6,6 @@ import { setChurchInactivityThresholdsAction } from "@/app/(dashboard)/settings/
 import {
   commitOnEnter,
   FieldSaveStatus,
-  revertOnEscape,
   useFieldSave,
 } from "@/components/settings/field-save";
 import { Input } from "@/components/ui/input";
@@ -161,10 +160,7 @@ function DayCountInput({
           aria-invalid={invalid ? true : undefined}
           aria-describedby="inactivity-help inactivity-status"
           className="w-24"
-          onKeyDown={(event) => {
-            commitOnEnter(event);
-            revertOnEscape(event, String(stored));
-          }}
+          onKeyDown={commitOnEnter}
         />
         <span className="text-muted-foreground text-sm">days</span>
       </div>
