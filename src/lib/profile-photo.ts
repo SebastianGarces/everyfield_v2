@@ -123,3 +123,37 @@ export function userAvatarSrc(
 ): string | undefined {
   return versionedSrc("/api/account/avatar", avatarKey);
 }
+
+// ============================================================================
+// When there is no picture
+// ============================================================================
+
+/**
+ * The two letters that stand in for an account with no picture.
+ *
+ * HERE RATHER THAN BESIDE ONE OF ITS CALLERS, because the fallback and the
+ * picture are one answer to one question — what shows for this account — and
+ * they are now asked in two places that must agree: the sidebar (which has
+ * asked since long before #617) and the Account section's own control. Two
+ * copies would drift the first time somebody with a middle name signed in and
+ * only one surface showed three letters.
+ *
+ * The name is the source when there is one, initials taken across its words;
+ * an account that never gave a name falls back to the address it signs in with,
+ * which always exists.
+ */
+export function accountInitials(
+  name: string | null | undefined,
+  email: string
+): string {
+  if (name) {
+    return name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }
+
+  return email.substring(0, 2).toUpperCase();
+}

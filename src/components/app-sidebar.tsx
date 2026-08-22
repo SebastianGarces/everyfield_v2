@@ -38,6 +38,13 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
     name: string;
     email: string;
     initials: string;
+    /**
+     * The ROUTE this account's picture is served from, or undefined for an
+     * account with none — in which case the initials render (CS-004, #617).
+     * Resolved in the layout: the stored key never crosses into a client
+     * component, so it never reaches the RSC payload.
+     */
+    avatarSrc?: string;
   };
   /**
    * The KIND of oversight org this account's tenancy is, or null for a plant
