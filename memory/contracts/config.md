@@ -5,7 +5,7 @@
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (Neon). The app reads it in `src/db/index.ts` and nothing else interprets it — no hostname is inspected, no endpoint is rewritten |
-| `LIVE_DB_TESTS` | No | `1` opts the race suites in. They ALSO probe reachability, so a placeholder `DATABASE_URL` still skips them. CI runs them in the `Live DB Race Suites` job. Pointing them at a LOCAL Postgres also needs the proxy preload `pnpm test:live` loads — a TEST-ONLY switch, read by `scripts/live-db-endpoint.ts` and by no module the app imports; see `memory/invariants/transactions-atomicity.md` |
+| `LIVE_DB_TESTS` | No | `1` opts the race suites in. They ALSO probe reachability, so a placeholder `DATABASE_URL` still skips them. CI runs them in the `Live DB Race Suites` job. Pointing them at a LOCAL Postgres also needs the proxy preload `pnpm test:live` loads — a TEST-ONLY switch, read by `scripts/live-db-endpoint.ts` and by no module the app imports; see `memory/invariants/transactions-atomicity.md`. In the `test:live` lane `DATABASE_URL` is a BASE connection only: the preload replaces its database component per suite (#594), so that variable's own database carries no schema and nothing runs against it |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL (default: localhost:3000) |
 | `REVALIDATION_SECRET` | For prod | Wiki cache revalidation auth. ⚠️ Still required by `src/app/api/wiki/revalidate/route.ts` but MISSING from `.env.example` |
 | `CRON_SECRET` | For prod | Bearer token for BOTH scheduled routes, `/api/phase-engine/assess` and `/api/notifications/dispatch`; both fail closed when unset. It must hold the same value in two places: the Vercel production env (read by the routes) and this repo's Actions secrets (sent by `.github/workflows/notifications-dispatch.yml` every 15 min and `.github/workflows/phase-engine-assess.yml` at 07:00/19:00 UTC). `vercel.json` carries no crons at all — Hobby caps them at daily, too few for either job |
@@ -27,6 +27,21 @@
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | Local only | Preview deployment-protection bypass (`scripts/preview-url.sh --bypass`) |
 
 **Source:** `.env.example` + `grep process.env` across `src/`
+
+### The live-suite scripts' own knobs
+
+Read by `scripts/live-db-*` only — never by anything the app imports, and all
+defaulted, so the lane runs with none of them set. They exist so one script
+serves CI (a real `psql`, service containers) and a laptop (a containerised
+client, non-default ports) without a second copy.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PSQL` | `psql` | How `live-db-prepare.sh` invokes its client. The seam a machine with no local `psql` uses: `PSQL="docker exec -i -e PGPASSWORD=… <container> psql -U postgres"` |
+| `LIVE_DB_TEMPLATE` | `live_template` | The database the migrations apply to ONCE, copied per suite. Nothing connects to it — Postgres refuses to copy a database that has another session on it |
+| `LIVE_DB_PROXY_DATABASE` | `main` | The database named in the PROXY's own `PG_CONNECTION_STRING`, which is where it looks for `neon_control_plane.endpoints` — never the requested one |
+| `LIVE_DB_NETWORK`, `LIVE_DB_PG_CONTAINER`, `LIVE_DB_PROXY_CONTAINER` | `everyfield-live*` | Docker names `live-db-stack.sh` creates and removes |
+| `LIVE_DB_PG_PORT`, `LIVE_DB_PROXY_PORT` | `55432`, `4444` | Published ports. Postgres is off its default so the stack cannot collide with one the developer already runs |
 
 ---
 

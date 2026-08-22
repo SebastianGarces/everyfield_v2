@@ -16,8 +16,13 @@ import { getLatestPersonNote } from "@/lib/people/service";
 import {
   parseTaskListSearchParams,
   type SearchParamValue,
+  type TaskListSearchParams,
 } from "@/lib/tasks/list-params";
-import { listTasks, type TaskListRow } from "@/lib/tasks/service";
+import {
+  listTasks,
+  type TaskCountScope,
+  type TaskListRow,
+} from "@/lib/tasks/service";
 
 /** How many tasks one page of `/tasks` shows. */
 export const TASKS_PAGE_SIZE = 50;
@@ -28,6 +33,36 @@ export interface TaskListPage {
   nextCursor: string | null;
   /** `personId` → latest note, for the person-related cards on THIS page. */
   personNotes: Record<string, string>;
+}
+
+/**
+ * WHICH TASKS `/tasks?…` IS ABOUT.
+ *
+ * The one place a read URL becomes a filter set, because more than one reader
+ * needs it and a second copy is how they drift. The list is drawn from it and
+ * so are the badges above the list, which is what #613 cost: the badges were
+ * scoped by church and assignee only, so `?category=follow_up` counted the
+ * whole church and claimed "1 active" over a "No tasks found" list.
+ *
+ * Takes the PARSED params, not the raw URL soup, so this is a pure map from one
+ * domain type to another and the reading of the address bar stays at the edge
+ * that already does it.
+ *
+ * Paging is NOT here — `cursor`, `limit` and the sort order belong to a reader
+ * walking rows and mean nothing to a count. `includeCompleted` is not here
+ * either: it is the list's to apply and the badges' to ignore, which is why
+ * `TaskCountScope` has no room for it.
+ */
+export function taskListScope(
+  userId: string,
+  parsed: TaskListSearchParams
+): TaskCountScope {
+  return {
+    status: parsed.status,
+    priority: parsed.priority,
+    category: parsed.category,
+    assignedToId: parsed.view === "my_tasks" ? userId : undefined,
+  };
 }
 
 /**
@@ -45,12 +80,9 @@ export async function readTaskListPage(
   const parsed = parseTaskListSearchParams(params);
 
   const result = await listTasks(churchId, {
-    cursor: cursor ?? parsed.cursor,
-    status: parsed.status,
-    priority: parsed.priority,
-    category: parsed.category,
-    assignedToId: parsed.view === "my_tasks" ? userId : undefined,
+    ...taskListScope(userId, parsed),
     includeCompleted: parsed.showCompleted,
+    cursor: cursor ?? parsed.cursor,
     sortBy: "due_date",
     sortDir: "asc",
     limit: TASKS_PAGE_SIZE,

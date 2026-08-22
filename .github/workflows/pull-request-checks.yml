@@ -254,50 +254,56 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The proxy authenticates through a MOCK control plane that reads two
-      # objects out of the target database. Without them every query comes back
-      # as HTTP 500 "Control plane request failed" — which looks like a
-      # connection problem and is not.
-      - name: Bootstrap the proxy's mock control plane
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d main -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE SCHEMA IF NOT EXISTS neon_control_plane;
-          CREATE TABLE IF NOT EXISTS neon_control_plane.endpoints (
-            endpoint_id VARCHAR(255) PRIMARY KEY,
-            allowed_ips VARCHAR(255)
-          );
-          SQL
-
-      # NOT `pnpm db:migrate`: drizzle-kit picks its driver from what is
-      # installed, the only installed driver is `@neondatabase/serverless`,
-      # and its websocket never reaches a plain TCP Postgres. The HTTP proxy
-      # is no road either — its prepared statements take one command each,
-      # and the hand-written migrations are multi-command. So the versioned
-      # SQL files apply directly with psql, in journal order (their numeric
-      # prefixes), in autocommit because 0025 builds an index CONCURRENTLY.
-      # The guards under test are created HERE — a suite run against an
-      # unmigrated database would pass by proving nothing.
-      - name: Apply migrations
-        run: |
-          for f in src/db/migrations/*.sql; do
-            echo "applying $f"
-            PGPASSWORD=postgres psql -h localhost -U postgres -d main -v ON_ERROR_STOP=1 -q -f "$f"
-          done
+      # ONE DATABASE PER SUITE, NOT ONE FOR ALL OF THEM (#594). The step is a
+      # script rather than a loop here because BOTH sides of the arrangement
+      # have to agree on the names, and the other side is
+      # `scripts/live-db-endpoint.ts` running inside each test child. They read
+      # one derivation — `scripts/live-db-names.ts` — so this job cannot create
+      # a set the runner does not look for.
+      #
+      # It bootstraps the proxy's mock control plane (without it every query is
+      # an HTTP 500 "Control plane request failed", which looks like a
+      # connection problem and is not), applies the migrations ONCE to a
+      # template, and copies that template per suite.
+      #
+      # It applies them with psql and NOT `pnpm db:migrate`: drizzle-kit picks
+      # its driver from what is installed, the only installed driver is
+      # `@neondatabase/serverless`, and its websocket never reaches a plain TCP
+      # Postgres. The HTTP proxy is no road either — its prepared statements
+      # take one command each, and the hand-written migrations are
+      # multi-command. So the versioned SQL applies directly, in journal order
+      # (the numeric prefixes), in autocommit because 0025 builds an index
+      # CONCURRENTLY. The guards under test are created THERE — a suite run
+      # against an unmigrated database would pass by proving nothing.
+      - name: Prepare the per-suite databases
+        run: ./scripts/live-db-prepare.sh
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
 
       # `test:live`, not `test`: the full suite also carries CORPUS tests
       # (`templates-live.test.ts`, `article-templates-live.test.ts`) that gate
       # on reachability alone and assert against the 90 published wiki
-      # articles. This database is migrated but unseeded, so they would fail
+      # articles. These databases are migrated but unseeded, so they would fail
       # here for a reason that has nothing to do with a race. Seeding the
       # corpus is a different job; `src/db/live-suite-coverage.test.ts` keeps
       # the `test:live` list from drifting away from the suites that opt in,
-      # and pins the `--import` preload the whole job depends on.
+      # and pins both the `--import` preload and the preflight this job depends
+      # on.
+      #
+      # `DATABASE_URL` names the BASE connection only. The preload replaces its
+      # database component per child, and `scripts/live-db-preflight.ts` — the
+      # first half of `test:live` — refuses to start the runner unless every
+      # one of those databases answers, because an unreachable one would make
+      # the suites SKIP and the job go green having asserted nothing.
       - name: Run the live suites
         run: LIVE_DB_TESTS=1 pnpm test:live
         env:
-          # The suites' SQL goes through the proxy; the migrate step above
-          # went straight to Postgres with psql. Both URLs are named
-          # explicitly; no hostname is being interpreted.
+          # The suites' SQL goes through the proxy; the prepare step above went
+          # straight to Postgres with psql. Both URLs are named explicitly; no
+          # hostname is being interpreted.
           NEON_HTTP_PROXY_URL: "http://localhost:4444/sql"
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/main"
           RESEND_API_KEY: "re_ci_placeholder"

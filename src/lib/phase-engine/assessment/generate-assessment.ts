@@ -32,6 +32,7 @@ import {
   runAssessment,
   type AssessmentResult,
   type RateLimitEvent,
+  type SchemaRejectionEvent,
   type TokenPacer,
 } from "@/lib/phase-engine/judge";
 
@@ -71,6 +72,12 @@ export interface AssessmentRunOptions {
   maxAttempts?: number;
   /** Called on every 429 — lets the caller log throttling apart from failure. */
   onRateLimit?: (event: RateLimitEvent) => void;
+  /**
+   * Called on every draft the judge's own rules rejected (#605) — lets the
+   * caller log a re-prompt, which is not a failure, apart from a run that spent
+   * every draft and failed.
+   */
+  onSchemaRejection?: (event: SchemaRejectionEvent) => void;
   /**
    * Instant (on the pacer's clock) past which the judge's retry ladder must
    * stand down instead of holding for another TPM window. The cron batch passes
@@ -192,6 +199,7 @@ export async function generateAssessment(
       pacer: run.pacer,
       maxAttempts: run.maxAttempts,
       onRateLimit: run.onRateLimit,
+      onSchemaRejection: run.onSchemaRejection,
       deadlineAt: run.deadlineAt,
     });
 

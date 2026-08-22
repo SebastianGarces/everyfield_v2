@@ -10,7 +10,12 @@
 import { formatDateTime } from "@/lib/datetime";
 import { meetingTypeLabel } from "@/lib/meetings/labels";
 import { parseAgenda, type AgendaSection } from "@/lib/meetings/agenda";
-import { escapeMergeValues } from "@/lib/rich-text/format";
+import {
+  escapeMergeValues,
+  isRichTextEmpty,
+  richTextToPlainText,
+} from "@/lib/rich-text/format";
+import { VOID_TAGS } from "@/lib/rich-text/sanitize";
 
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
@@ -23,22 +28,50 @@ export interface MergeFieldDefinition {
   group: "person" | "church" | "meeting";
   /** Sample value used in previews */
   sampleValue: string;
+  /**
+   * This field's value can be the EMPTY STRING — the fact is one a meeting or a
+   * church may simply not have.
+   *
+   * SO IT MUST OWN ITS LINE in any template body that uses it: text sharing that
+   * line survives the value, which is how a meeting with no location shipped a
+   * bare 📍 (#625) and one with no agenda a bare "Agenda:" (#612). That is what
+   * `system-templates.test.ts` walks the catalog to enforce, and this flag is
+   * where it reads the list — on the definition rather than beside it, so a
+   * field added to `MERGE_FIELDS` is covered without anyone remembering.
+   *
+   * It is NOT what `renderEmailBodyHtml` consults. The drop there is decided by
+   * the VALUE (`""`), because a body may carry a token this registry has never
+   * heard of — a church's own field — and the rule is the same for it.
+   */
+  optional?: true;
 }
 
 // ---------------------------------------------------------------------------
-// The agenda, as an email says it
+// The optional meeting facts, as an email says them
 // ---------------------------------------------------------------------------
+//
+// AN OPTIONAL FIELD'S TOKEN CARRIES ITS OWN PREFIX, INSIDE THE VALUE.
+//
+// The merge engine has no conditionals, so any prefix written into the template
+// body outlives the thing it introduces. A meeting with no agenda delivered a
+// bare "Agenda:" until the heading moved into the value (#612), and a meeting
+// with no location delivered a bare 📍 for exactly the same reason (#625). One
+// value means one thing to drop: `renderEmailBodyHtml` deletes the whole line
+// an emptied token would have filled, and there is no fragment left to dangle.
+//
+// `{{meeting_date}}` keeps its 📅 in the template, and correctly — a meeting
+// always has a datetime, so that line cannot empty. The rule is for the fields
+// that CAN be absent.
+//
+// Both field descriptions in `MERGE_FIELDS` tell a template author not to write
+// the prefix themselves, because from inside the template body the prefix is
+// invisible.
 
-/**
- * The heading `{{meeting_agenda}}` carries WITH the list, not above it.
- *
- * It is inside the VALUE deliberately. The merge engine has no conditionals, so
- * a heading written into the template body outlives the list it introduces: a
- * meeting with no agenda would deliver "Agenda:" and then nothing. Making the
- * whole block one value means an empty agenda renders an empty string and the
- * section is simply absent (#612).
- */
+/** The heading `{{meeting_agenda}}` carries WITH the list, not above it. */
 const AGENDA_HEADING = "Agenda:";
+
+/** The pin `{{meeting_location}}` carries WITH the venue, not before it. */
+const LOCATION_PIN = "📍";
 
 /**
  * The running order as plain text, or `""` when there is none.
@@ -65,6 +98,21 @@ export function formatAgendaForEmail(
   );
 
   return [AGENDA_HEADING, ...lines].join("\n");
+}
+
+/**
+ * The venue with its pin, or `""` when the meeting has no location.
+ *
+ * The two columns are one line to a reader — "Fellowship Hall, 400 Oak St" —
+ * and either may be absent on its own, so the pin belongs to the JOINED value
+ * rather than to the name. A meeting carrying only an address still gets one.
+ */
+export function formatLocationForEmail(
+  locationName: string | null,
+  locationAddress: string | null
+): string {
+  const venue = [locationName, locationAddress].filter(Boolean).join(", ");
+  return venue === "" ? "" : `${LOCATION_PIN} ${venue}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +148,8 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Recipient's email address",
     group: "person",
     sampleValue: "sarah@example.com",
+    // A person row may carry no address; `buildPersonMergeData` renders "".
+    optional: true,
   },
   // Church fields
   {
@@ -115,6 +165,8 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Senior pastor's name",
     group: "church",
     sampleValue: "Pastor John Smith",
+    // No church-profile field sources it yet — always "" today.
+    optional: true,
   },
   {
     name: "launch_date",
@@ -122,6 +174,8 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     description: "Target launch Sunday date",
     group: "church",
     sampleValue: "September 14, 2026",
+    // `buildChurchMergeData` takes only a name, so always "" today (#203).
+    optional: true,
   },
   // Meeting fields (available when triggered from a meeting context)
   {
@@ -148,9 +202,11 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
   {
     name: "meeting_location",
     label: "Meeting Location",
-    description: "Meeting venue name and address",
+    description:
+      "The venue, pin included. Renders nothing when the meeting has no location — do not write a 📍 before it.",
     group: "meeting",
-    sampleValue: "Community Center, 123 Main St",
+    sampleValue: `${LOCATION_PIN} Community Center, 123 Main St`,
+    optional: true,
   },
   {
     name: "meeting_agenda",
@@ -159,6 +215,7 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
       "The running order, heading included. Renders nothing when the meeting has no agenda — do not write a heading above it.",
     group: "meeting",
     sampleValue: AGENDA_HEADING + "\n• Welcome (10 min)\n• Vision (25 min)",
+    optional: true,
   },
   // Confirmation buttons (auto-injected when sending for a meeting)
   // These render as styled CTA buttons in the email — place on their own line
@@ -287,16 +344,20 @@ export function buildMeetingMergeData(meeting: {
   const typeLabel = meetingTypeLabel(meeting.type);
 
   return {
-    meeting_title: meeting.title ?? typeLabel,
+    // `||`, not `??`: the column is nullable AND its validator accepts "",
+    // so a meeting saved with a blank title must still fall back to the label
+    // rather than rendering an empty subject.
+    meeting_title: meeting.title || typeLabel,
     meeting_type: typeLabel,
     // Zone-pinned: this runs both on the server (sending mail) and inside the
     // client preview on /meetings/[id]. A locale-default format would put a
     // different time in the SSR markup than in the hydrated preview — and a
     // different time in the email than on the page. See src/lib/datetime.ts.
     meeting_date: formatDateTime(meeting.datetime),
-    meeting_location: [meeting.locationName, meeting.locationAddress]
-      .filter(Boolean)
-      .join(", "),
+    meeting_location: formatLocationForEmail(
+      meeting.locationName,
+      meeting.locationAddress
+    ),
     // `parseAgenda` is total — a null column, a legacy string or an array of
     // junk all yield sections, possibly none — so an unreadable row sends an
     // email without an agenda rather than failing the send.
@@ -333,8 +394,17 @@ function withNormalisedNewlines(
 }
 
 /**
- * A `<p>` holding ONE merge token and nothing else — a template's way of saying
- * "this section goes here".
+ * A LINE holding ONE merge token and nothing else — a template's way of saying
+ * "this fact goes here".
+ *
+ * THE UNIT IS THE LINE, not the paragraph, because that is the unit a template
+ * author writes a fact on. The date and the location are two lines of ONE
+ * paragraph — an author separates them with Enter, not with a blank line — so a
+ * paragraph-scoped rule could only drop them together or not at all. It dropped
+ * neither, and a meeting with no location shipped its pin with nothing after it
+ * (#625). A paragraph whose lines all go is still dropped whole; that is the
+ * `{{meeting_agenda}}` case (#612) falling out of the same rule rather than
+ * needing its own.
  *
  * The match is against the TEMPLATE, before substitution, and that is the whole
  * point. The first spelling of this rule ran over the RENDERED body looking for
@@ -343,11 +413,103 @@ function withNormalisedNewlines(
  * author's blank line (`format.ts`, `isRichTextEmpty`). So a change scoped to
  * "an absent agenda leaves no gap" silently restyled every outgoing email,
  * including ones with no meeting and no merge field in them. Asking the
- * template which paragraph belongs to which token keeps the rule where the
- * intent is.
+ * template which line belongs to which token keeps the rule where the intent is.
  */
-const TOKEN_ONLY_PARAGRAPH =
-  /<p\b[^>]*>(?:\s|&nbsp;|<br\s*\/?>)*\{\{(\w+)\}\}(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi;
+const TOKEN_ONLY = /^\s*\{\{(\w+)\}\}\s*$/;
+
+/**
+ * ONE block, opened and closed by the SAME tag — `<p>` or `<li>`, the two things
+ * the sanitiser allows that hold a line of prose.
+ *
+ * The backreference is load-bearing: without it a lazy `<p>|<li>` open could
+ * pair with the other's close, and `<li><p>x</p></li>` would "close" the `<li>`
+ * at `</p>` and rebuild across a tag boundary.
+ */
+const BLOCK = /(<(p|li)\b[^>]*>)([\s\S]*?)(<\/\2\s*>)/gi;
+
+/** The break BETWEEN two lines of one block. */
+const LINE_BREAK = /<br\s*\/?>/gi;
+
+/** `<name`, `</name`, or `<name attr …>`, for the balance check below. */
+const ANY_TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g;
+
+/**
+ * Does every tag this run opens also close inside it?
+ *
+ * Deleting a run of markup is only safe if the run is self-contained. A wrapper
+ * that spans a line break — `<em>a<br>{{x}}</em>` — puts its `</em>` in the
+ * SECOND line, so dropping that line alone would leave `<em>` open and hand the
+ * sanitiser's output to an inbox unbalanced. Such a line is kept instead; the
+ * fact renders empty inside its wrapper, which is a cosmetic miss rather than
+ * broken markup.
+ */
+function selfContained(run: string): boolean {
+  const open: string[] = [];
+  for (const [, closing, rawName] of run.matchAll(ANY_TAG)) {
+    const name = rawName.toLowerCase();
+    if (VOID_TAGS.has(name)) continue;
+    if (closing) {
+      if (open.pop() !== name) return false;
+    } else {
+      open.push(name);
+    }
+  }
+  return open.length === 0;
+}
+
+/**
+ * Delete every line an emptied token would have filled, and the block if that
+ * was all it held.
+ *
+ * WHAT COUNTS AS "the line is only this token" IS ITS VISIBLE TEXT, not its
+ * markup, and that is the same question the text/plain half asks — one predicate
+ * (`TOKEN_ONLY`) against `richTextToPlainText` here and against the raw line
+ * there, so the two halves of one email break in the same places by
+ * construction. Matching the raw HTML instead let any inline wrapper hide the
+ * token: a planter who bolds `{{meeting_location}}` in a forked invitation got
+ * `<em></em>` and a dangling `<br>` in the HTML half while the text half
+ * dropped the line — the exact artifact this rule exists to prevent.
+ *
+ * The match is against the TEMPLATE, before substitution. The first spelling of
+ * this rule ran over the RENDERED body looking for `<p></p>`, which cannot tell
+ * a paragraph a token emptied from a blank line the planter typed — and
+ * `<p><br></p>` is exactly what this repo calls an author's blank line
+ * (`format.ts`, `isRichTextEmpty`). So a change scoped to "an absent agenda
+ * leaves no gap" silently restyled every outgoing email, including ones with no
+ * merge field in them. Asking the template which line belongs to which token
+ * keeps the rule where the intent is.
+ *
+ * A token with NO VALUE AT ALL is not this case — it is left in place, so the
+ * compose preview can still draw its red "nothing resolved this" pill around
+ * it. Only a token whose value is the empty STRING marks a fact the meeting
+ * does not have.
+ *
+ * A block nothing was dropped from comes back byte-identical, which is what
+ * keeps the planter's own blank line untouched: its lines are empty but neither
+ * of them is a token, so the rule never fires.
+ */
+function dropEmptiedLines(
+  bodyHtml: string,
+  values: Record<string, string>
+): string {
+  return bodyHtml.replace(
+    BLOCK,
+    (block, open: string, _name: string, held: string, close: string) => {
+      const lines = held.split(LINE_BREAK);
+      const kept = lines.filter((line) => {
+        const token = TOKEN_ONLY.exec(richTextToPlainText(line))?.[1];
+        return (
+          token === undefined || values[token] !== "" || !selfContained(line)
+        );
+      });
+
+      if (kept.length === lines.length) return block;
+
+      const rebuilt = kept.join("<br />");
+      return isRichTextEmpty(rebuilt) ? "" : open + rebuilt + close;
+    }
+  );
+}
 
 /**
  * Substitute merge values into a sanitised rich-text body — the ONE door, for
@@ -362,12 +524,12 @@ const TOKEN_ONLY_PARAGRAPH =
  * 2. Newlines become `<br>`. Merge values are TEXT — the agenda is a list of
  *    lines — and a bare `\n` inside a `<p>` is whitespace, so without this the
  *    whole agenda arrives on one line.
- * 3. Drop the paragraph a field that resolved to NOTHING would have filled, so
- *    the section is absent rather than a blank gap. `{{meeting_agenda}}` on a
- *    meeting with no agenda is the case this was written for (#612);
- *    `{{pastor_name}}` and `{{launch_date}}` render empty today and left the
- *    same gap. A token with no value at all is NOT this case — it is left in
- *    place, so the preview can still draw its red "nothing resolved this" pill.
+ * 3. Drop the LINE a field that resolved to NOTHING would have filled — and the
+ *    paragraph too, if that was all it held — so the fact is absent rather than
+ *    a blank gap or a dangling prefix. `{{meeting_location}}` on a meeting with
+ *    no location (#625) and `{{meeting_agenda}}` on one with no agenda (#612)
+ *    are the two cases this was written for; `{{pastor_name}}` and
+ *    `{{launch_date}}` render empty today and leave the same gap.
  */
 export function renderEmailBodyHtml(
   bodyHtml: string,
@@ -380,27 +542,33 @@ export function renderEmailBodyHtml(
     escaped[name] = value.replace(/\n/g, "<br />");
   }
 
-  const withoutEmptied = bodyHtml.replace(
-    TOKEN_ONLY_PARAGRAPH,
-    (paragraph, name: string) => (escaped[name] === "" ? "" : paragraph)
-  );
-
-  return renderTemplate(withoutEmptied, escaped);
+  return renderTemplate(dropEmptiedLines(bodyHtml, escaped), escaped);
 }
 
 /**
  * The same substitution for the text/plain half. No escaping — it is not markup
- * — but the same intent: a field that rendered nothing does not leave three
- * blank lines where the HTML half leaves none.
+ * — but the SAME intent, line for line: a field that rendered nothing takes its
+ * line with it, so the two halves of one email break in the same places.
+ *
+ * The `\n{3,}` collapse alone nearly gets there and is why this went unnoticed,
+ * but it cannot tell a line the template ENDED from a line a token emptied: it
+ * would turn "date, location, then prose" into a paragraph break where the HTML
+ * half keeps a single line break.
  */
 export function renderEmailBodyText(
   bodyText: string,
   data: Record<string, string>
 ): string {
-  return renderTemplate(
-    bodyText.replace(NEWLINES, "\n"),
-    withNormalisedNewlines(data)
-  )
+  const values = withNormalisedNewlines(data);
+  const kept = bodyText
+    .replace(NEWLINES, "\n")
+    .split("\n")
+    .filter((line) => {
+      const token = TOKEN_ONLY.exec(line)?.[1];
+      return token === undefined || values[token] !== "";
+    });
+
+  return renderTemplate(kept.join("\n"), values)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
