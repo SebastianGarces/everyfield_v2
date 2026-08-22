@@ -231,20 +231,32 @@ export async function confirmEmailChangeAction(
   //
   // It also takes the outcome off the client, which is the half that was
   // BROKEN. The success sentence used to live in `useActionState`, and the
-  // update that would have shown it shared a transition with the tree patch
-  // `refresh()` streamed into this response — a transition that never
-  // committed. The swap landed, the payload arrived carrying the new address,
-  // and the button sat on "Confirming…" forever, while the refusal branch of
-  // the same component cleared in ~2s.
+  // observed symptom was that it never appeared: the swap landed, and the
+  // button sat on "Confirming…" while the refusal branch of the same component
+  // cleared in ~2s.
   //
-  // DO NOT READ THAT AS "a server `refresh()` strands a press". It does not, in
-  // general: `requestEmailChangeAction` above calls `refresh()` from the same
-  // shape and renders its "check your inbox" sentence correctly — driven on
-  // #658's preview to be sure. What differs at this call site was not worth
-  // bisecting a framework race to name, because the fix does not depend on the
-  // answer: a redirect is rendered by the server, so no sentence a reader
-  // depends on waits on a transition to commit. If a third call site strands,
-  // these two are the pair to compare.
+  // THAT SYMPTOM IS REAL AND INTERMITTENT (#665, reproduced). The pre-#662
+  // component and action were restored verbatim and pressed 12 times on a
+  // preview: 3 stranded, and all 3 were the FIRST or SECOND press against a
+  // freshly deployed build — 0 of the 9 later presses stranded, which commit in
+  // 400–1200 ms. Every one of the 12 swapped `users.email` in the database, so
+  // what strands is the render, never the write. Reversing the account order
+  // moved the strand with the POSITION, not with the account, which is what
+  // rules out a data or seat explanation.
+  //
+  // WHY THAT MATTERS FOR THE REDIRECT BELOW: it is not merely the nicer UX. A
+  // server-rendered redirect does not wait on a client transition to commit, so
+  // it is the only shape here that cannot show this symptom. Do not replace it
+  // with a returned success state.
+  //
+  // WHAT IS STILL OPEN. `requestEmailChangeAction` above calls `refresh()` too
+  // and has not been seen to strand (including once as the first press on a
+  // cold build), but one trial does not separate "a cold first press plus
+  // `refresh()`" from "…plus a success render that drops the `<form>` it was
+  // submitted from" — which is the other thing that differed, and which nobody
+  // had named before #665. A WARM bisect finds neither: a 2x2 over both
+  // variables committed in all four cells, which is why this went unexplained
+  // for so long. If you pick it up, deploy fresh and measure the first press.
   //
   // …AND THE DESTINATION IS FRESHENED RATHER THAN THE ROUTE BEING LEFT. A
   // client-side navigation REUSES the layout segments both routes share, and
