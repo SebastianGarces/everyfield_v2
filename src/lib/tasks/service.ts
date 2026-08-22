@@ -259,9 +259,24 @@ export async function getTask(
  * rows — and the ruling on #370 is that the badges mirror the list. Anything
  * that reports a number of *tasks* applies this.
  */
-export function topLevelTasksOnly(): SQL {
-  return isNull(tasks.parentTaskId);
+export function topLevelTasksOnly(table: TasksTable = tasks): SQL {
+  return isNull(table.parentTaskId);
 }
+
+/**
+ * The parent side of a checklist join — `tasks` again, under a second name, so
+ * one query can constrain an item and the task it itemises at the same time.
+ */
+const checklistParent = alias(tasks, "checklist_parent");
+
+/**
+ * The `tasks` table, or an alias of it.
+ *
+ * The predicate builders below take the table they are speaking about, because
+ * `getTaskCounts` has to constrain a parent by the same rules as its child.
+ * Both members have the same columns; only the name in the SQL differs.
+ */
+export type TasksTable = typeof tasks | typeof checklistParent;
 
 /**
  * Every WHERE condition `listTasks` applies, as a list.
@@ -272,7 +287,8 @@ export function topLevelTasksOnly(): SQL {
  */
 export function taskListConditions(
   churchId: string,
-  options: ListTasksOptions = {}
+  options: ListTasksOptions = {},
+  table: TasksTable = tasks
 ): SQL[] {
   const {
     status,
@@ -287,53 +303,53 @@ export function taskListConditions(
   } = options;
 
   const baseConditions: SQL[] = [
-    eq(tasks.churchId, churchId),
-    isNull(tasks.deletedAt),
+    eq(table.churchId, churchId),
+    isNull(table.deletedAt),
   ];
 
   // Exclude completed unless requested
   if (!includeCompleted) {
-    baseConditions.push(ne(tasks.status, "complete"));
+    baseConditions.push(ne(table.status, "complete"));
   }
 
   // Top-level rows only unless requested (T-016). Applied to the count query
   // as well as the page query — both are built from `baseConditions`.
   if (!includeSubtasks) {
-    baseConditions.push(topLevelTasksOnly());
+    baseConditions.push(topLevelTasksOnly(table));
   }
 
   // Filter by status
   if (status && status.length > 0) {
-    baseConditions.push(inArray(tasks.status, status));
+    baseConditions.push(inArray(table.status, status));
   }
 
   // Filter by priority
   if (priority && priority.length > 0) {
-    baseConditions.push(inArray(tasks.priority, priority));
+    baseConditions.push(inArray(table.priority, priority));
   }
 
   // Filter by category
   if (category && category.length > 0) {
-    baseConditions.push(inArray(tasks.category, category));
+    baseConditions.push(inArray(table.category, category));
   }
 
   // Filter by assignee
   if (assignedToId) {
-    baseConditions.push(eq(tasks.assignedToId, assignedToId));
+    baseConditions.push(eq(table.assignedToId, assignedToId));
   }
 
   // Filter by due date range
   if (dueDateFrom) {
-    baseConditions.push(gte(tasks.dueDate, dueDateFrom));
+    baseConditions.push(gte(table.dueDate, dueDateFrom));
   }
   if (dueDateTo) {
-    baseConditions.push(lte(tasks.dueDate, dueDateTo));
+    baseConditions.push(lte(table.dueDate, dueDateTo));
   }
 
   // Filter by search term
   if (search) {
     const searchLike = `%${search}%`;
-    baseConditions.push(ilike(tasks.title, searchLike));
+    baseConditions.push(ilike(table.title, searchLike));
   }
 
   return baseConditions;
@@ -420,46 +436,58 @@ export async function listTasks(
 }
 
 /**
- * Every WHERE condition the status badges count over.
+ * Every WHERE condition the status badges count over: the list's own.
  *
- * Shares `topLevelTasksOnly()` with `taskListConditions` — see the ruling note
- * there. Note there is no `includeSubtasks` escape hatch: a badge that says
- * "3 completed" always means three tasks, in every view.
+ * The badges mirror the list (decision C on #370), so they are not built from a
+ * second hand-written predicate list — they are built from `taskListConditions`
+ * itself, and whatever narrows the rows narrows the numbers with them. Written
+ * out separately they drifted twice: first over subtasks, then over every
+ * filter the URL carries, which is what #613 reported. `/tasks?category=
+ * follow_up` counted the whole church and rendered "1 active / 2 completed"
+ * above a "No tasks found" list.
+ *
+ * `includeCompleted` is the ONE option that does not carry over, and forcing it
+ * on is the entire difference between the two readings. It is a display toggle
+ * over the population rather than part of it: the badges have to see completed
+ * rows in order to say how many "Show Completed" would reveal. A toggle whose
+ * own badge reads "0 completed" explains itself; one that promises a task the
+ * filter excludes is the dead control ruled on in #611.
+ *
+ * There is still no `includeSubtasks` escape hatch — `taskListConditions`
+ * defaults it off, and a badge that says "3 completed" means three tasks in
+ * every view.
  */
-export function taskCountConditions(churchId: string, userId?: string): SQL[] {
-  const conditions: SQL[] = [
-    eq(tasks.churchId, churchId),
-    isNull(tasks.deletedAt),
-    topLevelTasksOnly(),
-  ];
-
-  if (userId) {
-    conditions.push(eq(tasks.assignedToId, userId));
-  }
-
-  return conditions;
+export function taskCountConditions(
+  churchId: string,
+  options: ListTasksOptions = {},
+  table: TasksTable = tasks
+): SQL[] {
+  return taskListConditions(
+    churchId,
+    { ...options, includeCompleted: true },
+    table
+  );
 }
 
 /**
- * Get task counts grouped by status for a church.
- * Optionally filtered to a specific user's assigned tasks.
+ * Get task counts grouped by status for a church, under the same filters the
+ * list is read with — pass `listTasks`' own options.
  *
  * Checklist items are counted separately, in `checklistTotal` /
  * `checklistComplete`, and are scoped by their PARENT rather than by their own
  * assignee: the question the line answers is "how much checklist work sits
  * inside the tasks I am looking at", so a subtask follows the task it itemises
- * into or out of view.
+ * into or out of view. That is why the parent side of the join carries the same
+ * conditions as the badges above it.
  */
 export async function getTaskCounts(
   churchId: string,
-  userId?: string
+  options: ListTasksOptions = {}
 ): Promise<TaskCounts> {
-  const baseConditions = taskCountConditions(churchId, userId);
+  const baseConditions = taskCountConditions(churchId, options);
 
   // The domain's one spelling of "today, as a calendar day in APP_TIME_ZONE".
   const today = toCalendarDate(new Date());
-
-  const parents = alias(tasks, "checklist_parent");
 
   const [statusResult, checklistResult] = await Promise.all([
     db
@@ -480,15 +508,15 @@ export async function getTaskCounts(
         checklistTotal: sql<number>`count(*)::int`,
       })
       .from(tasks)
-      .innerJoin(parents, eq(tasks.parentTaskId, parents.id))
+      .innerJoin(checklistParent, eq(tasks.parentTaskId, checklistParent.id))
       .where(
         and(
           eq(tasks.churchId, churchId),
           isNull(tasks.deletedAt),
           isNotNull(tasks.parentTaskId),
-          eq(parents.churchId, churchId),
-          isNull(parents.deletedAt),
-          ...(userId ? [eq(parents.assignedToId, userId)] : [])
+          // The PARENT carries the badges' own conditions, so a checklist line
+          // never describes items hanging off tasks the filter took away.
+          ...taskCountConditions(churchId, options, checklistParent)
         )
       ),
   ]);
