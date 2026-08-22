@@ -1,13 +1,12 @@
 // ============================================================================
 // "THEIR OWN TASK" — `tasks.own`'s subject half, in terms both sides have.
 //
-// PURE AND CLIENT-SAFE, on the `follow-up-ownership.shared` pattern and for the
-// same reason: the rule is asked in two places and one of them is a browser
-// bundle. `service.ts` asks it with a `User` in hand; `TaskCard` has a
-// capability answer from `useCan` and an id, and cannot import the service
-// without dragging `@/db` across the boundary. So the rule lives here and both
-// call it — `mayActOnTask` in the service delegates to this, and the card
-// passes what it has.
+// PURE AND CLIENT-SAFE, because the rule is asked in two places and one of them
+// is a browser bundle. `service.ts` asks it with a `User` in hand; `TaskCard`
+// has a capability answer from `useCan` and an id, and cannot import the
+// service without dragging `@/db` across the boundary. So the rule lives here
+// and both call it — `mayActOnTask` in the service delegates to this, and the
+// card passes what it has.
 //
 // It was TWO SPELLINGS of one sentence until #660: the service said
 // `task.assignedToId === actor.id || holdsSeatFor(actor, "tasks.write")` and
@@ -24,15 +23,16 @@
  * it differently (a seat lookup on the server, the capability transport in the
  * browser) and neither answer belongs in this rule.
  *
- * AN UNASSIGNED ROW IS NOBODY'S OWN. `assignedToId === viewerId` with both
- * `null` would make every unassigned task actionable by a viewer whose id is
- * unknown, so the nullability is checked rather than compared through.
+ * `viewerId` is a plain `string`: both callers hold an identity — the actor's
+ * row on the server, the threaded `currentUserId` in the card — so widening it
+ * to nullable would be defending a state neither can produce, and an
+ * unassigned row (`assignedToId: null`) then falls out as nobody's own without
+ * a guard.
  */
 export function mayActOnTaskRow(row: {
   canWrite: boolean;
   assignedToId: string | null;
-  viewerId: string | null | undefined;
+  viewerId: string;
 }): boolean {
-  if (row.canWrite) return true;
-  return row.viewerId != null && row.assignedToId === row.viewerId;
+  return row.canWrite || row.assignedToId === row.viewerId;
 }

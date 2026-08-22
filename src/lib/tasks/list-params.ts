@@ -22,10 +22,20 @@
  *
  * Pure and db-free, so the page's whole reading of the URL is testable without
  * a session or a database.
+ *
+ * AND WHAT IT IS WRITTEN AS, in the same file (#660). The toggle used to build
+ * its own URLs, with a rule that read "an `all` means no filter, so drop the
+ * key" — true of `status`, `priority` and `category`, where "All" is the option
+ * meaning *unfiltered*, and false of `view`, where `all` is a NAMED VIEW. So
+ * pressing **All Tasks** pushed `/tasks` with no parameter, this parser applied
+ * its default, and the page came back with **My Tasks** active: the tab could
+ * not be selected at all. Each half was self-consistent; only together were
+ * they wrong. They are one module now, round-tripped against each other in the
+ * test — every view the toggle can write parses back to itself — and there is
+ * one list of views for both to read.
  */
 
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
-import { isTaskListView, type TaskListView } from "@/lib/tasks/list-url";
 import {
   taskCategorySchema,
   taskPrioritySchema,
@@ -36,12 +46,83 @@ import type { z } from "zod";
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
 
+/**
+ * The views `/tasks` can be in — the one list the toggle renders from and the
+ * parser accepts, so a view can never be writable and unreadable (#660).
+ *
+ * `assignments` is the group-by-owner view of open follow-ups (#470 AC-3); it
+ * reads the same unfiltered set as `all`, so a consumer asking "whose tasks"
+ * gets one answer for both.
+ */
+export const TASK_LIST_VIEWS = ["my_tasks", "all", "assignments"] as const;
+
+export type TaskListView = (typeof TASK_LIST_VIEWS)[number];
+
+/** The params the toggle and the filter selects may write. */
+export type TaskListParamKey =
+  | "view"
+  | "completed"
+  | "status"
+  | "priority"
+  | "category";
+
+/** Is this URL value one of the views? Narrowing, so no caller casts. */
+function isTaskListView(value: unknown): value is TaskListView {
+  return (
+    typeof value === "string" &&
+    (TASK_LIST_VIEWS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * The query string one control's change produces, given the one on screen.
+ *
+ * `null` CLEARS and every other value SETS — including `"all"`. The dropped
+ * special case is #660: this used to delete the key for `"all"` too, which made
+ * `?view=all` unwritable. The filter selects were never relying on it — each
+ * maps its own "All" option to `null` at the call site, which is where that
+ * sentinel belongs, because it is the SELECT that has an "All" option.
+ *
+ * The cursor always goes: it names a position in the list being left.
+ */
+export function taskListParamsWith(
+  current: URLSearchParams | string,
+  key: TaskListParamKey,
+  value: string | null
+): URLSearchParams {
+  const params = new URLSearchParams(current);
+
+  if (value === null) params.delete(key);
+  else params.set(key, value);
+
+  params.delete("cursor");
+  return params;
+}
+
+/**
+ * What survives "Clear filters": the two params that are not filters.
+ *
+ * Here rather than in the toolbar for the reason the setter is: which keys are
+ * a VIEW of the list and which are a FILTER on it is one fact, and a sixth
+ * param added next round should not vanish on Clear because a component held a
+ * private copy of that list.
+ */
+export function taskListParamsCleared(
+  current: URLSearchParams | string
+): URLSearchParams {
+  const params = new URLSearchParams(current);
+  const kept = new URLSearchParams();
+
+  for (const key of ["view", "completed"] as const) {
+    const value = params.get(key);
+    if (value !== null) kept.set(key, value);
+  }
+
+  return kept;
+}
+
 export interface TaskListSearchParams {
-  /**
-   * `"my_tasks"` unless the URL says otherwise — and the list of what it may
-   * otherwise say lives in `./list-url`, with the code that WRITES these URLs
-   * (#660). Two halves of one contract, round-tripped in this module's test.
-   */
+  /** `"my_tasks"` unless the URL says one of the other `TASK_LIST_VIEWS`. */
   view: TaskListView;
   showCompleted: boolean;
   status?: TaskStatus[];

@@ -53,7 +53,7 @@ import {
 import { toCalendarDate } from "@/lib/datetime";
 import { blockedTaskIdsAmong } from "./dependencies";
 import { assertMayOwnFollowUp } from "./follow-up-ownership";
-import { mayActOnTaskRow } from "./own-duty.shared";
+import { mayActOnTaskRow } from "./own-duty";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
@@ -1221,9 +1221,8 @@ export function mayActOnTask(
   actor: User,
   task: Pick<Task, "assignedToId">
 ): boolean {
-  // The rule itself is in `./own-duty.shared`, because `TaskCard` asks the same
-  // question and cannot import this module (#660). This half only supplies the
-  // seat answer.
+  // The rule itself is in `./own-duty`, which `TaskCard` calls too (#660).
+  // This half only supplies the seat answer.
   return mayActOnTaskRow({
     canWrite: holdsSeatFor(actor, "tasks.write"),
     assignedToId: task.assignedToId,

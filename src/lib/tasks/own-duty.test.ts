@@ -14,7 +14,7 @@ import {
   planBulkTaskOperation,
   type BulkTaskCandidate,
 } from "./service";
-import { mayActOnTaskRow } from "./own-duty.shared";
+import { mayActOnTaskRow } from "./own-duty";
 
 // ============================================================================
 // THE SUBJECT HALF OF `tasks.own` (AS-006) — "their own task", enforced.
@@ -278,7 +278,7 @@ test("the same list is fully actionable for an Admin, so the hide is about owner
 
 test("the card and the service ask ONE function, so the checkbox and the action agree", () => {
   // The card cannot import the service (`@/db` would cross into the bundle), so
-  // the rule lives in `own-duty.shared` and both call it. This asserts the
+  // the rule lives in `own-duty` and both call it. This asserts the
   // client's call shape against the same answers the service gives above.
   const asTheCardAsks = (assignedToId: string | null) =>
     mayActOnTaskRow({
@@ -291,12 +291,5 @@ test("the card and the service ask ONE function, so the checkbox and the action 
     [MEMBER_ID, OTHER_ID, null].map(asTheCardAsks),
     [true, false, false],
     "what the checkbox is drawn from must equal what `assertMayActOnTask` will accept"
-  );
-
-  // The card may be handed no viewer id at all. An unassigned row must not
-  // become everybody's just because both sides are null.
-  assert.equal(
-    mayActOnTaskRow({ canWrite: false, assignedToId: null, viewerId: null }),
-    false
   );
 });

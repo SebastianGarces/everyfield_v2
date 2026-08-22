@@ -3,8 +3,12 @@ import { test } from "node:test";
 
 import { taskCategories, taskPriorities, taskStatuses } from "@/db/schema";
 
-import { parseTaskListSearchParams } from "./list-params";
-import { TASK_LIST_VIEWS, taskListParamsWith } from "./list-url";
+import {
+  TASK_LIST_VIEWS,
+  parseTaskListSearchParams,
+  taskListParamsCleared,
+  taskListParamsWith,
+} from "./list-params";
 
 // ----------------------------------------------------------------------------
 // `/tasks?…` — the URL is untrusted input, and the route it feeds has no error
@@ -134,18 +138,6 @@ test("every view the toggle can write parses back to that same view", () => {
   }
 });
 
-test("the three tabs produce three different URLs", () => {
-  const urls = TASK_LIST_VIEWS.map((view) =>
-    taskListParamsWith(new URLSearchParams(), "view", view).toString()
-  );
-
-  assert.equal(
-    new Set(urls).size,
-    TASK_LIST_VIEWS.length,
-    `two tabs share a URL, so one of them cannot be selected: ${urls.join(" | ")}`
-  );
-});
-
 test("a filter's own `all` still clears, because the select passes null", () => {
   // The sentinel belongs to the control that HAS an "All" option. Each select
   // maps it to `null` at the call site; the builder just clears on `null`.
@@ -160,6 +152,20 @@ test("a filter's own `all` still clears, because the select passes null", () => 
     withFilter.get("view"),
     "all",
     "clearing a filter must not clear the view beside it"
+  );
+});
+
+test("clearing filters keeps the view and the completed toggle, and nothing else", () => {
+  const kept = taskListParamsCleared(
+    new URLSearchParams(
+      "view=all&completed=true&status=blocked&priority=high&category=general&cursor=abc"
+    )
+  );
+
+  assert.deepEqual(
+    Object.fromEntries(kept),
+    { view: "all", completed: "true" },
+    "Clear filters must not drop the reader out of the view they are in — and the list of which params are a VIEW rather than a FILTER lives here, not in the toolbar"
   );
 });
 
