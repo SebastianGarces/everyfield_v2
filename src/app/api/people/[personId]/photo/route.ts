@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
 import { getPerson } from "@/lib/people/service";
-import { getFileBytes } from "@/lib/storage";
+import { storedImageResponse } from "@/lib/stored-image-response";
 
 // The S3 client needs the Node.js runtime.
 export const runtime = "nodejs";
@@ -43,22 +43,12 @@ export async function GET(
 
   const { personId } = await params;
   const person = await getPerson(user.churchId, personId);
-  if (!person?.photoUrl) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
 
-  const file = await getFileBytes(person.photoUrl);
-  if (!file) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  return new NextResponse(Buffer.from(file.body), {
-    headers: {
-      "Content-Type": file.contentType,
-      // PRIVATE, and revalidated every time. The photo is personal data behind
-      // a session check: a shared cache holding it would serve one church's
-      // avatar from another church's request.
-      "Cache-Control": "private, no-cache, must-revalidate",
-    },
-  });
+  // Refusals 2 and 3 are one call: `storedImageResponse` answers 404 for a
+  // person with no photo AND for a row naming an object the bucket no longer
+  // has, which is the same 404 the account avatar route gets from it (#617).
+  // The cache header and `nosniff` live there too — they were retyped here, and
+  // a header this codebase calls load-bearing is not a string two files should
+  // have to keep agreeing about.
+  return storedImageResponse(person?.photoUrl);
 }

@@ -286,7 +286,7 @@ test("removeUserAvatar is setUserAvatar with a null key and nothing else", async
 
   const outcome = await removeUserAvatar({ actor: ACTOR }, harness.effects);
 
-  assert.deepEqual(outcome, { ok: true, avatarKey: null });
+  assert.deepEqual(outcome, { ok: true });
   assert.deepEqual(harness.kinds(), ["load", "write", "remove"]);
   assert.deepEqual(harness.calls[1], { kind: "write", key: null });
 });
@@ -296,6 +296,6 @@ test("removing twice is removing once — the second call finds nothing to drop"
 
   const outcome = await removeUserAvatar({ actor: ACTOR }, harness.effects);
 
-  assert.deepEqual(outcome, { ok: true, avatarKey: null });
+  assert.deepEqual(outcome, { ok: true });
   assert.deepEqual(harness.kinds(), ["load", "write"]);
 });

@@ -8,7 +8,7 @@
 // actually empties the bucket rather than only the column.
 //
 // So this does the real thing. A real S3 PUT to the configured bucket, a real
-// row in a real Postgres, the real `readAvatar` reading the real object back,
+// row in a real Postgres, the real `storedImageResponse` reading the real object back,
 // and a real DELETE — then it checks the bucket directly to prove the object is
 // gone. The only thing it cannot do is click, which is what the browser gate is
 // for.
@@ -103,8 +103,10 @@ async function main() {
   const { db } = await import("../src/db");
   const { users } = await import("../src/db/schema");
   const { eq } = await import("drizzle-orm");
-  const { readAvatar, removeUserAvatar, uploadUserAvatar } =
+  const { removeUserAvatar, uploadUserAvatar } =
     await import("../src/lib/auth/avatar");
+  const { storedImageResponse } =
+    await import("../src/lib/stored-image-response");
   const { getFileBytes } = await import("../src/lib/storage");
   const { userAvatarSrc } = await import("../src/lib/profile-photo");
 
@@ -119,41 +121,50 @@ async function main() {
 
   const keys: string[] = [];
 
+  /**
+   * The key the ROW holds, which is the only place this script reads one.
+   *
+   * The outcome the actions return carries no key deliberately (see
+   * `AvatarOutcome`), and that makes this proof better rather than harder: every
+   * assertion below is about what actually landed in the database, never about
+   * what the function said it did.
+   */
+  const storedKey = async () =>
+    (
+      await db
+        .select({ key: users.avatarKey })
+        .from(users)
+        .where(eq(users.id, actor.id))
+    )[0].key;
+
   try {
     // ---- 1. An account starts with no picture -----------------------------
     assert.equal(actor.avatarKey, null, "a new account holds no key");
     assert.equal(
-      (await readAvatar(actor.avatarKey)).status,
+      (await storedImageResponse(actor.avatarKey)).status,
       404,
       "no picture answers 404, which is what renders the initials"
     );
 
     // ---- 2. Upload puts real bytes in the real bucket ----------------------
-    const first = await uploadUserAvatar({
-      actor,
-      file: pngFile(),
-    });
-    assert.equal(first.ok, true, "the upload was refused");
-    assert.ok(first.ok && first.avatarKey);
-    keys.push(first.avatarKey);
-    console.log(`==> uploaded ${first.avatarKey}`);
-
-    const storedKey = async () =>
-      (
-        await db
-          .select({ key: users.avatarKey })
-          .from(users)
-          .where(eq(users.id, actor.id))
-      )[0].key;
-
     assert.equal(
-      await storedKey(),
-      first.avatarKey,
-      "the row must name the object the upload just stored"
+      (await uploadUserAvatar({ actor, file: pngFile() })).ok,
+      true,
+      "the upload was refused"
+    );
+
+    const firstKey = await storedKey();
+    assert.ok(firstKey, "the row names no object after a successful upload");
+    keys.push(firstKey);
+    console.log(`==> uploaded ${firstKey}`);
+
+    assert.ok(
+      await getFileBytes(firstKey),
+      "the row names an object the bucket does not have — the one state P-024 forbids"
     );
 
     // ---- 3. The route hands those exact bytes back ------------------------
-    const served = await readAvatar(await storedKey());
+    const served = await storedImageResponse(await storedKey());
     assert.equal(served.status, 200);
     assert.equal(served.headers.get("Content-Type"), "image/png");
     assert.match(served.headers.get("Cache-Control") ?? "", /private/);
@@ -171,20 +182,22 @@ async function main() {
     assert.ok(!src.includes("avatars/"), "the key rode to the browser");
 
     // ---- 4. Replace: new object, old one collected ------------------------
-    const replaced = await uploadUserAvatar({
-      actor,
-      file: pngFile(),
-    });
-    assert.ok(replaced.ok && replaced.avatarKey);
-    keys.push(replaced.avatarKey);
+    assert.equal((await uploadUserAvatar({ actor, file: pngFile() })).ok, true);
+
+    const secondKey = await storedKey();
+    assert.ok(secondKey);
+    keys.push(secondKey);
     assert.notEqual(
-      replaced.avatarKey,
-      first.avatarKey,
+      secondKey,
+      firstKey,
       "a replacement must be a NEW object, or the browser keeps the old face"
     );
-    assert.equal(await storedKey(), replaced.avatarKey);
+    assert.ok(
+      await getFileBytes(secondKey),
+      "the row names an object the bucket does not have"
+    );
     assert.equal(
-      await getFileBytes(first.avatarKey),
+      await getFileBytes(firstKey),
       null,
       "the object the row stopped naming is still in the bucket — P-024's delete tail did not run"
     );
@@ -195,12 +208,12 @@ async function main() {
     assert.equal(removed.ok, true);
     assert.equal(await storedKey(), null, "the column still names an object");
     assert.equal(
-      await getFileBytes(replaced.avatarKey),
+      await getFileBytes(secondKey),
       null,
       "the removal emptied the column but left the bytes in the bucket"
     );
     assert.equal(
-      (await readAvatar(await storedKey())).status,
+      (await storedImageResponse(await storedKey())).status,
       404,
       "after a removal the route must 404 so the initials render"
     );

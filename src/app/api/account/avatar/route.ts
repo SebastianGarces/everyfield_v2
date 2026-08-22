@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
-import { readAvatar } from "@/lib/auth/avatar";
+import { storedImageResponse } from "@/lib/stored-image-response";
 
 // The S3 client needs the Node.js runtime.
 export const runtime = "nodejs";
@@ -27,8 +27,10 @@ export const runtime = "nodejs";
  *
  * So there are two refusals and this file holds only the first: no session is
  * 401, and everything after it — no stored key, or a row naming an object the
- * bucket no longer has — is `readAvatar`'s 404, which is what makes the initials
- * fallback render instead of a broken image.
+ * bucket no longer has — is `storedImageResponse`'s 404, which is what makes the
+ * initials fallback render instead of a broken image. That function is shared
+ * with the person photo route: the two differ entirely in who may read and not
+ * at all in what a key turns into.
  *
  * THE KEY IS READ OFF THE SESSION ROW, not queried again: `getCurrentSession`
  * joins `users` and is request-cached, so the freshest value this request can
@@ -43,5 +45,5 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return readAvatar(user.avatarKey);
+  return storedImageResponse(user.avatarKey);
 }

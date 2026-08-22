@@ -6,7 +6,6 @@ import { profilePhotoRefusal } from "@/lib/profile-photo";
 import {
   deleteFile,
   getExtensionFromMimeType,
-  getFileBytes,
   uploadFile,
   userAvatarStorageKey,
 } from "@/lib/storage";
@@ -62,9 +61,23 @@ import {
 /** The account a picture belongs to, narrowed to what these functions read. */
 export type AvatarActor = { id: string };
 
-export type AvatarOutcome =
-  | { ok: true; avatarKey: string | null }
-  | { ok: false; message: string };
+/**
+ * What an upload or a removal answers with.
+ *
+ * NO KEY IN IT, and that is not an omission to tidy up later. These functions
+ * are called from `"use server"` exports, and a Server Action's RETURN VALUE is
+ * serialized into the response the browser reads — so a key here would put
+ * `avatars/{userId}/{uuid}.png` in the network payload of every successful
+ * upload, which is the exact thing the private bucket and the session-checked
+ * route exist to prevent. It shipped that way in this issue's first draft and
+ * review caught it: the key was carried, nothing read it, and the client-side
+ * ratchet did not see it because a leaked VALUE is not a leaked identifier.
+ *
+ * The caller does not need one either. What changed on screen is re-read by the
+ * `refresh()` the action fires, and the picture the reader is shown in the
+ * meantime is the file they just chose.
+ */
+export type AvatarOutcome = { ok: true } | { ok: false; message: string };
 
 /**
  * The three effects `setUserAvatar` sequences, injectable so the ordering
@@ -193,7 +206,7 @@ export async function uploadUserAvatar(
     return { ok: false, message: "We could not save that picture" };
   }
 
-  return { ok: true, avatarKey: key };
+  return { ok: true };
 }
 
 /**
@@ -212,50 +225,5 @@ export async function removeUserAvatar(
     return { ok: false, message: "We could not remove that picture" };
   }
 
-  return { ok: true, avatarKey: null };
-}
-
-// ============================================================================
-// The read
-// ============================================================================
-
-/**
- * What a stored key answers with — the body of `GET /api/account/avatar`, minus
- * the session check that route does first.
- *
- * SPLIT FROM THE ROUTE SO IT CAN BE RUN. A route module may export nothing but
- * its HTTP verbs and Next's config keys, so a test that wanted the response
- * shape would have to import the handler whole and stand up a session and a
- * bucket to reach it. What is actually worth asserting — bytes come back with
- * the stored object's own content type, a missing object is a 404 rather than a
- * 500, and the cache header is PRIVATE — needs neither, so it lives here where a
- * test can hand in its own reader.
- *
- * A NULL KEY AND A MISSING OBJECT ANSWER THE SAME 404, deliberately. Both mean
- * "no picture to show" to the only caller there is, and the initials fallback is
- * what renders for either. The second case is the half-failed replacement P-024
- * tolerates: the row names an object the bucket no longer has, and a 404 makes
- * that a fallback rather than a broken image.
- */
-export async function readAvatar(
-  avatarKey: string | null | undefined,
-  readBytes: (
-    key: string
-  ) => Promise<{ body: Uint8Array; contentType: string } | null> = getFileBytes
-): Promise<Response> {
-  const file = avatarKey ? await readBytes(avatarKey) : null;
-
-  if (!file) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
-
-  return new Response(Buffer.from(file.body), {
-    headers: {
-      "Content-Type": file.contentType,
-      // PRIVATE, and revalidated every time. A profile picture is personal data
-      // behind a session check: a shared cache holding it would serve one
-      // account's face from another account's request.
-      "Cache-Control": "private, no-cache, must-revalidate",
-    },
-  });
+  return { ok: true };
 }

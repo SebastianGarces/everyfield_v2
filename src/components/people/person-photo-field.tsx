@@ -4,7 +4,6 @@ import {
   removePersonPhotoAction,
   uploadPersonPhotoAction,
 } from "@/app/(dashboard)/people/actions";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,30 +18,22 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
+  usePendingPicture,
+  type PictureOutcome,
+} from "@/components/use-pending-picture";
+import {
   PROFILE_PHOTO_MIME_TYPES,
-  profilePhotoRefusal,
   personPhotoSrc,
+  profilePhotoRefusal,
 } from "@/lib/profile-photo";
 import type { PersonForClient } from "@/lib/people/types";
 import { Loader2, Trash, Upload } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 interface PersonPhotoFieldProps {
   person: PersonForClient;
 }
-
-/**
- * What the planter has just done to the photo, before the round trip that makes
- * it the server's answer.
- *
- * ONE value rather than a preview string beside a `removed` boolean: those two
- * can disagree, and "a preview I also removed" has no meaning. The absent case
- * is `null` — nothing pending, so the stored row is what the avatar shows.
- */
-type PendingPhoto =
-  | { kind: "uploaded"; objectUrl: string }
-  | { kind: "removed" };
 
 /**
  * The person photo control on the profile form (P-024a, P-024b).
@@ -56,130 +47,82 @@ type PendingPhoto =
  * Removal is the exception that DOES ask first: an upload the planter regrets
  * is one more upload away from fixed, while the bytes a removal drops are gone
  * from the bucket and the original is on whatever device it came from.
+ *
+ * THE PREVIEW LOGIC IS `usePendingPicture`, shared with the account picture
+ * (#617). It used to live here in full, and the copy #617 made of it fixed
+ * three things this one never had — an object URL revoked at unmount, a revoke
+ * that is not a side effect inside a state updater, and a caught rejection —
+ * plus the accessibility this file was missing. Sharing the hook is what stops
+ * the next fix landing on one surface again.
  */
 export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<PendingPhoto | null>(null);
-  const [inFlight, setInFlight] = useState<"upload" | "remove" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
 
   const initials =
     `${person.firstName.charAt(0)}${person.lastName.charAt(0)}`.toUpperCase();
   const fullName = `${person.firstName} ${person.lastName}`;
-  const isBusy = inFlight !== null;
 
-  // The pending action outranks the stored row until the revalidation lands,
-  // which is what makes a removal show initials at once rather than the face it
-  // just deleted.
-  const src =
-    pending === null
-      ? personPhotoSrc(person.id, person.photoUrl)
-      : pending.kind === "uploaded"
-        ? pending.objectUrl
-        : undefined;
+  const announce = useCallback(
+    ({ ok, message }: { ok: boolean; message: string }) =>
+      ok ? toast.success(message) : toast.error(message),
+    []
+  );
 
-  /**
-   * The ONE way `pending` moves, because an object URL that is dropped without
-   * being revoked strands its bytes for the life of the document — and every
-   * transition off an `uploaded` value drops one.
-   */
-  const settle = (next: PendingPhoto | null) => {
-    setPending((current) => {
-      if (current?.kind === "uploaded" && current !== next) {
-        URL.revokeObjectURL(current.objectUrl);
-      }
-      return next;
-    });
-  };
+  /** The people actions answer in `ActionResult`; the hook speaks one shape. */
+  const asOutcome = (result: {
+    success: boolean;
+    error?: string;
+  }): PictureOutcome =>
+    result.success
+      ? { ok: true }
+      : { ok: false, message: result.error ?? "That did not work" };
 
-  const handleFile = (file: File) => {
-    setError(null);
+  const picture = usePendingPicture({
+    storedSrc: personPhotoSrc(person.id, person.photoUrl),
+    refuse: profilePhotoRefusal,
+    send: {
+      upload: async (file) => {
+        const formData = new FormData();
+        formData.append("photo", file);
+        return asOutcome(await uploadPersonPhotoAction(person.id, formData));
+      },
+      remove: async () => asOutcome(await removePersonPhotoAction(person.id)),
+    },
+    copy: { uploaded: "Photo updated", removed: "Photo removed" },
+    onSettled: announce,
+  });
 
-    // THE SAME RULE THE ACTION APPLIES, applied before the request exists.
-    // Not a duplicate of the gate — one function, called from both sides —
-    // and it is here because a file over the body cap never reaches the
-    // action: the platform answers 413 and the planter gets a console error
-    // where a sentence belongs.
-    const refusal = profilePhotoRefusal(file);
-    if (refusal) {
-      setError(refusal);
-      toast.error(refusal);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("photo", file);
-
-    setInFlight("upload");
-    startTransition(async () => {
-      try {
-        const result = await uploadPersonPhotoAction(person.id, formData);
-
-        if (!result.success) {
-          // The server is the gate — the picker's `accept` is a convenience,
-          // and a POST never saw it. A refusal drops the pending state so the
-          // avatar goes back to what is actually stored.
-          settle(null);
-          setError(result.error);
-          toast.error(result.error);
-          return;
-        }
-
-        settle({ kind: "uploaded", objectUrl: URL.createObjectURL(file) });
-        toast.success("Photo updated");
-      } finally {
-        setInFlight(null);
-      }
-    });
-  };
-
-  const handleRemove = () => {
-    setError(null);
-
-    setInFlight("remove");
-    startTransition(async () => {
-      try {
-        const result = await removePersonPhotoAction(person.id);
-
-        if (!result.success) {
-          settle(null);
-          setError(result.error);
-          toast.error(result.error);
-          return;
-        }
-
-        settle({ kind: "removed" });
-        toast.success("Photo removed");
-      } finally {
-        setInFlight(null);
-      }
-    });
-  };
+  const isBusy = picture.inFlight !== null;
 
   return (
     <div className="flex items-center gap-4">
       <Avatar className="h-16 w-16">
-        <AvatarImage src={src} alt={fullName} />
+        <AvatarImage src={picture.src} alt="" />
         <AvatarFallback className="text-lg font-semibold">
           {initials}
         </AvatarFallback>
       </Avatar>
 
       <div className="space-y-2">
+        {/* NOT IN THE TAB ORDER. The button below is the control — it carries
+            the name, the focus ring and the busy state — so leaving this
+            focusable would put an unlabelled file input in the tab order right
+            beside it, announcing nothing. */}
         <input
           ref={inputRef}
           type="file"
           name="photo"
           accept={PROFILE_PHOTO_MIME_TYPES.join(",")}
           className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
           data-testid="person-photo-input"
           disabled={isBusy}
           onChange={(event) => {
             const file = event.target.files?.[0];
             // Reset the input so re-choosing the same file fires `change` again.
             event.target.value = "";
-            if (file) handleFile(file);
+            if (file) picture.chooseFile(file);
           }}
         />
         <div className="flex items-center gap-2">
@@ -190,19 +133,25 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
             className="cursor-pointer"
             data-testid="person-photo-upload"
             disabled={isBusy}
+            aria-describedby={
+              picture.error ? "person-photo-error" : "person-photo-help"
+            }
             onClick={() => inputRef.current?.click()}
           >
             {/* The spinner belongs to the control that owns the work, not to
                 whichever one happens to be first in the row. */}
-            {inFlight === "upload" ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            {picture.inFlight === "upload" ? (
+              <Loader2
+                className="mr-2 h-4 w-4 animate-spin"
+                aria-hidden="true"
+              />
             ) : (
-              <Upload className="mr-2 h-4 w-4" />
+              <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
             )}
-            {src ? "Replace photo" : "Upload photo"}
+            {picture.src ? "Replace photo" : "Upload photo"}
           </Button>
 
-          {src && (
+          {picture.src && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
@@ -213,10 +162,13 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
                   data-testid="person-photo-remove"
                   disabled={isBusy}
                 >
-                  {inFlight === "remove" ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {picture.inFlight === "remove" ? (
+                    <Loader2
+                      className="mr-2 h-4 w-4 animate-spin"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Trash className="mr-2 h-4 w-4" />
+                    <Trash className="mr-2 h-4 w-4" aria-hidden="true" />
                   )}
                   Remove
                 </Button>
@@ -236,7 +188,7 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
                     Cancel
                   </AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={handleRemove}
+                    onClick={picture.removePicture}
                     variant="destructive"
                     className="cursor-pointer"
                     data-testid="person-photo-remove-confirm"
@@ -248,14 +200,32 @@ export function PersonPhotoField({ person }: PersonPhotoFieldProps) {
             </AlertDialog>
           )}
         </div>
-        <p className="text-muted-foreground text-xs">
-          JPG, PNG or WebP. Up to 3MB.
-        </p>
-        {error && (
-          <Alert variant="destructive" data-testid="person-photo-error">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+
+        {picture.error ? (
+          <p
+            id="person-photo-error"
+            role="alert"
+            className="text-destructive text-sm"
+            data-testid="person-photo-error"
+          >
+            {picture.error}
+          </p>
+        ) : (
+          <p id="person-photo-help" className="text-muted-foreground text-xs">
+            JPG, PNG or WebP. Up to 3MB.
+          </p>
         )}
+
+        {/* The work itself, for a reader who cannot see the spinner. Rendered
+            always and filled when busy: a live region inserted at the moment it
+            has something to say is announced unreliably. */}
+        <p role="status" aria-live="polite" className="sr-only">
+          {picture.inFlight === "upload"
+            ? "Uploading the photo"
+            : picture.inFlight === "remove"
+              ? "Removing the photo"
+              : ""}
+        </p>
       </div>
     </div>
   );

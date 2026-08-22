@@ -17,10 +17,14 @@
 // and the actions all say avatar, so the component does too; CS-004 and the
 // people using it say profile picture, so every string does. One word each way,
 // and neither leaks into the other.
+//
+// THE PREVIEW LOGIC IS NOT HERE. `usePendingPicture` owns it — the optimistic
+// value, the object URL and the revoke discipline — because the person photo
+// field needs exactly the same thing and the two copies had already drifted.
 // ============================================================================
 
 import { Loader2, Trash, Upload } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 import {
@@ -40,6 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { usePendingPicture } from "@/components/use-pending-picture";
 import {
   PROFILE_PHOTO_MIME_TYPES,
   profilePhotoRefusal,
@@ -53,9 +58,9 @@ type AvatarFieldProps = {
    * A ROUTE AND NOT THE KEY, and one prop rather than two. This is a client
    * component, so anything it takes is in the RSC payload the browser can read
    * — and the whole point of the private bucket is that a key never gets there.
-   * The component needs one more fact than the URL carries ("is a picture set?"),
-   * and `undefined` IS that fact: a boolean beside the route would be a second
-   * prop that could disagree with the first.
+   * The component needs one more fact than the URL carries ("is a picture
+   * set?"), and `undefined` IS that fact: a boolean beside the route would be a
+   * second prop that could disagree with the first.
    */
   avatarSrc: string | undefined;
   /** For the fallback, and for naming what a removal is about to drop. */
@@ -63,115 +68,34 @@ type AvatarFieldProps = {
   name: string;
 };
 
-/**
- * What the reader has just done, before the round trip that makes it the
- * server's answer.
- *
- * ONE value rather than a preview string beside a `removed` boolean: those two
- * can disagree, and "a preview I also removed" has no meaning. The absent case
- * is `null` — nothing pending, so the stored row is what shows.
- */
-type PendingPicture =
-  | { kind: "uploaded"; objectUrl: string }
-  | { kind: "removed" };
-
 export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<PendingPicture | null>(null);
-  const [inFlight, setInFlight] = useState<"upload" | "remove" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
 
-  const isBusy = inFlight !== null;
+  const announce = useCallback(
+    ({ ok, message }: { ok: boolean; message: string }) =>
+      ok ? toast.success(message) : toast.error(message),
+    []
+  );
 
-  // What the reader just did outranks the stored row until the re-read lands,
-  // which is what makes a removal show initials AT ONCE rather than the face it
-  // just deleted — and what keeps an upload from flashing the fallback while
-  // the browser fetches the route the new key points at.
-  const src =
-    pending === null
-      ? avatarSrc
-      : pending.kind === "uploaded"
-        ? pending.objectUrl
-        : undefined;
+  const picture = usePendingPicture({
+    storedSrc: avatarSrc,
+    refuse: profilePhotoRefusal,
+    send: {
+      upload: (file) => {
+        const formData = new FormData();
+        formData.append("avatar", file);
+        return uploadAvatarAction(formData);
+      },
+      remove: removeAvatarAction,
+    },
+    copy: {
+      uploaded: "Profile picture updated",
+      removed: "Profile picture removed",
+    },
+    onSettled: announce,
+  });
 
-  /**
-   * The ONE way `pending` moves, because an object URL dropped without being
-   * revoked strands its bytes for the life of the document — and every
-   * transition off an `uploaded` value drops one.
-   */
-  const settle = (next: PendingPicture | null) => {
-    setPending((current) => {
-      if (current?.kind === "uploaded" && current !== next) {
-        URL.revokeObjectURL(current.objectUrl);
-      }
-      return next;
-    });
-  };
-
-  const handleFile = (file: File) => {
-    setError(null);
-
-    // THE SAME RULE THE ACTION APPLIES, applied before the request exists. Not
-    // a duplicate of the gate — one function, called from both sides — and it
-    // is here because a file over the body cap never reaches the action: the
-    // platform answers 413 and the reader gets a console error where a sentence
-    // belongs.
-    const refusal = profilePhotoRefusal(file);
-    if (refusal) {
-      setError(refusal);
-      toast.error(refusal);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("avatar", file);
-
-    setInFlight("upload");
-    startTransition(async () => {
-      try {
-        const outcome = await uploadAvatarAction(formData);
-
-        if (!outcome.ok) {
-          // The server is the gate; the picker's `accept` is a convenience, and
-          // a POST never saw it. A refusal drops the pending state so what
-          // shows is what is actually stored.
-          settle(null);
-          setError(outcome.message);
-          toast.error(outcome.message);
-          return;
-        }
-
-        settle({ kind: "uploaded", objectUrl: URL.createObjectURL(file) });
-        toast.success("Profile picture updated");
-      } finally {
-        setInFlight(null);
-      }
-    });
-  };
-
-  const handleRemove = () => {
-    setError(null);
-
-    setInFlight("remove");
-    startTransition(async () => {
-      try {
-        const outcome = await removeAvatarAction();
-
-        if (!outcome.ok) {
-          settle(null);
-          setError(outcome.message);
-          toast.error(outcome.message);
-          return;
-        }
-
-        settle({ kind: "removed" });
-        toast.success("Profile picture removed");
-      } finally {
-        setInFlight(null);
-      }
-    });
-  };
+  const isBusy = picture.inFlight !== null;
 
   return (
     <div className="flex flex-wrap items-center gap-4">
@@ -181,7 +105,7 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
             account it belongs to is named twice within a few lines. What a
             reader without sight actually needs to know — whether a picture is
             SET — is carried by the button, which says Upload or Replace. */}
-        <AvatarImage src={src} alt="" />
+        <AvatarImage src={picture.src} alt="" />
         <AvatarFallback className="text-xl font-semibold">
           {initials}
         </AvatarFallback>
@@ -206,7 +130,7 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
             const file = event.target.files?.[0];
             // Reset the input so re-choosing the same file fires `change` again.
             event.target.value = "";
-            if (file) handleFile(file);
+            if (file) picture.chooseFile(file);
           }}
         />
 
@@ -218,14 +142,14 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
             className="cursor-pointer"
             data-testid="avatar-upload"
             disabled={isBusy}
-            aria-describedby={error ? "avatar-error" : "avatar-help"}
+            aria-describedby={picture.error ? "avatar-error" : "avatar-help"}
             onClick={() => inputRef.current?.click()}
           >
             {/* The spinner belongs to the control that owns the work, not to
                 whichever one happens to be first in the row. The label does not
                 change with it: a control that renames itself mid-request is a
                 control the reader has to re-read to find again. */}
-            {inFlight === "upload" ? (
+            {picture.inFlight === "upload" ? (
               <Loader2
                 className="mr-2 size-4 animate-spin"
                 aria-hidden="true"
@@ -233,10 +157,10 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
             ) : (
               <Upload className="mr-2 size-4" aria-hidden="true" />
             )}
-            {src ? "Replace picture" : "Upload picture"}
+            {picture.src ? "Replace picture" : "Upload picture"}
           </Button>
 
-          {src && (
+          {picture.src && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
@@ -247,7 +171,7 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
                   data-testid="avatar-remove"
                   disabled={isBusy}
                 >
-                  {inFlight === "remove" ? (
+                  {picture.inFlight === "remove" ? (
                     <Loader2
                       className="mr-2 size-4 animate-spin"
                       aria-hidden="true"
@@ -274,7 +198,7 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
                     Cancel
                   </AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={handleRemove}
+                    onClick={picture.removePicture}
                     variant="destructive"
                     className="cursor-pointer"
                     data-testid="avatar-remove-confirm"
@@ -287,13 +211,13 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
           )}
         </div>
 
-        {error ? (
+        {picture.error ? (
           <p
             id="avatar-error"
             role="alert"
             className="text-destructive text-sm"
           >
-            {error}
+            {picture.error}
           </p>
         ) : (
           <p id="avatar-help" className="text-muted-foreground text-sm">
@@ -305,9 +229,9 @@ export function AvatarField({ avatarSrc, initials, name }: AvatarFieldProps) {
             always and filled when busy: a live region inserted at the moment it
             has something to say is announced unreliably. */}
         <p role="status" aria-live="polite" className="sr-only">
-          {inFlight === "upload"
+          {picture.inFlight === "upload"
             ? "Uploading your profile picture"
-            : inFlight === "remove"
+            : picture.inFlight === "remove"
               ? "Removing your profile picture"
               : ""}
         </p>
