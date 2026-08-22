@@ -5,11 +5,15 @@ import { test } from "node:test";
 
 import {
   CHECKIN_DIMENSIONS,
+  CHECKIN_NOTE_MAX,
   CHECKIN_NUDGE_RUN,
+  checkinDraftFrom,
   checkinNudges,
+  completeAnswer,
   recentWeekStarts,
   thisWeeksCheckin,
   weekStartOf,
+  type CheckinAnswer,
 } from "./planter-checkin";
 import type { PlanterCheckin, PlanterCheckinLevel } from "@/db/schema";
 
@@ -96,6 +100,49 @@ test("this week's row is picked out of a history, not the newest one", () => {
     thisWeeksCheckin(history, new Date("2026-08-24T12:00:00.000Z")),
     null
   );
+});
+
+// -- the draft the change form opens on (#634) --------------------------------
+
+const ANSWER: CheckinAnswer = {
+  spiritually: "strained",
+  marriageFamily: "steady",
+  financially: "struggling",
+  pace: "strained",
+  note: "Hard week. Tell Ana on Saturday.",
+};
+
+test("reopening and saving unchanged writes back exactly what was there", () => {
+  // The write is a whole-row upsert. A form reopened without the note would
+  // save `note: null` over a note the planter wrote and never tell them.
+  assert.deepEqual(completeAnswer(checkinDraftFrom(ANSWER)), ANSWER);
+});
+
+test("a note of nothing but whitespace is stored as no note", () => {
+  const draft = checkinDraftFrom({ ...ANSWER, note: null });
+  draft.note = "   ";
+
+  assert.equal(completeAnswer(draft)?.note, null);
+});
+
+test("a half-tapped draft is not saveable", () => {
+  const draft = checkinDraftFrom(null);
+  draft.answers.spiritually = "steady";
+  draft.answers.pace = "strained";
+
+  assert.equal(completeAnswer(draft), null);
+});
+
+test("the note length the keyboard enforces is the one the server enforces", () => {
+  // The action's single refusal message is about the three levels, so a note
+  // refused on length would be refused in a sentence that never mentions notes.
+  const schema = readFileSync(
+    join(SRC, "app", "(dashboard)", "phase", "checkin-actions.ts"),
+    "utf8"
+  );
+
+  assert.match(schema, /z\.string\(\)\.max\(CHECKIN_NOTE_MAX\)/);
+  assert.equal(CHECKIN_NOTE_MAX, 2000);
 });
 
 // -- the nudge ----------------------------------------------------------------

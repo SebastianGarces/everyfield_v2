@@ -9,6 +9,9 @@
 //
 // A grep for the button's label would pass on a `<Button>` sitting in a branch
 // that never renders. Only the markup knows.
+//
+// The draft round-trip these panels are built on is asserted next door, in
+// `lib/phase-engine/planter-checkin.test.ts` — it is domain logic, not markup.
 // ============================================================================
 
 import assert from "node:assert/strict";
@@ -19,12 +22,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { CheckinAnswer } from "@/lib/phase-engine/planter-checkin";
 
-import {
-  PlanterCheckinCard,
-  checkinDraftFrom,
-  completeAnswer,
-  type CheckinWeek,
-} from "./planter-checkin-card";
+import { PlanterCheckinCard, type CheckinWeek } from "./planter-checkin-card";
 
 const ANSWER: CheckinAnswer = {
   spiritually: "strained",
@@ -34,11 +32,22 @@ const ANSWER: CheckinAnswer = {
   note: "Hard week. Tell Ana on Saturday.",
 };
 
-/** Twelve empty slots — the strip is not what these tests are about. */
-const WEEKS: CheckinWeek[] = Array.from({ length: 12 }, (_, index) => ({
-  weekStart: `2026-0${index < 4 ? 6 : 8}-${String(index + 1).padStart(2, "0")}`,
-  levels: null,
-}));
+/**
+ * Three answered weeks, so the strip renders its dots rather than taking its
+ * "nothing yet" early return. The control count below is then taken over a card
+ * that draws everything a real one draws, which is what the browser repro did.
+ */
+const WEEKS: CheckinWeek[] = ["2026-08-03", "2026-08-10", "2026-08-17"].map(
+  (weekStart) => ({
+    weekStart,
+    levels: {
+      spiritually: "steady",
+      marriageFamily: "steady",
+      financially: "strained",
+      pace: "strained",
+    },
+  })
+);
 
 function render(thisWeek: CheckinAnswer | null): string {
   return renderToStaticMarkup(
@@ -67,41 +76,22 @@ test("the answered card renders the change it promises (#634)", () => {
 test("an unanswered week opens straight into the form", () => {
   const markup = render(null);
 
-  // No sentence about having answered, and no Cancel: on an unanswered week
-  // the form IS the card, so there is nothing to cancel back to.
+  // The answered panel is UNREACHABLE without an answer. The shape this
+  // replaced latched "answered" at mount, so a page left open across a Monday
+  // told the planter they had answered a week nobody had.
   assert.doesNotMatch(markup, /You have answered this week/);
+  assert.doesNotMatch(markup, /Change my answer/);
+  // …and no Cancel: on an unanswered week the form IS the card, so there is
+  // nothing to cancel back to.
   assert.doesNotMatch(markup, /Cancel/);
   assert.match(markup, /Save this week/);
   assert.match(markup, /How are you doing with the Lord this week\?/);
 });
 
-test("both states are reachable, so neither test is asserting on an empty card", () => {
+test("both panels are really rendering, so neither test asserts on an empty card", () => {
   // A render that threw or returned nothing would satisfy `doesNotMatch` above.
-  assert.ok(render(ANSWER).length > 500);
-  assert.ok(render(null).length > 500);
-});
-
-// -- the note the reopened form must not eat ----------------------------------
-
-test("reopening and saving unchanged writes back exactly what was there", () => {
-  // The write is a whole-row upsert. A form reopened without the note would
-  // save `note: null` over a note the planter wrote and never told them.
-  const roundTripped = completeAnswer(checkinDraftFrom(ANSWER));
-
-  assert.deepEqual(roundTripped, ANSWER);
-});
-
-test("a note of nothing but whitespace is stored as no note", () => {
-  const draft = checkinDraftFrom({ ...ANSWER, note: null });
-  draft.note = "   ";
-
-  assert.equal(completeAnswer(draft)?.note, null);
-});
-
-test("a half-tapped draft is not saveable", () => {
-  const draft = checkinDraftFrom(null);
-  draft.answers.spiritually = "steady";
-  draft.answers.pace = "strained";
-
-  assert.equal(completeAnswer(draft), null);
+  for (const markup of [render(ANSWER), render(null)]) {
+    assert.match(markup, /data-testid="planter-checkin"/);
+    assert.match(markup, /data-testid="checkin-strip"/);
+  }
 });

@@ -72,6 +72,16 @@ export const CHECKIN_LEVELS = [
 export const CHECKIN_HISTORY_WEEKS = 12;
 
 /**
+ * How long the optional note may be.
+ *
+ * ONE NUMBER, read by the textarea and by the action's schema. The action has a
+ * single refusal message and it is about the three levels, so a note the server
+ * rejects on length would be refused in a sentence that does not mention notes
+ * — the fix is for the keyboard to stop at the same number the server does.
+ */
+export const CHECKIN_NOTE_MAX = 2000;
+
+/**
  * A run of this many consecutive weeks at `strained` or worse raises the nudge.
  *
  * Three, not two: a hard fortnight is a hard fortnight, and a product that asks
@@ -122,6 +132,49 @@ export interface CheckinAnswer {
   financially: PlanterCheckinLevel;
   pace: PlanterCheckinLevel;
   note?: string | null;
+}
+
+/** A half-filled answer: what the card's form holds while it is open. */
+export interface CheckinDraft {
+  answers: Partial<Record<CheckinDimension, PlanterCheckinLevel>>;
+  note: string;
+}
+
+/**
+ * The draft a form opens on: empty for a new week, this week's answer for a
+ * change (#634).
+ *
+ * SEEDED WITH THE NOTE, not just the four taps. The write is a whole-row
+ * upsert, so a change saved from a form that dropped the note would erase it
+ * and never say so. This and {@link completeAnswer} are each other's inverse,
+ * and `planter-checkin.test.ts` holds them to it.
+ */
+export function checkinDraftFrom(answer: CheckinAnswer | null): CheckinDraft {
+  if (!answer) return { answers: {}, note: "" };
+
+  return {
+    answers: {
+      spiritually: answer.spiritually,
+      marriageFamily: answer.marriageFamily,
+      financially: answer.financially,
+      pace: answer.pace,
+    },
+    note: answer.note ?? "",
+  };
+}
+
+/** The draft as a saveable answer, or `null` while a dimension is untapped. */
+export function completeAnswer(draft: CheckinDraft): CheckinAnswer | null {
+  const { spiritually, marriageFamily, financially, pace } = draft.answers;
+  if (!spiritually || !marriageFamily || !financially || !pace) return null;
+
+  return {
+    spiritually,
+    marriageFamily,
+    financially,
+    pace,
+    note: draft.note.trim() || null,
+  };
 }
 
 // ----------------------------------------------------------------------------
