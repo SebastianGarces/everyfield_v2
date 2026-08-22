@@ -294,20 +294,20 @@ test("a read is cached per key, and a NEW SERVER RENDER is what re-reads", async
     mod.openSettings("team");
     // The same three inputs must not ask twice — this is what stops the
     // suspended-replay loop.
-    await mod.sectionRequest("team", "render-1", 0);
-    await mod.sectionRequest("team", "render-1", 0);
+    await mod.sectionRequest("scope-a", "team", "render-1", 0);
+    await mod.sectionRequest("scope-a", "team", "render-1", 0);
     assert.equal(calls.length, 1, "one read for one section at one render");
 
     // A write moved the server: `refresh()` re-renders the layout and the id
     // changes, which is the ONLY thing that re-reads an open section.
-    await mod.sectionRequest("team", "render-2", 0);
+    await mod.sectionRequest("scope-a", "team", "render-2", 0);
     assert.equal(calls.length, 2, "a new server render re-reads");
 
     // The interleaved-render case: an urgent update re-renders the committed
     // tree at the OLD id while a transition renders at the new one. With one
     // cache slot each evicts the other and mints a fresh promise — the same loop
     // at a lower rate.
-    await mod.sectionRequest("team", "render-1", 0);
+    await mod.sectionRequest("scope-a", "team", "render-1", 0);
     assert.equal(calls.length, 2, "the previous render's read is still held");
   } finally {
     restore();
@@ -324,10 +324,12 @@ test("prefetching every visible section costs ONE read each, and a switch costs 
     // What the modal does on open: one read per visible section, at the render
     // id it opened on.
     for (const id of visible) {
-      mod.sectionRequest(id as never, "render-1", 0);
+      mod.sectionRequest("scope-a", id as never, "render-1", 0);
     }
     await Promise.all(
-      visible.map((id) => mod.sectionRequest(id as never, "render-1", 0))
+      visible.map((id) =>
+        mod.sectionRequest("scope-a", id as never, "render-1", 0)
+      )
     );
     assert.deepEqual(calls, visible, "five sections, five reads, in order");
 
@@ -335,7 +337,7 @@ test("prefetching every visible section costs ONE read each, and a switch costs 
     // so the rail stops costing a request per click. Five slots, not two: a
     // global cap of two would have the prefetch evicting itself as it filled.
     for (const id of [...visible].reverse()) {
-      await mod.sectionRequest(id as never, "render-1", 0);
+      await mod.sectionRequest("scope-a", id as never, "render-1", 0);
     }
     assert.equal(calls.length, 5, "switching through all five asked nothing");
   } finally {
@@ -349,15 +351,15 @@ test("an ANSWER survives the visit and a REVISIT paints it; a moved render id re
 
   try {
     assert.equal(
-      mod.cachedSectionView("team"),
+      mod.cachedSectionView("scope-a", "team"),
       null,
       "a section this tab has never loaded has nothing to paint"
     );
 
     mod.openSettings("team");
-    await mod.sectionRequest("team", "render-1", 0);
+    await mod.sectionRequest("scope-a", "team", "render-1", 0);
     assert.deepEqual(
-      mod.cachedSectionView("team"),
+      mod.cachedSectionView("scope-a", "team"),
       { section: "team" },
       "the answer is what a revisit paints"
     );
@@ -368,9 +370,11 @@ test("an ANSWER survives the visit and a REVISIT paints it; a moved render id re
     mod.closeSettings();
     assert.equal(fake.url, `${ORIGIN}/dashboard`);
     mod.openSettings("team");
-    await mod.sectionRequest("team", "render-1", 0);
+    await mod.sectionRequest("scope-a", "team", "render-1", 0);
     assert.equal(calls.length, 1, "reopening within one server render is free");
-    assert.deepEqual(mod.cachedSectionView("team"), { section: "team" });
+    assert.deepEqual(mod.cachedSectionView("scope-a", "team"), {
+      section: "team",
+    });
 
     // …and a reopening after the server MOVED paints the same held answer while
     // exactly one revalidation runs. The cached value is never alone on screen:
@@ -378,11 +382,11 @@ test("an ANSWER survives the visit and a REVISIT paints it; a moved render id re
     mod.closeSettings();
     mod.openSettings("team");
     assert.deepEqual(
-      mod.cachedSectionView("team"),
+      mod.cachedSectionView("scope-a", "team"),
       { section: "team" },
       "there is something to paint BEFORE the revalidation lands"
     );
-    await mod.sectionRequest("team", "render-2", 0);
+    await mod.sectionRequest("scope-a", "team", "render-2", 0);
     assert.equal(calls.length, 2, "exactly one revalidation, not a burst");
   } finally {
     restore();
@@ -412,8 +416,8 @@ test("the newest READ wins, not the newest RESPONSE", async () => {
   }) as unknown as typeof fetch;
 
   try {
-    const first = mod.sectionRequest("church", "render-1", 0);
-    const second = mod.sectionRequest("church", "render-2", 0);
+    const first = mod.sectionRequest("scope-a", "church", "render-1", 0);
+    const second = mod.sectionRequest("scope-a", "church", "render-2", 0);
 
     // The SECOND read answers first, then the first one straggles in.
     answered[1]();
@@ -422,7 +426,7 @@ test("the newest READ wins, not the newest RESPONSE", async () => {
     await first;
 
     assert.deepEqual(
-      mod.cachedSectionView("church"),
+      mod.cachedSectionView("scope-a", "church"),
       { section: "church", n: 1 },
       "the later read's answer is held, and the straggler is passed over"
     );
@@ -448,12 +452,15 @@ test("a FAILURE is never an answer, and never survives the visit (#673)", async 
 
   try {
     mod.openSettings("account");
-    assert.deepEqual(await mod.sectionRequest("account", "render-1", 0), {
-      ok: false,
-      reason: "failed",
-    });
+    assert.deepEqual(
+      await mod.sectionRequest("scope-a", "account", "render-1", 0),
+      {
+        ok: false,
+        reason: "failed",
+      }
+    );
     assert.equal(
-      mod.cachedSectionView("account"),
+      mod.cachedSectionView("scope-a", "account"),
       null,
       "a failure is NOT cached as content — there is nothing to paint"
     );
@@ -461,7 +468,7 @@ test("a FAILURE is never an answer, and never survives the visit (#673)", async 
     // It IS cached for the visit, and that is not an oversight: a key that mints
     // a new promise on every render is the suspended-replay loop, so the pane
     // could not stand still and say so without this.
-    await mod.sectionRequest("account", "render-1", 0);
+    await mod.sectionRequest("scope-a", "account", "render-1", 0);
     assert.equal(calls, 1, "within the visit the failure is held");
 
     // CLOSING DROPS IT. `attempt` is the dialog's own state and resets to 0 on
@@ -471,18 +478,124 @@ test("a FAILURE is never an answer, and never survives the visit (#673)", async 
     mod.closeSettings();
     ok = true;
     mod.openSettings("account");
-    const retried = await mod.sectionRequest("account", "render-1", 0);
+    const retried = await mod.sectionRequest(
+      "scope-a",
+      "account",
+      "render-1",
+      0
+    );
     assert.equal(calls, 2, "reopening after a failure asks again");
     assert.equal(retried.ok, true);
-    assert.deepEqual(mod.cachedSectionView("account"), { section: "account" });
+    assert.deepEqual(mod.cachedSectionView("scope-a", "account"), {
+      section: "account",
+    });
 
     // …and the answer that replaced it is kept, so the drop rule is aimed at
     // failures alone.
     mod.closeSettings();
-    await mod.sectionRequest("account", "render-1", 0);
+    await mod.sectionRequest("scope-a", "account", "render-1", 0);
     assert.equal(calls, 2, "the answer survived the same close");
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("a read still IN FLIGHT at close is not an answer either, so its failure cannot be cached (#673)", async () => {
+  // THE GAP A "did this fail?" TEST LEAVES, and the prefetch makes it five wide.
+  // A read that has not settled by the time the modal closes has failed at
+  // nothing yet — so a close that only removes settled failures keeps it, and it
+  // writes its failure into the map afterwards, under attempt 0, at a render id
+  // that has not moved. That is the very key the next opening lands on.
+  const { mod } = await arriveOn("/dashboard");
+  let release: (v: unknown) => void = () => {};
+  const pending = new Promise((resolve) => (release = resolve));
+  let calls = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls === 1) {
+      await pending;
+      throw new Error("network");
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, view: { section: "church" } }),
+    };
+  }) as unknown as typeof fetch;
+
+  try {
+    mod.openSettings("church");
+    const inFlight = mod.sectionRequest("scope-a", "church", "render-1", 0);
+
+    // The reader closes before it lands, and only THEN does it fail.
+    mod.closeSettings();
+    release(null);
+    assert.deepEqual(await inFlight, { ok: false, reason: "failed" });
+
+    mod.openSettings("church");
+    const reopened = await mod.sectionRequest(
+      "scope-a",
+      "church",
+      "render-1",
+      0
+    );
+    assert.equal(
+      calls,
+      2,
+      "the next opening asks again rather than replaying it"
+    );
+    assert.equal(reopened.ok, true);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("ONE ACCOUNT NEVER SEES ANOTHER'S ANSWERS, and signing out does not clear the tab (#673)", async () => {
+  // THE DISCLOSURE THIS KEY EXISTS FOR, and it shipped in this PR's first draft.
+  // Signing out is a server action ending in `redirect()`, which is a CLIENT-SIDE
+  // navigation — the document, and this module with it, survives the whole
+  // account change. `cachedSectionView` ignores `serverRenderId` on purpose, so
+  // without the scope the next account to sign in on the tab was painted the
+  // previous one's name and email while its own read was in flight. Measured on
+  // the preview before the fix.
+  const { mod } = await arriveOn("/dashboard");
+  const { calls, restore } = countingFetch(async (id) => ({
+    ok: true,
+    view: { section: id, who: served },
+  }));
+  let served = "sarah";
+
+  try {
+    await mod.sectionRequest("sarah-id", "account", "render-1", 0);
+    assert.deepEqual(mod.cachedSectionView("sarah-id", "account"), {
+      section: "account",
+      who: "sarah",
+    });
+
+    // The same tab, the same document, a different reader.
+    assert.equal(
+      mod.cachedSectionView("david-id", "account"),
+      null,
+      "the next account finds nothing to paint, which is the whole point"
+    );
+
+    served = "david";
+    await mod.sectionRequest("david-id", "account", "render-2", 0);
+    assert.equal(calls.length, 2, "and it reads for itself");
+    assert.deepEqual(mod.cachedSectionView("david-id", "account"), {
+      section: "account",
+      who: "david",
+    });
+
+    // …and the first reader's answers are gone rather than merely unreachable.
+    assert.equal(
+      mod.cachedSectionView("sarah-id", "account"),
+      null,
+      "a new scope empties the map, so nothing lingers to be found by a later bug"
+    );
+  } finally {
+    restore();
   }
 });
 
@@ -498,11 +611,14 @@ test("a REFUSED section is not cached as content either", async () => {
   }));
 
   try {
-    assert.deepEqual(await mod.sectionRequest("church", "render-1", 0), {
-      ok: false,
-      reason: "refused",
-    });
-    assert.equal(mod.cachedSectionView("church"), null);
+    assert.deepEqual(
+      await mod.sectionRequest("scope-a", "church", "render-1", 0),
+      {
+        ok: false,
+        reason: "refused",
+      }
+    );
+    assert.equal(mod.cachedSectionView("scope-a", "church"), null);
   } finally {
     restore();
   }
@@ -524,16 +640,26 @@ test("a retry is a new request, not a replay of the cached failure", async () =>
   }) as unknown as typeof fetch;
 
   try {
-    const first = await mod.sectionRequest("church", "render-1", 0);
+    const first = await mod.sectionRequest("scope-a", "church", "render-1", 0);
     assert.deepEqual(first, { ok: false, reason: "failed" });
 
     // The same key would replay the failure for ever; the retry count is part of
     // the key precisely so a Try again button is worth pressing.
-    const replayed = await mod.sectionRequest("church", "render-1", 0);
+    const replayed = await mod.sectionRequest(
+      "scope-a",
+      "church",
+      "render-1",
+      0
+    );
     assert.deepEqual(replayed, { ok: false, reason: "failed" }, "cached");
     assert.equal(attempt, 1);
 
-    const retried = await mod.sectionRequest("church", "render-1", 1);
+    const retried = await mod.sectionRequest(
+      "scope-a",
+      "church",
+      "render-1",
+      1
+    );
     assert.equal(attempt, 2, "the retry actually asked again");
     assert.equal(retried.ok, true);
   } finally {

@@ -90,10 +90,10 @@ function onUrlChange() {
 
   if (!nowOpen) {
     openedByPush = false;
-    // A VISIT ENDS HERE. What ends with it is the FAILURES only — see
-    // `dropFailedReads`. The answers are kept, because `serverRenderId` already
-    // says when they stopped being true (#673).
-    dropFailedReads();
+    // A VISIT ENDS HERE. What survives it is the ANSWERS only — see
+    // `dropReadsThatAreNotAnswers`. They are kept because `serverRenderId`
+    // already says when they stopped being true (#673).
+    dropReadsThatAreNotAnswers();
   } else if (!wasOpen || nowOn !== wasOn) {
     // THE ENTRY NOW SHOWING IS NOT THE ONE WE WERE LOOKING AT, so what Close
     // means has to be decided again. It is ours to remove with one step back
@@ -269,11 +269,29 @@ export async function readSection(
  * ordered map, so an answer that arrives out of order cannot overwrite a newer
  * one: the newest READ wins, not the newest RESPONSE.
  *
- * THE KEY IS (section, serverRenderId, attempt) and every part earns its place.
- * `serverRenderId` moves on every server render of the dashboard layout, so it
- * is already the invalidation signal a write needs — nothing new is threaded
- * for this. `attempt` is what makes a Retry a fresh request rather than a replay
- * of the cached failure.
+ * THE KEY IS (scope, section, serverRenderId, attempt) and every part earns its
+ * place. `serverRenderId` moves on every server render of the dashboard layout,
+ * so it is already the invalidation signal a write needs — nothing new is
+ * threaded for that. `attempt` is what makes a Retry a fresh request rather than
+ * a replay of the cached failure. And `scope` is WHOSE answers these are.
+ *
+ * THE SCOPE IS NOT DECORATION — IT IS THE ONE THING KEEPING THIS CACHE OUT OF
+ * ANOTHER ACCOUNT'S HANDS, and without it this shipped a real disclosure
+ * (measured on the preview, before the fix). Signing out is a SERVER ACTION
+ * ENDING IN `redirect()`, and a server redirect is a CLIENT-SIDE navigation
+ * (→ `memory/invariants.md` → Client/Server Data Synchronization, measured for
+ * #658): it reuses every layout segment the two routes share, so `/login` and
+ * the dashboard share the root layout and THE DOCUMENT SURVIVES A SIGN-OUT. One
+ * account's answers were therefore still here when the next account signed in on
+ * the same tab, and `cachedSectionView` — which deliberately ignores
+ * `serverRenderId`, since serving an answer from an older render is its whole
+ * job — handed them straight over. What it looked like: sign in as a sending
+ * church Owner, open settings, sign out, sign in as a coach, open settings, and
+ * the first painted frame carried the PREVIOUS reader's name and email address
+ * before the coach's own answer replaced it. Two accounts always differ in this
+ * segment, so no entry of theirs can ever be found; every foreign entry is also
+ * dropped on the first read of a new scope, so nothing lingers to be found by a
+ * later bug either.
  *
  * THREE READS PER SECTION, NOT ONE. React can render two keys inside one
  * window: a `refresh()` transition renders at the new `serverRenderId` while an
@@ -284,13 +302,12 @@ export async function readSection(
  * together, so a global cap of two would have the modal evicting its own
  * prefetch as it filled it.
  *
- * WHAT IS HELD, AND FOR HOW LONG. This is per-TAB memory in module scope: it
- * dies with the document, so a full navigation, a sign-out (which is one) and a
- * new tab all start empty — there is no path by which one account's Team roster
- * outlives its session here. A section this account may not open is never in it
- * either: the prefetch walks `visibleIds`, and a gated section reached by a
- * typed fragment answers `{ ok: false, reason: "refused" }`, which is not an
- * answer and is never `settled.ok`.
+ * WHAT IS HELD, AND FOR HOW LONG. Module scope is per-TAB memory, so a new tab
+ * and a full page load start empty — but the DOCUMENT is not the bound that
+ * matters, as the scope note above says; the SCOPE is. A section this account may
+ * not open is never held either: the prefetch walks `visibleIds`, and a gated
+ * section reached by a typed fragment answers `{ ok: false, reason: "refused" }`,
+ * which is not an answer and is never `settled.ok`.
  */
 type SectionRead = {
   /** The one promise for these inputs — the loop above is what forbids a second. */
@@ -304,14 +321,27 @@ const reads = new Map<string, SectionRead>();
 /** See "THREE READS PER SECTION" above. */
 const READS_PER_SECTION = 3;
 
+/** Everything this scope's reads are filed under. Never build a key any other way. */
+function keyPrefix(scope: string, id: SettingsSectionId): string {
+  return `${scope} ${id} `;
+}
+
 export function sectionRequest(
+  scope: string,
   id: SettingsSectionId,
   serverRenderId: string,
   attempt: number
 ): Promise<SettingsSectionLoad> {
-  const key = `${id} ${serverRenderId} ${attempt}`;
+  const key = `${keyPrefix(scope, id)}${serverRenderId} ${attempt}`;
   const existing = reads.get(key);
   if (existing) return existing.promise;
+
+  // A NEW SCOPE EMPTIES THE MAP. Matching on the scope segment is already enough
+  // to keep one account from finding another's answers; this is so nothing of
+  // theirs is still sitting here to be found by a later mistake.
+  for (const held of reads.keys()) {
+    if (!held.startsWith(`${scope} `)) reads.delete(held);
+  }
 
   const entry: SectionRead = {
     settled: null,
@@ -324,15 +354,15 @@ export function sectionRequest(
   };
   reads.set(key, entry);
 
-  const prefix = `${id} `;
+  const prefix = keyPrefix(scope, id);
   const mine = [...reads.keys()].filter((held) => held.startsWith(prefix));
   for (const stale of mine.slice(0, -READS_PER_SECTION)) reads.delete(stale);
   return entry.promise;
 }
 
 /**
- * The newest ANSWER this tab holds for a section, or `null` for one it has never
- * loaded.
+ * The newest ANSWER THIS SCOPE holds for a section, or `null` for one it has
+ * never loaded.
  *
  * THIS IS PRESENTATION, NOT STATE (#673, `memory/invariants.md` →
  * Client/Server Data Synchronization). Its one caller paints it as the Suspense
@@ -340,6 +370,10 @@ export function sectionRequest(
  * only while that read is in flight, and the fresh answer replaces it the moment
  * it lands. Nothing reads it without a revalidation running, and nothing stores
  * it in React state.
+ *
+ * IT IGNORES `serverRenderId` ON PURPOSE — serving an answer from an older
+ * render IS the feature — which is exactly why it must NOT ignore the scope. See
+ * the scope note above for what that cost before it was keyed.
  *
  * Newest READ rather than newest RESPONSE: the map is insertion-ordered, so the
  * last matching entry is the most recently ASKED, and a slower earlier read that
@@ -350,9 +384,10 @@ export function sectionRequest(
  * cache's key and the answer's own `section` field meet.
  */
 export function cachedSectionView<Id extends SettingsSectionId>(
+  scope: string,
   id: Id
 ): SettingsSectionViewOf<Id> | null {
-  const prefix = `${id} `;
+  const prefix = keyPrefix(scope, id);
   let newest: SettingsSectionViewOf<Id> | null = null;
   for (const [key, entry] of reads) {
     if (!key.startsWith(prefix)) continue;
@@ -365,24 +400,34 @@ export function cachedSectionView<Id extends SettingsSectionId>(
 }
 
 /**
- * Closing drops the FAILURES and keeps the answers (#673).
- *
- * A failure has to be cached WITHIN a visit — a key that mints a new promise on
- * every render is the replay loop above, so the cached failure is what lets the
- * pane say so and stand still. It must not survive the visit: `attempt` is the
- * dialog's own state and resets to 0 when the modal unmounts, so a kept failure
- * would be replayed on the next opening under the key the reader arrives back
- * on, and a section that failed once would look broken for as long as the tab
- * lived.
+ * Closing keeps the ANSWERS and drops everything else (#673).
  *
  * The answers stay, because `serverRenderId` already says when they stopped
  * being true. Closing moves neither it nor the section, so what #657 dropped
  * here to avoid serving "the previous visit's roster" is now served on purpose
  * — with a revalidation in flight whenever the render id has moved.
+ *
+ * A FAILURE HAS TO BE CACHED WITHIN A VISIT — a key that mints a new promise on
+ * every render is the replay loop above, so the cached failure is what lets the
+ * pane say so and stand still — AND MUST NOT SURVIVE ONE. `attempt` is the
+ * dialog's own state and resets to 0 when the modal unmounts, so a kept failure
+ * would be replayed on the next opening under the very key the reader arrives
+ * back on, and a section that failed once would look broken for as long as the
+ * tab lived.
+ *
+ * SO THE TEST IS "IS THIS AN ANSWER", NOT "DID THIS FAIL", and the difference is
+ * a bug that the prefetch made five wide. A read still IN FLIGHT at close has
+ * settled to nothing yet, so asking whether it failed says no and keeps it — and
+ * it then writes its failure into a map nobody will clear, under attempt 0, at a
+ * render id that has not moved. Opening settings starts five reads; closing a
+ * second later can leave all five in flight, and any that fail are cached
+ * failures for sections the reader never even looked at. Dropping them here is
+ * safe precisely because the dialog has gone: nothing is suspended on those
+ * promises, so re-minting one is not the replay loop, it is one more request.
  */
-function dropFailedReads() {
+function dropReadsThatAreNotAnswers() {
   for (const [key, entry] of reads) {
-    if (entry.settled && !entry.settled.ok) reads.delete(key);
+    if (!entry.settled?.ok) reads.delete(key);
   }
 }
 

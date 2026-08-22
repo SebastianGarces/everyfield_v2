@@ -201,15 +201,23 @@ export default async function DashboardLayout({
               rather than belonging to it, and Radix portals it to the document
               body regardless.
 
-              Both props come from the session this layout already holds, so
+              All three props come from the session this layout already holds, so
               opening settings costs no extra work here. `visibleIds` is the
               NAV's list — `loadSettingsSection` asks the same gate again on the
-              server before it reads anything. */}
+              server before it reads anything.
+
+              `scope` is WHOSE those answers are, and it is load-bearing: the
+              modal caches its section reads in module scope, and signing out is
+              a server action ending in `redirect()` — a client-side navigation,
+              so the document survives it. Without an identity in the cache key,
+              the next account to sign in on this tab was shown the previous
+              one's settings while its own read was in flight (#673). */}
             <SettingsModal
               visibleIds={settingsSectionsFor(user).map(
                 (section) => section.id
               )}
               serverRenderId={crypto.randomUUID()}
+              scope={user.id}
             />
             {!org && <WikiGuide />}
           </HeaderProvider>

@@ -67,16 +67,21 @@ action's `refresh()` carry the status change; the tag picker holds no local stat
 
 Ruled 2026-08-22 (#673). The settings sections are read over `GET /api/settings/sections/<id>` by a
 client modal that no route renders, so props cannot carry them. `settings-hash.ts` holds those reads
-in a module-scope map keyed (section, `serverRenderId`, attempt) — the answer beside the promise, so
-a revisit can paint immediately.
+in a module-scope map keyed (scope, section, `serverRenderId`, attempt) — the answer beside the
+promise, so a revisit can paint immediately.
 
 What makes it presentation rather than the state the rule above forbids is WHERE it is read: the
 cached view has exactly one caller, as the Suspense **fallback** for the read at the current
 `serverRenderId`. So it is on screen only while its own revalidation is in flight, and the fresh
 answer replaces it. A write rotates `serverRenderId` (via `refresh()`, as everything else here does),
 which is the whole invalidation — nothing new is threaded for it. Failures are held only long enough
-to stop the suspended-replay loop and are never cached as content. The bound is the document: module
-scope is per-tab memory, and a sign-out is a full navigation.
+to stop the suspended-replay loop and are never cached as content.
+
+The bound is the ACCOUNT, not the document, and that distinction is the whole of `scope`. Signing out
+is a server action ending in `redirect()` — a client-side navigation — so the document and this map
+survive the account change; the first draft of #673 painted one reader's name and email for the next
+reader to sign in on the same tab. `scope={user.id}` comes from the dashboard layout beside
+`serverRenderId`, it is the first key segment, and a read at a new scope empties the map.
 
 Do not copy this shape for data a server component can hand down as props. See
 `memory/invariants.md` → Client/Server Data Synchronization for the exact terms of the exception.
