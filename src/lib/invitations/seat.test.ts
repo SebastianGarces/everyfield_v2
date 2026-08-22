@@ -80,8 +80,10 @@ const TEAM_ACTIONS = sourceReader(
   stripComments(read("app", "(dashboard)", "settings", "team", "actions.ts")),
   "settings/team/actions.ts (stripped)"
 );
+// `/settings/team` is a SECTION of the settings modal since #615 — same URL,
+// same reads, same controls; the sibling page that drew them is gone.
 const TEAM_PAGE = stripComments(
-  read("app", "(dashboard)", "settings", "team", "page.tsx")
+  read("components", "settings", "sections", "team-section.tsx")
 );
 const ORG_ACTIONS = sourceReader(
   stripComments(

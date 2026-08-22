@@ -288,8 +288,15 @@ test("the read path takes an owner and nothing else", () => {
 // function tested where it lives (`suppression.test.ts`).
 // ============================================================================
 
+// The surface that draws the notice. It was the `/settings` index; since #615
+// settings is a modal of sections and the preference matrix — with the
+// suppression notice above it — is the Notifications section, reachable at
+// `/settings/notifications`. Same read, same condition, same component.
 const PAGE_SOURCE = readFileSync(
-  path.join(process.cwd(), "src/app/(dashboard)/settings/page.tsx"),
+  path.join(
+    process.cwd(),
+    "src/components/settings/sections/notifications-section.tsx"
+  ),
   "utf8"
 );
 
