@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Send, Loader2, AlertTriangle } from "lucide-react";
 
@@ -216,7 +217,11 @@ export function ComposeForm({
       return;
     }
     if (needsMeeting) {
-      setError("This template uses meeting fields — please select a meeting");
+      setError(
+        meetings.length === 0
+          ? "This template uses meeting fields, but you have no upcoming meetings. Schedule one, or pick a template without meeting fields."
+          : "This template uses meeting fields — please select a meeting"
+      );
       return;
     }
 
@@ -251,15 +256,24 @@ export function ComposeForm({
       {/* Left panel: Editor */}
       <div className="flex-1 overflow-auto border-r p-6">
         <div className="mx-auto max-w-2xl space-y-6">
-          {/* Template selector */}
+          {/* Template selector. Disabled when there is nothing to pick: an
+              enabled trigger over an empty list opens an invisible popover
+              and reads as broken (#610). */}
           <div className="space-y-2">
             <Label>Template (optional)</Label>
             <Select
               value={selectedTemplateId}
               onValueChange={handleTemplateChange}
+              disabled={templates.length === 0}
             >
               <SelectTrigger className="cursor-pointer">
-                <SelectValue placeholder="Select a template..." />
+                <SelectValue
+                  placeholder={
+                    templates.length === 0
+                      ? "No templates yet"
+                      : "Select a template..."
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {templates.map((t) => (
@@ -282,16 +296,39 @@ export function ComposeForm({
               {needsMeeting && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
-                  This template uses meeting fields. Select a meeting to fill
-                  them in.
+                  {meetings.length === 0 ? (
+                    <span>
+                      This template uses meeting fields, but you have no
+                      upcoming meetings.{" "}
+                      <Link
+                        href="/meetings/new"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Schedule a meeting
+                      </Link>{" "}
+                      to fill them in.
+                    </span>
+                  ) : (
+                    <span>
+                      This template uses meeting fields. Select a meeting to
+                      fill them in.
+                    </span>
+                  )}
                 </div>
               )}
               <Select
                 value={selectedMeetingId}
                 onValueChange={setSelectedMeetingId}
+                disabled={meetings.length === 0}
               >
                 <SelectTrigger className="cursor-pointer">
-                  <SelectValue placeholder="Select a meeting..." />
+                  <SelectValue
+                    placeholder={
+                      meetings.length === 0
+                        ? "No upcoming meetings"
+                        : "Select a meeting..."
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {meetings.map((m) => (
