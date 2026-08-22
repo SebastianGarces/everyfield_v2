@@ -23,7 +23,7 @@ import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
 import {
-  renderTemplate,
+  renderSubject,
   buildChurchMergeData,
   buildMeetingMergeData,
 } from "./merge";
@@ -191,7 +191,7 @@ export async function resolveSubjects(
       ...churchData,
       ...(comm.meetingId ? (meetingMap.get(comm.meetingId) ?? {}) : {}),
     };
-    result.set(comm.id, renderTemplate(comm.subject, mergeData));
+    result.set(comm.id, renderSubject(comm.subject, mergeData));
   }
 
   return result;

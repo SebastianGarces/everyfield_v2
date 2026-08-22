@@ -41,10 +41,11 @@ import {
   tasks,
   users,
 } from "@/db/schema";
-import type { LaunchMilestoneArea } from "@/db/schema/launch";
+import type { LaunchMilestoneArea, LaunchStatus } from "@/db/schema/launch";
 import type { TaskStatus } from "@/db/schema/tasks";
 import { requireChurchAccess } from "@/lib/auth/access";
 import { assertSeatFor } from "@/lib/auth/seat-rules";
+import type { LaunchRecord } from "@/lib/launch/queries";
 import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
 
 // ----------------------------------------------------------------------------
@@ -542,6 +543,123 @@ export async function getLaunchReadiness(
       0
     ),
   };
+}
+
+// ----------------------------------------------------------------------------
+// Converging on read (#614)
+// ----------------------------------------------------------------------------
+
+/**
+ * Does a launch in this state expect the Playbook readiness set?
+ *
+ * A MAP RATHER THAN A BRANCH, so the compiler names this decision the day a
+ * fifth status is added: `satisfies Record<LaunchStatus, boolean>` refuses a
+ * missing key, where an `if` chain would quietly answer `false` for it.
+ *
+ * `planning` has no day yet, and nothing is seeded until one is named.
+ * `completed` is the day already past — seeding twenty-two open tasks the
+ * Monday after a launch invents work for a plant that has finished it, and the
+ * page's board is a record by then, not a list to work. `postponed` is not
+ * terminal (see `launchStatuses`): it carries a NEW target date and the plant
+ * goes on preparing, so it expects its list exactly as `scheduled` does.
+ */
+const EXPECTS_READINESS = {
+  planning: false,
+  scheduled: true,
+  postponed: true,
+  completed: false,
+} satisfies Record<LaunchStatus, boolean>;
+
+export function launchExpectsReadiness(status: LaunchStatus): boolean {
+  return EXPECTS_READINESS[status];
+}
+
+/**
+ * The plant's Owner, or `null` for a plant that has none.
+ *
+ * At most one row can come back: `users_church_owner_unique_idx` is a partial
+ * unique on `church_id where seat = 'owner'` (AS-002), so "the Owner" is a row
+ * rather than a pick from a list.
+ */
+async function plantOwnerId(churchId: string): Promise<string | null> {
+  const [owner] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .limit(1);
+
+  return owner?.id ?? null;
+}
+
+/**
+ * The readiness board — AND the repair for a launch that has none (#614).
+ *
+ * WHY THE REPAIR IS ON THE READ. Seeding runs after the durable date write and
+ * is deliberately not part of it (`scheduleLaunchAction`), so a launch whose
+ * seed failed keeps its date and loses its list. Riverside sat in exactly that
+ * state for thirteen days: `status = 'scheduled'`, zero `launch_milestones`,
+ * and no path back — the schedule form disables both buttons until a DIFFERENT
+ * day is picked, so the only writer that could have re-seeded was unreachable
+ * from the page that showed the damage. Moving the retry to the read makes the
+ * operation idempotent from the reader's side: the next visit heals it, and no
+ * planter has to know that moving the date by a day is what fixes it.
+ *
+ * IT IS A WRITE DURING A SERVER-COMPONENT RENDER, which is legal here for the
+ * same two reasons `listResponsibilities` (MT-002b) is: `/launch` is
+ * `force-dynamic`, so the render is never cached, and nothing on the path
+ * revalidates. It is safe to run on every visit because the seed is idempotent
+ * by unique index — two tabs opened together produce ONE set of rows, since the
+ * second `insert … on conflict (launch_id, template_key) do nothing` waits for
+ * the first and then inserts nothing, and the task insert reads that insert's
+ * own `RETURNING` (see `seedLaunchMilestonesStatement`).
+ *
+ * A FAILED SEED NEVER TAKES THE PAGE DOWN. The `catch` is not a swallowed
+ * error: the caller renders the readiness section's empty state on a zero-rows
+ * answer, which is the honest thing to show and is what makes a second visit a
+ * retry rather than a fresh 500. Throwing instead would turn a missing list
+ * into a missing page.
+ *
+ * THE REPAIR IS THE PLANT'S, NOT THE READER'S, so the rows it writes are
+ * attributed to the plant's OWNER and are indistinguishable from the rows
+ * `scheduleLaunchAction` would have written. `/launch` admits a team member as
+ * well as the planter, and `tasks.created_by_id` is NOT NULL — so without this
+ * lookup the first Member to open a stranded plant's launch page would become
+ * the recorded author of its whole launch-prep list, which no capability ever
+ * granted them (`launch.schedule` is the Owner's alone, LS-007). `readerId` is
+ * the fallback and not the default: a plant can be left with no Owner seat
+ * (`removeSeat` clears the tenancy), and a repair refused for want of an author
+ * would strand exactly the plant this function exists for.
+ */
+export async function convergeLaunchReadiness(
+  launch: LaunchRecord,
+  readerId: string
+): Promise<LaunchReadiness> {
+  // The launch row carries its own tenant, so there is no second church id to
+  // pass in and none to get wrong; it was resolved by `getLaunchForChurch`.
+  const churchId = launch.churchId;
+  const readiness = await getLaunchReadiness(launch.id, churchId);
+
+  if (readiness.totalCount > 0) return readiness;
+  if (!launchExpectsReadiness(launch.status)) return readiness;
+
+  try {
+    await seedLaunchMilestones({
+      launchId: launch.id,
+      churchId,
+      actorUserId: (await plantOwnerId(churchId)) ?? readerId,
+    });
+  } catch (error) {
+    console.error(
+      `launch readiness converge failed for launch ${launch.id}:`,
+      error
+    );
+    return readiness;
+  }
+
+  // Re-read rather than build the board from the seed's counts: a concurrent
+  // visit may have won the insert, and its rows are the plant's readiness just
+  // as much as ours would have been.
+  return getLaunchReadiness(launch.id, churchId);
 }
 
 export interface LaunchMilestoneCompletion {

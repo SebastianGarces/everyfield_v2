@@ -30,10 +30,12 @@ import {
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/components/communication-email";
 import {
-  renderTemplate,
   buildPersonMergeData,
   buildChurchMergeData,
   buildMeetingMergeData,
+  renderEmailBodyHtml,
+  renderEmailBodyText,
+  renderSubject,
 } from "./merge";
 import { createConfirmationToken } from "./confirmation";
 import {
@@ -47,11 +49,7 @@ import {
   evaluateResendEligibility,
   resendBlockedMessage,
 } from "./resend-policy";
-import {
-  escapeMergeValues,
-  richTextToPlainText,
-  toRichTextHtml,
-} from "@/lib/rich-text/format";
+import { richTextToPlainText, toRichTextHtml } from "@/lib/rich-text/format";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -205,12 +203,12 @@ export async function sendCommunication(
       recipientId: crypto.randomUUID(),
       personId: person.id,
       email: person.email,
-      subject: input.subject ? renderTemplate(input.subject, mergeData) : "",
-      // Merge VALUES are escaped before they land in an HTML body — a person
-      // called `Bobby <script>` is a name, not markup. The token substitution
-      // itself is still `renderTemplate`, the one implementation of it.
-      bodyHtml: renderTemplate(safeBodyHtml, escapeMergeValues(mergeData)),
-      bodyText: renderTemplate(safeBodyText, mergeData),
+      subject: input.subject ? renderSubject(input.subject, mergeData) : "",
+      // Escaping, line breaks and the empty-paragraph collapse are all
+      // `renderEmailBodyHtml`'s — the compose preview calls the same door, so
+      // what a planter previewed is what the recipient gets.
+      bodyHtml: renderEmailBodyHtml(safeBodyHtml, mergeData),
+      bodyText: renderEmailBodyText(safeBodyText, mergeData),
       confirmUrl,
       declineUrl,
     });

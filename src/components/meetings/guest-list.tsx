@@ -36,6 +36,10 @@ import {
   quickAddPersonToGuestListAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { searchPeopleAction } from "@/app/(dashboard)/communication/actions";
+import {
+  emailableGuests,
+  meetingComposeUrl,
+} from "@/lib/communication/meeting-compose";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,12 +140,10 @@ export function GuestList({
       !g.responseStatus || !["confirmed", "declined"].includes(g.responseStatus)
   ).length;
 
-  // Build "Send Email" URL with all guest personIds
-  const guestsWithEmail = guests.filter((g) => g.email);
-  const sendEmailUrl =
-    guestsWithEmail.length > 0
-      ? `/communication/compose?meetingId=${meetingId}&recipientIds=${guestsWithEmail.map((g) => g.personId).join(",")}`
-      : null;
+  // The count on the button and the recipients behind it come from the SAME
+  // definition of emailable, so they cannot disagree (`meeting-compose.ts`).
+  const guestsWithEmail = emailableGuests(guests);
+  const sendEmailUrl = meetingComposeUrl(meetingId, guests);
 
   // ------- Person search -------
   const handleSearch = useCallback(
@@ -245,7 +247,7 @@ export function GuestList({
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Guest List</CardTitle>
             <div className="flex items-center gap-2">
-              {sendEmailUrl && (
+              {guestsWithEmail.length > 0 && (
                 <Button variant="default" size="sm" asChild>
                   <Link href={sendEmailUrl} className="cursor-pointer">
                     <Mail className="mr-2 h-4 w-4" />
