@@ -288,10 +288,17 @@ test("the read path takes an owner and nothing else", () => {
 // function tested where it lives (`suppression.test.ts`).
 // ============================================================================
 
-// The surface that draws the notice. It was the `/settings` index; since #615
-// settings is a modal of sections and the preference matrix — with the
-// suppression notice above it — is the Notifications section, reachable at
-// `/settings/notifications`. Same read, same condition, same component.
+// The surface that draws the notice, which is TWO FILES since #657. It was the
+// `/settings` index; #615 made it the Notifications section of the settings
+// modal, and #657 made that section a `"use client"` component fed by
+// `readNotifications`. So the ASK lives in the read and the CONDITION lives in
+// the section — same read, same condition, same component, one seam between
+// them. Both are checked, because a read that asks and a section that draws it
+// unconditionally is the same bug from either end.
+const READ_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/lib/settings/section-data.ts"),
+  "utf8"
+);
 const PAGE_SOURCE = readFileSync(
   path.join(
     process.cwd(),
@@ -375,13 +382,21 @@ test("the settings screen renders the notice only for a suppressed address", () 
   // A signed-in user with no suppression sees nothing: the read answers false
   // and the notice is behind that answer, not behind a role or a feature flag.
   assert.match(
-    PAGE_SOURCE,
-    /const emailSuppressed = await isAddressSuppressed\(session\.user\.email\)/,
-    "the page asks about the session's own address"
+    READ_SOURCE,
+    /const suppressed = await isAddressSuppressed\(session\.user\.email\)/,
+    "the read asks about the session's own address"
+  );
+  // The address travels only when it is suppressed — `null` otherwise — so the
+  // condition and the value the notice needs are one field, and a section
+  // cannot render the notice for an address that is fine.
+  assert.match(
+    READ_SOURCE,
+    /suppressedEmail: suppressed \? session\.user\.email : null/,
+    "the read must carry the address only when it is suppressed"
   );
   assert.match(
     PAGE_SOURCE,
-    /\{emailSuppressed && \(?\s*<EmailSuppressionNotice/,
+    /\{view\.suppressedEmail && \(?\s*<EmailSuppressionNotice/,
     "the notice must be conditional on the suppression"
   );
 });

@@ -401,6 +401,11 @@ export const UNSEATED_EXPORTS: Readonly<
       reason:
         "guarded by requirePlatformAdmin — an allowlist of platform operators, which demands a session but is not a seat in any tenancy",
     },
+  "src/lib/settings/section-data.ts → loadSettingsSection": {
+    kind: "non-seat-guard",
+    reason:
+      "it verifies the session and then asks settingsSectionsFor — the settings registry's own per-section gate, which IS this table read through holdsSeatFor — so no single capability describes it: Account and Notifications are every account's, Church is church.profile, Team is seat.invitation.manage. It reads and writes nothing (#657)",
+  },
 };
 
 /**

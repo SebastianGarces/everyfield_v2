@@ -454,11 +454,17 @@ test("no page hardcodes its own version of the consent promise", () => {
   // one. If the panel is ever extracted into a child component it must be added
   // here — a surface this map cannot see is a surface the drift guard cannot
   // hold.
+  // WHERE EACH SURFACE'S COPY COMES FROM, which since #657 is not always the
+  // file the reader looks at. The section components are `"use client"` now, so
+  // the association promise is sourced in `section-data.ts` and travels to the
+  // section as data; the Church panel still imports its own copy directly, and
+  // the registration form always did. The claim is unchanged — no surface writes
+  // the promise itself — so each is read where writing it would happen.
   const surfaces = {
-    "/settings/church": "../../components/settings/sections/church-section.tsx",
+    "#settings/church":
+      "../../components/settings/sections/church-section.tsx",
     "/register?invitation=": "../../app/(auth)/register/register-form.tsx",
-    "/settings/association":
-      "../../components/settings/sections/association-section.tsx",
+    "#settings/association": "../settings/section-data.ts",
   } as const;
 
   for (const [route, relative] of Object.entries(surfaces)) {

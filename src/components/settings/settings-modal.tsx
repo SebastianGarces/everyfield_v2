@@ -1,10 +1,22 @@
 "use client";
 
 import { Search } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useId, useState } from "react";
+import {
+  Suspense,
+  use,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
+import { AccountSection } from "@/components/settings/sections/account-section";
+import { AssociationSection } from "@/components/settings/sections/association-section";
+import { ChurchSection } from "@/components/settings/sections/church-section";
+import { NotificationsSection } from "@/components/settings/sections/notifications-section";
+import { TeamSection } from "@/components/settings/sections/team-section";
 import {
   Dialog,
   DialogContent,
@@ -12,96 +24,220 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
+import { loadSettingsSection } from "@/lib/settings/section-data";
+import type {
+  SettingsSectionLoad,
+  SettingsSectionViewOf,
+} from "@/lib/settings/section-view";
 import {
+  DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
+  settingsSectionFromHash,
   settingsSectionHref,
   type SettingsSectionId,
 } from "@/lib/settings/sections";
 
 // ============================================================================
-// THE SETTINGS MODAL — chrome only (CS-001, CS-016, #615).
+// THE SETTINGS MODAL — client state over whatever screen you are on (#657,
+// ruled 2026-08-22, superseding the routing half of 2026-08-21 §187).
 //
-// It draws the side navigation, the search box and the frame; the SECTION is
-// `children`, rendered on the server by the route and handed through. That
-// split is what keeps every section body a Server Component holding its own
-// reads — the modal never learns what a section contains, and a section never
-// learns it is in a modal.
+// ONE COMPONENT, MOUNTED ONCE, BY THE DASHBOARD LAYOUT. It is not a route and it
+// is not a slot: it reads `location.hash`, and `#settings/<section>` is the
+// whole of its state. So switching sections rewrites a fragment and nothing
+// else — no navigation, no new RSC render of the screen behind, no remount of
+// this component, and therefore no second open animation. `/phase` is still
+// `/phase` the entire time, mounted, scrolled where the reader left it.
 //
-// The screen behind is never re-rendered by any of this: the modal lives in a
-// parallel slot that intercepts `/settings/*`, so `children` of the dashboard
-// layout is still the route the reader was on, mounted, with its state intact.
+// WHY THE SECTIONS ARE CLIENT COMPONENTS. A server-rendered section needs a
+// route to render it, and there is no route any more. The obvious alternative —
+// a server function returning the section's JSX — was BUILT AND MEASURED on
+// Next 16.2.2 and does not work: a returned tree containing any client component
+// fails to serialize ("Could not find the module … in the React Client
+// Manifest"), and every section here is mostly client components. So each
+// section takes a finished view model instead, read by `loadSettingsSection`
+// (`@/lib/settings/section-data`) — one server endpoint that mints the session
+// FIRST, asks the registry's gate, and answers with what to draw. The seats are
+// still enforced on the server, on the read and on every write.
 //
-// ONE COPY, ALWAYS (#640, #646). Every route that draws this component lives in
-// the `@settings` slot — the interceptor for an in-app navigation, its
-// non-intercepting twin for a cold load — and a slot holds at most one match, so
-// no two of them can draw. A `/settings/*` page under the layout's `children`
-// is the only way to get a second modal beside this one, and
-// `settings-slot.test.ts` is what forbids one.
+// ----------------------------------------------------------------------------
+// THE HISTORY POLICY, WHICH THIS FILE OWNS ENTIRELY
+// ----------------------------------------------------------------------------
+//
+//   OPEN   pushes exactly ONE entry — a plain `<a href="#settings/account">` in
+//          the avatar menu is enough, and needs no JavaScript to work.
+//   SWITCH replaces. However many sections a reader opens from the rail,
+//          settings occupies that one entry: no back-through-every-section.
+//   CLOSE  goes BACK when this document pushed the entry, so the reader lands
+//          exactly where they were with the fragment gone. When the document was
+//          COLD-LOADED on a settings URL there is nothing behind it, so Close
+//          strips the fragment in place instead — `/phase#settings/church` closes
+//          to `/phase`, still mounted, never reloaded and never bounced to some
+//          account's home.
+//
+// Which of the two Close is turns on a fact about the DOCUMENT, and the store
+// below is what knows it: only a PUSH can take a document from "no settings
+// fragment" to "settings fragment" while it is running, because switches
+// replace. So the transition itself is the evidence, and no component has to be
+// told how it was opened. This is the same question `bootedIntoSettings` used to
+// answer by asking which route had matched.
 // ============================================================================
 
-type SettingsModalProps = {
-  /** The section the URL names, resolved and gate-checked on the server. */
-  activeId: SettingsSectionId;
-  /** The sections this account may open, in registry order. */
-  visibleIds: readonly SettingsSectionId[];
-  /** True only when the intercepting route matched — an in-app opening. */
-  intercepted: boolean;
-  /**
-   * Where Close goes when nothing is behind the modal. Resolved on the server,
-   * because only it knows whether this account's home is the plant dashboard or
-   * the oversight one.
-   */
-  home: string;
-  /** The section body — a Server Component. */
-  children: React.ReactNode;
-};
+// ----------------------------------------------------------------------------
+// The hash store
+//
+// `useSyncExternalStore` rather than an effect, so the modal has no "opening"
+// frame it renders wrongly and no state to keep in step with the address bar.
+// The SERVER snapshot is always "no fragment" — a fragment never reaches a
+// server — which is exactly right: a cold load renders the page normally and the
+// modal opens over it on hydration.
+// ----------------------------------------------------------------------------
+
+const listeners = new Set<() => void>();
 
 /**
- * Did this document boot straight into settings, with no app screen behind it?
- *
- * A fact about the DOCUMENT, not about the route rendering right now — which is
- * why `intercepted` cannot answer it. After a cold load every later section
- * switch is intercepted too, so the slot says `true` while there is still
- * nothing to go back to; closing on that answer walks the reader out of the app.
+ * Did THIS document push the entry the settings fragment sits on?
  *
  * Module scope is the honest scope for a per-document fact, and it is only ever
- * touched from an effect, so a server render never reads or writes it — module
- * state in a `"use client"` file is shared across requests on the server. A
- * `useRef` cannot hold it: the cold-load route and the interceptor are two
- * segments of the `@settings` slot, so the first section switch after a cold
- * load swaps one for the other and remounts this component.
- * Cleared on dismiss: once the modal has closed, the reader is on a real screen
- * and the next opening has somewhere to return to.
+ * read or written from the browser, so a server render never touches it (module
+ * state in a `"use client"` file is shared across requests on the server).
  */
-let bootedIntoSettings: boolean | null = null;
+let openedByPush = false;
+
+/** The open-ness the last transition left, so the next one can be compared to it. */
+let wasOpen = false;
+
+function isSettingsHash(hash: string): boolean {
+  return settingsSectionFromHash(hash) !== null;
+}
+
+function onHashChange() {
+  const nowOpen = isSettingsHash(window.location.hash);
+  // A `hashchange` that OPENS settings can only have come from a push: the rail
+  // replaces, and a cold load fires no event at all. Forward after a Back-close
+  // lands here too, and it is a push in every sense that matters — there is an
+  // entry behind it again.
+  if (nowOpen && !wasOpen) openedByPush = true;
+  if (!nowOpen) openedByPush = false;
+  wasOpen = nowOpen;
+  for (const listener of listeners) listener();
+}
+
+function subscribe(onStoreChange: () => void): () => void {
+  if (listeners.size === 0) {
+    wasOpen = isSettingsHash(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+  }
+  listeners.add(onStoreChange);
+  return () => {
+    listeners.delete(onStoreChange);
+    if (listeners.size === 0) {
+      window.removeEventListener("hashchange", onHashChange);
+    }
+  };
+}
+
+const getSnapshot = () => window.location.hash;
+const getServerSnapshot = () => "";
+
+/**
+ * Show a section without touching the history stack.
+ *
+ * `replaceState` fires no `hashchange`, so the store is notified by hand — which
+ * also keeps `openedByPush` correct, because a switch is not an opening.
+ */
+function showSection(id: SettingsSectionId) {
+  window.history.replaceState(null, "", settingsSectionHref(id));
+  onHashChange();
+}
+
+function closeSettings() {
+  if (openedByPush) {
+    // One entry was pushed, so one step removes it — and the fragment change
+    // that follows is a real `hashchange`, which resets the latch for the next
+    // opening.
+    window.history.back();
+    return;
+  }
+  window.history.replaceState(
+    null,
+    "",
+    window.location.pathname + window.location.search
+  );
+  onHashChange();
+}
+
+// ----------------------------------------------------------------------------
+// The modal
+// ----------------------------------------------------------------------------
+
+type SettingsModalProps = {
+  /**
+   * The sections this account may open, in registry order — resolved by the
+   * layout from the session it already holds, with `settingsSectionsFor`.
+   *
+   * It builds the NAV, and that is all it does. `loadSettingsSection` asks the
+   * same function again on the server before it reads a row, so a stale or
+   * forged list here cannot open a section; it can only fail to list one.
+   */
+  visibleIds: readonly SettingsSectionId[];
+  /**
+   * A value that CHANGES ON EVERY SERVER RENDER OF THE LAYOUT, and means
+   * nothing else.
+   *
+   * It is how a settings write reconciles. Every action behind these controls
+   * calls `refresh()` (`memory/contracts/data-patterns.md`), which re-renders
+   * the route's server components — including the layout that renders this — so
+   * a new value arriving here IS the signal "the server has changed, read your
+   * section again". Without it a section fetched once would sit at the value it
+   * had when it was opened: the modal is not part of any route, so nothing else
+   * about it re-renders when the route does.
+   */
+  serverRenderId: string;
+};
 
 export function SettingsModal({
+  visibleIds,
+  serverRenderId,
+}: SettingsModalProps) {
+  const hash = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const activeId = settingsSectionFromHash(hash);
+
+  if (activeId === null) return null;
+  return (
+    <SettingsDialog
+      activeId={activeId}
+      visibleIds={visibleIds}
+      serverRenderId={serverRenderId}
+    />
+  );
+}
+
+/**
+ * Split from `SettingsModal` so that everything below mounts when settings
+ * OPENS and unmounts when it closes.
+ *
+ * The search query is the reason: it belongs to one visit, and a component that
+ * survives closing would offer the next one a filtered rail it never typed.
+ * Section switches happen inside this component, so they are the case it does
+ * NOT remount for — which is the whole point of the issue.
+ */
+function SettingsDialog({
   activeId,
   visibleIds,
-  intercepted,
-  home,
-  children,
-}: SettingsModalProps) {
-  const router = useRouter();
+  serverRenderId,
+}: SettingsModalProps & { activeId: SettingsSectionId }) {
   const [query, setQuery] = useState("");
   const searchId = useId();
-
-  // The FIRST mount in this document is the truthful one: it is the route the
-  // URL bar was pointing at when the document loaded. A cold load lands on the
-  // non-intercepting route and reports no overlay; an in-app opening is
-  // intercepted and reports one. Every later mount is a section switch, which is
-  // always intercepted and so always says `true`.
-  useEffect(() => {
-    if (bootedIntoSettings === null) bootedIntoSettings = !intercepted;
-  }, [intercepted]);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 
   // The nav's own subject: the visible sections in registry order. `inNav` is
-  // what keeps `sharing` addressable without listing a sixth entry the ruling
-  // does not name.
+  // what would keep an unlisted section addressable; every entry is in the nav
+  // today (`sections.test.ts` asserts the unlisted set is empty).
   const navSections = SETTINGS_SECTIONS.filter(
     (section) => section.inNav && visibleIds.includes(section.id)
   );
@@ -110,36 +246,46 @@ export function SettingsModal({
   );
   const searching = query.trim() !== "";
 
-  // A SECTION SWITCH ALWAYS REPLACES. Settings occupies exactly ONE history
-  // entry however many sections the reader opens, so Close is one step and the
-  // entries in between are never sections they had already left.
+  // THE REQUEST, STARTED ONCE PER THING IT DEPENDS ON — the section asked for,
+  // and the last server render. Those two are the whole read policy: ask again
+  // when the reader picks a different section, ask again when a write has
+  // changed the server, ask at no other time.
   //
-  // This is the whole of the navigation policy, and it lives here rather than
-  // at each link, so a section body cannot spell its own (`church-section.tsx`
-  // links to Sharing and must go through this).
-  function goToSection(href: string) {
-    router.replace(href);
-  }
-
-  function dismiss() {
-    // One entry means `back()` is right whenever an app screen is behind that
-    // entry, and wrong when the document booted into settings — there, `back()`
-    // leaves the app. `bootedIntoSettings` is the only thing that knows which,
-    // because `intercepted` goes stale the moment a cold load switches section.
-    const nothingBehind = bootedIntoSettings ?? !intercepted;
-    bootedIntoSettings = null;
-    if (nothingBehind) router.replace(home);
-    else router.back();
-  }
+  // What is remembered is the PROMISE, never its result. Server data reaching
+  // `useState` is what `memory/invariants.md` → Client/Server Data
+  // Synchronization forbids, and for the reason this shape avoids: a value
+  // parked in state goes stale the moment the server moves, while an in-flight
+  // request cannot — it is replaced whenever either input does.
+  const request = useMemo(
+    () => loadSettingsSection(activeId),
+    // `serverRenderId` is a DEPENDENCY WITHOUT BEING AN ARGUMENT, and the rule
+    // cannot see that from the callback body: the endpoint has no use for the
+    // value, while a new value is precisely the event this must re-run on. It is
+    // not passed down to be ignored on the server — that would be a parameter
+    // that lies about what the read depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeId, serverRenderId]
+  );
 
   return (
     <Dialog
       open
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) dismiss();
+        if (!nextOpen) closeSettings();
       }}
     >
       <DialogContent
+        // NOTHING INSIDE IS FOCUSED ON OPEN (#657). Radix hands focus to the
+        // first focusable, which is the search box — so the modal opened with a
+        // cursor blinking in a field nobody asked for, and a screen reader
+        // announced "Search settings, edit text" instead of the dialog. Focus
+        // goes to the dialog itself instead: its title is announced, Escape
+        // works, and Tab starts at the top of the rail.
+        ref={contentRef}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          contentRef.current?.focus();
+        }}
         onCloseAutoFocus={(event) => {
           // Radix restores focus to whatever held it when the dialog opened.
           // That is normally the Settings item inside the avatar dropdown,
@@ -150,6 +296,7 @@ export function SettingsModal({
           event.preventDefault();
           document.getElementById(DASHBOARD_MAIN_ID)?.focus();
         }}
+        tabIndex={-1}
         className="bg-card flex h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:h-[min(40rem,calc(100dvh-4rem))] md:flex-row lg:max-w-4xl"
       >
         {/* THE RAIL. `border-b` on a stacked phone layout and `border-r` once
@@ -189,7 +336,7 @@ export function SettingsModal({
                   const first = matches[0];
                   if (!first) return;
                   event.preventDefault();
-                  goToSection(settingsSectionHref(first.id));
+                  showSection(first.id);
                 }}
               />
             </div>
@@ -203,11 +350,34 @@ export function SettingsModal({
               const Icon = section.icon;
               const isActive = section.id === activeId;
               return (
-                <Link
+                // A REAL ANCHOR AT A REAL ADDRESS, whose default action is
+                // cancelled. `#settings/church` is where this section lives, so
+                // the entry can be copied, opened in a new tab and read by
+                // anything that reads links — while the click itself goes
+                // through `showSection`, which REPLACES. Letting the browser
+                // follow it would push one history entry per section switch,
+                // and Close would then be as many steps back as the reader was
+                // curious.
+                <a
                   key={section.id}
                   href={settingsSectionHref(section.id)}
-                  replace
                   aria-current={isActive ? "page" : undefined}
+                  onClick={(event) => {
+                    // A modified click is the reader asking the BROWSER for
+                    // something — a new tab, a download, a saved link. Leave it
+                    // alone.
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    showSection(section.id);
+                  }}
                   className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors md:shrink ${
                     isActive
                       ? "bg-background text-foreground shadow-xs"
@@ -216,7 +386,7 @@ export function SettingsModal({
                 >
                   <Icon className="size-4 shrink-0" aria-hidden="true" />
                   {section.label}
-                </Link>
+                </a>
               );
             })}
           </nav>
@@ -263,9 +433,101 @@ export function SettingsModal({
             )}
           </div>
 
-          <div className="flex-1 px-5 py-5 md:px-6 md:py-6">{children}</div>
+          {/* THE TITLE AND THE RAIL ARE ALREADY DRAWN by the time this waits —
+              they come from the registry, which the browser has. Only the
+              section's own values are ever pending, which is why the frame does
+              not flicker on the way in.
+
+              KEYED BY SECTION so a switch shows the skeleton (a new boundary
+              suspends into its fallback) while a `refresh()`-driven re-read does
+              not (the same boundary, updated inside the router's transition,
+              keeps what is on screen until the new values arrive). */}
+          <div className="flex-1 px-5 py-5 md:px-6 md:py-6">
+            <Suspense key={activeId} fallback={<SectionSkeleton />}>
+              <SectionBody activeId={activeId} request={request} />
+            </Suspense>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * One body per section id, as a total map rather than a switch.
+ *
+ * `Record<SettingsSectionId, …>` is the exhaustiveness check: adding an id to
+ * the registry fails the build here until it has something to draw. Its twin is
+ * `SECTION_READS` in `section-data.ts`, which fails until it has something to
+ * read.
+ */
+const SECTION_BODIES: {
+  [Id in SettingsSectionId]: (props: {
+    view: SettingsSectionViewOf<Id>;
+  }) => React.ReactNode;
+} = {
+  account: AccountSection,
+  church: ChurchSection,
+  team: TeamSection,
+  association: AssociationSection,
+  notifications: NotificationsSection,
+};
+
+function SectionBody({
+  activeId,
+  request,
+}: {
+  activeId: SettingsSectionId;
+  request: Promise<SettingsSectionLoad>;
+}) {
+  const result = use(request);
+
+  if (!result.ok) return <SectionRefused />;
+
+  // THE TAG IS CHECKED, NOT ASSUMED. The view carries the section it belongs to
+  // and the server answered the id we asked for, so this is never false — but it
+  // is what makes the pairing below sound rather than merely likely, and it is
+  // the only place the tag and the map meet. Without it the cast would be a
+  // promise that a body and a view model match, kept by nobody.
+  const view = result.view;
+  if (view.section !== activeId) return <SectionRefused />;
+  const Body = SECTION_BODIES[activeId] as (props: {
+    view: typeof view;
+  }) => React.ReactNode;
+
+  return <Body view={view} />;
+}
+
+/**
+ * What a refusal draws: nothing, briefly, on the way to the default section.
+ *
+ * The correction is the same one the deleted `/settings/*` routes made with a
+ * `redirect()` — an account that may not open this section is put on the one
+ * every account can. It cannot loop: `account` is visible to every signed-in
+ * account and its read has no gate of its own to fail.
+ */
+function SectionRefused() {
+  useEffect(() => {
+    showSection(DEFAULT_SETTINGS_SECTION);
+  }, []);
+  return <SectionSkeleton />;
+}
+
+/**
+ * The section pane while its values are in flight.
+ *
+ * Blocks rather than a spinner, and roughly where a section's own blocks are, so
+ * the pane keeps its shape and nothing jumps when the values land. `role`-less
+ * and `aria-hidden`: the arrival is announced by the section itself, and a
+ * screen reader has no use for three grey rectangles.
+ */
+function SectionSkeleton() {
+  return (
+    <div className="space-y-6" aria-hidden="true">
+      <Skeleton className="h-5 w-32" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-5 w-40" />
+      <Skeleton className="h-32 w-full" />
+    </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
-import Link from "next/link";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -20,6 +19,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { logout } from "@/lib/auth/actions";
+import {
+  DEFAULT_SETTINGS_SECTION,
+  settingsSectionHref,
+} from "@/lib/settings/sections";
 
 type NavUserProps = {
   user: {
@@ -105,16 +108,21 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                {/* The section, not the bare route (#615). This is an in-app
-                    navigation, so it is INTERCEPTED: the modal opens over
-                    whatever screen the reader is on and the screen stays
-                    mounted behind it. Naming the section means the URL that
-                    lands in history is the one the modal is actually showing,
-                    which is what Escape has to return from. */}
-                <Link href="/settings/account">
+                {/* A PLAIN ANCHOR AT A FRAGMENT (#657), and deliberately not a
+                    `<Link>`: following it is not a navigation at all. The
+                    browser writes `#settings/account`, pushes exactly one
+                    history entry and fires `hashchange`, which is precisely the
+                    opening `settings-modal.tsx` is listening for — so the modal
+                    appears over whatever screen the reader is on, that screen is
+                    never re-rendered, and Escape takes the one entry back off
+                    again. It also works with no JavaScript.
+
+                    The SECTION is named rather than a bare `#settings`, so the
+                    address the reader can copy is the one they are looking at. */}
+                <a href={settingsSectionHref(DEFAULT_SETTINGS_SECTION)}>
                   <Settings />
                   Settings
-                </Link>
+                </a>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

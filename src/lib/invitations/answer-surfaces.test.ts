@@ -53,16 +53,27 @@ const APP = path.join(process.cwd(), "src", "app", "(dashboard)");
 const read = (...segments: string[]) =>
   readFileSync(path.join(APP, ...segments), "utf8");
 
-// SETTINGS IS A MODAL OF SECTIONS SINCE #615 (ruled 2026-08-21 §187), so the
-// two files this guard reads moved — the URLs did not.
+// SETTINGS IS A MODAL OF SECTIONS SINCE #615 (ruled 2026-08-21 §187) AND CLIENT
+// STATE OVER THE CURRENT SCREEN SINCE #657 (ruled 2026-08-22), so the files this
+// guard reads have moved twice. The claim has not: an account an org can TARGET
+// must have somewhere in the product to answer from.
 //
-// `/settings/association` is drawn by a section component now instead of a
-// sibling page, and the gate that decides whether a reader REACHES it moved
-// further than that: it is an entry in the settings registry, which is the one
-// list driving the side navigation, the search and the section's own
-// visibility. So the "…and `/settings` links the screen for it" half of this
-// contract is asked of the registry, which is where a link that must exist for
-// an answering account now either exists or does not.
+// THE SURFACE IS TWO FILES NOW, and each half is asked for what it owns. The
+// association section is a `"use client"` component, so its reads and its gate
+// live in `readAssociation` — that is where "does this account get a pending
+// list at all" is decided — while what a reader SEES is still the section
+// component. Asking one file for both would be asking a component to prove
+// something it no longer does.
+//
+// The gate that decides whether a reader REACHES the section moved further
+// still: it is an entry in the settings registry, the one list driving the side
+// navigation, the search and the section's own visibility. So the "…and
+// `/settings` links the screen for it" half of this contract is asked of the
+// registry.
+const ASSOCIATION_READ = readFileSync(
+  path.join(process.cwd(), "src/lib/settings/section-data.ts"),
+  "utf8"
+);
 const ASSOCIATION_PAGE = readFileSync(
   path.join(
     process.cwd(),
@@ -451,15 +462,15 @@ for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
   test(`${type}: the account that answers it has an in-app surface`, () => {
     // The association area reads a pending list for this account…
     assert.ok(
-      ASSOCIATION_PAGE.includes(contract.surfaceRead),
-      `/settings/association performs no ${contract.surfaceRead}`
+      ASSOCIATION_READ.includes(contract.surfaceRead),
+      `the association section's read performs no ${contract.surfaceRead}`
     );
 
-    // …the page admits it, on the (seat, tenancy) pair rather than on a role
+    // …the read admits it, on the (seat, tenancy) pair rather than on a role
     // name…
     assert.ok(
-      ASSOCIATION_PAGE.includes(contract.pageGate),
-      `/settings/association does not admit ${contract.answeredBy} (${contract.pageGate})`
+      ASSOCIATION_READ.includes(contract.pageGate),
+      `the association section's read does not admit ${contract.answeredBy} (${contract.pageGate})`
     );
 
     // …and the settings registry offers the section to it. A surface nobody

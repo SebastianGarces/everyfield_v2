@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { MailQuestion } from "lucide-react";
 
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import type { PendingInvitationView } from "@/app/(dashboard)/settings/association/queries";
+import { settingsSectionHref } from "@/lib/settings/sections";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
@@ -85,12 +85,17 @@ export function AssociationReminder({
           ))}
         </ul>
 
-        <Link
-          href="/settings/association"
+        {/* A FRAGMENT, AND A PLAIN ANCHOR (#657). This alert only ever draws on
+            `/dashboard`, so `#settings/association` opens the modal over the
+            dashboard the reader is already reading — no navigation, and this
+            card is still behind it when they close. A `<Link>` here would hand
+            a fragment to the router, which has nothing to do with it. */}
+        <a
+          href={settingsSectionHref("association")}
           className="cursor-pointer text-sm font-medium underline underline-offset-4"
         >
           See the details first
-        </Link>
+        </a>
       </AlertDescription>
     </Alert>
   );

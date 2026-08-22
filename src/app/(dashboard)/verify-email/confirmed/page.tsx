@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { settingsSectionUrl } from "@/lib/settings/sections";
+
 import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
@@ -47,7 +49,12 @@ export default async function EmailChangeConfirmedPage() {
           longer works, and we have told it about the change.
         </p>
         <Button asChild className="cursor-pointer">
-          <Link href="/settings/account">Back to settings</Link>
+          {/* PATH AND FRAGMENT, not a bare `#settings/account` (#657): this
+              page is not a dashboard screen the modal should open OVER — the
+              reader is finished here and is going back into the app. A real
+              navigation also keeps Next's router holding the fragment, which a
+              same-page `#`-link would not. */}
+          <Link href={settingsSectionUrl("account")}>Back to settings</Link>
         </Button>
       </div>
     </>

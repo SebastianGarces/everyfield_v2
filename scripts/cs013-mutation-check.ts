@@ -101,10 +101,22 @@ const MUTATIONS: Mutation[] = [
     suite: DEFAULTS_SUITE,
   },
   {
-    claim: "the association screen states the consent before accepting",
+    claim: "the association read states the consent before accepting",
+    file: "src/lib/settings/section-data.ts",
+    from:
+      "      consent: associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null,\n",
+    to: "      consent: null,\n",
+    suite: DEFAULTS_SUITE,
+  },
+  {
+    // #657 SPLIT THE SCREEN IN TWO, so gutting it takes two mutations. The one
+    // above stops the copy being CHOSEN; this one lets it be chosen and then
+    // drops it on the floor, which is the failure a source guard reading only
+    // the loader would report as a pass.
+    claim: "the association section renders the consent it is handed",
     file: "src/components/settings/sections/association-section.tsx",
-    from: "          associations.length === 0 ? INVITE_ORIGIN_SHARING_CONSENT : null\n",
-    to: "          null\n",
+    from: "                      {consent.map((line) => (",
+    to: "                      {[].map((line: string) => (",
     suite: DEFAULTS_SUITE,
   },
   {

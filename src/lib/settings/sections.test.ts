@@ -8,8 +8,10 @@ import {
   RETIRED_SETTINGS_SECTIONS,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
+  settingsSectionFromHash,
   settingsSectionHref,
   settingsSectionsFor,
+  settingsSectionUrl,
   type SettingsSectionId,
 } from "./sections";
 
@@ -203,13 +205,66 @@ test("a retired id lands on the section that absorbed it", () => {
 test("every section id resolves and nothing else does", () => {
   for (const section of SETTINGS_SECTIONS) {
     assert.ok(isSettingsSectionId(section.id));
-    assert.equal(settingsSectionHref(section.id), `/settings/${section.id}`);
+    // A FRAGMENT since #657 (ruled 2026-08-22): settings opens over the current
+    // screen, so a section's own address carries no path at all.
+    assert.equal(settingsSectionHref(section.id), `#settings/${section.id}`);
+    assert.equal(
+      settingsSectionUrl(section.id),
+      `/dashboard#settings/${section.id}`
+    );
   }
   for (const bogus of ["", "nonsense", "Account", "team/", "../actions"]) {
     assert.equal(
       isSettingsSectionId(bogus),
       false,
       `"${bogus}" must not resolve to a section`
+    );
+  }
+});
+
+test("the fragment grammar: what opens settings, and on what", () => {
+  // THE ADDRESS BAR IS UNTRUSTED INPUT and this is the parse. It is TOTAL —
+  // every string a browser can put in `location.hash` has an answer — so the
+  // interesting cases are the ones that must NOT be `null` and the ones that
+  // must be.
+  for (const section of SETTINGS_SECTIONS) {
+    assert.equal(settingsSectionFromHash(`#settings/${section.id}`), section.id);
+    // With and without the `#`, because `location.hash` carries one and the
+    // redirect pages have already stripped theirs.
+    assert.equal(settingsSectionFromHash(`settings/${section.id}`), section.id);
+  }
+
+  // A settings address that names no section still OPENS, on the section every
+  // account has. This is the old `/settings` route's landing rule.
+  assert.equal(settingsSectionFromHash("#settings"), DEFAULT_SETTINGS_SECTION);
+  assert.equal(
+    settingsSectionFromHash("#settings/nonsense"),
+    DEFAULT_SETTINGS_SECTION
+  );
+
+  // A RETIRED id goes where its panel went, never to the default: `#settings/
+  // sharing` was the consent panel's own address, and dropping its reader on
+  // Account tells a planter their privacy controls were removed.
+  for (const [retired, target] of Object.entries(RETIRED_SETTINGS_SECTIONS)) {
+    assert.equal(settingsSectionFromHash(`#settings/${retired}`), target);
+  }
+
+  // AND EVERYTHING ELSE LEAVES THE MODAL SHUT. A fragment belongs to whoever
+  // wrote it; a parser that treated an unrecognised one as "open settings"
+  // would hijack every other anchor in the product.
+  for (const other of [
+    "",
+    "#",
+    "#top",
+    "#settingsomething",
+    "#not-settings/church",
+    "#/settings/church",
+    "#church",
+  ]) {
+    assert.equal(
+      settingsSectionFromHash(other),
+      null,
+      `"${other}" must not open settings`
     );
   }
 });

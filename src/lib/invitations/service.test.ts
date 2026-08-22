@@ -529,6 +529,10 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
     "#496/AS-009 — ANSWERING a coach invitation, the surface a seat invitation never needed because it refuses every existing account. It reaches `./core` only transitively, through `./coach`, and only for `InvitationError`: the class the action narrows on to tell a refusal the invitee may read from a failure they may not. It imports NO core primitive of its own — its one write is `acceptCoachInvitationAs`, which takes the SESSION's user rather than an id from the form, re-resolves the token itself, and refuses everything that is not a clean accept with the single message the invitee is allowed to see",
   ],
   [
+    "src/lib/settings/section-data.ts",
+    "#657 — the settings modal's ONE READ, which draws the Team section. It reaches `./core` for the shared vocabulary only: `INVITATION_EXPIRY_DAYS` (the number the invite form prints) and `invitationActorFromSession` (the branded actor `./seat`'s reads demand). It performs NO write of any kind and imports no core write primitive — its two invitation calls are `expireLapsedUserInvitations` and `listUserInvitationsFor`, both scoped by the actor's own tenancy inside the logic layer",
+  ],
+  [
     "src/app/(auth)/register/actions.ts",
     "two things, both necessarily session-free because no account exists yet: (1) the private-beta gate — `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ, because an invitation id IS the bypass token (core.ts → Query Invitations); (2) #23's redemption — `bindOpenInvitationTarget` then `acceptInvitationAs`, which turn an invite link into an association. The WRITES are reached only from inside `register`, after the account has been created, and the actor is minted from the user row this same request inserted",
   ],
