@@ -12,9 +12,14 @@ import {
 import {
   READ_ONLY_SURFACE_CHECKLIST,
   REACH,
+  WALL_IS_NOT_THE_WHOLE_STORY,
   type ChecklistRow,
 } from "@/lib/auth/read-only-surfaces";
-import { ALL_CAPABILITIES, requiresPlantTenancy } from "@/lib/auth/seat-rules";
+import {
+  ALL_CAPABILITIES,
+  heldCapabilities,
+  requiresPlantTenancy,
+} from "@/lib/auth/seat-rules";
 
 // ============================================================================
 // THE CHECKLIST IS WALKED BY A TEST, NOT BY A PERSON — AS-020 (#499).
@@ -207,6 +212,54 @@ test("every plant surface refuses an account with no churchId", () => {
     ungated,
     [],
     `these plant surfaces do not refuse an account with no churchId, so a coach and an org Member render them:\n${ungated.join("\n")}\n\nAdd the guard, or name the route in NOT_PLANT_SURFACES with the reason it serves a churchless account.`
+  );
+});
+
+test("a seatless account holding a church_id still renders, so the hide is load-bearing", () => {
+  // FOUND IN THE BROWSER, PINNED HERE. The guard above reads `church_id` and
+  // nothing else, so it catches an account with no tenancy and MISSES one with
+  // a tenancy and no seat — which `scripts/seed-dev-db.ts` creates on purpose,
+  // because the FK is what gives a dev coach a notification feed. Signed in as
+  // `coach1@everyfield.app`, /people renders in full.
+  //
+  // The reason this is a test and not a comment: the wall invites exactly one
+  // wrong inference — "rows 2-13 are unreachable, so their gates are defence in
+  // depth" — and acting on it would delete the only thing refusing that
+  // account's writes in the UI. `heldCapabilities` of a seatless plant account
+  // is what makes the point, so that is what is asserted.
+  const seatlessInAPlant = {
+    seat: null,
+    churchId: "11111111-1111-4111-8111-111111111111",
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
+
+  const held = heldCapabilities(seatlessInAPlant);
+
+  for (const capability of [
+    "people.write",
+    "meetings.write",
+    "tasks.write",
+    "teams.write",
+    "communication.send",
+  ] as const) {
+    assert.ok(
+      !held.includes(capability),
+      `a seatless account holds ${capability} — the hide would render its controls`
+    );
+  }
+
+  // And it is not hidden from everything: the reads are what it is there for.
+  assert.ok(held.includes("read"), "a seatless account lost its reads");
+  assert.ok(
+    held.includes("self.write"),
+    "a seatless account lost its own settings"
+  );
+
+  assert.match(
+    WALL_IS_NOT_THE_WHOLE_STORY,
+    /only the capability hide/,
+    "the finding's own wording changed — re-read whether the claim still holds"
   );
 });
 

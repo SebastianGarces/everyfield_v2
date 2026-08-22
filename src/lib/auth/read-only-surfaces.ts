@@ -55,6 +55,32 @@ export type ReadOnlyContext = "coach" | "org-member" | "plant-member";
  * plant, pass every route guard, and see each of these screens in full — and
  * `ADMIN_PLUS` refuses them nearly every write on it.
  */
+/**
+ * WHY THE WALL IS NOT THE WHOLE STORY — found in the browser, not in a test.
+ *
+ * The route guard reads `church_id`, and nothing else. It therefore catches an
+ * account with NO tenancy and misses one that holds a `church_id` and NO SEAT —
+ * a state that is perfectly representable and that this repo's own dev seed
+ * creates on purpose: `coach1@everyfield.app` is `seat: null` with
+ * `churchIndex: 0`, because "`churchIndex` still links them to a plant, which
+ * is what gives them an in-app notification feed" (`scripts/seed-dev-db.ts`).
+ *
+ * Signed in as that account, `/people` RENDERS. It does not redirect. What
+ * refuses the writes there is not the wall — it is the capability hide this
+ * sweep put in, because `holdsSeatFor` needs a seat and there is none. The
+ * observed result was the whole directory, readable, with every create control
+ * absent and Export (a `read`) still present.
+ *
+ * SO THE HIDE IS LOAD-BEARING, NOT BELT-AND-BRACES. The tempting conclusion
+ * from the route walk — "rows 2-13 are unreachable for a coach, so the gates
+ * below them are defence in depth" — is false for any seatless account that
+ * names a plant, and the server's own refusal (`requireSeat`) is what makes it
+ * safe rather than merely tidy. Do not delete a gate on the strength of the
+ * wall alone.
+ */
+export const WALL_IS_NOT_THE_WHOLE_STORY =
+  "the churchId guard reads a tenancy, not a seat: a seatless account holding a church_id renders every plant surface, and only the capability hide refuses its writes";
+
 export const REACH: Readonly<
   Record<
     ReadOnlyContext,
@@ -63,7 +89,7 @@ export const REACH: Readonly<
 > = {
   coach: {
     plantSurfaces: false,
-    why: "seat NULL and church_id NULL — refused by every plant route's churchId guard; the coaching reach is /coaching/[churchId], one aggregate page that renders no control",
+    why: "a coach MINTED BY THE INVITATION FLOW holds no tenancy at all — `assignCoachOnAcceptStatement` writes a coach_assignments row and no FK — so church_id is NULL and every plant route's guard refuses them; their reach is /coaching/[churchId], one aggregate page that renders no control. But see WALL_IS_NOT_THE_WHOLE_STORY: a SEATLESS account carrying a church_id is representable, and the route guard does not catch it.",
   },
   "org-member": {
     plantSurfaces: false,
