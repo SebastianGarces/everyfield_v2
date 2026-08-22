@@ -27,17 +27,14 @@
 // tests drive the real builders and capture the message at this seam.
 // ============================================================================
 
-import { formatDateTime } from "@/lib/datetime";
+import { formatDateTimeWithZone } from "@/lib/datetime";
 import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
 import { redactForLog } from "@/lib/email/redact";
 import { emailChangeNoticeEmail } from "@/lib/email/templates/email-change-notice";
 import { emailChangeVerificationEmail } from "@/lib/email/templates/email-change-verification";
 import { appBaseUrl } from "@/lib/notifications/channels/email";
 
-import {
-  emailChangeVerifyPath,
-  hashEmailChangeToken,
-} from "./email-change-token";
+import { emailChangeVerifyPath, hashEmailChangeToken } from "./account-email";
 
 /** What a transport is handed. The same shape `sendEmail` takes. */
 export interface EmailChangeMessage {
@@ -102,10 +99,11 @@ export async function buildEmailChangeVerification(
     confirmUrl: emailChangeConfirmUrl(facts.token, baseUrl),
     // Formatted HERE, through `@/lib/datetime`, so the instant the reader sees
     // is pinned to `APP_TIME_ZONE` like every other surface with no church
-    // behind it (`memory/invariants.md` → Date & Time Rendering). WITH THE
-    // TIME, not just the day: a 24-hour window ending "on Friday" is a sentence
-    // that is wrong for most of Friday.
-    expiresLabel: formatDateTime(facts.expiresAt),
+    // behind it (`memory/invariants.md` → Date & Time Rendering). WITH THE TIME
+    // AND WITH THE ZONE: a 24-hour window ending "on Friday" is wrong for most
+    // of Friday, and an unlabelled "3:30 PM" in an inbox is read as the
+    // reader's own afternoon.
+    expiresLabel: formatDateTimeWithZone(facts.expiresAt),
   });
 
   return {
@@ -129,7 +127,11 @@ export async function buildEmailChangeNotice(
     previousEmail: facts.to,
     newEmail: facts.newEmail,
     recipientName: facts.recipientName?.trim() || null,
-    changedAtLabel: formatDateTime(facts.changedAt),
+    // WITH THE ZONE, like the expiry above: this is the timestamp somebody
+    // checks against their own memory when deciding whether they were
+    // compromised, so an hour it is read in the wrong clock is worse than no
+    // hour at all.
+    changedAtLabel: formatDateTimeWithZone(facts.changedAt),
   });
 
   return {

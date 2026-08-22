@@ -16,7 +16,7 @@ import {
   PASSWORD_TOO_SHORT_MESSAGE,
   PASSWORD_UNCHANGED_MESSAGE,
 } from "./password-policy";
-import { checkRateLimit, type FailureCounter } from "./rate-limit";
+import type { FailureCounter } from "./rate-limit";
 import { authAttempts } from "@/db/schema";
 
 // ============================================================================
@@ -87,8 +87,7 @@ function limiterWithLog(): { limiter: AttemptLimiter; log: Recorded[] } {
   return {
     log,
     limiter: {
-      check: (identifier, ip, kind) =>
-        checkRateLimit(identifier, ip, kind, count),
+      count,
       record: async (identifier, ip, kind, success) => {
         log.push({
           identifier: identifier.toLowerCase(),
@@ -310,7 +309,9 @@ test("the order is guard, shape, secret, write, record", () => {
     BODY,
     "password-change.ts",
     [
-      'limiter.check(identifier, ip, "password_change")',
+      // Wrapped by Prettier, so the anchor is the injected counter — the one
+      // thing in the call that occurs exactly once in this file.
+      "limiter.count",
       "newPassword.length < MIN_PASSWORD_LENGTH",
       "verifyPassword(actor.passwordHash, currentPassword)",
       "await db.batch([",

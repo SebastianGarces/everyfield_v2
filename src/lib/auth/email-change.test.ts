@@ -33,10 +33,10 @@ import {
   isMailableAddress,
   newEmailChangeToken,
   normalizeAccountEmail,
-} from "./email-change-token";
+} from "./account-email";
 import { hashPassword } from "./password";
 import { CURRENT_PASSWORD_WRONG_MESSAGE } from "./password-policy";
-import { checkRateLimit, type FailureCounter } from "./rate-limit";
+import type { FailureCounter } from "./rate-limit";
 
 // ============================================================================
 // CS-002 — an address change is asked for, mailed to the NEW address, and only
@@ -106,8 +106,7 @@ function limiterWithLog(): { limiter: AttemptLimiter; log: Recorded[] } {
   return {
     log,
     limiter: {
-      check: (identifier, ip, kind) =>
-        checkRateLimit(identifier, ip, kind, count),
+      count,
       record: async (identifier, ip, kind, success) => {
         log.push({
           identifier: identifier.toLowerCase(),
@@ -319,6 +318,7 @@ test("the claim is single-use AND inside the window", () => {
 test("the swap re-asserts the address it is moving off", () => {
   const { sql, params } = swapLoginIdentifierStatement(
     USER_ID,
+    "req-1",
     "planter@example.com",
     NEW_EMAIL,
     NOW
@@ -331,8 +331,19 @@ test("the swap re-asserts the address it is moving off", () => {
     /"users"\."email" = \$\d/,
     "a compare-and-set on the row being changed — without it a replay re-applies a swap whose starting point has moved"
   );
+  assert.match(
+    sql,
+    /exists \(\s*select 1 from "email_change_requests"/,
+    "…and it re-asserts THE CLAIM, not only the users row — without this a concurrent supersede makes the claim match nothing while the swap still commits, and the login identifier moves to a superseded address"
+  );
+  assert.match(
+    sql,
+    /"consumed_at" = \$\d/,
+    "`= $now`, not `is not null`: somebody else's settle must not stand in for ours"
+  );
   assert.ok(params.includes("planter@example.com"));
   assert.ok(params.includes(NEW_EMAIL));
+  assert.ok(params.includes("req-1"));
 });
 
 test("the supersede is scoped to the account and to LIVE rows only", () => {
@@ -357,7 +368,6 @@ test("the confirm's order is claim first, then the dependent swap", () => {
     body,
     "email-change.ts",
     [
-      'limiter.check(previousEmail, ip, "email_change")',
       "hashEmailChangeToken(token)",
       "consumeRequestStatement(request.id, now)",
       "swapLoginIdentifierStatement(",
@@ -385,11 +395,12 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
     body,
     "email-change.ts",
     [
-      'limiter.check(identifier, ip, "email_change")',
+      // Wrapped by Prettier, so the anchor is the injected counter — the one
+      // thing in the call that occurs exactly once in this file.
+      "limiter.count",
       "isMailableAddress(newEmail)",
       "verifyPassword(actor.passwordHash, currentPassword)",
-      "supersedeLiveRequestsStatement(actor.id, now)",
-      "db.insert(emailChangeRequests)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt)",
       "sendEmailChangeVerification(",
     ],
     "email_change_requests_live_user_unique_idx is partial on consumed_at IS NULL, so a second live row cannot commit; and the mail must follow the durable row"
@@ -400,7 +411,7 @@ test("the request supersedes BEFORE it inserts — the partial index refuses the
     READER.after("const token = newEmailChangeToken()"),
     "email-change.ts",
     [
-      "db.insert(emailChangeRequests)",
+      "openRequest(actor.id, newEmail, token, now, expiresAt)",
       "sendEmailChangeVerification(",
       'limiter.record(identifier, ip, "email_change", false)',
     ],
@@ -425,6 +436,57 @@ test("a link with no token at all gets the same sentence, from the page", () => 
     EMAIL_CHANGE_LINK_DEAD_MESSAGE,
     /ask for the change again/i,
     "the one sentence has to carry the remedy, because it is all five cases' only answer"
+  );
+});
+
+test("the REDEMPTION is not rate-limited — a link asked for is a link that opens", () => {
+  // The regression this exists for: `confirmEmailChange` used to check the same
+  // counter that `requestEmailChange` INCREMENTS on every ask. Three asks in the
+  // hour then left the account holding a live link it could not open, under a
+  // sentence telling it to go and open one. There is no secret to guess at here
+  // and nothing is mailed to a stranger, so the path carries no check at all.
+  const body = stripComments(
+    READER.after("export async function confirmEmailChange")
+  );
+
+  assert.equal(
+    /checkRateLimit\(/.test(body),
+    false,
+    "a guard on the redemption path locks an account out of the change it legitimately asked for"
+  );
+  assert.match(
+    body,
+    /limiter\.record\(previousEmail, ip, "email_change", true\)/,
+    "…but the SUCCESS is still recorded, because that is what clears the request-side window (ruled 405-4b)"
+  );
+});
+
+test("success needs BOTH rowcounts, not just the claim's", () => {
+  const body = stripComments(
+    READER.after("export async function confirmEmailChange")
+  );
+
+  assert.match(
+    body,
+    /claimed\.length === 0 \|\| swapped\.length === 0/,
+    "an empty swap with a winning claim would report a change to an address the account does not have — `db.batch` is all-or-nothing on FAILURE only, so a zero-row UPDATE commits the rest"
+  );
+});
+
+test("two concurrent asks converge instead of surfacing a 23505", () => {
+  const body = stripComments(
+    READER.span("async function openRequest", "/**\n * Ask to move")
+  );
+
+  assert.match(
+    body,
+    /isUniqueViolation\(\s*error,\s*"email_change_requests_live_user_unique_idx"\s*\)/,
+    "supersede-then-insert is an ORDERING guard, not a concurrency one: the loser's supersede never sees the winner's row and its insert meets the partial index instead"
+  );
+  assert.equal(
+    body.match(/await write\(\)/g)?.length,
+    2,
+    "exactly one retry — the second supersede runs after the winner committed, so it converges; a third concurrent writer is real news and propagates"
   );
 });
 

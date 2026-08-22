@@ -19,22 +19,37 @@
 // arithmetic — over an in-memory list of attempts, and the wrong-password
 // refusal executes for real against a real argon2 hash.
 //
+// WHAT IT DOES *NOT* LET A CALLER REPLACE IS THE POLICY. The flows call
+// `checkRateLimit` themselves and pass `limiter.count` into it, so the only
+// thing substitutable is WHERE the attempts are stored. A member that stood in
+// for `checkRateLimit` itself would have been a second answer to "is this
+// caller over the limit", which is precisely what CS-005 forbids.
+//
 // THE DEFAULT IS PRODUCTION. Every call site takes `REAL_ATTEMPT_LIMITER`
 // unless a test passes something else, so there is no branch in the flows and
 // no environment check anywhere.
 // ============================================================================
 
-import { checkRateLimit, recordAttempt } from "./rate-limit";
+import {
+  countAuthAttemptFailures,
+  recordAttempt,
+  type FailureCounter,
+} from "./rate-limit";
 
 export interface AttemptLimiter {
-  /** `checkRateLimit` — "has this identifier or IP used up its attempts?" */
-  check: typeof checkRateLimit;
-  /** `recordAttempt` — the write that both counts a failure and clears on success. */
+  /**
+   * HOW FAILURES ARE COUNTED — handed straight to `checkRateLimit`, which is
+   * still the thing that decides. ONE seam, not two: an interface member that
+   * wrapped `checkRateLimit` itself would let a caller substitute the POLICY,
+   * which is the one thing CS-005 says may never have a second copy.
+   */
+  count: FailureCounter;
+  /** `recordAttempt` — the write that counts a failure and clears on success. */
   record: typeof recordAttempt;
 }
 
 /** The `auth_attempts` table, through the functions every auth flow already uses. */
 export const REAL_ATTEMPT_LIMITER: AttemptLimiter = {
-  check: checkRateLimit,
+  count: countAuthAttemptFailures,
   record: recordAttempt,
 };

@@ -40,7 +40,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { sessions, users, type User } from "@/db/schema";
 
-import { normalizeAccountEmail } from "./email-change-token";
+import { normalizeAccountEmail } from "./account-email";
 import {
   CURRENT_PASSWORD_WRONG_MESSAGE,
   MIN_PASSWORD_LENGTH,
@@ -49,6 +49,7 @@ import {
   PASSWORD_UNCHANGED_MESSAGE,
 } from "./password-policy";
 import { REAL_ATTEMPT_LIMITER, type AttemptLimiter } from "./attempt-limiter";
+import { checkRateLimit } from "./rate-limit";
 import { hashPassword, verifyPassword } from "./password";
 
 export type PasswordChangeActor = Pick<User, "id" | "email" | "passwordHash">;
@@ -103,7 +104,12 @@ export async function changeOwnPassword({
 }): Promise<PasswordChangeOutcome> {
   const identifier = normalizeAccountEmail(actor.email);
 
-  const { limited } = await limiter.check(identifier, ip, "password_change");
+  const { limited } = await checkRateLimit(
+    identifier,
+    ip,
+    "password_change",
+    limiter.count
+  );
   if (limited) {
     return {
       ok: false,

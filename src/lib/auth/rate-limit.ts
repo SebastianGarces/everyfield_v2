@@ -143,9 +143,14 @@ export type FailureCounter = (
 ) => Promise<number>;
 
 /**
- * Count failed attempts in a window matching a single column predicate.
+ * Count failed attempts in a window matching a single column predicate — the
+ * PRODUCTION counter, and `checkRateLimit`'s default.
+ *
+ * Exported so `REAL_ATTEMPT_LIMITER` can name it: the self-service flows carry
+ * their store as a value rather than relying on the default, so what a test
+ * substitutes and what production uses are the same parameter.
  */
-async function countFailures(
+export async function countAuthAttemptFailures(
   column: RateLimitAxis,
   value: string,
   kind: AuthAttemptKind,
@@ -179,7 +184,7 @@ export async function checkRateLimit(
   identifier: string,
   ip: string | null,
   kind: AuthAttemptKind,
-  count: FailureCounter = countFailures
+  count: FailureCounter = countAuthAttemptFailures
 ): Promise<RateLimitResult> {
   const limit = RATE_LIMITS[kind];
 

@@ -1,5 +1,13 @@
 // ============================================================================
-// THE ADDRESS-CHANGE CREDENTIAL, AND THE ADDRESS ITSELF — CS-002 (#616).
+// THE ADDRESS AN ACCOUNT SIGNS IN WITH, AND THE CREDENTIAL THAT MOVES IT —
+// CS-002 (#616).
+//
+// NAMED FOR THE ADDRESS, not for the change. `normalizeAccountEmail` is "how
+// `users.email` is stored", which is a fact about the column rather than about
+// this feature — `password-change.ts` needs it to key the rate-limit guard and
+// has nothing to do with an address change. A module called
+// `email-change-token` would make that a wrong-looking import at a right call
+// site.
 //
 // AN IMPORT-FREE LEAF (bar `node:crypto`), for the reason `@/lib/auth/roles`
 // and `@/lib/auth/unauthorized` are: three modules that must not import each

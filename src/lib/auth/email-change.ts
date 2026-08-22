@@ -85,8 +85,9 @@ import {
   isMailableAddress,
   newEmailChangeToken,
   normalizeAccountEmail,
-} from "./email-change-token";
+} from "./account-email";
 import { REAL_ATTEMPT_LIMITER, type AttemptLimiter } from "./attempt-limiter";
+import { checkRateLimit } from "./rate-limit";
 import { verifyPassword } from "./password";
 import { CURRENT_PASSWORD_WRONG_MESSAGE } from "./password-policy";
 import {
@@ -185,6 +186,58 @@ export function supersedeLiveRequestsStatement(userId: string, at: Date) {
 }
 
 /**
+ * SUPERSEDE, THEN INSERT — and once more if the index says somebody beat us.
+ *
+ * The order is not a convention: `email_change_requests_live_user_unique_idx`
+ * is partial on `consumed_at IS NULL`, so an insert ahead of the supersede
+ * cannot commit. What the ORDER does not buy is a concurrency guard. Two
+ * requests in flight at once (two tabs, a double submit, a retried action) each
+ * take their snapshot before the other commits, so the loser's supersede never
+ * sees the winner's new row and its insert meets the index instead. That
+ * unique violation would otherwise reach the reader as "we could not send that
+ * confirmation email" for a request that was perfectly good. (The SQLSTATE is
+ * spelled in `@/db/errors` and nowhere else — `isUniqueViolation` is the one
+ * predicate, and #411 AC5 is a test.)
+ *
+ * ONE RETRY CONVERGES, and it converges for a reason rather than by hope: the
+ * retry's supersede runs after the winner has committed, so it settles that row
+ * and the insert then has the live slot to itself. The retry is also the RIGHT
+ * outcome — the reader asked last, so their address is the one that should be
+ * live. A second collision would mean a third concurrent writer, at which point
+ * the violation is real news and propagates.
+ */
+async function openRequest(
+  userId: string,
+  newEmail: string,
+  token: string,
+  now: Date,
+  expiresAt: Date
+): Promise<void> {
+  const write = () =>
+    db.batch([
+      supersedeLiveRequestsStatement(userId, now),
+      db.insert(emailChangeRequests).values({
+        userId,
+        newEmail,
+        tokenHash: hashEmailChangeToken(token),
+        createdAt: now,
+        expiresAt,
+      }),
+    ]);
+
+  try {
+    await write();
+  } catch (error) {
+    if (
+      !isUniqueViolation(error, "email_change_requests_live_user_unique_idx")
+    ) {
+      throw error;
+    }
+    await write();
+  }
+}
+
+/**
  * Ask to move this account to `requestedEmail`.
  *
  * `users.email` IS NOT TOUCHED. The old address keeps signing in until the link
@@ -227,7 +280,12 @@ export async function requestEmailChange({
 }): Promise<EmailChangeRequestOutcome> {
   const identifier = normalizeAccountEmail(actor.email);
 
-  const { limited } = await limiter.check(identifier, ip, "email_change");
+  const { limited } = await checkRateLimit(
+    identifier,
+    ip,
+    "email_change",
+    limiter.count
+  );
   if (limited) {
     return {
       ok: false,
@@ -266,16 +324,7 @@ export async function requestEmailChange({
     now.getTime() + EMAIL_CHANGE_EXPIRY_HOURS * HOUR_MS
   );
 
-  await db.batch([
-    supersedeLiveRequestsStatement(actor.id, now),
-    db.insert(emailChangeRequests).values({
-      userId: actor.id,
-      newEmail,
-      tokenHash: hashEmailChangeToken(token),
-      createdAt: now,
-      expiresAt,
-    }),
-  ]);
+  await openRequest(actor.id, newEmail, token, now, expiresAt);
 
   const sent = await sendEmailChangeVerification(
     {
@@ -326,11 +375,29 @@ export function consumeRequestStatement(requestId: string, now: Date) {
 /**
  * STATEMENT TWO — THE SWAP, whose `WHERE` RE-ASSERTS WHAT THE CLAIM SET.
  *
- * `users.email = previousEmail` is a compare-and-set on the very row being
- * changed, so this is not "update the account the caller named" — it is "move
- * this account off exactly the address it was on". A replay, a second tab, or a
- * change that landed from somewhere else in between writes NOTHING instead of
- * re-applying a swap whose starting point has moved.
+ * TWO PREDICATES, AND THEY ARE NOT THE SAME PREDICATE TWICE:
+ *
+ *   * `EXISTS (… consumed_at = $now)` re-asserts THE CLAIM — that statement one,
+ *     in this batch, is what settled this request. Each statement in a
+ *     `db.batch` sees the previous one's writes
+ *     (`memory/invariants/transactions-atomicity.md`), so this reads the claim
+ *     rather than a snapshot. WITHOUT IT the two statements can disagree inside
+ *     one committed batch: a concurrent `requestEmailChange` that supersedes
+ *     this row between the read above and this batch makes the claim match zero
+ *     rows while the swap still matches one — and the login identifier moves to
+ *     a superseded address while the reader is told the link is dead and the old
+ *     mailbox is never told. `consumed_at = $now` and not merely `is not null`,
+ *     so somebody ELSE's settle cannot stand in for ours.
+ *   * `users.email = previousEmail` is a compare-and-set on the row being
+ *     changed — "move this account off exactly the address it was on" — so a
+ *     replay or a change that landed from elsewhere writes nothing rather than
+ *     re-applying a swap whose starting point has moved.
+ *
+ * BOTH ROWCOUNTS ARE READ by the caller. An empty claim is a token somebody
+ * else spent; an empty swap is an account whose address moved underneath the
+ * redemption. Neither is a rollback — `db.batch` is all-or-nothing on FAILURE
+ * only — so reporting success off the claim alone would name an address the
+ * account does not have.
  *
  * `users_email_unique` is what decides whether the new address is free, and it
  * decides it HERE — a failure aborts the whole batch, so the claim rolls back
@@ -339,6 +406,7 @@ export function consumeRequestStatement(requestId: string, now: Date) {
  */
 export function swapLoginIdentifierStatement(
   userId: string,
+  requestId: string,
   previousEmail: string,
   newEmail: string,
   now: Date
@@ -346,7 +414,17 @@ export function swapLoginIdentifierStatement(
   return db
     .update(users)
     .set({ email: newEmail, updatedAt: now })
-    .where(and(eq(users.id, userId), eq(users.email, previousEmail)))
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.email, previousEmail),
+        sql`exists (
+              select 1 from ${emailChangeRequests}
+              where ${emailChangeRequests.id} = ${requestId}
+                and ${emailChangeRequests.consumedAt} = ${now}
+            )`
+      )
+    )
     .returning({ id: users.id });
 }
 
@@ -375,13 +453,16 @@ export async function liveEmailChangeRequest(
     .where(
       and(
         eq(emailChangeRequests.userId, userId),
-        isNull(emailChangeRequests.consumedAt)
+        isNull(emailChangeRequests.consumedAt),
+        // THE WINDOW IS IN THE `WHERE`, like the claim's. Filtering it in
+        // JavaScript afterwards would be a second reading of the same rule, one
+        // round trip later — and the two can only ever drift apart.
+        sql`${emailChangeRequests.expiresAt} > ${now}`
       )
     )
     .limit(1);
 
-  if (!row || row.expiresAt.getTime() <= now.getTime()) return null;
-  return row;
+  return row ?? null;
 }
 
 /**
@@ -420,11 +501,21 @@ export async function confirmEmailChange({
 }): Promise<EmailChangeConfirmOutcome> {
   const previousEmail = normalizeAccountEmail(actor.email);
 
-  const { limited } = await limiter.check(previousEmail, ip, "email_change");
-  if (limited) {
-    return { ok: false, message: EMAIL_CHANGE_RATE_LIMITED_MESSAGE };
-  }
-
+  // NO GUARD ON THIS PATH, AND THAT IS DELIBERATE — it was here, and it was a
+  // lockout. An email-change REQUEST is recorded as an attempt that has not
+  // succeeded (see `RATE_LIMITS`), so checking that same counter here refused
+  // the redemption of a link the account had legitimately asked for: three asks
+  // in the hour — or two fumbled passwords and one good ask — and the live link
+  // could not be opened until the window slid, under a sentence telling the
+  // reader to go and open it. The per-IP axis spread the same refusal to
+  // everybody else behind one office NAT.
+  //
+  // Nothing is lost by its absence. There is no secret here to guess at: the
+  // token is 256 random bits AND the caller must hold the session it was issued
+  // to, so there is no attempt worth counting. Nothing is mailed to a stranger,
+  // so the outbound cap this kind exists for has no job. What the path DOES owe
+  // the guard is the SUCCESS below, which clears the window (ruled 405-4b) —
+  // that is the half that makes the request-side cap self-clearing.
   const [request] = await db
     .select()
     .from(emailChangeRequests)
@@ -446,10 +537,17 @@ export async function confirmEmailChange({
   const newEmail = request.newEmail;
 
   let claimed;
+  let swapped;
   try {
-    [claimed] = await db.batch([
+    [claimed, swapped] = await db.batch([
       consumeRequestStatement(request.id, now),
-      swapLoginIdentifierStatement(actor.id, previousEmail, newEmail, now),
+      swapLoginIdentifierStatement(
+        actor.id,
+        request.id,
+        previousEmail,
+        newEmail,
+        now
+      ),
     ]);
   } catch (error) {
     if (isUniqueViolation(error, "users_email_unique")) {
@@ -458,7 +556,12 @@ export async function confirmEmailChange({
     throw error;
   }
 
-  if (claimed.length === 0) {
+  // BOTH ROWCOUNTS, AND THE SAME SENTENCE FOR EITHER. An empty claim is a token
+  // somebody else spent; an empty swap is an account whose address moved
+  // underneath this redemption. Both mean "this link did not do anything", and
+  // both leave the caller with the one remedy the sentence names. Reporting on
+  // the claim alone would announce a swap that did not happen.
+  if (claimed.length === 0 || swapped.length === 0) {
     return { ok: false, message: EMAIL_CHANGE_LINK_DEAD_MESSAGE };
   }
 
