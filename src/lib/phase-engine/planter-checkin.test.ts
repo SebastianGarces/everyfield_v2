@@ -7,8 +7,8 @@ import {
   CHECKIN_DIMENSIONS,
   CHECKIN_NUDGE_RUN,
   checkinNudges,
-  hasAnsweredThisWeek,
   recentWeekStarts,
+  thisWeeksCheckin,
   weekStartOf,
 } from "./planter-checkin";
 import type { PlanterCheckin, PlanterCheckinLevel } from "@/db/schema";
@@ -69,9 +69,33 @@ test("the strip's weeks are contiguous and end at this week", () => {
 
 test("this week is answered only by THIS week's row", () => {
   const asOf = new Date("2026-08-21T12:00:00.000Z");
-  assert.equal(hasAnsweredThisWeek([checkin("2026-08-17")], asOf), true);
-  assert.equal(hasAnsweredThisWeek([checkin("2026-08-10")], asOf), false);
-  assert.equal(hasAnsweredThisWeek([], asOf), false);
+  assert.equal(
+    thisWeeksCheckin([checkin("2026-08-17")], asOf)?.weekStart,
+    "2026-08-17"
+  );
+  assert.equal(thisWeeksCheckin([checkin("2026-08-10")], asOf), null);
+  assert.equal(thisWeeksCheckin([], asOf), null);
+});
+
+test("this week's row is picked out of a history, not the newest one", () => {
+  // The card prefills the change form from this row (#634). Handing it last
+  // week's answers would show a planter the wrong week and then save it over
+  // this one.
+  const asOf = new Date("2026-08-21T12:00:00.000Z");
+  const history = [
+    checkin("2026-08-03", { pace: "steady" }),
+    checkin("2026-08-10", { pace: "struggling" }),
+    checkin("2026-08-17", { pace: "strained" }),
+  ];
+
+  assert.equal(thisWeeksCheckin(history, asOf)?.pace, "strained");
+
+  // …and a week nobody answered yet reads as unanswered even with a full
+  // history behind it.
+  assert.equal(
+    thisWeeksCheckin(history, new Date("2026-08-24T12:00:00.000Z")),
+    null
+  );
 });
 
 // -- the nudge ----------------------------------------------------------------

@@ -177,11 +177,23 @@ export function checkinNudges(
   });
 }
 
-/** Has this church answered the week containing `asOf`? */
-export function hasAnsweredThisWeek(
+/**
+ * This church's row for the week containing `asOf`, or `null` if nobody has
+ * answered it yet.
+ *
+ * THE ROW, NOT A BOOLEAN (#634). The card has to be able to REOPEN a week that
+ * was already answered — the write was an upsert from the start, so correcting
+ * an answer was always possible and only the affordance was missing. A form
+ * reopened with nothing to prefill would blank the note the planter wrote, so
+ * the answer itself is what crosses to the card and "answered" is derived from
+ * it rather than tracked beside it.
+ */
+export function thisWeeksCheckin(
   checkins: readonly PlanterCheckin[],
   asOf: Date = new Date()
-): boolean {
+): PlanterCheckin | null {
   const week = weekStartOf(asOf);
-  return checkins.some((checkin) => checkin.weekStart.slice(0, 10) === week);
+  return (
+    checkins.find((checkin) => checkin.weekStart.slice(0, 10) === week) ?? null
+  );
 }
