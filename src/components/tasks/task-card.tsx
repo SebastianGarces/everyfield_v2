@@ -14,8 +14,10 @@
 // — plus the checkbox that fires it, handed to the view as a slot.
 // ============================================================================
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { TaskListRow } from "@/lib/tasks/service";
+import { Check } from "lucide-react";
 import { useTransition } from "react";
 import {
   completeTaskAction,
@@ -38,12 +40,36 @@ interface TaskCardProps {
   /** The instant the due-date line is measured against — one for the whole
    *  list, from the server. See `TaskCardViewProps.now`. */
   now: Date;
+  /**
+   * The viewer's own `users.id` — the other half of `tasks.own` (AS-006).
+   *
+   * IDENTITY, NOT A PERMISSION DECISION, which is why it is threaded rather
+   * than asked from the capability context. "May the viewer complete a task?"
+   * is answered by the seat table; "is THIS task theirs?" needs the row and the
+   * account, and `assignedToId` is already on every row while the session's id
+   * is server-side only. The rule below is `mayActOnTask`
+   * (`@/lib/tasks/service`) — the same predicate the action enforces.
+   */
+  currentUserId: string;
 }
 
-export function TaskCard({ task, personNote, now }: TaskCardProps) {
+export function TaskCard({
+  task,
+  personNote,
+  now,
+  currentUserId,
+}: TaskCardProps) {
   const [isPending, startTransition] = useTransition();
 
   const isComplete = task.status === "complete";
+
+  // THE SWEEP'S ONE SURVIVOR. `completeTaskAction` and `reopenTaskAction` are
+  // `tasks.own` (SEATED) — a Member HOLDS that verb, and `assertMayActOnTask`
+  // checks the subject half server-side. Gating this on `tasks.write` alone
+  // would hide a Member's own assigned work from them, which is the over-hide
+  // AS-020 forbids just as firmly as an under-hide.
+  const canComplete =
+    useCan("tasks.write") || task.assignedToId === currentUserId;
 
   function handleToggleComplete() {
     startTransition(async () => {
@@ -66,13 +92,34 @@ export function TaskCard({ task, personNote, now }: TaskCardProps) {
       now={now}
       isPending={isPending}
       checkboxSlot={
-        <Checkbox
-          checked={isComplete}
-          onCheckedChange={handleToggleComplete}
-          disabled={isPending}
-          className="cursor-pointer"
-          aria-label={isComplete ? "Reopen task" : "Complete task"}
-        />
+        canComplete ? (
+          <Checkbox
+            checked={isComplete}
+            onCheckedChange={handleToggleComplete}
+            disabled={isPending}
+            className="cursor-pointer"
+            aria-label={isComplete ? "Reopen task" : "Complete task"}
+          />
+        ) : (
+          // NOT `undefined` — the CONTROL is what AS-020 hides, and the two
+          // things the checkbox was carrying beside it are not permissions.
+          // A read-only list is mixed (the viewer's own rows keep their
+          // checkbox), so an empty slot would indent every other row by the
+          // gutter's width; and "is this done" is announced in words, because
+          // the strike-through above is invisible to a screen reader once
+          // there is no checked checkbox to read.
+          <span className="flex size-4 items-center justify-center">
+            {isComplete && (
+              <>
+                <Check
+                  aria-hidden="true"
+                  className="size-4 text-green-600 dark:text-green-500"
+                />
+                <span className="sr-only">Complete</span>
+              </>
+            )}
+          </span>
+        )
       }
     />
   );

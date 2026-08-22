@@ -6,6 +6,7 @@ import { PersonProfileWrapper } from "@/components/people/person-profile-wrapper
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { getPersonCommunications } from "@/lib/communication/service";
 import { DEFAULT_CHURCH_TIME_ZONE, formatDateTime } from "@/lib/datetime";
@@ -53,17 +54,26 @@ export default async function PersonCommunicationPage({
   ]);
   const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
 
+  // AS-020: this tab's one control is a link to the composer, and sending is
+  // `communication.send` — NOT `people.write`, which is what governs the rest
+  // of this person's screens. The verb follows the destination's action, so a
+  // viewer who may edit people but not send mail loses this button and keeps
+  // the others. The compose ROUTE is refused too, by the communication track.
+  const canSend = holdsSeatFor(user, "communication.send");
+
   return (
     <PersonProfileWrapper personId={id} activeTab="communication">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Communication Log</h2>
-          <Button size="sm" asChild>
-            <Link href={`/communication/compose`} className="cursor-pointer">
-              <Send className="mr-1 h-3 w-3" />
-              Send Message
-            </Link>
-          </Button>
+          {canSend && (
+            <Button size="sm" asChild>
+              <Link href={`/communication/compose`} className="cursor-pointer">
+                <Send className="mr-1 h-3 w-3" />
+                Send Message
+              </Link>
+            </Button>
+          )}
         </div>
 
         {history.length === 0 ? (

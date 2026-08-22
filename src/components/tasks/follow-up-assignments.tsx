@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -63,6 +64,12 @@ const ASSIGN_PLACEHOLDER = "Assign to…";
  * The one control every row carries. `disabled` while its own write is in
  * flight — a row is its own unit of work, so a slow assignment must not freeze
  * the twenty rows under it.
+ *
+ * ONE GATE FOR ALL THREE CALL SITES. Assigning, reassigning and creating-and-
+ * assigning are `tasks.write` to a one (`follow-up-actions.ts`), and they are
+ * the same control in three places, so the question is asked where the control
+ * is drawn rather than three rows up. A read-only viewer keeps the VIEW — who
+ * is carrying what, and what nobody is on — and loses only the handing-out.
  */
 function AssigneeSelect({
   assignees,
@@ -77,6 +84,10 @@ function AssigneeSelect({
   pending: boolean;
   value?: string;
 }) {
+  const canAssign = useCan("tasks.write");
+
+  if (!canAssign) return null;
+
   if (assignees.length === 0) {
     return (
       <span className="text-muted-foreground text-xs">
@@ -110,6 +121,7 @@ export function FollowUpAssignments({
   uncovered,
   assignees,
 }: FollowUpAssignmentsProps) {
+  const canAssign = useCan("tasks.write");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busyRow, setBusyRow] = useState<string | null>(null);
@@ -302,8 +314,9 @@ export function FollowUpAssignments({
 
       {owners.length === 0 && (
         <p className="text-muted-foreground text-sm">
-          Nobody owns a follow-up yet. Shared ownership of growth is the second
-          Critical Success Factor — handing these out is the work.
+          {canAssign
+            ? "Nobody owns a follow-up yet. Shared ownership of growth is the second Critical Success Factor — handing these out is the work."
+            : "Nobody owns a follow-up yet. Your plant's admins hand these out."}
         </p>
       )}
     </div>

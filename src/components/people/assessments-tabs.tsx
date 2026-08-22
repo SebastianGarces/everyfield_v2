@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Assessment, Commitment, Interview } from "@/db/schema";
@@ -26,6 +27,13 @@ export function AssessmentsTabs({
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentTab = searchParams.get("tab") || "interviews";
+
+  // AS-020: each of the three tabs offers the same create verb twice — once in
+  // its header and once again in its empty state — and all six land on an entry
+  // route whose save is `people.write`. A Member reads the history and is
+  // offered neither, and the entry routes themselves refuse them
+  // (`AssessmentEntryShell`), so a copied URL is no way around it.
+  const canWrite = useCan("people.write");
 
   const handleTabChange = (value: string) => {
     router.push(`/people/${personId}/assessments?tab=${value}`, {
@@ -71,12 +79,14 @@ export function AssessmentsTabs({
               Life
             </p>
           </div>
-          <Button asChild>
-            <Link href={`/people/${personId}/assessments/interview`}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Interview
-            </Link>
-          </Button>
+          {canWrite && (
+            <Button asChild>
+              <Link href={`/people/${personId}/assessments/interview`}>
+                <Plus className="mr-2 h-4 w-4" />
+                New Interview
+              </Link>
+            </Button>
+          )}
         </div>
 
         {interviews.length > 0 ? (
@@ -85,15 +95,24 @@ export function AssessmentsTabs({
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <UserCheck className="text-muted-foreground/50 h-12 w-12" />
             <h3 className="mt-4 font-semibold">No interviews yet</h3>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Conduct an interview to evaluate this person&apos;s readiness.
-            </p>
-            <Button asChild className="mt-4">
-              <Link href={`/people/${personId}/assessments/interview`}>
-                <Plus className="mr-2 h-4 w-4" />
-                Start First Interview
-              </Link>
-            </Button>
+            {canWrite ? (
+              <>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  Conduct an interview to evaluate this person&apos;s readiness.
+                </p>
+                <Button asChild className="mt-4">
+                  <Link href={`/people/${personId}/assessments/interview`}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Start First Interview
+                  </Link>
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground mt-1 text-sm">
+                Your plant&apos;s admins conduct interviews. Completed ones show
+                up here.
+              </p>
+            )}
           </div>
         )}
       </TabsContent>
@@ -106,12 +125,14 @@ export function AssessmentsTabs({
               Record signed commitment cards for Core Group and Launch Team
             </p>
           </div>
-          <Button asChild>
-            <Link href={`/people/${personId}/assessments/commitment`}>
-              <Plus className="mr-2 h-4 w-4" />
-              Record Commitment
-            </Link>
-          </Button>
+          {canWrite && (
+            <Button asChild>
+              <Link href={`/people/${personId}/assessments/commitment`}>
+                <Plus className="mr-2 h-4 w-4" />
+                Record Commitment
+              </Link>
+            </Button>
+          )}
         </div>
 
         {commitments.length > 0 ? (
@@ -120,15 +141,25 @@ export function AssessmentsTabs({
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <FileSignature className="text-muted-foreground/50 h-12 w-12" />
             <h3 className="mt-4 font-semibold">No commitments yet</h3>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Record a commitment when this person signs their commitment card.
-            </p>
-            <Button asChild className="mt-4">
-              <Link href={`/people/${personId}/assessments/commitment`}>
-                <Plus className="mr-2 h-4 w-4" />
-                Record First Commitment
-              </Link>
-            </Button>
+            {canWrite ? (
+              <>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  Record a commitment when this person signs their commitment
+                  card.
+                </p>
+                <Button asChild className="mt-4">
+                  <Link href={`/people/${personId}/assessments/commitment`}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Record First Commitment
+                  </Link>
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground mt-1 text-sm">
+                Your plant&apos;s admins record commitment cards. Signed ones
+                show up here.
+              </p>
+            )}
           </div>
         )}
       </TabsContent>
@@ -141,12 +172,14 @@ export function AssessmentsTabs({
               Track Committed, Compelled, Contagious, and Courageous qualities
             </p>
           </div>
-          <Button asChild>
-            <Link href={`/people/${personId}/assessments/new`}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Assessment
-            </Link>
-          </Button>
+          {canWrite && (
+            <Button asChild>
+              <Link href={`/people/${personId}/assessments/new`}>
+                <Plus className="mr-2 h-4 w-4" />
+                New Assessment
+              </Link>
+            </Button>
+          )}
         </div>
 
         {assessments.length > 0 ? (
@@ -155,15 +188,25 @@ export function AssessmentsTabs({
           <div className="bg-card flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
             <ClipboardList className="text-muted-foreground/50 h-12 w-12" />
             <h3 className="mt-4 font-semibold">No assessments yet</h3>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Start a 4 C&apos;s assessment to track this person&apos;s growth.
-            </p>
-            <Button asChild className="mt-4">
-              <Link href={`/people/${personId}/assessments/new`}>
-                <Plus className="mr-2 h-4 w-4" />
-                Start First Assessment
-              </Link>
-            </Button>
+            {canWrite ? (
+              <>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  Start a 4 C&apos;s assessment to track this person&apos;s
+                  growth.
+                </p>
+                <Button asChild className="mt-4">
+                  <Link href={`/people/${personId}/assessments/new`}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Start First Assessment
+                  </Link>
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground mt-1 text-sm">
+                Your plant&apos;s admins record 4 C&apos;s assessments.
+                Completed ones show up here.
+              </p>
+            )}
           </div>
         )}
       </TabsContent>

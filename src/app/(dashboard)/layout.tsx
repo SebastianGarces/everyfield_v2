@@ -5,10 +5,12 @@ import { Suspense } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
+import { heldCapabilities } from "@/lib/auth/seat-rules";
 import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
@@ -148,58 +150,68 @@ export default async function DashboardLayout({
   // waiting on a query that returns nothing for nearly every account.
   const assignedPlants = assignedPlantsSafely(user.id);
 
+  // WHAT THIS ACCOUNT MAY DO, resolved once for the whole tree (AS-020, #499).
+  //
+  // The same table `requireSeat` reads, so a control's visibility and the
+  // server's refusal cannot disagree. Server components below keep asking
+  // `holdsSeatFor` with this same `user`; only the client half needs carrying,
+  // and it is carried from here so no screen re-derives it.
+  const capabilities = heldCapabilities(user);
+
   return (
-    <SidebarProvider defaultOpen={defaultOpen}>
-      <AppSidebar
-        user={sidebarUser}
-        orgType={org?.type ?? null}
-        hasChurch={!!user.churchId}
-        assignedPlants={assignedPlants}
-        isPlatformAdmin={userIsPlatformAdmin}
-      />
-      <SidebarInset className="flex h-screen flex-col overflow-hidden">
-        <HeaderProvider>
-          <DashboardHeader>
-            {viewer && (
-              // The fallback is the bell in its LOADING state, so the header's
-              // geometry and its link to /notifications are there from the
-              // first byte while the count itself stays unclaimed until it
-              // arrives.
-              //
-              // It is NOT a zero (#308 WS2, from #232; #528). A failed read
-              // and a not-yet-finished one both used to arrive here as the
-              // number the FAILURE path returned, which announces
-              // "Notifications, none unread" to a screen reader and then
-              // corrects itself to "1 unread" a moment later. Both are values
-              // of `UnreadCount` now, so neither can be spelled as a count; see
-              // `notification-bell.tsx`'s header for the rest of the argument.
-              <Suspense fallback={<NotificationBell unreadCount="loading" />}>
-                <NotificationBellSlot viewer={viewer} />
-              </Suspense>
-            )}
-          </DashboardHeader>
-          {/* `tabIndex={-1}` so the settings modal has somewhere to put focus
+    <ViewerCapabilitiesProvider capabilities={capabilities}>
+      <SidebarProvider defaultOpen={defaultOpen}>
+        <AppSidebar
+          user={sidebarUser}
+          orgType={org?.type ?? null}
+          hasChurch={!!user.churchId}
+          assignedPlants={assignedPlants}
+          isPlatformAdmin={userIsPlatformAdmin}
+        />
+        <SidebarInset className="flex h-screen flex-col overflow-hidden">
+          <HeaderProvider>
+            <DashboardHeader>
+              {viewer && (
+                // The fallback is the bell in its LOADING state, so the header's
+                // geometry and its link to /notifications are there from the
+                // first byte while the count itself stays unclaimed until it
+                // arrives.
+                //
+                // It is NOT a zero (#308 WS2, from #232; #528). A failed read
+                // and a not-yet-finished one both used to arrive here as the
+                // number the FAILURE path returned, which announces
+                // "Notifications, none unread" to a screen reader and then
+                // corrects itself to "1 unread" a moment later. Both are values
+                // of `UnreadCount` now, so neither can be spelled as a count; see
+                // `notification-bell.tsx`'s header for the rest of the argument.
+                <Suspense fallback={<NotificationBell unreadCount="loading" />}>
+                  <NotificationBellSlot viewer={viewer} />
+                </Suspense>
+              )}
+            </DashboardHeader>
+            {/* `tabIndex={-1}` so the settings modal has somewhere to put focus
               when it closes. The control that opened it — a Settings item
               inside the avatar dropdown — is gone by then, so Radix's
               restore-to-trigger lands on `<body>` and a keyboard reader has to
               tab from the top of the document. Focusing the main region instead
               is the SPA-navigation answer, and it is `-1` so nothing joins the
               tab order. */}
-          <main
-            id={DASHBOARD_MAIN_ID}
-            tabIndex={-1}
-            className="flex-1 overflow-auto outline-none"
-          >
-            {children}
-          </main>
-          {/* Beside `children`, not inside `<main>`: the modal is a sibling of
+            <main
+              id={DASHBOARD_MAIN_ID}
+              tabIndex={-1}
+              className="flex-1 overflow-auto outline-none"
+            >
+              {children}
+            </main>
+            {/* Beside `children`, not inside `<main>`: the modal is a sibling of
               the screen it covers, and Radix portals it to the document body
               regardless. Rendered here so it sits inside the router and sidebar
               providers it reads. */}
-          {settings}
-          {!org && <WikiGuide />}
-        </HeaderProvider>
-      </SidebarInset>
-    </SidebarProvider>
+            {settings}
+            {!org && <WikiGuide />}
+          </HeaderProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </ViewerCapabilitiesProvider>
   );
 }

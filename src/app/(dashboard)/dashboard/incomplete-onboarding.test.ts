@@ -25,10 +25,14 @@ import { ONBOARDING_STEP_IDS } from "@/lib/onboarding/steps";
 
 const CHURCH_ID = "22222222-2222-4222-8222-222222222222";
 
+/** Holds every verb — the plant's Owner, for whom no row is filtered. */
+const OWNER = () => true;
+
 /** A viewer the leadership row is FOR: can answer, not currently being asked. */
 const ASKABLE: IncompleteOnboardingVisibility = {
   canAnswerLeadership: true,
   pastorPromptShowing: false,
+  holds: OWNER,
 };
 
 test("a plant that skipped everything after step 1 lists all three, in flow order", () => {
@@ -103,7 +107,7 @@ test("the leadership row is dropped for a viewer whose answer would be refused",
   // renders only for somebody `canAnswerLeadershipQuestion` admits.
   const items = incompleteOnboardingItems(
     { churchId: CHURCH_ID },
-    { canAnswerLeadership: false, pastorPromptShowing: false }
+    { canAnswerLeadership: false, pastorPromptShowing: false, holds: OWNER }
   );
 
   assert.deepEqual(
@@ -116,7 +120,7 @@ test("the leadership row is dropped while the pastor prompt is asking it", () =>
   // The prompt IS this question; asking it twice on one screen reads as a bug.
   const items = incompleteOnboardingItems(
     { churchId: CHURCH_ID },
-    { canAnswerLeadership: true, pastorPromptShowing: true }
+    { canAnswerLeadership: true, pastorPromptShowing: true, holds: OWNER }
   );
 
   assert.deepEqual(
@@ -125,10 +129,14 @@ test("the leadership row is dropped while the pastor prompt is asking it", () =>
   );
 });
 
-test("the visibility gates touch no row but leadership", () => {
+test("the two leadership gates drop that row and no other", () => {
+  // Named for what it asserts: `canAnswerLeadership` and `pastorPromptShowing`
+  // decide the leadership row ALONE. The capability filter added for AS-020 is
+  // the thing that reaches the other two, and `OWNER` holds every verb here so
+  // this case still isolates the leadership pair.
   const items = incompleteOnboardingItems(
     { churchId: CHURCH_ID },
-    { canAnswerLeadership: false, pastorPromptShowing: true }
+    { canAnswerLeadership: false, pastorPromptShowing: true, holds: OWNER }
   );
 
   assert.deepEqual(
@@ -168,4 +176,59 @@ test("the leadership row uses the one specced re-entry into the flow", () => {
     INCOMPLETE_ONBOARDING_ITEMS.leadership.href,
     "/dashboard?step=leadership"
   );
+});
+
+// ----------------------------------------------------------------------------
+// AS-020 (#499) — a row is a CALL TO ACTION, so it is addressed only to
+// somebody who could take it.
+//
+// The module already refused to show the leadership row to a viewer whose
+// answer would be refused, on the stated ground that "a link that quietly does
+// nothing is worse than no link". The other two rows went out to everybody, and
+// on a plant Member's dashboard that produced exactly that: "Set your stage"
+// linking to /phase, which redirects them back, under an offer to dismiss the
+// reminder.
+// ----------------------------------------------------------------------------
+
+test("a plant Member is shown no row at all, so the indicator does not render", () => {
+  const items = incompleteOnboardingItems(
+    { churchId: CHURCH_ID },
+    {
+      canAnswerLeadership: false,
+      pastorPromptShowing: false,
+      // A Member holds neither `phase.declare` (OWNER_ONLY) nor `people.write`
+      // (ADMIN_PLUS) — the two verbs the surviving rows ask for.
+      holds: () => false,
+    }
+  );
+
+  assert.deepEqual(items, [], "a Member was offered a step they cannot take");
+});
+
+test("an Admin keeps the row they can act on, and loses the Owner-only one", () => {
+  // THE OVER-HIDE GUARD. `people.write` is ADMIN_PLUS, so an Admin really can
+  // add the first person and must still be told to; `phase.declare` is
+  // OWNER_ONLY and /phase would bounce them.
+  const items = incompleteOnboardingItems(
+    { churchId: CHURCH_ID },
+    {
+      canAnswerLeadership: false,
+      pastorPromptShowing: false,
+      holds: (capability) => capability === "people.write",
+    }
+  );
+
+  assert.deepEqual(
+    items.map((item) => item.id),
+    ["people"]
+  );
+});
+
+test("every row names a verb, so none can be added without deciding who sees it", () => {
+  for (const item of Object.values(INCOMPLETE_ONBOARDING_ITEMS)) {
+    assert.ok(
+      typeof item.requires === "string" && item.requires.length > 0,
+      `the ${item.id} row names no capability`
+    );
+  }
 });

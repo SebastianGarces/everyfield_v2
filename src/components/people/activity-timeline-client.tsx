@@ -59,19 +59,15 @@ export function ActivityTimelineClient({
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Add Note</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <NoteForm
-            personId={personId}
-            currentUserId={currentUserId}
-            onAddNote={handleAddNote}
-            isPending={isPending}
-          />
-        </CardContent>
-      </Card>
+      {/* Card and all — `NoteForm` renders its own frame, so the whole
+          affordance leaves together for a viewer without `people.write`
+          (AS-020). */}
+      <NoteForm
+        personId={personId}
+        currentUserId={currentUserId}
+        onAddNote={handleAddNote}
+        isPending={isPending}
+      />
 
       <Card>
         <CardHeader>

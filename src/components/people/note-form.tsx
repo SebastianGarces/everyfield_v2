@@ -1,6 +1,8 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { type ActivityWithPerformer } from "@/lib/people/activity.shared";
 import { Loader2 } from "lucide-react";
@@ -26,6 +28,16 @@ export function NoteForm({
   isPending,
 }: NoteFormProps) {
   const [note, setNote] = useState("");
+
+  // AS-020: `addNoteAction` is `people.write`, so a plant Member is not offered
+  // the form. IT OWNS ITS OWN CARD for exactly this reason — the heading, the
+  // frame and the textarea are one affordance, and a gate that left the card
+  // behind would announce "Add Note" over an empty box.
+  //
+  // EDITING AND DELETING A NOTE IS A DIFFERENT QUESTION and is NOT gated here.
+  // `activity-item.tsx` asks whether the viewer WROTE the note, which is
+  // authorship rather than seat, and that rule is unchanged by this sweep.
+  const canWrite = useCan("people.write");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,22 +69,35 @@ export function NoteForm({
     }
   };
 
+  if (!canWrite) return null;
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <Textarea
-        placeholder="Add a note..."
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        disabled={isPending}
-        rows={2}
-        className="min-h-0 resize-none"
-      />
-      <div className="flex justify-end">
-        <Button type="submit" size="sm" disabled={isPending || !note.trim()}>
-          {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Add Note
-        </Button>
-      </div>
-    </form>
+    <Card>
+      <CardHeader>
+        <CardTitle>Add Note</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <Textarea
+            placeholder="Add a note..."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={isPending}
+            rows={2}
+            className="min-h-0 resize-none"
+          />
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              size="sm"
+              disabled={isPending || !note.trim()}
+            >
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add Note
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

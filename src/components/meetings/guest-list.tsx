@@ -36,6 +36,7 @@ import {
   quickAddPersonToGuestListAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { searchPeopleAction } from "@/app/(dashboard)/communication/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import {
   emailableGuests,
   meetingComposeUrl,
@@ -95,6 +96,32 @@ const rsvpBadge: Record<
   },
 };
 
+/**
+ * The RSVP badge, which is a READ of `responseStatus` and nothing else.
+ *
+ * Lifted out because it renders on both sides of the write gate — inside the
+ * toggle for a viewer who may change the answer, and bare for one who may not.
+ * Two copies of the markup would drift the moment a third response status
+ * exists.
+ */
+function rsvpBadgeFor(rsvp: (typeof rsvpBadge)[string] | null) {
+  if (!rsvp) {
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        <Clock className="mr-1 h-3 w-3" />
+        Pending
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge className={rsvp.className} variant="secondary">
+      <rsvp.icon className="mr-1 h-3 w-3" />
+      {rsvp.label}
+    </Badge>
+  );
+}
+
 const emailStatusIcons: Record<
   string,
   { icon: typeof Mail; color: string; label: string }
@@ -118,6 +145,16 @@ export function GuestList({
   emailTracking,
 }: GuestListProps) {
   const [isPending, startTransition] = useTransition();
+
+  // AS-020. EVERY control on this card is `meetings.write`, THE RSVP TOGGLE
+  // INCLUDED — and that one is the trap. AS-006 keeps "a Member's own RSVP",
+  // but this toggle is not it: it is staff recording somebody ELSE's answer
+  // (`updateRsvpStatusAction` → `meetings.write` in `capability-map.ts`), and a
+  // Member's own RSVP is answered from the emailed link at `/rsvp/[token]`, a
+  // page outside `(dashboard)` that holds no session at all. So it hides with
+  // the rest, and the badge stays as the read it always was.
+  const canWrite = useCan("meetings.write");
+  const canSend = useCan("communication.send");
 
   // Person picker state
   const [searchQuery, setSearchQuery] = useState("");
@@ -247,7 +284,11 @@ export function GuestList({
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Guest List</CardTitle>
             <div className="flex items-center gap-2">
-              {guestsWithEmail.length > 0 && (
+              {/* Gated on the verb it INVOKES, which is not this card's own:
+                  the link leaves for /communication/compose, whose page and
+                  send action are `communication.send`. Same ADMIN_PLUS answer
+                  today, but the rule stays the one the server will apply. */}
+              {canSend && guestsWithEmail.length > 0 && (
                 <Button variant="default" size="sm" asChild>
                   <Link href={sendEmailUrl} className="cursor-pointer">
                     <Mail className="mr-2 h-4 w-4" />
@@ -256,101 +297,107 @@ export function GuestList({
                 </Button>
               )}
 
-              {/* Quick Add Person Dialog */}
-              <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
-                <DialogTrigger asChild>
+              {canWrite && (
+                <>
+                  {/* Quick Add Person Dialog */}
+                  <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="cursor-pointer"
+                      >
+                        <UserPlus className="mr-2 h-4 w-4" />
+                        Quick Add Person
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Quick Add Person</DialogTitle>
+                        <DialogDescription>
+                          Create a new person and add them to the guest list.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleQuickAdd} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="firstName">First Name *</Label>
+                            <Input
+                              id="firstName"
+                              name="firstName"
+                              required
+                              placeholder="John"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="lastName">Last Name *</Label>
+                            <Input
+                              id="lastName"
+                              name="lastName"
+                              required
+                              placeholder="Doe"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="email">Email</Label>
+                          <Input
+                            id="email"
+                            name="email"
+                            type="email"
+                            placeholder="john@example.com"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="phone">Phone</Label>
+                          <Input
+                            id="phone"
+                            name="phone"
+                            type="tel"
+                            placeholder="(555) 123-4567"
+                          />
+                        </div>
+                        {quickAddError && (
+                          <p className="text-sm text-red-600">
+                            {quickAddError}
+                          </p>
+                        )}
+                        <DialogFooter>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setQuickAddOpen(false)}
+                            className="cursor-pointer"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            disabled={isPending}
+                            className="cursor-pointer"
+                          >
+                            {isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Add Person
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* Add Existing Person */}
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={() => setShowSearch(!showSearch)}
                     className="cursor-pointer"
                   >
-                    <UserPlus className="mr-2 h-4 w-4" />
-                    Quick Add Person
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Existing
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Quick Add Person</DialogTitle>
-                    <DialogDescription>
-                      Create a new person and add them to the guest list.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleQuickAdd} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="firstName">First Name *</Label>
-                        <Input
-                          id="firstName"
-                          name="firstName"
-                          required
-                          placeholder="John"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lastName">Last Name *</Label>
-                        <Input
-                          id="lastName"
-                          name="lastName"
-                          required
-                          placeholder="Doe"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        name="email"
-                        type="email"
-                        placeholder="john@example.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        name="phone"
-                        type="tel"
-                        placeholder="(555) 123-4567"
-                      />
-                    </div>
-                    {quickAddError && (
-                      <p className="text-sm text-red-600">{quickAddError}</p>
-                    )}
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setQuickAddOpen(false)}
-                        className="cursor-pointer"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={isPending}
-                        className="cursor-pointer"
-                      >
-                        {isPending && (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        )}
-                        Add Person
-                      </Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-
-              {/* Add Existing Person */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSearch(!showSearch)}
-                className="cursor-pointer"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Existing
-              </Button>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -414,8 +461,9 @@ export function GuestList({
           {/* Guest Table */}
           {guests.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center text-sm">
-              No guests added yet. Add people from your database or use Quick
-              Add to create new people.
+              {canWrite
+                ? "No guests added yet. Add people from your database or use Quick Add to create new people."
+                : "No guests on this list yet. Your plant's admins invite people to a meeting."}
             </p>
           ) : (
             <div className="divide-y">
@@ -425,7 +473,12 @@ export function GuestList({
                 <div className="col-span-3">Contact</div>
                 <div className="col-span-2">RSVP</div>
                 <div className="col-span-2">Email Status</div>
-                <div className="col-span-1 text-right">Actions</div>
+                {/* The header goes with the controls. An "Actions" column with
+                    nothing under it announces a set of controls that is not
+                    there — the same failure the seat roster pins. */}
+                {canWrite && (
+                  <div className="col-span-1 text-right">Actions</div>
+                )}
               </div>
 
               {guests.map((guest) => {
@@ -459,32 +512,28 @@ export function GuestList({
                       {guest.email || guest.phone || "—"}
                     </div>
 
-                    {/* RSVP Status */}
+                    {/* RSVP Status — the badge is the READ and it always
+                        renders; only the toggle around it is the write. */}
                     <div className="col-span-2">
-                      <button
-                        type="button"
-                        className="cursor-pointer"
-                        onClick={() =>
-                          handleRsvpToggle(guest.personId, guest.responseStatus)
-                        }
-                        disabled={isPending}
-                        title="Click to change RSVP status"
-                      >
-                        {rsvp ? (
-                          <Badge className={rsvp.className} variant="secondary">
-                            <rsvp.icon className="mr-1 h-3 w-3" />
-                            {rsvp.label}
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="text-muted-foreground"
-                          >
-                            <Clock className="mr-1 h-3 w-3" />
-                            Pending
-                          </Badge>
-                        )}
-                      </button>
+                      {canWrite ? (
+                        <button
+                          type="button"
+                          className="cursor-pointer"
+                          onClick={() =>
+                            handleRsvpToggle(
+                              guest.personId,
+                              guest.responseStatus
+                            )
+                          }
+                          disabled={isPending}
+                          aria-label={`Change RSVP for ${guest.firstName} ${guest.lastName}`}
+                          title="Click to change RSVP status"
+                        >
+                          {rsvpBadgeFor(rsvp)}
+                        </button>
+                      ) : (
+                        rsvpBadgeFor(rsvp)
+                      )}
                     </div>
 
                     {/* Email Tracking */}
@@ -503,17 +552,20 @@ export function GuestList({
                     </div>
 
                     {/* Actions */}
-                    <div className="col-span-1 flex justify-end">
-                      <button
-                        type="button"
-                        className="text-muted-foreground cursor-pointer rounded-md p-1 hover:bg-red-50 hover:text-red-600"
-                        onClick={() => handleRemovePerson(guest.personId)}
-                        disabled={isPending}
-                        title="Remove from guest list"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                    {canWrite && (
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          className="text-muted-foreground cursor-pointer rounded-md p-1 hover:bg-red-50 hover:text-red-600"
+                          onClick={() => handleRemovePerson(guest.personId)}
+                          disabled={isPending}
+                          aria-label={`Remove ${guest.firstName} ${guest.lastName} from the guest list`}
+                          title="Remove from guest list"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

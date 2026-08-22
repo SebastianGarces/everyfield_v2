@@ -12,6 +12,13 @@ import {
 
 interface DeliveryOverviewProps {
   totals: DeliveryTotals;
+  /**
+   * AS-020 (#499): the empty state's sentence is a call to action, so it is
+   * addressed only to somebody who can act on it. A Member reads the same card
+   * — the figures are a read — and is told where the numbers come from instead
+   * of being invited to send a message the server would refuse.
+   */
+  canSend: boolean;
 }
 
 /**
@@ -23,7 +30,7 @@ interface DeliveryOverviewProps {
  * are drawn with the theme's own chart token, so they hold up in light and
  * dark without a second palette.
  */
-export function DeliveryOverview({ totals }: DeliveryOverviewProps) {
+export function DeliveryOverview({ totals, canSend }: DeliveryOverviewProps) {
   const overview = summarizeDelivery(totals);
 
   return (
@@ -52,8 +59,9 @@ export function DeliveryOverview({ totals }: DeliveryOverviewProps) {
             <Mail className="text-muted-foreground mb-3 h-8 w-8" />
             <p className="font-medium">No delivery data yet</p>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-              Send your first message and delivery, open and click rates will
-              appear here.
+              {canSend
+                ? "Send your first message and delivery, open and click rates will appear here."
+                : "Once your plant's admins send a message, delivery, open and click rates will appear here."}
             </p>
           </div>
         ) : (

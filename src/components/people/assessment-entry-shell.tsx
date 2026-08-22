@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { PersonForClient } from "@/lib/people/types";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getPerson } from "@/lib/people/service";
 import { ArrowLeft } from "lucide-react";
@@ -38,6 +39,18 @@ export async function AssessmentEntryShell({
 
   if (!user.churchId) {
     redirect("/dashboard");
+  }
+
+  // AS-020 rule 3: all three entry routes exist only to WRITE — a 4 C's
+  // assessment, an interview, a commitment card — and each save is
+  // `people.write`. Hiding the six buttons that link here is not enough; a
+  // typed URL would otherwise open a full form that is refused at submit.
+  //
+  // ONE GATE FOR THREE ROUTES, because the shell is what those three routes
+  // are: their page files name only a title, a back tab and a form. Back to the
+  // history they may read.
+  if (!holdsSeatFor(user, "people.write")) {
+    redirect(`/people/${personId}/assessments?tab=${backTab}`);
   }
 
   const person = await getPerson(user.churchId, personId);

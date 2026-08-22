@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { MeetingList } from "@/components/meetings/meeting-list";
 import { Button } from "@/components/ui/button";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
 import { listMeetings } from "@/lib/meetings/service";
@@ -27,6 +28,12 @@ export default async function MeetingsPage({
   if (!user.churchId) {
     redirect("/dashboard");
   }
+
+  // AS-020: the header CTA is a write affordance, so a plant Member never sees
+  // it. Asked of the same table `requireSeat("meetings.write")` refuses the
+  // create action with — this is a server component holding the session, so it
+  // reads `holdsSeatFor` directly rather than going through the client context.
+  const canWrite = holdsSeatFor(user, "meetings.write");
 
   const params = await searchParams;
   const view = (
@@ -76,12 +83,14 @@ export default async function MeetingsPage({
                 Schedule, track, and analyze all your meetings
               </p>
             </div>
-            <Button asChild className="cursor-pointer">
-              <Link href="/meetings/new">
-                <Plus className="mr-2 h-4 w-4" />
-                Schedule Meeting
-              </Link>
-            </Button>
+            {canWrite && (
+              <Button asChild className="cursor-pointer">
+                <Link href="/meetings/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Schedule Meeting
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
         <div className="flex-1 overflow-auto p-6">

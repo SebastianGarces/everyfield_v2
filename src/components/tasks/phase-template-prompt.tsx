@@ -10,6 +10,7 @@ import {
   ClearReceiptCookie,
   PhaseTemplatePromptForm,
 } from "@/components/tasks/phase-template-prompt-controls";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
@@ -474,6 +475,19 @@ export function PhaseTemplatePromptView({
 export async function PhaseTemplatePrompt() {
   const { user } = await getCurrentSession();
   if (!user?.churchId) return null;
+
+  // AS-020 — THE PANEL IS AN ASK, AND BOTH ANSWERS ARE WRITES. Importing is
+  // `tasks.write` and declining is `phase.signal`; a viewer holding neither can
+  // give no answer at all, so they are not asked. The two verbs are read
+  // SEPARATELY rather than as one "may write" because they are separate rows in
+  // the capability table and the buttons gate on their own (see the island) —
+  // this is the door, not the per-control rule.
+  if (
+    !holdsSeatFor(user, "tasks.write") &&
+    !holdsSeatFor(user, "phase.signal")
+  ) {
+    return null;
+  }
 
   // One read for both: the prompt, and the id of the transition this render is
   // reporting on — which the receipt below has to match. Whether the prompt has

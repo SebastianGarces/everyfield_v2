@@ -27,6 +27,7 @@ import {
   updateMeetingStatusAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { MeetingForm } from "@/components/meetings/meeting-form";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { MeetingSummaryCards } from "./meeting-summary-cards";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { Location, MeetingStatus } from "@/db/schema";
@@ -54,6 +55,10 @@ const statusTransitions: Record<
 
 export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
   const router = useRouter();
+  // AS-020: edit, delete and the status transition are all `meetings.write`
+  // (`capability-map.ts`), so the whole actions bar is absent for a Member —
+  // the summary cards below it are the read, and they stay.
+  const canWrite = useCan("meetings.write");
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -85,76 +90,78 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {/* Actions Bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          {transition && status !== "cancelled" && (
-            <Button
-              onClick={handleStatusTransition}
-              disabled={isTransitioning}
-              className="cursor-pointer"
-            >
-              <ArrowRight className="mr-2 h-4 w-4" />
-              {transition.label}
-            </Button>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="cursor-pointer">
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Edit {title}</DialogTitle>
-              </DialogHeader>
-              <MeetingForm
-                meeting={meeting}
-                locations={locations}
-                mode="edit"
-                onSuccess={() => setIsEditOpen(false)}
-              />
-            </DialogContent>
-          </Dialog>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
+      {canWrite && (
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2">
+            {transition && status !== "cancelled" && (
               <Button
-                variant="outline"
-                size="sm"
-                className="text-destructive hover:text-destructive cursor-pointer"
+                onClick={handleStatusTransition}
+                disabled={isTransitioning}
+                className="cursor-pointer"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
+                <ArrowRight className="mr-2 h-4 w-4" />
+                {transition.label}
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete {title}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete this meeting and all associated
-                  attendance records, evaluations, and checklist items. This
-                  action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel className="cursor-pointer">
-                  Cancel
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  variant="destructive"
-                  className="cursor-pointer"
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="cursor-pointer">
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Edit {title}</DialogTitle>
+                </DialogHeader>
+                <MeetingForm
+                  meeting={meeting}
+                  locations={locations}
+                  mode="edit"
+                  onSuccess={() => setIsEditOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive cursor-pointer"
                 >
-                  {isDeleting ? "Deleting..." : "Delete Meeting"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {title}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete this meeting and all associated
+                    attendance records, evaluations, and checklist items. This
+                    action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="cursor-pointer">
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    variant="destructive"
+                    className="cursor-pointer"
+                  >
+                    {isDeleting ? "Deleting..." : "Delete Meeting"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Meeting Info Cards */}
       <MeetingSummaryCards meeting={meeting} />

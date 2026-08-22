@@ -4,6 +4,7 @@ import {
   bulkCompleteTasksAction,
   bulkRescheduleTasksAction,
 } from "@/app/(dashboard)/tasks/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -130,6 +131,16 @@ export function TaskSelectionProvider({
 // ============================================================================
 // Selection controls
 // ============================================================================
+//
+// ALL THREE OF THEM ARE `tasks.write` (AS-020), and that is a judgement about
+// the MECHANISM rather than about either button on the bar. `bulkCompleteTasks
+// Action` is `tasks.own` and `bulkRescheduleTasksAction` is `tasks.write`; the
+// selection exists to drive both, so a viewer who may only ever press one of
+// them is being offered a multi-select whose second answer is a refusal. A
+// Member completes their own task one at a time, from the row control in
+// `task-card.tsx`, which stays — so nothing is taken away, and the bar stops
+// advertising a batch verb the server would reject.
+// ============================================================================
 
 /**
  * A selection checkbox inside a padded label.
@@ -203,6 +214,7 @@ export function TaskSelectionRow({
   title: string;
   children: React.ReactNode;
 }) {
+  const canWrite = useCan("tasks.write");
   const { isSelected, setSelected } = useTaskSelection();
   const checked = isSelected(taskId);
 
@@ -216,16 +228,20 @@ export function TaskSelectionRow({
       data-task-id={taskId}
       data-selected={checked ? "true" : "false"}
     >
-      <div className="pt-4">
-        <SelectionCheckbox
-          id={`task-select-${taskId}`}
-          checked={checked}
-          onToggle={() => setSelected(taskId, !checked)}
-          label={`Select task: ${title}`}
-          testId="task-select"
-          taskId={taskId}
-        />
-      </div>
+      {/* The gutter goes with the checkbox, so the cards line up with the
+          group headings above them either way. */}
+      {canWrite && (
+        <div className="pt-4">
+          <SelectionCheckbox
+            id={`task-select-${taskId}`}
+            checked={checked}
+            onToggle={() => setSelected(taskId, !checked)}
+            label={`Select task: ${title}`}
+            testId="task-select"
+            taskId={taskId}
+          />
+        </div>
+      )}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -241,6 +257,7 @@ export function TaskGroupSelectAll({
   label: string;
   disabled?: boolean;
 }) {
+  const canWrite = useCan("tasks.write");
   const { isSelected, setManySelected } = useTaskSelection();
 
   const selectedCount = taskIds.filter(isSelected).length;
@@ -250,6 +267,8 @@ export function TaskGroupSelectAll({
     : selectedCount > 0
       ? "indeterminate"
       : false;
+
+  if (!canWrite) return null;
 
   return (
     <SelectionCheckbox
@@ -347,6 +366,7 @@ function offsetFromToday(days: number): string {
  * selection is empty, so it never occupies space (or the SSR output) idly.
  */
 export function BulkActionsBar() {
+  const canWrite = useCan("tasks.write");
   const { selectedIds, count, clear } = useTaskSelection();
   const [isPending, startTransition] = useTransition();
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -361,7 +381,7 @@ export function BulkActionsBar() {
     []
   );
 
-  if (count === 0) return null;
+  if (!canWrite || count === 0) return null;
 
   // Show the cap before the click, not after. A group select-all can easily run
   // past MAX_BULK_TASKS, and letting the request go would spend a server round

@@ -243,29 +243,74 @@ function MilestoneRow({
         <ul className="mt-3 space-y-2">
           {milestone.tasks.map((task) => (
             <li key={task.id} className="flex items-start gap-2.5">
-              <Checkbox
-                id={`launch-task-${task.id}`}
-                checked={task.isComplete}
-                disabled={!canEdit || isPending}
-                className="mt-0.5 cursor-pointer"
-                onCheckedChange={(checked) =>
-                  onToggleTask(task.id, checked === true)
-                }
-              />
-              <label
-                htmlFor={`launch-task-${task.id}`}
-                className={cn(
-                  "cursor-pointer text-sm leading-5",
-                  task.isComplete && "text-muted-foreground line-through"
-                )}
-              >
-                {task.title}
-                {task.assigneeName && (
-                  <span className="text-muted-foreground ml-2 text-xs">
-                    {task.assigneeName}
-                  </span>
-                )}
-              </label>
+              {/*
+                HIDDEN, NOT DISABLED (AS-020, #499). This checkbox used to
+                render `disabled={!canEdit || isPending}`, which fused a
+                PERMISSION with a pending state: a viewer who may not tick got a
+                greyed-out box announcing a control they will never have, on
+                every task in the list. `isPending` stays on the control that is
+                still offered — that one IS a transient state — and the
+                permission decides whether there is a control at all.
+
+                The completion state is not what is hidden: a done task keeps
+                its check mark, in WORDS as well as in green, because a
+                strike-through is invisible to a screen reader that no longer
+                has a checked checkbox to read. The gutter keeps its width
+                either way, so the titles still line up.
+              */}
+              {canEdit ? (
+                <Checkbox
+                  id={`launch-task-${task.id}`}
+                  checked={task.isComplete}
+                  disabled={isPending}
+                  className="mt-0.5 cursor-pointer"
+                  onCheckedChange={(checked) =>
+                    onToggleTask(task.id, checked === true)
+                  }
+                />
+              ) : (
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                  {task.isComplete && (
+                    <>
+                      <Check
+                        aria-hidden="true"
+                        className="h-4 w-4 text-green-600 dark:text-green-500"
+                      />
+                      <span className="sr-only">Complete</span>
+                    </>
+                  )}
+                </span>
+              )}
+              {canEdit ? (
+                <label
+                  htmlFor={`launch-task-${task.id}`}
+                  className={cn(
+                    "cursor-pointer text-sm leading-5",
+                    task.isComplete && "text-muted-foreground line-through"
+                  )}
+                >
+                  {task.title}
+                  {task.assigneeName && (
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      {task.assigneeName}
+                    </span>
+                  )}
+                </label>
+              ) : (
+                <span
+                  className={cn(
+                    "text-sm leading-5",
+                    task.isComplete && "text-muted-foreground line-through"
+                  )}
+                >
+                  {task.title}
+                  {task.assigneeName && (
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      {task.assigneeName}
+                    </span>
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>

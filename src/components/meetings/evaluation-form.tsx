@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { createEvaluationAction } from "@/app/(dashboard)/meetings/actions";
+import { useCan } from "@/components/shared/viewer-capabilities";
 // The factors and the rating scale come from the one list the zod schema is
 // built from, so a factor added there is asked for here, listed on the summary
 // and accepted by the server in one edit. See
@@ -47,6 +48,11 @@ interface EvaluationFormProps {
 const FACTOR_COUNT = EVALUATION_QUALITY_FACTORS.length;
 
 export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
+  // AS-020. The page renders this form ONLY when no evaluation exists yet, so
+  // for a Member it is an empty state and not a form: there is nothing to read
+  // here, and every mark on it is `createEvaluationAction` — `meetings.write`.
+  // So the read-only render states the fact and offers no control at all.
+  const canWrite = useCan("meetings.write");
   const [scores, setScores] = useState<
     Partial<Record<EvaluationScoreKey, number>>
   >({});
@@ -69,6 +75,18 @@ export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
   const totalScore = isComplete
     ? (rated.reduce((a, b) => a + b, 0) / FACTOR_COUNT).toFixed(1)
     : null;
+
+  if (!canWrite) {
+    return (
+      <div>
+        <h2 className="text-xl font-bold">Evaluate {title}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
+          This meeting has not been evaluated yet. Your plant&apos;s admins
+          score a meeting after it happens.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <form action={formAction} className="space-y-6">

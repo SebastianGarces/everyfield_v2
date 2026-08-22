@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,6 +16,11 @@ import { quickAddTaskAction } from "@/app/(dashboard)/tasks/actions";
 import { toast } from "sonner";
 
 export function TaskQuickAdd() {
+  // `quickAddTaskAction` is `tasks.write` (AS-020). Asked here, in the file that
+  // renders the control, so the affordance and the refusal can never disagree —
+  // and so a second mount of this component inherits the gate rather than
+  // needing its own.
+  const canWrite = useCan("tasks.write");
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -32,6 +38,8 @@ export function TaskQuickAdd() {
       }
     });
   }
+
+  if (!canWrite) return null;
 
   if (!isOpen) {
     return (

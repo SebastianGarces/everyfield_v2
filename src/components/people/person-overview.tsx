@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,6 +70,13 @@ export function PersonOverview({
   onEdit,
 }: PersonOverviewProps) {
   const router = useRouter();
+
+  // AS-020: the one create affordance this component owns is the commitment
+  // link, which lands on an entry route whose save is `people.write`. The
+  // inline pencil above is already conditional on an `onEdit` prop the detail
+  // page does not pass, and the cards below own their own gates (`TagPicker`,
+  // `SkillsList`, `HouseholdMembers`).
+  const canWrite = useCan("people.write");
 
   const fullAddress = [
     person.addressLine1,
@@ -264,12 +272,14 @@ export function PersonOverview({
               <p className="text-muted-foreground text-sm">
                 No commitment recorded yet
               </p>
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/people/${person.id}/assessments/commitment`}>
-                  <Plus className="mr-1 h-3 w-3" />
-                  Record Commitment
-                </Link>
-              </Button>
+              {canWrite && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/people/${person.id}/assessments/commitment`}>
+                    <Plus className="mr-1 h-3 w-3" />
+                    Record Commitment
+                  </Link>
+                </Button>
+              )}
             </div>
           )}
         </CardContent>

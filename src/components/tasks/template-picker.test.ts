@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import {
   TASK_TEMPLATES,
   TEMPLATES_ROUTE,
@@ -18,6 +19,13 @@ import { TaskTemplatePicker } from "./template-picker";
 // The picker, rendered. These are DOM assertions, not source scans: the Cursor
 // Pointer Rule is about what ships to a browser, so it is asserted on the
 // markup a browser would receive.
+//
+// RENDERED AS SOMEBODY WHO MAY IMPORT (#499). Every row's Import button gates on
+// `tasks.write` — the verb `importTaskTemplateAction` refuses without — and
+// `useCan` fails closed with no provider, so without this the whole file would
+// be counting buttons that are never drawn. The catalog's own ROUTE turns a
+// viewer without the verb away at the door; the absence is asserted in
+// `tasks-read-only.test.ts`.
 // ----------------------------------------------------------------------------
 
 function render(
@@ -25,7 +33,13 @@ function render(
   headingLevel?: "h1" | "h2"
 ): string {
   return renderToStaticMarkup(
-    createElement(TaskTemplatePicker, { currentPhase, headingLevel })
+    createElement(ViewerCapabilitiesProvider, {
+      capabilities: ["tasks.write"],
+      children: createElement(TaskTemplatePicker, {
+        currentPhase,
+        headingLevel,
+      }),
+    })
   );
 }
 

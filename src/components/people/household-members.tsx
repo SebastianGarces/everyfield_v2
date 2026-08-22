@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +41,11 @@ export function HouseholdMembers({
 }: HouseholdMembersProps) {
   const [managerOpen, setManagerOpen] = useState(false);
 
+  // AS-020: both buttons here open `HouseholdManager`, which creates, joins and
+  // re-roles a household — `people.write` throughout. A Member reads the family
+  // and is offered neither, so the manager itself never mounts either.
+  const canWrite = useCan("people.write");
+
   // Filter out the current person from the members list for display
   const otherMembers = members.filter((m) => m.id !== person.id);
 
@@ -50,11 +56,12 @@ export function HouseholdMembers({
           <CardTitle className="text-base font-semibold">
             Family Members
           </CardTitle>
-          {household && (
+          {household && canWrite && (
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7"
+              aria-label="Manage household"
               onClick={() => setManagerOpen(true)}
             >
               <Settings className="h-3.5 w-3.5" />
@@ -99,7 +106,7 @@ export function HouseholdMembers({
                 No other members in this household
               </p>
             )
-          ) : (
+          ) : canWrite ? (
             <Button
               variant="outline"
               size="sm"
@@ -109,17 +116,23 @@ export function HouseholdMembers({
               <UserPlus className="mr-2 h-4 w-4" />
               Connect Family
             </Button>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              No household on record
+            </p>
           )}
         </CardContent>
       </Card>
 
-      <HouseholdManager
-        person={person}
-        currentHousehold={household}
-        households={households}
-        open={managerOpen}
-        onOpenChange={setManagerOpen}
-      />
+      {canWrite && (
+        <HouseholdManager
+          person={person}
+          currentHousehold={household}
+          households={households}
+          open={managerOpen}
+          onOpenChange={setManagerOpen}
+        />
+      )}
     </>
   );
 }

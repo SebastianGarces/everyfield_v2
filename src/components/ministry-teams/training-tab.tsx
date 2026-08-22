@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { GraduationCap, Plus } from "lucide-react";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,6 +41,12 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
 
+  // `createTrainingProgramAction` and `markTrainingCompleteAction` are both
+  // `teams.write` (AS-020, #499). The MATRIX is the read — who has completed
+  // what — and it survives whole, because the grid already takes its one
+  // interactive cell as a render prop.
+  const canWrite = useCan("teams.write");
+
   async function handleAddProgram(formData: FormData) {
     setAddLoading(true);
     formData.set("teamId", teamId);
@@ -62,19 +69,23 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Training</h2>
-          <AddProgramDialog
-            open={addOpen}
-            onOpenChange={setAddOpen}
-            loading={addLoading}
-            onSubmit={handleAddProgram}
-          />
+          {canWrite && (
+            <AddProgramDialog
+              open={addOpen}
+              onOpenChange={setAddOpen}
+              loading={addLoading}
+              onSubmit={handleAddProgram}
+            />
+          )}
         </div>
         <Card>
           <CardContent className="flex flex-col items-center justify-center p-8 text-center">
             <GraduationCap className="text-muted-foreground h-10 w-10" />
             <h3 className="mt-3 font-medium">No training programs</h3>
             <p className="text-muted-foreground mt-1 max-w-sm text-sm">
-              Add training programs to track completion across team members.
+              {canWrite
+                ? "Add training programs to track completion across team members."
+                : "Your plant's admins set up this team's training programs."}
             </p>
           </CardContent>
         </Card>
@@ -86,30 +97,40 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Training Matrix</h2>
-        <AddProgramDialog
-          open={addOpen}
-          onOpenChange={setAddOpen}
-          loading={addLoading}
-          onSubmit={handleAddProgram}
-        />
+        {canWrite && (
+          <AddProgramDialog
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            loading={addLoading}
+            onSubmit={handleAddProgram}
+          />
+        )}
       </div>
 
       {/* Training completion matrix. The grid itself is presentational and
           lives in training-matrix.tsx; this tab only supplies the one
-          interactive cell — the click that marks a training complete. */}
+          interactive cell — the click that marks a training complete.
+          WITHOUT `incompleteCell` the grid draws its own inert marker in the
+          same box, which is the read-only render it already documents — so
+          hiding the write here is withholding the prop, not a second branch
+          through the table. */}
       <TrainingMatrix
         programs={programs}
         matrix={matrix}
-        incompleteCell={({ personId, programId }) => (
-          <button
-            type="button"
-            className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
-            onClick={() => handleMarkComplete(personId, programId)}
-            title="Mark as complete"
-          >
-            <TrainingMatrixIncompleteMarker />
-          </button>
-        )}
+        incompleteCell={
+          canWrite
+            ? ({ personId, programId }) => (
+                <button
+                  type="button"
+                  className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
+                  onClick={() => handleMarkComplete(personId, programId)}
+                  title="Mark as complete"
+                >
+                  <TrainingMatrixIncompleteMarker />
+                </button>
+              )
+            : undefined
+        }
       />
 
       {/* Training stats */}

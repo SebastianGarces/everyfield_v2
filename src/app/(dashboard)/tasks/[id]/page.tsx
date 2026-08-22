@@ -7,6 +7,7 @@ import { RichText } from "@/components/shared/rich-text";
 import { TaskDetailActions } from "./task-detail-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import {
   formatDate,
@@ -146,6 +147,12 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     listPrerequisiteCandidates(user.churchId, id),
   ]);
 
+  // AS-020. Editing a task is `tasks.write`, so the edit form is not OFFERED to
+  // a Member — the page itself stays readable, which is what they came for. The
+  // controls that are `tasks.own` (complete, reopen, the checklist) ask their
+  // own question further down, against the row's assignee.
+  const canWrite = holdsSeatFor(user, "tasks.write");
+
   const statusConfig = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
   const priorityConfig =
     PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
@@ -197,7 +204,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               Created {createdDate}
             </p>
           </div>
-          <TaskDetailActions task={task} />
+          <TaskDetailActions task={task} currentUserId={user.id} />
         </div>
 
         {/* Status badges */}
@@ -325,27 +332,31 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               parentTaskId={task.id}
               subtasks={subtasks}
               parentIsSubtask={task.parentTaskId !== null}
+              currentUserId={user.id}
+              parentAssignedToId={task.assignedToId}
             />
           </CardContent>
         </Card>
 
         {/* Edit form */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Edit Task</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TaskForm
-              task={task}
-              users={churchUsers}
-              followUpAssignees={followUpAssignees}
-              prerequisiteCandidates={[...candidateById.values()]}
-              prerequisiteIds={prerequisites.map(
-                (prerequisite) => prerequisite.id
-              )}
-            />
-          </CardContent>
-        </Card>
+        {canWrite && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Edit Task</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TaskForm
+                task={task}
+                users={churchUsers}
+                followUpAssignees={followUpAssignees}
+                prerequisiteCandidates={[...candidateById.values()]}
+                prerequisiteIds={prerequisites.map(
+                  (prerequisite) => prerequisite.id
+                )}
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </>
   );

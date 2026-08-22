@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { Button } from "@/components/ui/button";
 import type {
   PhaseTemplateDismissOutcome,
@@ -353,6 +354,14 @@ export function PhaseTemplatePromptForm({
   importAction,
   dismissAction,
 }: PhaseTemplatePromptFormProps) {
+  // TWO ANSWERS, TWO VERBS, TWO GATES (AS-020). Import creates 22–26 tasks and
+  // is `tasks.write`; "Not now" writes a phase-prompt answer row and is
+  // `phase.signal`. They sit at the same level today, but they are separate
+  // rows in the capability table and one may move without the other — so each
+  // button asks for the verb IT invokes, in the file that renders it, rather
+  // than sharing a "may answer" boolean that would silently offer the wrong one.
+  const canImport = useCan("tasks.write");
+  const canDismiss = useCan("phase.signal");
   const [importOutcome, importFormAction, importPending] = useActionState(
     importAction,
     PHASE_TEMPLATE_IMPORT_IDLE
@@ -445,34 +454,38 @@ export function PhaseTemplatePromptForm({
       {alertMessage && <PhaseTemplatePromptAlert message={alertMessage} />}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="submit"
-          size="sm"
-          className="cursor-pointer"
-          disabled={importDisabled}
-          aria-busy={importing}
-          onClick={() => setLastPress("import")}
-        >
-          {importLabel}
-        </Button>
+        {canImport && (
+          <Button
+            type="submit"
+            size="sm"
+            className="cursor-pointer"
+            disabled={importDisabled}
+            aria-busy={importing}
+            onClick={() => setLastPress("import")}
+          >
+            {importLabel}
+          </Button>
+        )}
         {/*
             A second action on the same form rather than a nested one — a form
             may not contain a form, and the two answers belong to one control
             group. `formAction` is how React routes a submit to the other
             action, `useActionState`'s wrapper included.
           */}
-        <Button
-          type="submit"
-          size="sm"
-          variant="ghost"
-          formAction={dismissFormAction}
-          className="cursor-pointer"
-          disabled={dismissDisabled}
-          aria-busy={dismissing}
-          onClick={() => setLastPress("dismiss")}
-        >
-          Not now
-        </Button>
+        {canDismiss && (
+          <Button
+            type="submit"
+            size="sm"
+            variant="ghost"
+            formAction={dismissFormAction}
+            className="cursor-pointer"
+            disabled={dismissDisabled}
+            aria-busy={dismissing}
+            onClick={() => setLastPress("dismiss")}
+          >
+            Not now
+          </Button>
+        )}
       </div>
 
       {/*

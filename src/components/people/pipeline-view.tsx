@@ -1,5 +1,6 @@
 "use client";
 
+import { useCan } from "@/components/shared/viewer-capabilities";
 import { validateStatusTransition } from "@/lib/people/status.shared";
 import { PersonStatus, PersonWithTags, PipelineData } from "@/lib/people/types";
 import { extractClosestEdge } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
@@ -94,6 +95,12 @@ export function PipelineView({
   const [items, setItems] = useState<Record<string, PersonWithTags[]>>(
     data.people
   );
+
+  // AS-020: moving a card is a stage change and a reorder, both `people.write`.
+  // A viewer without it reads the board and cannot move anything — the cards
+  // render no drag handle (`PipelineCard`) and this monitor never subscribes,
+  // so there is no drop to commit even if a drag were started some other way.
+  const canWrite = useCan("people.write");
 
   // Latest-value refs so the once-subscribed monitor never re-subscribes
   const onReorderRef = useLatestRef(onReorder);
@@ -241,6 +248,8 @@ export function PipelineView({
   // Main drag monitor — subscribes once, never re-creates
   // ────────────────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!canWrite) return;
+
     return monitorForElements({
       canMonitor({ source }) {
         return isCardData(source.data);
@@ -341,7 +350,7 @@ export function PipelineView({
         }
       },
     });
-  }, [reorderCard, moveCard]);
+  }, [canWrite, reorderCard, moveCard]);
 
   // ────────────────────────────────────────────────────────────────────────
   // Confirmation modal handlers
