@@ -183,13 +183,17 @@ export type ChecklistRow =
  *     would flag the one row this file says must stay ungated.
  *   * "View", "Monitor" — reads. /teams/org-chart and /teams/health address
  *     everybody honestly.
- *   * "Manage", "Organize" — softer, and they cover /people, /teams and
- *     /tasks, whose subtitles ("Manage your contacts and pipeline",
- *     "Organize, staff, and track your ministry teams", "Manage your tasks and
- *     follow-ups") are the same defect in a lower register. They are NOT
- *     widened in here, because widening the list without fixing those pages
- *     just moves the debt into an allowlist. #668 owns them, and adding the two
- *     verbs is one of its acceptance criteria.
+ *
+ * "MANAGE" AND "ORGANIZE" ARE IN THE LIST AND WERE NOT ALWAYS (#668). They are
+ * softer than the rest — an umbrella over a set of writes rather than the name
+ * of one — and they covered exactly three pages: /people ("Manage your contacts
+ * and pipeline"), /teams ("Organize, staff, and track your ministry teams") and
+ * /tasks ("Manage your tasks and follow-ups"), the same defect in a lower
+ * register. #666 left them OUT on purpose, because a verb list widened while
+ * the pages still say those words has to grow an allowlist to stay green, and
+ * an allowlist is where a defect goes to become permanent. They went in with
+ * the three fixes, in one change, so the scan holds the line from the commit it
+ * learned the words.
  */
 const WRITE_IMPERATIVES = [
   "Add",
@@ -201,8 +205,10 @@ const WRITE_IMPERATIVES = [
   "Edit",
   "Import",
   "Invite",
+  "Manage",
   "Name",
   "New",
+  "Organize",
   "Pick",
   "Record",
   "Remove",
