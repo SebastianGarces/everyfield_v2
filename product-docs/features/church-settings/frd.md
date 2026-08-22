@@ -107,7 +107,7 @@ surveillance feed of which switch flipped.
 
 | ID | Priority | Requirement |
 |----|----------|-------------|
-| CS-001 | Must | Settings is a modal over the current screen with a side navigation of sections; the URL addresses it — `/settings/<section>` opens the modal at that section, closing returns to the screen behind, and a direct load opens the modal over the dashboard. This feature contributes the Account section and the Church section beside the team, association and notification-preferences sections. |
+| CS-001 | Must | Settings is a modal over the current screen with a side navigation of sections; the URL's FRAGMENT addresses it — `#settings/<section>` on any page opens the modal at that section over that page, changing sections rewrites the fragment without navigating, and closing clears it and leaves the page behind untouched. A page loaded with the fragment already set renders normally and opens the modal over itself. This feature contributes the Account section and the Church section beside the team, association and notification-preferences sections. |
 | CS-002 | Must | Account section, every account: change email — the new address is verified before it becomes the login identifier, and the prior address is notified of the change. |
 | CS-003 | Must | Account section, every account: change password, requiring the current password. |
 | CS-004 | Must | Account section, every account: upload, replace or remove a profile picture, stored in the same object storage the product's uploads use. |
@@ -122,11 +122,11 @@ surveillance feed of which switch flipped.
 | CS-013 | Must | A plant created by accepting an org invitation starts with all sharing toggles on, written by the acceptance itself with the consent stated on the acceptance screen beforehand; a self-started plant starts with all toggles off; database defaults stay off. |
 | CS-014 | Must | Launch Sunday appears nowhere on the page; the launch entity owns it and its edits. |
 | CS-015 | Should | Each profile field saves independently with visible feedback; a failed save names the field, not the form. |
-| CS-016 | Should | A search box above the side navigation filters sections and settings entries by name; choosing a match shows its section. |
+| CS-016 | Should | A search box above the side navigation filters sections and settings entries by name; choosing a match shows its section. It is not focused when the modal opens — the dialog is. |
 
 ## Acceptance criteria
 
-1. A plant Member opens `/settings` and finds the Account section but no church profile
+1. A plant Member opens settings and finds the Account section but no church profile
    and no sharing panel; a plant Admin finds the profile but no sharing panel; the Owner
    finds all of it. A sharing write submitted by an Admin without the UI is refused.
 2. Changing the email leaves the old address as the login identifier until the new
@@ -145,10 +145,14 @@ surveillance feed of which switch flipped.
 7. Changing the digest hour changes when the next digest lands, in church time; changing
    the weekday changes which day the weekly digest lands without touching any
    recipient's own digest preference.
-8. No control on `/settings` reads or writes Launch Sunday.
+8. No control in settings reads or writes Launch Sunday.
 9. Settings opened from any screen keeps that screen behind the modal, and closing
-   returns to it; the same URL loaded in a fresh window opens the modal over the
-   dashboard.
+   returns to it with the screen unchanged. Moving between sections navigates nowhere:
+   the screen behind is never re-rendered and the modal never re-opens. A page loaded
+   with `#settings/<section>` already in the address bar draws that page and opens the
+   modal over it; closing there leaves the reader on that page.
+10. The modal opens with no field focused — focus is on the dialog itself, so its title
+    is what a screen reader announces.
 
 ## Data entities
 
