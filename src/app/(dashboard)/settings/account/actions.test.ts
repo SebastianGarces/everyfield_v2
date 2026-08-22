@@ -187,14 +187,14 @@ test("every catch defers to unstable_rethrow before it classifies", () => {
 
 test("every write that changes what the screen shows calls refresh(), and only those", () => {
   // The address and the picture BOTH appear in the Account section and in the
-  // chrome, so those four reconcile the whole tree. The password change
-  // deliberately does not: nothing on screen renders a password, so there is
-  // nothing to re-read and a refresh would be dead work on every rotation.
+  // chrome, so those three reconcile the whole tree. Two do not, for opposite
+  // reasons: the password change has nothing on screen to re-read, and the
+  // CONFIRMATION redirects, so the tree a refresh would patch is the tree the
+  // redirect replaces (the test below owns that one).
   const RECONCILES = new Set([
     "uploadAvatarAction",
     "removeAvatarAction",
     "requestEmailChangeAction",
-    "confirmEmailChangeAction",
   ]);
 
   for (const name of EXPORTS) {
@@ -209,10 +209,49 @@ test("every write that changes what the screen shows calls refresh(), and only t
       continue;
     }
 
+    // Comments off, for the reason the header gives: an endpoint that EXPLAINS
+    // why it does not refresh must be able to write the word.
     assert.equal(
-      body.includes("refresh()"),
+      stripComments(body).includes("refresh()"),
       false,
       `${name} has nothing on screen to reconcile — a refresh here is dead work on every call`
     );
   }
+});
+
+test("the confirmation ends in a redirect, and the redirect sits OUTSIDE the try (#658)", () => {
+  // Comments off, for the reason the header gives: the block above this code
+  // explains the redirect at length, and prose that satisfies the assertion is
+  // an assertion that stops reading the code.
+  const code = stripComments(bodyOf("confirmEmailChangeAction"));
+
+  assert.match(
+    code,
+    /redirect\("\/verify-email\/confirmed"\);/,
+    "a swap that committed must leave the spent `?token=` URL — the reader who reloads it is told the link is dead about a change that succeeded, and the pane that used to say otherwise waited on a transition that never committed (#658)"
+  );
+
+  assert.match(
+    code,
+    /revalidatePath\("\/", "layout"\);/,
+    "the redirect is a CLIENT-SIDE navigation, which reuses the layout segments both routes share — without this the reader lands on `you now sign in as <new>` beside a sidebar still rendering the old address (measured on #658's preview)"
+  );
+
+  // `assertInOrder` and never a pair of `indexOf`s: a missing needle returns
+  // -1, and `-1 < n` is TRUE, so the ordering claim would go green over a
+  // function that had lost the structure this test exists to pin.
+  assertInOrder(
+    code,
+    "settings/account/actions.ts → confirmEmailChangeAction",
+    ["} catch (error)", 'redirect("/verify-email/confirmed")'],
+    "redirect() reports itself by THROWING, so a redirect inside the try is caught by the classifier above it and returned as `We could not confirm that address` — about a change that already happened"
+  );
+});
+
+test("the confirmation's return type cannot describe a success (#658)", () => {
+  assert.match(
+    CODE,
+    /export async function confirmEmailChangeAction\([^)]*\): Promise<EmailChangeConfirmRefusal>/,
+    "its success REDIRECTS, so no success value ever reaches a caller — typing it with the full outcome union keeps an arm alive that the client would have to handle, which is the pane #658 deleted. The narrower type makes putting it back a compile error rather than a convention."
+  );
 });
