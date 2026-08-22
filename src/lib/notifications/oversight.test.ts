@@ -428,9 +428,14 @@ test("no page hardcodes its own version of the consent promise", () => {
   // closes the loop: a page that writes the promise itself is invisible to it,
   // which is how `/settings` drifted for two rulings. Both consent routes must
   // render the shared constants and hold no claim prose of their own.
+  // Both consent surfaces are SECTIONS of the settings modal since #615. The
+  // sharing panel keeps its URL and the teaser moved from the deleted
+  // `/settings` index into the Church section; each is now one component file,
+  // and both still take their copy from `categories.ts`.
   const surfaces = {
-    "/settings": "../../app/(dashboard)/settings/page.tsx",
-    "/settings/sharing": "../../app/(dashboard)/settings/sharing/page.tsx",
+    "/settings/church": "../../components/settings/sections/church-section.tsx",
+    "/settings/sharing":
+      "../../components/settings/sections/sharing-section.tsx",
   } as const;
 
   for (const [route, relative] of Object.entries(surfaces)) {
