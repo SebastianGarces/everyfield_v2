@@ -104,6 +104,47 @@ export const getPerson = cache(
 );
 
 /**
+ * The stored photo KEY for a person in this church, or `null` when there is no
+ * such person. A person who simply has no photo answers `{ photoKey: null }`.
+ *
+ * THE ONE READ OF `photo_url`, and the reason `getPerson` above no longer
+ * offers it (#654). That read hands its row straight to `"use client"`
+ * components, so `toPersonForClient` trades the key for the route it resolves
+ * to — and the two callers that genuinely need the KEY ask for it by name here
+ * instead. Both are server-only and both are the key's whole business: the
+ * photo route, which turns one into pixels, and `setPersonPhoto`, which needs
+ * the OLD key to know which object to drop.
+ *
+ * TWO NULLS, NOT ONE, because the callers want different things from them. A
+ * missing person is a 404 the route must answer; a person with no photo is the
+ * initials fallback. Collapsing both into a bare `string | null` would make
+ * those indistinguishable, and the route would answer the same 404 for a
+ * foreign `personId` by accident rather than by rule.
+ *
+ * CHURCH-SCOPED like every other read here, so a foreign `personId` reads as
+ * MISSING rather than forbidden — the same answer a person with no photo gets,
+ * and the same shape the generated-documents read uses.
+ */
+export async function getPersonPhotoKey(
+  churchId: string,
+  personId: string
+): Promise<{ photoKey: string | null } | null> {
+  const [row] = await db
+    .select({ photoKey: persons.photoUrl })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        eq(persons.id, personId),
+        isNull(persons.deletedAt)
+      )
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
  * Assert that `personId` names a live person in `churchId`.
  *
  * The guard person-scoped actions call before writing rows (or uploading
@@ -556,7 +597,15 @@ export async function updatePerson(
  * bucket.
  */
 export type PersonPhotoEffects = {
-  load: (churchId: string, personId: string) => Promise<PersonForClient | null>;
+  /**
+   * The OLD key, so the tail of the sequence knows what to drop — `null` when
+   * there is no such person. Deliberately not `getPerson`: that read strips the
+   * key on its way out (#654), and this is the one moment the writer needs it.
+   */
+  load: (
+    churchId: string,
+    personId: string
+  ) => Promise<{ photoKey: string | null } | null>;
   write: (
     churchId: string,
     personId: string,
@@ -566,7 +615,7 @@ export type PersonPhotoEffects = {
 };
 
 const LIVE_PHOTO_EFFECTS: PersonPhotoEffects = {
-  load: getPerson,
+  load: getPersonPhotoKey,
   write: async (churchId, personId, key) => {
     const [updated] = await db
       .update(persons)
@@ -620,9 +669,9 @@ export async function setPersonPhoto(
   if (!updated) return null;
 
   // The row has stopped naming it, so it is now garbage rather than an avatar.
-  if (existing.photoUrl && existing.photoUrl !== key) {
+  if (existing.photoKey && existing.photoKey !== key) {
     try {
-      await effects.remove(existing.photoUrl);
+      await effects.remove(existing.photoKey);
     } catch (error) {
       console.error("[people] failed to delete replaced photo object:", error);
     }

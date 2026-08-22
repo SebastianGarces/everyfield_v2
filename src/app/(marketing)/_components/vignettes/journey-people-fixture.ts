@@ -47,7 +47,7 @@ const LOCATION_ID = "fixture-location";
 /** The columns every row in this file shares, so each person below is only
  *  the fields the card actually reads. None of these render: `country` is the
  *  column default, the address and household columns are empty for every
- *  person in this church, and `photoUrl` being null is why every card shows
+ *  person in this church, and `photoSrc` being undefined is why every card shows
  *  the app's initials avatar rather than a photo we would have to host. */
 const PERSON_BASE = {
   churchId: CHURCH_ID,
@@ -60,7 +60,7 @@ const PERSON_BASE = {
   sourceDetails: null,
   backgroundCheckStatus: "not_started",
   notes: null,
-  photoUrl: null,
+  photoSrc: undefined,
   householdId: null,
   householdRole: null,
   pipelineSortOrder: 0,

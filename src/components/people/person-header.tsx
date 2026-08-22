@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Household } from "@/db/schema";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
-import { personPhotoSrc } from "@/lib/profile-photo";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
@@ -95,10 +94,7 @@ export function PersonHeader({
     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div className="flex items-start gap-4">
         <Avatar className="border-background h-16 w-16 border-2 shadow-sm">
-          <AvatarImage
-            src={personPhotoSrc(person.id, person.photoUrl)}
-            alt={fullName}
-          />
+          <AvatarImage src={person.photoSrc} alt={fullName} />
           <AvatarFallback className="text-lg font-semibold">
             {initials}
           </AvatarFallback>

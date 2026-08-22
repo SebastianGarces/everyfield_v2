@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { stripComments } from "@/lib/testing/source-span";
+import { personPhotoSrc } from "@/lib/profile-photo";
 
 import { toPersonForClient } from "./types";
 
@@ -35,6 +36,16 @@ import { toPersonForClient } from "./types";
 // behavioural test and the strip do that. They fail the moment a NEW surface
 // spells the raw row type where the narrow one belongs, which is the shape
 // every instance of this bug has had.
+//
+// SINCE #654 THE STRIP CARRIES A SECOND COLUMN: `photo_url`, a private-bucket
+// key, traded for the route it resolves to. The last test below covers both,
+// because they cross at the same moment and there is only ever one of those.
+// The key's own ratchets — where it may be named at all, in either spelling —
+// live in `src/lib/picture-key-boundary.test.ts` beside the account avatar's.
+// One happy side effect worth knowing: `photoSrc` is a key `Person` does not
+// have, so a full row NO LONGER satisfies `PersonForClient` and `tsc` finally
+// catches the structural hole described above. It caught two the day it landed.
+// The scans stay anyway — an excess property still survives assignment.
 //
 // WHAT THEY MEASURED WHEN THEY FIRST RAN, against a1a08f9, the commit before
 // the fix: 15 client-component props typed `Person` across 11 files, and 19
@@ -249,11 +260,14 @@ test("the people boundary hands out PersonForClient, not Person", () => {
   );
 });
 
-test("toPersonForClient removes the key, and nothing else", () => {
+test("toPersonForClient removes both keys, and nothing else", () => {
+  const photoKey = "people/church-1/person-1/abc-123.png";
+
   const row = {
     id: "person-1",
     churchId: "church-1",
     userId: "account-1",
+    photoUrl: photoKey,
     firstName: "Jane",
     lastName: "Smith",
     email: null,
@@ -262,18 +276,31 @@ test("toPersonForClient removes the key, and nothing else", () => {
 
   const forClient = toPersonForClient(row as never);
 
-  // The KEY is gone, not merely undefined: `{ userId: undefined }` still
+  // The KEYS are gone, not merely undefined: `{ userId: undefined }` still
   // serializes as a property, so a test on the VALUE would pass on a row that
   // still ships the column name.
+  for (const column of ["userId", "photoUrl"]) {
+    assert.equal(
+      Object.hasOwn(forClient, column),
+      false,
+      `${column} must not survive as a key`
+    );
+    assert.equal(
+      JSON.stringify(forClient).includes(column),
+      false,
+      `${column} must not survive serialization`
+    );
+  }
+
+  // Nor may the photo key survive as a VALUE under another name. This is the
+  // whole point of trading it for a route rather than dropping it: the route is
+  // built FROM the key, so a careless version of that trade ships the key
+  // inside the string it returns. Only the last segment rides along, which
+  // names no church and no bucket path (#654).
   assert.equal(
-    Object.hasOwn(forClient, "userId"),
+    JSON.stringify(forClient).includes("people/church-1"),
     false,
-    "userId must not survive as a key"
-  );
-  assert.equal(
-    JSON.stringify(forClient).includes("userId"),
-    false,
-    "userId must not survive serialization"
+    "the bucket path must not survive inside the resolved route"
   );
 
   // Every other column rides through untouched — the strip is a boundary, not
@@ -285,9 +312,18 @@ test("toPersonForClient removes the key, and nothing else", () => {
     lastName: "Smith",
     email: null,
     deletedAt: null,
+    photoSrc: personPhotoSrc("person-1", photoKey),
   });
+
+  // A person with no photo gets `undefined`, which is what makes the initials
+  // fallback render — the ONE fact a client surface needs beyond the address.
+  assert.equal(
+    toPersonForClient({ ...row, photoUrl: null } as never).photoSrc,
+    undefined
+  );
 
   // The input is not mutated: `createPerson` emits `person.created` from the
   // full row it just wrote, and strips only what it RETURNS.
   assert.equal(row.userId, "account-1", "the source row keeps its link");
+  assert.equal(row.photoUrl, photoKey, "the source row keeps its photo key");
 });

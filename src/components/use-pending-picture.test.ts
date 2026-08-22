@@ -75,10 +75,25 @@ test("a rejected action is still answered", () => {
   );
 });
 
-test("both picture surfaces are on this hook, so a fix lands on both", () => {
-  // The point of the hook. The two controls' markup is still their own; this is
-  // what stops the LOGIC drifting again — it already had, and only one copy
-  // carried the accessibility work when review found it.
+test("one control uses this hook, and the surfaces go through it", () => {
+  // The point of the hook, now enforced one level up. #617 shared the LOGIC and
+  // left the two controls' markup as near-clones; #654 merged the markup too,
+  // so `PictureField` is the single consumer and the two surfaces are wiring.
+  //
+  // Both halves are asserted, because either one alone rots. Without the first,
+  // the shared control could roll its own preview state; without the second, a
+  // surface could go back to hand-rolling a whole control beside it.
+  const control = readFileSync(
+    path.join(process.cwd(), "src/components/picture-field.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    control,
+    /usePendingPicture/,
+    "picture-field.tsx rolled its own preview state again"
+  );
+
   for (const relative of [
     "src/components/settings/avatar-field.tsx",
     "src/components/people/person-photo-field.tsx",
@@ -87,9 +102,23 @@ test("both picture surfaces are on this hook, so a fix lands on both", () => {
 
     assert.match(
       component,
-      /usePendingPicture/,
-      `${relative} rolled its own preview state again`
+      /PictureField/,
+      `${relative} must render the shared control, not a second copy of it`
     );
+  }
+
+  // Nobody in the picture control makes an object URL — the hook owns creating
+  // and revoking them as one pair, and a second creator is a leak it cannot
+  // see. Scoped to these three files rather than the tree: `export-button`,
+  // `import-wizard` and `article-actions` all mint one to hand the reader a
+  // FILE, which is a different job with a different lifetime.
+  for (const relative of [
+    "src/components/picture-field.tsx",
+    "src/components/settings/avatar-field.tsx",
+    "src/components/people/person-photo-field.tsx",
+  ]) {
+    const component = readFileSync(path.join(process.cwd(), relative), "utf8");
+
     assert.equal(
       /createObjectURL/.test(stripComments(component)),
       false,

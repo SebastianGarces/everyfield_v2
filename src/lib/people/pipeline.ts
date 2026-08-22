@@ -7,8 +7,21 @@ import {
   type PersonStatus,
   type Tag,
 } from "@/db/schema";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { PersonWithTags, PipelineColumn, PipelineData } from "./types";
+import {
+  and,
+  asc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNull,
+  sql,
+} from "drizzle-orm";
+import {
+  toPersonForClient,
+  type PersonWithTags,
+  type PipelineColumn,
+  type PipelineData,
+} from "./types";
 
 // ============================================================================
 // Pipeline Column Definitions
@@ -83,35 +96,16 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
 
   const peopleRows = await db
     .select({
-      id: persons.id,
-      churchId: persons.churchId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      email: persons.email,
-      phone: persons.phone,
-      addressLine1: persons.addressLine1,
-      addressLine2: persons.addressLine2,
-      city: persons.city,
-      state: persons.state,
-      postalCode: persons.postalCode,
-      country: persons.country,
-      status: persons.status,
-      backgroundCheckStatus: persons.backgroundCheckStatus,
-      source: persons.source,
-      sourceDetails: persons.sourceDetails,
-      notes: persons.notes,
-      photoUrl: persons.photoUrl,
-      householdId: persons.householdId,
-      householdRole: persons.householdRole,
-      // NO `userId`. This projection is drawn by `PipelineView`, a client
-      // component, so every column named here crosses to the browser — and an
-      // account identifier has no business in a drag-and-drop card (#378).
-      // `PersonForClient` is the type that says so.
-      createdBy: persons.createdBy,
-      createdAt: persons.createdAt,
-      updatedAt: persons.updatedAt,
-      pipelineSortOrder: persons.pipelineSortOrder,
-      deletedAt: persons.deletedAt,
+      // EVERY COLUMN, and the strip below is what makes that safe (#654).
+      //
+      // This used to be a hand-typed list of 25 columns whose whole job was to
+      // leave `user_id` out — a second spelling of a decision `toPersonForClient`
+      // already owns, and one that had to be re-read every time `persons` grew a
+      // column. A projection that omits a column silently and a strip that
+      // removes one deliberately look identical in a diff; only one of them says
+      // why. So the query asks for the row and the boundary narrows it, which is
+      // what every other read in this domain does.
+      ...getTableColumns(persons),
       lastActivityAt: lastActivitySubquery,
     })
     .from(persons)
@@ -153,11 +147,15 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
     }
   }
 
-  // Build PersonWithTags array
-  const peopleWithTags: PersonWithTags[] = peopleRows.map((person) => ({
-    ...person,
-    tags: personTagsMap.get(person.id) ?? [],
-  }));
+  // Build PersonWithTags array. `PipelineView` is a client component, so this
+  // map IS the boundary: the strip drops the account link (#378) and trades the
+  // photo key for its route (#654) in one pass, decorations and all.
+  const peopleWithTags: PersonWithTags[] = peopleRows.map((person) =>
+    toPersonForClient({
+      ...person,
+      tags: personTagsMap.get(person.id) ?? [],
+    })
+  );
 
   // Group people by column
   const peopleByColumn: Record<string, PersonWithTags[]> = {};
