@@ -37,9 +37,9 @@ import {
   checkinNudges,
   CHECKIN_HISTORY_WEEKS,
   hasAnsweredThisWeek,
-  listRecentCheckins,
   recentWeekStarts,
 } from "@/lib/phase-engine/planter-checkin";
+import { listRecentCheckins } from "@/lib/phase-engine/planter-checkin-db";
 import { Trends } from "@/components/phase-engine/trends";
 import {
   Card,

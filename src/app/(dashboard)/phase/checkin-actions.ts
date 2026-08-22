@@ -7,7 +7,8 @@ import { planterCheckinLevels } from "@/db/schema";
 import { requireChurchAccess } from "@/lib/auth/access";
 import { requireSeat } from "@/lib/auth/seats";
 import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
-import { saveCheckin, weekStartOf } from "@/lib/phase-engine/planter-checkin";
+import { weekStartOf } from "@/lib/phase-engine/planter-checkin";
+import { saveCheckin } from "@/lib/phase-engine/planter-checkin-db";
 
 // ============================================================================
 // The planter's weekly sustainability check-in (#484, C19).
