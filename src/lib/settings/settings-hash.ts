@@ -5,7 +5,10 @@ import {
   settingsSectionHref,
   type SettingsSectionId,
 } from "@/lib/settings/sections";
-import type { SettingsSectionLoad } from "@/lib/settings/section-view";
+import type {
+  SettingsSectionLoad,
+  SettingsSectionViewOf,
+} from "@/lib/settings/section-view";
 
 // ============================================================================
 // WHERE SETTINGS LIVES: `#settings/<section>`, and the rules for moving it
@@ -13,7 +16,8 @@ import type { SettingsSectionLoad } from "@/lib/settings/section-view";
 //
 // Settings is client state over whatever screen the reader is on, and the URL's
 // FRAGMENT is that state. This module is the whole of it — the store the modal
-// subscribes to, the history policy, and the in-flight read — separated from the
+// subscribes to, the history policy, and the section reads with their
+// stale-while-revalidate cache — separated from the
 // component that draws it so a test can DRIVE it rather than grep for it. That
 // separation is not tidiness: three defects found in review lived in exactly
 // this logic, and a topological guard cannot see any of them
@@ -86,10 +90,10 @@ function onUrlChange() {
 
   if (!nowOpen) {
     openedByPush = false;
-    // A VISIT ENDS HERE, so the read ends with it. Closing moves neither the
-    // section nor the server render, so without this the next opening would be
-    // served the previous visit's roster from the cache below.
-    forgetSection();
+    // A VISIT ENDS HERE. What ends with it is the FAILURES only — see
+    // `dropFailedReads`. The answers are kept, because `serverRenderId` already
+    // says when they stopped being true (#673).
+    dropFailedReads();
   } else if (!wasOpen || nowOn !== wasOn) {
     // THE ENTRY NOW SHOWING IS NOT THE ONE WE WERE LOOKING AT, so what Close
     // means has to be decided again. It is ours to remove with one step back
@@ -210,7 +214,7 @@ export function closeSettings() {
 }
 
 // ----------------------------------------------------------------------------
-// The read
+// The read, and the stale-while-revalidate cache in front of it
 // ----------------------------------------------------------------------------
 
 /**
@@ -244,7 +248,7 @@ export async function readSection(
 }
 
 /**
- * THE IN-FLIGHT READS, CACHED OUTSIDE REACT — and they have to be outside.
+ * THE READS, CACHED OUTSIDE REACT — and they have to be outside.
  *
  * The section is unwrapped with `use()`, so the promise has to exist before the
  * render that consumes it. A promise minted during render is the documented
@@ -255,18 +259,50 @@ export async function readSection(
  * modal stayed open. A `useMemo` cannot hold this because React is free to drop
  * it; module scope is not React's to drop.
  *
- * TWO ENTRIES, NOT ONE. React can render two keys inside one window: a
- * `refresh()` transition renders at the new `serverRenderId` while an urgent
- * update — a keystroke in the search box — re-renders the committed tree at the
- * old one. With a single slot each render evicts the other's promise and mints a
- * fresh one, which is the same loop at a lower rate.
+ * ONE MAP, TWO JOBS, AND THAT IS WHY THE ANSWER IS KEPT BESIDE THE PROMISE
+ * (#673). It is a stale-while-revalidate cache: the promise is what a render
+ * suspends on, and `settled` is what a LATER visit can paint immediately while
+ * the read for the current `serverRenderId` is still in flight. Deriving the
+ * second from the first is impossible — a promise has no synchronous value —
+ * and a parallel map of views would be a second place for "the newest answer
+ * for this section" to be decided. Here it is one scan over one insertion-
+ * ordered map, so an answer that arrives out of order cannot overwrite a newer
+ * one: the newest READ wins, not the newest RESPONSE.
  *
- * AND THEY DO NOT OUTLIVE THE VISIT: `onUrlChange` drops them the moment
- * settings closes, so what is held is only ever an in-flight REQUEST for the
- * modal on screen — never server data parked for later, which is what
- * `memory/invariants.md` → Client/Server Data Synchronization forbids.
+ * THE KEY IS (section, serverRenderId, attempt) and every part earns its place.
+ * `serverRenderId` moves on every server render of the dashboard layout, so it
+ * is already the invalidation signal a write needs — nothing new is threaded
+ * for this. `attempt` is what makes a Retry a fresh request rather than a replay
+ * of the cached failure.
+ *
+ * THREE READS PER SECTION, NOT ONE. React can render two keys inside one
+ * window: a `refresh()` transition renders at the new `serverRenderId` while an
+ * urgent update — a keystroke in the search box — re-renders the committed tree
+ * at the old one. With a single slot each render evicts the other's promise and
+ * mints a fresh one, which is the same loop at a lower rate. The third slot is
+ * a retry's headroom. It is per SECTION because all five are prefetched
+ * together, so a global cap of two would have the modal evicting its own
+ * prefetch as it filled it.
+ *
+ * WHAT IS HELD, AND FOR HOW LONG. This is per-TAB memory in module scope: it
+ * dies with the document, so a full navigation, a sign-out (which is one) and a
+ * new tab all start empty — there is no path by which one account's Team roster
+ * outlives its session here. A section this account may not open is never in it
+ * either: the prefetch walks `visibleIds`, and a gated section reached by a
+ * typed fragment answers `{ ok: false, reason: "refused" }`, which is not an
+ * answer and is never `settled.ok`.
  */
-const requests = new Map<string, Promise<SettingsSectionLoad>>();
+type SectionRead = {
+  /** The one promise for these inputs — the loop above is what forbids a second. */
+  promise: Promise<SettingsSectionLoad>;
+  /** The answer once it lands; `null` while the read is in flight. */
+  settled: SettingsSectionLoad | null;
+};
+
+const reads = new Map<string, SectionRead>();
+
+/** See "THREE READS PER SECTION" above. */
+const READS_PER_SECTION = 3;
 
 export function sectionRequest(
   id: SettingsSectionId,
@@ -274,18 +310,80 @@ export function sectionRequest(
   attempt: number
 ): Promise<SettingsSectionLoad> {
   const key = `${id} ${serverRenderId} ${attempt}`;
-  const existing = requests.get(key);
-  if (existing) return existing;
+  const existing = reads.get(key);
+  if (existing) return existing.promise;
 
-  const request = readSection(id);
-  requests.set(key, request);
-  // Keep the previous key for the interleaved render above, and nothing older.
-  for (const stale of [...requests.keys()].slice(0, -2)) requests.delete(stale);
-  return request;
+  const entry: SectionRead = {
+    settled: null,
+    // `entry` is referenced from a callback that cannot run before the object
+    // exists, so the cycle is only apparent.
+    promise: readSection(id).then((load) => {
+      entry.settled = load;
+      return load;
+    }),
+  };
+  reads.set(key, entry);
+
+  const prefix = `${id} `;
+  const mine = [...reads.keys()].filter((held) => held.startsWith(prefix));
+  for (const stale of mine.slice(0, -READS_PER_SECTION)) reads.delete(stale);
+  return entry.promise;
 }
 
-function forgetSection() {
-  requests.clear();
+/**
+ * The newest ANSWER this tab holds for a section, or `null` for one it has never
+ * loaded.
+ *
+ * THIS IS PRESENTATION, NOT STATE (#673, `memory/invariants.md` →
+ * Client/Server Data Synchronization). Its one caller paints it as the Suspense
+ * fallback for the read at the CURRENT `serverRenderId` — so it is on screen
+ * only while that read is in flight, and the fresh answer replaces it the moment
+ * it lands. Nothing reads it without a revalidation running, and nothing stores
+ * it in React state.
+ *
+ * Newest READ rather than newest RESPONSE: the map is insertion-ordered, so the
+ * last matching entry is the most recently ASKED, and a slower earlier read that
+ * settles afterwards is passed over rather than allowed to win.
+ *
+ * THE TAG IS CHECKED HERE, which is what makes the return type true. The caller
+ * pairs this view with the body for `id`, and this is the boundary where the
+ * cache's key and the answer's own `section` field meet.
+ */
+export function cachedSectionView<Id extends SettingsSectionId>(
+  id: Id
+): SettingsSectionViewOf<Id> | null {
+  const prefix = `${id} `;
+  let newest: SettingsSectionViewOf<Id> | null = null;
+  for (const [key, entry] of reads) {
+    if (!key.startsWith(prefix)) continue;
+    const settled = entry.settled;
+    if (settled?.ok && settled.view.section === id) {
+      newest = settled.view as SettingsSectionViewOf<Id>;
+    }
+  }
+  return newest;
+}
+
+/**
+ * Closing drops the FAILURES and keeps the answers (#673).
+ *
+ * A failure has to be cached WITHIN a visit — a key that mints a new promise on
+ * every render is the replay loop above, so the cached failure is what lets the
+ * pane say so and stand still. It must not survive the visit: `attempt` is the
+ * dialog's own state and resets to 0 when the modal unmounts, so a kept failure
+ * would be replayed on the next opening under the key the reader arrives back
+ * on, and a section that failed once would look broken for as long as the tab
+ * lived.
+ *
+ * The answers stay, because `serverRenderId` already says when they stopped
+ * being true. Closing moves neither it nor the section, so what #657 dropped
+ * here to avoid serving "the previous visit's roster" is now served on purpose
+ * — with a revalidation in flight whenever the render id has moved.
+ */
+function dropFailedReads() {
+  for (const [key, entry] of reads) {
+    if (entry.settled && !entry.settled.ok) reads.delete(key);
+  }
 }
 
 /** Test seam: the module's per-document facts, reset between cases. */
@@ -295,5 +393,5 @@ export function __resetSettingsHashForTest() {
   wasOpen = false;
   wasOn = "";
   historyWatched = false;
-  requests.clear();
+  reads.clear();
 }

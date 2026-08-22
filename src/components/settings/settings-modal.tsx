@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
 import {
+  cachedSectionView,
   closeSettings,
   sectionRequest,
   settingsHashServerSnapshot,
@@ -194,6 +195,32 @@ function SettingsDialog({
   // see `sectionRequest`, which holds it OUTSIDE React because a suspended
   // render is replayed and a replay would mint a second promise.
   const request = sectionRequest(activeId, serverRenderId, attempt);
+
+  // WHAT THIS TAB ALREADY KNOWS about this section, which is what stands in
+  // while the read above is in flight (#673). `null` on a first visit, so a
+  // first open still draws the skeleton.
+  const stale = cachedSectionView(activeId);
+
+  // PREFETCH EVERY VISIBLE SECTION, ONCE PER OPENING (#673). There are at most
+  // five and each is small, so the switch a reader makes next has its values
+  // already in hand — that is the whole of "no spinner per switch". They are
+  // idempotent: `sectionRequest` is keyed, so this asks for the active section's
+  // read the render above already started, and a StrictMode double-invoke costs
+  // nothing.
+  //
+  // AN EFFECT, AND ON PURPOSE. This is not data SYNC — the read is keyed and the
+  // answer never reaches React state (`memory/contracts/data-patterns.md`) — it
+  // is a WARM, and "when settings opens" is exactly the moment an effect names.
+  // Spelling it during render would fire five reads on every `serverRenderId`
+  // change instead, which is the burst after a write that #673 rules against:
+  // the section on screen refetches, the other four revalidate when they are
+  // next looked at.
+  const prefetched = useRef(false);
+  useEffect(() => {
+    if (prefetched.current) return;
+    prefetched.current = true;
+    for (const id of visibleIds) sectionRequest(id, serverRenderId, 0);
+  }, [visibleIds, serverRenderId]);
 
   return (
     <Dialog
@@ -366,12 +393,33 @@ function SettingsDialog({
               section's own values are ever pending, which is why the frame does
               not flicker on the way in.
 
-              KEYED BY SECTION so a switch shows the skeleton (a new boundary
-              suspends into its fallback) while a `refresh()`-driven re-read does
-              not (the same boundary, updated inside the router's transition,
-              keeps what is on screen until the new values arrive). */}
+              KEYED BY SECTION so a switch shows the fallback (a new boundary
+              suspends into it) while a `refresh()`-driven re-read does not (the
+              same boundary, updated inside the router's transition, keeps what
+              is on screen until the new values arrive). The key must NOT gain
+              `serverRenderId`: that would turn every write into a new boundary,
+              and a new boundary drops what the reader is looking at.
+
+              AND THE FALLBACK IS THE LAST ANSWER THIS TAB HOLDS, not a skeleton,
+              whenever there is one (#673). That is the stale-while-revalidate
+              half of the mechanism in one expression: the cached values paint
+              instantly and `use(request)` below replaces them with the fresh
+              ones — so the pane is never blank for a section this reader has
+              already opened, and the pixels are right whether or not React ever
+              commits the fallback. It is on screen ONLY while the read for the
+              current `serverRenderId` is in flight, which is what keeps a
+              cached value presentation rather than state. */}
           <div className="flex-1 px-5 py-5 md:px-6 md:py-6">
-            <Suspense key={activeId} fallback={<SectionSkeleton />}>
+            <Suspense
+              key={activeId}
+              fallback={
+                stale ? (
+                  <SectionView activeId={activeId} view={stale} />
+                ) : (
+                  <SectionSkeleton />
+                )
+              }
+            >
               <SectionBody
                 activeId={activeId}
                 request={request}
@@ -430,16 +478,37 @@ function SectionBody({
   // THE TAG IS CHECKED, NOT ASSUMED. The view carries the section it belongs to
   // and the server answered the id we asked for, so this is never false — but it
   // is what makes the pairing below sound rather than merely likely, and it is
-  // the only place the tag and the map meet. Without it the cast would be a
-  // promise that a body and a view model match, kept by nobody.
-  const view = result.view;
-  if (view.section !== activeId) {
+  // the only place the answer OFF THE WIRE and the body map meet. Without it the
+  // cast would be a promise that a body and a view model match, kept by nobody.
+  if (result.view.section !== activeId) {
     return <SectionRefused activeId={activeId} retry={onRetry} />;
   }
-  const Body = SECTION_BODIES[activeId] as (props: {
-    view: typeof view;
-  }) => React.ReactNode;
 
+  return <SectionView activeId={activeId} view={result.view} />;
+}
+
+/**
+ * A section drawn from values already in hand.
+ *
+ * TWO CALLERS, AND THAT IS THE POINT (#673): the read's answer, and — as the
+ * Suspense fallback — the last answer this tab holds for the section while the
+ * current read is in flight. Both draw the identical component from the
+ * identical view model, so a revalidation is invisible unless something changed.
+ *
+ * The cast is the one `SECTION_BODIES` has always needed: the map is total over
+ * the id, the view is tagged with it, and the two are paired by whoever checked
+ * that tag — `SectionBody` for the wire, `cachedSectionView` for the cache.
+ */
+function SectionView<Id extends SettingsSectionId>({
+  activeId,
+  view,
+}: {
+  activeId: Id;
+  view: SettingsSectionViewOf<Id>;
+}) {
+  const Body = SECTION_BODIES[activeId] as (props: {
+    view: SettingsSectionViewOf<Id>;
+  }) => React.ReactNode;
   return <Body view={view} />;
 }
 
