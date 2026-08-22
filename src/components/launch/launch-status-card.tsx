@@ -16,6 +16,7 @@ import Link from "next/link";
 import {
   countdownHeadline,
   formatLaunchDay,
+  launchDateInvitation,
   launchedHeadline,
   launchStatusMeta,
   outcomeSummary,
@@ -40,6 +41,16 @@ export interface LaunchStatusCardProps {
    * "not recorded", never zero.
    */
   outcome?: { attendanceCount: number | null; decisionsCount: number | null };
+  /**
+   * Whether this viewer may name the day — `launch.schedule`, asked of the
+   * capability table by the page (#659).
+   *
+   * A PROP AND NOT A READ, like every other fact this card renders: it is a
+   * server component with no session in hand, and the same reason `daysUntil`
+   * arrives resolved applies here — one answer, decided once, so the card and
+   * the server cannot disagree about who may act.
+   */
+  canSchedule: boolean;
 }
 
 export function LaunchStatusCard({
@@ -48,6 +59,7 @@ export function LaunchStatusCard({
   daysUntil,
   readiness,
   outcome,
+  canSchedule,
 }: LaunchStatusCardProps) {
   const headline = countdownHeadline(daysUntil);
   const meta = launchStatusMeta(status ?? "planning");
@@ -109,7 +121,7 @@ export function LaunchStatusCard({
         </div>
         <p className="mt-3 text-lg font-semibold tracking-tight">No date yet</p>
         <p className="text-muted-foreground mt-1 text-xs">
-          Name the day and we&apos;ll build your readiness list.
+          {launchDateInvitation(canSchedule)}
         </p>
       </Link>
     );

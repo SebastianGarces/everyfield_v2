@@ -36,6 +36,7 @@ import {
   countdownHeadline,
   formatLaunchDay,
   launchStatusMeta,
+  PLANTER_NAMES_THE_DAY,
 } from "@/components/launch/presentation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -151,7 +152,7 @@ export function LaunchDateCard({
           <p className="text-muted-foreground mt-6">
             {canChangeDate
               ? "No date is set yet. Name the day and your readiness list is created from the Launch Playbook."
-              : "No date is set yet. Your planter names the day."}
+              : `No date is set yet. ${PLANTER_NAMES_THE_DAY}`}
           </p>
         )}
       </div>

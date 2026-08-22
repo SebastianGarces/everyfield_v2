@@ -271,6 +271,12 @@ export async function PlantDashboard({
                 new Date()
               )}
               readiness={launchReadiness}
+              // #659: the card's no-date line is a call to action, and naming
+              // the day is `launch.schedule`. Asked of the CAPABILITY TABLE —
+              // the same declaration `requireSeat` refuses the write with — so
+              // the sentence a Member reads and the answer the server would
+              // give cannot drift apart.
+              canSchedule={holdsSeatFor(viewer, "launch.schedule")}
               outcome={
                 launch
                   ? {

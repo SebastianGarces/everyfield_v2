@@ -176,11 +176,11 @@ export const READ_ONLY_SURFACE_CHECKLIST: readonly ChecklistRow[] = [
     surface: "Dashboard",
     mustNotRender:
       'Quick-action tiles, "add" cards, inline phase-advance controls, dismiss and edit affordances on cards',
-    governedBy: ["people.write", "meetings.write"],
+    governedBy: ["people.write", "meetings.write", "launch.schedule"],
     reachedBy: ["plant-member"],
     verdict: "fixed-here",
     gatedIn: ["src/app/(dashboard)/dashboard/plant-dashboard.tsx"],
-    note: "The two create tiles (Add Person, Schedule Meeting) rendered for every seat. There is no inline phase-advance control on this surface — the phase is a text label, and the declaration lives on /phase. The association Accept/Decline reminder was already Owner-gated at its data read (`isPlantOwner(viewer)`), and the leadership prompts were already gated by `canAnswerLeadershipQuestion`.",
+    note: 'The two create tiles (Add Person, Schedule Meeting) rendered for every seat. There is no inline phase-advance control on this surface — the phase is a text label, and the declaration lives on /phase. The association Accept/Decline reminder was already Owner-gated at its data read (`isPlantOwner(viewer)`), and the leadership prompts were already gated by `canAnswerLeadershipQuestion`. `launch.schedule` joined the row for #659: the Launch Sunday card\'s no-date line read "Name the day and we\'ll build your readiness list" to every seat — an imperative for a write only an Owner holds, on a card whose own destination already told a Member "Your planter names the day". A sweep that reads this row as being about BUTTONS misses it; a call to action is a write affordance in sentence form, and the FRD\'s "affordances on cards" covers it.',
   },
   {
     surface: "People directory (list)",

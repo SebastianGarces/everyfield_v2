@@ -18,6 +18,7 @@ import {
   isLaunchDateEvent,
   journalEntryLabel,
   launchDateEvents,
+  launchDateInvitation,
   launchedHeadline,
   launchStatusMeta,
   outcomeSummary,
@@ -558,4 +559,50 @@ test("no launch component computes a day difference of its own", () => {
       `${file} reads the clock — the server passes one instant down, or the SSR and hydrated markup disagree (React #418)`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// #659 — the no-date card does not tell a Member to act
+// ---------------------------------------------------------------------------
+
+test("the no-date line asks the Owner to act and tells everyone else who does", () => {
+  assert.match(
+    launchDateInvitation(true),
+    /^Name the day/,
+    "the seat that holds `launch.schedule` is the one the card may address"
+  );
+
+  const member = launchDateInvitation(false);
+  assert.equal(
+    member,
+    "Your planter names the day.",
+    "a Member reads the CONDITION, in the destination page's own words"
+  );
+  assert.ok(
+    !/^(Name|Add|Set|Choose|Pick)\b/.test(member),
+    "an imperative addressed to a reader who cannot perform it is the #659 defect — a link that quietly does nothing is worse than no link"
+  );
+});
+
+test("no component spells the who-names-the-day sentence itself", () => {
+  // The defect was a card and its destination disagreeing about who acts. The
+  // INVITATION may differ between surfaces — the page has room to name the
+  // Playbook, the compact card does not — but the CONDITION is one fact, so it
+  // is one constant and every surface reads it. A second literal is that
+  // disagreement growing back, and this is the file that would host it.
+  const dir = path.join(process.cwd(), "src", "components", "launch");
+  const offenders = readdirSync(dir)
+    .filter((file) => file !== "presentation.ts" && /\.tsx?$/.test(file))
+    .filter((file) => !file.endsWith(".test.ts"))
+    .filter((file) =>
+      /Your planter names the day/.test(
+        readFileSync(path.join(dir, file), "utf8")
+      )
+    );
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these components spell PLANTER_NAMES_THE_DAY themselves instead of importing it:\n${offenders.join("\n")}`
+  );
 });
