@@ -174,7 +174,8 @@ export const PRE_LAUNCH_CAPTION = `Before phase ${LAUNCH_PHASE} — still prepar
 export const LAUNCHED_CAPTION = `Phase ${LAUNCH_PHASE} and beyond — launched or past it`;
 
 /**
- * What an empty portfolio says — to a reader who may not be able to change it.
+ * What an empty PLANT portfolio says — to a reader who may not be able to
+ * change it.
  *
  * IT STATES THE CONDITION, IT DOES NOT ISSUE AN INSTRUCTION (#636). "Send
  * invitations to get started" is an order, and an org Member cannot follow it:
@@ -183,16 +184,25 @@ export const LAUNCHED_CAPTION = `Phase ${LAUNCH_PHASE} and beyond — launched o
  * thing the screen does not let them do reads as a broken page, not as a
  * suggestion.
  *
- * The sentence below is true for an Owner and a Member alike, so it needs no
- * seat branch of its own. The CALL TO ACTION is what turns on the seat, and it
- * stays beside this sentence gated on `org.invitation.manage` — the shape the
- * plants directory's empty state already used and the reason this wording was
- * borrowed from it rather than invented.
+ * The sentence is true for an Owner and a Member alike, so it needs no seat
+ * branch of its own. The CALL TO ACTION is what turns on the seat, and
+ * `EmptyPortfolio` renders it gated on `org.invitation.manage`.
  *
- * ONE SENTENCE, THREE EMPTY STATES. `/oversight` said it twice in two different
- * ways and `/oversight/plants` a third; the copy is always the one that misses
- * the fix, which is how the Owner's instruction outlived #500 on this page.
+ * WHICH SURFACES THESE SERVE, and which state their own condition on purpose.
+ * These two strings are for the empty PLANT portfolio: the `/oversight` index
+ * and the `/oversight/plants` directory, which said the same fact in three
+ * hand-typed wordings until #636 — and the copy is always the one that misses
+ * the fix, which is how the Owner's instruction outlived #500 on the index.
+ *
+ * The sending-church roster and `/oversight/health` are NOT behind these and
+ * should not be folded in. They are different subjects with different
+ * conditions — health adds "after each plant's first assessment" — and neither
+ * carries an imperative, so neither was ever this defect. A shared template
+ * that served all four would need a subject noun, a pronoun and a trailing
+ * condition slot, which is a worse trade than three similar sentences.
  */
+export const EMPTY_PORTFOLIO_HEADLINE = "No plants yet";
+
 export function emptyPortfolioCaption(scopeLabel: string): string {
   return `A plant appears here once its planter accepts an invitation from your ${scopeLabel}.`;
 }

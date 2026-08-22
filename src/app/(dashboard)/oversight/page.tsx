@@ -29,6 +29,7 @@
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { EmptyPortfolio } from "@/components/oversight/empty-portfolio";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -39,9 +40,9 @@ import {
 } from "@/components/ui/card";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import {
+  EMPTY_PORTFOLIO_HEADLINE,
   LAUNCHED_CAPTION,
   PRE_LAUNCH_CAPTION,
-  emptyPortfolioCaption,
   formatPhase,
   portfolioSpreadCaption,
   summarizePortfolioPhases,
@@ -101,15 +102,17 @@ export default async function OversightDashboardPage() {
           </CardHeader>
           <CardContent>
             {/*
-              The empty caption states the condition rather than ordering the
-              reader to invite somebody (#636). This card's caption carries no
-              call to action at all — a 12px line under a headline number is not
-              where a link belongs, and the same sentence in the Plants by Phase
-              block below has the seat-gated one beside it.
+              ORIENTATION ONLY, in this slot (#636). The old caption ordered the
+              reader to send invitations, which an org Member may not do. What
+              replaces it is not the full sentence either: this is a 12px line
+              in a third of a grid row, its other branch is a 15-character
+              count, and the Plants by Phase block below already says the long
+              version — the same sentence twice in one viewport reads as a
+              rendering fault.
             */}
             <p className="text-muted-foreground text-xs">
               {portfolio.total === 0
-                ? emptyPortfolioCaption(scopeLabel)
+                ? EMPTY_PORTFOLIO_HEADLINE
                 : portfolioSpreadCaption(portfolio)}
             </p>
           </CardContent>
@@ -157,27 +160,21 @@ export default async function OversightDashboardPage() {
         </CardHeader>
         <CardContent>
           {portfolio.total === 0 ? (
-            <p className="text-muted-foreground py-8 text-center">
-              {emptyPortfolioCaption(scopeLabel)}{" "}
-              {/*
-                This sentence named a page that did not exist until #23. Copy
-                that points at a surface is a promise; the link is what keeps it
-                — and since #500 the promise is only made to whoever can keep
-                it, because an org Member may not invite (`org.invitation.manage`
-                is Owner-only).
-              */}
-              {holdsSeatFor(user, "org.invitation.manage") && (
-                <>
-                  <Link
-                    href="/oversight/invitations"
-                    className="text-primary cursor-pointer underline underline-offset-4"
-                  >
-                    Invite a planter
-                  </Link>{" "}
-                  to get started.
-                </>
-              )}
-            </p>
+            /*
+              The words and the seat gate belong to `EmptyPortfolio`, shared
+              with `/oversight/plants` (#636). They were written out here as
+              well, and the two copies had already drifted — which is the same
+              way the Owner-only instruction in the card above outlived #500.
+              Copy that points at a surface is a promise; the link is what keeps
+              it, and since #500 the promise is only made to whoever can keep it
+              (`org.invitation.manage` is Owner-only).
+            */
+            <div className="py-8 text-center">
+              <EmptyPortfolio
+                scopeLabel={scopeLabel}
+                canInvite={holdsSeatFor(user, "org.invitation.manage")}
+              />
+            </div>
           ) : (
             <div className="space-y-3">
               {portfolio.distribution.map((row) => (
