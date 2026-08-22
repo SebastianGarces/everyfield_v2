@@ -2,7 +2,7 @@
 
 import { Search } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 
 import {
@@ -33,10 +33,12 @@ import {
 // parallel slot that intercepts `/settings/*`, so `children` of the dashboard
 // layout is still the route the reader was on, mounted, with its state intact.
 //
-// TWO COPIES OF THIS COMPONENT CAN EXIST, and `overlaid` is what tells them
-// apart: the slot's copy sets it, the real `/settings/*` route under `children`
-// — the one that draws for a URL somebody pasted — does not. Exactly one of them
-// is ever on screen; the stand-down rule below is what guarantees it.
+// ONE COPY, ALWAYS (#640, #646). Every route that draws this component lives in
+// the `@settings` slot — the interceptor for an in-app navigation, its
+// non-intercepting twin for a cold load — and a slot holds at most one match, so
+// a second copy is unrepresentable rather than ruled out. `overlaid` no longer
+// tells two copies apart; it says which of the two routes matched, which is the
+// same question as "was this document already showing a screen".
 // ============================================================================
 
 type SettingsModalProps = {
@@ -44,14 +46,7 @@ type SettingsModalProps = {
   activeId: SettingsSectionId;
   /** The sections this account may open, in registry order. */
   visibleIds: readonly SettingsSectionId[];
-  /**
-   * The exact path this copy was rendered for — `/settings/church`, or the bare
-   * `/settings`. NOT the section's canonical href: the bare route renders the
-   * default section, so the two differ there, and comparing against the section
-   * would leave that copy believing `/settings/account` was still its own.
-   */
-  ownPath: string;
-  /** True only for the copy the intercepting slot rendered. */
+  /** True only when the intercepting route matched — an in-app opening. */
   overlaid: boolean;
   /**
    * Where Close goes when nothing is behind the modal. Resolved on the server,
@@ -73,7 +68,10 @@ type SettingsModalProps = {
  *
  * Module scope is the honest scope for a per-document fact, and it is only ever
  * touched from an effect, so a server render never reads or writes it — module
- * state in a `"use client"` file is shared across requests on the server.
+ * state in a `"use client"` file is shared across requests on the server. A
+ * `useRef` cannot hold it: the cold-load route and the interceptor are two
+ * segments of the `@settings` slot, so the first section switch after a cold
+ * load swaps one for the other and remounts this component.
  * Cleared on dismiss: once the modal has closed, the reader is on a real screen
  * and the next opening has somewhere to return to.
  */
@@ -82,37 +80,22 @@ let bootedIntoSettings: boolean | null = null;
 export function SettingsModal({
   activeId,
   visibleIds,
-  ownPath,
   overlaid,
   home,
   children,
 }: SettingsModalProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const [query, setQuery] = useState("");
   const searchId = useId();
 
-  // First copy to mount in this document wins, and it is the truthful one: on a
-  // cold load that is the `children` copy, reporting no overlay; on an in-app
-  // open it is the slot's, reporting one.
+  // The FIRST mount in this document is the truthful one: it is the route the
+  // URL bar was pointing at when the document loaded. A cold load lands on the
+  // non-intercepting route and reports no overlay; an in-app opening is
+  // intercepted and reports one. Every later mount is a section switch, which is
+  // always intercepted and so always says `true`.
   useEffect(() => {
     if (bootedIntoSettings === null) bootedIntoSettings = !overlaid;
   }, [overlaid]);
-
-  // THE COLD-LOAD COPY STANDS DOWN ONCE THE SLOT TAKES OVER.
-  //
-  // After a pasted `/settings/church`, `children` is pinned at that path for as
-  // long as the document lives — a client-side move to another section is
-  // INTERCEPTED into the `@settings` slot and never re-renders `children`. Both
-  // trees would then be holding a modal, and the two stack: one showing Church,
-  // one showing Team, each with its own search box and its own Close.
-  //
-  // The address bar settles it. This copy was rendered for exactly one path; the
-  // moment the URL names a different one, the slot owns the modal and this copy
-  // draws nothing. The slot's copy re-renders on every navigation, so its
-  // pathname always matches — but it is excluded explicitly rather than left to
-  // that coincidence.
-  if (!overlaid && pathname !== ownPath) return null;
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 

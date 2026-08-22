@@ -59,6 +59,11 @@ export async function settingsSectionMetadata(
 // which sections the side navigation lists, which body draws — is resolved once,
 // here, so the four route files stay three lines each and cannot drift.
 //
+// ALL FOUR LIVE IN THE `@settings` SLOT (#640, #646), which holds at most one
+// match — so however a reader arrives, exactly one modal is on screen. Nothing
+// under the layout's `children` renders this, and `settings-slot.test.ts` is
+// what keeps it that way.
+//
 // THE GATE IS THE REGISTRY'S, ASKED ONCE. `settingsSectionsFor` is the same
 // answer the navigation is built from, so a section can never be listed and then
 // refuse its reader, and a section can never be reachable by URL that the
@@ -89,17 +94,9 @@ const SECTION_BODIES: Record<
 
 export async function SettingsSurface({
   sectionId,
-  ownPath,
   overlaid,
 }: {
   sectionId: SettingsSectionId;
-  /**
-   * The path the route was matched at — `/settings/church`, or the bare
-   * `/settings`. It is NOT derivable from `sectionId`, because the bare route
-   * renders the default section: those two paths name the same section and are
-   * different addresses, and the modal has to tell them apart.
-   */
-  ownPath: string;
   /**
    * True when an intercepting route put this modal over a live screen, false
    * when the URL was loaded cold. The ROUTE knows which it is; nothing here can
@@ -122,7 +119,6 @@ export async function SettingsSurface({
     <SettingsModal
       activeId={sectionId}
       visibleIds={visible.map((section) => section.id)}
-      ownPath={ownPath}
       overlaid={overlaid}
       // Where Close goes when there is nothing behind the modal. Resolved here
       // rather than pushing `/dashboard` and letting its own redirect fire,
