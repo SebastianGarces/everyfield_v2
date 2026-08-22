@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  DASHBOARD_MAIN_ID,
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
@@ -148,7 +149,19 @@ export function SettingsModal({
         if (!nextOpen) dismiss();
       }}
     >
-      <DialogContent className="bg-card flex h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:h-[min(40rem,calc(100dvh-4rem))] md:flex-row lg:max-w-4xl">
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          // Radix restores focus to whatever held it when the dialog opened.
+          // That is normally the Settings item inside the avatar dropdown,
+          // which has been unmounted by the time we get here, so the restore
+          // lands on `<body>` and the next Tab starts at the top of the
+          // document. Hand focus to the region the reader is looking at
+          // instead.
+          event.preventDefault();
+          document.getElementById(DASHBOARD_MAIN_ID)?.focus();
+        }}
+        className="bg-card flex h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:h-[min(40rem,calc(100dvh-4rem))] md:flex-row lg:max-w-4xl"
+      >
         {/* THE RAIL. `border-b` on a stacked phone layout and `border-r` once
             the two panes sit side by side, so the seam always separates the
             navigation from the section rather than floating. */}

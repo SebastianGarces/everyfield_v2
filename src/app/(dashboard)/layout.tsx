@@ -13,6 +13,7 @@ import { oversightOrgOf } from "@/lib/auth/tenancy";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { isCrawlerPreviewRequest } from "@/lib/crawler";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
+import { DASHBOARD_MAIN_ID } from "@/lib/settings/sections";
 import {
   notificationViewer,
   type NotificationViewer,
@@ -184,7 +185,20 @@ export default async function DashboardLayout({
               </Suspense>
             )}
           </DashboardHeader>
-          <main className="flex-1 overflow-auto">{children}</main>
+          {/* `tabIndex={-1}` so the settings modal has somewhere to put focus
+              when it closes. The control that opened it — a Settings item
+              inside the avatar dropdown — is gone by then, so Radix's
+              restore-to-trigger lands on `<body>` and a keyboard reader has to
+              tab from the top of the document. Focusing the main region instead
+              is the SPA-navigation answer, and it is `-1` so nothing joins the
+              tab order. */}
+          <main
+            id={DASHBOARD_MAIN_ID}
+            tabIndex={-1}
+            className="flex-1 overflow-auto outline-none"
+          >
+            {children}
+          </main>
           {/* Beside `children`, not inside `<main>`: the modal is a sibling of
               the screen it covers, and Radix portals it to the document body
               regardless. Rendered here so it sits inside the router and sidebar
