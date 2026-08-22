@@ -24,6 +24,19 @@ const Toaster = ({ ...props }: ToasterProps) => {
         error: <OctagonXIcon className="size-4" />,
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
+      toastOptions={{
+        classNames: {
+          // 24x24 for WCAG 2.5.8, WITHOUT redrawing the toast (#639). Sonner
+          // paints this control as a bordered 20px circle from its own
+          // stylesheet, so unlike the dialog and sheet X — invisible until it
+          // is hovered — growing the box here would be a visible change to
+          // every toast in the product. The painted circle keeps its 20px and
+          // `hit-area-6` (globals.css) extends the target with a centred
+          // `::after`. The overlay's far edge lands 15px in and the toast pads
+          // its content to 16px, so it collides with nothing.
+          closeButton: "hit-area-6",
+        },
+      }}
       style={
         {
           "--normal-bg": "var(--popover)",
