@@ -5,11 +5,15 @@ import { test } from "node:test";
 
 import {
   CHECKIN_DIMENSIONS,
+  CHECKIN_NOTE_MAX,
   CHECKIN_NUDGE_RUN,
+  checkinDraftFrom,
   checkinNudges,
-  hasAnsweredThisWeek,
+  completeAnswer,
   recentWeekStarts,
+  thisWeeksCheckin,
   weekStartOf,
+  type CheckinAnswer,
 } from "./planter-checkin";
 import type { PlanterCheckin, PlanterCheckinLevel } from "@/db/schema";
 
@@ -69,9 +73,76 @@ test("the strip's weeks are contiguous and end at this week", () => {
 
 test("this week is answered only by THIS week's row", () => {
   const asOf = new Date("2026-08-21T12:00:00.000Z");
-  assert.equal(hasAnsweredThisWeek([checkin("2026-08-17")], asOf), true);
-  assert.equal(hasAnsweredThisWeek([checkin("2026-08-10")], asOf), false);
-  assert.equal(hasAnsweredThisWeek([], asOf), false);
+  assert.equal(
+    thisWeeksCheckin([checkin("2026-08-17")], asOf)?.weekStart,
+    "2026-08-17"
+  );
+  assert.equal(thisWeeksCheckin([checkin("2026-08-10")], asOf), null);
+  assert.equal(thisWeeksCheckin([], asOf), null);
+});
+
+test("this week's row is picked out of a history, not the newest one", () => {
+  // The card prefills the change form from this row (#634). Handing it last
+  // week's answers would show a planter the wrong week and then save it over
+  // this one.
+  const asOf = new Date("2026-08-21T12:00:00.000Z");
+  const history = [
+    checkin("2026-08-03", { pace: "steady" }),
+    checkin("2026-08-10", { pace: "struggling" }),
+    checkin("2026-08-17", { pace: "strained" }),
+  ];
+
+  assert.equal(thisWeeksCheckin(history, asOf)?.pace, "strained");
+
+  // …and a week nobody answered yet reads as unanswered even with a full
+  // history behind it.
+  assert.equal(
+    thisWeeksCheckin(history, new Date("2026-08-24T12:00:00.000Z")),
+    null
+  );
+});
+
+// -- the draft the change form opens on (#634) --------------------------------
+
+const ANSWER: CheckinAnswer = {
+  spiritually: "strained",
+  marriageFamily: "steady",
+  financially: "struggling",
+  pace: "strained",
+  note: "Hard week. Tell Ana on Saturday.",
+};
+
+test("reopening and saving unchanged writes back exactly what was there", () => {
+  // The write is a whole-row upsert. A form reopened without the note would
+  // save `note: null` over a note the planter wrote and never tell them.
+  assert.deepEqual(completeAnswer(checkinDraftFrom(ANSWER)), ANSWER);
+});
+
+test("a note of nothing but whitespace is stored as no note", () => {
+  const draft = checkinDraftFrom({ ...ANSWER, note: null });
+  draft.note = "   ";
+
+  assert.equal(completeAnswer(draft)?.note, null);
+});
+
+test("a half-tapped draft is not saveable", () => {
+  const draft = checkinDraftFrom(null);
+  draft.answers.spiritually = "steady";
+  draft.answers.pace = "strained";
+
+  assert.equal(completeAnswer(draft), null);
+});
+
+test("the note length the keyboard enforces is the one the server enforces", () => {
+  // The action's single refusal message is about the three levels, so a note
+  // refused on length would be refused in a sentence that never mentions notes.
+  const schema = readFileSync(
+    join(SRC, "app", "(dashboard)", "phase", "checkin-actions.ts"),
+    "utf8"
+  );
+
+  assert.match(schema, /z\.string\(\)\.max\(CHECKIN_NOTE_MAX\)/);
+  assert.equal(CHECKIN_NOTE_MAX, 2000);
 });
 
 // -- the nudge ----------------------------------------------------------------
