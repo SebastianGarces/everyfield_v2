@@ -173,6 +173,30 @@ export function portfolioSpreadCaption(summary: PortfolioPhaseSummary): string {
 export const PRE_LAUNCH_CAPTION = `Before phase ${LAUNCH_PHASE} — still preparing to launch`;
 export const LAUNCHED_CAPTION = `Phase ${LAUNCH_PHASE} and beyond — launched or past it`;
 
+/**
+ * What an empty portfolio says — to a reader who may not be able to change it.
+ *
+ * IT STATES THE CONDITION, IT DOES NOT ISSUE AN INSTRUCTION (#636). "Send
+ * invitations to get started" is an order, and an org Member cannot follow it:
+ * #500 gave them a seat that reads the portfolio and changes nothing, so the
+ * page carries no invite control for them anywhere. Telling somebody to do a
+ * thing the screen does not let them do reads as a broken page, not as a
+ * suggestion.
+ *
+ * The sentence below is true for an Owner and a Member alike, so it needs no
+ * seat branch of its own. The CALL TO ACTION is what turns on the seat, and it
+ * stays beside this sentence gated on `org.invitation.manage` — the shape the
+ * plants directory's empty state already used and the reason this wording was
+ * borrowed from it rather than invented.
+ *
+ * ONE SENTENCE, THREE EMPTY STATES. `/oversight` said it twice in two different
+ * ways and `/oversight/plants` a third; the copy is always the one that misses
+ * the fix, which is how the Owner's instruction outlived #500 on this page.
+ */
+export function emptyPortfolioCaption(scopeLabel: string): string {
+  return `A plant appears here once its planter accepts an invitation from your ${scopeLabel}.`;
+}
+
 // THE COUNTDOWN ITSELF IS NOT HERE. This module carried a byte-for-byte copy
 // of `daysUntilTarget` (`src/lib/launch/countdown.ts`) — written first, in PR
 // #339, and left in place when the canon was extracted. It is gone: two

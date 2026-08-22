@@ -41,6 +41,7 @@ import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import {
   LAUNCHED_CAPTION,
   PRE_LAUNCH_CAPTION,
+  emptyPortfolioCaption,
   formatPhase,
   portfolioSpreadCaption,
   summarizePortfolioPhases,
@@ -99,9 +100,16 @@ export default async function OversightDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/*
+              The empty caption states the condition rather than ordering the
+              reader to invite somebody (#636). This card's caption carries no
+              call to action at all — a 12px line under a headline number is not
+              where a link belongs, and the same sentence in the Plants by Phase
+              block below has the seat-gated one beside it.
+            */}
             <p className="text-muted-foreground text-xs">
               {portfolio.total === 0
-                ? "No church plants yet. Send invitations to get started."
+                ? emptyPortfolioCaption(scopeLabel)
                 : portfolioSpreadCaption(portfolio)}
             </p>
           </CardContent>
@@ -150,7 +158,7 @@ export default async function OversightDashboardPage() {
         <CardContent>
           {portfolio.total === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
-              No church plants associated yet.{" "}
+              {emptyPortfolioCaption(scopeLabel)}{" "}
               {/*
                 This sentence named a page that did not exist until #23. Copy
                 that points at a surface is a promise; the link is what keeps it

@@ -33,7 +33,10 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { PlantFacts } from "@/components/oversight/plant-facts";
-import { formatPhase } from "@/lib/oversight/presentation";
+import {
+  emptyPortfolioCaption,
+  formatPhase,
+} from "@/lib/oversight/presentation";
 import type { OversightPlantSummary } from "@/lib/oversight/types";
 
 export function PlantsDirectory({
@@ -137,8 +140,7 @@ function EmptyDirectory({
     <div className="bg-card rounded-xl border border-dashed p-10 text-center">
       <h2 className="font-semibold">No plants yet</h2>
       <p className="text-muted-foreground mx-auto mt-2 max-w-md text-sm text-pretty">
-        A plant appears here once its planter accepts an invitation from your{" "}
-        {scopeLabel}.
+        {emptyPortfolioCaption(scopeLabel)}
       </p>
       {/* The sentence above is true for everyone; the call to action is only
           offered to whoever can answer it. */}
