@@ -29,6 +29,11 @@ import {
   NETWORK_VERDICT_PHRASES,
 } from "./network-register";
 
+import {
+  EVIDENCE_LENSES,
+  type EvidenceLens,
+  type EvidenceProfile,
+} from "@/lib/phase-engine/signals/evidence";
 import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 
 /** Who the insight is phrased for (rubric-v0: planter coaching vs. network health). */
@@ -129,6 +134,7 @@ export const JUDGE_RULES = [
   "observation_budget",
   "network_verdict_register",
   "planter_first_pairing",
+  "unknown_lens_not_healthy",
 ] as const;
 export type JudgeRule = (typeof JUDGE_RULES)[number];
 
@@ -143,8 +149,36 @@ function ruleIssue(rule: JudgeRule, message: string) {
 }
 
 /**
- * The full object the model is constrained to return: a list of insights plus a
- * one-line overall summary.
+ * The shape alone — a list of insights plus a one-line overall summary. Nothing
+ * calls this directly; {@link judgeOutputSchemaFor} is the schema, and the type
+ * below is inferred from the shape because a refinement does not change it.
+ */
+const judgeOutputShape = z.object({
+  /** A single conservative, plain-language read of overall plant health. */
+  summary: z.string().min(10).max(600),
+  /** The grounded findings. At least one is required. */
+  insights: z.array(insightSchema).min(1),
+});
+export type JudgeOutput = z.infer<typeof judgeOutputShape>;
+
+/** Is this insight category one of the eight lenses the profile speaks for? */
+function lensOf(category: InsightCategory): EvidenceLens | null {
+  return (EVIDENCE_LENSES as readonly string[]).includes(category)
+    ? (category as EvidenceLens)
+    : null;
+}
+
+/**
+ * The full object the model is constrained to return, held to the rules THIS
+ * PLANT's facts make available.
+ *
+ * A FUNCTION OF THE EVIDENCE PROFILE, and there is deliberately no snapshot-free
+ * spelling of this schema (#635). "Unknown is not healthy" cannot be asked of a
+ * draft without knowing what each lens knows, and the version of this file that
+ * had a constant schema is the version where that rule lived in rubric prose
+ * only — a request the model could talk itself out of on the one plant where it
+ * matters most. A cold-start plant was told its vision casting was GOING WELL,
+ * on the evidence line "based on no activity recorded yet".
  *
  * EVERY RULE A DRAFT IS HELD TO IS A REFINEMENT HERE, including audience
  * coverage (PE-012), which used to be a post-parse throw in the pipeline. That
@@ -153,14 +187,8 @@ function ruleIssue(rule: JudgeRule, message: string) {
  * draft while the other three rules were re-prompted (#605). One list of rules,
  * one rejection path, one place to add the next one.
  */
-export const judgeOutputSchema = z
-  .object({
-    /** A single conservative, plain-language read of overall plant health. */
-    summary: z.string().min(10).max(600),
-    /** The grounded findings. At least one is required. */
-    insights: z.array(insightSchema).min(1),
-  })
-  .superRefine((output, ctx) => {
+export function judgeOutputSchemaFor(evidence: EvidenceProfile) {
+  return judgeOutputShape.superRefine((output, ctx) => {
     // Both audiences must be represented (PE-012). The object shape cannot say
     // "at least one of each", so it is said here.
     if (!hasBothAudiences(output.insights)) {
@@ -178,6 +206,16 @@ export const judgeOutputSchema = z
     );
     const unpaired = findUnpairedNetworkCategories(output.insights);
 
+    // THE LENSES THAT KNOW NOTHING, read once because three of the messages
+    // below have to agree about them (#635). The free-pairing device — pair a
+    // network concern with a "positive" planter insight, which the budget does
+    // not count — is illegal in exactly these categories, and a message that
+    // recommends it there sends the model at a rule that will refuse it.
+    const blind = EVIDENCE_LENSES.filter(
+      (lens) => evidence[lens].quality === "unknown"
+    );
+    const blindList = blind.join(", ");
+
     if (work.length > PLANTER_FOCUS_BUDGET) {
       ctx.addIssue(
         ruleIssue(
@@ -193,7 +231,15 @@ export const judgeOutputSchema = z
             // budget, dropped a planter item, and came back unpaired. The way
             // out is stated here, where both counts are in hand.
             (unpaired.length > 0
-              ? ` The pairing rule failed too, and the two are not in conflict: this budget counts only NON-POSITIVE planter insights, so pairing a network concern with a "positive" planter insight in the same category costs nothing against it. Reach for that before dropping anything.`
+              ? ` The pairing rule failed too, and the two are not in conflict: this budget counts only NON-POSITIVE planter insights, so pairing a network concern with a "positive" planter insight in the same category costs nothing against it. Reach for that before dropping anything.` +
+                // …EXCEPT WHERE THE LENS KNOWS NOTHING (#635). A "positive"
+                // insight there is refused outright, so recommending the free
+                // device in a blind category walks the model into the other
+                // rule — the same two-rule ping-pong this paragraph exists to
+                // stop, one lens over.
+                (blind.length > 0
+                  ? ` The one place that device is unavailable: ${blindList} have nothing measured and nothing attested, so NO "positive" insight may sit in them. Pair a concern there with an "info" insight — which DOES take one of your three slots — or raise it under a cross-cutting category instead.`
+                  : "")
               : "")
         )
       );
@@ -244,12 +290,69 @@ export const judgeOutputSchema = z
       ctx.addIssue(
         ruleIssue(
           "planter_first_pairing",
-          `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Your planter insights currently cover: ${planterCategories.join(", ") || "(none)"}. Fix it one of two ways: ADD a planter insight in each missing category (any severity counts, including "positive"), or, if it is not really a concern, mark the network insight "positive" or drop it. Different wording for each audience is expected; a concern the planter was never shown is not.`
+          `The planter must never discover a concern through their overseer. These categories were raised to the network with nothing for the planter on the same concern: ${unpaired.join(", ")}. Your planter insights currently cover: ${planterCategories.join(", ") || "(none)"}. Fix it one of two ways: ADD a planter insight in each missing category (any severity counts, including "positive"), or, if it is not really a concern, mark the network insight "positive" or drop it. Different wording for each audience is expected; a concern the planter was never shown is not.` +
+            // BOTH OF THOSE OUTS NAME "positive", AND BOTH ARE CLOSED ON A
+            // BLIND LENS (#635) — for either audience, since an overseer reads
+            // the same eight tiles the planter does. Say so here rather than
+            // letting the model discover it as a second rejection.
+            (blind.length > 0
+              ? ` Note: ${blindList} have nothing measured and nothing attested, so neither out may use "positive" there — for either audience. In those categories, pair with an "info" insight or drop the network concern.`
+              : "")
+        )
+      );
+    }
+
+    // UNKNOWN IS NOT HEALTHY (#483 C17, enforced by #635). The rubric has said
+    // this since v1 shipped — "for an unknown lens, produce at most an
+    // insufficient-evidence statement, never a quiet pass, a blank, or an
+    // encouraging remark" — and prose is where it stayed. Seven lenses obeyed
+    // it on the cold-start plant and the eighth did not, which is what a rule
+    // with nothing behind it looks like: it holds until the one plant where the
+    // model has nothing else to say.
+    //
+    // A "positive" severity is a VERDICT, and the scorecard renders it as the
+    // words GOING WELL over the lead insight's own evidence line. On a lens with
+    // nothing measured and nothing attested, the only line available is the
+    // absence itself, so the tile read "Going well · Based on no activity
+    // recorded yet". THAT SENTENCE IS NOW UNWRITABLE: `isColdStart` is true only
+    // when every signal block is empty (build-fact-snapshot.ts), which makes
+    // every one of the eight lenses `unknown`, which this rule refuses to let a
+    // positive insight land in.
+    //
+    // ONLY THE POSITIVE BAND. A lens the engine cannot see may still be spoken
+    // about — "we don't have enough information to assess prayer yet" is the
+    // sentence #483 exists to produce, and it is severity "info". Refusing that
+    // too would trade a false pass for the blank it replaced.
+    const unhealthy = output.insights.filter((insight) => {
+      const lens = lensOf(insight.category);
+      return (
+        insight.severity === "positive" &&
+        lens !== null &&
+        evidence[lens].quality === "unknown"
+      );
+    });
+
+    if (unhealthy.length > 0) {
+      // BOTH SIDES AND THE WAY OUT, the shape #605 settled on: the lenses that
+      // know nothing, the insights that claimed otherwise, and the severity to
+      // reach for instead. The way out is stated at its REAL price — an "info"
+      // insight pairs a network concern just as well as a "positive" one, but
+      // it is not exempt from the observation budget the way a positive is, and
+      // a message that says otherwise walks the model into a budget rejection
+      // that then recommends the positive this rule refuses.
+      const claimed = unhealthy
+        .map((insight) => `"${insight.title}" (${insight.category})`)
+        .join("; ");
+
+      ctx.addIssue(
+        ruleIssue(
+          "unknown_lens_not_healthy",
+          `Absence of evidence is not evidence of health. These lenses have nothing measured and nothing attested for this plant, so they are UNKNOWN: ${blindList}. A "positive" insight in an unknown lens is a verdict resting on an absence, and is not stored: ${claimed}. For an unknown lens produce at most an insufficient-evidence statement at severity "info" — "we don't have enough information to assess this yet" — or leave the lens out of the assessment entirely. Never cite the absence itself as the basis for an encouraging read. If one of these was pairing a network concern, an "info" insight pairs it just as well — but unlike a "positive" one it DOES take one of your three planter focus slots, so drop something else or raise the concern under a cross-cutting category (onboarding, follow_up, launch_readiness, phase_progress), which this rule does not touch.`
         )
       );
     }
   });
-export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
+}
 
 /**
  * The pipeline's public return type: the validated model output plus the audit

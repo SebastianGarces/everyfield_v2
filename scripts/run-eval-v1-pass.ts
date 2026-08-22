@@ -34,6 +34,7 @@
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
 
+import type { EvidenceLens } from "../src/lib/phase-engine/signals/evidence";
 import type { PlantFactSnapshot } from "../src/lib/phase-engine/signals/types";
 
 config({ path: ".env.local" });
@@ -194,7 +195,9 @@ async function audit(): Promise<void> {
   }
 
   // ---- Per-lens matrix -------------------------------------------------
-  const LENSES = [
+  // Typed as the evidence profile's own key, so the matrix and the evidence
+  // audit below cannot drift apart from the eight lenses that profile covers.
+  const LENSES: EvidenceLens[] = [
     "vision_casting",
     "shared_ownership",
     "critical_mass",
@@ -344,12 +347,43 @@ async function audit(): Promise<void> {
       }
 
       // An unknown lens may not produce a confident read.
-      for (const lens of ["prayer", "generosity"] as const) {
-        const quality = snap.evidence?.[lens].quality;
+      //
+      // ALL EIGHT LENSES, NOT THE TWO THE RULE WAS WRITTEN FOR (#635). This
+      // loop used to name prayer and generosity — #483's worked examples, and
+      // the only two lenses that are blind on a plant with activity. Every lens
+      // is blind on the COLD-START plant, and the one this audit never asked
+      // about is the one that broke the rule: EVAL-01's CSF-1 tile read "Vision
+      // casting · GOING WELL · Based on no activity recorded yet" through a
+      // fleet pass that reported no violations.
+      for (const lens of LENSES) {
+        const quality = snap.evidence?.[lens]?.quality;
         if (quality !== "unknown") continue;
         for (const i of insights.filter((x) => x.category === lens)) {
+          // A POSITIVE VERDICT ON A BLIND LENS IS ITS OWN LINE, because it is
+          // the one shape that reaches the planter as a health verdict rather
+          // than as prose: the scorecard renders it as the words GOING WELL.
+          // Since #635 the judge schema refuses it outright, so a hit here means
+          // the refinement is not doing what the PR claims.
+          if (judgeSeverity(i.severity) === "positive") {
+            violations.push({
+              church,
+              rule: `unknown lens must never read as healthy (${lens})`,
+              detail: `${i.audience} "${i.title}" — positive verdict on a lens with nothing measured and nothing attested`,
+            });
+            continue;
+          }
+          // THE NEUTRAL BAND IS NOT A CONFIDENT READ (#635). "info" on a blind
+          // lens is either Bryan's sentence or a plain statement of the absence
+          // with the first step beside it — "vision meetings have not yet
+          // commenced; consider setting up a rhythm" — which claims nothing
+          // about health and is what a cold-start planter is owed (PE-018).
+          // #635 ruled that band defensible on an absence, so only a WATCH or
+          // URGENT read is held to the insufficient-evidence phrasing here: a
+          // confident negative on a lens with no evidence is the same overclaim
+          // as a confident positive, pointed the other way.
+          if (judgeSeverity(i.severity) === "info") continue;
           if (
-            !/not (currently )?have enough information|do not have enough|insufficient|cannot assess|no information/i.test(
+            !/not (currently )?have enough information|do not have enough|insufficient|cannot assess|no information|don't have enough|not enough information/i.test(
               i.body
             )
           ) {

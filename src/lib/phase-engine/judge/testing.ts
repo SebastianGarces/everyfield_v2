@@ -1,5 +1,6 @@
 // ============================================================================
-// Test support for the judge's throttle — the ONE virtual `PacerClock`.
+// Test support for the judge: the ONE virtual `PacerClock`, and the ONE schema
+// a suite that is not about evidence should be holding drafts to.
 //
 // Every throttle suite runs on a clock whose `sleep` ADVANCES time instead of
 // passing it, so a 27-second pacing wait is asserted in microseconds. That is
@@ -17,7 +18,21 @@
 // which is why it is deliberately NOT re-exported from `index.ts`.
 // ============================================================================
 
+import { makeEvidence } from "@/lib/phase-engine/signals/testing";
+
+import { judgeOutputSchemaFor } from "./schema";
 import type { PacerClock } from "./token-pacer";
+
+/**
+ * The judge schema for the fixture plant.
+ *
+ * There is no snapshot-free judge schema (#635) — the rules a draft is held to
+ * include what each lens can possibly know — so every suite needs a profile to
+ * build one from, and four suites reaching for their own is how they end up
+ * describing four different plants. `makeEvidence()` derives it from the shared
+ * snapshot fixture, so what these suites assert is what production would.
+ */
+export const FIXTURE_JUDGE_SCHEMA = judgeOutputSchemaFor(makeEvidence());
 
 export interface VirtualClock extends PacerClock {
   /** Every `sleep` the code under test asked for, in order, in ms. */
