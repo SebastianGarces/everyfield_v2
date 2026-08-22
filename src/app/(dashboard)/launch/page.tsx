@@ -65,6 +65,7 @@ import { getLaunchJournalEntries } from "@/lib/launch/journal";
 import {
   convergeLaunchReadiness,
   getLaunchMilestoneHistory,
+  launchExpectsReadiness,
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
@@ -125,6 +126,25 @@ export default async function LaunchPage() {
   const history = buildLaunchHistory(milestoneHistory, journal);
   const hasDateHistory = launchDateEvents(journal).length > 0;
   const hasReadiness = !!readiness && readiness.totalCount > 0;
+  // A launch with a day named is one whose readiness list exists or is owed —
+  // never one whose absence is left unexplained (#614).
+  const expectsReadiness = launchExpectsReadiness(status);
+
+  // THE TWO ZERO-ROWS MOMENTS ARE DIFFERENT FACTS, so one message cannot be true
+  // of both. Before a day is named, nothing is meant to be there and the copy
+  // says what names it. After one is named, the list is owed, the converge above
+  // has just failed to produce it, and telling that planter their list arrives
+  // when they name the day would be a lie about a day they already named.
+  const readinessEmptyState = expectsReadiness
+    ? {
+        title: "We could not build your readiness list",
+        detail:
+          "Reload the page to try again. If it stays empty, tell us with the Feedback button.",
+      }
+    : {
+        title: "No readiness list yet",
+        detail: "Naming Launch Sunday seeds it from the Launch Playbook.",
+      };
 
   return (
     <>
@@ -219,8 +239,16 @@ export default async function LaunchPage() {
             />
           )}
 
-          {/* ---- The work, and the record of it ------------------------- */}
-          {(hasReadiness || history.length > 0) && (
+          {/* ---- The work, and the record of it -------------------------
+              `expectsReadiness` is the third arm, and it is what makes the
+              section unhideable for a launch with a day (#614). The empty state
+              below used to live INSIDE a guard that required readiness or
+              history, so the one plant that needed the explanation — a
+              scheduled launch with zero milestone rows — was the one plant the
+              explanation could never reach. A page that says "work the
+              readiness list" over a hidden list is a page the planter reads as
+              broken. */}
+          {(hasReadiness || history.length > 0 || expectsReadiness) && (
             <LaunchTabs
               historyCount={history.length}
               tasks={
@@ -228,9 +256,9 @@ export default async function LaunchPage() {
                   <MilestoneBoard readiness={readiness} canEdit />
                 ) : (
                   <div className="bg-card rounded-xl border border-dashed p-6 text-center shadow-sm">
-                    <p className="font-medium">No readiness list yet</p>
+                    <p className="font-medium">{readinessEmptyState.title}</p>
                     <p className="text-muted-foreground mt-1 text-sm">
-                      Naming Launch Sunday seeds it from the Launch Playbook.
+                      {readinessEmptyState.detail}
                     </p>
                   </div>
                 )
