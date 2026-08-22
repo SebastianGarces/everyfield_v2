@@ -39,7 +39,8 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // the CHECK constraint on the column, and this route has no error boundary
   // (`src/lib/tasks/list-params.ts`).
   const params = await searchParams;
-  const { view, showCompleted } = parseTaskListSearchParams(params);
+  const parsed = parseTaskListSearchParams(params);
+  const { view, showCompleted } = parsed;
 
   // ONE clock read for the page. Every relative due date under it — the group
   // headings and each card's "2 days overdue" — is measured against this
@@ -61,7 +62,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
       // the rows under them, so they take the list's own filters — anything
       // that narrows the list narrows the numbers with it. Passing less is how
       // `?category=follow_up` came to render "1 active" over "No tasks found".
-      getTaskCounts(user.churchId, taskListScope(user.id, params)),
+      getTaskCounts(user.churchId, taskListScope(user.id, parsed)),
       listOpenFollowUpTasks(user.churchId),
       listFollowUpContacts(user.churchId),
       listFollowUpAssignees(user.churchId),

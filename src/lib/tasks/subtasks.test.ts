@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { and, type SQL } from "drizzle-orm";
-import { PgDialect } from "drizzle-orm/pg-core";
 
 import type { NewTask, Task } from "@/db/schema";
 import {
@@ -14,8 +12,6 @@ import {
   createNextRecurrence,
   planRecurrenceChildren,
   resolveSubtaskAssignee,
-  taskCountConditions,
-  taskListConditions,
   type RecurrenceChild,
   type RecurrenceDeps,
 } from "./service";
@@ -122,63 +118,7 @@ test("an unassigned parent leaves the subtask unassigned", () => {
   assert.equal(resolveSubtaskAssignee("", null), null);
 });
 
-// ----------------------------------------------------------------------------
-// The badges count what the list shows (decision C on #370).
-//
-// `listTasks` filtered subtasks out and `getTaskCounts` did not, so the header
-// read "3 completed" over a list with no completed rows. The two condition
-// builders are rendered here and compared: no database, just the SQL they
-// would send.
-// ----------------------------------------------------------------------------
-
 const CHURCH_ID = "11111111-1111-4111-8111-111111111111";
-const PARENT_ONLY = `"tasks"."parent_task_id" is null`;
-
-const dialect = new PgDialect();
-
-function renderConditions(conditions: SQL[]): string {
-  return dialect.sqlToQuery(and(...conditions)!).sql;
-}
-
-test("the count query excludes subtasks, exactly as the list does", () => {
-  const listed = renderConditions(taskListConditions(CHURCH_ID));
-  const counted = renderConditions(taskCountConditions(CHURCH_ID));
-
-  assert.ok(
-    listed.includes(PARENT_ONLY),
-    `the list should exclude subtasks, got: ${listed}`
-  );
-  assert.ok(
-    counted.includes(PARENT_ONLY),
-    `the badges should exclude subtasks, got: ${counted}`
-  );
-});
-
-test("the badges exclude subtasks in the completed view too", () => {
-  // The view that exposed the contradiction: `?view=all&includeCompleted=true`.
-  const listed = renderConditions(
-    taskListConditions(CHURCH_ID, { includeCompleted: true })
-  );
-
-  assert.ok(listed.includes(PARENT_ONLY));
-  assert.ok(
-    renderConditions(taskCountConditions(CHURCH_ID)).includes(PARENT_ONLY)
-  );
-});
-
-test("no option makes the badges count checklist items as tasks", () => {
-  // `listTasks` has an `includeSubtasks` escape hatch for callers that really
-  // want the rows. `getTaskCounts` deliberately has none — a badge that says
-  // "3 completed" means three tasks in every view.
-  const withSubtasks = renderConditions(
-    taskListConditions(CHURCH_ID, { includeSubtasks: true })
-  );
-
-  assert.ok(!withSubtasks.includes(PARENT_ONLY));
-  assert.ok(
-    renderConditions(taskCountConditions(CHURCH_ID)).includes(PARENT_ONLY)
-  );
-});
 
 // ----------------------------------------------------------------------------
 // The checklist carries over to the next instance (decision A on #370).

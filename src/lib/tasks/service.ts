@@ -275,8 +275,39 @@ const checklistParent = alias(tasks, "checklist_parent");
  * The predicate builders below take the table they are speaking about, because
  * `getTaskCounts` has to constrain a parent by the same rules as its child.
  * Both members have the same columns; only the name in the SQL differs.
+ *
+ * Deliberately not exported: every caller outside this module wants the
+ * default, and a type whose second arm nobody else can construct would read as
+ * a choice it does not offer.
  */
-export type TasksTable = typeof tasks | typeof checklistParent;
+type TasksTable = typeof tasks | typeof checklistParent;
+
+/**
+ * The filters a NUMBER of tasks is defined by.
+ *
+ * `listTasks`' options minus the four that belong to a reader walking rows
+ * (`cursor`, `limit`, `sortBy`, `sortDir`), and minus the two the badges DECIDE
+ * rather than accept. Those two are the whole point of the type:
+ *
+ * - `includeCompleted` is forced on. It is a display toggle over the
+ *   population, not part of it, and the badges have to see completed rows to
+ *   say how many "Show Completed" would reveal.
+ * - there is no `includeSubtasks`, because a badge that says "3 completed"
+ *   means three TASKS in every view (decision C on #370).
+ *
+ * Both were once unrepresentable, because the count query hard-coded them.
+ * Handing the badges the list's full option type would have made them merely
+ * documented again — an excess-property error is the version that holds.
+ */
+export type TaskCountScope = Omit<
+  ListTasksOptions,
+  | "cursor"
+  | "limit"
+  | "sortBy"
+  | "sortDir"
+  | "includeCompleted"
+  | "includeSubtasks"
+>;
 
 /**
  * Every WHERE condition `listTasks` applies, as a list.
@@ -453,13 +484,12 @@ export async function listTasks(
  * own badge reads "0 completed" explains itself; one that promises a task the
  * filter excludes is the dead control ruled on in #611.
  *
- * There is still no `includeSubtasks` escape hatch — `taskListConditions`
- * defaults it off, and a badge that says "3 completed" means three tasks in
- * every view.
+ * `TaskCountScope` is what makes both of those structural rather than stated:
+ * neither option is on the type, so no caller can hand them in.
  */
 export function taskCountConditions(
   churchId: string,
-  options: ListTasksOptions = {},
+  options: TaskCountScope = {},
   table: TasksTable = tasks
 ): SQL[] {
   return taskListConditions(
@@ -470,19 +500,52 @@ export function taskCountConditions(
 }
 
 /**
+ * The "Checklists: N of M items done" line, as a query rather than a result.
+ *
+ * Handed back un-awaited — the technique `meetingFollowUpCountQuery` uses — so
+ * a test can render its SQL without a database. It is the half of #613 that is
+ * otherwise unreachable from outside this module, because the join it turns on
+ * is against a private alias. The failure it guards is quiet: let
+ * `includeCompleted` default through onto the PARENT side and every completed
+ * task's checklist vanishes from the line, with nothing on screen to say so.
+ *
+ * Items are scoped by their PARENT rather than by their own assignee, and the
+ * parent carries the badges' own conditions: the question the line answers is
+ * "how much checklist work sits inside the tasks I am looking at", so an item
+ * follows the task it itemises into or out of view.
+ */
+export function checklistCountQuery(
+  churchId: string,
+  options: TaskCountScope = {}
+) {
+  return db
+    .select({
+      checklistComplete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
+      checklistTotal: sql<number>`count(*)::int`,
+    })
+    .from(tasks)
+    .innerJoin(checklistParent, eq(tasks.parentTaskId, checklistParent.id))
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        isNull(tasks.deletedAt),
+        isNotNull(tasks.parentTaskId),
+        ...taskCountConditions(churchId, options, checklistParent)
+      )
+    );
+}
+
+/**
  * Get task counts grouped by status for a church, under the same filters the
- * list is read with — pass `listTasks`' own options.
+ * list is read with — pass the scope the list was read under.
  *
  * Checklist items are counted separately, in `checklistTotal` /
- * `checklistComplete`, and are scoped by their PARENT rather than by their own
- * assignee: the question the line answers is "how much checklist work sits
- * inside the tasks I am looking at", so a subtask follows the task it itemises
- * into or out of view. That is why the parent side of the join carries the same
- * conditions as the badges above it.
+ * `checklistComplete` — see `checklistCountQuery` for why they follow their
+ * parent rather than their own assignee.
  */
 export async function getTaskCounts(
   churchId: string,
-  options: ListTasksOptions = {}
+  options: TaskCountScope = {}
 ): Promise<TaskCounts> {
   const baseConditions = taskCountConditions(churchId, options);
 
@@ -502,23 +565,7 @@ export async function getTaskCounts(
       .from(tasks)
       .where(and(...baseConditions)),
 
-    db
-      .select({
-        checklistComplete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
-        checklistTotal: sql<number>`count(*)::int`,
-      })
-      .from(tasks)
-      .innerJoin(checklistParent, eq(tasks.parentTaskId, checklistParent.id))
-      .where(
-        and(
-          eq(tasks.churchId, churchId),
-          isNull(tasks.deletedAt),
-          isNotNull(tasks.parentTaskId),
-          // The PARENT carries the badges' own conditions, so a checklist line
-          // never describes items hanging off tasks the filter took away.
-          ...taskCountConditions(churchId, options, checklistParent)
-        )
-      ),
+    checklistCountQuery(churchId, options),
   ]);
 
   return {
