@@ -9,7 +9,11 @@
 
 ## Feature overview
 
-One route, `/settings`, presented as a settings hub with tabs. This FRD owns two of them:
+Settings is a modal that opens over whatever screen the user is on. The URL carries its
+state: `/settings/<section>` opens the modal at that section, and closing it returns to
+the screen behind. Inside the modal a side navigation lists the sections, a search box
+filters them, and the selected section renders beside the navigation. A settings URL
+loaded directly opens the same modal over the dashboard. This FRD owns two sections:
 
 - **Account** — for every signed-in account, in any tenancy: change email, change
   password, set a profile picture.
@@ -17,9 +21,10 @@ One route, `/settings`, presented as a settings hub with tabs. This FRD owns two
   schedule, inactivity thresholds) and the sharing panel that governs what an associated
   sending church or network sees.
 
-The hub also hosts the team page and the association area, each owned by its own feature
-(the seat-management surface and Oversight). This FRD adds its two tabs beside them; it
-does not restate theirs.
+The modal also hosts the team section, the association section, and the
+notification-preferences section, each owned by its own feature (the seat-management
+surface, Oversight, and the notification service). This FRD adds its two sections beside
+them; it does not restate theirs.
 
 Two deliberate absences shape the page. Launch Sunday is edited on the launch page —
 the launch entity is its only owner, and a date change there is journaled and
@@ -33,9 +38,9 @@ danger zone deferred past alpha and a church logo deferred to document-generatio
 
 | Surface | Who | Why this line sits where it does |
 |---------|-----|----------------------------------|
-| Account tab | Every account — plant, sending church, network, coach-only | Email, password and picture belong to the person, not the tenancy |
-| Church tab — profile | Plant **Admin and above** | Running the plant's day-to-day is what the Admin seat is for |
-| Church tab — sharing panel | Plant **Owner only** | What the plant shares with its overseers is a relationship decision, and relationship decisions are the Owner-only list |
+| Account section | Every account — plant, sending church, network, coach-only | Email, password and picture belong to the person, not the tenancy |
+| Church section — profile | Plant **Admin and above** | Running the plant's day-to-day is what the Admin seat is for |
+| Church section — sharing panel | Plant **Owner only** | What the plant shares with its overseers is a relationship decision, and relationship decisions are the Owner-only list |
 
 An Admin sees no sharing panel — the controls are absent, not disabled — and every
 sharing action is refused server-side for any seat but the Owner, through the same
@@ -43,7 +48,7 @@ single guard every state-changing action calls.
 
 ## User-visible behavior
 
-**Account tab** — three self-service controls:
+**Account section** — three self-service controls:
 
 - **Change email.** Email is the login identifier, so the new address must prove itself:
   the change takes effect only after the new address is verified, and the old address is
@@ -55,7 +60,7 @@ single guard every state-changing action calls.
 Both auth flows ride the same rate-limit guard that sign-in and registration ride — one
 implementation, not a second copy.
 
-**Church tab — profile** (Admin and above):
+**Church section — profile** (Admin and above):
 
 - Church name.
 - City and state / region, and an optional street address.
@@ -71,7 +76,7 @@ implementation, not a second copy.
   notification preferences.
 - Inactivity thresholds: the warning and alert day counts that drive inactivity signals.
 
-**Church tab — sharing panel** (Owner only):
+**Church section — sharing panel** (Owner only):
 
 One row per thing an associated org can see, each in plain language stating what the
 sending church or network will and will not see — the copy must not overclaim, because
@@ -102,10 +107,10 @@ surveillance feed of which switch flipped.
 
 | ID | Priority | Requirement |
 |----|----------|-------------|
-| CS-001 | Must | `/settings` is one route, a hub with tabs; this feature contributes the Account tab and the Church tab beside the team page the seat-management surface owns. |
-| CS-002 | Must | Account tab, every account: change email — the new address is verified before it becomes the login identifier, and the prior address is notified of the change. |
-| CS-003 | Must | Account tab, every account: change password, requiring the current password. |
-| CS-004 | Must | Account tab, every account: upload, replace or remove a profile picture, stored in the same object storage the product's uploads use. |
+| CS-001 | Must | Settings is a modal over the current screen with a side navigation of sections; the URL addresses it — `/settings/<section>` opens the modal at that section, closing returns to the screen behind, and a direct load opens the modal over the dashboard. This feature contributes the Account section and the Church section beside the team, association and notification-preferences sections. |
+| CS-002 | Must | Account section, every account: change email — the new address is verified before it becomes the login identifier, and the prior address is notified of the change. |
+| CS-003 | Must | Account section, every account: change password, requiring the current password. |
+| CS-004 | Must | Account section, every account: upload, replace or remove a profile picture, stored in the same object storage the product's uploads use. |
 | CS-005 | Must | Email and password changes ride the same rate-limit guard sign-in and registration ride — one implementation, not a second copy. |
 | CS-006 | Must | Church profile, plant Admin and above: edit church name, city, state / region, and an optional street address. |
 | CS-007 | Must | The church carries one IANA timezone, default `America/Chicago`, edited on the church profile and never inferred from the address; church-scoped surfaces render dates and relative-day badges in it. |
@@ -117,11 +122,12 @@ surveillance feed of which switch flipped.
 | CS-013 | Must | A plant created by accepting an org invitation starts with all sharing toggles on, written by the acceptance itself with the consent stated on the acceptance screen beforehand; a self-started plant starts with all toggles off; database defaults stay off. |
 | CS-014 | Must | Launch Sunday appears nowhere on the page; the launch entity owns it and its edits. |
 | CS-015 | Should | Each profile field saves independently with visible feedback; a failed save names the field, not the form. |
+| CS-016 | Should | A search box above the side navigation filters sections and settings entries by name; choosing a match shows its section. |
 
 ## Acceptance criteria
 
-1. A plant Member opens `/settings` and finds the Account tab but no church profile and
-   no sharing panel; a plant Admin finds the profile but no sharing panel; the Owner
+1. A plant Member opens `/settings` and finds the Account section but no church profile
+   and no sharing panel; a plant Admin finds the profile but no sharing panel; the Owner
    finds all of it. A sharing write submitted by an Admin without the UI is refused.
 2. Changing the email leaves the old address as the login identifier until the new
    address is verified; after verification the new address signs in, the old one does
@@ -140,6 +146,9 @@ surveillance feed of which switch flipped.
    the weekday changes which day the weekly digest lands without touching any
    recipient's own digest preference.
 8. No control on `/settings` reads or writes Launch Sunday.
+9. Settings opened from any screen keeps that screen behind the modal, and closing
+   returns to it; the same URL loaded in a fresh window opens the modal over the
+   dashboard.
 
 ## Data entities
 
@@ -162,8 +171,8 @@ detail belongs to the implementing unit.
   than duplicating the control.
 - **The wiki**: the wiki sharing row gates what an associated org reads of the plant's
   wiki.
-- **The seat-management surface**: owns `/settings/team`; this FRD only places its tabs
-  beside it.
+- **The seat-management surface**: owns `/settings/team`; this FRD only places its
+  sections beside it.
 
 ## Non-functional requirements
 
