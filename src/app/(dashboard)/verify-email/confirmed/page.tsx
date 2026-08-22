@@ -8,40 +8,28 @@ import { verifySession } from "@/lib/auth/session";
 // ============================================================================
 // WHERE A COMPLETED ADDRESS CHANGE LANDS — CS-002 (#616), added by #658.
 //
-// ----------------------------------------------------------------------------
-// IT PROVES NOTHING AND ASSERTS NOTHING — IT READS THE SESSION
-// ----------------------------------------------------------------------------
+// IT READS THE SESSION AND NOTHING ELSE. No token, no query, no write:
+// `/verify-email` owns the redemption and this page owns only the telling, so
+// the address it names is the one the account signs in with right now.
+// `confirmEmailChangeAction` holds WHY the outcome is a page rather than a pane
+// on the asking screen — in short, a spent `?token=` URL cannot survive a
+// reload and a pane's sentence had to wait on a transition that never came.
 //
-// The sentence names the address the account signs in with RIGHT NOW, taken
-// from the session's own row. So it is true for every reader who reaches it,
-// including one who arrives by typing the URL, and it cannot drift from the
-// swap the way a message carried in a query string could. Nothing here re-reads
-// the token, and nothing here writes: `/verify-email` owns the redemption and
-// this page owns only the telling.
-//
-// ----------------------------------------------------------------------------
-// WHY THE OUTCOME IS A PAGE AND NOT A PANE ON THE ONE THAT ASKED
-// ----------------------------------------------------------------------------
-//
-// Two reasons, both measured on the pane it replaces (#658).
-//
-// The change is TERMINAL, and the URL that asked for it is not: `?token=` is
-// spent the moment the swap commits, so a reload of the asking page — the first
-// thing a reader who is unsure does — earned the dead-link sentence for a change
-// that had in fact succeeded. This URL carries no token, so reloading it, or
-// coming back to it, says the same thing every time.
-//
-// And a pane whose text came out of the press had to wait for the press's own
-// transition to commit, which — with the tree patch `refresh()` streamed into
-// it — never happened: the address moved, the payload arrived, and the button
-// stayed on "Confirming…". A server-rendered page is not waiting on anything.
+// ONE THING IT CLAIMS THAT IT CANNOT CHECK: the second sentence describes an
+// EVENT ("your old address no longer works"), and a signed-in reader who simply
+// types this URL never had one. Kept deliberately — it is the reassurance the
+// reader who DID just move a credential needs, and the arrival it is wrong for
+// is one nothing links to. It is a trade, not an oversight.
 // ============================================================================
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Your email address is confirmed",
-};
+// One string for the tab, the breadcrumb and the heading — the sibling page
+// does the same, and three names for one page is three pages to a reader
+// skimming history.
+const TITLE = "Your address is confirmed";
+
+export const metadata: Metadata = { title: TITLE };
 
 export default async function EmailChangeConfirmedPage() {
   // The LAYOUT refuses a signed-out reader (see `../page.tsx`); this asks for
@@ -51,11 +39,9 @@ export default async function EmailChangeConfirmedPage() {
 
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Your email address" }]} />
+      <HeaderBreadcrumbs items={[{ label: TITLE }]} />
       <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-10">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Your address is confirmed
-        </h1>
+        <h1 className="text-xl font-semibold tracking-tight">{TITLE}</h1>
         <p className="text-muted-foreground text-pretty">
           You now sign in as <strong>{user.email}</strong>. Your old address no
           longer works, and we have told it about the change.

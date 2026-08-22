@@ -13,6 +13,7 @@ import {
   confirmEmailChange,
   requestEmailChange,
   type EmailChangeConfirmOutcome,
+  type EmailChangeConfirmRefusal,
   type EmailChangeRequestOutcome,
 } from "@/lib/auth/email-change";
 import {
@@ -203,7 +204,7 @@ export async function requestEmailChangeAction(input: {
  */
 export async function confirmEmailChangeAction(
   token: string
-): Promise<EmailChangeConfirmOutcome> {
+): Promise<EmailChangeConfirmRefusal> {
   const { user } = await requireSeat("self.write");
 
   let outcome: EmailChangeConfirmOutcome;
@@ -228,13 +229,22 @@ export async function confirmEmailChangeAction(
   // and a reload of that page says the same thing instead of the dead-link
   // sentence a spent `?token=` earns.
   //
-  // It also takes the outcome off the client. `refresh()` here streamed a tree
-  // patch that had to be applied INSIDE the transition the press opened, and
-  // the transition never settled — the swap committed, the payload arrived
-  // carrying the new address, and the button sat on "Confirming…" forever
-  // (#658; the refusal branch cleared in ~2s, and its only difference is that
-  // it does not revalidate). A redirect is rendered by the server, so no
-  // sentence a reader depends on waits on a transition to commit.
+  // It also takes the outcome off the client, which is the half that was
+  // BROKEN. The success sentence used to live in `useActionState`, and the
+  // update that would have shown it shared a transition with the tree patch
+  // `refresh()` streamed into this response — a transition that never
+  // committed. The swap landed, the payload arrived carrying the new address,
+  // and the button sat on "Confirming…" forever, while the refusal branch of
+  // the same component cleared in ~2s.
+  //
+  // DO NOT READ THAT AS "a server `refresh()` strands a press". It does not, in
+  // general: `requestEmailChangeAction` above calls `refresh()` from the same
+  // shape and renders its "check your inbox" sentence correctly — driven on
+  // #658's preview to be sure. What differs at this call site was not worth
+  // bisecting a framework race to name, because the fix does not depend on the
+  // answer: a redirect is rendered by the server, so no sentence a reader
+  // depends on waits on a transition to commit. If a third call site strands,
+  // these two are the pair to compare.
   //
   // …AND THE DESTINATION IS FRESHENED RATHER THAN THE ROUTE BEING LEFT. A
   // client-side navigation REUSES the layout segments both routes share, and

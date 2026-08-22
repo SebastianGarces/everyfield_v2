@@ -428,9 +428,20 @@ export function swapLoginIdentifierStatement(
     .returning({ id: users.id });
 }
 
+/**
+ * The only outcome a CALLER of the action can be handed (#658).
+ *
+ * Named separately because the endpoint's success does not return: it
+ * redirects, so the swap is reported by the page it lands on rather than by a
+ * value. Typing the action with this makes "the client renders no success
+ * pane" a fact the compiler holds, instead of a convention a later edit could
+ * quietly undo — which is how the stuck pane got here.
+ */
+export type EmailChangeConfirmRefusal = { ok: false; message: string };
+
 export type EmailChangeConfirmOutcome =
   | { ok: true; newEmail: string; previousEmail: string }
-  | { ok: false; message: string };
+  | EmailChangeConfirmRefusal;
 
 /**
  * The live request this account is holding, if any — what the Account section

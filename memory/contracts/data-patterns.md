@@ -18,7 +18,10 @@ const handleAdd = (data) =>
 ```
 
 In the action: `refresh()` (from `next/cache`) for mutations affecting the current page;
-`revalidatePath('/people')` for mutations affecting other pages.
+`revalidatePath('/people')` for mutations affecting other pages; and `revalidatePath('/', 'layout')`
+**before** a `redirect()` when the action itself navigates — the redirect is a client-side
+navigation, so it reuses the layout segments both routes share and the destination renders beside
+stale chrome without it (`confirmEmailChangeAction`, #658).
 
 **Unless the click is leaving.** A `<Link>` whose `onClick` also fires the action must call it
 plainly — no `startTransition`, and no `refresh()` in the action — because each turns the click
