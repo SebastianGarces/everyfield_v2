@@ -84,9 +84,33 @@ export type SettingsSection = {
 // renders.
 // ----------------------------------------------------------------------------
 
-/** A plant Owner whose plant exists — the account the Church section is about. */
+/** A plant Owner whose plant exists — the account the Sharing section is about. */
 function isPlanterWithPlant(viewer: SeatFields): boolean {
   return isPlantOwner(viewer);
+}
+
+/**
+ * A plant ADMIN OR ABOVE — the account the Church section is about (CS-006).
+ *
+ * THE WIDENING #615 DEFERRED, MADE HERE ON PURPOSE (#618). That change moved
+ * the zone and digest controls into this section and kept the old index block's
+ * Owner-only gate, with the reason stated in its PR: "CS-006 widens the church
+ * profile to Admin-and-above; doing it here would be a permission change
+ * wearing a rename." This is the issue that owns the widening, so it happens
+ * here, once, and the FRD row it answers is CS-006.
+ *
+ * It ASKS THE CAPABILITY TABLE rather than spelling a seat set, so the section's
+ * visibility and its four writes are the same question — `church.profile` is
+ * ADMIN_PLUS on a plant, and `setChurchProfileFieldAction` guards on exactly
+ * that. A control beside an action guaranteed to refuse it is the visible half
+ * of a permission drift (memory/invariants.md → Multi-Tenancy).
+ *
+ * SHARING DOES NOT COME WITH IT. The teaser inside the section stays gated on
+ * `isPlanterWithPlant`, because consent to share a plant's activity is the
+ * Owner's decision and always has been — see the section body.
+ */
+function isPlantAdminOrAbove(viewer: SeatFields): boolean {
+  return holdsSeatFor(viewer, "church.profile");
 }
 
 /**
@@ -126,18 +150,29 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: "church",
     label: "Church",
     description:
-      "How this plant's dates and times are shown, and when its digest arrives.",
+      "Where this plant is and what to call it, how its dates and times are shown, and when its digest arrives.",
     icon: Church,
     keywords: [
+      "name",
+      "address",
+      "street",
+      "city",
+      "state",
+      "region",
+      "country",
+      "location",
       "timezone",
       "time zone",
       "digest",
       "schedule",
       "weekday",
       "clock",
+      "inactivity",
+      "inactive",
+      "quiet",
     ],
     inNav: true,
-    isVisibleTo: isPlanterWithPlant,
+    isVisibleTo: isPlantAdminOrAbove,
   },
   {
     id: "team",

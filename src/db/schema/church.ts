@@ -24,6 +24,16 @@ export const churches = pgTable(
     city: varchar("city", { length: 255 }),
     stateRegion: varchar("state_region", { length: 255 }),
     country: varchar("country", { length: 255 }),
+    // CS-006, ruled 2026-08-15 §187: the one part of the address onboarding does
+    // NOT ask for, added here rather than at step 1 because a planter naming
+    // their plant does not yet have a street to give. Nullable and never
+    // required, exactly like the three above, and it joins them as a fourth
+    // INDIVIDUALLY optional column rather than being folded into `city`.
+    //
+    // IT IS NOT AN OVERSIGHT FIELD. `formatPlantLocation` (oversight/read.ts)
+    // composes city, region and country and deliberately does not read this —
+    // a sending church locating a plant needs the town, not the door.
+    streetAddress: varchar("street_address", { length: 255 }),
     // Onboarding (F12 / OB-001): null = the onboarding flow still owns this
     // planter's dashboard. Set once, when the planter finishes or skips out of
     // the flow. Existing churches were backfilled to their created_at by
@@ -54,7 +64,18 @@ export const churches = pgTable(
     timeZone: varchar("time_zone", { length: 64 })
       .default("America/Chicago")
       .notNull(),
-    // Inactivity thresholds (days since last activity)
+    // Inactivity thresholds (days since last activity), edited on the church
+    // profile since CS-009. Read by `/people` to age a contact's last-activity
+    // badge; `warning` must be the SMALLER of the two.
+    //
+    // NO `CHECK` HERE, unlike the digest columns below, and the line between
+    // them is what a bad value COSTS. A stored digest hour of 24 is a send that
+    // never happens — silent, unrecoverable, and invisible until someone asks
+    // why the digest stopped. A warning of 400 days is wrong on the very next
+    // page load of `/people`, in the same session, and the control that set it
+    // is one click away. So this column takes the `time_zone` posture: rejected
+    // by the action's parser and again by `setChurchInactivityThresholds`
+    // before the statement is built, with nothing frozen into DDL.
     inactivityWarningDays: integer("inactivity_warning_days")
       .default(7)
       .notNull(),

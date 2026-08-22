@@ -1,0 +1,38 @@
+-- #618 (CS-006) — the church profile gains the one address part onboarding
+-- never asked for.
+--
+-- ORDERING. `when` is the tail (0061) plus ONE SECOND, written by
+-- `scripts/restamp-migration.ts` during `pnpm db:generate` (#566). No sibling
+-- below it to reconcile forward, and this migration has never been renumbered:
+-- it was minted as 0062 and ships as 0062, so no operator reconcile is owed
+-- (memory/invariants.md → Migrations).
+--
+-- PURELY ADDITIVE, and additive in the cheapest shape Postgres has: one
+-- NULLABLE column with no default, which is a catalog-only change — no table
+-- rewrite, no lock held for the length of a scan, nothing to backfill. A NULL
+-- `street_address` is exactly "nobody has given this plant a street yet", which
+-- is true of every row that exists when this applies and stays true until a
+-- planter types one.
+--
+-- WHY NOT NOT-NULL-WITH-A-DEFAULT: the three location columns beside it
+-- (`city`, `state_region`, `country`) are individually nullable for the reason
+-- OB-002 gives — a planter who knows one part and not another must not be
+-- blocked — and NULL is the ONE flavour of absent this table carries. An empty
+-- string here would be a second flavour every later reader would have to know
+-- about.
+--
+-- NO CHECK CONSTRAINT ON THE INACTIVITY COLUMNS, deliberately, and #618's PR
+-- body carries the argument: `inactivity_warning_days < inactivity_alert_days`
+-- is guarded by the action's parser and again by
+-- `setChurchInactivityThresholds` before the statement is built — the same two
+-- guards `time_zone` has, and for the same reason. A bad threshold is wrong on
+-- the next `/people` load and correctable in the control that set it; a bad
+-- digest hour (which DOES carry a CHECK, 0056) is a send that never happens and
+-- is never noticed.
+--
+-- ROLLBACK (loses only the street addresses planters have typed since it
+-- applied; every other church-profile field predates this file):
+--
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "street_address";
+
+ALTER TABLE "churches" ADD COLUMN "street_address" varchar(255);
