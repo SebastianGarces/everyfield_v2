@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TeamsDashboard } from "@/components/ministry-teams/teams-dashboard";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
+import { teamsListSubtitle } from "@/lib/ministry-teams/presentation";
 import { getStaffingSummary, listTeams } from "@/lib/ministry-teams/service";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,15 @@ export default async function TeamsPage() {
   if (!user.churchId) {
     redirect("/dashboard");
   }
+
+  // AS-020: this page renders no control of its own — `TeamsDashboard` asks
+  // `useCan("teams.write")` for the create affordances — but the HEADER is a
+  // write affordance in sentence form (#668). "Organize, staff, and track"
+  // named three verbs and a Member holds only the third, on a page whose New
+  // Team button they are already not shown. Asked here rather than in the
+  // client because this component holds the session, which is the same table
+  // `requireSeat` refuses the POST with.
+  const canWrite = holdsSeatFor(user, "teams.write");
 
   const [teams, staffingSummary] = await Promise.all([
     listTeams(user.churchId),
@@ -30,7 +41,7 @@ export default async function TeamsPage() {
                 Ministry Teams
               </h1>
               <p className="text-muted-foreground">
-                Organize, staff, and track your ministry teams
+                {teamsListSubtitle(canWrite)}
               </p>
             </div>
           </div>

@@ -22,6 +22,7 @@ import {
   PEOPLE_PAGE_SIZE,
 } from "@/lib/people/list-params";
 import { getPipelineData } from "@/lib/people/pipeline";
+import { peopleDirectorySubtitle } from "@/lib/people/presentation";
 import { listPeople } from "@/lib/people/service";
 import { listTags } from "@/lib/people/tags";
 
@@ -92,8 +93,11 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">People</h1>
+              {/* The header is capability-matched too (#668): "Manage" is a
+                  write verb in a lower register, and a Member holds no
+                  `people.write` to manage anything with. */}
               <p className="text-muted-foreground">
-                Manage your contacts and pipeline
+                {peopleDirectorySubtitle(canWrite)}
               </p>
             </div>
             <div className="flex items-center gap-2">
