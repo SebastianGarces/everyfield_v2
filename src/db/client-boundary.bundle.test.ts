@@ -3,13 +3,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { SRC, codeOf, rel } from "@/lib/auth/server-action-surface";
 import {
-  SRC,
   chainTo,
   clientClosure,
   clientEntries,
-  codeOf,
-  rel,
 } from "@/lib/testing/client-bundle";
 
 // ============================================================================

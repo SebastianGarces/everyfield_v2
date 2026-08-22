@@ -5,12 +5,11 @@ import { test } from "node:test";
 
 import {
   SRC,
-  chainTo,
-  clientClosure,
   codeOf,
   declaresDirective,
   rel,
-} from "@/lib/testing/client-bundle";
+} from "@/lib/auth/server-action-surface";
+import { chainTo, clientClosure } from "@/lib/testing/client-bundle";
 
 // ============================================================================
 // WHAT THIS FILE EXISTS TO CATCH, and why the sibling suite could not.
