@@ -10,20 +10,20 @@
 // reading of a rule the server already owns, and it holds no token state to get
 // out of step with the URL that carried one.
 //
-// SUCCESS IS TERMINAL HERE. The address has moved, so the page it came from is
-// about an account identity that no longer holds — `refresh()` in the action
-// re-reads the chrome, and this pane then says what happened and points at
-// Settings rather than leaving a spent button on screen.
+// SUCCESS IS NOT RENDERED HERE AT ALL, and the TYPE is what says so: the action
+// returns `EmailChangeConfirmRefusal`, because its success redirects to
+// `/verify-email/confirmed` instead of returning. So a success pane added back
+// here does not compile. It was here, and it never appeared — see
+// `confirmEmailChangeAction` for what it waited on (#658).
 // ============================================================================
 
-import Link from "next/link";
 import { useActionState } from "react";
 
 import { confirmEmailChangeAction } from "@/app/(dashboard)/settings/account/actions";
 import { Button } from "@/components/ui/button";
 // Declared in the logic module, not re-exported by the action module — see the
 // header of `@/components/settings/change-email-form`.
-import type { EmailChangeConfirmOutcome } from "@/lib/auth/email-change";
+import type { EmailChangeConfirmRefusal } from "@/lib/auth/email-change";
 
 export function VerifyEmailConfirm({
   token,
@@ -34,27 +34,9 @@ export function VerifyEmailConfirm({
   currentEmail: string;
 }) {
   const [state, formAction, submitting] = useActionState<
-    EmailChangeConfirmOutcome | null,
+    EmailChangeConfirmRefusal | null,
     FormData
   >(async () => confirmEmailChangeAction(token), null);
-
-  if (state?.ok) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Your address is confirmed
-        </h1>
-        <p className="text-muted-foreground text-pretty">
-          You now sign in as <strong>{state.newEmail}</strong>.{" "}
-          <strong>{state.previousEmail}</strong> no longer works, and we have
-          told it about the change.
-        </p>
-        <Button asChild className="cursor-pointer">
-          <Link href="/settings/account">Back to settings</Link>
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <form action={formAction} className="space-y-4">
@@ -67,7 +49,7 @@ export function VerifyEmailConfirm({
         with. You currently sign in as <strong>{currentEmail}</strong>.
       </p>
 
-      {state && !state.ok && (
+      {state && (
         <p
           role="alert"
           className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
