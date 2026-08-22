@@ -46,8 +46,16 @@ export async function SharingSection() {
       >
         Your sending church and network
       </h2>
+      {/*
+        "Off unless you turn it on" was true of every plant until CS-013 and is
+        now false of half of them: a plant that joined through an org invitation
+        started sharing at the moment it accepted, and a planter arriving here to
+        check would have read a sentence saying their own switch could not be in
+        the position it visibly is in. The line says what is true of both origins
+        instead — the switch below shows which one this plant is.
+      */}
       <p className="text-muted-foreground text-sm">
-        Off unless you turn it on. Changes take effect at the next update.
+        Yours to change at any time. Changes take effect at the next update.
       </p>
 
       <OversightSharingSwitch

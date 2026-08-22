@@ -1,13 +1,16 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { planterCheckinLevels } from "@/db/schema";
 import { requireChurchAccess } from "@/lib/auth/access";
 import { requireSeat } from "@/lib/auth/seats";
 import { rethrowUnauthorized } from "@/lib/auth/unauthorized";
-import { weekStartOf } from "@/lib/phase-engine/planter-checkin";
+import {
+  CHECKIN_NOTE_MAX,
+  weekStartOf,
+} from "@/lib/phase-engine/planter-checkin";
 import { saveCheckin } from "@/lib/phase-engine/planter-checkin-db";
 
 // ============================================================================
@@ -31,7 +34,7 @@ const checkinSchema = z.object({
   marriageFamily: z.enum(planterCheckinLevels),
   financially: z.enum(planterCheckinLevels),
   pace: z.enum(planterCheckinLevels),
-  note: z.string().max(2000).nullish(),
+  note: z.string().max(CHECKIN_NOTE_MAX).nullish(),
 });
 
 export type SaveCheckinInput = z.infer<typeof checkinSchema>;
@@ -64,7 +67,11 @@ export async function saveCheckinAction(
       parsed.data
     );
 
-    revalidatePath("/phase");
+    // `refresh()`, not `revalidatePath("/phase")`: the check-in changes nothing
+    // off this page, and the card now DERIVES its answered state from the props
+    // this re-render carries (#634). The contract names the shape —
+    // memory/contracts/data-patterns.md.
+    refresh();
 
     return { success: true };
   } catch (error) {

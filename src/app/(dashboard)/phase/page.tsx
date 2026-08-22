@@ -36,8 +36,8 @@ import { PlanterCheckinCard } from "@/components/phase-engine/planter-checkin-ca
 import {
   checkinNudges,
   CHECKIN_HISTORY_WEEKS,
-  hasAnsweredThisWeek,
   recentWeekStarts,
+  thisWeeksCheckin,
 } from "@/lib/phase-engine/planter-checkin";
 import { listRecentCheckins } from "@/lib/phase-engine/planter-checkin-db";
 import { Trends } from "@/components/phase-engine/trends";
@@ -202,6 +202,12 @@ export default async function PhasePage() {
     }
   );
 
+  // This week's own row, not a boolean (#634): the card reopens it to be
+  // changed, and a form reopened with nothing to prefill would blank the note.
+  // Only the four answers cross the boundary — the row's ids and timestamps are
+  // the server's business.
+  const answeredThisWeek = thisWeeksCheckin(checkins, now);
+
   // The CSF scorecard (PE-023) is a pure projection of the SAME snapshot the
   // Focus panel renders — built here rather than re-read, so the two halves of
   // the page can never disagree and the page still costs one assessment read.
@@ -290,7 +296,15 @@ export default async function PhasePage() {
               assessment, deliberately: launch-green may not be shown without
               the planter's own state beside it. */}
           <PlanterCheckinCard
-            needsAnswer={!hasAnsweredThisWeek(checkins, now)}
+            thisWeek={
+              answeredThisWeek && {
+                spiritually: answeredThisWeek.spiritually,
+                marriageFamily: answeredThisWeek.marriageFamily,
+                financially: answeredThisWeek.financially,
+                pace: answeredThisWeek.pace,
+                note: answeredThisWeek.note,
+              }
+            }
             weeks={checkinWeeks}
             nudges={checkinNudges(checkins)}
           />

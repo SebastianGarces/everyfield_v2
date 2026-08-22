@@ -75,10 +75,16 @@ const ACCOUNTS: {
   {
     what: "a plant Admin",
     who: account({ churchId: PLANT, seat: "admin" }),
-    // AS-014 gives an Admin the team surface. The Church section keeps the
-    // Owner-only gate the old index block had; CS-006 is the issue that widens
-    // it, and widening it here would be a permission change wearing a rename.
-    sees: ["account", "team", "notifications"],
+    // AS-014 gives an Admin the team surface, and CS-006 gives them CHURCH
+    // (#618) — the widening #615 deferred by name, made in the issue that owns
+    // it. `church.profile` is ADMIN_PLUS on a plant, and the section now asks
+    // the capability table rather than spelling a seat set, so this row and the
+    // four writes behind the section move together or not at all.
+    //
+    // SHARING IS STILL ABSENT and that is the whole point of the two-gate
+    // split: an Admin may edit the plant's name, clocks and thresholds, and
+    // consent to send its activity to a sending church remains the Owner's.
+    sees: ["account", "church", "team", "notifications"],
   },
   {
     what: "a plant Member",

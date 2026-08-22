@@ -1,11 +1,17 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { churches } from "@/db/schema/church";
+import { churches, type NewChurch } from "@/db/schema/church";
 import { isValidTimeZone } from "@/lib/datetime";
+import {
+  INACTIVITY_DAYS_MAX,
+  INACTIVITY_DAYS_MIN,
+  type ChurchProfileWrite,
+} from "@/lib/churches/profile";
 
 // ============================================================================
-// THE CHURCH-LEVEL SETTINGS WRITES — the timezone, and when the digest lands.
+// THE CHURCH-LEVEL SETTINGS WRITES — the profile, the timezone, when the digest
+// lands, and how long silence runs before it is worth saying so.
 //
 // Columns on `churches`, written by the settings screen and read by whoever
 // already loaded the church row. This module exists so the `"use server"`
@@ -137,6 +143,166 @@ export class InvalidDigestScheduleError extends Error {
   constructor(field: ChurchDigestScheduleField, value: number) {
     super("INVALID_DIGEST_SCHEDULE");
     this.name = "InvalidDigestScheduleError";
+    this.field = field;
+    this.value = value;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The church profile — name and address (CS-006, #618)
+// ----------------------------------------------------------------------------
+//
+// ONE FIELD PER CALL, because CS-015 says each saves independently and a
+// whole-profile write would make a failure in any one of them a failure of all
+// five. The value arrives ALREADY PARSED as `ChurchProfileWrite`
+// (`./profile.ts`), which is the discriminated union whose `name` arm is
+// `string` and whose four optional arms are `string | null` — so the statement
+// below needs no "but is this the name?" guard: a NULL name is not a value this
+// signature accepts.
+//
+// THIS IS THE ONLY WRITER OF `churches.name` OUTSIDE CREATION. The name was
+// settable exactly once until now — `churchCreationStatements` at onboarding
+// step 1 — and it stays a single writer here rather than gaining a second
+// surface: `./profile.test.ts` walks `src/` for every `.update(churches)`,
+// holds the file list to a checked-in one, and asserts that no `.set()` outside
+// THIS module names a profile column.
+
+/**
+ * Persist one church-profile field.
+ *
+ * An empty `returning()` means the church id named no row — the action treats
+ * that as a save failure, never as success with a stale value, exactly as the
+ * timezone write above does.
+ */
+export function setChurchProfileFieldQuery(
+  churchId: string,
+  write: ChurchProfileWrite
+) {
+  return db
+    .update(churches)
+    .set({ ...profilePatch(write), updatedAt: new Date() })
+    .where(eq(churches.id, churchId))
+    .returning({
+      name: churches.name,
+      streetAddress: churches.streetAddress,
+      city: churches.city,
+      stateRegion: churches.stateRegion,
+      country: churches.country,
+    });
+}
+
+export async function setChurchProfileField(
+  churchId: string,
+  write: ChurchProfileWrite
+): Promise<string | null> {
+  const [row] = await setChurchProfileFieldQuery(churchId, write);
+  if (!row) {
+    throw new Error("CHURCH_NOT_FOUND");
+  }
+  return row[write.field];
+}
+
+/**
+ * The field id to the column it names.
+ *
+ * EXHAUSTIVE BY CONSTRUCTION: the switch returns on every arm and declares no
+ * default, so widening `ChurchProfileField` fails the build here until the new
+ * field names a column. That is the whole reason this is a switch and not
+ * `{ [write.field]: write.value }` — a computed key compiles for a field the
+ * table does not have.
+ */
+function profilePatch(write: ChurchProfileWrite): Partial<NewChurch> {
+  switch (write.field) {
+    case "name":
+      return { name: write.value };
+    case "streetAddress":
+      return { streetAddress: write.value };
+    case "city":
+      return { city: write.value };
+    case "stateRegion":
+      return { stateRegion: write.value };
+    case "country":
+      return { country: write.value };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Inactivity thresholds (CS-009, #618)
+// ----------------------------------------------------------------------------
+//
+// The same shape as the digest schedule above — TWO NUMBERS WRITTEN TOGETHER,
+// because `warning` must stay below `alert` and a half-landed save is a pair
+// nobody chose. Rejected before the statement is built, and NOT by a `CHECK`:
+// the argument for that line is on the columns themselves
+// (`src/db/schema/church.ts`) and in 0062's header.
+
+export interface ChurchInactivityThresholds {
+  /** Days of silence before a contact is flagged. Below `alertDays`. */
+  warningDays: number;
+  /** Days of silence before the flag escalates. */
+  alertDays: number;
+}
+
+export function setChurchInactivityThresholdsQuery(
+  churchId: string,
+  thresholds: ChurchInactivityThresholds
+) {
+  assertDayCount("warningDays", thresholds.warningDays);
+  assertDayCount("alertDays", thresholds.alertDays);
+  if (thresholds.warningDays >= thresholds.alertDays) {
+    throw new InvalidInactivityThresholdsError(
+      "warningDays",
+      thresholds.warningDays
+    );
+  }
+
+  return db
+    .update(churches)
+    .set({
+      inactivityWarningDays: thresholds.warningDays,
+      inactivityAlertDays: thresholds.alertDays,
+      updatedAt: new Date(),
+    })
+    .where(eq(churches.id, churchId))
+    .returning({
+      warningDays: churches.inactivityWarningDays,
+      alertDays: churches.inactivityAlertDays,
+    });
+}
+
+export async function setChurchInactivityThresholds(
+  churchId: string,
+  thresholds: ChurchInactivityThresholds
+): Promise<ChurchInactivityThresholds> {
+  const [row] = await setChurchInactivityThresholdsQuery(churchId, thresholds);
+  if (!row) {
+    throw new Error("CHURCH_NOT_FOUND");
+  }
+  return row;
+}
+
+function assertDayCount(
+  field: InactivityThresholdWriteField,
+  value: number
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < INACTIVITY_DAYS_MIN ||
+    value > INACTIVITY_DAYS_MAX
+  ) {
+    throw new InvalidInactivityThresholdsError(field, value);
+  }
+}
+
+export type InactivityThresholdWriteField = "warningDays" | "alertDays";
+
+export class InvalidInactivityThresholdsError extends Error {
+  readonly field: InactivityThresholdWriteField;
+  readonly value: number;
+
+  constructor(field: InactivityThresholdWriteField, value: number) {
+    super("INVALID_INACTIVITY_THRESHOLDS");
+    this.name = "InvalidInactivityThresholdsError";
     this.field = field;
     this.value = value;
   }
