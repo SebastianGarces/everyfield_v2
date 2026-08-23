@@ -223,10 +223,66 @@ test("each step is complete when — and only when — its own fact is in", () =
     true
   );
   assert.equal(
-    onboardingStepComplete("journey", { journeyDeclared: true }),
+    onboardingStepComplete("journey", {
+      journey: { declaredInPhaseHistory: true },
+    }),
     true
   );
   assert.equal(onboardingStepComplete("people", { peopleAdded: true }), true);
+});
+
+test("step 3 reads every piece of evidence a declared journey leaves", () => {
+  // #306 and #675 are the two halves of one rule, and each broke when the
+  // other's evidence was the only one read.
+  //
+  // #306: "not sure, and no date yet" is a real answer that writes no launch
+  // row and leaves `current_phase` at 0. Read the columns alone and the
+  // planter who answered looks exactly like the planter who never saw the
+  // step, so the nudge asks forever.
+  assert.equal(
+    onboardingStepComplete("journey", {
+      journey: {
+        declaredInPhaseHistory: true,
+        currentPhase: 0,
+        hasLaunch: false,
+      },
+    }),
+    true,
+    "the declaration row answers on its own, every column empty"
+  );
+
+  // #675: the converse. A plant on Phase 5 with a launch date, whose phase
+  // arrived through the phase control rather than through step 3, has no
+  // declaration row — and was told its phase and launch date were "still
+  // unset" while the control beside the nudge showed both.
+  assert.equal(
+    onboardingStepComplete("journey", {
+      journey: { declaredInPhaseHistory: false, currentPhase: 5 },
+    }),
+    true,
+    "a phase above zero is a declared journey, however it got there"
+  );
+  assert.equal(
+    onboardingStepComplete("journey", {
+      journey: { declaredInPhaseHistory: false, hasLaunch: true },
+    }),
+    true,
+    "a launch row is a named day, and step 3 is the only place to say no day"
+  );
+
+  // The case the nudge exists for: no record anywhere that the question was
+  // ever put to this planter.
+  assert.equal(
+    onboardingStepComplete("journey", {
+      journey: {
+        declaredInPhaseHistory: false,
+        currentPhase: 0,
+        hasLaunch: false,
+      },
+    }),
+    false,
+    "no declaration, no phase, no launch — the step is genuinely unanswered"
+  );
 });
 
 test("incomplete steps are listed in flow order", () => {
