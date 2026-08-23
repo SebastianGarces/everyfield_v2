@@ -46,11 +46,14 @@ export async function OnboardingDashboard({
     redirect("/dashboard");
   }
 
-  // OB-003/005: step 3's fact is asked of phase HISTORY, not of
-  // `current_phase` or of the launch row — "not sure, and no date yet" is a
-  // real answer that leaves both of those exactly as a planter who never saw
-  // the step would leave them. Only asked when there is a church to ask about.
-  const journeyDeclared = churchId
+  // OB-003/005: step 3's evidence. Phase HISTORY is the only piece this half
+  // reads, and the only piece it needs — inside a flow that has not finished,
+  // a phase above 0 or a launch row can only have come FROM step 3, which
+  // writes the declaration row in the same transaction. The finished
+  // dashboard reads the other two because there the columns can arrive by
+  // other paths (#675); the rule joining them is one function either way
+  // (`JourneyEvidence`). Only asked when there is a church to ask about.
+  const declaredInPhaseHistory = churchId
     ? await hasInitialPhaseDeclaration(churchId)
     : false;
 
@@ -60,7 +63,11 @@ export async function OnboardingDashboard({
         initialStep={
           stepRequest.outcome === "honour"
             ? stepRequest.step
-            : resolveResumeStep({ churchId, leadershipStatus, journeyDeclared })
+            : resolveResumeStep({
+                churchId,
+                leadershipStatus,
+                journey: { declaredInPhaseHistory },
+              })
         }
         leadershipStatus={leadershipStatus}
       />

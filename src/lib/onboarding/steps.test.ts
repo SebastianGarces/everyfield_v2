@@ -231,14 +231,21 @@ test("each step is complete when — and only when — its own fact is in", () =
   assert.equal(onboardingStepComplete("people", { peopleAdded: true }), true);
 });
 
-test("step 3 reads every piece of evidence a declared journey leaves", () => {
-  // #306 and #675 are the two halves of one rule, and each broke when the
-  // other's evidence was the only one read.
-  //
-  // #306: "not sure, and no date yet" is a real answer that writes no launch
-  // row and leaves `current_phase` at 0. Read the columns alone and the
-  // planter who answered looks exactly like the planter who never saw the
-  // step, so the nudge asks forever.
+// ----------------------------------------------------------------------------
+// #675 — step 3 is ATTESTATION, not column state (ruled 2026-08-23).
+//
+// The nudge is for a planter who has never said where they are. It is not for
+// a planter whose phase the product cannot see: those are different facts, and
+// the three planters below are the three answers. Written as stories because
+// the rule is about people, not about which column is null.
+// ----------------------------------------------------------------------------
+
+test("the planter in discernment who said 'not sure' has attested", () => {
+  // #306's planter. She answered step 3 honestly — "not sure, and no date
+  // yet" — which writes no launch row and leaves `current_phase` at 0, and she
+  // may sit there for months while she discerns. Read the columns alone and
+  // she is indistinguishable from someone who never saw the step, so the nudge
+  // asked her forever to answer a question she had answered.
   assert.equal(
     onboardingStepComplete("journey", {
       journey: {
@@ -248,30 +255,39 @@ test("step 3 reads every piece of evidence a declared journey leaves", () => {
       },
     }),
     true,
-    "the declaration row answers on its own, every column empty"
+    "the declaration row is the attestation and answers alone, columns empty"
   );
+});
 
-  // #675: the converse. A plant on Phase 5 with a launch date, whose phase
-  // arrived through the phase control rather than through step 3, has no
-  // declaration row — and was told its phase and launch date were "still
-  // unset" while the control beside the nudge showed both.
+test("the Phase 5 planter attested through another door", () => {
+  // #675's planter. Dayspring is on Phase 5 with a launch date of 2026-08-17
+  // and no declaration row, because its phase came from the phase control (or
+  // predates #306, or a seed). Both states can ONLY be reached by an explicit
+  // act — `transitionPhase` and `setLaunchDate` are the sole writers, and
+  // nothing raises either on a planter's behalf — so each is the footprint of
+  // an attestation. He was being told his phase and launch date were "still
+  // unset" while the control beside the nudge read "Phase 5".
   assert.equal(
     onboardingStepComplete("journey", {
       journey: { declaredInPhaseHistory: false, currentPhase: 5 },
     }),
     true,
-    "a phase above zero is a declared journey, however it got there"
+    "a phase above zero was set by somebody, so the journey was attested"
   );
   assert.equal(
     onboardingStepComplete("journey", {
       journey: { declaredInPhaseHistory: false, hasLaunch: true },
     }),
     true,
-    "a launch row is a named day, and step 3 is the only place to say no day"
+    "a launch row means a day was named — step 3 writes none for 'no date'"
   );
+});
 
-  // The case the nudge exists for: no record anywhere that the question was
-  // ever put to this planter.
+test("the planter who was never asked still gets the nudge", () => {
+  // The case the row exists for, and the one that must NOT be optimised away:
+  // nothing on this plant records anybody saying where it is. Phase 0 here is
+  // the default, not an answer — the difference from the first planter is the
+  // attestation, not the column.
   assert.equal(
     onboardingStepComplete("journey", {
       journey: {
@@ -281,7 +297,7 @@ test("step 3 reads every piece of evidence a declared journey leaves", () => {
       },
     }),
     false,
-    "no declaration, no phase, no launch — the step is genuinely unanswered"
+    "no attestation and no footprint of one — the step is genuinely unanswered"
   );
 });
 
@@ -303,7 +319,10 @@ test("a skipped step is where a returning planter resumes", () => {
   // still the first incomplete step, so that is where the flow opens — being
   // further along once is not the same as having answered.
   assert.equal(
-    resolveResumeStep({ churchId: CHURCH_ID, journeyDeclared: true }),
+    resolveResumeStep({
+      churchId: CHURCH_ID,
+      journey: { declaredInPhaseHistory: true },
+    }),
     "leadership"
   );
 });
@@ -313,7 +332,7 @@ test("resumption walks forward as each later fact lands", () => {
     resolveResumeStep({
       churchId: CHURCH_ID,
       leadershipStatus: "planter_confirmed",
-      journeyDeclared: true,
+      journey: { declaredInPhaseHistory: true },
     }),
     "people"
   );
@@ -327,7 +346,7 @@ test("a planter with every fact in lands on the last step, not back at 3", () =>
     resolveResumeStep({
       churchId: CHURCH_ID,
       leadershipStatus: "no_planter",
-      journeyDeclared: true,
+      journey: { declaredInPhaseHistory: true },
       peopleAdded: true,
     }),
     LAST_ONBOARDING_STEP
@@ -347,7 +366,7 @@ test("step 1 is where a planter resumes if and only if there is no church", () =
   for (const facts of [
     {},
     { leadershipStatus: "planter_confirmed" as const },
-    { journeyDeclared: true },
+    { journey: { declaredInPhaseHistory: true } },
     { leadershipStatus: "no_planter" as const, peopleAdded: true },
   ]) {
     assert.notEqual(

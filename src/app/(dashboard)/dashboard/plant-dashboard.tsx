@@ -73,7 +73,7 @@ export async function PlantDashboard({
     hasPlanterUser,
     launchCard,
     pendingInvitations,
-    journeyDeclared,
+    declaredInPhaseHistory,
   ] = await Promise.all([
     getDashboardMetrics(churchId, viewer.id),
     getRecentActivity(churchId),
@@ -109,10 +109,10 @@ export async function PlantDashboard({
     isPlantOwner(viewer)
       ? getPendingInvitationsForPlant(churchId)
       : Promise.resolve([]),
-    // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and
-    // not the launch row — "not sure, and no date yet" is a real answer
-    // that leaves both of those looking exactly like never having been
-    // asked.
+    // OB-003/005: the half of step 3's fact that only phase HISTORY can
+    // answer — "not sure, and no date yet" leaves `current_phase` at 0 and
+    // writes no launch row (#306). The other half rides on reads this
+    // dashboard already makes; the two are joined below.
     hasInitialPhaseDeclaration(churchId),
   ]);
 
@@ -152,12 +152,18 @@ export async function PlantDashboard({
   const onboardingFacts: OnboardingFacts = {
     churchId,
     leadershipStatus: church?.leadershipStatus,
-    // Step 3's fact, read from the record the declaration itself writes (#306).
-    // It used to be inferred from the columns — a launch date, or a phase above
-    // 0 — and that inference could not see the honest answer: a planter who
-    // said "not sure" and "no date yet" leaves phase 0 and no launch row, and
-    // was nagged forever to answer a question they had answered.
-    journeyDeclared,
+    // Step 3's evidence, all of it: the attestation record AND the footprints
+    // an attestation made elsewhere leaves. Neither alone is the fact — the
+    // record is the only trace of "not sure, and no date yet" (#306), and the
+    // columns are the only trace of a phase or a launch set through the phase
+    // control (#675). The rule joining them lives on `JourneyEvidence`, not
+    // here; this hands over what the reads already know. Both extra fields are
+    // free — `church` came down from the page, `launch` is read three lines up.
+    journey: {
+      declaredInPhaseHistory,
+      currentPhase: church?.currentPhase,
+      hasLaunch: launch !== null,
+    },
     // Step 4's fact: anybody at all on the plant's list (OB-006).
     peopleAdded: metrics.totalPeople > 0,
   };
