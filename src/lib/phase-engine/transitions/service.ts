@@ -121,13 +121,13 @@ export const transitionPhaseSchema = z.object({
     .max(2000, "Reason is too long")
     .refine(
       (reason) => reason !== INITIAL_DECLARATION_REASON,
-      "That wording is reserved for the stage you declared when you set up. Say what changed instead."
+      "That wording is reserved for the phase you declared when you set up. Say what changed instead."
     ),
 });
 
 export type TransitionPhaseInput = z.infer<typeof transitionPhaseSchema>;
 
-/** The stage a planter declares at onboarding. No reason — the row carries one. */
+/** The phase a planter declares at onboarding. No reason — the row carries one. */
 export const initialPhaseDeclarationSchema = z.object({
   phase: phaseNumberSchema,
 });

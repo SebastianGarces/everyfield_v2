@@ -558,7 +558,7 @@ function declareInitialPhaseBody(): string {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-test("declaring a stage emits no phase.changed", () => {
+test("declaring a phase emits no phase.changed", () => {
   const body = declareInitialPhaseBody();
 
   assert.equal(
@@ -609,7 +609,7 @@ test("the handler cannot tell a declaration from a move, which is why nothing is
 // The declaration's own validation surface
 // ---------------------------------------------------------------------------
 
-test("a declared stage must be a real phase", () => {
+test("a declared phase must be one of the seven", () => {
   for (const phase of [0, 3, 6]) {
     assert.equal(
       initialPhaseDeclarationSchema.safeParse({ phase }).success,
