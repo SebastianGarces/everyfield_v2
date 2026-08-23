@@ -152,8 +152,14 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   {
     id: "church",
     label: "Church",
+    // WHAT AN ADMIN ACTUALLY GETS, and no more. The sentence used to end "and
+    // what it shares with its sending church or network", which is the Sharing
+    // block — gated on `isPlanterWithPlant`, so an Admin was promised a control
+    // their pane never draws. The section's own gate is wider than that block's
+    // (see `isPlantAdminOrAbove`), so the description names only the half every
+    // reader who can open it can use.
     description:
-      "Where this plant is and what to call it, how its dates and times are shown, and what it shares with its sending church or network.",
+      "Where this plant is, what to call it, and how its dates and times are shown.",
     icon: Church,
     // The sharing words are entry keywords rather than a section of their own
     // since #619 folded the panel in here. A planter looking for "privacy" was
@@ -200,7 +206,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: "association",
     label: "Association",
     description:
-      "Who your organization belongs to, and any invitation waiting on your answer.",
+      "Who you belong to, and any invitation waiting on your answer.",
     icon: Building2,
     keywords: ["sending church", "network", "invitation", "leave", "join"],
     inNav: true,

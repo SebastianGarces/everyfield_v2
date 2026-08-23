@@ -84,7 +84,7 @@ export function ChangePasswordForm() {
       {succeeded && (
         <p
           role="status"
-          className="bg-muted text-foreground rounded-md p-3 text-sm"
+          className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
         >
           {succeeded.otherSessionsEnded > 0
             ? `Password changed. We signed you out everywhere else — ${succeeded.otherSessionsEnded} other ${succeeded.otherSessionsEnded === 1 ? "session" : "sessions"} ended.`
@@ -130,7 +130,7 @@ export function ChangePasswordForm() {
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="newPassword">New password</Label>
           <Input

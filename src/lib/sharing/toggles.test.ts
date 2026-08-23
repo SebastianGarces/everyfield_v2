@@ -28,7 +28,7 @@ import {
 //     WRITE one" is the fact that matters — the panel is hidden by the same
 //     predicate `requireSeat` throws on, so the walk below is the refusal.
 //   * The copy is held to `memory/invariants.md` line 84: the six pull toggles
-//     gate FEATURE data, and the portfolio listing (name, stage, launch
+//     gate FEATURE data, and the portfolio listing (name, phase, launch
 //     countdown, health) returns to an oversight admin with no privacy gate at
 //     all. A panel of switches that reads as "turn these off and they see
 //     nothing" is a consent control overstating its own reach, which is worse
@@ -206,7 +206,7 @@ test("no row claims the plant is hidden — the listing is ungated (line 84)", (
   // switches with no such line makes the overclaim by LAYOUT rather than by a
   // sentence, which no phrase-level guard would catch.
   assert.match(SHARING_PANEL_INTRO, /always see this plant listed/i);
-  for (const fact of ["name", "current stage", "launch date"]) {
+  for (const fact of ["name", "current phase", "launch date"]) {
     assert.ok(
       SHARING_PANEL_INTRO.toLowerCase().includes(fact),
       `the intro never names "${fact}", which they see regardless`

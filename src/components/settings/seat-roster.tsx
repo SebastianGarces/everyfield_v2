@@ -11,11 +11,11 @@
 // server produces two different strings and a hydration mismatch).
 //
 // THE CONTROLS ARE ABSENT, NOT DISABLED (AS-020). `canManageSeats` is false for
-// an Admin and the whole actions column — header cell included — is never
-// rendered, so there is no greyed button to hover and no tooltip explaining
-// what somebody may not do. The same rule handles the Owner's own row through
-// `isSelf`: AS-017 says an Owner may not remove their own seat, so the row that
-// would offer it renders nothing at all.
+// an Admin and the row's whole actions block is never rendered, so there is no
+// greyed button to hover and no tooltip explaining what somebody may not do.
+// The same rule handles the Owner's own row through `isSelf`: AS-017 says an
+// Owner may not remove their own seat, so the row that would offer it renders
+// nothing at all.
 //
 // NONE OF THAT IS THE AUTHORIZATION. `requireSeat("seat.manage")` and the
 // plant-scoped `WHERE` in `@/lib/seats/roster` refuse a request that never saw
@@ -28,7 +28,7 @@
 // the absence rule on real markup.
 // ============================================================================
 
-import { useState, useTransition } from "react";
+import { type RefObject, useRef, useState, useTransition } from "react";
 
 import {
   AlertDialog,
@@ -39,23 +39,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { UserSeat } from "@/db/schema";
 import type { SeatTenancyType } from "@/lib/auth/tenancy";
 import { TENANCY_NOUN } from "@/lib/invitations/seat-copy";
@@ -182,49 +171,44 @@ export function SeatRoster({
   tenancyType: SeatTenancyType;
 }) {
   const noun = TENANCY_NOUN[tenancyType];
+  // A ROW LIST AND NOT A TABLE. Five columns that may not wrap need about
+  // 926px, and the settings pane is 540px wide at a 1280px viewport, so a table
+  // put the seat, the join date and every control behind an uncued sideways
+  // scroll at EVERY width. The identity block wraps under the controls instead,
+  // which is what `PlantCoachList` beside it already does.
+  //
+  // IT IS ALSO WHERE FOCUS LANDS after a removal — see `SeatRow`'s dialog. The
+  // list outlives every row in it, so `tabIndex={-1}` makes it a target the
+  // removed row's vanished button can hand focus to.
+  const list = useRef<HTMLUListElement>(null);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Seats</CardTitle>
-        <CardDescription>
-          {`Everyone with a login on this ${noun}. ${
+    <section aria-labelledby="team-seats">
+      <SettingsBlock>
+        <SettingsHeading
+          id="team-seats"
+          description={`Everyone with a login on this ${noun}. ${
             canManageSeats
               ? SEAT_SUMMARY[tenancyType]
               : "Only the Owner can change what a seat may do."
           }`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Seat</TableHead>
-                <TableHead>Joined</TableHead>
-                {/* Absent, not empty, for an Admin — see the header. */}
-                {canManageSeats ? (
-                  <TableHead className="text-right">Manage</TableHead>
-                ) : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <SeatRow
-                  key={row.userId}
-                  row={row}
-                  canManageSeats={canManageSeats}
-                  actions={actions}
-                  tenancyType={tenancyType}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+        >
+          Seats
+        </SettingsHeading>
+        <ul ref={list} tabIndex={-1} className="divide-border divide-y">
+          {rows.map((row) => (
+            <SeatRow
+              key={row.userId}
+              row={row}
+              canManageSeats={canManageSeats}
+              actions={actions}
+              tenancyType={tenancyType}
+              listRef={list}
+            />
+          ))}
+        </ul>
+      </SettingsBlock>
+    </section>
   );
 }
 
@@ -233,16 +217,23 @@ function SeatRow({
   canManageSeats,
   actions,
   tenancyType,
+  listRef,
 }: {
   row: SeatRosterViewRow;
   canManageSeats: boolean;
   actions: SeatRosterActions;
   tenancyType: SeatTenancyType;
+  /** Where focus goes when this row's own Remove button stops existing. */
+  listRef: RefObject<HTMLUListElement | null>;
 }) {
   const noun = TENANCY_NOUN[tenancyType];
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  // A ref and not state: it is read inside Radix's close handler in the same
+  // tick the removal closes the dialog, and it must not schedule a render of a
+  // row the server is about to drop.
+  const removed = useRef(false);
 
   const name = displayName(row);
   const rule = SEAT_RULES[row.seat];
@@ -259,7 +250,11 @@ function SeatRow({
   // with no diff anywhere near the line that decided it.
   const mayAct = canManageSeats && !row.isSelf;
 
-  function run(mutate: () => Promise<SeatActionOutcome>) {
+  function run(
+    mutate: () => Promise<SeatActionOutcome>,
+    /** Whether success takes this row off the roster — the dialog reads it. */
+    isRemoval = false
+  ) {
     setError(null);
     startTransition(async () => {
       const result = await mutate();
@@ -267,27 +262,29 @@ function SeatRow({
         setError(result.error);
         return;
       }
+      removed.current = isRemoval;
       setConfirmingRemoval(false);
     });
   }
 
   return (
-    <TableRow>
-      <TableCell className="font-medium">
-        {row.name?.trim() || (
-          <span className="text-muted-foreground">Not set</span>
-        )}
-      </TableCell>
-      <TableCell className="text-muted-foreground">{row.email}</TableCell>
-      <TableCell>
-        <Badge variant={rule.emphasis}>{rule.label}</Badge>
-      </TableCell>
-      <TableCell className="text-muted-foreground whitespace-nowrap">
-        {row.joinedLabel}
-      </TableCell>
+    <li className="flex flex-wrap items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium break-words">
+            {row.name?.trim() || (
+              <span className="text-muted-foreground">Not set</span>
+            )}
+          </p>
+          <Badge variant={rule.emphasis}>{rule.label}</Badge>
+        </div>
+        <p className="text-muted-foreground text-sm break-words">
+          {row.email} · joined {row.joinedLabel}
+        </p>
+      </div>
 
       {canManageSeats ? (
-        <TableCell className="text-right">
+        <div className="flex flex-col items-end gap-1">
           <div className="flex flex-wrap items-center justify-end gap-2">
             {mayAct && move ? (
               <Button
@@ -301,7 +298,7 @@ function SeatRow({
                 // is appointed and an Admin is demoted.
                 onClick={() => run(() => actions[move.action](row.userId))}
               >
-                {move.label}
+                {pending ? "Saving…" : move.label}
               </Button>
             ) : null}
 
@@ -323,13 +320,13 @@ function SeatRow({
           {/* THE REFUSAL GOES WHERE THE READER IS LOOKING. While the dialog is
               open it is MODAL — Radix portals it over a `fixed inset-0`
               overlay and `aria-hidden`s everything outside — so a message
-              rendered in this cell would be painted under the overlay and
+              rendered in this row would be painted under the overlay and
               taken out of the accessibility tree, which is the one path the
               plain-Button-instead-of-AlertDialogAction choice below exists to
               serve. So the removal's refusal renders INSIDE the dialog, and
               only the appoint/demote refusal renders here. */}
           {error && !confirmingRemoval ? (
-            <p role="alert" className="text-destructive mt-1 text-xs">
+            <p role="alert" className="text-destructive text-sm text-pretty">
               {error}
             </p>
           ) : null}
@@ -342,7 +339,20 @@ function SeatRow({
             open={confirmingRemoval}
             onOpenChange={setConfirmingRemoval}
           >
-            <AlertDialogContent>
+            <AlertDialogContent
+              // WHERE FOCUS GOES WHEN THE ROW STOPS EXISTING. Radix restores
+              // focus to the trigger on close, and after a successful removal
+              // that trigger unmounts with its row on the next render — which
+              // drops keyboard focus to `<body>` and loses a keyboard reader's
+              // place entirely. The list outlives every row, so a removal hands
+              // focus there. A CANCEL keeps Radix's own restore: the Remove
+              // button it came from is still on the screen.
+              onCloseAutoFocus={(event) => {
+                if (!removed.current) return;
+                event.preventDefault();
+                listRef.current?.focus();
+              }}
+            >
               <AlertDialogHeader>
                 <AlertDialogTitle>
                   Remove {name} from this {noun}?
@@ -374,15 +384,15 @@ function SeatRow({
                   type="button"
                   variant="destructive"
                   disabled={pending}
-                  onClick={() => run(() => actions.remove(row.userId))}
+                  onClick={() => run(() => actions.remove(row.userId), true)}
                 >
-                  {pending ? "Removing…" : `Remove from ${noun}`}
+                  {pending ? "Removing…" : `Remove from this ${noun}`}
                 </Button>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </TableCell>
+        </div>
       ) : null}
-    </TableRow>
+    </li>
   );
 }

@@ -36,7 +36,7 @@ import {
 // empty for an org. Coaching is a relationship with a church plant —
 // `coach.assignment.manage` is `tenancy: "plant"`, so an org actor cannot create
 // one, and `listPlantCoaches` refuses one outright. Rendering an empty "Coaches"
-// card to a network would offer a section that can never fill.
+// block to a network would offer a section that can never fill.
 //
 // THE CAPABILITY ANSWERS ARRIVE RESOLVED, and neither is the section's own gate.
 // The gate is `seat.invitation.manage`, asked by the registry and again by the
@@ -59,12 +59,15 @@ import {
 // THE LIST COMPONENT IS THE ORG SURFACE'S, given this section's own two actions.
 // Both tables answer the same two questions on a pending row — resend it, close
 // it — so the countdown, the wrapping control cluster and the accessible names
-// are written once (`@/components/oversight/invitations-list`).
+// are written once (`@/components/oversight/invitations-list`). What this
+// section does supply is `container="block"`: the org page is a full page where
+// `Card` is the surrounding density, and this is a modal pane where every block
+// above these two is a `SettingsBlock`.
 // ============================================================================
 
 export function TeamSection({ view }: { view: TeamSectionView }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <SeatInviteForm
         expiryDays={view.expiryDays}
         tenancyType={view.tenancyType}
@@ -101,6 +104,7 @@ export function TeamSection({ view }: { view: TeamSectionView }) {
 
       <InvitationsList
         rows={view.seatInvitations}
+        container="block"
         actions={{
           resend: resendSeatInvitationEmailAction,
           revoke: revokeSeatInvitationAction,
@@ -112,6 +116,7 @@ export function TeamSection({ view }: { view: TeamSectionView }) {
       {view.isPlant && view.coachInvitations.length > 0 && (
         <InvitationsList
           rows={view.coachInvitations}
+          container="block"
           actions={{
             resend: resendSeatInvitationEmailAction,
             revoke: revokeSeatInvitationAction,

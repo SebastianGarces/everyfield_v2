@@ -39,7 +39,7 @@ export function NotificationsSection({
   view: NotificationsSectionView;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       {/* ABOVE the matrix, because it changes what every row in it means: a
           suppressed address makes every `email` switch below inert, and a
           notice under them would be read after the reader had already concluded

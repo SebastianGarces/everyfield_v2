@@ -22,7 +22,7 @@ import { OVERSIGHT_SHARING_FEATURE } from "@/lib/notifications/categories";
 // guard can hold to the code. `toggles.test.ts` holds every line below to
 // `memory/invariants.md` line 84 — a summary may state what the org gets to see
 // and what it never sees, and may not claim the plant is hidden, because the
-// portfolio listing (name, stage, launch countdown, health) returns to an
+// portfolio listing (name, phase, launch countdown, health) returns to an
 // oversight admin with no privacy gate at all.
 //
 // EACH SUMMARY IS PERMISSION LANGUAGE, deliberately: "lets them see". Two of the
@@ -130,4 +130,4 @@ export function isSharingFeature(value: string): value is PrivacyFeatureKey {
  * to forbid, made by layout rather than by a sentence.
  */
 export const SHARING_PANEL_INTRO =
-  "Your sending church or network can always see this plant listed with its name, current stage and launch date. These switches decide what else they may look up, and they only ever see totals — never the people behind them.";
+  "Your sending church or network can always see this plant listed with its name, current phase and launch date. These switches decide what else they may look up, and they only ever see totals — never the people behind them.";

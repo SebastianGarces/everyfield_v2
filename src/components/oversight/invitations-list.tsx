@@ -84,9 +84,26 @@
 // The countdown after a send is round 2 of the same ruling, and its per-session
 // limit is an accepted residual ruled 2026-08-12 (option (a) on PR #392). See
 // `useResendCooldown` for what it cannot reach and why nothing here closes it.
+//
+// ----------------------------------------------------------------------------
+// THE CONTAINER IS THE CALLER'S, THE CONTENTS ARE NOT (2026-08-23 review)
+// ----------------------------------------------------------------------------
+//
+// This list renders on two surfaces with different container norms: a full page
+// at `/oversight/invitations`, where `Card` IS the surrounding density, and the
+// settings modal's Team pane, where every other block is a `SettingsBlock` at a
+// tighter density inside a `rounded-lg` dialog. Hard-coding either one leaves
+// the other with a container that reads as a different rank of thing than its
+// neighbours, which is the defect the review found in the Team pane.
+//
+// So `container` is ONE prop and the ONE place the choice is made — the two
+// shapes live side by side in `InvitationPanel` rather than as two JSX trees
+// through this file. Everything else is identical on both surfaces, which is
+// the point: the rows, the countdown, the accessible names and the four states
+// this component spent three rulings getting right do not fork.
 // ============================================================================
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useId, useRef, useState } from "react";
 
 import {
   resendInvitationEmailAction,
@@ -101,6 +118,10 @@ import {
 // spent three rulings getting right are written ONCE. Both tables answer the
 // same two questions on a pending row ("email it again", "close it"), so the
 // component's contract is those two verbs and not either table.
+import {
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -163,14 +184,24 @@ const ORG_INVITATION_ACTIONS: InvitationRowActions = {
   revoke: revokeInvitationAction,
 };
 
+/** Which surface's density the two panels take — see the header. */
+export type InvitationsListContainer = "card" | "block";
+
 export function InvitationsList({
   rows,
+  container = "card",
   canAct = true,
   actions = ORG_INVITATION_ACTIONS,
   pendingDescription = "Waiting on an answer. Anyone who can invite for your organization can resend the email or revoke the invitation — revoking closes it immediately, and the invitation stops working.",
   answeredDescription = "Every invitation your organization has sent that is no longer open.",
 }: {
   rows: InvitationListRow[];
+  /**
+   * `card` is the full page's density and the default, so `/oversight/invitations`
+   * names nothing. `block` is the settings modal's, where these two panels are
+   * the last of the pane's blocks and must match the four above them.
+   */
+  container?: InvitationsListContainer;
   /**
    * WHETHER THIS READER MAY RESEND OR REVOKE (#500).
    *
@@ -190,58 +221,111 @@ export function InvitationsList({
   const pending = rows.filter((row) => row.status === "pending");
   const answered = rows.filter((row) => row.status !== "pending");
 
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Pending invitations</CardTitle>
-          <CardDescription>{pendingDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {pending.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              No invitations are waiting for an answer.
-            </p>
-          ) : (
-            <ul className="divide-border divide-y">
-              {pending.map((row) => (
-                <InvitationRow
-                  key={row.id}
-                  row={row}
-                  canAct={canAct}
-                  actions={actions}
-                />
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+  // MINTED, NEVER WRITTEN DOWN. The Team pane renders this component TWICE —
+  // seat invitations and coach invitations — so a pair of literal heading ids
+  // would collide with each other on that one screen, and a prefix prop would
+  // put the uniqueness back in the caller's hands. `useId` is stable across the
+  // server render and the hydration that follows it, which is what an
+  // `aria-labelledby` needs.
+  const headingId = useId();
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Answered and closed</CardTitle>
-          <CardDescription>{answeredDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {answered.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              Nothing here yet.
-            </p>
-          ) : (
-            <ul className="divide-border divide-y">
-              {answered.map((row) => (
-                <InvitationRow
-                  key={row.id}
-                  row={row}
-                  canAct={canAct}
-                  actions={actions}
-                />
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+  return (
+    <div className={container === "block" ? "space-y-8" : "space-y-6"}>
+      <InvitationPanel
+        container={container}
+        id={`${headingId}-pending`}
+        title="Pending invitations"
+        description={pendingDescription}
+      >
+        {pending.length === 0 ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            No invitations are waiting for an answer.
+          </p>
+        ) : (
+          <ul className="divide-border divide-y">
+            {pending.map((row) => (
+              <InvitationRow
+                key={row.id}
+                row={row}
+                canAct={canAct}
+                actions={actions}
+              />
+            ))}
+          </ul>
+        )}
+      </InvitationPanel>
+
+      <InvitationPanel
+        container={container}
+        id={`${headingId}-answered`}
+        title="Answered and closed"
+        description={answeredDescription}
+      >
+        {answered.length === 0 ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            Nothing here yet.
+          </p>
+        ) : (
+          <ul className="divide-border divide-y">
+            {answered.map((row) => (
+              <InvitationRow
+                key={row.id}
+                row={row}
+                canAct={canAct}
+                actions={actions}
+              />
+            ))}
+          </ul>
+        )}
+      </InvitationPanel>
     </div>
+  );
+}
+
+/**
+ * One titled panel, in whichever density the caller asked for.
+ *
+ * The whole of the difference between the two surfaces lives here, so a change
+ * to what a panel HOLDS is made once. The settings shape carries the extra
+ * `<section aria-labelledby>` and a real `<h2>` because the modal's panes are a
+ * stack of blocks under one `DialogTitle` and need a navigable outline;
+ * `/oversight/invitations` is a page with its own `<h1>` and keeps the
+ * `CardTitle` div it has always had.
+ */
+function InvitationPanel({
+  container,
+  id,
+  title,
+  description,
+  children,
+}: {
+  container: InvitationsListContainer;
+  id: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  if (container === "block") {
+    return (
+      <section aria-labelledby={id}>
+        <SettingsBlock>
+          <SettingsHeading id={id} description={description}>
+            {title}
+          </SettingsHeading>
+          {children}
+        </SettingsBlock>
+      </section>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
@@ -471,7 +555,7 @@ function ResendEmailButton({
     <form action={formAction} className="flex items-center gap-2">
       <input type="hidden" name="invitationId" value={invitationId} />
       {state.error && (
-        <span role="alert" className="text-destructive text-xs">
+        <span role="alert" className="text-destructive text-sm text-pretty">
           {state.error}
         </span>
       )}
@@ -533,7 +617,7 @@ function RevokeButton({
     <form action={formAction} className="flex items-center gap-2">
       <input type="hidden" name="invitationId" value={invitationId} />
       {state.error && (
-        <span role="alert" className="text-destructive text-xs">
+        <span role="alert" className="text-destructive text-sm text-pretty">
           {state.error}
         </span>
       )}

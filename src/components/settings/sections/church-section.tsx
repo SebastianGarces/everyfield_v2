@@ -4,6 +4,10 @@ import { ChurchDigestScheduleSelect } from "@/components/settings/church-digest-
 import { ChurchInactivityThresholds } from "@/components/settings/church-inactivity-thresholds";
 import { ChurchProfileFields } from "@/components/settings/church-profile-fields";
 import { ChurchTimeZoneSelect } from "@/components/settings/church-time-zone-select";
+import {
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
 import { SharingSwitch } from "@/components/settings/sharing-panel";
 import {
   OVERSIGHT_SHARING_FEATURE,
@@ -22,10 +26,12 @@ import {
 // plant is (CS-006), WHEN its dates, digest and quiet-contact thresholds are
 // read (CS-007/008/009), and WHO ELSE sees any of it (CS-010/011/012).
 //
-// The zone and digest controls were moved here whole by #615 and are unchanged
-// again: same components, same actions, same order, and the digest select still
-// sits directly under the zone because it is READ on that clock ("4:00 PM" means
-// nothing until you know whose afternoon it is).
+// The zone and digest controls were moved here whole by #615 — same components,
+// same actions, same order, and the digest select still sits directly under the
+// zone because it is READ on that clock ("4:00 PM" means nothing until you know
+// whose afternoon it is). What the 2026-08-23 review changed is only their
+// CONTAINER: the three clock controls share one `SettingsBlock` instead of
+// drawing a border each.
 //
 // ----------------------------------------------------------------------------
 // TWO GATES, NOT ONE, AND THE SECOND ONE IS NOW A SHAPE
@@ -76,32 +82,33 @@ export function ChurchSection({ view }: { view: ChurchSectionView }) {
   return (
     <div className="space-y-8">
       <section aria-labelledby="church-profile" className="space-y-4">
-        <h2
-          id="church-profile"
-          className="text-lg font-semibold tracking-tight"
-        >
-          Profile
-        </h2>
+        <SettingsHeading id="church-profile">Profile</SettingsHeading>
         <ChurchProfileFields
           fields={view.profileFields}
           values={view.profile}
         />
       </section>
 
+      {/* ONE BLOCK FOR THE THREE CLOCKS, not three boxes. The digest schedule
+          only means anything read on the zone above it ("4:00 PM" needs whose
+          afternoon it is), and three borders 16px apart drew a stronger break
+          between the controls than the 16px of padding inside each — so the eye
+          read three unrelated settings rather than one clock. They separate on
+          rhythm inside one surface instead. */}
       <section aria-labelledby="church-clock" className="space-y-4">
-        <h2 id="church-clock" className="text-lg font-semibold tracking-tight">
-          Dates and times
-        </h2>
-        <ChurchTimeZoneSelect timeZone={view.timeZone} />
-        <ChurchDigestScheduleSelect
-          weekday={view.digestSendWeekday}
-          hour={view.digestSendHour}
-          timeZone={view.timeZone}
-        />
-        <ChurchInactivityThresholds
-          warningDays={view.inactivityWarningDays}
-          alertDays={view.inactivityAlertDays}
-        />
+        <SettingsHeading id="church-clock">Dates and times</SettingsHeading>
+        <SettingsBlock className="gap-6">
+          <ChurchTimeZoneSelect timeZone={view.timeZone} />
+          <ChurchDigestScheduleSelect
+            weekday={view.digestSendWeekday}
+            hour={view.digestSendHour}
+            timeZone={view.timeZone}
+          />
+          <ChurchInactivityThresholds
+            warningDays={view.inactivityWarningDays}
+            alertDays={view.inactivityAlertDays}
+          />
+        </SettingsBlock>
       </section>
 
       {sharing ? (
@@ -110,31 +117,28 @@ export function ChurchSection({ view }: { view: ChurchSectionView }) {
           data-testid="sharing-panel"
           className="space-y-6"
         >
-          <div className="space-y-1">
-            <h2
-              id="church-sharing"
-              className="text-lg font-semibold tracking-tight"
-            >
-              Sharing
-            </h2>
-            <p className="text-muted-foreground text-sm text-pretty">
-              {SHARING_PANEL_INTRO}
-            </p>
-          </div>
+          <SettingsHeading
+            id="church-sharing"
+            description={SHARING_PANEL_INTRO}
+          >
+            Sharing
+          </SettingsHeading>
 
           {/* `role="group"` so the heading is what a screen reader announces
               the switches under — without it "People, switch, off" loses the
               verb that makes "People" mean anything. Same shape as
-              `preference-matrix.tsx`. */}
+              `preference-matrix.tsx`.
+
+              THE GROUP HEADING IS THE SAME 14px AS THE SWITCH LABELS IT HEADS,
+              never the smaller uppercase token it used to be: a heading lighter
+              and shorter than its own contents inverts the rank it is there to
+              state. */}
           <div
             role="group"
             aria-labelledby="sharing-pull-heading"
             className="space-y-3"
           >
-            <h3
-              id="sharing-pull-heading"
-              className="text-muted-foreground text-xs font-medium tracking-wide uppercase"
-            >
+            <h3 id="sharing-pull-heading" className="text-sm font-medium">
               What your sending church or network can look up
             </h3>
             {SHARING_PULL_TOGGLES.map((toggle) => (
@@ -153,10 +157,7 @@ export function ChurchSection({ view }: { view: ChurchSectionView }) {
             aria-labelledby="sharing-push-heading"
             className="space-y-3"
           >
-            <h3
-              id="sharing-push-heading"
-              className="text-muted-foreground text-xs font-medium tracking-wide uppercase"
-            >
+            <h3 id="sharing-push-heading" className="text-sm font-medium">
               Updates they receive
             </h3>
             <SharingSwitch

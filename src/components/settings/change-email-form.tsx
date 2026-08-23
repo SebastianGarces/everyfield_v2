@@ -74,11 +74,11 @@ export function ChangeEmailForm({
       {state?.ok && (
         <p
           role="status"
-          className="bg-muted text-foreground rounded-md p-3 text-sm"
+          className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
         >
           {state.emailSent
             ? `Check ${state.newEmail} for a confirmation link. Until you open it, you keep signing in as ${currentEmail}.`
-            : `We saved the request but could not send the email to ${state.newEmail}. Check the address and ask again.`}
+            : `Saved, but the confirmation link could not be sent to ${state.newEmail}. Check the address and send it again.`}
         </p>
       )}
 
@@ -98,7 +98,7 @@ export function ChangeEmailForm({
         </p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="newEmail">New email address</Label>
           <Input

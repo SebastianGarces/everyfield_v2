@@ -69,7 +69,7 @@ export function ChurchDigestScheduleSelect({
   };
 
   return (
-    <div className="bg-card space-y-3 rounded-lg border px-4 py-4">
+    <div className="space-y-3">
       <div className="space-y-1">
         {/* A GROUP HEADING, not a label — it names the pair of selects, and the
             two `<Label>`s below name one control each. Pointing it at

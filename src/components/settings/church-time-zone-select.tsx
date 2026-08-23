@@ -52,7 +52,7 @@ export function ChurchTimeZoneSelect({ timeZone }: ChurchTimeZoneSelectProps) {
   };
 
   return (
-    <div className="bg-card space-y-3 rounded-lg border px-4 py-4">
+    <div className="space-y-3">
       <div className="space-y-1">
         <Label htmlFor="church-time-zone" className="cursor-pointer">
           Timezone

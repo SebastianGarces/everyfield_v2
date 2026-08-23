@@ -5,7 +5,7 @@
 //
 // BESIDE THE SEAT ROSTER ON PURPOSE (AS-024): a planter auditing who reaches
 // their plant has to see both reaches in one pass, because a coach reads the
-// plant's own records without holding a seat at all. Two cards on one page is
+// plant's own records without holding a seat at all. Two blocks in one pane is
 // the whole of that requirement.
 //
 // COACHING IS NOT A SEAT, and this list is shaped to say so. There is no seat
@@ -22,7 +22,7 @@
 // roster's `canManageSeats` rather than the same boolean threaded twice.
 // ============================================================================
 
-import { useState, useTransition } from "react";
+import { type RefObject, useRef, useState, useTransition } from "react";
 
 import {
   AlertDialog,
@@ -33,14 +33,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
+import { Button } from "@/components/ui/button";
 
 import type { SeatActionOutcome } from "./seat-action-outcome";
 
@@ -62,34 +59,44 @@ export function PlantCoachList({
   canEndAssignments: boolean;
   endAssignment: (assignmentId: string) => Promise<SeatActionOutcome>;
 }) {
+  // The list outlives every row in it, which is why it is focusable: ending an
+  // assignment unmounts the button focus would otherwise return to. See the
+  // dialog in `CoachRow`.
+  const list = useRef<HTMLUListElement>(null);
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Coaches</CardTitle>
-        <CardDescription>
-          Coaches read this plant&rsquo;s own records and change nothing. They
-          hold no seat, so they are not on the roster above.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <section aria-labelledby="team-coaches">
+      <SettingsBlock>
+        <SettingsHeading
+          id="team-coaches"
+          description={
+            <>
+              Coaches read this plant&rsquo;s own records and change nothing.
+              They hold no seat, so they are not on the roster above.
+            </>
+          }
+        >
+          Coaches
+        </SettingsHeading>
         {rows.length === 0 ? (
           <p className="text-muted-foreground py-6 text-center text-sm">
             No coach is assigned to this plant.
           </p>
         ) : (
-          <ul className="divide-border divide-y">
+          <ul ref={list} tabIndex={-1} className="divide-border divide-y">
             {rows.map((row) => (
               <CoachRow
                 key={row.assignmentId}
                 row={row}
                 canEndAssignments={canEndAssignments}
                 endAssignment={endAssignment}
+                listRef={list}
               />
             ))}
           </ul>
         )}
-      </CardContent>
-    </Card>
+      </SettingsBlock>
+    </section>
   );
 }
 
@@ -97,14 +104,21 @@ function CoachRow({
   row,
   canEndAssignments,
   endAssignment,
+  listRef,
 }: {
   row: PlantCoachViewRow;
   canEndAssignments: boolean;
   endAssignment: (assignmentId: string) => Promise<SeatActionOutcome>;
+  /** Where focus goes when this row's own control stops existing. */
+  listRef: RefObject<HTMLUListElement | null>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
+  // A ref and not state: it is read inside Radix's close handler in the same
+  // tick the success closes the dialog, and it must not schedule a render of a
+  // row the server is about to drop.
+  const ended = useRef(false);
 
   const name = row.name?.trim() || row.email;
 
@@ -116,6 +130,7 @@ function CoachRow({
         setError(result.error);
         return;
       }
+      ended.current = true;
       setConfirming(false);
     });
   }
@@ -123,8 +138,11 @@ function CoachRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-3">
       <div className="min-w-0">
-        <p className="truncate font-medium">{name}</p>
-        <p className="text-muted-foreground truncate text-sm">
+        {/* Wrapping, not truncating: a name or an address cut off with an
+            ellipsis leaves the full value unreachable — there is no hover, no
+            tooltip and no second place it is written. */}
+        <p className="font-medium break-words">{name}</p>
+        <p className="text-muted-foreground text-sm break-words">
           {row.email} · coaching since {row.assignedLabel}
         </p>
         {/* Only while the dialog is CLOSED. Radix's AlertDialog is modal — it
@@ -134,7 +152,7 @@ function CoachRow({
             instead, which is the whole reason the confirm control below is a
             plain Button rather than `AlertDialogAction`. */}
         {error && !confirming ? (
-          <p role="alert" className="text-destructive mt-1 text-xs">
+          <p role="alert" className="text-destructive mt-1 text-sm text-pretty">
             {error}
           </p>
         ) : null}
@@ -154,7 +172,19 @@ function CoachRow({
       ) : null}
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          // WHERE FOCUS GOES WHEN THE ROW STOPS EXISTING. Radix restores focus
+          // to the trigger on close, and after a successful end that trigger
+          // unmounts with its row on the next render — dropping keyboard focus
+          // to `<body>`. The list outlives every row, so it takes focus
+          // instead. A CANCEL keeps Radix's own restore: the End-assignment
+          // button it came from is still on the screen.
+          onCloseAutoFocus={(event) => {
+            if (!ended.current) return;
+            event.preventDefault();
+            listRef.current?.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>
               End {name}&rsquo;s coach assignment?

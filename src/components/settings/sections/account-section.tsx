@@ -3,6 +3,7 @@
 import { AvatarField } from "@/components/settings/avatar-field";
 import { ChangeEmailForm } from "@/components/settings/change-email-form";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
+import { SettingsHeading } from "@/components/settings/settings-block";
 import type { AccountSectionView } from "@/lib/settings/section-view";
 
 // ============================================================================
@@ -40,12 +41,7 @@ export function AccountSection({ view }: { view: AccountSectionView }) {
   return (
     <div className="space-y-8">
       <section aria-labelledby="account-identity" className="space-y-4">
-        <h2
-          id="account-identity"
-          className="text-lg font-semibold tracking-tight"
-        >
-          Signed in
-        </h2>
+        <SettingsHeading id="account-identity">Signed in</SettingsHeading>
 
         <AvatarField
           avatarSrc={view.avatarSrc ?? undefined}
@@ -68,19 +64,12 @@ export function AccountSection({ view }: { view: AccountSectionView }) {
       </section>
 
       <section aria-labelledby="account-email" className="space-y-4">
-        <div className="space-y-1">
-          <h2
-            id="account-email"
-            className="text-lg font-semibold tracking-tight"
-          >
-            Email address
-          </h2>
-          <p className="text-muted-foreground text-sm text-pretty">
-            We send a confirmation link to the new address. It becomes your
-            sign-in address once you open that link — until then nothing
-            changes, and we tell your old address when it does.
-          </p>
-        </div>
+        <SettingsHeading
+          id="account-email"
+          description="We send a confirmation link to the new address. It becomes your sign-in address once you open that link — until then nothing changes, and we tell your old address when it does."
+        >
+          Email address
+        </SettingsHeading>
 
         <ChangeEmailForm
           currentEmail={view.email}
@@ -89,17 +78,12 @@ export function AccountSection({ view }: { view: AccountSectionView }) {
       </section>
 
       <section aria-labelledby="account-password" className="space-y-4">
-        <div className="space-y-1">
-          <h2
-            id="account-password"
-            className="text-lg font-semibold tracking-tight"
-          >
-            Password
-          </h2>
-          <p className="text-muted-foreground text-sm text-pretty">
-            Changing your password signs you out everywhere except here.
-          </p>
-        </div>
+        <SettingsHeading
+          id="account-password"
+          description="Changing your password signs you out everywhere except here."
+        >
+          Password
+        </SettingsHeading>
 
         <ChangePasswordForm />
       </section>

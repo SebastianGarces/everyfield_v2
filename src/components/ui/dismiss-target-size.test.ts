@@ -43,6 +43,21 @@ import { resolveTargetBox } from "@/lib/testing/tailwind-box";
 const MINIMUM_TARGET_PX = 24;
 
 const UI_DIR = path.join(process.cwd(), "src/components/ui");
+const SETTINGS_DIR = path.join(process.cwd(), "src/components/settings");
+
+/**
+ * Every directory that may hold a dismiss control, and therefore every
+ * directory the sweep at the foot of this file reads.
+ *
+ * `src/components/ui/` alone was the original scope, and it was the scope of
+ * the DEFECT: a shared primitive is wrong everywhere at once. It stopped being
+ * the whole scope when the settings modal refused `DialogContent`'s Close and
+ * drew its own — two hand-placed buttons, in a directory nothing here read,
+ * growing their own 24px box on trust (#657 review). A local control is not a
+ * smaller version of the problem; it is the same 16x16 target with no shared
+ * primitive to fix it in.
+ */
+const SWEPT_DIRS: readonly string[] = [UI_DIR, SETTINGS_DIR];
 
 /**
  * How a control reaches the floor — and therefore where the box is measured.
@@ -60,7 +75,12 @@ const UI_DIR = path.join(process.cwd(), "src/components/ui");
 type Mechanism = "box" | "overlay";
 
 interface DismissControl {
-  /** File under `src/components/ui/`. */
+  /**
+   * The file, relative to `src/components/ui/` — so a control that lives in
+   * another swept directory is spelled the way `path.relative` spells it
+   * (`"../settings/settings-modal.tsx"`), and one string serves both the read
+   * below and the sweep at the foot of the file.
+   */
   readonly file: string;
   /** Successive narrowing spans, outermost first, ending on the class string. */
   readonly anchors: readonly (readonly [from: string, to: string])[];
@@ -101,6 +121,14 @@ const DISMISS_CONTROLS: readonly DismissControl[] = [
     mechanism: "overlay",
     control:
       "the toast close button — painted by sonner's own stylesheet at 20x20",
+  },
+  {
+    file: "../settings/settings-modal.tsx",
+    anchors: [["function SettingsClose(", "<XIcon"]],
+    attribute: "className=",
+    mechanism: "box",
+    control:
+      "the settings modal's Close — drawn twice (the stacked corner X, and the section pane's bar at md) from this one class string",
   },
 ];
 
@@ -166,12 +194,16 @@ Measured by compiling "${classes}" through the project's own Tailwind.`
 });
 
 /**
- * The tells that a primitive HAS a dismiss control, so a new one cannot arrive
+ * The tells that a file HAS a dismiss control, so a new one cannot arrive
  * unmeasured.
  *
  * The test above only checks what it has been told about, and `pnpm dlx
  * shadcn@latest add <anything>` is one command away from dropping a fresh 16x16
- * Close into this directory — invisible to an inventory that never re-reads it.
+ * Close into `src/components/ui/` — invisible to an inventory that never
+ * re-reads it. `src/components/settings/` is swept for the same reason with a
+ * different cause: nothing generates a file there, but the modal already has a
+ * precedent for refusing the shared Close and hand-placing its own, and the
+ * next surface that does it will copy the modal.
  * `showCloseButton` is deliberately NOT a tell: `command.tsx` forwards that prop
  * to `DialogContent` and owns no control of its own, which is the difference
  * between passing the flag and painting the button.
@@ -185,11 +217,19 @@ Measured by compiling "${classes}" through the project's own Tailwind.`
  */
 const DISMISS_TELL = /sr-only">(?:Close|Dismiss)|(?<![A-Za-z])closeButton\b/;
 
-test("src/components/ui/ holds no dismiss control this file has not measured", () => {
+/** Every `.tsx` under `dir`, at any depth, named as `DismissControl.file` is. */
+function tsxFilesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return tsxFilesUnder(full);
+    return entry.name.endsWith(".tsx") ? [path.relative(UI_DIR, full)] : [];
+  });
+}
+
+test("no swept directory holds a dismiss control this file has not measured", () => {
   const measured = new Set(DISMISS_CONTROLS.map((control) => control.file));
 
-  const found = readdirSync(UI_DIR)
-    .filter((file) => file.endsWith(".tsx"))
+  const found = SWEPT_DIRS.flatMap(tsxFilesUnder)
     .filter((file) =>
       DISMISS_TELL.test(
         stripComments(readFileSync(path.join(UI_DIR, file), "utf8"))
@@ -200,8 +240,10 @@ test("src/components/ui/ holds no dismiss control this file has not measured", (
   assert.deepEqual(
     found,
     [...measured].sort(),
-    `the dismiss controls in src/components/ui/ are no longer the ones this file measures.
+    `the dismiss controls in ${SWEPT_DIRS.map((dir) => path.relative(process.cwd(), dir)).join(" and ")} are no longer the ones this file measures.
 
-A primitive that paints its own Close is a 24x24 target the test above cannot see until it is listed. Add it to DISMISS_CONTROLS with the anchors that reach its class string — or, if it merely forwards a flag to another primitive's control, it owns no target and the tell is what needs narrowing.`
+A file that paints its own Close is a 24x24 target the test above cannot see until it is listed. Add it to DISMISS_CONTROLS with the anchors that reach its class string — or, if it merely forwards a flag to another primitive's control, it owns no target and the tell is what needs narrowing.
+
+Two Close buttons in one file must be ONE component with one class string before they can be listed: the entry names a file and an anchor, so a second hand-placed control in the same file is a second unmeasured target wearing a measured one's name.`
   );
 });
