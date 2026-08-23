@@ -326,7 +326,7 @@ test("the copy admits what this toggle does NOT cover", () => {
     prose.includes("already listed on their dashboard"),
     "the copy never names the ungated portfolio listing"
   );
-  for (const fact of ["current stage", "launch date"]) {
+  for (const fact of ["current phase", "launch date"]) {
     assert.ok(prose.includes(fact), `the copy never names "${fact}"`);
   }
 });

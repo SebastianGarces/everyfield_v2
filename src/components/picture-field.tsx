@@ -186,7 +186,15 @@ export function PictureField({
 
   return (
     <div className="flex flex-wrap items-center gap-4">
-      <Avatar className={copy.avatarClass}>
+      {/* AN EDGE, DRAWN INSIDE. A portrait shot against a white wall has no
+          boundary of its own, so without this it bleeds into the card and the
+          picture stops reading as one round thing. `outline` rather than
+          `border` because the Avatar clips its image to the box — a border
+          would be painted over — and the negative offset keeps the ring inside
+          the 80px rather than growing the control by two pixels. */}
+      <Avatar
+        className={`${copy.avatarClass} outline outline-1 -outline-offset-1 outline-black/10`}
+      >
         {/* EMPTY ALT, and it is the right call rather than a lazy one. The
             picture carries no information a screen reader could use, and whose
             picture it is is named within a few lines either way. What a reader
@@ -241,12 +249,9 @@ export function PictureField({
                 change with it: a control that renames itself mid-request is a
                 control the reader has to re-read to find again. */}
             {picture.inFlight === "upload" ? (
-              <Loader2
-                className="mr-2 size-4 animate-spin"
-                aria-hidden="true"
-              />
+              <Loader2 className="animate-spin" aria-hidden="true" />
             ) : (
-              <Upload className="mr-2 size-4" aria-hidden="true" />
+              <Upload aria-hidden="true" />
             )}
             {picture.src ? copy.replace : copy.upload}
           </Button>
@@ -263,12 +268,9 @@ export function PictureField({
                   disabled={isBusy}
                 >
                   {picture.inFlight === "remove" ? (
-                    <Loader2
-                      className="mr-2 size-4 animate-spin"
-                      aria-hidden="true"
-                    />
+                    <Loader2 className="animate-spin" aria-hidden="true" />
                   ) : (
-                    <Trash className="mr-2 size-4" aria-hidden="true" />
+                    <Trash aria-hidden="true" />
                   )}
                   Remove
                 </Button>

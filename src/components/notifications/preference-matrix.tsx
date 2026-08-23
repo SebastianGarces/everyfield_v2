@@ -7,6 +7,7 @@ import {
   setDigestCadenceAction,
   setNotificationPreferenceAction,
 } from "@/app/(dashboard)/settings/actions";
+import { SettingsBlock } from "@/components/settings/settings-block";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import {
@@ -196,7 +197,7 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
     digestRow?.cells.every((cell) => state.cells[cell.key] === false) ?? false;
 
   return (
-    <div className="bg-card rounded-lg border">
+    <SettingsBlock>
       {/* Column headers, for the eye only.
           `aria-hidden` is deliberate: every switch already carries a full
           accessible name ("Tasks — Email"), so announcing the header as well
@@ -207,7 +208,7 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
           none. */}
       <div
         aria-hidden="true"
-        className="text-muted-foreground hidden items-center gap-6 border-b px-4 py-2 text-xs font-medium sm:flex"
+        className="text-muted-foreground hidden items-center gap-6 border-b pb-2 text-xs font-medium sm:flex"
       >
         <span className="flex-1">Category</span>
         <span className="flex">
@@ -228,7 +229,7 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
               key={row.category}
               data-testid={`preference-row-${row.category}`}
               data-eligible={row.eligible}
-              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-6"
+              className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:gap-6"
             >
               <div className="min-w-0 flex-1 space-y-1">
                 <p
@@ -414,6 +415,6 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
           );
         })}
       </ul>
-    </div>
+    </SettingsBlock>
   );
 }

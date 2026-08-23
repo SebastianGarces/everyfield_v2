@@ -1,6 +1,6 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Search, XIcon } from "lucide-react";
 import {
   Suspense,
   use,
@@ -18,6 +18,7 @@ import { NotificationsSection } from "@/components/settings/sections/notificatio
 import { TeamSection } from "@/components/settings/sections/team-section";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogTitle,
@@ -27,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
+import { cn } from "@/lib/utils";
 import {
   cachedSectionView,
   closeSettings,
@@ -207,6 +209,9 @@ function SettingsDialog({
     setAttempts((held) => ({ ...held, [activeId]: (held[activeId] ?? 0) + 1 }));
   const searchId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const activeEntryRef = useRef<HTMLAnchorElement>(null);
 
   const active = SETTINGS_SECTIONS.find((section) => section.id === activeId);
 
@@ -255,6 +260,23 @@ function SettingsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A SWITCH IS A NEW PANE, NOT A SCROLLED ONE. Nothing here remounts on a
+  // switch — that is the whole mechanism — so the scroller kept the previous
+  // section's `scrollTop`, and a reader who left Church halfway down arrived in
+  // Notifications halfway down.
+  //
+  // AND THE RAIL IS PULLED BACK TO THE ENTRY IT IS NAMING. On a phone the nav
+  // scrolls sideways and five entries are about 556px in a 327px viewport, so
+  // the section on screen could be named off the edge of it. `nearest` on both
+  // axes so an entry already in view moves nothing.
+  useEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = 0;
+    activeEntryRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeId]);
+
   return (
     <Dialog
       open
@@ -285,12 +307,28 @@ function SettingsDialog({
           document.getElementById(DASHBOARD_MAIN_ID)?.focus();
         }}
         tabIndex={-1}
-        className="bg-card flex h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:h-[min(40rem,calc(100dvh-4rem))] md:flex-row lg:max-w-4xl"
+        // `showCloseButton={false}`: Close is drawn by this component instead —
+        // in the section pane's top bar once the panes sit side by side, and as
+        // the usual corner X while they are stacked. The built-in one is
+        // absolute over the whole dialog, so the scrollbar ran behind it.
+        showCloseButton={false}
+        className="bg-card flex h-[calc(100dvh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 md:h-[min(40rem,calc(100dvh-4rem))] md:max-w-3xl md:flex-row lg:max-w-4xl"
       >
+        {/* The stacked layout's Close, hidden once the section pane's bar takes
+            over at `md`. */}
+        <SettingsClose className="absolute top-3 right-3 z-10 md:hidden" />
         {/* THE RAIL. `border-b` on a stacked phone layout and `border-r` once
             the two panes sit side by side, so the seam always separates the
-            navigation from the section rather than floating. */}
-        <div className="bg-muted/40 flex shrink-0 flex-col border-b md:w-56 md:border-r md:border-b-0 lg:w-64">
+            navigation from the section rather than floating.
+
+            AND NO TINT OF ITS OWN. `bg-muted/40` over the dialog's `bg-card`
+            put the rail within 1.009:1 of the active entry's own fill — two
+            greys nobody can tell apart — so the rail is the dialog's surface
+            and the ENTRIES carry the state instead: `bg-muted` for the fill,
+            and a 4px `--ef` edge for which one is open. That is the treatment
+            `wiki-sidebar.tsx` already ships, and the green edge is the signal
+            this rail was the only navigation in the product without. */}
+        <div className="flex shrink-0 flex-col border-b md:w-44 md:border-r md:border-b-0 lg:w-48">
           {/* `pr-12` ONLY while the panes are stacked. The dialog's Close sits
               at the content's top-right corner, which on a phone is directly
               over this search field — measured at 375px, the two boxes
@@ -314,7 +352,7 @@ function SettingsDialog({
                 value={query}
                 placeholder="Search"
                 autoComplete="off"
-                className="bg-background pl-8"
+                className="bg-card pl-8"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   // Enter jumps to the first match, so a reader who typed
@@ -325,6 +363,14 @@ function SettingsDialog({
                   if (!first) return;
                   event.preventDefault();
                   showSection(first.id);
+                  // …AND FOCUS GOES WITH IT. The jump redraws the pane and used
+                  // to leave the caret in the search box, so the next Tab
+                  // resumed at the top of the rail and a screen reader had no
+                  // reason to look at what had just opened. The heading is
+                  // `tabIndex={-1}` for exactly this. What is SAID is the
+                  // status region's job below, since the heading's own text
+                  // does not change until the commit after this handler.
+                  titleRef.current?.focus();
                 }}
               />
             </div>
@@ -348,6 +394,7 @@ function SettingsDialog({
                 // curious.
                 <a
                   key={section.id}
+                  ref={isActive ? activeEntryRef : undefined}
                   href={settingsSectionHref(section.id)}
                   aria-current={isActive ? "page" : undefined}
                   onClick={(event) => {
@@ -366,10 +413,20 @@ function SettingsDialog({
                     event.preventDefault();
                     showSection(section.id);
                   }}
-                  className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors md:shrink ${
+                  // THE EDGE'S COLOUR BELONGS TO A BRANCH, NEVER TO THE BASE.
+                  // `before:bg-transparent` and `before:bg-ef` compile to the
+                  // same specificity, and Tailwind emits transparent LATER in
+                  // the sheet — so an element carrying both is transparent
+                  // whatever the branch says, and the active entry shipped with
+                  // no green edge at all (measured in the browser:
+                  // rgba(0, 0, 0, 0)). `wiki-sidebar.tsx` survives the same
+                  // pair only because `cn()` runs tailwind-merge, which DELETES
+                  // the losing class; a template literal has no such editor, so
+                  // the two colours may never both be in the string.
+                  className={`relative flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors before:absolute before:top-0 before:left-0 before:h-full before:w-[4px] before:transition-colors md:shrink md:whitespace-normal ${
                     isActive
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                      ? "bg-muted text-foreground before:bg-ef"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground before:bg-transparent"
                   }`}
                 >
                   <Icon className="size-4 shrink-0" aria-hidden="true" />
@@ -399,7 +456,7 @@ function SettingsDialog({
               <button
                 type="button"
                 onClick={() => setQuery("")}
-                className="text-foreground cursor-pointer text-sm font-medium underline underline-offset-4"
+                className="text-foreground hover:text-muted-foreground cursor-pointer text-sm font-medium underline underline-offset-4 transition-colors"
               >
                 Clear search
               </button>
@@ -407,21 +464,57 @@ function SettingsDialog({
           )}
         </div>
 
-        {/* THE SECTION. `overscroll-contain` so a flick at the end of a long
-            section does not scroll the screen behind the modal. */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-          <div className="space-y-1 px-5 pt-5 pr-12 md:px-6 md:pt-6 md:pr-14">
-            <DialogTitle className="text-xl font-semibold tracking-tight">
-              {active?.label ?? "Settings"}
-            </DialogTitle>
-            {active && (
-              <DialogDescription className="text-pretty">
-                {active.description}
-              </DialogDescription>
-            )}
+        {/* THE SECTION PANE. From `md` up, a fixed bar owns the top of the
+            pane and hosts Close; the scrollable container starts UNDER it, so
+            content clips against the bar and the scrollbar's track begins
+            below the X instead of running behind it. The bar is `h-15` and the
+            X sits `pr-3` from the edge, which puts the glyph's centre exactly on
+            the search field's: the rail's `p-3` above an `h-9` input centres it
+            30px down, and a centred X in a 60px bar lands on the same line. At
+            `h-12` it sat six pixels high of the one horizontal the eye reads
+            straight across the seam between the two panes. */}
+        <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
+          <div className="hidden h-15 shrink-0 items-center justify-end pr-3 md:flex">
+            <SettingsClose />
           </div>
 
-          {/* THE TITLE AND THE RAIL ARE ALREADY DRAWN by the time this waits —
+          {/* `overscroll-contain` so a flick at the end of a long section does
+              not scroll the screen behind the modal.
+
+              AND IT IS THE `@container` the section forms measure against. The
+              pane is the width that decides whether a field grid is one column
+              or two — the viewport is not, because the rail takes 14 or 16rem
+              off it and the dialog itself caps at `md`. */}
+          <div
+            ref={paneRef}
+            className="@container flex flex-1 flex-col overflow-y-auto overscroll-contain"
+          >
+            <div className="space-y-1 px-5 pt-5 pr-12 md:px-6 md:pt-1 md:pr-6">
+              <DialogTitle
+                ref={titleRef}
+                // Focusable only by script: the search box's Enter jump hands
+                // focus here, and nothing else should stop on a heading.
+                tabIndex={-1}
+                className="text-xl font-semibold tracking-tight"
+              >
+                {active?.label ?? "Settings"}
+              </DialogTitle>
+              {active && (
+                <DialogDescription className="max-w-prose text-pretty">
+                  {active.description}
+                </DialogDescription>
+              )}
+              {/* WHICH SECTION IS ON SCREEN, SAID OUT LOUD. A switch rewrites
+                  the pane under a reader whose focus has not moved, and the
+                  dialog announces its title once, on open — so without this
+                  nothing at all marks the change. Rendered on every pass, so a
+                  repeated switch is announced again. */}
+              <p role="status" className="sr-only">
+                {active ? `${active.label} settings` : "Settings"}
+              </p>
+            </div>
+
+            {/* THE TITLE AND THE RAIL ARE ALREADY DRAWN by the time this waits —
               they come from the registry, which the browser has. Only the
               section's own values are ever pending, which is why the frame does
               not flicker on the way in.
@@ -460,29 +553,76 @@ function SettingsDialog({
               read through the store the fragment already uses, with no fallback
               and no second instance. That is a larger change than this issue,
               and it is written down rather than half-done. */}
-          <div className="flex-1 px-5 py-5 md:px-6 md:py-6">
-            <Suspense
-              key={activeId}
-              fallback={
-                stale ? (
-                  <div inert aria-hidden="true">
-                    <SectionView activeId={activeId} view={stale} />
-                  </div>
-                ) : (
-                  <SectionSkeleton />
-                )
-              }
-            >
-              <SectionBody
-                activeId={activeId}
-                request={request}
-                onRetry={retry}
-              />
-            </Suspense>
+            {/* A MEASURE CAP FOR THE WHOLE PANE, not five copies of one class
+                across five section files this component does not own. At `lg`
+                the pane is wide enough to run a section's prose to 80-85
+                characters, past the 45-75 a reader tracks a line across.
+
+                CENTRED PARAGRAPHS OPT OUT, and that is not a hedge: a `max-w`
+                narrows the BOX and leaves it flush left, so a `text-center`
+                empty state — `plant-coach-list.tsx` has one — would go on
+                centring its text inside a box that no longer fills the pane and
+                land visibly off centre. A paragraph that centres itself is a
+                caption, not a measure of prose. */}
+            <div className="flex-1 px-5 py-5 md:px-6 md:py-6 [&_p:not(.text-center)]:max-w-prose">
+              <Suspense
+                key={activeId}
+                fallback={
+                  stale ? (
+                    <div
+                      inert
+                      aria-hidden="true"
+                      className="pointer-events-none"
+                    >
+                      <SectionView activeId={activeId} view={stale} />
+                    </div>
+                  ) : (
+                    <SectionSkeleton />
+                  )
+                }
+              >
+                <SectionBody
+                  activeId={activeId}
+                  request={request}
+                  onRetry={retry}
+                />
+              </Suspense>
+            </div>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * THE MODAL'S CLOSE — drawn twice, spelled once.
+ *
+ * `DialogContent`'s built-in X is refused here (`showCloseButton={false}`)
+ * because it is absolute over the WHOLE dialog and the section's scrollbar ran
+ * behind it. What replaces it is two placements of the same control: the corner
+ * X while the panes are stacked, and the section pane's own top bar from `md`.
+ *
+ * ONE COMPONENT RATHER THAN TWO CALL SITES, and the reason is a test. The
+ * shared primitive's Close is measured against WCAG 2.5.8's 24x24 floor by
+ * `dismiss-target-size.test.ts`, which reads class strings out of
+ * `src/components/ui/` — so these two, being neither shared nor in that
+ * directory, were the only dismiss controls in the product growing their own
+ * box on trust. As one component there is ONE class string to measure, and that
+ * file now measures it and sweeps this directory for a second one. `className`
+ * carries PLACEMENT only; the box is not a caller's to change.
+ */
+function SettingsClose({ className }: { className?: string }) {
+  return (
+    <DialogClose
+      className={cn(
+        "ring-offset-background focus-visible:ring-ring grid size-6 place-items-center rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden [&_svg]:pointer-events-none [&_svg]:size-4",
+        className
+      )}
+    >
+      <XIcon />
+      <span className="sr-only">Close</span>
+    </DialogClose>
   );
 }
 
@@ -629,8 +769,7 @@ function SectionUnavailable({ retry }: { retry: () => void }) {
   return (
     <div role="status" className="space-y-3">
       <p className="text-sm text-pretty">
-        We could not load this section just now. Nothing you have saved is
-        affected.
+        Unable to load this section. Nothing you have saved is affected.
       </p>
       <Button variant="outline" className="cursor-pointer" onClick={retry}>
         Try again

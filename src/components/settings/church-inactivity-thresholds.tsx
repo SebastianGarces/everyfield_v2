@@ -37,6 +37,10 @@ import { Label } from "@/components/ui/label";
 // window, the URL bar), and `contains(null)` is false — so that commits, which
 // is right: the planter has finished with the pair either way.
 //
+// Enter is the second way in and it is handed the SAME group commit, so it says
+// what leaving the pair says. It always did — it used to blur, and a blur out of
+// the document commits by the line above — but it said so by side effect.
+//
 // Uncontrolled inputs and no server data in state — see `./field-save.tsx`,
 // which owns the save machine both church controls share.
 // ============================================================================
@@ -53,24 +57,27 @@ export function ChurchInactivityThresholds({
   const warning = useRef<HTMLInputElement>(null);
   const alert = useRef<HTMLInputElement>(null);
 
-  const typed = () => ({
+  const counts = () => ({
     warningDays: Number(warning.current?.value),
     alertDays: Number(alert.current?.value),
   });
 
   const { state, commit } = useFieldSave({
-    // NUMBERS, so "07" and "7" are the same answer and neither costs a write.
-    isDirty: () => {
-      const next = typed();
-      return next.warningDays !== warningDays || next.alertDays !== alertDays;
+    // NUMBERS, so "07" and "7" are the same answer and neither costs a write —
+    // and the PAIR is one string, because the pair is one decision here for the
+    // same reason it is one row write.
+    typed: () => {
+      const next = counts();
+      return `${next.warningDays}/${next.alertDays}`;
     },
-    save: () => setChurchInactivityThresholdsAction(typed()),
+    stored: `${warningDays}/${alertDays}`,
+    save: () => setChurchInactivityThresholdsAction(counts()),
   });
 
   const invalid = state.status === "failed" ? state.invalid : [];
 
   return (
-    <div className="bg-card space-y-3 rounded-lg border px-4 py-4">
+    <div className="space-y-3">
       <div className="space-y-1">
         {/* A GROUP HEADING, not a label — the same rule the digest pair learned
             the hard way: pointing one label at both inputs concatenates into
@@ -102,6 +109,7 @@ export function ChurchInactivityThresholds({
           label="Warn after"
           ref={warning}
           stored={warningDays}
+          commit={commit}
           // Only the count the parser actually named. A bound refusal ("365
           // days or fewer") is about ONE input, and marking the other invalid
           // tells a screen-reader user a correct value is wrong; the ORDER
@@ -113,6 +121,7 @@ export function ChurchInactivityThresholds({
           label="Alert after"
           ref={alert}
           stored={alertDays}
+          commit={commit}
           invalid={invalid.includes("alertDays")}
         />
       </div>
@@ -129,12 +138,17 @@ function DayCountInput({
   label,
   ref,
   stored,
+  commit,
   invalid,
 }: {
   id: string;
   label: string;
   ref: React.RefObject<HTMLInputElement | null>;
   stored: number;
+  /** THE GROUP'S commit, not one of this input's own — see the header. Enter
+   *  says the planter has finished with the PAIR, the same thing leaving it
+   *  says, so both counts are read and one request is sent. */
+  commit: () => void;
   invalid: boolean;
 }) {
   return (
@@ -160,7 +174,7 @@ function DayCountInput({
           aria-invalid={invalid ? true : undefined}
           aria-describedby="inactivity-help inactivity-status"
           className="w-24"
-          onKeyDown={commitOnEnter}
+          onKeyDown={commitOnEnter(commit)}
         />
         <span className="text-muted-foreground text-sm">days</span>
       </div>

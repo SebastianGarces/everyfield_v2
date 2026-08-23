@@ -32,14 +32,11 @@ import {
   createCoachInvitationAction,
   type CreateSeatInvitationState,
 } from "@/app/(dashboard)/settings/team/actions";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { invitationCreatedNotice } from "@/lib/invitations/create-notice";
@@ -56,20 +53,25 @@ export function CoachInviteForm({ expiryDays }: { expiryDays: number }) {
   const [inviteeEmail, setInviteeEmail] = useState("");
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Invite a coach</CardTitle>
-        <CardDescription>
-          A coach reads your plant&apos;s work — its people, meetings, teams and
-          tasks — and cannot change any of it. They do not join your team and
-          they take no seat. Anyone can be invited to coach, whether or not they
-          already have an EveryField account.
-        </CardDescription>
-      </CardHeader>
-      <form action={formAction}>
-        <CardContent className="space-y-4">
+    <section aria-labelledby="team-invite-coach">
+      <SettingsBlock>
+        <SettingsHeading
+          id="team-invite-coach"
+          description={
+            <>
+              A coach reads your plant&apos;s work — its people, meetings, teams
+              and tasks — and cannot change any of it. They do not join your
+              team and they take no seat. Anyone can be invited to coach,
+              whether or not they already have an EveryField account.
+            </>
+          }
+        >
+          Invite a coach
+        </SettingsHeading>
+        <form action={formAction} className="space-y-4">
           {state.error && (
             <p
+              id="coachInviteeEmail-error"
               role="alert"
               className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
             >
@@ -94,20 +96,23 @@ export function CoachInviteForm({ expiryDays }: { expiryDays: number }) {
               value={inviteeEmail}
               onChange={(event) => setInviteeEmail(event.target.value)}
               aria-invalid={Boolean(state.error)}
+              aria-describedby={
+                state.error ? "coachInviteeEmail-error" : undefined
+              }
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" className="cursor-pointer" disabled={pending}>
-              {pending ? "Sending invitation…" : "Invite coach"}
+              {pending ? "Sending invitation…" : "Send invitation"}
             </Button>
             <p className="text-muted-foreground text-xs">
               Invitations expire after {expiryDays} days.
             </p>
           </div>
-        </CardContent>
-      </form>
-    </Card>
+        </form>
+      </SettingsBlock>
+    </section>
   );
 }
 
@@ -127,12 +132,21 @@ function CoachInviteCreatedNotice({
     <div
       role="status"
       className={
+        // The attention scale's MEDIUM step — the repo's caution treatment, the
+        // same one `SeatInviteForm` paints. The invitation exists; only the
+        // email did not go.
         failed
-          ? "space-y-1 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/20"
+          ? "border-attention-medium/45 bg-attention-medium/18 space-y-1 rounded-md border p-3 text-sm"
           : "border-primary/30 bg-primary/5 space-y-1 rounded-md border p-3 text-sm"
       }
     >
-      <p className="font-medium">{notice.headline}</p>
+      <p
+        className={
+          failed ? "text-attention-medium-ink font-medium" : "font-medium"
+        }
+      >
+        {notice.headline}
+      </p>
       <p className="text-muted-foreground">{notice.detail}</p>
     </div>
   );

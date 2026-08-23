@@ -65,7 +65,7 @@ export function AssociationReminder({
       <AlertDescription>
         <p className="text-pretty">
           Nothing is associated until you answer. Accepting lists your plant in
-          their directory with its name, stage and launch date — what else they
+          their directory with its name, phase and launch date — what else they
           hear about stays yours to decide.
         </p>
 

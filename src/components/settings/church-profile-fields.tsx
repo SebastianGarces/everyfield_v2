@@ -8,6 +8,7 @@ import {
   FieldSaveStatus,
   useFieldSave,
 } from "@/components/settings/field-save";
+import { SettingsBlock } from "@/components/settings/settings-block";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type {
@@ -57,22 +58,22 @@ export function ChurchProfileFields({
   values,
 }: ChurchProfileFieldsProps) {
   return (
-    <div className="bg-card space-y-3 rounded-lg border px-4 py-4">
+    <SettingsBlock>
       <div className="space-y-1">
         <h3 id="church-profile-heading" className="text-sm font-medium">
           Name and address
         </h3>
         <p className="text-muted-foreground text-sm text-pretty">
           Where this plant is, and what to call it. Each field saves on its own
-          when you click away. Only the name is required — leave anything else
-          blank until you know it.
+          when you move to the next one. Only the name is required — leave
+          anything else blank until you know it.
         </p>
       </div>
 
       <div
         role="group"
         aria-labelledby="church-profile-heading"
-        className="grid gap-4 sm:grid-cols-2"
+        className="grid gap-4 @md:grid-cols-2"
       >
         {fields.map((field) => (
           <ProfileFieldRow
@@ -82,7 +83,7 @@ export function ChurchProfileFields({
           />
         ))}
       </div>
-    </div>
+    </SettingsBlock>
   );
 }
 
@@ -95,21 +96,23 @@ function ProfileFieldRow({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const stored = value ?? "";
+  const typed = () => input.current?.value.trim() ?? stored;
 
   const { state, commit } = useFieldSave({
-    isDirty: () => (input.current?.value.trim() ?? stored) !== stored,
+    typed,
+    stored,
     save: () =>
-      setChurchProfileFieldAction({
-        field: field.id,
-        value: input.current?.value.trim() ?? stored,
-      }),
+      setChurchProfileFieldAction({ field: field.id, value: typed() }),
   });
 
   const inputId = `church-profile-${field.id}`;
   const statusId = `${inputId}-status`;
 
+  // The span tracks the GRID, not the viewport: `sm:col-span-2` in a
+  // one-column grid asks for a second column and CSS grid obliges by creating
+  // an implicit one, which is a stray half-width track.
   return (
-    <div className={field.span === "full" ? "sm:col-span-2" : undefined}>
+    <div className={field.span === "full" ? "@md:col-span-2" : undefined}>
       <div className="space-y-1.5">
         <Label htmlFor={inputId} className="cursor-pointer">
           {field.label}
@@ -142,7 +145,7 @@ function ProfileFieldRow({
           aria-describedby={statusId}
           className="w-full max-w-md"
           onBlur={commit}
-          onKeyDown={commitOnEnter}
+          onKeyDown={commitOnEnter(commit)}
         />
 
         <FieldSaveStatus id={statusId} state={state} />

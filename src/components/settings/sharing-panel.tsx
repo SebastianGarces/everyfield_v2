@@ -4,6 +4,7 @@ import { useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 
 import { setSharingToggleAction } from "@/app/(dashboard)/settings/actions";
+import { SettingsBlock } from "@/components/settings/settings-block";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { PrivacyFeatureKey } from "@/lib/auth/access";
@@ -68,15 +69,19 @@ export function SharingSwitch({
   };
 
   return (
-    <div className="bg-card rounded-lg border">
+    <SettingsBlock>
       {/* ONE ROW AT EVERY WIDTH. Stacked, the switch lands under the summary
-          and bottom-left, so seven cards give the eye a control to re-find on
+          and bottom-left, so seven blocks give the eye a control to re-find on
           every row instead of a column of them down one edge. */}
-      <div className="flex items-start justify-between gap-4 px-4 py-4 sm:gap-6">
+      <div className="flex items-start justify-between gap-4 sm:gap-6">
         <div className="min-w-0 flex-1 space-y-1">
+          {/* `leading-snug` overrides the Label primitive's `leading-none`,
+              which assumes one line. The longest of these labels is 49
+              characters and wraps on a phone, and two lines at line-height 1
+              touch. */}
           <Label
             htmlFor={switchId}
-            className="cursor-pointer text-sm font-medium"
+            className="cursor-pointer text-sm leading-snug font-medium"
           >
             {label}
           </Label>
@@ -103,11 +108,15 @@ export function SharingSwitch({
         />
       </div>
 
+      {/* A RULE INSIDE THE BLOCK, not a second compartment. The list used to
+          sit in its own full-bleed panel below the row, which read as two
+          stacked surfaces for one switch; the block's padding now holds both
+          and the hairline only separates them. */}
       {detail ? (
         <ul
           id={detailId}
           data-testid={`${switchId}-detail`}
-          className="text-muted-foreground list-disc space-y-1.5 border-t px-4 py-4 pl-8 text-sm"
+          className="text-muted-foreground list-disc space-y-1.5 border-t ps-4 pt-3 text-sm"
         >
           {detail.map((line) => (
             <li key={line} className="text-pretty">
@@ -116,6 +125,6 @@ export function SharingSwitch({
           ))}
         </ul>
       ) : null}
-    </div>
+    </SettingsBlock>
   );
 }

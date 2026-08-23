@@ -3,11 +3,9 @@
 import { Building2, Inbox } from "lucide-react";
 
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/components/ui/card";
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
 import type {
   AssociationSectionView,
   CurrentAssociationRow,
@@ -64,29 +62,35 @@ import { LeaveOrgDialog } from "@/app/(dashboard)/settings/association/leave-org
 // (`memory/contracts/data-patterns.md`).
 //
 // ----------------------------------------------------------------------------
-// WHY EACH SECTION IS A CARD (design pass, #304 "UI ruling round 3")
+// WHY EACH SECTION IS A SURFACE (design pass, #304 "UI ruling round 3")
 // ----------------------------------------------------------------------------
 //
 // The first build put heading, helper sentence and content box on the shell's
 // bare background at one shared left edge with near-uniform gaps, so nothing
 // on the screen said which sentence belonged to which box — the reviewer read
-// the empty state as unrelated to the heading above it. A card is the
-// project's existing answer to that, and `/oversight/invitations` — the other
-// half of this same feature — already uses it: one surface per question, the
-// question's title and its explanation inside that surface, the answer
+// the empty state as unrelated to the heading above it. A bordered surface is
+// the project's existing answer to that, and `/oversight/invitations` — the
+// other half of this same feature — already uses it: one surface per question,
+// the question's title and its explanation inside that surface, the answer
 // underneath. Matching it means an admin and a planter looking at the two ends
 // of one invitation see the same structure.
 //
-// The semantics do NOT come from the card. `CardTitle` is a `div`; the section
-// headings here stay real `<h2>` elements owned by their `<section
-// aria-labelledby=…>`, so the section keeps a navigable outline under the
-// modal's own title that the reference surface does not have.
+// WHICH surface is no longer this file's choice. `Card` was it until the
+// 2026-08-23 review found three container treatments in one modal; the density
+// now comes from `SettingsBlock`, which every section of the modal shares, and
+// the `shadow-sm` this file used to add is gone with it — see that file for the
+// radius and padding argument.
+//
+// The semantics do NOT come from the surface. `SettingsHeading` is a real
+// `<h2>` owned by its `<section aria-labelledby=…>`, so the section keeps a
+// navigable outline under the modal's own title that the reference surface
+// does not have.
 // ============================================================================
 
 export function AssociationSection({ view }: { view: AssociationSectionView }) {
   if (view.answerer === "plant") {
     return (
-      <div className="space-y-6">
+      <div className="space-y-8">
         <PendingInvitations
           invitations={view.pending}
           subjectNoun="your plant"
@@ -102,63 +106,58 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
           // is ungated and lasts as long as the association) and false of six of
           // the seven toggles (no switch exists for them yet). Reversibility is
           // the consent copy's to state, where it is stated precisely.
-          consequence="Accepting lists your plant in their directory with its name, stage and launch date."
+          consequence="Accepting lists your plant in their directory with its name, phase and launch date."
           consent={view.consent}
         />
 
         <section aria-labelledby="current-associations">
-          <Card className="shadow-sm">
-            <CardHeader>
-              <SectionTitle id="current-associations">
-                Who you belong to
-              </SectionTitle>
-              <CardDescription className="text-pretty">
-                A plant can belong to a sending church and to a network. Leaving
-                one leaves the other standing.
-              </CardDescription>
-            </CardHeader>
+          <SettingsBlock>
+            <SettingsHeading
+              id="current-associations"
+              description="A plant can belong to a sending church and to a network. Leaving one leaves the other standing."
+            >
+              Who you belong to
+            </SettingsHeading>
 
-            <CardContent>
-              {view.associations.length === 0 ? (
-                <EmptySection
-                  icon={Building2}
-                  title="Your plant is independent"
-                  detail="It belongs to no sending church or network."
-                />
-              ) : (
-                <ul className="divide-border divide-y">
-                  {view.associations.map((association) => (
-                    <li
-                      key={`${association.orgType}:${association.orgId}`}
-                      className="py-4 first:pt-0 last:pb-0"
-                    >
-                      <AssociationRow
-                        orgName={association.orgName}
-                        roleLabel={
-                          association.orgType === "sending_church"
-                            ? "Your sending church"
-                            : "Your network"
-                        }
-                        action={
-                          <LeaveOrgDialog
-                            orgType={association.orgType}
-                            orgName={association.orgName}
-                          />
-                        }
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+            {view.associations.length === 0 ? (
+              <EmptySection
+                icon={Building2}
+                title="Your plant is independent"
+                detail="It belongs to no sending church or network."
+              />
+            ) : (
+              <ul className="divide-border divide-y">
+                {view.associations.map((association) => (
+                  <li
+                    key={`${association.orgType}:${association.orgId}`}
+                    className="py-4 first:pt-0 last:pb-0"
+                  >
+                    <AssociationRow
+                      orgName={association.orgName}
+                      roleLabel={
+                        association.orgType === "sending_church"
+                          ? "Your sending church"
+                          : "Your network"
+                      }
+                      action={
+                        <LeaveOrgDialog
+                          orgType={association.orgType}
+                          orgName={association.orgName}
+                        />
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SettingsBlock>
         </section>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PendingInvitations
         invitations={view.pending}
         subjectNoun="your sending church"
@@ -176,26 +175,12 @@ export function AssociationSection({ view }: { view: AssociationSectionView }) {
 // ----------------------------------------------------------------------------
 
 /**
- * The section title, styled like `CardTitle` but kept a real heading.
- *
- * `CardTitle` renders a `div`, which would leave this pane with the modal's
- * title and no sections under it. The id is what its `<section aria-labelledby>`
- * points at.
- */
-function SectionTitle({ id, children }: { id: string; children: string }) {
-  return (
-    <h2 id={id} className="leading-none font-semibold tracking-tight">
-      {children}
-    </h2>
-  );
-}
-
-/**
  * A section with nothing in it yet — oriented, not a shrug.
  *
- * Centered inside its card rather than left-aligned in a dashed box: the dashed
- * rectangle the first build used reads as a drop target, and left-aligning it
- * on the same edge as the heading was half of why the two looked unrelated.
+ * Centered inside its block rather than left-aligned in a dashed box: the
+ * dashed rectangle the first build used reads as a drop target, and
+ * left-aligning it on the same edge as the heading was half of why the two
+ * looked unrelated.
  */
 function EmptySection({
   icon: Icon,
@@ -228,8 +213,9 @@ function EmptySection({
  * THE PROMISE AND THE EMPTY STATE ARE NEVER BOTH ON SCREEN. "Nothing is
  * associated until you accept" is addressed to somebody who has an invitation
  * in front of them; when there is none it said nothing and sat one line above
- * an empty state that repeated it. It is now the card's description in the one
- * state where it has a referent, and the empty state speaks alone in the other.
+ * an empty state that repeated it. It is now the heading's description in the
+ * one state where it has a referent, and the empty state speaks alone in the
+ * other.
  * The consequence sentence moved up here for the same reason — it is a property
  * of accepting, not of one invitation, and it was repeated per row.
  */
@@ -261,77 +247,77 @@ function PendingInvitations({
 }) {
   return (
     <section aria-labelledby="pending-invitations">
-      <Card className="shadow-sm">
-        <CardHeader>
-          <SectionTitle id="pending-invitations">Invitations</SectionTitle>
-          {invitations.length > 0 && (
-            <CardDescription className="text-pretty">
-              Nothing is associated until you accept. {consequence}
-            </CardDescription>
-          )}
-        </CardHeader>
+      <SettingsBlock>
+        <SettingsHeading
+          id="pending-invitations"
+          description={
+            invitations.length > 0
+              ? `Nothing is associated until you accept. ${consequence}`
+              : undefined
+          }
+        >
+          Invitations
+        </SettingsHeading>
 
-        <CardContent>
-          {invitations.length === 0 ? (
-            <EmptySection
-              icon={Inbox}
-              title="No invitations waiting"
-              detail={emptyDetail}
-            />
-          ) : (
-            <ul className="divide-border divide-y">
-              {invitations.map((invitation) => (
-                <li
-                  key={invitation.id}
-                  className="space-y-3 py-4 first:pt-0 last:pb-0"
-                >
-                  <div className="space-y-0.5">
-                    <p className="font-medium">
-                      {invitation.orgName} invited {subjectNoun}
+        {invitations.length === 0 ? (
+          <EmptySection
+            icon={Inbox}
+            title="No invitations waiting"
+            detail={emptyDetail}
+          />
+        ) : (
+          <ul className="divide-border divide-y">
+            {invitations.map((invitation) => (
+              <li
+                key={invitation.id}
+                className="space-y-3 py-4 first:pt-0 last:pb-0"
+              >
+                <div className="space-y-0.5">
+                  <p className="font-medium">
+                    {invitation.orgName} invited {subjectNoun}
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    {invitation.orgType === "sending_church"
+                      ? "A sending church"
+                      : "A church planting network"}
+                    {" · sent "}
+                    {invitation.sentLabel}
+                    {invitation.expiresLabel
+                      ? ` · expires ${invitation.expiresLabel}`
+                      : ""}
+                  </p>
+                </div>
+                {/*
+                  BEFORE THE BUTTONS, not beside them (CS-013). The planter
+                  has to be able to read what accepting shares while the
+                  control that does it is still below the copy — a consent
+                  notice under the button it qualifies is a notice read after
+                  the decision.
+                */}
+                {consent && (
+                  <div className="bg-muted/40 space-y-2 rounded-md p-3">
+                    <p className="text-sm font-medium">
+                      What {invitation.orgName} will see
                     </p>
-                    <p className="text-muted-foreground text-sm">
-                      {invitation.orgType === "sending_church"
-                        ? "A sending church"
-                        : "A church planting network"}
-                      {" · sent "}
-                      {invitation.sentLabel}
-                      {invitation.expiresLabel
-                        ? ` · expires ${invitation.expiresLabel}`
-                        : ""}
-                    </p>
-                  </div>
-                  {/*
-                    BEFORE THE BUTTONS, not beside them (CS-013). The planter
-                    has to be able to read what accepting shares while the
-                    control that does it is still below the copy — a consent
-                    notice under the button it qualifies is a notice read after
-                    the decision.
-                  */}
-                  {consent && (
-                    <div className="bg-muted/40 space-y-2 rounded-md p-3">
-                      <p className="text-sm font-medium">
-                        What {invitation.orgName} will see
+                    {consent.map((line) => (
+                      <p
+                        key={line}
+                        className="text-muted-foreground max-w-prose text-sm text-pretty"
+                      >
+                        {line}
                       </p>
-                      {consent.map((line) => (
-                        <p
-                          key={line}
-                          className="text-muted-foreground max-w-prose text-sm text-pretty"
-                        >
-                          {line}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                  <InvitationAnswer
-                    invitationId={invitation.id}
-                    orgName={invitation.orgName}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+                    ))}
+                  </div>
+                )}
+                <InvitationAnswer
+                  invitationId={invitation.id}
+                  orgName={invitation.orgName}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </SettingsBlock>
     </section>
   );
 }
@@ -384,32 +370,28 @@ function NetworkAssociation({
 }) {
   return (
     <section aria-labelledby="current-associations">
-      <Card className="shadow-sm">
-        <CardHeader>
-          <SectionTitle id="current-associations">
-            Who you belong to
-          </SectionTitle>
-          <CardDescription className="text-pretty">
-            A sending church belongs to at most one church planting network.
-          </CardDescription>
-        </CardHeader>
+      <SettingsBlock>
+        <SettingsHeading
+          id="current-associations"
+          description="A sending church belongs to at most one church planting network."
+        >
+          Who you belong to
+        </SettingsHeading>
 
-        <CardContent>
-          {network === null ? (
-            <EmptySection
-              icon={Building2}
-              title="Your sending church is independent"
-              detail="It belongs to no network."
-            />
-          ) : (
-            <AssociationRow
-              orgName={network.orgName}
-              roleLabel="Your network"
-              action={<LeaveNetworkDialog networkName={network.orgName} />}
-            />
-          )}
-        </CardContent>
-      </Card>
+        {network === null ? (
+          <EmptySection
+            icon={Building2}
+            title="Your sending church is independent"
+            detail="It belongs to no network."
+          />
+        ) : (
+          <AssociationRow
+            orgName={network.orgName}
+            roleLabel="Your network"
+            action={<LeaveNetworkDialog networkName={network.orgName} />}
+          />
+        )}
+      </SettingsBlock>
     </section>
   );
 }

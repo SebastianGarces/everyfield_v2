@@ -145,9 +145,29 @@ test("the roster shows each person's name, address, seat and join date", () => {
   ]) {
     assert.ok(
       html.includes(shown),
-      `AS-023: the roster must show "${shown}" — an Owner auditing access reads all four columns in one pass`
+      `AS-023: the roster must show "${shown}" — an Owner auditing access reads every row's four facts in one pass`
     );
   }
+});
+
+test("the roster is a wrapping row list, never a table", () => {
+  // AS-023 SAYS "IN ONE PASS", AND A TABLE COULD NOT DELIVER IT HERE. These
+  // four facts plus the controls were five `whitespace-nowrap` columns needing
+  // ~926px, and the settings pane is 540px at a 1280px viewport — so the seat,
+  // the join date and every control sat behind an uncued sideways scroll at
+  // every width the app is used at. The row list wraps instead.
+  const html = asOwner();
+
+  assert.doesNotMatch(
+    html,
+    /<table/,
+    "a five-column table cannot fit the settings pane at any viewport — see `PlantCoachList` for the row idiom this section uses"
+  );
+  assert.match(
+    html,
+    /<ul[^>]*class="[^"]*divide-y/,
+    "the roster is a divided row list"
+  );
 });
 
 test("an account with no name shows a placeholder, never a blank cell", () => {
@@ -225,9 +245,8 @@ test("an Admin sees no appoint, demote or remove control in the markup", () => {
     "AS-015: appoint, demote and remove are not rendered for an Admin"
   );
 
-  // THE THREE SPELLINGS A "HIDDEN" CONTROL IS USUALLY GOT WRONG AS. A disabled
-  // button, a control with the verb still in its text, and the column header
-  // that would announce a set of controls with nothing under it.
+  // THE TWO SPELLINGS A "HIDDEN" CONTROL IS USUALLY GOT WRONG AS: a disabled
+  // button, and a control with the verb still in its text.
   assert.doesNotMatch(
     html,
     /<button[^>]*\bdisabled\b/,
@@ -237,11 +256,6 @@ test("an Admin sees no appoint, demote or remove control in the markup", () => {
     html,
     /Make an Admin|Make a Member|Remove/,
     "no seat verb may appear in an Admin's markup, as a button or as anything else"
-  );
-  assert.doesNotMatch(
-    html,
-    /Manage/,
-    "the actions column header goes with the actions — an empty column announces a set of controls that is not there"
   );
 });
 

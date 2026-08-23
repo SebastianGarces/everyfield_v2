@@ -25,14 +25,11 @@ import {
   createSeatInvitationAction,
   type CreateSeatInvitationState,
 } from "@/app/(dashboard)/settings/team/actions";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  SettingsBlock,
+  SettingsHeading,
+} from "@/components/settings/settings-block";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -102,19 +99,18 @@ export function SeatInviteForm({
   const [seat, setSeat] = useState<InvitableSeat>("member");
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Invite someone to your team</CardTitle>
-        <CardDescription>
-          They get an email with a link to create their EveryField account and
-          join this {noun}. The link only works for the address you type, and
-          only for someone who does not already have an account.
-        </CardDescription>
-      </CardHeader>
-      <form action={formAction}>
-        <CardContent className="space-y-4">
+    <section aria-labelledby="team-invite-seat">
+      <SettingsBlock>
+        <SettingsHeading
+          id="team-invite-seat"
+          description={`They get an email with a link to create their EveryField account and join this ${noun}. The link only works for the address you type, and only for someone who does not already have an account.`}
+        >
+          Invite someone to your team
+        </SettingsHeading>
+        <form action={formAction} className="space-y-4">
           {state.error && (
             <p
+              id="inviteeEmail-error"
               role="alert"
               className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
             >
@@ -124,7 +120,10 @@ export function SeatInviteForm({
 
           {state.created && <InviteCreatedNotice created={state.created} />}
 
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+          {/* @md and not sm: the section is a container query root, and this
+              grid answers to the PANE it sits in — about 472–592px from `md`
+              up — not to the viewport behind it. */}
+          <div className="grid gap-4 @md:grid-cols-[1fr_auto] @md:items-end">
             <div className="space-y-2">
               <Label htmlFor="inviteeEmail">Email address</Label>
               <Input
@@ -138,6 +137,9 @@ export function SeatInviteForm({
                 value={inviteeEmail}
                 onChange={(event) => setInviteeEmail(event.target.value)}
                 aria-invalid={Boolean(state.error)}
+                aria-describedby={
+                  state.error ? "inviteeEmail-error" : undefined
+                }
               />
             </div>
 
@@ -155,7 +157,7 @@ export function SeatInviteForm({
               >
                 <SelectTrigger
                   id="seat"
-                  className="w-full cursor-pointer sm:w-56"
+                  className="w-full cursor-pointer @md:w-56"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -179,9 +181,9 @@ export function SeatInviteForm({
               Invitations expire after {expiryDays} days.
             </p>
           </div>
-        </CardContent>
-      </form>
-    </Card>
+        </form>
+      </SettingsBlock>
+    </section>
   );
 }
 
@@ -205,15 +207,22 @@ function InviteCreatedNotice({
     <div
       role="status"
       className={
-        // Amber, not destructive: the invitation was CREATED. The repo's
-        // caution treatment — "there is something left for you to do", not
-        // "this failed".
+        // The attention scale's MEDIUM step, not destructive: the invitation
+        // was CREATED. It is the repo's caution treatment — the same tokens and
+        // the same alphas the phase engine paints "worth a look" with — and it
+        // says "there is something left for you to do", not "this failed".
         failed
-          ? "space-y-1 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/20"
+          ? "border-attention-medium/45 bg-attention-medium/18 space-y-1 rounded-md border p-3 text-sm"
           : "border-primary/30 bg-primary/5 space-y-1 rounded-md border p-3 text-sm"
       }
     >
-      <p className="font-medium">{notice.headline}</p>
+      <p
+        className={
+          failed ? "text-attention-medium-ink font-medium" : "font-medium"
+        }
+      >
+        {notice.headline}
+      </p>
       <p className="text-muted-foreground">{notice.detail}</p>
     </div>
   );

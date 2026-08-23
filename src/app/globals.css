@@ -314,6 +314,37 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
+   Reduced motion — every dialog in the product
+
+   `tw-animate-css` ships NO `prefers-reduced-motion` rules of its own, so
+   `data-[state=open]:zoom-in-95` scaled the modal for a reader who has asked
+   the operating system for less movement. It is one class on two shared
+   primitives, so it was wrong on every dialog and alert dialog at once.
+
+   THE ZOOM BECOMES A CROSSFADE, which is the substitution the
+   better-accessibility skill prescribes: reduced motion is reduced, not
+   eliminated, and an opacity change carries no vestibular trigger. So the
+   FADE's 200ms is left exactly as it is and only the scaling is removed —
+   killing the duration here as well would make the dialog appear as a cut,
+   which is a worse answer to "I get motion sick", not a safer one.
+
+   `--tw-enter-scale` / `--tw-exit-scale` are the variables the library's own
+   `enter` and `exit` keyframes read (`node_modules/tw-animate-css/dist/`), and
+   the overlay is untouched because it only ever fades. UNLAYERED on purpose:
+   the utilities that set these live in `@layer utilities`, and an unlayered
+   declaration beats a layered one at any specificity — so this needs no
+   `!important` and no selector arms race with the class strings in
+   `dialog.tsx` and `alert-dialog.tsx`.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"] {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
    Print (W-020)
 
    A printed article is the prose and nothing else. The whole block is INERT

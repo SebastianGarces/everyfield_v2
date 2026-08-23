@@ -4,13 +4,14 @@ import { Check } from "lucide-react";
 import { useRef, useState } from "react";
 
 // ============================================================================
-// SAVE-ON-BLUR, ONCE (#618).
+// SAVE ON LEAVING, ONCE (#618).
 //
 // The church profile's five text fields and its two day counts both commit when
-// focus leaves them, and both report what they did in one line underneath.
-// Written twice, the two copies drifted immediately — one of them committed on
-// each input's blur and refused the planter halfway through editing a pair — so
-// the machine lives here and the components are markup.
+// focus leaves them — or when Enter says the planter has finished — and both
+// report what they did in one line underneath. Written twice, the two copies
+// drifted immediately — one of them committed on each input's blur and refused
+// the planter halfway through editing a pair — so the machine lives here and the
+// components are markup.
 //
 // ----------------------------------------------------------------------------
 // WHY THERE IS NO `useOptimistic` HERE
@@ -45,6 +46,21 @@ import { useRef, useState } from "react";
 // `chain` makes each field's writes strictly sequential. It is per-hook, so two
 // DIFFERENT fields still save concurrently, which is what CS-015's independence
 // means.
+//
+// ----------------------------------------------------------------------------
+// AND IT IS ALSO WHY A COMMIT COMPARES AGAINST WHAT WE SENT, NOT ONLY THE PROP
+// ----------------------------------------------------------------------------
+//
+// There are two ways to reach a commit — Enter and blur — and pressing Enter and
+// then tabbing away reaches both, a keystroke apart. The prop cannot have caught
+// up in that keystroke, so a comparison against the prop alone calls the second
+// one dirty and writes the identical value again: two round trips, and a status
+// line that says Saving… twice for one edit.
+//
+// So the hook remembers the value it last HANDED to `save` and has not since
+// seen refused, and `decideCommit` treats that as the truth when it is newer
+// than the prop. A refusal drops it, because the planter must be able to send
+// the same text again once whatever refused it is gone.
 // ============================================================================
 
 /** What one field (or one field group) is doing right now. */
@@ -59,36 +75,88 @@ export type SaveOutcome =
   | { success: true }
   | { success: false; error: string; invalid?: readonly string[] };
 
+/**
+ * What one commit should do, given the three values that decide it.
+ *
+ * Pure, and exported, for the same reason `commitOnEnter` is: the components
+ * are not reachable from `pnpm test`, and this rule is the one a second commit
+ * path can break silently — the write still happens, so nothing looks wrong.
+ *
+ * - `save` — the DOM holds an answer the server neither has nor is being told.
+ * - `nothing` — this is the value already in flight, so the second of Enter and
+ *   blur is not a second edit.
+ * - `reset` — the DOM agrees with the server, so whatever the last save said is
+ *   no longer about anything on screen.
+ */
+export type CommitDecision = "save" | "nothing" | "reset";
+
+export function decideCommit({
+  typed,
+  stored,
+  sent,
+}: {
+  /** What the DOM holds now. */
+  typed: string;
+  /** What the server held at the last render. Lags a write until `refresh()`. */
+  stored: string;
+  /** The value handed to `save` and not since refused, or null for neither. */
+  sent: string | null;
+}): CommitDecision {
+  if (typed !== (sent ?? stored)) return "save";
+  return sent === null ? "reset" : "nothing";
+}
+
 export function useFieldSave({
-  isDirty,
+  typed,
+  stored,
   save,
 }: {
-  /** Does the DOM hold something the server does not? Asked on every commit. */
-  isDirty: () => boolean;
-  /** Write what the DOM holds. Only called when `isDirty` said so. */
+  /**
+   * What the DOM holds, spelled so that two equal ANSWERS compare equal —
+   * trimmed text, a number rather than its digits. Asked on every commit.
+   */
+  typed: () => string;
+  /** The server's value in that same spelling. */
+  stored: string;
+  /** Write what the DOM holds. Only called when the commit is a `save`. */
   save: () => Promise<SaveOutcome>;
 }): { state: SaveState; commit: () => void } {
   const [state, setState] = useState<SaveState>({ status: "idle" });
   const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const sent = useRef<string | null>(null);
 
   // NOT memoised, and NOT reading its callbacks out of a "latest" ref. `commit`
   // is handed to a DOM `onBlur`, so a fresh identity on every render costs nothing —
-  // and closing over the CURRENT render's `isDirty`/`save` is what makes the
-  // comparison right without any ref housekeeping. (Writing a ref during render
-  // is also what `react-hooks/refs` refuses, correctly.)
+  // and closing over the CURRENT render's `typed`/`stored`/`save` is what makes
+  // the comparison right without any ref housekeeping. (Writing a ref during
+  // render is also what `react-hooks/refs` refuses, correctly.)
   const commit = () => {
-    if (!isDirty()) {
+    // The prop has caught up with our last write, so the two are one fact and
+    // only the prop needs keeping — which puts the field back under the plain
+    // "agrees with the server" arm below.
+    if (sent.current === stored) sent.current = null;
+
+    const value = typed();
+    const decision = decideCommit({ typed: value, stored, sent: sent.current });
+
+    if (decision === "nothing") return;
+    if (decision === "reset") {
       // Put back to what the server holds — including after a refusal, because
       // the planter has just undone whatever was refused.
       setState({ status: "idle" });
       return;
     }
 
+    sent.current = value;
     setState({ status: "saving" });
 
     chain.current = chain.current
       .then(() => save())
       .then((result) => {
+        // `=== value` because the chain may already be carrying a NEWER commit
+        // by the time this one answers, and that one's value is the live claim.
+        if (!result.success && sent.current === value) sent.current = null;
+
         setState(
           result.success
             ? { status: "saved" }
@@ -103,6 +171,8 @@ export function useFieldSave({
         // A rejected action means the round trip failed, not that the value
         // was refused — the actions themselves return their refusals. Never
         // rethrow: an unhandled rejection here has nobody to tell.
+        if (sent.current === value) sent.current = null;
+
         setState({
           status: "failed",
           message: "Unable to save. Check your connection and try again.",
@@ -190,13 +260,21 @@ export function FieldSaveStatus({
 
 /**
  * Enter commits, because a lone input in a dialog has no form to submit and a
- * planter who types a name and presses Enter has finished. Blurring stays the
- * ONE save path; this just reaches it.
+ * planter who types a name and presses Enter has finished.
+ *
+ * IT CALLS THE COMMIT AND DOES NOT BLUR. This used to reach the save by calling
+ * `event.currentTarget.blur()`, which does save — and drops keyboard focus to
+ * `<body>` on the way, measured on the preview: after Enter in City,
+ * `document.activeElement` was BODY, so the next Tab restarted from the top of
+ * the dialog and a screen-reader user lost their place for confirming an edit.
+ * Saving is the effect the planter asked for; moving focus is not.
+ *
+ * `decideCommit` is what makes the blur that follows a tab-out free.
  */
-export function commitOnEnter(
-  event: React.KeyboardEvent<HTMLInputElement>
-): void {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  event.currentTarget.blur();
+export function commitOnEnter(commit: () => void) {
+  return (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    commit();
+  };
 }

@@ -505,7 +505,7 @@ export const OVERSIGHT_SHARING_FEATURE =
  *
  * So an earlier draft of this screen ("they see nothing about this plant unless
  * you turn sharing on") was false the moment it shipped, and false about
- * precisely the two facts — current stage, launch date — the milestones below
+ * precisely the two facts — current phase, launch date — the milestones below
  * mention. The "Two things this setting does not cover" bullet exists to say
  * that out loud. A consent control whose promise overstates its own reach is
  * worse than no promise: the planter makes a decision about a guarantee the
@@ -530,7 +530,7 @@ export const OVERSIGHT_SHARING_TOGGLE = {
     "They also hear about two milestones — you move to a new stage, you set or change a launch date.",
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
-    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
+    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current phase and launch date — this is about the updates they receive, not that listing.",
     "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing.",
   ],
 } as const;
@@ -558,7 +558,7 @@ export const OVERSIGHT_SHARING_TOGGLE = {
  *     (`@/lib/oversight/sections`) — naming them would tell a planter their
  *     giving is being read when nothing reads it.
  *   * It does not promise the toggles cover the plant LISTING. Name, current
- *     stage and launch date reach an oversight admin with no privacy gate at
+ *     phase and launch date reach an oversight admin with no privacy gate at
  *     all (`getOversightPlantHealth`), so the limit is stated rather than
  *     glossed — the same bullet, and the same reason, as the sharing screen's.
  *   * It does not say "giving" in the never-seen list, though the push toggle's
@@ -587,7 +587,7 @@ export const INVITE_ORIGIN_SHARING_CONSENT = [
   "They see totals — how many people sit at each stage, how often you meet and how attendance is running, how much work is open or finished, and how many ministry teams have a leader.",
   "Totals only, never the people behind them. No names, no notes, no messages, and no list of what you did.",
   "Once a day, on days something happened, they also get a summary of what changed, and they hear when you reach a new stage or set a launch date.",
-  "One thing this does not cover. Your plant is listed on their dashboard with its name, current stage and launch date whether you share or not, and that listing stays as long as you belong to them.",
+  "One thing this does not cover. Your plant is listed on their dashboard with its name, current phase and launch date whether you share or not, and that listing stays as long as you belong to them.",
   "Every part of this is yours to change: each one has its own switch in Church settings, so turn it off whenever you like and sharing stops at the next update — nothing already sent is recalled. Leaving them stops the rest.",
   "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing.",
 ] as const;
