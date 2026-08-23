@@ -17,7 +17,7 @@ import { isPhaseAdvance, phaseAdvanceCondition } from "./oversight-events";
 // The milestone emitter judges ONE event with `isPhaseAdvance`; the digest
 // COUNTS rows with `phaseAdvanceCondition`. They diverged once — the emitter
 // deliberately withheld a regression while the digest counted it as "1 new
-// stage", so the correction a planter made to their own record reached their
+// phase", so the correction a planter made to their own record reached their
 // oversight partner anyway, labelled as its opposite. These tests pin both
 // expressions to the same table of pairs.
 //
@@ -28,7 +28,7 @@ import { isPhaseAdvance, phaseAdvanceCondition } from "./oversight-events";
 /** `[fromPhase, toPhase, isAdvance]`. */
 const CASES: [number, number, boolean][] = [
   [1, 2, true], // the ordinary advance
-  [2, 5, true], // a skip is still an advance, announced once for the stage reached
+  [2, 5, true], // a skip is still an advance, announced once for the phase reached
   [3, 2, false], // THE CORRECTION — the case that shipped wrong
   [5, 1, false], // a large correction is still a correction
   [2, 2, false], // a no-op is not an event
@@ -51,7 +51,7 @@ test("the SQL predicate says exactly what isPhaseAdvance says", () => {
   // `to_phase > from_phase` for the same reason `isPhaseAdvance(3, 2)` is
   // false — and the real-database half of this is
   // `scripts/g3-oversight-model.ts` §6, which seeds a 3 → 2 row and asserts the
-  // digest counts zero stages for it.
+  // digest counts zero phases for it.
   const { sql, params } = new PgDialect().sqlToQuery(phaseAdvanceCondition());
 
   assert.equal(
@@ -70,11 +70,11 @@ test("the SQL predicate says exactly what isPhaseAdvance says", () => {
 // thing when OB-005 added the initial declaration (#306).
 //
 // A declaration is a 0 → N row: it satisfies `to_phase > from_phase` and reached
-// no stage whatsoever. Two readers depended on that predicate — the digest's
-// `stagesReached` count and, worse, `hasActivityCondition`, the "was there
+// no phase whatsoever. Two readers depended on that predicate — the digest's
+// `phasesReached` count and, worse, `hasActivityCondition`, the "was there
 // activity at all?" gate that decides whether a digest is sent on a given day.
 // Left uncorrected, a brand-new plant that had only said where it already stood
-// both counted "1 new stage" and triggered a digest on a day nothing happened.
+// both counted "1 new phase" and triggered a digest on a day nothing happened.
 // ----------------------------------------------------------------------------
 
 test("an initial declaration is not an advance, and contributes nothing", () => {
@@ -82,8 +82,8 @@ test("an initial declaration is not an advance, and contributes nothing", () => 
 
   // The predicate the digest counts rows with admits ONE kind, and it is not
   // the declaration's. A 0 → 3 declaration row therefore contributes 0 to
-  // `stagesReached` — and, because `hasActivityCondition` is built from the
-  // very same condition (`stageReachedCondition` in `./oversight-digest.ts`),
+  // `phasesReached` — and, because `hasActivityCondition` is built from the
+  // very same condition (`phaseReachedCondition` in `./oversight-digest.ts`),
   // does not satisfy the activity gate either. One clause fixes both because
   // both call this function.
   assert.deepEqual(rendered.params, [TRANSITION_KIND]);
@@ -101,7 +101,7 @@ test("an initial declaration is not an advance, and contributes nothing", () => 
 });
 
 test("both digest readers ask this one function, so neither can drift", () => {
-  // `stageReachedCondition` counts; `hasActivityCondition` gates. They are the
+  // `phaseReachedCondition` counts; `hasActivityCondition` gates. They are the
   // same rule and must stay one call — the bug this fixes was two readers of
   // `phase_transitions` disagreeing about what counts.
   const digest = readFileSync(
@@ -111,11 +111,11 @@ test("both digest readers ask this one function, so neither can drift", () => {
 
   assert.match(
     digest,
-    /function stageReachedCondition[\s\S]*?phaseAdvanceCondition\(\)/
+    /function phaseReachedCondition[\s\S]*?phaseAdvanceCondition\(\)/
   );
   assert.match(
     digest,
-    /function hasActivityCondition[\s\S]*?stageReachedCondition\(/
+    /function hasActivityCondition[\s\S]*?phaseReachedCondition\(/
   );
   // No second, hand-rolled copy of the direction test anywhere in the file.
   assert.equal(/gt\(\s*phaseTransitions\.toPhase/.test(digest), false);

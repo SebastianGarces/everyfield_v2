@@ -22,7 +22,7 @@ import { announcePhaseAdvanced } from "./oversight";
  * own record, and reporting it outward turns a correction into an event the
  * planter has to explain — which is exactly the pressure that makes people stop
  * correcting their records. A skip (forward by more than one) is still an
- * advance and is announced once, for the stage actually reached. A no-op is
+ * advance and is announced once, for the phase actually reached. A no-op is
  * nothing.
  *
  * Pure, so the rule is testable without a database.
@@ -36,9 +36,9 @@ export function isPhaseAdvance(fromPhase: number, toPhase: number): boolean {
  *
  * It lives here, touching `isPhaseAdvance`, because the two paths that ask
  * "was this an advance?" — the milestone emitter below and the digest's
- * `stagesReached` count in `./oversight-digest.ts` — got different answers once
+ * `phasesReached` count in `./oversight-digest.ts` — got different answers once
  * already. The digest counted every `phase_transitions` row, so a planter
- * correcting stage 3 back to 2 read as "1 new stage" in tomorrow's summary: the
+ * correcting phase 3 back to 2 read as "1 new phase" in tomorrow's summary: the
  * event this file deliberately withholds, leaking through the other door and
  * mislabelled as its opposite.
  *
@@ -48,11 +48,11 @@ export function isPhaseAdvance(fromPhase: number, toPhase: number): boolean {
  *
  * `kind = 'transition'` IS PART OF THE RULE, not a refinement of it (#306).
  * `phase_transitions` stopped being one population when OB-005 added the
- * initial declaration: a planter saying "we are already at stage 3" during
+ * initial declaration: a planter saying "we are already at phase 3" during
  * onboarding writes a 0 → 3 row that satisfies `to_phase > from_phase` and
- * reached no stage at all. Without this clause the same bug the paragraph above
+ * reached no phase at all. Without this clause the same bug the paragraph above
  * records as fixed comes back through a new row TYPE instead of a new
- * direction: `stagesReached` counts 1, and — worse — `hasActivityCondition`
+ * direction: `phasesReached` counts 1, and — worse — `hasActivityCondition`
  * treats a brand-new plant that has only declared where it stood as a day on
  * which something happened, which sends a digest the digest's own contract says
  * must not be sent. Declarations are history the plant arrived with; the digest
@@ -66,7 +66,7 @@ export function phaseAdvanceCondition(): SQL {
 }
 
 /**
- * `phase.changed` → the oversight "reached a new stage" milestone (N-025).
+ * `phase.changed` → the oversight "reached a new phase" milestone (N-025).
  *
  * Never throws: a handler that threw would surface in the phase transition that
  * emitted the event, and a notification must not be able to fail a transition.

@@ -529,14 +529,14 @@ test("the milestones category description covers both directions of the associat
   // preferences screen, and `milestones` carries SIX distinct events: the five
   // `oversightMilestoneKinds` addressed to an oversight admin plus
   // `association.removed_by_org` addressed to the planter. It once named three
-  // of the six ("an invitation accepted, a new stage, a launch date"), which
+  // of the six ("an invitation accepted, a new phase, a launch date"), which
   // read as though an association ending were silent.
   const description = NOTIFICATION_CATEGORIES.milestones.description;
 
   for (const phrase of [
     "either way",
     "association starting or ending",
-    "new stage",
+    "new phase",
     "launch date",
   ]) {
     assert.ok(

@@ -121,7 +121,7 @@ const MUTATIONS: Mutation[] = [
   {
     claim: "no screen invents a reversibility promise of its own",
     file: "src/components/settings/sections/association-section.tsx",
-    from: 'consequence="Accepting lists your plant in their directory with its name, stage and launch date."',
+    from: 'consequence="Accepting lists your plant in their directory with its name, phase and launch date."',
     to: 'consequence="Accepting lists your plant in their directory — all of which you can change afterwards."',
     suite: COPY_SUITE,
   },

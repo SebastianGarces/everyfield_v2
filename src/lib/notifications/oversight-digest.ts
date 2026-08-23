@@ -118,7 +118,7 @@ export interface OversightActivitySummary {
   peopleAdded: number;
   meetingsHeld: number;
   tasksCompleted: number;
-  stagesReached: number;
+  phasesReached: number;
 }
 
 /** Total events in the window — the "was there activity?" answer. */
@@ -127,7 +127,7 @@ export function totalActivity(summary: OversightActivitySummary): number {
     summary.peopleAdded +
     summary.meetingsHeld +
     summary.tasksCompleted +
-    summary.stagesReached
+    summary.phasesReached
   );
 }
 
@@ -147,7 +147,7 @@ export function composeDigestBody(summary: OversightActivitySummary): string {
   line(summary.meetingsHeld, "meeting", "meetings");
   line(summary.peopleAdded, "new person", "new people");
   line(summary.tasksCompleted, "task finished", "tasks finished");
-  line(summary.stagesReached, "new stage", "new stages");
+  line(summary.phasesReached, "new phase", "new phases");
 
   return parts.join(", ") + ".";
 }
@@ -380,11 +380,11 @@ function taskFinishedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
  * ADVANCES only, via the same predicate the milestone emitter judges a single
  * event with (`phaseAdvanceCondition`, beside `isPhaseAdvance` in
  * `./oversight-events.ts`). Counting every transition made a planter's
- * correction from stage 3 back to 2 read as "1 new stage" — the milestone path
+ * correction from phase 3 back to 2 read as "1 new phase" — the milestone path
  * withholding a regression on purpose while the digest path announced it as its
  * opposite. One rule, one place.
  */
-function stageReachedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
+function phaseReachedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
   return and(
     eq(phaseTransitions.churchId, churchId),
     phaseAdvanceCondition(),
@@ -430,7 +430,7 @@ function hasActivityCondition(
       db
         .select({ one: sql`1` })
         .from(phaseTransitions)
-        .where(stageReachedCondition(churchId, window))
+        .where(phaseReachedCondition(churchId, window))
     )
   );
 }
@@ -446,7 +446,7 @@ export async function summarizeChurchActivity(
   churchId: string,
   window: ActivityWindow
 ): Promise<OversightActivitySummary> {
-  const [people, meetings, finishedTasks, stages] = await Promise.all([
+  const [people, meetings, finishedTasks, phases] = await Promise.all([
     db
       .select({ n: count() })
       .from(persons)
@@ -462,14 +462,14 @@ export async function summarizeChurchActivity(
     db
       .select({ n: count() })
       .from(phaseTransitions)
-      .where(stageReachedCondition(churchId, window)),
+      .where(phaseReachedCondition(churchId, window)),
   ]);
 
   return {
     peopleAdded: people[0]?.n ?? 0,
     meetingsHeld: meetings[0]?.n ?? 0,
     tasksCompleted: finishedTasks[0]?.n ?? 0,
-    stagesReached: stages[0]?.n ?? 0,
+    phasesReached: phases[0]?.n ?? 0,
   };
 }
 

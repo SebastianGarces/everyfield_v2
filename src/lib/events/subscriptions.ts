@@ -173,7 +173,7 @@ export function registerSubscriptions(bus: EventBusLike): void {
   // PE (Phase Engine) -> F11 (Notifications) — the oversight phase milestone
   // --------------------------------------------------------------------------
 
-  // F11 N-025, milestone #2: a plant advancing to a new stage is one of the
+  // F11 N-025, milestone #2: a plant advancing to a new phase is one of the
   // three events an oversight partner hears about the day it happens.
   //
   // Wired HERE rather than called from `transitions/service.ts`, because the
@@ -188,7 +188,7 @@ export function registerSubscriptions(bus: EventBusLike): void {
   // PE (Phase Engine) -> F5 (Task Management) — the phase template prompt
   // --------------------------------------------------------------------------
 
-  // T-020: entering a stage makes that stage's checklists worth offering. The
+  // T-020: entering a phase makes that phase's checklists worth offering. The
   // handler CREATES NOTHING — silently generating twenty tasks on a phase
   // change is the surprise this feature exists to avoid — and the prompt on
   // `/tasks` derives itself from the `phase_transitions` row this event
