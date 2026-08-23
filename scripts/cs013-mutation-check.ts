@@ -120,8 +120,12 @@ const MUTATIONS: Mutation[] = [
     // the loader would report as a pass.
     claim: "the association section renders the consent it is handed",
     file: "src/components/settings/sections/association-section.tsx",
-    from: "                    {consent.map((line) => (",
-    to: "                    {[].map((line: string) => (",
+    // Unindented, like its sibling above: #677 re-indented this block and the
+    // needle's leading spaces stopped matching, which is rot with no copy
+    // change behind it at all. #678 requoted it at the new column; this drops
+    // the indentation instead, so the next reformat cannot rot it again.
+    from: "{consent.map((line) => (",
+    to: "{[].map((line: string) => (",
     suite: DEFAULTS_SUITE,
   },
   {
