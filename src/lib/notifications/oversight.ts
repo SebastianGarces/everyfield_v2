@@ -36,7 +36,7 @@ import {
 //                 - the planter declined an invitation           (#304/OV-006),
 //                 - the planter left the org                     (#304/OV-007),
 //                 - the planter closed something they were sharing  (#619/CS-012),
-//                 - the plant advanced a phase/stage,
+//                 - the plant advanced a phase,
 //                 - a launch date was set or changed.
 //               The first four are the ORG'S OWN relationship changing and go
 //               to that one org, consent-exempt; the last two are facts about
@@ -410,7 +410,7 @@ function milestoneTitle(facts: MilestoneFacts): string {
     case "sharing_changed":
       return `${facts.subject} changed what it shares with you`;
     case "phase_advanced":
-      return `${facts.subject} reached a new stage`;
+      return `${facts.subject} reached a new phase`;
     case "launch_date_changed":
       return `${facts.subject} has a launch date`;
   }
@@ -891,11 +891,11 @@ export function announcePhaseAdvanced(
       anchor: churchAnchor(input.churchId),
       subject: input.plantName,
       kind: "phase_advanced",
-      // The phase REACHED, not the transition id: advancing to stage 3 twice
+      // The phase REACHED, not the transition id: advancing to phase 3 twice
       // (after a correction back to 2) is one milestone, and a replayed event is
       // none.
       occurrence: `phase-${input.toPhase}`,
-      detail: `They moved up to stage ${input.toPhase}.`,
+      detail: `They advanced to phase ${input.toPhase}.`,
     },
     deps
   );

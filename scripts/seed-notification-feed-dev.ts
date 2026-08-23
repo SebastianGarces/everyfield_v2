@@ -197,7 +197,7 @@ async function seedFor(email: string): Promise<SeededOrg> {
           : "oversight.digest.daily",
       title:
         category === "milestones"
-          ? `Sharing Plant reached a new stage (#${index + 1})`
+          ? `Sharing Plant reached a new phase (#${index + 1})`
           : `Sharing Plant — daily summary (#${index + 1})`,
       body: "Seeded by scripts/seed-notification-feed-dev.ts for the #308 oversight feed.",
       // Newest first, one minute apart, so the keyset cursor has a total order

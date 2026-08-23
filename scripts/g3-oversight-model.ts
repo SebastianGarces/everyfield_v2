@@ -458,8 +458,8 @@ async function run(created: Created) {
     recipientUserId: adminA.id,
     category: "milestones",
     type: "oversight.milestone.phase_advanced",
-    title: "Scratch Plant reached a new stage",
-    body: "They moved up to stage 2.",
+    title: "Scratch Plant reached a new phase",
+    body: "They advanced to phase 2.",
   });
   assert.equal(gatedWhileOff.status, "skipped");
   assert.equal(gatedWhileOff.reason, "oversight_privacy");
@@ -1268,7 +1268,7 @@ async function run(created: Created) {
     .where(eq(notifications.churchId, racePlant.id));
 
   // --------------------------------------------------------------------------
-  // 4. MILESTONE 2 — the plant advanced a stage.
+  // 4. MILESTONE 2 — the plant advanced a phase.
   // --------------------------------------------------------------------------
   const phaseEvent = {
     type: "phase.changed" as const,
@@ -1569,7 +1569,7 @@ async function run(created: Created) {
 
   // Two transitions; one advance, one CORRECTION. `oversight-events.ts` refuses
   // to announce the correction as a milestone, and the digest must not
-  // re-disclose it as "a new stage" — the whole point of the shared predicate.
+  // re-disclose it as "a phase change" — the whole point of the shared predicate.
   await db.insert(phaseTransitions).values([
     {
       churchId: plant.id,
@@ -1605,7 +1605,7 @@ async function run(created: Created) {
   // task, a phase regression, a soft-deleted person, a completed-then-deleted
   // task. Any of them leaking changes this string.
   const EXPECTED_BODY =
-    "1 meeting, 2 new people, 1 task finished, 1 new stage.";
+    "1 meeting, 2 new people, 1 task finished, 1 phase change.";
   for (const row of digestRows) {
     assert.equal(row.body, EXPECTED_BODY, "the digest miscounted");
   }
@@ -2143,8 +2143,8 @@ async function run(created: Created) {
     recipientUserId: adminA.id,
     category: "milestones",
     type: "oversight.milestone.phase_advanced",
-    title: "Scratch Plant Two reached a new stage",
-    body: "They moved up to stage 2.",
+    title: "Scratch Plant Two reached a new phase",
+    body: "They advanced to phase 2.",
   });
   assert.equal(acrossPlants.status, "skipped");
   assert.equal(acrossPlants.reason, "oversight_privacy");

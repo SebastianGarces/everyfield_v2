@@ -129,15 +129,15 @@ export const NOTIFICATION_CATEGORIES: Record<
     // Both directions of the association live in this category and the
     // description has to admit it (#304). An oversight admin's five kinds are
     // `oversightMilestoneKinds` — an invitation accepted, an invitation
-    // declined, an association ended, a new stage, a launch date — and the
+    // declined, an association ended, a new phase, a launch date — and the
     // planter's own `association.removed_by_org` (`./plant-association.ts`)
     // rides the same category from the other side. An earlier version listed
-    // only "an invitation accepted, a new stage, a launch date", which named
+    // only "an invitation accepted, a new phase, a launch date", which named
     // three of six and read as though ending a relationship were silent.
     // #619 adds the seventh — a plant closing something it was sharing — and
     // the description names it for the same reason.
     description:
-      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a change to what a plant shares, a new stage, a launch date.",
+      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a change to what a plant shares, a new phase, a launch date.",
     defaults: { email: true, in_app: true },
   },
   digest: {
@@ -199,7 +199,7 @@ export const DEFAULT_DIGEST_CADENCE: DigestCadence = "weekly";
  *
  * The ruling: oversight receives a daily activity SUMMARY (`digest`, sent only
  * on a day that had activity) and three MILESTONES (`milestones` — planter
- * accepted an invitation, phase/stage advanced, launch date set or changed).
+ * accepted an invitation, phase advanced, launch date set or changed).
  * Everything else — the per-event stream a plant's own team lives in — is for
  * the plant. So the five granular categories are refused for an oversight
  * recipient outright: not "off by default", not "unless the plant shares
@@ -526,8 +526,8 @@ export const OVERSIGHT_SHARING_TOGGLE = {
    * however it likes without re-writing them.
    */
   detail: [
-    "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, stages reached.",
-    "They also hear about two milestones — you move to a new stage, you set or change a launch date.",
+    "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, phases reached.",
+    "They also hear about two milestones — you move to a new phase, you set or change a launch date.",
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
     "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current phase and launch date — this is about the updates they receive, not that listing.",
@@ -586,7 +586,7 @@ export const INVITE_ORIGIN_SHARING_CONSENT = [
   "Accepting starts you off sharing with them: every sharing setting begins on.",
   "They see totals — how many people sit at each stage, how often you meet and how attendance is running, how much work is open or finished, and how many ministry teams have a leader.",
   "Totals only, never the people behind them. No names, no notes, no messages, and no list of what you did.",
-  "Once a day, on days something happened, they also get a summary of what changed, and they hear when you reach a new stage or set a launch date.",
+  "Once a day, on days something happened, they also get a summary of what changed, and they hear when you reach a new phase or set a launch date.",
   "One thing this does not cover. Your plant is listed on their dashboard with its name, current phase and launch date whether you share or not, and that listing stays as long as you belong to them.",
   "Every part of this is yours to change: each one has its own switch in Church settings, so turn it off whenever you like and sharing stops at the next update — nothing already sent is recalled. Leaving them stops the rest.",
   "Four things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, when your association with them ends, and when you close something you were sharing.",

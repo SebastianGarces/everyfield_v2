@@ -532,9 +532,9 @@ test("a refused declaration still reports the LOCKED church's phase", () => {
 //
 // `phase.changed` has exactly one subscriber today
 // (`src/lib/events/subscriptions.ts` → `handlePhaseChangedForOversight`), and
-// its whole job is the oversight "reached a new stage" milestone. A planter
+// its whole job is the oversight "reached a new phase" milestone. A planter
 // invited by a sending church who declares phase 4 at onboarding reached no
-// stage — they told us where they already were — so that push must not fire.
+// phase — they told us where they already were — so that push must not fire.
 // `PhaseChangedEvent` carries no `kind`, so the handler cannot tell the two
 // apart; the emit is therefore DROPPED from the declaration path rather than
 // filtered downstream, which is the version a future subscriber cannot undo by

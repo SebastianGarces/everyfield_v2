@@ -642,10 +642,10 @@ export async function declareInitialPhase(
   // The event exists for PE-003's downstream consumers, and today it has
   // exactly one subscriber (`src/lib/events/subscriptions.ts` →
   // `handlePhaseChangedForOversight`), whose whole job is the oversight
-  // "reached a new stage" milestone. A declaration reaches no stage — it
+  // "reached a new phase" milestone. A declaration reaches no phase — it
   // records where the plant already stood before EveryField saw it — so a
   // planter invited by a sending church who declares phase 4 at onboarding
-  // would have pushed "reached a new stage — Phase 4" to that church for
+  // would have pushed "reached a new phase — Phase 4" to that church for
   // something they did years ago. `PhaseChangedEvent` carries no `kind`, so no
   // handler can tell a declaration from a move; the emit is dropped rather than
   // discriminated, which is the version that cannot be got wrong by the next

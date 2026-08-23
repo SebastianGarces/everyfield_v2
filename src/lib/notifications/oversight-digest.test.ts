@@ -37,14 +37,14 @@ const QUIET: OversightActivitySummary = {
   peopleAdded: 0,
   meetingsHeld: 0,
   tasksCompleted: 0,
-  stagesReached: 0,
+  phasesReached: 0,
 };
 
 const BUSY: OversightActivitySummary = {
   peopleAdded: 2,
   meetingsHeld: 1,
   tasksCompleted: 5,
-  stagesReached: 0,
+  phasesReached: 0,
 };
 
 interface FakeOptions {
@@ -182,7 +182,7 @@ test("a single event anywhere is activity", async () => {
     "peopleAdded",
     "meetingsHeld",
     "tasksCompleted",
-    "stagesReached",
+    "phasesReached",
   ] as const) {
     const deps = new FakeDigestDeps({ summary: { ...QUIET, [key]: 1 } });
     const outcome = await runOversightDigest(deps, {
@@ -298,9 +298,9 @@ test("singular and plural are both handled", () => {
       peopleAdded: 1,
       meetingsHeld: 2,
       tasksCompleted: 1,
-      stagesReached: 1,
+      phasesReached: 1,
     }),
-    "2 meetings, 1 new person, 1 task finished, 1 new stage."
+    "2 meetings, 1 new person, 1 task finished, 1 phase change."
   );
 });
 
