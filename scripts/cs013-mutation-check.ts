@@ -11,9 +11,8 @@
  * Every mutation is a string replacement that must match exactly once — a
  * mutation whose needle has drifted FAILS the run rather than quietly testing
  * nothing, which is the failure mode a mutation harness is most prone to. That
- * half of the check is `needleDrift()`, and it is EXPORTED because nothing runs
- * this script automatically: `cs013-mutation-check.test.ts` calls it inside
- * `pnpm test`, so a rename that rots a needle goes red in the PR that makes it.
+ * half of the check is `needleDrift()` below, which is exported so `pnpm test`
+ * runs it too — see its docblock for why that matters (#681).
  *
  * IT REFUSES TO RUN AGAINST A DIRTY TREE, and that is not tidiness. The restore
  * reads the file's own contents as the thing to put back, so a run that starts
@@ -122,8 +121,11 @@ const MUTATIONS: Mutation[] = [
     file: "src/components/settings/sections/association-section.tsx",
     // Unindented, like its sibling above: #677 re-indented this block and the
     // needle's leading spaces stopped matching, which is rot with no copy
-    // change behind it at all. #678 requoted it at the new column; this drops
-    // the indentation instead, so the next reformat cannot rot it again.
+    // change behind it at all. #678 requoted it at the new column; dropping the
+    // indentation instead is what stops the next reformat rotting it again.
+    // The rule is the SHORTEST quotation that matches exactly once —
+    // indentation earns its place in a needle only where it is what makes the
+    // match unique, as it is in the `claim,\n    sharing,` ones.
     from: "{consent.map((line) => (",
     to: "{[].map((line: string) => (",
     suite: DEFAULTS_SUITE,
@@ -170,6 +172,10 @@ const TOUCHED = [...new Set(MUTATIONS.map((m) => m.file))];
  * reached CI; by the time #681 was filed, two needles had rotted and nothing
  * anywhere had gone red. The test is the half that fails on the day of the
  * rename, in the PR that causes it.
+ *
+ * THE REMEDY TRAVELS IN THE MESSAGE, not in a console.error next to the caller.
+ * The reader who needs it most meets this through a failed assertion in CI, and
+ * would never see anything the CLI printed alongside.
  */
 export function needleDrift(): string[] {
   return MUTATIONS.flatMap((mutation) => {
@@ -178,7 +184,13 @@ export function needleDrift(): string[] {
     if (matches === 1) return [];
     return [
       `NEEDLE DRIFT — "${mutation.claim}": ${matches} matches in ` +
-        `${mutation.file}, expected 1\n  needle: ${JSON.stringify(mutation.from)}`,
+        `${mutation.file}, expected 1. That claim is unproven, not unbroken.\n` +
+        `  needle: ${JSON.stringify(mutation.from)}\n` +
+        "  Requote the needle from the file, or delete the mutation if the " +
+        "claim is gone.\n" +
+        "  But check `git status` first: a harness run killed outside its " +
+        "signal handlers leaves\n  its deliberate bug in the file, and " +
+        "requoting THAT would make the bug permanent.",
     ];
   });
 }
@@ -233,12 +245,7 @@ function main(): void {
   // the run here instead, so `failures` below means one thing only.
   const drift = needleDrift();
   if (drift.length > 0) {
-    console.error(drift.join("\n"));
-    console.error(
-      `\n${drift.length} needle(s) no longer quote their file — those claims ` +
-        "went unproven, not unbroken.\nRequote the needle from the file, or " +
-        "delete the mutation if the claim is gone."
-    );
+    console.error(drift.join("\n\n"));
     process.exit(1);
   }
 
@@ -271,8 +278,27 @@ function main(): void {
     const file = path.join(REPO, mutation.file);
     const original = readFileSync(file, "utf8");
 
+    // THE GATE ABOVE RAN MINUTES AGO, three baseline suites back, and this is a
+    // second read. A file that changed in between (a formatter hook, an editor
+    // save, another agent in the same worktree) makes `replace` a no-op, the
+    // suite stay green, and the report say MISSED — the words for a hole in the
+    // tests, for a mutation that was never applied. So assert the WRITE, which
+    // is the real invariant and not merely "the needle appeared once".
+    //
+    // `() => mutation.to` and not the bare string: as a string, `$&`, `$1` and
+    // friends are substitution syntax, and one needle quoting a `$` would
+    // corrupt the file this harness promises to restore byte for byte.
+    const mutated = original.replace(mutation.from, () => mutation.to);
+    if (mutated === original) {
+      throw new Error(
+        `NEEDLE VANISHED MID-RUN — "${mutation.claim}" no longer quotes ` +
+          `${mutation.file}. The tree changed under this run; nothing was ` +
+          "mutated and nothing is proven. Rerun on a settled tree."
+      );
+    }
+
     inFlight.set(file, original);
-    writeFileSync(file, original.replace(mutation.from, mutation.to));
+    writeFileSync(file, mutated);
 
     let caught: boolean;
     try {

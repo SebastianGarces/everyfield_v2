@@ -4,15 +4,8 @@
  * The harness itself cannot live here: it rewrites checked-in files and runs a
  * suite per mutation, which is minutes of work and a manual reviewer's job. Its
  * NEEDLES are a different thing — reading twelve files and counting a substring
- * costs nothing, and it is the half that rots.
- *
- * And rot is exactly what went unnoticed. The harness has always exited 1 on a
- * needle that matches nothing, but no workflow, no package script and no hook
- * has ever invoked it, so that exit code reached no one. By the time #681 was
- * filed two needles had rotted — #676 renamed "stage" to "phase" in the copy,
- * #677 re-indented the block around another — and both mutations had quietly
- * stopped being applied. Nothing was red anywhere. A guard nobody runs is not a
- * guard, so the guard moved to where the runner already is.
+ * costs milliseconds, and it is the half that rots. `needleDrift()` carries the
+ * account of why that had to move here.
  */
 
 import assert from "node:assert/strict";
