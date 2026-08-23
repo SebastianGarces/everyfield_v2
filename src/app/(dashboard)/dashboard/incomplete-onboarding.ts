@@ -55,7 +55,7 @@ export type IncompleteOnboardingItem = {
    * anybody whose answer would be refused (a link that quietly does nothing is
    * worse than no link)" — and the other two rows went out to everybody. On a
    * plant Member's dashboard that produced exactly the failure that sentence
-   * describes: "Set your stage" pointing at `/phase`, which redirects them
+   * describes: "Set your phase" pointing at `/phase`, which redirects them
    * straight back, under a card offering to dismiss the reminder.
    *
    * So the rule becomes the table's, not one row's. `leadership` still carries
@@ -96,10 +96,12 @@ export const INCOMPLETE_ONBOARDING_ITEMS: Record<
   journey: {
     id: "journey",
     title: "Where you are in the journey",
+    // "Phase", never "stage": CONTEXT.md reserves stage for the people
+    // pipeline, and this row is about the plant (#675).
     detail:
-      "Your stage and target launch date are still unset, so guidance, the countdown and your phase all assume you are starting from zero.",
+      "Your phase and target launch date are still unset, so guidance and the countdown assume you are starting from zero.",
     href: "/phase",
-    cta: "Set your stage",
+    cta: "Set your phase",
     // `/phase` itself redirects anyone who is not the plant's Owner.
     requires: "phase.declare",
   },

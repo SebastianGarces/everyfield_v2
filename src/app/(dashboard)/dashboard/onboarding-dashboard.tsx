@@ -6,6 +6,7 @@ import {
   resolveOnboardingStepRequest,
   resolveResumeStep,
 } from "@/lib/onboarding/steps";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 import { hasInitialPhaseDeclaration } from "@/lib/phase-engine/transitions";
 
 /**
@@ -19,12 +20,15 @@ export async function OnboardingDashboard({
   step,
   churchId,
   leadershipStatus,
+  currentPhase,
 }: {
   /** The raw `?step=` value. Repeated params arrive as an array. */
   step: string | string[] | undefined;
   churchId: string | null;
   /** The church's recorded OB-004 answer, so step 2 opens on it. */
   leadershipStatus: ChurchLeadershipStatus | null | undefined;
+  /** `churches.current_phase` — step 3's evidence, off the page's church row. */
+  currentPhase: number | null | undefined;
 }) {
   // The guard OB-004 carried, widened from one step to four and moved into a
   // pure function so it can be exercised by CALLING it (#373 fix pass): a URL
@@ -46,13 +50,18 @@ export async function OnboardingDashboard({
     redirect("/dashboard");
   }
 
-  // OB-003/005: step 3's fact is asked of phase HISTORY, not of
-  // `current_phase` or of the launch row — "not sure, and no date yet" is a
-  // real answer that leaves both of those exactly as a planter who never saw
-  // the step would leave them. Only asked when there is a church to ask about.
-  const journeyDeclared = churchId
-    ? await hasInitialPhaseDeclaration(churchId)
-    : false;
+  // OB-003/005: step 3's evidence, the same three records the finished
+  // dashboard reads (`JourneyEvidence`). Not phase history alone: a plant can
+  // reach `/phase` or `/launch` while its flow is unfinished, and then this
+  // half would resume a Phase 5 planter to "where are you in the journey?" —
+  // #675's nudge one route over. Both reads are church-scoped and only run
+  // once there is a church to ask about.
+  const [declaredInPhaseHistory, launch] = churchId
+    ? await Promise.all([
+        hasInitialPhaseDeclaration(churchId),
+        getLaunchForChurch(churchId),
+      ])
+    : [false, null];
 
   return (
     <div className="p-6">
@@ -60,7 +69,15 @@ export async function OnboardingDashboard({
         initialStep={
           stepRequest.outcome === "honour"
             ? stepRequest.step
-            : resolveResumeStep({ churchId, leadershipStatus, journeyDeclared })
+            : resolveResumeStep({
+                churchId,
+                leadershipStatus,
+                journey: {
+                  declaredInPhaseHistory,
+                  currentPhase: currentPhase ?? 0,
+                  hasLaunch: launch !== null,
+                },
+              })
         }
         leadershipStatus={leadershipStatus}
       />

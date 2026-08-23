@@ -28,6 +28,18 @@ const CHURCH_ID = "22222222-2222-4222-8222-222222222222";
 /** Holds every verb — the plant's Owner, for whom no row is filtered. */
 const OWNER = () => true;
 
+/**
+ * Step 3 answered the honest way: the planter attested "not sure, and no date
+ * yet", which leaves both columns exactly as never having been asked would
+ * (#306). Whether that answers the step is `onboardingStepComplete`'s to decide
+ * and its tests', not this module's — here it is simply an answered step.
+ */
+const ATTESTED = {
+  declaredInPhaseHistory: true,
+  currentPhase: 0,
+  hasLaunch: false,
+};
+
 /** A viewer the leadership row is FOR: can answer, not currently being asked. */
 const ASKABLE: IncompleteOnboardingVisibility = {
   canAnswerLeadership: true,
@@ -49,7 +61,7 @@ test("every fact in means no indicator at all", () => {
     {
       churchId: CHURCH_ID,
       leadershipStatus: "planter_confirmed",
-      journeyDeclared: true,
+      journey: ATTESTED,
       peopleAdded: true,
     },
     ASKABLE
@@ -69,7 +81,7 @@ test("each fact that lands removes exactly its own row", () => {
 
   assert.deepEqual(
     incompleteOnboardingItems(
-      { churchId: CHURCH_ID, journeyDeclared: true },
+      { churchId: CHURCH_ID, journey: ATTESTED },
       ASKABLE
     ).map((item) => item.id),
     ["leadership", "people"]
@@ -89,7 +101,7 @@ test("an answered No counts as answered — the nudge covers it, not this list",
     {
       churchId: CHURCH_ID,
       leadershipStatus: "no_planter",
-      journeyDeclared: true,
+      journey: ATTESTED,
       peopleAdded: true,
     },
     ASKABLE
@@ -185,7 +197,7 @@ test("the leadership row uses the one specced re-entry into the flow", () => {
 // The module already refused to show the leadership row to a viewer whose
 // answer would be refused, on the stated ground that "a link that quietly does
 // nothing is worse than no link". The other two rows went out to everybody, and
-// on a plant Member's dashboard that produced exactly that: "Set your stage"
+// on a plant Member's dashboard that produced exactly that: "Set your phase"
 // linking to /phase, which redirects them back, under an offer to dismiss the
 // reminder.
 // ----------------------------------------------------------------------------

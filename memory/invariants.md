@@ -168,6 +168,7 @@ Some sections link `invariants/<domain>.md` for the why, the pattern and the wor
 Applies to `phase_transitions` and every reader of it.
 
 - A declaration is NOT an advance. Anything counting, gating on or announcing "reached a new stage" filters `kind = 'transition'` through one predicate, `phaseAdvanceCondition()`.
+- ⚖ ONBOARDING STEP 3 IS ATTESTATION, NOT COLUMN STATE (ruled 2026-08-23, #675). It is answered by the initial-declaration row OR by a state only an explicit act could have produced — `current_phase > 0` (`transitionPhase`) or a launch row (`setLaunchDate`), the sole writers of each. A plant at phase 0 with no declaration and no launch has never attested and keeps the nudge however long it discerns; `onboardingStepComplete("journey")` is the one place that decides it, over `JourneyEvidence`.
 
 ## Phase Engine — Cited Facts & Attestation Citations
 

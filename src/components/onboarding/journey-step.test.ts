@@ -350,26 +350,31 @@ test("revealing the date input moves the caret into it", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 5. "Did they answer step 3?" is asked of phase history
+// 5. "Did they answer step 3?" is asked of every record the answer leaves
 // ----------------------------------------------------------------------------
 
-test("the step-3 fact comes from the declaration record, not the columns", () => {
-  // Inferring it from `current_phase > 0 || a launch date` cannot see the
+test("the dashboard hands step 3 the declaration record AND the columns", () => {
+  // Neither source answers alone, and each was shipped alone once.
+  //
+  // The columns alone (`current_phase > 0 || a launch date`) cannot see the
   // honest answer: "not sure — start me at the beginning" plus "no date yet"
   // leaves phase 0 and no launch row, so the planter who answered and the
-  // planter who never saw the step look identical, and the OB-011 nudge would
-  // keep asking forever.
+  // planter who never saw the step look identical (#306).
+  //
+  // The record alone cannot see a phase or a launch that arrived any other way
+  // — the phase control, a plant older than #306 — so a Phase 5 plant with a
+  // launch date was told both were "still unset" (#675).
+  //
+  // What this pins is the WIRING; the rule joining the three is
+  // `onboardingStepComplete("journey")` and its own tests decide it.
   const page = stripComments(
     read("app", "(dashboard)", "dashboard", "plant-dashboard.tsx")
   );
 
   assert.match(page, /hasInitialPhaseDeclaration\(churchId\)/);
-  assert.match(page, /journeyDeclared,/);
-  assert.equal(
-    /journeyDeclared: !!launch\?\.targetDate/.test(page),
-    false,
-    "the column-shaped inference is gone, not merely supplemented"
-  );
+  assert.match(page, /declaredInPhaseHistory,/);
+  assert.match(page, /currentPhase: church\?\.currentPhase \?\? 0,/);
+  assert.match(page, /hasLaunch: launch !== null,/);
 });
 
 // ----------------------------------------------------------------------------

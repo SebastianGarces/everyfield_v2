@@ -500,6 +500,59 @@ export function shouldShowOnboarding(viewer: OnboardingViewer): boolean {
 }
 
 /**
+ * STEP 3'S EVIDENCE: AN ATTESTATION, OR EVIDENCE OF ONE MADE ELSEWHERE.
+ *
+ * What step 3 asks for is an ATTESTATION — the planter saying where they are.
+ * The step is answered when they have said it, and NOT answered when the
+ * product merely cannot see a phase. Those are different facts, and reading
+ * either record alone gets one of them wrong (ruled 2026-08-23, #675):
+ *
+ * - #306 — the attestation itself. "Not sure, and no date yet" is a real
+ *   thing to say, and a planter in discernment can honestly sit at phase 0
+ *   for months. It writes no launch row and leaves `current_phase` at 0, so
+ *   the columns cannot tell it apart from never having been asked. Only the
+ *   INITIAL DECLARATION row in `phase_transitions`
+ *   (`hasInitialPhaseDeclaration`) records that they spoke.
+ * - #675 — evidence of an attestation made through another door. A phase
+ *   above 0 or a launch row can only come from an explicit act: the phase
+ *   control (`transitionPhase`, the sole writer of `churches.current_phase`
+ *   besides the declaration itself) or naming a day (`setLaunchDate`, the
+ *   sole writer of `launches`). Nothing in the product raises either on a
+ *   planter's behalf. So a plant showing one has attested — through the phase
+ *   control, or before #306 existed, or via a seed — and telling it "your
+ *   phase and target launch date are still unset" contradicts the control
+ *   sitting beside the nudge.
+ *
+ * This is NOT column inference, which is what #306 removed. The columns are
+ * read as the FOOTPRINT OF AN ACT, never as "we can see a phase, so they must
+ * be fine": an unattested plant at phase 0 with no launch keeps the nudge, for
+ * as long as it takes.
+ *
+ * So the fact is a DISJUNCTION over every record an attestation can leave,
+ * decided in one place (`onboardingStepComplete`) rather than at each call
+ * site. EVERY FIELD IS REQUIRED, unlike the rest of `OnboardingFacts`: a
+ * caller that omitted one would silently answer "never attested" on evidence
+ * it simply did not read, which is the bug this type exists to end. Both
+ * callers — the finished dashboard and the wizard — supply all three.
+ */
+export type JourneyEvidence = {
+  /**
+   * The attestation itself: an initial-declaration row exists
+   * (`hasInitialPhaseDeclaration`). Answers the step on its own, whatever the
+   * columns say.
+   */
+  declaredInPhaseHistory: boolean;
+  /** `churches.current_phase`. 0 is Pre-Phase 1: never moved off the start. */
+  currentPhase: number;
+  /**
+   * A launch row exists (`getLaunchForChurch`). Its mere existence is the
+   * evidence, day or no day: step 3's "no date yet" writes NOTHING, so a row
+   * means somebody named a launch somewhere.
+   */
+  hasLaunch: boolean;
+};
+
+/**
  * What the database already knows about a plant, expressed as one fact per
  * step. Every field is optional and absent means "not answered", so a caller
  * that has not learned to read a step's fact yet gets the honest answer
@@ -512,15 +565,11 @@ export type OnboardingFacts = {
   /** Step 2 — OB-004's question has an explicit answer, either way. */
   leadershipStatus?: ChurchLeadershipStatus | null;
   /**
-   * Step 3 — the planter declared where they are (OB-003/005). The durable
-   * record is the INITIAL DECLARATION row in `phase_transitions`
-   * (`isInitialDeclaration`, `src/lib/phase-engine/transitions/service.ts`),
-   * because that is the one fact both answers write: "not sure, and no date
-   * yet" writes no launch row and leaves `current_phase` at 0, so neither
-   * column can tell a planter who answered apart from one who never saw the
-   * step.
+   * Step 3 — what the plant knows about its own journey (OB-003/005). Not a
+   * boolean, because no single row answers the question: see
+   * `JourneyEvidence`.
    */
-  journeyDeclared?: boolean | null;
+  journey?: JourneyEvidence | null;
   /** Step 4 — at least one person is on the plant's list (OB-006). */
   peopleAdded?: boolean | null;
 };
@@ -541,8 +590,18 @@ export function onboardingStepComplete(
       return !!facts.churchId;
     case "leadership":
       return leadershipAnswered({ leadershipStatus: facts.leadershipStatus });
-    case "journey":
-      return !!facts.journeyDeclared;
+    case "journey": {
+      // Attested, or showing the footprint of an attestation made elsewhere —
+      // the disjunction `JourneyEvidence` documents. One place, so the nudge,
+      // the resume rule and anything that asks later cannot drift apart.
+      const journey = facts.journey;
+      if (!journey) return false;
+      return (
+        journey.declaredInPhaseHistory ||
+        journey.currentPhase > 0 ||
+        journey.hasLaunch
+      );
+    }
     case "people":
       return !!facts.peopleAdded;
     default: {
