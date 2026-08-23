@@ -373,7 +373,7 @@ test("the dashboard hands step 3 the declaration record AND the columns", () => 
 
   assert.match(page, /hasInitialPhaseDeclaration\(churchId\)/);
   assert.match(page, /declaredInPhaseHistory,/);
-  assert.match(page, /currentPhase: church\?\.currentPhase,/);
+  assert.match(page, /currentPhase: church\?\.currentPhase \?\? 0,/);
   assert.match(page, /hasLaunch: launch !== null,/);
 });
 

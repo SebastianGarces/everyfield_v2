@@ -530,7 +530,10 @@ export function shouldShowOnboarding(viewer: OnboardingViewer): boolean {
  *
  * So the fact is a DISJUNCTION over every record an attestation can leave,
  * decided in one place (`onboardingStepComplete`) rather than at each call
- * site. Absent fields are "this caller did not read that one", not "false".
+ * site. EVERY FIELD IS REQUIRED, unlike the rest of `OnboardingFacts`: a
+ * caller that omitted one would silently answer "never attested" on evidence
+ * it simply did not read, which is the bug this type exists to end. Both
+ * callers — the finished dashboard and the wizard — supply all three.
  */
 export type JourneyEvidence = {
   /**
@@ -540,13 +543,13 @@ export type JourneyEvidence = {
    */
   declaredInPhaseHistory: boolean;
   /** `churches.current_phase`. 0 is Pre-Phase 1: never moved off the start. */
-  currentPhase?: number | null;
+  currentPhase: number;
   /**
    * A launch row exists (`getLaunchForChurch`). Its mere existence is the
    * evidence, day or no day: step 3's "no date yet" writes NOTHING, so a row
    * means somebody named a launch somewhere.
    */
-  hasLaunch?: boolean | null;
+  hasLaunch: boolean;
 };
 
 /**
@@ -595,8 +598,8 @@ export function onboardingStepComplete(
       if (!journey) return false;
       return (
         journey.declaredInPhaseHistory ||
-        (journey.currentPhase ?? 0) > 0 ||
-        !!journey.hasLaunch
+        journey.currentPhase > 0 ||
+        journey.hasLaunch
       );
     }
     case "people":

@@ -161,7 +161,7 @@ export async function PlantDashboard({
     // free — `church` came down from the page, `launch` is read three lines up.
     journey: {
       declaredInPhaseHistory,
-      currentPhase: church?.currentPhase,
+      currentPhase: church?.currentPhase ?? 0,
       hasLaunch: launch !== null,
     },
     // Step 4's fact: anybody at all on the plant's list (OB-006).

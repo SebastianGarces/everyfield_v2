@@ -69,6 +69,7 @@ export default async function DashboardPage({
         step={step}
         churchId={user.churchId}
         leadershipStatus={church?.leadershipStatus}
+        currentPhase={church?.currentPhase}
       />
     );
   }

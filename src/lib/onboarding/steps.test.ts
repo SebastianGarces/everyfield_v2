@@ -29,6 +29,7 @@ import {
   resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
+  type JourneyEvidence,
   type OnboardingStepId,
 } from "./steps";
 
@@ -52,6 +53,21 @@ const NETWORK_ID = "77777777-7777-4777-8777-777777777777";
  * seat alone does not say WHOSE owner, so a fixture that omitted an FK would be
  * asserting about a shape `isChurchLevelOwner` never sees.
  */
+/**
+ * Step 3's evidence, with every record ABSENT unless the case names it — a
+ * plant nobody has attested for. `JourneyEvidence` requires all three fields on
+ * purpose (a caller that omitted one would answer "never attested" on evidence
+ * it did not read), so the default is spelled here once rather than per case.
+ */
+function evidence(named: Partial<JourneyEvidence> = {}): JourneyEvidence {
+  return {
+    declaredInPhaseHistory: false,
+    currentPhase: 0,
+    hasLaunch: false,
+    ...named,
+  };
+}
+
 function viewer(
   seat: SeatFields["seat"],
   tenancy: Partial<TenancyFields> = {}
@@ -224,7 +240,7 @@ test("each step is complete when — and only when — its own fact is in", () =
   );
   assert.equal(
     onboardingStepComplete("journey", {
-      journey: { declaredInPhaseHistory: true },
+      journey: evidence({ declaredInPhaseHistory: true }),
     }),
     true
   );
@@ -269,14 +285,14 @@ test("the Phase 5 planter attested through another door", () => {
   // unset" while the control beside the nudge read "Phase 5".
   assert.equal(
     onboardingStepComplete("journey", {
-      journey: { declaredInPhaseHistory: false, currentPhase: 5 },
+      journey: evidence({ currentPhase: 5 }),
     }),
     true,
     "a phase above zero was set by somebody, so the journey was attested"
   );
   assert.equal(
     onboardingStepComplete("journey", {
-      journey: { declaredInPhaseHistory: false, hasLaunch: true },
+      journey: evidence({ hasLaunch: true }),
     }),
     true,
     "a launch row means a day was named — step 3 writes none for 'no date'"
@@ -321,7 +337,7 @@ test("a skipped step is where a returning planter resumes", () => {
   assert.equal(
     resolveResumeStep({
       churchId: CHURCH_ID,
-      journey: { declaredInPhaseHistory: true },
+      journey: evidence({ declaredInPhaseHistory: true }),
     }),
     "leadership"
   );
@@ -332,7 +348,7 @@ test("resumption walks forward as each later fact lands", () => {
     resolveResumeStep({
       churchId: CHURCH_ID,
       leadershipStatus: "planter_confirmed",
-      journey: { declaredInPhaseHistory: true },
+      journey: evidence({ declaredInPhaseHistory: true }),
     }),
     "people"
   );
@@ -346,7 +362,7 @@ test("a planter with every fact in lands on the last step, not back at 3", () =>
     resolveResumeStep({
       churchId: CHURCH_ID,
       leadershipStatus: "no_planter",
-      journey: { declaredInPhaseHistory: true },
+      journey: evidence({ declaredInPhaseHistory: true }),
       peopleAdded: true,
     }),
     LAST_ONBOARDING_STEP
@@ -366,7 +382,7 @@ test("step 1 is where a planter resumes if and only if there is no church", () =
   for (const facts of [
     {},
     { leadershipStatus: "planter_confirmed" as const },
-    { journey: { declaredInPhaseHistory: true } },
+    { journey: evidence({ declaredInPhaseHistory: true }) },
     { leadershipStatus: "no_planter" as const, peopleAdded: true },
   ]) {
     assert.notEqual(

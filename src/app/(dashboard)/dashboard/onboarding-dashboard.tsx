@@ -6,6 +6,7 @@ import {
   resolveOnboardingStepRequest,
   resolveResumeStep,
 } from "@/lib/onboarding/steps";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 import { hasInitialPhaseDeclaration } from "@/lib/phase-engine/transitions";
 
 /**
@@ -19,12 +20,15 @@ export async function OnboardingDashboard({
   step,
   churchId,
   leadershipStatus,
+  currentPhase,
 }: {
   /** The raw `?step=` value. Repeated params arrive as an array. */
   step: string | string[] | undefined;
   churchId: string | null;
   /** The church's recorded OB-004 answer, so step 2 opens on it. */
   leadershipStatus: ChurchLeadershipStatus | null | undefined;
+  /** `churches.current_phase` — step 3's evidence, off the page's church row. */
+  currentPhase: number | null | undefined;
 }) {
   // The guard OB-004 carried, widened from one step to four and moved into a
   // pure function so it can be exercised by CALLING it (#373 fix pass): a URL
@@ -46,16 +50,18 @@ export async function OnboardingDashboard({
     redirect("/dashboard");
   }
 
-  // OB-003/005: step 3's evidence. Phase HISTORY is the only piece this half
-  // reads, and the only piece it needs — inside a flow that has not finished,
-  // a phase above 0 or a launch row can only have come FROM step 3, which
-  // writes the declaration row in the same transaction. The finished
-  // dashboard reads the other two because there the columns can arrive by
-  // other paths (#675); the rule joining them is one function either way
-  // (`JourneyEvidence`). Only asked when there is a church to ask about.
-  const declaredInPhaseHistory = churchId
-    ? await hasInitialPhaseDeclaration(churchId)
-    : false;
+  // OB-003/005: step 3's evidence, the same three records the finished
+  // dashboard reads (`JourneyEvidence`). Not phase history alone: a plant can
+  // reach `/phase` or `/launch` while its flow is unfinished, and then this
+  // half would resume a Phase 5 planter to "where are you in the journey?" —
+  // #675's nudge one route over. Both reads are church-scoped and only run
+  // once there is a church to ask about.
+  const [declaredInPhaseHistory, launch] = churchId
+    ? await Promise.all([
+        hasInitialPhaseDeclaration(churchId),
+        getLaunchForChurch(churchId),
+      ])
+    : [false, null];
 
   return (
     <div className="p-6">
@@ -66,7 +72,11 @@ export async function OnboardingDashboard({
             : resolveResumeStep({
                 churchId,
                 leadershipStatus,
-                journey: { declaredInPhaseHistory },
+                journey: {
+                  declaredInPhaseHistory,
+                  currentPhase: currentPhase ?? 0,
+                  hasLaunch: launch !== null,
+                },
               })
         }
         leadershipStatus={leadershipStatus}
