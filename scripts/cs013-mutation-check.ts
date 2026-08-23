@@ -10,7 +10,10 @@
  *
  * Every mutation is a string replacement that must match exactly once — a
  * mutation whose needle has drifted FAILS the run rather than quietly testing
- * nothing, which is the failure mode a mutation harness is most prone to.
+ * nothing, which is the failure mode a mutation harness is most prone to. That
+ * half of the check is `needleDrift()`, and it is EXPORTED because nothing runs
+ * this script automatically: `cs013-mutation-check.test.ts` calls it inside
+ * `pnpm test`, so a rename that rots a needle goes red in the PR that makes it.
  *
  * IT REFUSES TO RUN AGAINST A DIRTY TREE, and that is not tidiness. The restore
  * reads the file's own contents as the thing to put back, so a run that starts
@@ -21,8 +24,11 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 type Mutation = {
   /** What claim this breaks, in the words the test is about. */
@@ -145,10 +151,38 @@ const MUTATIONS: Mutation[] = [
 
 const TOUCHED = [...new Set(MUTATIONS.map((m) => m.file))];
 
+/**
+ * The needles that no longer quote their file, one line each — empty is green.
+ *
+ * A needle is a QUOTATION, AND A QUOTATION ROTS: a copy wave renames a word
+ * (#676 turned "stage" into "phase"), a review re-indents a block (#677), and
+ * the mutation that quoted it can no longer be applied. The claim it proves
+ * then goes unproven, silently, because a harness has no way to tell "this bug
+ * was caught" from "this bug was never introduced".
+ *
+ * So this runs BEFORE any suite, and `cs013-mutation-check.test.ts` runs it
+ * again in `pnpm test` — which is where it matters. The harness below is a
+ * manual reviewer tool that no workflow invokes, so its exit code has never
+ * reached CI; by the time #681 was filed, two needles had rotted and nothing
+ * anywhere had gone red. The test is the half that fails on the day of the
+ * rename, in the PR that causes it.
+ */
+export function needleDrift(): string[] {
+  return MUTATIONS.flatMap((mutation) => {
+    const source = readFileSync(path.join(REPO, mutation.file), "utf8");
+    const matches = source.split(mutation.from).length - 1;
+    if (matches === 1) return [];
+    return [
+      `NEEDLE DRIFT — "${mutation.claim}": ${matches} matches in ` +
+        `${mutation.file}, expected 1\n  needle: ${JSON.stringify(mutation.from)}`,
+    ];
+  });
+}
+
 function runSuite(suite: string): boolean {
   try {
     execFileSync("pnpm", ["exec", "tsx", "--test", suite], {
-      cwd: process.cwd(),
+      cwd: REPO,
       stdio: "pipe",
       env: {
         ...process.env,
@@ -163,23 +197,6 @@ function runSuite(suite: string): boolean {
   }
 }
 
-// A DIRTY TREE IS REFUSED, not warned about — see the header. Uncommitted work
-// in one of these files is indistinguishable from a mutation a killed run left
-// behind, and restoring over it would destroy real edits.
-try {
-  execFileSync("git", ["diff", "--quiet", "--", ...TOUCHED], {
-    cwd: process.cwd(),
-    stdio: "pipe",
-  });
-} catch {
-  console.error(
-    "REFUSING: uncommitted changes in a file this harness rewrites.\n" +
-      "Commit or stash them first — the restore would overwrite them.\n" +
-      TOUCHED.map((file) => `  ${file}`).join("\n")
-  );
-  process.exit(1);
-}
-
 /** Files currently holding a mutation, so a signal can put them back. */
 const inFlight = new Map<string, string>();
 
@@ -188,62 +205,99 @@ function restoreAll(): void {
   inFlight.clear();
 }
 
-// `finally` does not run on a signal, and an interrupted run that left a
-// deliberate bug in a checked-in file is the worst thing this script could do.
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    restoreAll();
-    console.error(`\n${signal} — restored ${TOUCHED.length} file(s), exiting`);
-    process.exit(130);
-  });
-}
-
-let failures = 0;
-
-// The baseline first: a harness reporting "caught" against an already red suite
-// proves nothing at all.
-for (const suite of new Set(MUTATIONS.map((m) => m.suite))) {
-  if (!runSuite(suite)) {
-    console.error(`BASELINE RED — ${suite} fails before any mutation`);
+function main(): void {
+  // A DIRTY TREE IS REFUSED, not warned about — see the header. Uncommitted work
+  // in one of these files is indistinguishable from a mutation a killed run left
+  // behind, and restoring over it would destroy real edits.
+  try {
+    execFileSync("git", ["diff", "--quiet", "--", ...TOUCHED], {
+      cwd: REPO,
+      stdio: "pipe",
+    });
+  } catch {
+    console.error(
+      "REFUSING: uncommitted changes in a file this harness rewrites.\n" +
+        "Commit or stash them first — the restore would overwrite them.\n" +
+        TOUCHED.map((file) => `  ${file}`).join("\n")
+    );
     process.exit(1);
   }
-  console.log(`baseline green  ${suite}`);
-}
-console.log("");
 
-for (const mutation of MUTATIONS) {
-  const file = path.join(process.cwd(), mutation.file);
-  const original = readFileSync(file, "utf8");
-
-  const occurrences = original.split(mutation.from).length - 1;
-  if (occurrences !== 1) {
+  // THE NEEDLES BEFORE THE SUITES. A rotted needle used to be counted with the
+  // misses and reported as "went undetected" — the same words as a real hole in
+  // the tests, for the opposite situation: nothing was ever mutated. It stops
+  // the run here instead, so `failures` below means one thing only.
+  const drift = needleDrift();
+  if (drift.length > 0) {
+    console.error(drift.join("\n"));
     console.error(
-      `NEEDLE DRIFT — "${mutation.claim}": found ${occurrences} matches in ${mutation.file}, expected 1`
+      `\n${drift.length} needle(s) no longer quote their file — those claims ` +
+        "went unproven, not unbroken.\nRequote the needle from the file, or " +
+        "delete the mutation if the claim is gone."
     );
-    failures += 1;
-    continue;
+    process.exit(1);
   }
 
-  inFlight.set(file, original);
-  writeFileSync(file, original.replace(mutation.from, mutation.to));
-
-  let caught: boolean;
-  try {
-    caught = !runSuite(mutation.suite);
-  } finally {
-    writeFileSync(file, original);
-    inFlight.delete(file);
+  // `finally` does not run on a signal, and an interrupted run that left a
+  // deliberate bug in a checked-in file is the worst thing this script could do.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      restoreAll();
+      console.error(
+        `\n${signal} — restored ${TOUCHED.length} file(s), exiting`
+      );
+      process.exit(130);
+    });
   }
 
-  console.log(
-    `${caught ? "caught " : "MISSED "} ${mutation.claim}  →  ${mutation.suite}`
-  );
-  if (!caught) failures += 1;
+  // The baseline first: a harness reporting "caught" against an already red
+  // suite proves nothing at all.
+  for (const suite of new Set(MUTATIONS.map((m) => m.suite))) {
+    if (!runSuite(suite)) {
+      console.error(`BASELINE RED — ${suite} fails before any mutation`);
+      process.exit(1);
+    }
+    console.log(`baseline green  ${suite}`);
+  }
+  console.log("");
+
+  let failures = 0;
+
+  for (const mutation of MUTATIONS) {
+    const file = path.join(REPO, mutation.file);
+    const original = readFileSync(file, "utf8");
+
+    inFlight.set(file, original);
+    writeFileSync(file, original.replace(mutation.from, mutation.to));
+
+    let caught: boolean;
+    try {
+      caught = !runSuite(mutation.suite);
+    } finally {
+      writeFileSync(file, original);
+      inFlight.delete(file);
+    }
+
+    console.log(
+      `${caught ? "caught " : "MISSED "} ${mutation.claim}  →  ${mutation.suite}`
+    );
+    if (!caught) failures += 1;
+  }
+
+  console.log("");
+  if (failures > 0) {
+    console.error(`${failures} mutation(s) went undetected`);
+    process.exit(1);
+  }
+  console.log(`all ${MUTATIONS.length} mutations caught`);
 }
 
-console.log("");
-if (failures > 0) {
-  console.error(`${failures} mutation(s) went undetected`);
-  process.exit(1);
+// Importing this module must run nothing: `cs013-mutation-check.test.ts` pulls
+// `needleDrift` out of it, and everything in `main()` rewrites checked-in files.
+// Same guard as `scripts/db-migrate.ts` and `scripts/restamp-migration.ts`.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
+  main();
 }
-console.log(`all ${MUTATIONS.length} mutations caught`);
