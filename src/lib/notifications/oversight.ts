@@ -895,7 +895,7 @@ export function announcePhaseAdvanced(
       // (after a correction back to 2) is one milestone, and a replayed event is
       // none.
       occurrence: `phase-${input.toPhase}`,
-      detail: `They moved up to phase ${input.toPhase}.`,
+      detail: `They advanced to phase ${input.toPhase}.`,
     },
     deps
   );

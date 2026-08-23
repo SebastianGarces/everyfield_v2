@@ -74,7 +74,7 @@ test("the SQL predicate says exactly what isPhaseAdvance says", () => {
 // `phasesReached` count and, worse, `hasActivityCondition`, the "was there
 // activity at all?" gate that decides whether a digest is sent on a given day.
 // Left uncorrected, a brand-new plant that had only said where it already stood
-// both counted "1 new phase" and triggered a digest on a day nothing happened.
+// both counted "1 phase change" and triggered a digest on a day nothing happened.
 // ----------------------------------------------------------------------------
 
 test("an initial declaration is not an advance, and contributes nothing", () => {

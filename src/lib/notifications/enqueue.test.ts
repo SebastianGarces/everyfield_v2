@@ -1313,7 +1313,7 @@ test("the two gated milestones are still refused with the plant not sharing", as
       category: "milestones",
       type,
       title: "Grace Chapel reached a new phase",
-      body: "They moved up to phase 3.",
+      body: "They advanced to phase 3.",
     });
     assert.equal(result.status, "skipped", type);
     assert.equal(result.reason, "oversight_privacy", type);

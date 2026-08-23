@@ -300,7 +300,7 @@ test("singular and plural are both handled", () => {
       tasksCompleted: 1,
       phasesReached: 1,
     }),
-    "2 meetings, 1 new person, 1 task finished, 1 new phase."
+    "2 meetings, 1 new person, 1 task finished, 1 phase change."
   );
 });
 

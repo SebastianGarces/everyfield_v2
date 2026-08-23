@@ -38,7 +38,7 @@ export function isPhaseAdvance(fromPhase: number, toPhase: number): boolean {
  * "was this an advance?" — the milestone emitter below and the digest's
  * `phasesReached` count in `./oversight-digest.ts` — got different answers once
  * already. The digest counted every `phase_transitions` row, so a planter
- * correcting phase 3 back to 2 read as "1 new phase" in tomorrow's summary: the
+ * correcting phase 3 back to 2 read as "1 phase change" in tomorrow's summary: the
  * event this file deliberately withholds, leaking through the other door and
  * mislabelled as its opposite.
  *

@@ -114,8 +114,8 @@ const MUTATIONS: Mutation[] = [
     // the loader would report as a pass.
     claim: "the association section renders the consent it is handed",
     file: "src/components/settings/sections/association-section.tsx",
-    from: "                      {consent.map((line) => (",
-    to: "                      {[].map((line: string) => (",
+    from: "                    {consent.map((line) => (",
+    to: "                    {[].map((line: string) => (",
     suite: DEFAULTS_SUITE,
   },
   {

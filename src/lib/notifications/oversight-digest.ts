@@ -147,7 +147,7 @@ export function composeDigestBody(summary: OversightActivitySummary): string {
   line(summary.meetingsHeld, "meeting", "meetings");
   line(summary.peopleAdded, "new person", "new people");
   line(summary.tasksCompleted, "task finished", "tasks finished");
-  line(summary.phasesReached, "new phase", "new phases");
+  line(summary.phasesReached, "phase change", "phase changes");
 
   return parts.join(", ") + ".";
 }
@@ -380,7 +380,7 @@ function taskFinishedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
  * ADVANCES only, via the same predicate the milestone emitter judges a single
  * event with (`phaseAdvanceCondition`, beside `isPhaseAdvance` in
  * `./oversight-events.ts`). Counting every transition made a planter's
- * correction from phase 3 back to 2 read as "1 new phase" — the milestone path
+ * correction from phase 3 back to 2 read as "1 phase change" — the milestone path
  * withholding a regression on purpose while the digest path announced it as its
  * opposite. One rule, one place.
  */

@@ -459,7 +459,7 @@ async function run(created: Created) {
     category: "milestones",
     type: "oversight.milestone.phase_advanced",
     title: "Scratch Plant reached a new phase",
-    body: "They moved up to phase 2.",
+    body: "They advanced to phase 2.",
   });
   assert.equal(gatedWhileOff.status, "skipped");
   assert.equal(gatedWhileOff.reason, "oversight_privacy");
@@ -1569,7 +1569,7 @@ async function run(created: Created) {
 
   // Two transitions; one advance, one CORRECTION. `oversight-events.ts` refuses
   // to announce the correction as a milestone, and the digest must not
-  // re-disclose it as "a new phase" — the whole point of the shared predicate.
+  // re-disclose it as "a phase change" — the whole point of the shared predicate.
   await db.insert(phaseTransitions).values([
     {
       churchId: plant.id,
@@ -1605,7 +1605,7 @@ async function run(created: Created) {
   // task, a phase regression, a soft-deleted person, a completed-then-deleted
   // task. Any of them leaking changes this string.
   const EXPECTED_BODY =
-    "1 meeting, 2 new people, 1 task finished, 1 new phase.";
+    "1 meeting, 2 new people, 1 task finished, 1 phase change.";
   for (const row of digestRows) {
     assert.equal(row.body, EXPECTED_BODY, "the digest miscounted");
   }
@@ -2144,7 +2144,7 @@ async function run(created: Created) {
     category: "milestones",
     type: "oversight.milestone.phase_advanced",
     title: "Scratch Plant Two reached a new phase",
-    body: "They moved up to phase 2.",
+    body: "They advanced to phase 2.",
   });
   assert.equal(acrossPlants.status, "skipped");
   assert.equal(acrossPlants.reason, "oversight_privacy");
