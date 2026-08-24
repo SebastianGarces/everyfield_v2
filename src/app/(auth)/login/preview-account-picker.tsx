@@ -51,14 +51,16 @@ export function PreviewAccountPicker({
   accounts: PreviewAccount[];
   picked: PreviewAccount | null;
   pending: boolean;
-  onPick: (account: PreviewAccount) => void;
+  /** Returns whether the form moved focus, so the popover can leave it there. */
+  onPick: (account: PreviewAccount) => boolean;
   onSignIn: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
-  // A closing popover pulls focus back to its trigger, which would undo the
-  // password field `LoginForm` focuses for an account whose password is not in
-  // the repo. A ref, not state: the close handler reads it as the event fires.
+  // A closing popover pulls focus back to its trigger, which would undo any
+  // move `LoginForm` made — it focuses the password field for an account whose
+  // password is not in the repo, and says so by returning `true` from `onPick`.
+  // A ref, not state: the close handler reads it as the event fires.
   const reclaimFocus = useRef(true);
 
   // Grouped in encounter order — the server list is already in the order the
@@ -91,7 +93,7 @@ export function PreviewAccountPicker({
         <div className="min-w-0">
           <p className="text-sm font-medium">Preview QA accounts</p>
           <p className="text-muted-foreground text-xs">
-            Picks an account and signs in as it. Oversight admins still need
+            Fills the form above and signs in through it. Oversight admins need
             their password typed.
           </p>
         </div>
@@ -104,7 +106,10 @@ export function PreviewAccountPicker({
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            aria-label="Search seeded accounts"
+            disabled={pending}
+            // No `aria-label`: the button's own contents are its accessible
+            // name, so a reader hears the prompt before a pick and the account
+            // that is loaded after one.
             className="w-full cursor-pointer justify-between font-normal"
           >
             {picked ? (
@@ -151,8 +156,7 @@ export function PreviewAccountPicker({
                         " "
                       )}
                       onSelect={() => {
-                        reclaimFocus.current = account.password !== null;
-                        onPick(account);
+                        reclaimFocus.current = !onPick(account);
                         setOpen(false);
                       }}
                       className="cursor-pointer"
@@ -184,6 +188,7 @@ export function PreviewAccountPicker({
 
       {picked?.password === null ? (
         <p
+          id="preview-account-password-hint"
           data-testid="preview-account-password-hint"
           className="text-muted-foreground text-xs"
         >

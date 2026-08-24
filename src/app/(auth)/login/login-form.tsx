@@ -90,7 +90,12 @@ export function LoginForm({
           <input type="hidden" name="redirect" value={`${redirectTo}${hash}`} />
           <CardContent className="space-y-4">
             {state.error && (
-              <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
+              // The picker's sign-in button sits below the card, so a reader
+              // who submits from there may never see this — it has to announce.
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+              >
                 {state.error}
               </div>
             )}
@@ -136,6 +141,13 @@ export function LoginForm({
                   setPicked(null);
                 }}
                 aria-invalid={!!state.fieldErrors?.password}
+                // The picker's hint says where this account's password is
+                // recorded; a reader sent here by the focus move below hears it.
+                aria-describedby={
+                  picked?.password === null
+                    ? "preview-account-password-hint"
+                    : undefined
+                }
               />
               {state.fieldErrors?.password && (
                 <p className="text-destructive text-sm">
@@ -174,6 +186,8 @@ export function LoginForm({
         accounts={previewAccounts}
         picked={picked}
         pending={pending}
+        // Returns whether focus moved, which is the picker's cue not to pull it
+        // back to its own trigger — one place decides, one flag travels.
         onPick={(account) => {
           setPicked(account);
           setEmail(account.email);
@@ -182,7 +196,9 @@ export function LoginForm({
           // is on screen is what will be submitted — and send the reader to
           // it, because typing it is the only way this account signs in.
           setPassword(account.password ?? "");
-          if (account.password === null) passwordRef.current?.focus();
+          if (account.password !== null) return false;
+          passwordRef.current?.focus();
+          return true;
         }}
         // `requestSubmit` runs the form's own submit path, so the hidden
         // `redirect` field and both controlled values ride along exactly as
