@@ -12,8 +12,15 @@ import {
 } from "./preview-accounts";
 
 // ============================================================================
-// THE PREVIEW ACCOUNT PICKER IS AUTOFILL, AND THESE ARE THE THREE THINGS THAT
-// KEEP IT THAT WAY (#146).
+// THE PREVIEW ACCOUNT PICKER OWNS NO PATH TO A SESSION, AND THESE ARE THE THREE
+// THINGS THAT KEEP IT THAT WAY (#146, UX superseded by #684).
+//
+// #684 gave the picker a combobox and a "Sign in as this account" button, so a
+// reader no longer leaves it to press "Sign in" by hand. The button presses the
+// LOGIN FORM's own submit through a callback: same POST, same password check,
+// same session issuance. What #146 forbade is untouched — the picker holds no
+// form, no action, no endpoint and no cookie of its own, and the rules below are
+// unchanged.
 //
 //   1. THE GATE. `VERCEL_ENV === "preview"` and nothing else. Production, local
 //      development and a bare node process all get an empty roster, so the
@@ -228,18 +235,21 @@ test("the picker is a client entry with no action, form or session call", () => 
   // walk is describing something else.
   assert.match(picker, /^\s*"use client"/);
 
-  // The hard guard from #146: autofill, never a grant. No form, no action, no
-  // cookie, no session.
+  // The hard guard from #146, kept by #684: the picker asks the login form to
+  // submit, and owns nothing that could sign anyone in on its own. No form, no
+  // action, no cookie, no session.
   for (const banned of [
     /<form\b/,
     /\baction=/,
     /createSession|setSessionCookie|generateSessionToken/,
     /useActionState/,
+    /"use server"|'use server'/,
+    /\bfetch\(/,
   ]) {
     assert.doesNotMatch(
       picker,
       banned,
-      `the picker grew ${banned} — it must fill fields and nothing else`
+      `the picker grew ${banned} — it may fill the two fields and ask the login form to submit, and nothing else`
     );
   }
 });

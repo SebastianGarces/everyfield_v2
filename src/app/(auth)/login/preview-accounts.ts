@@ -1,13 +1,14 @@
 // ============================================================================
-// PREVIEW-ONLY — the seeded QA accounts, offered as FORM AUTOFILL.
+// PREVIEW-ONLY — the seeded QA accounts, offered to the login FORM.
 //
 // ⚠️  THIS IS NOT A SESSION GRANT, AND MUST NEVER BECOME ONE. Picking an
-// account types an email and a password into the two fields on the login form.
-// That is the entire feature. The reader still presses "Sign in", the normal
-// login POST still runs, and it runs the same password check, the same rate
-// limiting and the same session issuance as a hand-typed login. There is no
-// route here, no `"use server"` export, no handler and no cookie — a reviewer
-// should reject any change to this file that adds one (#146).
+// account types an email and a password into the two fields on the login form,
+// and the picker's button presses that same form's submit for the reader
+// (#684). That is the entire feature. The normal login POST still runs, and it
+// runs the same password check, the same rate limiting and the same session
+// issuance as a hand-typed login. There is no route here, no `"use server"`
+// export, no handler and no cookie — a reviewer should reject any change to
+// this file that adds one (#146's hard half, kept by #684).
 //
 // Why this is allowed on a preview where the dev account switcher is not:
 // `dev-accounts.ts` issues a session with NO password, so it is gated on
@@ -27,8 +28,8 @@
 // THE TWO OVERSIGHT ADMINS CARRY NO PASSWORD, and that is an invariant rather
 // than an oversight: no in-repo constant may open an account on a database
 // anyone else uses, so `SEED_ADMIN_PASSWORD` is recorded in `.env.local` and
-// nowhere else (`memory/invariants.md`). Those two rows fill the email and
-// leave the password field empty and focused.
+// nowhere else (`memory/invariants.md`). Those two rows fill the email, leave
+// the password field empty and focused, and offer no sign-in button.
 //
 // KEEP THIS MODULE OFF THE CLIENT. The roster reaches a browser as a PROP of a
 // preview render and by no other path, which is what keeps it out of a
@@ -50,7 +51,7 @@ export interface PreviewAccount {
   /**
    * What gets typed into the password field. `null` where the password is
    * deliberately absent from the repo — see the header. The picker fills the
-   * email and leaves the password to the reader.
+   * email, focuses the password field and leaves the typing to the reader.
    */
   password: string | null;
   name: string;
