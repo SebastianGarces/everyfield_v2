@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useSyncExternalStore } from "react";
+import { useActionState, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,12 +50,13 @@ function subscribeToHash(onChange: () => void) {
  * value can change under a mounted form.
  *
  * `previewAccounts` is empty everywhere but a Vercel preview, where it carries
- * the seeded QA roster (`preview-accounts.ts`). The picker it feeds only WRITES
- * THESE TWO FIELDS — this component owns both values, the form action below is
- * the same one a hand-typed login submits, and there is no second path to a
- * session. Both inputs are controlled for exactly that reason: an autofill that
- * reached around into the DOM would be a second owner of the field, and the
- * value React submits is the one in this state.
+ * the seeded QA roster (`preview-accounts.ts`). The picker it feeds WRITES THESE
+ * TWO FIELDS and may ask THIS form to submit itself (#684) — it holds no form,
+ * no action and no endpoint of its own, so the POST below is the same one a
+ * hand-typed login sends and there is still no second path to a session. Both
+ * inputs are controlled for exactly that reason: a fill that reached around into
+ * the DOM would be a second owner of the field, and the value React submits is
+ * the one in this state.
  */
 export function LoginForm({
   redirectTo,
@@ -69,6 +70,8 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [picked, setPicked] = useState<PreviewAccount | null>(null);
   const hash = useSyncExternalStore(subscribeToHash, readHash, () => "");
+  const formRef = useRef<HTMLFormElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   return (
     <>
@@ -79,7 +82,7 @@ export function LoginForm({
             Enter your credentials to sign in to your account
           </CardDescription>
         </CardHeader>
-        <form action={formAction}>
+        <form action={formAction} ref={formRef}>
           {/* `safeRedirectPath` has already gated the path half on the server
               and gates it again on the way back; a fragment adds nothing it can
               refuse, since it must still start with `/` and carry no control
@@ -87,7 +90,12 @@ export function LoginForm({
           <input type="hidden" name="redirect" value={`${redirectTo}${hash}`} />
           <CardContent className="space-y-4">
             {state.error && (
-              <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
+              // The picker's sign-in button sits below the card, so a reader
+              // who submits from there may never see this — it has to announce.
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+              >
                 {state.error}
               </div>
             )}
@@ -123,6 +131,7 @@ export function LoginForm({
                 id="password"
                 name="password"
                 type="password"
+                ref={passwordRef}
                 placeholder="••••••••"
                 autoComplete="current-password"
                 required
@@ -132,6 +141,13 @@ export function LoginForm({
                   setPicked(null);
                 }}
                 aria-invalid={!!state.fieldErrors?.password}
+                // The picker's hint says where this account's password is
+                // recorded; a reader sent here by the focus move below hears it.
+                aria-describedby={
+                  picked?.password === null
+                    ? "preview-account-password-hint"
+                    : undefined
+                }
               />
               {state.fieldErrors?.password && (
                 <p className="text-destructive text-sm">
@@ -162,20 +178,32 @@ export function LoginForm({
       {/*
         Below the Sign in button, a sibling of the card — the same slot the dev
         account switcher occupies in `page.tsx` (owner ruling, 2026-08-20). It
-        still only WRITES the two controlled values above; it is not in the
-        form, has no field of its own, and nothing about the submit changed.
+        WRITES the two controlled values above and can press this form's own
+        submit; it is not in the form, has no field of its own, and nothing
+        about the submit itself changed.
       */}
       <PreviewAccountPicker
         accounts={previewAccounts}
         picked={picked}
+        pending={pending}
+        // Returns whether focus moved, which is the picker's cue not to pull it
+        // back to its own trigger — one place decides, one flag travels.
         onPick={(account) => {
           setPicked(account);
           setEmail(account.email);
           // `null` means the password is not in the repo. Clear the field
           // rather than leaving a stale one from the previous pick, so what
-          // is on screen is what will be submitted.
+          // is on screen is what will be submitted — and send the reader to
+          // it, because typing it is the only way this account signs in.
           setPassword(account.password ?? "");
+          if (account.password !== null) return false;
+          passwordRef.current?.focus();
+          return true;
         }}
+        // `requestSubmit` runs the form's own submit path, so the hidden
+        // `redirect` field and both controlled values ride along exactly as
+        // they do when the reader presses "Sign in".
+        onSignIn={() => formRef.current?.requestSubmit()}
       />
     </>
   );

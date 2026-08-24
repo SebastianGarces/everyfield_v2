@@ -12,8 +12,15 @@ import {
 } from "./preview-accounts";
 
 // ============================================================================
-// THE PREVIEW ACCOUNT PICKER IS AUTOFILL, AND THESE ARE THE THREE THINGS THAT
-// KEEP IT THAT WAY (#146).
+// THE PREVIEW ACCOUNT PICKER OWNS NO PATH TO A SESSION, AND THESE ARE THE THREE
+// THINGS THAT KEEP IT THAT WAY (#146, UX superseded by #684).
+//
+// #684 gave the picker a combobox and a "Sign in as this account" button, so a
+// reader no longer leaves it to press "Sign in" by hand. The button presses the
+// LOGIN FORM's own submit through a callback: same POST, same password check,
+// same session issuance. What #146 forbade is untouched — the picker holds no
+// form, no action, no endpoint and no cookie of its own, and the rules below are
+// unchanged.
 //
 //   1. THE GATE. `VERCEL_ENV === "preview"` and nothing else. Production, local
 //      development and a bare node process all get an empty roster, so the
@@ -228,20 +235,71 @@ test("the picker is a client entry with no action, form or session call", () => 
   // walk is describing something else.
   assert.match(picker, /^\s*"use client"/);
 
-  // The hard guard from #146: autofill, never a grant. No form, no action, no
-  // cookie, no session.
+  // The hard guard from #146, kept by #684: the picker asks the login form to
+  // submit, and owns nothing that could sign anyone in on its own. No form, no
+  // action, no cookie, no session.
   for (const banned of [
     /<form\b/,
     /\baction=/,
     /createSession|setSessionCookie|generateSessionToken/,
     /useActionState/,
+    /"use server"|'use server'/,
+    /\bfetch\(/,
   ]) {
     assert.doesNotMatch(
       picker,
       banned,
-      `the picker grew ${banned} — it must fill fields and nothing else`
+      `the picker grew ${banned} — it may fill the two fields and ask the login form to submit, and nothing else`
     );
   }
+});
+
+test("the picker imports nothing that could sign anyone in", () => {
+  // The bans above are spellings, and a spelling list cannot see
+  // `import { devLoginAs } from "./dev-actions"` wired to the button. This reads
+  // the other way round: every module the picker pulls in must be on this list,
+  // so reaching for an action, a route or a session helper fails here whatever
+  // it is called.
+  const picker = stripComments(
+    readFileSync(path.join(LOGIN_DIR, "preview-account-picker.tsx"), "utf8")
+  );
+
+  const allowed =
+    /^(?:react|lucide-react|@\/lib\/utils|@\/components\/ui\/[a-z-]+)$/;
+  const offenders: string[] = [];
+  const seen: string[] = [];
+
+  // Every static `import`/`export … from "…"`, including the side-effect and
+  // multi-line forms, plus any dynamic `import("…")`.
+  const statements =
+    /^\s*(?:import|export)\s+(?:(type)\s+)?(?:[\s\S]*?\sfrom\s*)?["']([^"']+)["']\s*;?\s*$/gm;
+  for (const [, typeOnly, specifier] of picker.matchAll(statements)) {
+    seen.push(specifier);
+    if (specifier === "./preview-accounts") {
+      // The roster may come in, but only as a type — the erased kind.
+      if (!typeOnly) offenders.push(`${specifier} (imported as a value)`);
+      continue;
+    }
+    if (!allowed.test(specifier)) offenders.push(specifier);
+  }
+  for (const [, specifier] of picker.matchAll(
+    /\bimport\(\s*["']([^"']+)["']\s*\)/g
+  )) {
+    seen.push(specifier);
+    offenders.push(`${specifier} (dynamic import)`);
+  }
+
+  // The parse itself, so a regex that stops matching cannot pass by finding
+  // nothing to object to.
+  assert.ok(
+    seen.includes("./preview-accounts") && seen.length >= 5,
+    `the import parse found ${seen.length} specifiers — it has stopped reading the file`
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    `the picker imports something outside the allowlist:\n  ${offenders.join("\n  ")}`
+  );
 });
 
 test("the login directory publishes no second server-action module", () => {

@@ -48,13 +48,17 @@ navigate → https://everyfield-v2-<hash>.vercel.app/people
 "development" && !process.env.VERCEL`. Log in through the real form; previews read the same
 development database as local dev.
 
-**The login form does carry a preview-only picker for the table below** (#146). Pick an account and
-it *types the email and password into the two fields*; you still press **Sign in** and the normal
-login POST runs. It is form autofill and nothing else — no route, no server action, no cookie, no
-session — which is why it is allowed where the switcher is not, and a change that turns it into a
-one-click sign-in is a change to reject. It renders only on `VERCEL_ENV === "preview"`, so it is
-absent locally (use the switcher) and absent in production. The two oversight admins appear in it
-with the email only: their password is not in the repo, per the block below.
+**The login form does carry a preview-only picker for the table below** (#684, superseding the UX
+half of #146). It is a searchable combobox: filter by name, email or note, pick an account, and it
+types the email and password into the two fields. A **Sign in as this account** button then appears,
+and pressing it presses the login form's own submit — the same POST, password check, rate limiting
+and session issuance a hand-typed login gets. The picker itself still owns no route, no server
+action, no cookie and no session, which is why it is allowed where the switcher is not; #146's hard
+half stands, and a change that gives previews a passwordless side door is a change to reject. The
+two oversight admins have no password in the repo, so they degrade rather than disappear: picking one
+fills the email, focuses the password field, and offers no button — type the password from the block
+below. It renders only on `VERCEL_ENV === "preview"`, so it is absent locally (use the switcher) and
+absent in production.
 
 | Account | Email | Password | Notes |
 |---|---|---|---|
