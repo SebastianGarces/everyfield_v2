@@ -21,6 +21,9 @@ body {
   --color-ef: var(--ef);
   --color-ef-dark: var(--ef-dark);
   --color-ef-field: var(--ef-field);
+  --color-app-bar: var(--app-bar);
+  --color-app-bar-foreground: var(--app-bar-foreground);
+  --color-app-bar-logo: var(--app-bar-logo);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -78,14 +81,14 @@ body {
    --------------------------------------------------------------------------- */
 
 :root {
-  /* Sharp ruling (DESIGN.md, 2026-07-30): radius is 0 — edges are drawn, not
-     implied. The derived scale above goes negative and clamps to 0. */
-  --radius: 0rem;
+  /* The authenticated app uses shadcn's default geometry (#688). Marketing
+     keeps its own radius-zero Sharp rules in marketing.css. */
+  --radius: 0.625rem;
 
-  /* Brand — sharp brings the app exactly two colours: green (the signal:
-     active rails, the logo tile, never a button) and ink (text and primary).
-     Surfaces and neutrals stay the pre-sharp grays by ruling (2026-07-31).
-     Field green is green's text voice on light surfaces. */
+  /* Brand — the app takes exactly two colours from Sharp: green (the signal:
+     active rails, the brand mark, never a button) and ink (text and primary).
+     Surfaces and neutrals keep their neutral grays. Field green is green's text
+     voice on light surfaces. */
   --ef: #1ce362;
 
   /* THE INK, and the ONLY place it is written down. DESIGN.md spells it
@@ -95,6 +98,13 @@ body {
      this is the value behind the role tokens, not a colour to paint with.
      Paint with the role. */
   --ink: oklch(0.224 0.011 151.267);
+
+  /* Authenticated-shell chrome. Ink and its readable foreground are semantic
+     roles; the green role is licensed only for the 24px brand mark in the app
+     bar. It is not a general green-on-ink text or icon colour. */
+  --app-bar: var(--ink);
+  --app-bar-foreground: oklch(0.985 0 0);
+  --app-bar-logo: var(--ef);
 
   /* The ink that reads on GREEN. One colour in both themes by design, so `.dark`
      inherits it — which makes the GROUND the rule: paint it only where the green

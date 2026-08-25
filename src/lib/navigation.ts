@@ -16,6 +16,8 @@ import {
   UsersRound,
 } from "lucide-react";
 
+import type { SeatTenancyType } from "@/lib/auth/tenancy";
+
 export type NavItem = {
   title: string;
   href?: string;
@@ -29,6 +31,22 @@ export type NavSection = {
   title: string;
   items: NavItem[];
 };
+
+export type TenancyShell = Readonly<{
+  label: "Church Planting" | "Sending Church" | "Sending Network";
+  homeHref: "/dashboard" | "/oversight";
+}>;
+
+const TENANCY_SHELLS = {
+  church: { label: "Church Planting", homeHref: "/dashboard" },
+  sending_church: { label: "Sending Church", homeHref: "/oversight" },
+  network: { label: "Sending Network", homeHref: "/oversight" },
+} as const satisfies Record<SeatTenancyType, TenancyShell>;
+
+/** The account identity and home destination shown by authenticated chrome. */
+export function resolveTenancyShell(tenancy: SeatTenancyType): TenancyShell {
+  return TENANCY_SHELLS[tenancy];
+}
 
 /**
  * A path belongs to an href when it *is* that href or sits under it — the `/`

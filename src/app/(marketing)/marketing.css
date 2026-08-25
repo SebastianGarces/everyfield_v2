@@ -5,6 +5,10 @@
    ============================================================ */
 
 .marketing {
+  /* The app restores shadcn's radius; Sharp remains radius-zero even when a
+     shared component is rendered inside this route group. */
+  --radius: 0rem;
+
   /* BRAND · 3 */
   --green: #1ce362;
   --ink: #181d19;
