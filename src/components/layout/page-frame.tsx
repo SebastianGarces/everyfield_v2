@@ -1,18 +1,24 @@
 import * as React from "react";
 
+import type { HeaderBreadcrumbItem } from "@/components/header/header-context";
 import { PageContext } from "@/components/header/page-context";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import { cn } from "@/lib/utils";
 
 /** Gray, padded scroll frame shared by authenticated page bodies. */
 export function PageCanvas({
   className,
+  contextItems,
   frameClassName,
   context = "default",
+  contextAttachment = "standalone",
   children,
   ...props
 }: React.ComponentProps<"div"> & {
   frameClassName?: string;
   context?: "default" | "none";
+  contextAttachment?: "standalone" | "attached";
+  contextItems?: HeaderBreadcrumbItem[];
 }) {
   return (
     <div
@@ -27,16 +33,22 @@ export function PageCanvas({
         data-slot="page-hierarchy-frame"
         className={cn(
           "flex h-full min-h-full min-w-0 flex-col gap-3",
-          "[[data-auth-page-hierarchy=b]_&]:gap-0",
+          contextAttachment === "attached" &&
+            "[[data-auth-page-hierarchy=b]_&]:gap-0",
           frameClassName
         )}
       >
-        {context === "default" && <PageContext />}
+        {context === "default" && (
+          <PageContext attachment={contextAttachment} items={contextItems} />
+        )}
         <div
+          id={context === "default" ? DASHBOARD_PAGE_CONTENT_ID : undefined}
+          tabIndex={context === "default" ? -1 : undefined}
           data-slot="page-content"
           className={cn(
-            "min-h-0 min-w-0 flex-1",
-            "[[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:border-t-0"
+            "min-h-0 min-w-0 flex-1 outline-none",
+            contextAttachment === "attached" &&
+              "[[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:border-t-0"
           )}
         >
           {children}

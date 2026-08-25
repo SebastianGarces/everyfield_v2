@@ -20,7 +20,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
-import { HeaderBreadcrumbs, PageContext } from "@/components/header";
+import {
+  HeaderBreadcrumbs,
+  PageContext,
+  type HeaderBreadcrumbItem,
+} from "@/components/header";
 import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
 import { PageCanvas } from "@/components/layout/page-frame";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
@@ -53,6 +57,7 @@ import { db } from "@/db";
 import { churches, insightFeedback } from "@/db/schema";
 import type { InsightFeedbackRating } from "@/db/schema";
 import { verifySession } from "@/lib/auth";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import {
   buildCsfScorecard,
   buildExitCriteriaProgress,
@@ -70,6 +75,10 @@ export const metadata = {
   title: "Plant Intelligence",
   description: "Your prioritized focus, phase control, and self-attestations.",
 };
+
+const PHASE_BREADCRUMBS: HeaderBreadcrumbItem[] = [
+  { label: "Plant Intelligence" },
+];
 
 export default async function PhasePage() {
   // The `(dashboard)` layout is what bounces a signed-out reader, and it is
@@ -235,15 +244,23 @@ export default async function PhasePage() {
 
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />
+      <HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />
       <PageCanvas frameClassName="mx-auto w-full max-w-6xl" context="none">
         <div
           data-slot="plant-intelligence-content"
           className="min-h-full space-y-6"
         >
           <header className="[[data-auth-page-hierarchy=b]_&]:bg-card [[data-auth-page-hierarchy=b]_&]:rounded-xl [[data-auth-page-hierarchy=b]_&]:border [[data-auth-page-hierarchy=b]_&]:p-4 [[data-auth-page-hierarchy=b]_&]:shadow-sm [[data-auth-page-hierarchy=b]_&]:sm:p-6">
-            <PageContext className="mb-2" />
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <PageContext
+              className="mb-2"
+              items={PHASE_BREADCRUMBS}
+              suppressSingleCrumb
+            />
+            <h1
+              id={DASHBOARD_PAGE_CONTENT_ID}
+              tabIndex={-1}
+              className="text-2xl font-semibold tracking-tight outline-none"
+            >
               Plant Intelligence
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">

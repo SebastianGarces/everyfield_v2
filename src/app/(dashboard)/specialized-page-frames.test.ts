@@ -65,7 +65,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
     markers: [
-      /HeaderBreadcrumbs items=\{\[\{ label: "Wiki" \}\]\}/,
+      /HeaderBreadcrumbs items=\{WIKI_BREADCRUMBS\}/,
       /PageCanvas/,
       /SplitWorkspace/,
       /WorkspacePanel/,
@@ -409,11 +409,17 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
     source,
     "wiki/layout.tsx",
     [
-      '<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />',
+      "<HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />",
       '<SplitWorkspace className="grid-rows-[auto_minmax(0,1fr)] [[data-auth-page-hierarchy=b]_&]:gap-y-0">',
       "<PageContext",
     ],
     "Wiki context must replace Dashboard before the split workspace renders"
+  );
+  assertInOrder(
+    source,
+    "wiki/layout.tsx",
+    ["<PageContext", "id={DASHBOARD_PAGE_CONTENT_ID}", "tabIndex={-1}"],
+    "the settings focus target must follow Wiki's manually placed context"
   );
 });
 
@@ -442,4 +448,45 @@ test("Wiki keeps one full-height row at every width when B suppresses a one-item
     /> \[data-slot="workspace-panel"\] \{\s*grid-row: 1;/,
     "both the mobile article and desktop panes must occupy that one full-height row"
   );
+});
+
+test("B only joins page context to workspaces with matching geometry", () => {
+  const history = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/app/(dashboard)/communication/history/page.tsx"
+    ),
+    "utf8"
+  );
+  const wiki = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+  assert.match(
+    history,
+    /<PageCanvas[\s\S]*contextAttachment="attached"[\s\S]*contextItems=\{HISTORY_BREADCRUMBS\}/,
+    "the full-width history workspace explicitly opts into the integrated seam"
+  );
+  assert.match(
+    wiki,
+    /<PageContext[\s\S]*attachment="attached"[\s\S]*items=\{WIKI_BREADCRUMBS\}/,
+    "Wiki's one-item suppressed state must be correct in the server HTML"
+  );
+
+  for (const relativePath of [
+    "meetings/new/page.tsx",
+    "people/new/page.tsx",
+    "tasks/[id]/page.tsx",
+    "coaching/[churchId]/page.tsx",
+  ]) {
+    const source = readFileSync(
+      path.join(DASHBOARD_APP_ROOT, relativePath),
+      "utf8"
+    );
+    assert.doesNotMatch(
+      source,
+      /contextAttachment="attached"/,
+      `${relativePath} has a centered or route-specific workspace and must keep complete independent surfaces`
+    );
+  }
 });
