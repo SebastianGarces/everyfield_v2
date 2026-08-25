@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
-import { HeaderBreadcrumbs } from "@/components/header";
+import {
+  HeaderBreadcrumbs,
+  type HeaderBreadcrumbItem,
+} from "@/components/header";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { HistoryFilters } from "@/components/communication/history-filters";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +39,11 @@ const channelLabels: Record<string, string> = {
   sms: "SMS",
   both: "Email + SMS",
 };
+
+const HISTORY_BREADCRUMBS: HeaderBreadcrumbItem[] = [
+  { label: "Communication", href: "/communication" },
+  { label: "Message History" },
+];
 
 export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const { user } = await verifySession();
@@ -83,13 +91,12 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Communication", href: "/communication" },
-          { label: "Message History" },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={HISTORY_BREADCRUMBS} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={HISTORY_BREADCRUMBS}
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="border-b p-4 pb-4 sm:p-6 sm:pb-4">
             <h1 className="text-3xl font-bold tracking-tight">

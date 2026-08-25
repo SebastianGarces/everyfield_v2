@@ -17,6 +17,7 @@ const MOBILE_TRIGGER = read(
 );
 const PAGE_CONTEXT = read("components", "header", "page-context.tsx");
 const PAGE_FRAME = read("components", "layout", "page-frame.tsx");
+const SETTINGS = read("components", "settings", "settings-modal.tsx");
 const SIDEBAR = read("components", "app-sidebar.tsx");
 const SIDEBAR_PRIMITIVE = read("components", "ui", "sidebar.tsx");
 const ACCOUNT = read("components", "nav-user.tsx");
@@ -47,7 +48,10 @@ test("the one shell bar keeps its ruled geometry", () => {
 });
 
 test("the page canvas owns breadcrumbs and the existing actions portal", () => {
-  assert.match(PAGE_FRAME, /<PageContext \/>/);
+  assert.match(
+    PAGE_FRAME,
+    /<PageContext attachment=\{contextAttachment\} items=\{contextItems\} \/>/
+  );
   assert.doesNotMatch(
     PAGE_CONTEXT,
     /<header\b/,
@@ -170,7 +174,26 @@ test("page context stays inside the focusable route-content main", () => {
     "</SidebarInset>",
     "<SettingsModal",
   ]);
-  assert.match(PAGE_FRAME, /data-slot="page-canvas"[\s\S]*<PageContext \/>/);
+  assert.match(
+    PAGE_FRAME,
+    /data-slot="page-canvas"[\s\S]*<PageContext attachment=\{contextAttachment\} items=\{contextItems\} \/>/
+  );
+});
+
+test("settings close resumes after page context instead of re-entering it", () => {
+  assert.match(
+    PAGE_FRAME,
+    /<PageContext[\s\S]*id=\{context === "default" \? DASHBOARD_PAGE_CONTENT_ID : undefined\}[\s\S]*tabIndex=\{context === "default" \? -1 : undefined\}/
+  );
+  assert.match(
+    SETTINGS,
+    /document\.getElementById\(DASHBOARD_PAGE_CONTENT_ID\)\?\.focus\(\)/
+  );
+  assert.doesNotMatch(
+    SETTINGS,
+    /document\.getElementById\(DASHBOARD_MAIN_ID\)/,
+    "focusing main would put breadcrumb links before route content on the next Tab"
+  );
 });
 
 test("the viewport caps the shell and leaves route scrolling to the main pane", () => {

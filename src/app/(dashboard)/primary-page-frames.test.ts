@@ -199,10 +199,21 @@ test("every primary route declares page context and phase names Plant Intelligen
     phase,
     "phase/page.tsx",
     [
-      '<HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />',
+      "<HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />",
       "<PageCanvas",
-      '<PageContext className="mb-2" />',
+      "<PageContext",
     ],
     "phase context must be declared before its canvas"
+  );
+  assertInOrder(
+    phase,
+    "phase/page.tsx",
+    [
+      "items={PHASE_BREADCRUMBS}",
+      "suppressSingleCrumb",
+      "id={DASHBOARD_PAGE_CONTENT_ID}",
+      "tabIndex={-1}",
+    ],
+    "the settings focus target must follow Phase's manually placed context"
   );
 });

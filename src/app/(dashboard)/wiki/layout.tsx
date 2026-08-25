@@ -1,15 +1,22 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
-import { HeaderBreadcrumbs, PageContext } from "@/components/header";
+import {
+  HeaderBreadcrumbs,
+  PageContext,
+  type HeaderBreadcrumbItem,
+} from "@/components/header";
 import {
   PageCanvas,
   SplitWorkspace,
   WorkspacePanel,
 } from "@/components/layout/page-frame";
 import { getCurrentSession } from "@/lib/auth";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import { getBookmarks, getRecentlyViewed, getWikiNavigation } from "@/lib/wiki";
 
 // Force dynamic rendering for recently viewed data
 export const dynamic = "force-dynamic";
+
+const WIKI_BREADCRUMBS: HeaderBreadcrumbItem[] = [{ label: "Wiki" }];
 
 export default async function WikiLayout({
   children,
@@ -33,9 +40,13 @@ export default async function WikiLayout({
     <PageCanvas className="overflow-hidden" context="none">
       {/* Header context is state, not paint: CSS cannot replace the dashboard
           fallback with this route's page-context label. */}
-      <HeaderBreadcrumbs items={[{ label: "Wiki" }]} />
+      <HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />
       <SplitWorkspace className="grid-rows-[auto_minmax(0,1fr)] [[data-auth-page-hierarchy=b]_&]:gap-y-0">
-        <PageContext className="col-span-full [[data-auth-page-hierarchy=b]_&]:lg:col-span-1 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2" />
+        <PageContext
+          attachment="attached"
+          className="col-span-full [[data-auth-page-hierarchy=b]_&]:lg:col-span-1 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2"
+          items={WIKI_BREADCRUMBS}
+        />
         {/* The secondary navigation needs its own surface beside the article
             workspace. CSS alone could not separate it while the old sidebar
             and content were siblings on one uninterrupted canvas. */}
@@ -59,7 +70,11 @@ export default async function WikiLayout({
           compressed below its measure by a rail the viewport cannot afford —
           below that the TOC stays a disclosure above the article, whatever
           the surrounding sidebars are doing. */}
-        <WorkspacePanel className="h-full overflow-y-auto [container:wiki-content/size] [[data-auth-page-hierarchy=b]_&]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:border-t-0 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2 [[data-auth-page-hierarchy=b]_&]:lg:row-start-2">
+        <WorkspacePanel
+          id={DASHBOARD_PAGE_CONTENT_ID}
+          tabIndex={-1}
+          className="h-full overflow-y-auto outline-none [container:wiki-content/size] [[data-auth-page-hierarchy=b]_&]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:border-t-0 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2 [[data-auth-page-hierarchy=b]_&]:lg:row-start-2"
+        >
           <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
             {children}
           </div>

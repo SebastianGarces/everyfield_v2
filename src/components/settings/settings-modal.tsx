@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { loginPathFor } from "@/lib/auth/safe-redirect";
-import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import { cn } from "@/lib/utils";
 import {
   cachedSectionView,
@@ -304,7 +304,7 @@ function SettingsDialog({
           // document. Hand focus to the region the reader is looking at
           // instead.
           event.preventDefault();
-          document.getElementById(DASHBOARD_MAIN_ID)?.focus();
+          document.getElementById(DASHBOARD_PAGE_CONTENT_ID)?.focus();
         }}
         tabIndex={-1}
         // `showCloseButton={false}`: Close is drawn by this component instead —

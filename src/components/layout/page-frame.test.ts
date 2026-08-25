@@ -31,6 +31,10 @@ test("page-frame primitives contain presentation only and preserve caller props"
   assert.match(html, /data-slot="page-canvas"/);
   assert.match(html, /data-slot="page-hierarchy-frame"/);
   assert.match(html, /data-slot="page-content"/);
+  assert.match(html, /id="dashboard-page-content"/);
+  assert.match(html, /tabindex="-1"/);
+  assert.match(html, /data-attachment="standalone"/);
+  assert.doesNotMatch(html, /rounded-t-none/);
   assert.match(html, /aria-label="Dashboard canvas"/);
   assert.match(html, /class="[^"]*h-full[^"]*overflow-auto[^"]*test-canvas/);
   assert.match(html, /data-slot="split-workspace"/);
@@ -40,12 +44,68 @@ test("page-frame primitives contain presentation only and preserve caller props"
   assert.match(html, />Workspace<\/div>/);
 });
 
+test("only an explicitly attached context removes the workspace's top seam", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      HeaderProvider,
+      null,
+      createElement(
+        PageCanvas,
+        { contextAttachment: "attached" },
+        createElement(WorkspacePanel, null, "Attached workspace")
+      )
+    )
+  );
+
+  assert.match(html, /data-attachment="attached"/);
+  assert.match(html, /rounded-t-none/);
+  assert.match(html, /border-t-0/);
+});
+
+test("attached context renders its server-known breadcrumb geometry in SSR", () => {
+  const multiCrumbHtml = renderToStaticMarkup(
+    createElement(
+      HeaderProvider,
+      null,
+      createElement(PageCanvas, {
+        contextAttachment: "attached",
+        contextItems: [
+          { label: "Communication", href: "/communication" },
+          { label: "Message History" },
+        ],
+      })
+    )
+  );
+  const oneCrumbHtml = renderToStaticMarkup(
+    createElement(
+      HeaderProvider,
+      null,
+      createElement(PageCanvas, {
+        contextAttachment: "attached",
+        contextItems: [{ label: "Wiki" }],
+      })
+    )
+  );
+
+  assert.match(multiCrumbHtml, /data-breadcrumb-depth="2"/);
+  assert.match(multiCrumbHtml, />Communication<\/a>/);
+  assert.match(multiCrumbHtml, />Message History<\/span>/);
+  assert.match(oneCrumbHtml, /data-breadcrumb-depth="1"/);
+  assert.match(oneCrumbHtml, />Wiki<\/span>/);
+  assert.doesNotMatch(oneCrumbHtml, />Dashboard<\/span>/);
+});
+
 test("the canvas can delegate context placement to a specialized split workspace", () => {
   const html = renderToStaticMarkup(
     createElement(PageCanvas, { context: "none" }, "Specialized workspace")
   );
 
   assert.doesNotMatch(html, /data-slot="page-context"/);
+  assert.doesNotMatch(
+    html,
+    /id="dashboard-page-content"/,
+    "a specialized composition must place the focus target after its own context"
+  );
   assert.match(html, />Specialized workspace<\/div>/);
 });
 

@@ -5,9 +5,14 @@
  * settings registry — the layout would otherwise import six lucide icons and six
  * gate closures to read one string.
  *
- * It exists for the settings modal, which focuses this element when it closes.
- * Settings is usually opened from an item inside the avatar dropdown, and that
- * item is gone by the time the modal closes, so Radix's restore-to-trigger lands
- * on `<body>` and a keyboard reader has to tab from the top of the document.
+ * It is the skip-link destination. Settings uses the narrower page-content
+ * target below so closing the dialog resumes after contextual navigation.
  */
 export const DASHBOARD_MAIN_ID = "dashboard-main";
+
+/**
+ * The focus target after Settings closes. It follows page context in DOM order,
+ * so the next Tab reaches the route's content instead of re-entering breadcrumb
+ * navigation or page actions.
+ */
+export const DASHBOARD_PAGE_CONTENT_ID = "dashboard-page-content";

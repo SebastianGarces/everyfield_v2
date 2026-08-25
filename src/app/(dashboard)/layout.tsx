@@ -197,14 +197,10 @@ export default async function DashboardLayout({
           />
           <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             <HeaderProvider>
-              {/* The route-content main carries `tabIndex={-1}` so the settings
-                modal has somewhere to put focus when it closes. The control
-                that opened it — a Settings item inside the account dropdown —
-                is gone by then, so Radix's restore-to-trigger lands on `<body>`
-                and a keyboard reader has to tab from the top of the document.
-                Focusing route content instead is the SPA-navigation answer: the
-                next Tab reaches the page rather than re-entering breadcrumbs or
-                page actions, and `-1` keeps the main itself out of tab order. */}
+              {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
+                settings modal has a narrower focus target inside PageCanvas:
+                page content AFTER breadcrumb/actions, so its next Tab cannot
+                re-enter contextual navigation. */}
               <SidebarInset
                 id={DASHBOARD_MAIN_ID}
                 tabIndex={-1}
