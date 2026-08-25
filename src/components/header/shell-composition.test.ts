@@ -220,13 +220,23 @@ test("settings close resumes after page context instead of re-entering it", () =
   );
 });
 
-test("the viewport caps the shell and leaves route scrolling to the main pane", () => {
+test("the viewport caps the shell and leaves route scrolling to page canvases", () => {
   assert.match(
     LAYOUT,
-    /<SidebarProvider[\s\S]*className="[^"]*\bh-svh\b[^"]*\boverflow-hidden\b[^"]*"/
+    /<SidebarProvider[\s\S]*data-authenticated-shell[\s\S]*className="[^"]*\bh-svh\b[^"]*\boverflow-hidden\b[^"]*"/
   );
   assert.match(
     LAYOUT,
-    /<SidebarInset[\s\S]*className="[^"]*\bmin-h-0\b[^"]*\boverflow-auto\b[^"]*"[\s\S]*{children}[\s\S]*<\/SidebarInset>/
+    /<SidebarInset[\s\S]*className="[^"]*\bmin-h-0\b[^"]*\boverflow-hidden\b[^"]*\boverscroll-y-none\b[^"]*"[\s\S]*{children}[\s\S]*<\/SidebarInset>/
+  );
+  assert.match(
+    GLOBAL_STYLES,
+    /html:has\(\[data-authenticated-shell\]\),\s*body:has\(\[data-authenticated-shell\]\)\s*\{[^}]*overscroll-behavior-y:\s*none;/,
+    "the viewport must not rubber-band past the authenticated shell"
+  );
+  assert.doesNotMatch(
+    GLOBAL_STYLES,
+    /(?:^|\n)html,\s*body\s*\{[^}]*overscroll-behavior-y:/,
+    "public pages must retain their native viewport overscroll behavior"
   );
 });
