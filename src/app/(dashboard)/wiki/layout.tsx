@@ -1,4 +1,5 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
+import { HeaderBreadcrumbs } from "@/components/header";
 import {
   PageCanvas,
   SplitWorkspace,
@@ -30,6 +31,9 @@ export default async function WikiLayout({
 
   return (
     <PageCanvas className="overflow-hidden">
+      {/* Header context is state, not paint: CSS cannot replace the dashboard
+          fallback with this route's page-context label. */}
+      <HeaderBreadcrumbs items={[{ label: "Wiki" }]} />
       <SplitWorkspace>
         {/* The secondary navigation needs its own surface beside the article
             workspace. CSS alone could not separate it while the old sidebar

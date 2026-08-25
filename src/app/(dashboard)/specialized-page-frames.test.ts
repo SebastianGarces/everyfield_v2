@@ -62,7 +62,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
   {
     routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
-    markers: [/PageCanvas/, /SplitWorkspace/, /WorkspacePanel/],
+    markers: [
+      /HeaderBreadcrumbs items=\{\[\{ label: "Wiki" \}\]\}/,
+      /PageCanvas/,
+      /SplitWorkspace/,
+      /WorkspacePanel/,
+    ],
   },
   {
     routes: ["/dashboard (onboarding)"],
@@ -387,4 +392,25 @@ test("the wiki table of contents is capped by its workspace, not the viewport", 
   assert.match(layout, /\[container:wiki-content\/size\]/);
   assert.match(tableOfContents, /100cqh/);
   assert.doesNotMatch(tableOfContents, /100vh/);
+});
+
+test("the wiki layout publishes Wiki page context before its workspace", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+  const contextAt = source.indexOf(
+    '<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />'
+  );
+  const workspaceAt = source.indexOf("<SplitWorkspace>");
+
+  assert.notEqual(
+    contextAt,
+    -1,
+    "/wiki must not fall back to Dashboard context"
+  );
+  assert.ok(
+    contextAt < workspaceAt,
+    "/wiki must publish its context before rendering the split workspace"
+  );
 });
