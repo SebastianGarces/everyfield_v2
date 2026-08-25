@@ -207,7 +207,10 @@ export async function PlantDashboard({
     <PageCanvas context="none" contentFocusTarget>
       {showConfetti && <ChurchCreatedConfetti />}
 
-      <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">
+      <div
+        data-slot="completed-dashboard-content"
+        className="mx-auto min-h-full max-w-6xl space-y-6"
+      >
         {/* OV-005 — first, and not dismissible. An unanswered invitation
             decides who can see this plant, so it outranks every other banner
             here and stays until it is ANSWERED. */}
@@ -229,7 +232,7 @@ export async function PlantDashboard({
           <h1 className="text-2xl font-semibold tracking-tight">
             {church?.name ?? "Dashboard"}
           </h1>
-          <p className="text-muted-foreground mt-1">{phaseLabel}</p>
+          <p className="text-foreground mt-1 text-sm">{phaseLabel}</p>
         </div>
 
         {/* Metric Cards */}
@@ -304,7 +307,7 @@ export async function PlantDashboard({
             <QuickActions capabilities={quickActionCapabilities} />
           </div>
         </div>
-      </WorkspacePanel>
+      </div>
     </PageCanvas>
   );
 }
