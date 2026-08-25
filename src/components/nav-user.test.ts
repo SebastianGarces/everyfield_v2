@@ -23,6 +23,16 @@ const identityText = identity.slice(
 test("the passive sidebar identity clips its mounted labels while width collapses", () => {
   assert.match(identityWrapper, /\bw-full\b/);
   assert.match(identityWrapper, /\boverflow-hidden\b/);
+  assert.match(
+    identityWrapper,
+    /\bpx-1\b/,
+    "mobile Sheet identity must retain its original horizontal inset"
+  );
+  assert.match(
+    identityWrapper,
+    /\bmd:px-0\b/,
+    "desktop identity must use one fixed horizontal geometry"
+  );
   assert.doesNotMatch(
     identityWrapper,
     /group-data-\[collapsible=icon\]:(justify-|p[lrxy]?-|m[lrxy]?-|translate-x-)/,

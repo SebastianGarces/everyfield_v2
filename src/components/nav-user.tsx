@@ -111,7 +111,7 @@ export function SidebarIdentity({ user }: NavUserProps) {
   return (
     <div
       data-slot="sidebar-identity"
-      className="flex w-full min-w-0 items-center gap-2 overflow-hidden py-1"
+      className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-1 py-1 md:px-0"
     >
       <Avatar className="size-8 shrink-0 rounded-lg">
         <AvatarImage src={user.avatarSrc} alt="" className="rounded-lg" />
