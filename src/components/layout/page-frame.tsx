@@ -30,7 +30,7 @@ export function PageCanvas({
     <div
       data-slot="page-canvas"
       className={cn(
-        "bg-background h-full min-h-0 overflow-auto p-3 sm:p-4",
+        "bg-background h-full min-h-0 overflow-auto overscroll-y-none p-3 sm:p-4",
         className
       )}
       {...props}

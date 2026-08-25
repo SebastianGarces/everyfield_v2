@@ -162,6 +162,7 @@ export default async function DashboardLayout({
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
       <SidebarProvider
+        data-authenticated-shell
         defaultOpen={defaultOpen}
         className="h-svh flex-col overflow-hidden"
       >
@@ -202,7 +203,7 @@ export default async function DashboardLayout({
               <SidebarInset
                 id={DASHBOARD_MAIN_ID}
                 tabIndex={-1}
-                className="min-h-0 overflow-auto outline-none"
+                className="min-h-0 overflow-hidden overscroll-y-none outline-none"
               >
                 {children}
               </SidebarInset>

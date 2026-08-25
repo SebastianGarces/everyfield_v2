@@ -37,6 +37,7 @@ test("page-frame primitives contain presentation only and preserve caller props"
   assert.doesNotMatch(html, /rounded-t-none/);
   assert.match(html, /aria-label="Dashboard canvas"/);
   assert.match(html, /class="[^"]*h-full[^"]*overflow-auto[^"]*test-canvas/);
+  assert.match(html, /class="[^"]*overscroll-y-none[^"]*test-canvas/);
   assert.match(html, /data-slot="split-workspace"/);
   assert.match(html, /class="[^"]*grid[^"]*test-split/);
   assert.match(html, /data-slot="workspace-panel"/);

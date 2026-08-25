@@ -502,8 +502,13 @@ test("Wiki keeps both panes in one full-height row at every width", () => {
   );
   assert.match(
     source,
-    /className="row-start-1 h-full overflow-y-auto outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
+    /className="row-start-1 h-full overflow-y-auto overscroll-y-none outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
     "the article occupies that same row on mobile and desktop"
+  );
+  assert.match(
+    source,
+    /<aside className="h-full overflow-y-auto overscroll-y-none p-4">/,
+    "the navigation pane must not hand a boundary gesture to the shell"
   );
 });
 

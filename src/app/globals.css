@@ -3,6 +3,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+html:has([data-authenticated-shell]),
+body:has([data-authenticated-shell]) {
+  overscroll-behavior-y: none;
+}
+
 body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
