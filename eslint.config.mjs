@@ -22,6 +22,7 @@ export default tseslint.config(
       "node_modules/**",
       ".claude/**",
       ".cursor/**",
+      ".lavish/**",
       ".next/**",
       "out/**",
       "dist/**",
