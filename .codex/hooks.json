@@ -1,14 +1,16 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "description": "EveryField lifecycle hooks for Codex.",
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/ops/principles-context.sh",
+            "command": "\"$(git rev-parse --show-toplevel)/ops/codex-session-context.sh\"",
             "timeout": 10,
-            "statusMessage": "Loading principles"
+            "statusMessage": "Loading engineering principles",
+            "additionalContextLimit": 12000
           }
         ]
       }
@@ -19,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/ops/guard-worktree-pnpm-hook.sh",
+            "command": "\"$(git rev-parse --show-toplevel)/ops/guard-worktree-pnpm-hook.sh\"",
             "timeout": 10,
             "statusMessage": "Guarding node_modules"
           }
@@ -28,11 +30,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/ops/format-agent-edit.sh",
+            "command": "\"$(git rev-parse --show-toplevel)/ops/format-agent-edit.sh\"",
             "timeout": 30,
             "statusMessage": "Formatting"
           }

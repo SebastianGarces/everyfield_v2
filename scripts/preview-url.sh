@@ -98,7 +98,7 @@ if [ "$with_bypass" = true ]; then
 
   if [ -z "$secret" ]; then
     echo "VERCEL_AUTOMATION_BYPASS_SECRET is not set and not in .env.local." >&2
-    echo "See .env.example, or .claude/skills/browser-validation/SKILL.md." >&2
+    echo "See .env.example, or .agents/skills/browser-validation/SKILL.md." >&2
     exit 1
   fi
   # x-vercel-set-bypass-cookie=true makes Vercel set a cookie on the redirect,

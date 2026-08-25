@@ -1,0 +1,2 @@
+# Codex-managed worktrees copy ignored setup files listed here.
+.env.local

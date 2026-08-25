@@ -9,8 +9,8 @@
 # Everything resolves while the worktree exists; deleting it breaks the parent
 # silently (40 dead links on 2026-08-19). pnpm runs root lifecycle scripts only
 # AFTER rewiring, so a preinstall check cannot prevent this — it must be blocked
-# before pnpm starts. This script is that block, called from the Claude
-# PreToolUse hook and the Cursor beforeShellExecution hook.
+# before pnpm starts. This script is that block, called from the Claude and
+# Codex PreToolUse hooks and the Cursor beforeShellExecution hook.
 #
 # Interface: guard-worktree-pnpm.sh <cwd> <command-string>
 #   exit 0            → allow

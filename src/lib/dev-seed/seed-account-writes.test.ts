@@ -285,7 +285,7 @@ test("the docs point a verifier at the password instead of printing one", () => 
   // for everyone else, at a login that rejects them. The row has to say where
   // the value is READ FROM.
   const skill = readFileSync(
-    path.join(process.cwd(), ".claude/skills/browser-validation/SKILL.md"),
+    path.join(process.cwd(), ".agents/skills/browser-validation/SKILL.md"),
     "utf8"
   );
 

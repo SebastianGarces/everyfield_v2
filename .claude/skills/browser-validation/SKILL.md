@@ -109,7 +109,7 @@ Proven on #378's validation: the full onboarding flow ran cold on a preview this
 
 ## 4. Drive it and capture evidence
 
-The gate thresholds live in `.claude/skills/validate/SKILL.md`. Two facts belong here. Evidence is
+The gate thresholds live in `.agents/skills/validate/SKILL.md`. Two facts belong here. Evidence is
 **the interaction, not the render**: "clicked Export, a CSV downloaded, it had N rows matching the
 filtered list", never "the Export button is present" — parse the file, do not photograph the click.
 And the one known console noise on previews is a single `Failed to load resource: 403` per page
@@ -117,8 +117,9 @@ load, from the Vercel toolbar's `HEAD` request; verify that is what you have bef
 
 ## 5. Teardown (mandatory, PASS or FAIL)
 
-The last browser action is closing what you opened: Playwright → `browser_close`; chrome-devtools →
-`list_pages`, then `close_page` for every page you created. A leaked browser outlives the agent and
-a long pass leaks until the machine is out of RAM; `scripts/cleanup-mcp-browsers.sh` only catches
-agents that died first. Delete any stray `.png` too, then return the outcome to the ship pass, which
-writes it into the PR body (on an amendment pass, edit the body in place).
+The last browser action is closing what you opened with the host's browser teardown control
+(`browser_close`, or `list_pages` followed by `close_page` for every page you created). A leaked
+browser outlives the agent and a long pass leaks until the machine is out of RAM;
+`scripts/cleanup-mcp-browsers.sh` only catches agents that died first. Delete any stray `.png` too,
+then return the outcome to the ship pass, which writes it into the PR body (on an amendment pass,
+edit the body in place).

@@ -8,8 +8,8 @@
 // `../.claude/worktrees/<name>/node_modules/.pnpm/...` — dead the moment the
 // worktree is deleted (40 broken links on 2026-08-19). pnpm runs root
 // lifecycle scripts only AFTER linking (proven 2026-08-20), so the guard must
-// fire before pnpm does: PreToolUse for Claude, beforeShellExecution for
-// Cursor, both pointing at this one script.
+// fire before pnpm does: PreToolUse for Claude and Codex,
+// beforeShellExecution for Cursor, all pointing at this one script.
 //
 // These run the real script against throwaway directories — no pnpm, no
 // network. The last block asserts the *wiring*: both hook configs and the
@@ -124,7 +124,7 @@ test("empty command and cwd without any package.json are allowed", () => {
 
 // ---- wiring: the mechanism must actually be attached, in all three places ----
 
-test("Claude PreToolUse Bash hook points at the guard script", () => {
+test("Claude PreToolUse Bash hook points at the shared guard adapter", () => {
   const settings = JSON.parse(
     fs.readFileSync(path.join(ROOT, ".claude/settings.json"), "utf8")
   );
@@ -132,8 +132,47 @@ test("Claude PreToolUse Bash hook points at the guard script", () => {
   const bash = pre.find((h) => h.matcher === "Bash");
   assert.ok(bash, "no PreToolUse matcher for Bash in .claude/settings.json");
   const cmd = bash.hooks.map((h) => h.command).join("\n");
-  assert.match(cmd, /guard-worktree-pnpm\.sh/);
-  assert.match(cmd, /exit 2/, "a PreToolUse hook blocks by exiting 2");
+  assert.match(cmd, /guard-worktree-pnpm-hook\.sh/);
+
+  const adapter = fs.readFileSync(
+    path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh"),
+    "utf8"
+  );
+  assert.match(adapter, /ops\/guard-worktree-pnpm\.sh/);
+  assert.match(adapter, /exit 2/, "a PreToolUse hook blocks by exiting 2");
+});
+
+test("Codex PreToolUse Bash hook points at the shared guard adapter", () => {
+  const hooks = JSON.parse(
+    fs.readFileSync(path.join(ROOT, ".codex/hooks.json"), "utf8")
+  );
+  const pre = hooks.hooks?.PreToolUse ?? [];
+  const bash = pre.find((h) => h.matcher === "Bash");
+  assert.ok(bash, "no PreToolUse matcher for Bash in .codex/hooks.json");
+  const cmd = bash.hooks.map((h) => h.command).join("\n");
+  assert.match(cmd, /guard-worktree-pnpm-hook\.sh/);
+
+  const adapter = fs.readFileSync(
+    path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh"),
+    "utf8"
+  );
+  assert.match(adapter, /ops\/guard-worktree-pnpm\.sh/);
+  assert.match(adapter, /exit 2/);
+});
+
+test("the Claude/Codex hook adapter blocks the real poisoned-worktree event", () => {
+  const { wt } = fixture();
+  const event = JSON.stringify({
+    cwd: wt,
+    tool_input: { command: "pnpm install" },
+  });
+  const result = spawnSync(
+    "bash",
+    [path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh")],
+    { encoding: "utf8", input: event }
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /node_modules is a symlink/);
 });
 
 test("Cursor beforeShellExecution hook points at the adapter, and the adapter at the script", () => {

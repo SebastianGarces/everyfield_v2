@@ -12,15 +12,18 @@ beats a ✅ that means "looked at the code". Validate; don't fix.
 
 ## Frontend / fullstack — one browser look
 
-Reach the preview per `.claude/skills/browser-validation/SKILL.md` (never `localhost`; re-fetch the
+Reach the preview per `.agents/skills/browser-validation/SKILL.md` (never `localhost`; re-fetch the
 URL after every push). Sign in with a seeded account — `planter1@everyfield.app` has zero people, so
 anything list-shaped needs an eval planter.
 
-1. Drive the interaction the AC describes, then **assert the outcome** with `browser_evaluate`
-   reading concrete DOM or state — one assertion per AC, minimum.
+1. Drive the interaction the AC describes, then **assert the outcome** with the host browser's
+   evaluate or DOM-inspection capability reading concrete DOM or state — one assertion per AC,
+   minimum.
 2. One screenshot of the decisive state, in the session scratchpad, never in the working tree.
 3. Pull the console. **Any `error` fails the gate**, except the single Vercel preview-toolbar `403`.
-4. `lighthouse_audit` on the primary touched page: **accessibility ≥ 90** to pass.
+4. Run the host's Lighthouse/accessibility audit on the primary touched page:
+   **accessibility ≥ 90** to pass. If the host exposes no automated audit, report that gate as
+   unverified rather than inventing a score.
 5. While you are there, judge layout, hierarchy and copy — not only defects. Apply what you can and
    name what you leave.
 6. **Close the browser** before writing the report, and delete any stray `.png`.

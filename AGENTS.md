@@ -4,9 +4,10 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 
 ## Hard conventions
 
-- **NEVER start a dev server.** One already runs on `localhost:3000` and it serves the **main checkout**, so it never contains your branch. Use the branch's Vercel preview: `.claude/skills/browser-validation/SKILL.md`.
-- **Do not run `pnpm format`.** A Claude `PostToolUse` hook and a Cursor `afterFileEdit` hook format every file you write, and CI runs `format:check`. `.prettierignore` excludes `*.md`, so unformatted markdown is deliberate.
-- **Cursor's factory mirror is `.cursor/`.** Skills, agents, commands, and workflows are symlinks to `.claude/`; the Prettier hook is native (Claude's `settings.json` hooks do not run here).
+- **NEVER start a dev server.** One already runs on `localhost:3000` and it serves the **main checkout**, so it never contains your branch. Use the branch's Vercel preview: `.agents/skills/browser-validation/SKILL.md`.
+- **Do not run `pnpm format`.** Claude and Codex `PostToolUse` hooks plus Cursor's `afterFileEdit` hook format every file you write, and CI runs `format:check`. `.prettierignore` excludes `*.md`, so unformatted markdown is deliberate.
+- **Cross-agent skills live in `.agents/skills/`.** Codex discovers that directory directly; Claude and Cursor use symlinks where their native directories require them. Claude-native workflow sources stay in `.claude/skills/` and `node ops/sync-codex-setup.mjs --write` exposes them to Codex and regenerates `.codex/agents/`.
+- **Agent edit hooks share the adapters in `ops/`.** Claude, Cursor, and Codex all run the same Prettier adapter; Claude and Codex also run the same worktree/pnpm guard. Do not add a host-only copy of either rule.
 - **New UI components come from the shadcn CLI**, never hand-written: `pnpm dlx shadcn@latest add <component>` (new-york style).
 - **Migrations run with `pnpm db:migrate`, never `pnpm db:push`** — versioned SQL in `src/db/migrations/` keeps them auditable.
 - **Every clickable element gets `cursor-pointer`** — shadcn components and custom clickables must add it; native `<button>`/`<a>` inherit it from `globals.css`.
@@ -22,11 +23,12 @@ Decisions, requirements, and rulings live in this repo (FRDs, `memory/`, the Git
 | Updating `memory/` after a change | `memory/index.md` (same-change maintenance rules) |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX work — implementation, polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |
-| Proving a UI change works in a browser | `.claude/skills/browser-validation/SKILL.md` |
-| A fuzzy ask, before writing a spec | `.claude/skills/grilling/SKILL.md` |
-| A direction question needing a ruling | `.claude/skills/prototype/SKILL.md` |
-| A merge/rebase conflict | `.claude/skills/resolving-merge-conflicts/SKILL.md` |
+| Proving a UI change works in a browser | `.agents/skills/browser-validation/SKILL.md` |
+| A fuzzy ask, before writing a spec | `.agents/skills/grilling/SKILL.md` |
+| A direction question needing a ruling | `.agents/skills/prototype/SKILL.md` |
+| A merge/rebase conflict | `.agents/skills/resolving-merge-conflicts/SKILL.md` |
 | How we work — the whole process, one page | `ops/process.md` |
+| Codex project setup, hooks, skills, custom agents, worktrees | `ops/codex.md` |
 | The engineering principles (auto-injected at session start) | `.agents/skills/principle-*/SKILL.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | The canonical word for a domain term — roles, plant, phase vs. stage, launch, oversight, association | `CONTEXT.md` at the repo root (the ubiquitous-language glossary; it names the deprecated synonyms too) |

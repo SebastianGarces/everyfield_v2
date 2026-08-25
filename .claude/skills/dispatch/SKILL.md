@@ -51,15 +51,18 @@ Per `ops/process.md`, in order:
 
 1. **Claim it** — swap `agent:queued` (or `agent:changes-requested`) for `agent:in-progress`, and
    read the label back with `gh issue view <n> --json labels`.
-2. **Worktree** — `scripts/worktree-add.sh -b feature/<slug> <path> origin/main`, never raw
-   `git worktree add`. A fresh worktree has no `node_modules`: run `pnpm install` in it.
-3. **Implement** — spawn subagents in the worktree, every one pinned to model `opus`. An issue
+2. **Worktree** — use the current checkout when the host already placed this task in a managed
+   Codex worktree. Otherwise run
+   `scripts/worktree-add.sh -b feature/<slug> <path> origin/main`, never raw `git worktree add`.
+   A fresh worktree has no `node_modules`: run `pnpm install` in it.
+3. **Implement** — use one subagent per genuinely file-disjoint workstream and inherit the host's
+   configured model unless the user explicitly requested an override. An issue
    labelled `agent:changes-requested` keeps its existing branch and PR: resume it, read the PR's
    review threads, and re-validate rather than recutting.
 4. **Prove it works, once** — the branch's Vercel preview, never `localhost:3000`
-   (`.claude/skills/browser-validation/`). Backend work gets one real request asserting status and
+   (`.agents/skills/browser-validation/`). Backend work gets one real request asserting status and
    shape.
-5. **Ship** — open the PR per `.claude/skills/open-pr/`, `Closes #<issue>` per issue, evidence in the
+5. **Ship** — open the PR per `.agents/skills/open-pr/`, `Closes #<issue>` per issue, evidence in the
    body, then enable auto-merge and move on. A migration in the diff owes its scratch-DB transcripts
    and DDL delta.
 
