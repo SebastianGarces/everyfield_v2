@@ -23,14 +23,15 @@ const identityText = identity.slice(
 test("the passive sidebar identity clips its mounted labels while width collapses", () => {
   assert.match(identityWrapper, /\bw-full\b/);
   assert.match(identityWrapper, /\boverflow-hidden\b/);
-  assert.match(identityWrapper, /transition-\[width,height,padding\]/);
-  assert.match(identityWrapper, /\bduration-200\b/);
-  assert.match(identityWrapper, /\bease-linear\b/);
-  assert.match(identityWrapper, /group-data-\[collapsible=icon\]:px-0/);
   assert.doesNotMatch(
     identityWrapper,
-    /group-data-\[collapsible=icon\]:justify-center/,
-    "the avatar must remain in leading flow while the sidebar width changes"
+    /group-data-\[collapsible=icon\]:(justify-|p[lrxy]?-|m[lrxy]?-|translate-x-)/,
+    "collapsed state must not change the avatar's horizontal geometry"
+  );
+  assert.doesNotMatch(
+    identityWrapper,
+    /transition-|duration-|ease-|animate-/,
+    "the identity needs no motion when its geometry is invariant"
   );
   assert.doesNotMatch(
     identityText,
