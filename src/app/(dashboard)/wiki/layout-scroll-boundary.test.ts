@@ -40,3 +40,46 @@ test("Wiki clips its canvas without making it a route-transition scroll owner", 
   assert.equal(classes.includes("overflow-auto"), false);
   assert.equal(classes.includes("overflow-hidden"), false);
 });
+
+test("Wiki route roots keep the complete article inset when scrolled into view", () => {
+  const contentWrapper = LAYOUT.match(
+    /<div className="([^"]*)">\s*\{children\}\s*<\/div>/
+  );
+  assert.ok(contentWrapper, "the article content wrapper must remain explicit");
+
+  const classes = contentWrapper[1].split(" ");
+  for (const [padding, routeMargin] of [
+    ["py-8", "[&>*]:scroll-mt-8"],
+    ["sm:py-10", "sm:[&>*]:scroll-mt-10"],
+  ] as const) {
+    assert.equal(classes.includes(padding), true);
+    assert.equal(
+      classes.includes(routeMargin),
+      true,
+      `${routeMargin} must match ${padding} so Next scrolls the new route to scrollTop 0`
+    );
+  }
+});
+
+test("both Wiki panes contain vertical and horizontal boundary gestures", () => {
+  const navigationPane = LAYOUT.match(/<aside className="([^"]*)">/);
+  const articlePane = LAYOUT.match(
+    /<WorkspacePanel\s+id=\{DASHBOARD_PAGE_CONTENT_ID\}[\s\S]*?className="([^"]*)"/
+  );
+  assert.ok(navigationPane, "the Wiki navigation pane must remain explicit");
+  assert.ok(articlePane, "the Wiki article pane must remain explicit");
+
+  for (const [label, classes] of [
+    ["navigation", navigationPane[1]],
+    ["article", articlePane[1]],
+  ] as const) {
+    assert.match(classes, /(?:^| )overflow-y-auto(?: |$)/);
+    assert.match(classes, /(?:^| )overscroll-x-none(?: |$)/);
+    assert.match(classes, /(?:^| )overscroll-y-none(?: |$)/);
+    assert.doesNotMatch(
+      classes,
+      /(?:^| )overflow-x-(?:hidden|clip)(?: |$)/,
+      `${label} pane must not hide horizontal overflow`
+    );
+  }
+});
