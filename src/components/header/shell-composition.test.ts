@@ -221,13 +221,24 @@ test("settings close resumes after page context instead of re-entering it", () =
 });
 
 test("the viewport caps the shell and leaves route scrolling to page canvases", () => {
+  const shellMain = LAYOUT.slice(
+    LAYOUT.indexOf("<SidebarInset"),
+    LAYOUT.indexOf("</SidebarInset>") + "</SidebarInset>".length
+  );
+
   assert.match(
     LAYOUT,
     /<SidebarProvider[\s\S]*data-authenticated-shell[\s\S]*className="[^"]*\bh-svh\b[^"]*\boverflow-hidden\b[^"]*"/
   );
   assert.match(
-    LAYOUT,
-    /<SidebarInset[\s\S]*className="[^"]*\bmin-h-0\b[^"]*\boverflow-hidden\b[^"]*\boverscroll-y-none\b[^"]*"[\s\S]*{children}[\s\S]*<\/SidebarInset>/
+    shellMain,
+    /className="[^"]*\bmin-h-0\b[^"]*\boverflow-clip\b[^"]*\boverscroll-y-none\b[^"]*"[\s\S]*{children}/,
+    "the shell main must clip without becoming a programmatic scroll ancestor"
+  );
+  assert.doesNotMatch(
+    shellMain,
+    /\boverflow-(?:auto|hidden|scroll)\b/,
+    "PageCanvas and specialized panes, not the persistent shell main, own route scrolling"
   );
   assert.match(
     GLOBAL_STYLES,
