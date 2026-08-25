@@ -18,6 +18,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { PlantDetail } from "@/components/oversight/plant-detail";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
@@ -72,16 +73,20 @@ export default async function OversightPlantPage({
           { label: detail.plant.name },
         ]}
       />
-      <PlantDetail
-        detail={detail}
-        scopeLabel={scopeLabelForOrgType(callerOrg.type)}
-        history={history}
-        // THE SEVER IS OWNER-ONLY AND THE PAGE IS NOT (#500). Every seat in the
-        // org reads this plant; only the Owner may remove it from the portfolio
-        // (`org.association.sever`, ruling 185 (1)). Asked of the capability
-        // table so the button and `severAssociationAction` cannot disagree.
-        canSever={holdsSeatFor(user, "org.association.sever")}
-      />
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto min-h-full max-w-7xl">
+          <PlantDetail
+            detail={detail}
+            scopeLabel={scopeLabelForOrgType(callerOrg.type)}
+            history={history}
+            // THE SEVER IS OWNER-ONLY AND THE PAGE IS NOT (#500). Every seat in the
+            // org reads this plant; only the Owner may remove it from the portfolio
+            // (`org.association.sever`, ruling 185 (1)). Asked of the capability
+            // table so the button and `severAssociationAction` cannot disagree.
+            canSever={holdsSeatFor(user, "org.association.sever")}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

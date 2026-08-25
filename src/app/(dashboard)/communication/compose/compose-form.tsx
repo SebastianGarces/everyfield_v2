@@ -234,21 +234,21 @@ export function ComposeForm({
   };
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col lg:flex-row">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row">
       {/* Left panel: Editor */}
-      <div className="flex-1 overflow-auto border-r p-6">
+      <div className="min-w-0 flex-1 overflow-auto p-4 sm:p-6 lg:border-r">
         <div className="mx-auto max-w-2xl space-y-6">
           {/* Template selector. Disabled when there is nothing to pick: an
               enabled trigger over an empty list opens an invisible popover
               and reads as broken (#610). */}
           <div className="space-y-2">
-            <Label>Template (optional)</Label>
+            <Label htmlFor="message-template">Template (optional)</Label>
             <Select
               value={selectedTemplateId}
               onValueChange={handleTemplateChange}
               disabled={templates.length === 0}
             >
-              <SelectTrigger className="cursor-pointer">
+              <SelectTrigger id="message-template" className="cursor-pointer">
                 <SelectValue
                   placeholder={
                     templates.length === 0
@@ -274,9 +274,9 @@ export function ComposeForm({
           {/* Meeting selector — shown when template uses meeting fields */}
           {hasMeetingFields && (
             <div className="space-y-2">
-              <Label>Meeting</Label>
+              <Label htmlFor="message-meeting">Meeting</Label>
               {needsMeeting && (
-                <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   {meetings.length === 0 ? (
                     <span>
@@ -303,7 +303,7 @@ export function ComposeForm({
                 onValueChange={setSelectedMeetingId}
                 disabled={meetings.length === 0}
               >
-                <SelectTrigger className="cursor-pointer">
+                <SelectTrigger id="message-meeting" className="cursor-pointer">
                   <SelectValue
                     placeholder={
                       meetings.length === 0
@@ -373,7 +373,11 @@ export function ComposeForm({
           />
 
           {/* Error */}
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          )}
 
           {/* Send button */}
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -406,7 +410,7 @@ export function ComposeForm({
       </div>
 
       {/* Right panel: Live Preview */}
-      <div className="hidden w-[480px] shrink-0 lg:block">
+      <div className="hidden w-[42%] max-w-[30rem] min-w-[22rem] shrink-0 lg:block">
         <EmailPreview
           subject={subject}
           body={body}
