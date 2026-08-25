@@ -9,6 +9,16 @@ body:has([data-authenticated-shell]) {
   overscroll-behavior-y: none;
 }
 
+/* Overscroll policy is not inherited. Authenticated pages contain nested
+   vertical and horizontal scroll owners (canvases, tables, boards, dialogs),
+   so containing only the viewport still lets Safari rubber-band the owner
+   itself before the gesture can chain to html/body. Apply the x-axis policy to
+   every authenticated scroll owner without hiding or disabling its scrolling.
+   The body scope also reaches Radix portals mounted beside the shell. */
+body:has([data-authenticated-shell]) * {
+  overscroll-behavior-x: none;
+}
+
 body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
