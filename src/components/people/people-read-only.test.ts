@@ -276,6 +276,31 @@ test("the person header still reads in full for a read-only viewer", () => {
   }
 });
 
+test("the person header follows the shared detail-header hierarchy", () => {
+  const html = personHeader(WRITER);
+  const slots = parseElements(html)
+    .map((element) => element.attrs["data-slot"])
+    .filter(
+      (slot): slot is string => slot?.startsWith("detail-header") ?? false
+    );
+
+  for (const slot of [
+    "detail-header",
+    "detail-header-eyebrow",
+    "detail-header-title",
+    "detail-header-metadata",
+    "detail-header-trailing",
+  ]) {
+    assert.ok(slots.includes(slot), `${slot} must stay in the person header`);
+  }
+
+  assert.ok(
+    html.indexOf("Core Group") < html.indexOf("Mel Okafor") &&
+      html.indexOf("Mel Okafor") < html.indexOf("Joined on"),
+    "the status belongs above the title and the metadata below it"
+  );
+});
+
 test("the skills card hides add, edit and remove but keeps the inventory", () => {
   const skills = [
     {

@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { DetailHeader } from "@/components/shared/detail-header";
 import { CalendarDays, MapPin, Users, Clock } from "lucide-react";
 // Shares one zone-pinned formatter with the detail card below it, so the two
 // cannot disagree about when the meeting is. See src/lib/datetime.ts.
@@ -31,42 +32,42 @@ export function MeetingHeader({ meeting, timeZone }: MeetingHeaderProps) {
   const isPast = new Date(meeting.datetime) < new Date();
 
   return (
-    <div className="space-y-4 pb-4">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="mb-1 flex items-center gap-2">
-            <Badge
-              className={MEETING_TYPE_BADGE_CLASSES[meeting.type]}
-              variant="secondary"
-            >
-              {MEETING_TYPE_LABELS[meeting.type]}
-            </Badge>
-            {meeting.teamName && meeting.type === "team_meeting" && (
-              <span className="text-muted-foreground text-sm">
-                {meeting.teamName}
-              </span>
-            )}
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {meetingDisplayTitle(meeting)}
-          </h1>
-          <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
-            <span className="flex items-center gap-1.5">
-              <CalendarDays className="h-4 w-4" />
-              {formatDate(meeting.datetime)}
+    <DetailHeader
+      eyebrow={
+        <>
+          <Badge
+            className={MEETING_TYPE_BADGE_CLASSES[meeting.type]}
+            variant="secondary"
+          >
+            {MEETING_TYPE_LABELS[meeting.type]}
+          </Badge>
+          {meeting.teamName && meeting.type === "team_meeting" && (
+            <span className="text-muted-foreground text-sm">
+              {meeting.teamName}
             </span>
-            <span className="flex items-center gap-1.5">
-              <Clock className="h-4 w-4" />
-              {formatTime(meeting.datetime)}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <MapPin className="h-4 w-4" />
-              {locationDisplay}
-              {addressDisplay && ` - ${addressDisplay}`}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
+          )}
+        </>
+      }
+      title={meetingDisplayTitle(meeting)}
+      metadata={
+        <>
+          <span className="flex items-center gap-1.5">
+            <CalendarDays className="h-4 w-4" />
+            {formatDate(meeting.datetime)}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Clock className="h-4 w-4" />
+            {formatTime(meeting.datetime)}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <MapPin className="h-4 w-4" />
+            {locationDisplay}
+            {addressDisplay && ` - ${addressDisplay}`}
+          </span>
+        </>
+      }
+      trailing={
+        <>
           <span className="text-muted-foreground text-sm font-medium">
             {formatRelativeDay(meeting.datetime, new Date(), timeZone)}
           </span>
@@ -76,32 +77,36 @@ export function MeetingHeader({ meeting, timeZone }: MeetingHeaderProps) {
           >
             {MEETING_STATUS_LABELS[status]}
           </Badge>
-        </div>
-      </div>
-
-      {isPast && meeting.actualAttendance != null && (
-        <div className="flex gap-6 text-sm">
-          <div className="flex items-center gap-1.5">
-            <Users className="text-muted-foreground h-4 w-4" />
-            <span className="font-medium">{meeting.actualAttendance}</span>
-            <span className="text-muted-foreground">attended</span>
+        </>
+      }
+      summary={
+        isPast &&
+        meeting.actualAttendance != null && (
+          <div className="flex gap-6 text-sm">
+            <div className="flex items-center gap-1.5">
+              <Users className="text-muted-foreground h-4 w-4" />
+              <span className="font-medium">{meeting.actualAttendance}</span>
+              <span className="text-muted-foreground">attended</span>
+            </div>
+            {meeting.newAttendees > 0 && (
+              <div>
+                <span className="font-medium text-green-600 dark:text-green-400">
+                  {meeting.newAttendees}
+                </span>
+                <span className="text-muted-foreground"> new</span>
+              </div>
+            )}
+            {meeting.returningAttendees > 0 && (
+              <div>
+                <span className="font-medium">
+                  {meeting.returningAttendees}
+                </span>
+                <span className="text-muted-foreground"> returning</span>
+              </div>
+            )}
           </div>
-          {meeting.newAttendees > 0 && (
-            <div>
-              <span className="font-medium text-green-600 dark:text-green-400">
-                {meeting.newAttendees}
-              </span>
-              <span className="text-muted-foreground"> new</span>
-            </div>
-          )}
-          {meeting.returningAttendees > 0 && (
-            <div>
-              <span className="font-medium">{meeting.returningAttendees}</span>
-              <span className="text-muted-foreground"> returning</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+        )
+      }
+    />
   );
 }
