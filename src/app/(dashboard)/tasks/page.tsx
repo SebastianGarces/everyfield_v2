@@ -104,11 +104,12 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   // What the banner counts is what "Needs owner" holds: a follow-up whose task
   // nobody live owns, plus a contact with no task at all.
   const needsOwnerCount = ownerGroups[0].tasks.length + uncovered.length;
+  const breadcrumbs = [{ label: "Tasks" }];
 
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Tasks" }]} />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
         <WorkspacePanel className="flex min-h-full flex-col overflow-hidden">
           {/* Header */}
           <div className="space-y-4 border-b p-4 sm:p-6 sm:pb-4">

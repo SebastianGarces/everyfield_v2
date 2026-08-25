@@ -112,15 +112,19 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
       : (meetingInvitationTemplate(composingForMeeting.type, templates) ??
         undefined);
 
+  const breadcrumbs = [
+    { label: "Communication", href: "/communication" },
+    { label: "New Message" },
+  ];
+
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Communication", href: "/communication" },
-          { label: "New Message" },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
         <h1 className="sr-only">New message</h1>
         <WorkspacePanel className="h-full overflow-hidden">
           <ComposeForm

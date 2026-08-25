@@ -50,16 +50,19 @@ export default async function TemplatesPage() {
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(t);
   }
+  const breadcrumbs = [
+    { label: "Communication", href: "/communication" },
+    { label: "Templates" },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Communication", href: "/communication" },
-          { label: "Templates" },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 pb-4 sm:p-6 sm:pb-4">
             <div className="flex items-center justify-between">

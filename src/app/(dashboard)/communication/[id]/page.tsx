@@ -141,16 +141,15 @@ export default async function MessageDetailPage({
     deliveredCount: nonOpeners.delivered,
     nonOpenerCount: nonOpeners.personIds.length,
   });
+  const breadcrumbs = [
+    { label: "Communication", href: "/communication" },
+    { label: resolvedSubject },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Communication", href: "/communication" },
-          { label: resolvedSubject },
-        ]}
-      />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
         <WorkspacePanel className="min-h-full">
           <div className="border-b p-4 sm:p-6">
             <Button

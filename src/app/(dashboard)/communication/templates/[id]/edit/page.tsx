@@ -30,17 +30,20 @@ export default async function EditTemplatePage({
   const { id } = await params;
   const template = await getTemplate(id, user.churchId);
   if (!template) notFound();
+  const breadcrumbs = [
+    { label: "Communication", href: "/communication" },
+    { label: "Templates", href: "/communication/templates" },
+    { label: template.name },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Communication", href: "/communication" },
-          { label: "Templates", href: "/communication/templates" },
-          { label: template.name },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
         <h1 className="sr-only">Edit {template.name}</h1>
         <WorkspacePanel className="h-full overflow-hidden">
           <TemplateEditor template={template} />
