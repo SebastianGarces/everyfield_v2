@@ -231,12 +231,17 @@ test("the viewport caps the shell and leaves route scrolling to page canvases", 
   );
   assert.match(
     GLOBAL_STYLES,
-    /html:has\(\[data-authenticated-shell\]\),\s*body:has\(\[data-authenticated-shell\]\)\s*\{[^}]*overscroll-behavior-y:\s*none;/,
-    "the viewport must not rubber-band past the authenticated shell"
+    /html:has\(\[data-authenticated-shell\]\),\s*body:has\(\[data-authenticated-shell\]\)\s*\{[^}]*overscroll-behavior-x:\s*none;[^}]*overscroll-behavior-y:\s*none;/,
+    "the viewport must not rubber-band past the authenticated shell on either axis"
   );
   assert.doesNotMatch(
     GLOBAL_STYLES,
-    /(?:^|\n)html,\s*body\s*\{[^}]*overscroll-behavior-y:/,
+    /(?:^|\n)html,\s*body\s*\{[^}]*(?:overscroll-behavior(?:-[xy])?):/,
     "public pages must retain their native viewport overscroll behavior"
+  );
+  assert.doesNotMatch(
+    GLOBAL_STYLES,
+    /\[data-authenticated-shell\][^}]*overflow-x:\s*hidden/,
+    "contain viewport chaining without clipping intentional horizontal scrollers"
   );
 });
