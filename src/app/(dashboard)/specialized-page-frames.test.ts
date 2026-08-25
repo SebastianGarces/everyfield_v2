@@ -173,6 +173,10 @@ const NON_PRESENTATION_ROUTE_EXCLUSIONS = [
 ] as const satisfies readonly NonPresentationRouteExclusion[];
 
 const DASHBOARD_APP_ROOT = path.join(process.cwd(), "src/app/(dashboard)");
+const GLOBAL_STYLES = readFileSync(
+  path.join(process.cwd(), "src/app/globals.css"),
+  "utf8"
+);
 
 function collectPageRoutes(
   directory: string,
@@ -410,5 +414,26 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
       "<PageContext",
     ],
     "Wiki context must replace Dashboard before the split workspace renders"
+  );
+});
+
+test("Wiki keeps the article pane full-height when B suppresses a one-item trail", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /\[\[data-auth-page-hierarchy=b\]_&\]:lg:col-start-2 \[\[data-auth-page-hierarchy=b\]_&\]:lg:row-start-2/,
+    "a real ancestor trail must reserve the row above the article pane"
+  );
+  const suppressedTrailRule = GLOBAL_STYLES.slice(
+    GLOBAL_STYLES.lastIndexOf('html[data-auth-page-hierarchy="b"]')
+  );
+  assert.match(
+    suppressedTrailRule,
+    /\[data-slot="split-workspace"\]:has\([\s\S]*\[data-breadcrumb-depth="1"\][\s\S]*> \[data-slot="workspace-panel"\]:last-child \{[\s\S]*grid-row: 1 \/ span 2;/,
+    "a suppressed top-level trail must return the article pane to the full grid height"
   );
 });
