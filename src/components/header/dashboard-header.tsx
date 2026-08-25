@@ -8,21 +8,18 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
 import { resolveBreadcrumbTrail } from "./breadcrumb-trail";
 import { useHeader } from "./header-context";
 
 /**
- * `children` are SHELL-level controls — rendered on every dashboard route, to
- * the right of the breadcrumbs and before the page's own actions.
+ * `children` are optional context-level controls — rendered to the right of
+ * the breadcrumbs and before the page's own actions.
  *
- * They come in as a prop rather than being imported here because the header is
- * a client component and the shell's controls (the unread bell) need
- * server-resolved data. Passing them as a rendered node keeps the fetch in the
- * layout, where the session already is, and keeps this component free of it.
+ * Keeping this slot preserves the existing header API for a route that needs a
+ * stable control before its portal actions. Account-wide controls now live in
+ * the global app bar above this page-context bar.
  */
 export function DashboardHeader({ children }: { children?: ReactNode }) {
   const { breadcrumbs, setActionsContainer } = useHeader();
@@ -32,14 +29,8 @@ export function DashboardHeader({ children }: { children?: ReactNode }) {
   const trail = resolveBreadcrumbTrail(breadcrumbs);
 
   return (
-    <header className="bg-card flex h-16 shrink-0 items-center gap-2 border-b px-4">
-      <SidebarTrigger className="-ml-1" />
-      <Separator
-        orientation="vertical"
-        className="mr-2 data-[orientation=vertical]:h-4"
-      />
-
-      <Breadcrumb>
+    <header className="bg-card flex h-16 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
+      <Breadcrumb className="min-w-0 overflow-hidden">
         <BreadcrumbList>
           {trail.map((crumb, index) => (
             <Fragment key={index}>
@@ -59,13 +50,16 @@ export function DashboardHeader({ children }: { children?: ReactNode }) {
       </Breadcrumb>
 
       {/* Spacer pushes actions to the right */}
-      <div className="flex-1" />
+      <div className="min-w-0 flex-1" />
 
       {/* Shell-level controls, present on every route */}
       {children}
 
       {/* Portal target for page-specific actions */}
-      <div ref={setActionsContainer} className="flex items-center gap-2" />
+      <div
+        ref={setActionsContainer}
+        className="flex shrink-0 items-center gap-2"
+      />
     </header>
   );
 }
