@@ -37,4 +37,4 @@ Each iteration:
 
 ## Stop and report
 
-At the stop time: stop dispatching new work, let in-flight agents land, then post one report to Sebastian: issues taken, PRs opened/merged, decisions made, failures and what restarts them, and the frontier that remains. Then update the session handoff memory.
+At the stop time: stop dispatching new work, let in-flight agents land, then post one report to Sebastian: issues taken, PRs opened/merged, decisions made, failures and what restarts them, and the frontier that remains. Use the current host's native handoff. Claude updates its session handoff memory; Codex relies on the task history and native handoff, and writes no Claude memory.

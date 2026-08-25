@@ -116,3 +116,10 @@ test("the Codex SessionStart adapter emits the real principles", () => {
   assert.match(result.stdout, /^# Prove It Works$/m);
   assert.match(result.stdout, /^# Build the Lever$/m);
 });
+
+test("mirrored overnight work uses the current host's native handoff", () => {
+  const skill = read(".agents/skills/work-overnight/SKILL.md");
+  assert.doesNotMatch(skill, /Then update the session handoff memory\./);
+  assert.match(skill, /Claude updates its session handoff memory/);
+  assert.match(skill, /Codex relies on the task history and native handoff/);
+});

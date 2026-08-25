@@ -48,6 +48,39 @@ function fixture() {
   return { dir, parent, wt };
 }
 
+function registeredFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-registered-wt-"));
+  const parent = path.join(dir, "repo");
+  const wt = path.join(dir, "worktree");
+  fs.mkdirSync(parent, { recursive: true });
+  fs.writeFileSync(path.join(parent, "package.json"), "{}");
+  spawnSync("git", ["init", "-q", parent], { encoding: "utf8" });
+  spawnSync("git", ["-C", parent, "add", "package.json"], {
+    encoding: "utf8",
+  });
+  spawnSync(
+    "git",
+    [
+      "-C",
+      parent,
+      "-c",
+      "user.name=Guard Test",
+      "-c",
+      "user.email=guard@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ],
+    { encoding: "utf8" }
+  );
+  spawnSync("git", ["-C", parent, "worktree", "add", "-q", wt], {
+    encoding: "utf8",
+  });
+  fs.mkdirSync(path.join(parent, "node_modules"));
+  fs.symlinkSync(path.join(parent, "node_modules"), path.join(wt, "node_modules"));
+  return { parent, wt };
+}
+
 test("allows pnpm install where node_modules is a real directory", () => {
   const { parent } = fixture();
   assert.equal(guard(parent, "pnpm install").code, 0);
@@ -173,6 +206,25 @@ test("the Claude/Codex hook adapter blocks the real poisoned-worktree event", ()
   );
   assert.equal(result.status, 2);
   assert.match(result.stderr, /node_modules is a symlink/);
+});
+
+test("the hook blocks when cwd is healthy but a registered worktree is poisoned", () => {
+  const { parent, wt } = registeredFixture();
+  const event = JSON.stringify({
+    cwd: parent,
+    tool_input: { command: "pnpm install" },
+  });
+  const result = spawnSync(
+    "bash",
+    [path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh")],
+    {
+      encoding: "utf8",
+      input: event,
+      env: { ...process.env, GUARD_WORKTREE_REPO_ROOT: parent },
+    }
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, new RegExp(`${wt}/node_modules is a symlink`));
 });
 
 test("Cursor beforeShellExecution hook points at the adapter, and the adapter at the script", () => {
