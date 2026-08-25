@@ -8,6 +8,7 @@ import { X, ExternalLink, Clock, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/wiki/callout";
+import { WIKI_GUIDE_TRIGGER_ID } from "./wiki-guide-button";
 import { useWikiGuide } from "./wiki-guide-provider";
 import { cn } from "@/lib/utils";
 import { wikiHref } from "@/lib/wiki/href";
@@ -196,146 +197,158 @@ export function WikiGuidePanel() {
   if (!isAvailable) return null;
 
   const hasMultipleArticles = entry && entry.slugs.length > 1;
+  const closeAndRestoreFocus = () => {
+    close();
+    document.getElementById(WIKI_GUIDE_TRIGGER_ID)?.focus();
+  };
 
   return (
     <div
-      className={cn(
-        // Panel positioning — floating with margin on all sides
-        "fixed top-4 right-4 bottom-4 z-40 w-[520px]",
-        "bg-card rounded-xl border shadow-2xl",
-        "flex flex-col",
-        // Slide transition
-        "transition-all duration-300 ease-in-out",
-        isOpen
-          ? "translate-x-0 opacity-100"
-          : "translate-x-[calc(100%+1rem)] opacity-0",
-        // Mobile: full width with smaller margins
-        "max-md:right-4 max-md:left-4 max-md:w-auto"
-      )}
-      role="complementary"
-      aria-label="Wiki guide panel"
+      data-slot="wiki-guide-viewport"
+      className="pointer-events-none fixed inset-y-0 right-0 z-40 w-full overflow-clip md:max-w-[536px]"
     >
-      {/* ── Panel Header ─────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between gap-2 rounded-t-xl border-b px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <FileText className="text-muted-foreground size-4 shrink-0" />
-          <h2 className="truncate text-sm font-semibold">
-            {entry?.label ?? "Wiki Guide"}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {activeSlug && (
+      <div
+        className={cn(
+          // The viewport rail is the clip boundary. The panel may keep its full
+          // slide distance without its closed transform widening the document.
+          "absolute top-4 right-4 bottom-4 w-[520px]",
+          "bg-card rounded-xl border shadow-2xl",
+          "flex flex-col",
+          // Slide transition
+          "transition-[transform,opacity] duration-300 ease-in-out motion-reduce:transition-none",
+          isOpen
+            ? "pointer-events-auto translate-x-0 opacity-100"
+            : "translate-x-[calc(100%+1rem)] opacity-0",
+          // Mobile: full width with smaller margins
+          "max-md:left-4 max-md:w-auto"
+        )}
+        role="complementary"
+        aria-label="Wiki guide panel"
+        aria-hidden={!isOpen}
+        inert={!isOpen}
+      >
+        {/* ── Panel Header ─────────────────────────────────────────── */}
+        <div className="flex shrink-0 items-center justify-between gap-2 rounded-t-xl border-b px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileText className="text-muted-foreground size-4 shrink-0" />
+            <h2 className="truncate text-sm font-semibold">
+              {entry?.label ?? "Wiki Guide"}
+            </h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {activeSlug && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                asChild
+                className="cursor-pointer"
+              >
+                <Link href={wikiHref(activeSlug)} title="Open in Wiki">
+                  <ExternalLink className="size-3.5" />
+                </Link>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-xs"
-              asChild
+              onClick={closeAndRestoreFocus}
               className="cursor-pointer"
+              aria-label="Close guide panel"
             >
-              <Link href={wikiHref(activeSlug)} title="Open in Wiki">
-                <ExternalLink className="size-3.5" />
-              </Link>
+              <X className="size-3.5" />
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={close}
-            className="cursor-pointer"
-            aria-label="Close guide panel"
-          >
-            <X className="size-3.5" />
-          </Button>
-        </div>
-      </div>
-
-      {/* ── Article Content (scrollable) ─────────────────────────── */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="p-4">
-          {isLoading && <ArticleSkeleton />}
-
-          {(error || compileError) && (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <AlertCircle className="text-muted-foreground size-8" />
-              <div className="space-y-1">
-                <p className="text-muted-foreground text-sm font-medium">
-                  {error || compileError}
-                </p>
-                <p className="text-muted-foreground/70 text-xs">
-                  This article may not exist yet. Check the wiki guide
-                  configuration.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {!isLoading && !error && !compileError && article && (
-            <>
-              {/* Article metadata */}
-              <div className="mb-4 space-y-2">
-                <h3 className="text-lg font-bold tracking-tight">
-                  {article.title}
-                </h3>
-                {article.description && (
-                  <p className="text-muted-foreground text-sm">
-                    {article.description}
-                  </p>
-                )}
-                <div className="text-muted-foreground flex items-center gap-3 text-xs">
-                  <span className="inline-flex items-center gap-1">
-                    <Clock className="size-3" />
-                    {article.readTime} min read
-                  </span>
-                  <span className="bg-muted rounded-full px-2 py-0.5 capitalize">
-                    {article.type}
-                  </span>
-                </div>
-              </div>
-
-              {/* Rendered MDX content — identical to wiki pages */}
-              <div className="prose prose-neutral dark:prose-invert max-w-none">
-                {mdxContent}
-              </div>
-
-              {/* Footer link */}
-              <div className="mt-8 border-t pt-4 pb-2">
-                <Link
-                  href={wikiHref(article.slug)}
-                  className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs hover:underline"
-                >
-                  <ExternalLink className="size-3" />
-                  Read full article in Wiki
-                </Link>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── Related Articles Card (always visible at bottom) ─────── */}
-      {hasMultipleArticles && (
-        <div className="bg-muted/30 shrink-0 rounded-b-xl border-t px-4 py-3">
-          <p className="text-muted-foreground mb-2 text-xs font-medium">
-            Related Articles
-          </p>
-          <div className="space-y-1">
-            {entry.slugs.map((slug) => (
-              <button
-                key={slug}
-                onClick={() => setActiveSlug(slug)}
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
-                  slug === activeSlug
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <FileText className="size-3.5 shrink-0" />
-                <span className="truncate">{formatSlugLabel(slug)}</span>
-              </button>
-            ))}
           </div>
         </div>
-      )}
+
+        {/* ── Article Content (scrollable) ─────────────────────────── */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="p-4">
+            {isLoading && <ArticleSkeleton />}
+
+            {(error || compileError) && (
+              <div className="flex flex-col items-center gap-3 py-12 text-center">
+                <AlertCircle className="text-muted-foreground size-8" />
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm font-medium">
+                    {error || compileError}
+                  </p>
+                  <p className="text-muted-foreground/70 text-xs">
+                    This article may not exist yet. Check the wiki guide
+                    configuration.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!isLoading && !error && !compileError && article && (
+              <>
+                {/* Article metadata */}
+                <div className="mb-4 space-y-2">
+                  <h3 className="text-lg font-bold tracking-tight">
+                    {article.title}
+                  </h3>
+                  {article.description && (
+                    <p className="text-muted-foreground text-sm">
+                      {article.description}
+                    </p>
+                  )}
+                  <div className="text-muted-foreground flex items-center gap-3 text-xs">
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="size-3" />
+                      {article.readTime} min read
+                    </span>
+                    <span className="bg-muted rounded-full px-2 py-0.5 capitalize">
+                      {article.type}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Rendered MDX content — identical to wiki pages */}
+                <div className="prose prose-neutral dark:prose-invert max-w-none">
+                  {mdxContent}
+                </div>
+
+                {/* Footer link */}
+                <div className="mt-8 border-t pt-4 pb-2">
+                  <Link
+                    href={wikiHref(article.slug)}
+                    className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs hover:underline"
+                  >
+                    <ExternalLink className="size-3" />
+                    Read full article in Wiki
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Related Articles Card (always visible at bottom) ─────── */}
+        {hasMultipleArticles && (
+          <div className="bg-muted/30 shrink-0 rounded-b-xl border-t px-4 py-3">
+            <p className="text-muted-foreground mb-2 text-xs font-medium">
+              Related Articles
+            </p>
+            <div className="space-y-1">
+              {entry.slugs.map((slug) => (
+                <button
+                  key={slug}
+                  onClick={() => setActiveSlug(slug)}
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                    slug === activeSlug
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <FileText className="size-3.5 shrink-0" />
+                  <span className="truncate">{formatSlugLabel(slug)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

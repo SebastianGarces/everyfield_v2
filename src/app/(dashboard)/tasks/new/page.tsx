@@ -55,6 +55,7 @@ export default async function NewTaskPage() {
         contextAttachment="attached"
         contextItems={breadcrumbs}
         frameClassName="mx-auto w-full max-w-2xl"
+        scrollLayout="flow"
       >
         <WorkspacePanel className="p-4 sm:p-6">
           <h1 className="mb-6 text-2xl font-semibold tracking-tight">

@@ -95,7 +95,11 @@ export default async function AdminFeedbackPage({
   return (
     <>
       <HeaderBreadcrumbs items={breadcrumbs} />
-      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        scrollLayout="flow"
+      >
         <WorkspacePanel className="flex min-h-full flex-col gap-6 overflow-hidden p-4 sm:p-6">
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-tight">Feedback</h1>

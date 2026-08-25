@@ -87,7 +87,7 @@ export default async function OversightDashboardPage() {
         does not participate in `space-y-6`.
       */}
       <HeaderBreadcrumbs items={[{ label: title }]} />
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <div
           data-slot="oversight-sibling-surfaces"
           className="mx-auto min-h-full max-w-6xl space-y-6"

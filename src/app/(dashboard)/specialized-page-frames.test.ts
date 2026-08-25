@@ -436,6 +436,18 @@ test("task detail keeps a canvas-sized bottom inset after tall content", () => {
   collectCanvases(sourceFile);
 
   assert.equal(canvases.length, 1, "task detail must keep one PageCanvas");
+  const scrollLayout = canvases[0].openingElement.attributes.properties.find(
+    (property): property is ts.JsxAttribute =>
+      ts.isJsxAttribute(property) &&
+      property.name.getText(sourceFile) === "scrollLayout"
+  );
+
+  assert.ok(
+    scrollLayout?.initializer && ts.isStringLiteral(scrollLayout.initializer),
+    "task detail must explicitly choose the shared flow layout"
+  );
+  assert.equal(scrollLayout.initializer.text, "flow");
+
   const directElements = canvases[0].children.filter(
     (child): child is ts.JsxElement | ts.JsxSelfClosingElement =>
       ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)
@@ -443,10 +455,10 @@ test("task detail keeps a canvas-sized bottom inset after tall content", () => {
 
   assert.equal(
     directElements.length,
-    2,
-    "the canvas content must end with one presentation spacer after its workspace"
+    1,
+    "the shared canvas contract must replace the route-specific spacer"
   );
-  const [workspace, endInset] = directElements;
+  const [workspace] = directElements;
   assert.ok(
     ts.isJsxElement(workspace),
     "the task card must remain a JSX element"
@@ -456,27 +468,17 @@ test("task detail keeps a canvas-sized bottom inset after tall content", () => {
     "WorkspacePanel",
     "the task card remains the first canvas-content box"
   );
-  assert.ok(
-    ts.isJsxSelfClosingElement(endInset),
-    "the end inset must remain an empty presentation box"
-  );
-  assert.equal(
-    endInset.tagName.getText(sourceFile),
-    "div",
-    "a concrete box after the overflowing card must extend the scroll range"
-  );
   const workspaceSource = workspace.getText(sourceFile);
-  const endInsetSource = endInset.getText(sourceFile);
 
   assert.match(
-    endInsetSource,
-    /aria-hidden="true"[\s\S]*className="h-3 shrink-0 sm:h-4"[\s\S]*data-slot="task-detail-end-inset"/,
-    "the non-shrinking post-card box must match PageCanvas's p-3/sm:p-4 bottom inset"
+    PAGE_FRAME_SOURCE,
+    /"flex min-h-full min-w-0 flex-col gap-3"[\s\S]*scrollLayout === "fixed" && "h-full"/,
+    "flow hierarchies must be allowed to grow beyond the canvas viewport"
   );
   assert.match(
     PAGE_FRAME_SOURCE,
-    /overflow-auto overscroll-y-none p-3 sm:p-4/,
-    "the spacer sizes must stay paired with the shared canvas inset"
+    /"min-w-0 flex-1 outline-none"[\s\S]*scrollLayout === "fixed" && "min-h-0"/,
+    "flow content must contribute its intrinsic height to the hierarchy"
   );
   assert.doesNotMatch(
     workspaceSource,
@@ -485,7 +487,7 @@ test("task detail keeps a canvas-sized bottom inset after tall content", () => {
   );
   assert.doesNotMatch(
     page,
-    /(?:overflow-auto|overflow-y-auto)/,
+    /task-detail-end-inset|(?:overflow-auto|overflow-y-auto)/,
     "the fix must not add another vertical scroll owner"
   );
 });
@@ -581,12 +583,12 @@ test("Wiki keeps both panes in one full-height row at every width", () => {
   );
   assert.match(
     source,
-    /className="row-start-1 h-full overflow-y-auto overscroll-y-none outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
+    /className="row-start-1 h-full overflow-y-auto overscroll-x-none overscroll-y-none outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
     "the article occupies that same row on mobile and desktop"
   );
   assert.match(
     source,
-    /<aside className="h-full overflow-y-auto overscroll-y-none p-4">/,
+    /<aside className="h-full overflow-y-auto overscroll-x-none overscroll-y-none p-4">/,
     "the navigation pane must not hand a boundary gesture to the shell"
   );
 });

@@ -62,6 +62,7 @@ export default async function CoachedPlantPage({
         contentClassName="space-y-6"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="flow"
       >
         <WorkspacePanel className="space-y-3 p-4 sm:p-6">
           <div className="flex flex-wrap items-center gap-3">

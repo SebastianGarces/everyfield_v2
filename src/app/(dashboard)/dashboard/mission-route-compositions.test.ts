@@ -24,7 +24,7 @@ test("top-level mission and oversight routes suppress redundant shell context", 
 
     assert.match(
       source,
-      /<PageCanvas(?: className="p-0")? context="none" contentFocusTarget>/,
+      /<PageCanvas(?=[^>]*context="none")(?=[^>]*contentFocusTarget)(?=[^>]*scrollLayout="flow")[^>]*>/,
       `${relativePath} keeps its page identity in its own content header`
     );
     assert.doesNotMatch(
@@ -136,7 +136,7 @@ test("Wiki keeps no shell context and its proven independent-pane height contrac
   assert.match(source, /hidden h-full overflow-hidden lg:col-start-1/);
   assert.match(
     source,
-    /row-start-1 h-full overflow-y-auto overscroll-y-none outline-none/
+    /row-start-1 h-full overflow-y-auto overscroll-x-none overscroll-y-none outline-none/
   );
   assert.doesNotMatch(source, /PageContext/);
 });

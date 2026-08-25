@@ -245,7 +245,11 @@ export default async function PhasePage() {
   return (
     <>
       <HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />
-      <PageCanvas frameClassName="mx-auto w-full max-w-6xl" context="none">
+      <PageCanvas
+        frameClassName="mx-auto w-full max-w-6xl"
+        context="none"
+        scrollLayout="flow"
+      >
         <div
           data-slot="plant-intelligence-content"
           className="min-h-full space-y-6"

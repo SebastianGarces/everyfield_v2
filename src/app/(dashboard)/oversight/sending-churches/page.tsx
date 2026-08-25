@@ -60,7 +60,12 @@ export default async function OversightSendingChurchesPage() {
         item and the page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Sending churches" }]} />
-      <PageCanvas className="p-0" context="none" contentFocusTarget>
+      <PageCanvas
+        className="p-0"
+        context="none"
+        contentFocusTarget
+        scrollLayout="flow"
+      >
         <SendingChurchesRoster
           sendingChurches={sendingChurches}
           canInvite={holdsSeatFor(user, "org.invitation.manage")}

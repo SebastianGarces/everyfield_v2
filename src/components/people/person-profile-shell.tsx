@@ -61,6 +61,7 @@ export function PersonProfileShell({
         { label: "People & CRM", href: "/people" },
         { label: personName },
       ]}
+      scrollLayout="flow"
     >
       <WorkspacePanel className="min-h-full">
         {/* The extra wrapper gives the profile one rounded surface while the

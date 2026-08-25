@@ -46,7 +46,12 @@ export default async function OversightPlantsPage() {
         the page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Church plants" }]} />
-      <PageCanvas className="p-0" context="none" contentFocusTarget>
+      <PageCanvas
+        className="p-0"
+        context="none"
+        contentFocusTarget
+        scrollLayout="flow"
+      >
         <PlantsDirectory
           plants={plants}
           scopeLabel={scopeLabelForOrgType(org.type)}

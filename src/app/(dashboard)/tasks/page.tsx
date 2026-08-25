@@ -109,7 +109,11 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   return (
     <>
       <HeaderBreadcrumbs items={breadcrumbs} />
-      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        scrollLayout="flow"
+      >
         <WorkspacePanel className="flex min-h-full flex-col overflow-hidden">
           {/* Header */}
           <div className="space-y-4 border-b p-4 sm:p-6 sm:pb-4">

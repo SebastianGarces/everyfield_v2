@@ -93,6 +93,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
         className={isPipelineView ? "overflow-hidden" : undefined}
         context="none"
         contentFocusTarget
+        scrollLayout={isPipelineView ? "fixed" : "flow"}
       >
         <WorkspacePanel
           className={

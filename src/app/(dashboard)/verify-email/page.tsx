@@ -67,7 +67,7 @@ export default async function VerifyEmailPage({
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Confirm your email address" }]} />
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <WorkspacePanel className="mx-auto w-full max-w-xl p-4 sm:p-6">
           {candidate === "" ? (
             <p

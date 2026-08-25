@@ -37,12 +37,70 @@ test("page-frame primitives contain presentation only and preserve caller props"
   assert.doesNotMatch(html, /rounded-t-none/);
   assert.match(html, /aria-label="Dashboard canvas"/);
   assert.match(html, /class="[^"]*h-full[^"]*overflow-auto[^"]*test-canvas/);
+  assert.match(html, /class="[^"]*overscroll-x-none[^"]*test-canvas/);
   assert.match(html, /class="[^"]*overscroll-y-none[^"]*test-canvas/);
+  assert.match(html, /data-scroll-layout="fixed"/);
   assert.match(html, /data-slot="split-workspace"/);
   assert.match(html, /class="[^"]*grid[^"]*test-split/);
   assert.match(html, /data-slot="workspace-panel"/);
   assert.match(html, /class="[^"]*rounded-xl[^"]*test-panel/);
   assert.match(html, />Workspace<\/div>/);
+});
+
+test("flow layout grows the hierarchy so canvas padding extends the scroll range", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      PageCanvas,
+      { context: "none", scrollLayout: "flow" },
+      createElement(WorkspacePanel, { className: "min-h-full" }, "Long page")
+    )
+  );
+
+  const hierarchyClass = html.match(
+    /data-slot="page-hierarchy-frame"[^>]*class="([^"]*)"/
+  )?.[1];
+  const contentClass = html.match(
+    /data-slot="page-content"[^>]*class="([^"]*)"/
+  )?.[1];
+
+  assert.equal(
+    html.includes('data-scroll-layout="flow"'),
+    true,
+    "the rendered contract must expose the selected scroll layout"
+  );
+  assert.ok(hierarchyClass, "the hierarchy frame must render its classes");
+  assert.match(hierarchyClass, /(?:^| )min-h-full(?: |$)/);
+  assert.doesNotMatch(
+    hierarchyClass,
+    /(?:^| )h-full(?: |$)/,
+    "a flow hierarchy must be allowed to grow beyond the viewport"
+  );
+  assert.ok(contentClass, "the page content must render its classes");
+  assert.match(contentClass, /(?:^| )flex-1(?: |$)/);
+  assert.doesNotMatch(
+    contentClass,
+    /(?:^| )min-h-0(?: |$)/,
+    "flow content must contribute its intrinsic height to the hierarchy"
+  );
+});
+
+test("fixed layout preserves definite height for descendant scroll owners", () => {
+  const html = renderToStaticMarkup(
+    createElement(PageCanvas, { context: "none" }, "Fixed workspace")
+  );
+
+  const hierarchyClass = html.match(
+    /data-slot="page-hierarchy-frame"[^>]*class="([^"]*)"/
+  )?.[1];
+  const contentClass = html.match(
+    /data-slot="page-content"[^>]*class="([^"]*)"/
+  )?.[1];
+
+  assert.ok(hierarchyClass, "the hierarchy frame must render its classes");
+  assert.match(hierarchyClass, /(?:^| )h-full(?: |$)/);
+  assert.match(hierarchyClass, /(?:^| )min-h-full(?: |$)/);
+  assert.ok(contentClass, "the page content must render its classes");
+  assert.match(contentClass, /(?:^| )min-h-0(?: |$)/);
 });
 
 test("only an explicitly attached context removes the workspace's top seam", () => {

@@ -67,6 +67,7 @@ export async function AssessmentEntryShell({
         { label: personName, href: `/people/${personId}` },
         { label: title },
       ]}
+      scrollLayout="flow"
     >
       {/* The attached context and form need one rounded workspace boundary;
           CSS cannot join the context to a shadcn Card whose slot remains an

@@ -13,6 +13,7 @@ export function PageCanvas({
   frameClassName,
   context = "default",
   contextAttachment = "standalone",
+  scrollLayout = "fixed",
   contentFocusTarget,
   children,
   ...props
@@ -21,6 +22,12 @@ export function PageCanvas({
   contentClassName?: string;
   context?: "default" | "none";
   contextAttachment?: "standalone" | "attached";
+  /**
+   * `flow` lets the hierarchy grow so the canvas padding remains inside the
+   * page's scroll range. `fixed` keeps a definite-height hierarchy for
+   * workspaces whose descendants own their scrolling.
+   */
+  scrollLayout?: "flow" | "fixed";
   contextItems?: HeaderBreadcrumbItem[];
   contentFocusTarget?: boolean;
 }) {
@@ -30,15 +37,17 @@ export function PageCanvas({
     <div
       data-slot="page-canvas"
       className={cn(
-        "bg-background h-full min-h-0 overflow-auto overscroll-y-none p-3 sm:p-4",
+        "bg-background h-full min-h-0 overflow-auto overscroll-x-none overscroll-y-none p-3 sm:p-4",
         className
       )}
       {...props}
     >
       <div
         data-slot="page-hierarchy-frame"
+        data-scroll-layout={scrollLayout}
         className={cn(
-          "flex h-full min-h-full min-w-0 flex-col gap-3",
+          "flex min-h-full min-w-0 flex-col gap-3",
+          scrollLayout === "fixed" && "h-full",
           contextAttachment === "attached" && "gap-0",
           frameClassName
         )}
@@ -51,7 +60,8 @@ export function PageCanvas({
           tabIndex={hasContentFocusTarget ? -1 : undefined}
           data-slot="page-content"
           className={cn(
-            "min-h-0 min-w-0 flex-1 outline-none",
+            "min-w-0 flex-1 outline-none",
+            scrollLayout === "fixed" && "min-h-0",
             contextAttachment === "attached" &&
               "[&>[data-slot=workspace-panel]]:rounded-t-none [&>[data-slot=workspace-panel]]:border-t-0",
             contentClassName

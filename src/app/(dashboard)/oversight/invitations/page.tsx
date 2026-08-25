@@ -81,7 +81,7 @@ export default async function OversightInvitationsPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Invitations" }]} />
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <div
           data-slot="oversight-invitation-surfaces"
           className="mx-auto min-h-full max-w-6xl space-y-6"
