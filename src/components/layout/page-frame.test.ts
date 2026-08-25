@@ -97,7 +97,11 @@ test("attached context renders its server-known breadcrumb geometry in SSR", () 
 
 test("the canvas can delegate context placement to a specialized split workspace", () => {
   const html = renderToStaticMarkup(
-    createElement(PageCanvas, { context: "none" }, "Specialized workspace")
+    createElement(
+      PageCanvas,
+      { contentClassName: "h-full", context: "none" },
+      createElement(SplitWorkspace, null, "Specialized workspace")
+    )
   );
 
   assert.doesNotMatch(html, /data-slot="page-context"/);
@@ -106,6 +110,12 @@ test("the canvas can delegate context placement to a specialized split workspace
     /id="dashboard-page-content"/,
     "a specialized composition must place the focus target after its own context"
   );
+  assert.match(
+    html,
+    /data-slot="page-content" class="[^"]*h-full[^"]*"/,
+    "a size-contained specialized grid can receive a definite block size from its PageCanvas wrapper"
+  );
+  assert.match(html, /data-slot="split-workspace"/);
   assert.match(html, />Specialized workspace<\/div>/);
 });
 

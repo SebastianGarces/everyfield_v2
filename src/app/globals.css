@@ -26,35 +26,31 @@ html[data-auth-page-hierarchy="b"]
       )
   )
   > [data-slot="page-content"]
-  > [data-slot="workspace-panel"],
+  > [data-slot="workspace-panel"] {
+  border-top-width: 1px;
+  border-radius: var(--radius-xl);
+}
+
+/* Wiki knows this is a one-item trail in the server render. Its responsive
+   grid therefore carries that state directly instead of asking :has() to
+   infer row geometry from a child whose display changes between variants. */
 html[data-auth-page-hierarchy="b"]
-  [data-slot="split-workspace"]:has(
-    > [data-slot="page-context"][data-attachment="attached"][data-breadcrumb-depth="1"]:not(
-        :has(> [data-slot="page-actions"] > *)
-      )
-  )
+  [data-slot="split-workspace"][data-context-layout="single-suppressed"]
   > [data-slot="workspace-panel"]:last-child {
   border-top-width: 1px;
   border-radius: var(--radius-xl);
 }
 
 html[data-auth-page-hierarchy="b"]
-  [data-slot="split-workspace"]:has(
-    > [data-slot="page-context"][data-attachment="attached"][data-breadcrumb-depth="1"]:not(
-        :has(> [data-slot="page-actions"] > *)
-      )
-  ) {
+  [data-slot="split-workspace"][data-context-layout="single-suppressed"] {
   grid-template-rows: minmax(0, 1fr);
 }
 
 html[data-auth-page-hierarchy="b"]
-  [data-slot="split-workspace"]:has(
-    > [data-slot="page-context"][data-attachment="attached"][data-breadcrumb-depth="1"]:not(
-        :has(> [data-slot="page-actions"] > *)
-      )
-  )
+  [data-slot="split-workspace"][data-context-layout="single-suppressed"]
   > [data-slot="workspace-panel"] {
   grid-row: 1;
+  min-height: 0;
 }
 
 @theme inline {
