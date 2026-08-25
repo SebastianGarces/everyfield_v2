@@ -6,8 +6,9 @@ import type { ReactNode } from "react";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { Mark } from "@/components/logo";
 import { NavUser } from "@/components/nav-user";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { TenancyShell } from "@/lib/navigation";
+
+import { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
 
 type GlobalAppBarProps = {
   shell: TenancyShell;
@@ -34,8 +35,11 @@ export function GlobalAppBar({ shell, user, children }: GlobalAppBarProps) {
       data-slot="global-app-bar"
       className="bg-app-bar text-app-bar-foreground relative z-30 flex h-10 shrink-0 items-center justify-between gap-2 px-2 sm:px-3"
     >
-      <div className="flex min-w-0 items-center gap-1">
-        <SidebarTrigger className="text-app-bar-foreground hover:text-app-bar-foreground hover:bg-white/10 focus-visible:ring-white/70 md:hidden" />
+      <div
+        data-slot="global-app-brand"
+        className="flex min-w-0 items-center gap-1 md:w-64 md:shrink-0"
+      >
+        <MobileSidebarTrigger />
         <Link
           href={shell.homeHref}
           aria-label={`EveryField — ${shell.label} home`}

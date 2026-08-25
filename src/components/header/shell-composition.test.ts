@@ -10,6 +10,11 @@ function read(...segments: string[]) {
 }
 
 const GLOBAL_BAR = read("components", "header", "global-app-bar.tsx");
+const MOBILE_TRIGGER = read(
+  "components",
+  "header",
+  "mobile-sidebar-trigger.tsx"
+);
 const CONTEXT_BAR = read("components", "header", "dashboard-header.tsx");
 const SIDEBAR = read("components", "app-sidebar.tsx");
 const SIDEBAR_PRIMITIVE = read("components", "ui", "sidebar.tsx");
@@ -42,7 +47,56 @@ test("global controls stay in the requested reading order", () => {
     "{children}",
     "<NavUser user={user} />",
   ]);
-  assert.match(GLOBAL_BAR, /<SidebarTrigger[^>]*md:hidden/);
+  assert.match(GLOBAL_BAR, /<MobileSidebarTrigger\s*\/>/);
+});
+
+test("the desktop global brand remains visible independently of sidebar state", () => {
+  const brand = GLOBAL_BAR.slice(
+    GLOBAL_BAR.indexOf('data-slot="global-app-brand"')
+  );
+
+  assert.match(
+    brand,
+    /className="[^"]*\bmd:w-64\b[^"]*\bmd:shrink-0\b[^"]*"/,
+    "the global brand keeps the expanded 16rem lane when the desktop sidebar collapses"
+  );
+  assert.doesNotMatch(
+    brand.slice(0, brand.indexOf("</div>")),
+    /--sidebar-width|group-data-\[collapsible/,
+    "global brand geometry must not inherit the desktop sidebar's collapsed width"
+  );
+  assertInOrder(brand, ["<Mark", "{shell.label}"]);
+});
+
+test("the mobile shell trigger restores focus after its Sheet closes", () => {
+  assert.match(
+    MOBILE_TRIGGER,
+    /const \{ isMobile, openMobile \} = useSidebar\(\)/
+  );
+  assert.match(
+    MOBILE_TRIGGER,
+    /const triggerRef = useRef<HTMLButtonElement>\(null\)/
+  );
+  assert.match(
+    MOBILE_TRIGGER,
+    /const sheetClosed = wasOpen\.current && !openMobile/
+  );
+  assert.match(
+    MOBILE_TRIGGER,
+    /document\.querySelector\('\[data-sidebar="sidebar"\]\[data-mobile="true"\]'\)/,
+    "focus restoration must wait for Radix to remove the closing Sheet's focus scope"
+  );
+  assertInOrder(MOBILE_TRIGGER, [
+    "const restoreAfterSheetUnmounts",
+    "document.querySelector",
+    "triggerRef.current?.focus()",
+  ]);
+  assert.match(
+    MOBILE_TRIGGER,
+    /if \(isMobile && !openMobile\) openedFromTrigger\.current = true/,
+    "only the top-bar trigger's own open should claim focus restoration"
+  );
+  assert.match(MOBILE_TRIGGER, /<SidebarTrigger[\s\S]*ref=\{triggerRef\}/);
 });
 
 test("notification streaming remains below its own Suspense boundary", () => {
