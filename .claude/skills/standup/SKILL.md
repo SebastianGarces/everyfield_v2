@@ -25,8 +25,9 @@ The morning board plus the morning's rulings. Never starts build work.
    with an open blocker is not runnable, and reporting it as available is the main way a standup
    misleads.
 
-3. **Live work.** `TaskList` for running agents, plus `ops/board.sh claims`; for each stalled issue,
-   its latest comment, so what failed is in the report.
+3. **Live work.** Use the host's agent/task-status tool for running agents, plus
+   `ops/board.sh claims`; for each stalled issue, read its latest comment so what failed is in the
+   report.
 
 4. **Features.** `gh issue list --limit 200 --label feature --state open`, plus
    `gh api repos/{owner}/{repo}/issues/<parent> --jq '.sub_issues_summary'` for the roll-up.

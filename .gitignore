@@ -54,7 +54,15 @@ Thumbs.db
 *.pem
 
 # AI Agents
-.codex
+# Lavish outputs are local working artifacts. Historical review records that
+# were committed deliberately remain tracked.
+.lavish/
+# Codex project hooks and generated custom-agent adapters are shared. Runtime
+# state and personal configuration under .codex remain ignored.
+.codex/*
+!.codex/hooks.json
+!.codex/agents/
+!.codex/agents/*.toml
 scratchpad/
 # Playwright MCP browser artifacts (snapshots, console logs, screenshots)
 .playwright-mcp/

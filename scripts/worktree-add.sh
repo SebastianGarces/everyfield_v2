@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #
-# worktree-add.sh — THE one command that materialises a track worktree.
+# worktree-add.sh — THE one command that materialises a shell-created track worktree.
 #
 # `git worktree add` copies tracked files only, so a fresh tree has no
 # `.env.local` and every DB-touching suite fails. This wraps that call and then
-# runs `scripts/worktree-env.sh` on the new path. Loop sites go through this
-# script only — never raw `git worktree add`, never `isolation: "worktree"`.
+# runs `scripts/worktree-env.sh` on the new path. Shell/orchestrator loop sites
+# go through this script only — never raw `git worktree add`. Codex-managed
+# worktrees are created by the app and receive ignored files via
+# `.worktreeinclude` instead.
 #
 # Usage: the same argv as `git worktree add`:
 #   scripts/worktree-add.sh -b <branch> <path> <start-point>   # fresh

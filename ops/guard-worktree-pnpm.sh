@@ -9,16 +9,17 @@
 # Everything resolves while the worktree exists; deleting it breaks the parent
 # silently (40 dead links on 2026-08-19). pnpm runs root lifecycle scripts only
 # AFTER rewiring, so a preinstall check cannot prevent this — it must be blocked
-# before pnpm starts. This script is that block, called from the Claude
-# PreToolUse hook and the Cursor beforeShellExecution hook.
+# before pnpm starts. This script is that block, called from the Claude and
+# Codex PreToolUse hooks and the Cursor beforeShellExecution hook.
 #
-# Interface: guard-worktree-pnpm.sh <cwd> <command-string>
+# Interface: guard-worktree-pnpm.sh <cwd> <command-string> [repository-root]
 #   exit 0            → allow
 #   exit 1 + stdout   → block, stdout is the reason (hooks relay it to the agent)
 set -euo pipefail
 
 cwd="${1:-}"
 cmd="${2:-}"
+repo_root="${3:-}"
 [ -n "$cmd" ] || exit 0
 
 block() {
@@ -53,6 +54,20 @@ if printf '%s' "$cmd" | grep -qE '(^|[;|&([:space:]])pnpm[[:space:]]+(i|install|
   done
   if [ -f "$d/package.json" ] && [ -L "$d/node_modules" ]; then
     block "Blocked: $d/node_modules is a symlink (points at $(readlink "$d/node_modules")). Running pnpm through it rewires the checkout that symlink points into. Remove the symlink and run a real 'pnpm install' here. If pnpm already ran through it once, repair the other checkout with 'CI=true pnpm install' there."
+  fi
+
+  # Codex's hook payload does not expose exec_command's separate workdir. If
+  # the command targets a registered worktree that way, cwd still names the
+  # healthy checkout. Scan the repository's registered worktrees before any
+  # relinking pnpm command so the missing boundary field cannot bypass the
+  # guard. Claude and Cursor pass the same root and gain the same safety net.
+  if [ -n "$repo_root" ] && git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+    while IFS= read -r worktree; do
+      [ -n "$worktree" ] || continue
+      if [ -f "$worktree/package.json" ] && [ -L "$worktree/node_modules" ]; then
+        block "Blocked: $worktree/node_modules is a symlink (points at $(readlink "$worktree/node_modules")). A relinking pnpm command may be targeting that registered worktree through a workdir the hook payload cannot see. Remove the symlink and run a real 'pnpm install' there."
+      fi
+    done < <(git -C "$repo_root" worktree list --porcelain | sed -n 's/^worktree //p')
   fi
 fi
 

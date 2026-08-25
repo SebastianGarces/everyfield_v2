@@ -10,6 +10,11 @@ both inline rather than calling this skill; anything opening a PR by hand follow
 
 ## Procedure
 
+Before step 1, make sure the evidence bundle contains a current review. If it does not, use the
+host's `code-reviewer` custom agent on the staged and unstaged diff, apply every actionable finding,
+and re-run the relevant proof. The generated Codex role and the Claude source share the same review
+instructions; do not substitute an ad-hoc review prompt.
+
 1. Push the branch: `git push -u origin <branch>`.
 2. Build the body from the evidence bundle (template below) and open, or update, **the** PR for this
    branch — never a second one.

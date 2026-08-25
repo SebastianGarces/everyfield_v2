@@ -5,6 +5,8 @@ one quick fix; a stalled agent costs a day. The principles injected at session s
 `.agents/skills/principle-*/`) are the guidance. There is no mandated pass graph: pick the process
 that fits the task and keep moving.
 
+Host setup is an adapter, not a second process: Codex specifics live in `ops/codex.md`.
+
 ## The loop
 
 1. **Pick work.** An open, unblocked, unassigned issue on the board, or whatever Sebastian asked
@@ -23,16 +25,19 @@ that fits the task and keep moving.
 2. **Decide, don't ask.** Rule from `product-docs/product-values.md`, `CONTEXT.md` and `memory/`.
    Record product rulings in `product-docs/decisions.md`, code rulings in the PR body. A wrong
    ruling is cheap; a stalled task is not. Two exceptions: owner taste on UI direction gets 2-3
-   live prototypes behind the switcher (`.claude/skills/prototype/`), and an idea that is not yet
+   live prototypes behind the switcher (`.agents/skills/prototype/`), and an idea that is not yet
    fleshed out carries `needs-spec` — the marker for "Sebastian and the agent still need to talk
-   this through" (`.claude/skills/grilling/`). `needs-spec` issues never enter the frontier; the
+   this through" (`.agents/skills/grilling/`). `needs-spec` issues never enter the frontier; the
    conversation turns them into `agent:queued` issues. In both cases, continue other work.
 3. **Read `memory/invariants.md` before mutating.** It holds facts about this codebase, not
    ceremony. An invariant is never broken; a ⚖ ruling is never broken silently.
-4. **Build.** Branch off `origin/main`; use `scripts/worktree-add.sh` when parallel work could
-   collide. Fresh worktrees need `pnpm install`.
+4. **Build.** Branch off `origin/main`. In the Codex app, start isolated work in a managed
+   worktree: `.worktreeinclude` copies `.env.local`, and the selected local environment must run
+   `pnpm install`. When an agent or human creates the worktree from the shell, use
+   `scripts/worktree-add.sh`; it links the env without copying it. Never use a raw
+   `git worktree add`. Every fresh worktree needs its own real `pnpm install`.
 5. **Prove it works, once, against the real thing.** The branch's Vercel preview, never
-   `localhost:3000` (it serves the main checkout). Mechanics: `.claude/skills/browser-validation/`.
+   `localhost:3000` (it serves the main checkout). Mechanics: `.agents/skills/browser-validation/`.
    Assert the outcome; a screenshot you only admired proves nothing. Backend work gets one real
    request asserting status and shape.
 6. **Ship.** One PR, `Closes #<issue>` per issue, evidence in the body. CI green
@@ -42,7 +47,7 @@ that fits the task and keep moving.
    merge, and when another PR carries **`merge-priority`** it is starved, so every other track
    holds until it lands — read that off the board in the same breath as merging, never earlier:
    `ops/merge-hold.sh <your-pr> --wait && gh pr merge <your-pr> --squash`. Full recipe and the
-   reason the merge goes last: `.claude/skills/open-pr/`.
+   reason the merge goes last: `.agents/skills/open-pr/`.
 7. **If something fails, fix it and go again.** There is no attempt cap, no blocked label, no
    handing the work back. "I could not finish because X" is only acceptable when X is missing
    access or credentials.

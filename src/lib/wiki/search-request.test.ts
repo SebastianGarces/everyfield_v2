@@ -38,7 +38,7 @@ import type { SearchResult } from "./search";
 // instead of quietly asserting about the empty string.
 //
 // The browser half — trigger the refusal, watch the spinner settle, console
-// clean — is proved on the branch's Vercel preview (`.claude/skills/
+// clean — is proved on the branch's Vercel preview (`.agents/skills/
 // validate-frontend`).
 // ----------------------------------------------------------------------------
 

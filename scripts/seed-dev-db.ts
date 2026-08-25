@@ -486,7 +486,7 @@ const DEV_PASSWORD = "password123";
  * domain (ruled 2026-07-31); the placeholder domain it replaced is retired
  * repo-wide, and this constant is why there is one place to change rather than
  * nine literals to keep in step. Docs that hand an agent a login —
- * `.claude/skills/browser-validation/SKILL.md` above all — quote these
+ * `.agents/skills/browser-validation/SKILL.md` above all — quote these
  * addresses, so a change here is a change there.
  *
  * `OVERSIGHT_ADMIN_EMAILS` spells two of them out instead, because this file

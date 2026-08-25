@@ -2,7 +2,7 @@
 # Sweep browser processes left behind by the playwright / chrome-devtools MCP servers.
 #
 # Agents are required to close their own browsers (the teardown rule in
-# .claude/skills/validate/SKILL.md and browser-validation); this sweep catches the
+# .agents/skills/validate/SKILL.md and browser-validation); this sweep catches the
 # ones whose agent died before teardown. Left running, they accumulate across a long
 # dispatch pass and exhaust RAM.
 #

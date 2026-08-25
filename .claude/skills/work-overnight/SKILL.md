@@ -16,10 +16,14 @@ Sebastian is asleep. You are the orchestrator. Run dispatch passes on a loop unt
 
 Each iteration:
 
-1. Run one dispatch pass per `.claude/skills/dispatch/SKILL.md` — take unblocked, unclaimed frontier issues and build them to PRs.
+1. Run one dispatch pass per `.agents/skills/dispatch/SKILL.md` — take unblocked, unclaimed frontier issues and build them to PRs.
 2. Dispatch as many agents as the frontier supports. Around 6 parallel tracks is a good ceiling; use judgment on collisions (file ownership, shared surfaces).
-3. **Model cap: every spawned agent pins Opus 5 at high effort. Never spawn anything above that.** The orchestrator (you) does not implement; it dispatches, monitors, reviews, and merges.
-4. Between passes, schedule a wakeup (ScheduleWakeup) sized to the work in flight — long fallback (20+ min) when agents are running, immediate next pass when the frontier still has takeable work and slots are free.
+3. **Model discipline:** spawned agents inherit the host's configured model and reasoning effort
+   unless Sebastian explicitly requests an override. The orchestrator does not implement; it
+   dispatches, monitors, reviews, and merges.
+4. Between passes, use the host's supported wakeup or automation mechanism, sized to the work in
+   flight — long fallback (20+ min) when agents are running, immediate next pass when the frontier
+   still has takeable work and slots are free.
 5. Keep agents working. When one finishes, review its PR, fix or re-dispatch follow-ups, and backfill its slot from the frontier.
 
 ## Standing rules
@@ -33,4 +37,4 @@ Each iteration:
 
 ## Stop and report
 
-At the stop time: stop dispatching new work, let in-flight agents land, then post one report to Sebastian: issues taken, PRs opened/merged, decisions made, failures and what restarts them, and the frontier that remains. Then update the session handoff memory.
+At the stop time: stop dispatching new work, let in-flight agents land, then post one report to Sebastian: issues taken, PRs opened/merged, decisions made, failures and what restarts them, and the frontier that remains. Use the current host's native handoff. Claude updates its session handoff memory; Codex relies on the task history and native handoff, and writes no Claude memory.

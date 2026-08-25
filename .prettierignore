@@ -19,14 +19,14 @@ pnpm-lock.yaml
 # code then reached CI, which is the only formatter check that could still see it
 # (a CI fail on #302).
 #
-# The fix is in `.claude/settings.json` (PostToolUse) and `.cursor/hooks/format.sh`
-# (afterFileEdit): each hook resolves the NEAREST `.prettierignore` walking up
-# from the file it was handed and passes it as `--ignore-path`. For a file in the
-# main checkout that is this file, unchanged. For a file inside a worktree it is
-# that worktree's own copy, where the patterns resolve against the worktree root
-# — so `node_modules`/`.next` still apply and the line below does not match
-# `src/...`. Do not "simplify" that flag away, and do not delete this line:
-# dropping it makes `pnpm format:check` walk every sibling worktree.
+# The fix is the shared `ops/format-agent-edit.sh` adapter, wired from Claude,
+# Cursor, and Codex: it resolves the NEAREST `.prettierignore` walking up from
+# the file it was handed and passes it as `--ignore-path`. For a file in the main
+# checkout that is this file, unchanged. For a file inside a worktree it is that
+# worktree's own copy, where the patterns resolve against the worktree root — so
+# `node_modules`/`.next` still apply and the line below does not match `src/...`.
+# Do not "simplify" that flag away, and do not delete this line: dropping it
+# makes `pnpm format:check` walk every sibling worktree.
 .claude/worktrees/
 
 # Historical impeccable critique outputs (the skill itself was removed 2026-08-04)

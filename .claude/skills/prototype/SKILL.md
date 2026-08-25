@@ -33,7 +33,7 @@ on `<html>`, so switching is instant and comparison is honest. The harness is
 docblock; it is the full pattern.** Diverge on structure (layout, hierarchy, affordances), not
 styling, and stub any variant interaction that would mutate data — the preview writes to the shared
 development database. Get the URL with `./scripts/preview-url.sh --wait --bypass <pr-number>`; see
-`.claude/skills/browser-validation/SKILL.md` for logins and the bypass cookie.
+`.agents/skills/browser-validation/SKILL.md` for logins and the bypass cookie.
 
 ## Behavior directions (rare — only when the call is irreversible)
 

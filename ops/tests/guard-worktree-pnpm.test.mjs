@@ -8,8 +8,8 @@
 // `../.claude/worktrees/<name>/node_modules/.pnpm/...` — dead the moment the
 // worktree is deleted (40 broken links on 2026-08-19). pnpm runs root
 // lifecycle scripts only AFTER linking (proven 2026-08-20), so the guard must
-// fire before pnpm does: PreToolUse for Claude, beforeShellExecution for
-// Cursor, both pointing at this one script.
+// fire before pnpm does: PreToolUse for Claude and Codex,
+// beforeShellExecution for Cursor, all pointing at this one script.
 //
 // These run the real script against throwaway directories — no pnpm, no
 // network. The last block asserts the *wiring*: both hook configs and the
@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 import { spawnSync } from "node:child_process";
 
 // Resolved from this file, not the cwd — the test must not depend on where it is run from.
@@ -46,6 +47,42 @@ function fixture() {
     path.join(wt, "node_modules")
   );
   return { dir, parent, wt };
+}
+
+function registeredFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-registered-wt-"));
+  const parent = path.join(dir, "repo");
+  const wt = path.join(dir, "worktree");
+  fs.mkdirSync(parent, { recursive: true });
+  fs.writeFileSync(path.join(parent, "package.json"), "{}");
+  spawnSync("git", ["init", "-q", parent], { encoding: "utf8" });
+  spawnSync("git", ["-C", parent, "add", "package.json"], {
+    encoding: "utf8",
+  });
+  spawnSync(
+    "git",
+    [
+      "-C",
+      parent,
+      "-c",
+      "user.name=Guard Test",
+      "-c",
+      "user.email=guard@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ],
+    { encoding: "utf8" }
+  );
+  spawnSync("git", ["-C", parent, "worktree", "add", "-q", wt], {
+    encoding: "utf8",
+  });
+  fs.mkdirSync(path.join(parent, "node_modules"));
+  fs.symlinkSync(
+    path.join(parent, "node_modules"),
+    path.join(wt, "node_modules")
+  );
+  return { parent, wt };
 }
 
 test("allows pnpm install where node_modules is a real directory", () => {
@@ -124,7 +161,7 @@ test("empty command and cwd without any package.json are allowed", () => {
 
 // ---- wiring: the mechanism must actually be attached, in all three places ----
 
-test("Claude PreToolUse Bash hook points at the guard script", () => {
+test("Claude PreToolUse Bash hook points at the shared guard adapter", () => {
   const settings = JSON.parse(
     fs.readFileSync(path.join(ROOT, ".claude/settings.json"), "utf8")
   );
@@ -132,8 +169,66 @@ test("Claude PreToolUse Bash hook points at the guard script", () => {
   const bash = pre.find((h) => h.matcher === "Bash");
   assert.ok(bash, "no PreToolUse matcher for Bash in .claude/settings.json");
   const cmd = bash.hooks.map((h) => h.command).join("\n");
-  assert.match(cmd, /guard-worktree-pnpm\.sh/);
-  assert.match(cmd, /exit 2/, "a PreToolUse hook blocks by exiting 2");
+  assert.match(cmd, /guard-worktree-pnpm-hook\.sh/);
+
+  const adapter = fs.readFileSync(
+    path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh"),
+    "utf8"
+  );
+  assert.match(adapter, /ops\/guard-worktree-pnpm\.sh/);
+  assert.match(adapter, /exit 2/, "a PreToolUse hook blocks by exiting 2");
+});
+
+test("Codex PreToolUse Bash hook points at the shared guard adapter", () => {
+  const hooks = JSON.parse(
+    fs.readFileSync(path.join(ROOT, ".codex/hooks.json"), "utf8")
+  );
+  const pre = hooks.hooks?.PreToolUse ?? [];
+  const bash = pre.find((h) => h.matcher === "Bash");
+  assert.ok(bash, "no PreToolUse matcher for Bash in .codex/hooks.json");
+  const cmd = bash.hooks.map((h) => h.command).join("\n");
+  assert.match(cmd, /guard-worktree-pnpm-hook\.sh/);
+
+  const adapter = fs.readFileSync(
+    path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh"),
+    "utf8"
+  );
+  assert.match(adapter, /ops\/guard-worktree-pnpm\.sh/);
+  assert.match(adapter, /exit 2/);
+});
+
+test("the Claude/Codex hook adapter blocks the real poisoned-worktree event", () => {
+  const { wt } = fixture();
+  const event = JSON.stringify({
+    cwd: wt,
+    tool_input: { command: "pnpm install" },
+  });
+  const result = spawnSync(
+    "bash",
+    [path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh")],
+    { encoding: "utf8", input: event }
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /node_modules is a symlink/);
+});
+
+test("the hook blocks when cwd is healthy but a registered worktree is poisoned", () => {
+  const { parent, wt } = registeredFixture();
+  const event = JSON.stringify({
+    cwd: parent,
+    tool_input: { command: "pnpm install" },
+  });
+  const result = spawnSync(
+    "bash",
+    [path.join(ROOT, "ops/guard-worktree-pnpm-hook.sh")],
+    {
+      encoding: "utf8",
+      input: event,
+      env: { ...process.env, GUARD_WORKTREE_REPO_ROOT: parent },
+    }
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, new RegExp(`${wt}/node_modules is a symlink`));
 });
 
 test("Cursor beforeShellExecution hook points at the adapter, and the adapter at the script", () => {
