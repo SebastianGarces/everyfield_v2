@@ -3,9 +3,10 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
-import { DashboardHeader, HeaderProvider } from "@/components/header";
+import { HeaderProvider } from "@/components/header";
 import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { PageHierarchyPrototype } from "@/components/page-hierarchy-prototype";
 import { SettingsModal } from "@/components/settings/settings-modal";
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -185,6 +186,7 @@ export default async function DashboardLayout({
             </Suspense>
           )}
         </GlobalAppBar>
+        <PageHierarchyPrototype />
         <div className="flex min-h-0 flex-1">
           <AppSidebar
             user={sidebarUser}
@@ -195,7 +197,6 @@ export default async function DashboardLayout({
           />
           <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             <HeaderProvider>
-              <DashboardHeader />
               {/* The route-content main carries `tabIndex={-1}` so the settings
                 modal has somewhere to put focus when it closes. The control
                 that opened it — a Settings item inside the account dropdown —

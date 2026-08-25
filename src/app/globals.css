@@ -7,6 +7,36 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+/* #697 taste prototype. Direction B lets the page's h1 name a top-level route;
+   a breadcrumb only earns the integrated surface header when it provides a
+   navigable ancestor. Portal actions keep the header visible even on a
+   top-level route. This entire block leaves with the prototype switcher. */
+html[data-auth-page-hierarchy="b"]
+  [data-slot="page-context"][data-breadcrumb-depth="1"]:not(
+    :has(> [data-slot="page-actions"] > *)
+  ) {
+  display: none;
+}
+
+html[data-auth-page-hierarchy="b"]
+  [data-slot="page-hierarchy-frame"]:has(
+    > [data-slot="page-context"][data-breadcrumb-depth="1"]:not(
+        :has(> [data-slot="page-actions"] > *)
+      )
+  )
+  > [data-slot="page-content"]
+  > [data-slot="workspace-panel"],
+html[data-auth-page-hierarchy="b"]
+  [data-slot="split-workspace"]:has(
+    > [data-slot="page-context"][data-breadcrumb-depth="1"]:not(
+        :has(> [data-slot="page-actions"] > *)
+      )
+  )
+  > [data-slot="workspace-panel"]:last-child {
+  border-top-width: 1px;
+  border-radius: var(--radius-xl);
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

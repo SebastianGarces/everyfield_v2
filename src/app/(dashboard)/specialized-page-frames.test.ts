@@ -404,7 +404,11 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
   assertInOrder(
     source,
     "wiki/layout.tsx",
-    ['<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />', "<SplitWorkspace>"],
+    [
+      '<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />',
+      '<SplitWorkspace className="grid-rows-[auto_minmax(0,1fr)] [[data-auth-page-hierarchy=b]_&]:gap-y-0">',
+      "<PageContext",
+    ],
     "Wiki context must replace Dashboard before the split workspace renders"
   );
 });

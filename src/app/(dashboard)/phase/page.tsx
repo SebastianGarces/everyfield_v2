@@ -20,9 +20,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
-import { HeaderBreadcrumbs } from "@/components/header";
+import { HeaderBreadcrumbs, PageContext } from "@/components/header";
 import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
 import { FocusPanel } from "@/components/phase-engine/focus-panel";
 import {
@@ -236,9 +236,13 @@ export default async function PhasePage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">
-          <header>
+      <PageCanvas frameClassName="mx-auto w-full max-w-6xl" context="none">
+        <div
+          data-slot="plant-intelligence-content"
+          className="min-h-full space-y-6"
+        >
+          <header className="[[data-auth-page-hierarchy=b]_&]:bg-card [[data-auth-page-hierarchy=b]_&]:rounded-xl [[data-auth-page-hierarchy=b]_&]:border [[data-auth-page-hierarchy=b]_&]:p-4 [[data-auth-page-hierarchy=b]_&]:shadow-sm [[data-auth-page-hierarchy=b]_&]:sm:p-6">
+            <PageContext className="mb-2" />
             <h1 className="text-2xl font-semibold tracking-tight">
               Plant Intelligence
             </h1>
@@ -320,7 +324,7 @@ export default async function PhasePage() {
               />
             </div>
           </div>
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );
