@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -149,145 +150,146 @@ export default async function MessageDetailPage({
           { label: resolvedSubject },
         ]}
       />
-      <div className="flex h-full flex-col">
-        <div className="bg-card p-6 shadow-sm">
-          <Button
-            variant="ghost"
-            size="sm"
-            asChild
-            className="mb-4 cursor-pointer"
-          >
-            <Link href="/communication/history">
-              <ArrowLeft className="mr-1 h-4 w-4" />
-              Back to Messages
-            </Link>
-          </Button>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {resolvedSubject}
-          </h1>
-          <div className="mt-1 flex items-center gap-4">
-            <p className="text-muted-foreground">
-              Sent{" "}
-              {comm.sentAt
-                ? formatDateTime(comm.sentAt, "long", timeZone)
-                : "—"}
-            </p>
-            {meeting && (
-              <Link
-                href={`/meetings/${meeting.id}`}
-                className="bg-muted/50 text-foreground/70 hover:bg-muted hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
-              >
-                <Calendar className="h-3.5 w-3.5" />
-                {meeting.title || meetingTypeLabel(meeting.type)}
-                <ExternalLink className="h-3 w-3" />
+      <PageCanvas>
+        <WorkspacePanel className="min-h-full">
+          <div className="border-b p-4 sm:p-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="mb-4 cursor-pointer"
+            >
+              <Link href="/communication/history">
+                <ArrowLeft className="mr-1 h-4 w-4" />
+                Back to Messages
               </Link>
-            )}
-          </div>
-          {/* Resend to non-openers (COM-018) */}
-          <div className="mt-4">
-            <ResendNonOpeners
-              communicationId={comm.id}
-              nonOpenerCount={nonOpeners.personIds.length}
-              openedCount={nonOpeners.opened}
-              eligibility={resendEligibility}
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-6">
-          {/* Delivery Stats */}
-          <div className="mb-6 grid gap-4 md:grid-cols-4">
-            {tiles.map((tile) => {
-              const Icon = tileIcons[tile.key];
-              return (
-                <Card key={tile.key} data-testid={`message-tile-${tile.key}`}>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">
-                      {tile.label}
-                    </CardTitle>
-                    <Icon className="text-muted-foreground h-4 w-4" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold tabular-nums">
-                      {tile.value}
-                    </div>
-                    <p
-                      className="text-muted-foreground text-xs"
-                      data-testid={`message-tile-${tile.key}-caption`}
-                    >
-                      {tile.caption}
-                    </p>
-                  </CardContent>
-                </Card>
-              );
-            })}
+            </Button>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {resolvedSubject}
+            </h1>
+            <div className="mt-1 flex items-center gap-4">
+              <p className="text-muted-foreground">
+                Sent{" "}
+                {comm.sentAt
+                  ? formatDateTime(comm.sentAt, "long", timeZone)
+                  : "—"}
+              </p>
+              {meeting && (
+                <Link
+                  href={`/meetings/${meeting.id}`}
+                  className="bg-muted/50 text-foreground/70 hover:bg-muted hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  {meeting.title || meetingTypeLabel(meeting.type)}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+            {/* Resend to non-openers (COM-018) */}
+            <div className="mt-4">
+              <ResendNonOpeners
+                communicationId={comm.id}
+                nonOpenerCount={nonOpeners.personIds.length}
+                openedCount={nonOpeners.opened}
+                eligibility={resendEligibility}
+              />
+            </div>
           </div>
 
-          {/* Recipients */}
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Recipients</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-lg border">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b bg-gray-50 text-left text-sm font-medium text-gray-500">
-                      <th className="px-4 py-3">Name</th>
-                      <th className="px-4 py-3">Email</th>
-                      <th className="px-4 py-3 text-center">Status</th>
-                      <th className="px-4 py-3">Timestamps</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recipients.map((r) => {
-                      return (
-                        <tr
-                          key={r.id}
-                          className="border-b last:border-0 hover:bg-gray-50"
-                        >
-                          <td className="px-4 py-3 font-medium">
-                            <Link
-                              href={`/people/${r.personId}`}
-                              className="cursor-pointer hover:underline"
-                            >
-                              {r.person.firstName} {r.person.lastName}
-                            </Link>
-                          </td>
-                          <td className="text-muted-foreground px-4 py-3 text-sm">
-                            {r.email}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge
-                              variant="secondary"
-                              className={recipientStatusBadgeClass(r.status)}
-                            >
-                              {recipientStatusLabel(r.status)}
-                            </Badge>
-                          </td>
-                          <td className="text-muted-foreground px-4 py-3 text-xs">
-                            {r.deliveredAt &&
-                              `Delivered: ${formatDateTime(r.deliveredAt, "short", timeZone)}`}
-                            {r.openedAt &&
-                              ` · Opened: ${formatDateTime(r.openedAt, "short", timeZone)}`}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="p-4 sm:p-6">
+            {/* Delivery Stats */}
+            <div className="mb-6 grid gap-4 md:grid-cols-4">
+              {tiles.map((tile) => {
+                const Icon = tileIcons[tile.key];
+                return (
+                  <Card key={tile.key} data-testid={`message-tile-${tile.key}`}>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">
+                        {tile.label}
+                      </CardTitle>
+                      <Icon className="text-muted-foreground h-4 w-4" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold tabular-nums">
+                        {tile.value}
+                      </div>
+                      <p
+                        className="text-muted-foreground text-xs"
+                        data-testid={`message-tile-${tile.key}-caption`}
+                      >
+                        {tile.caption}
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
 
-          {/* Message Content */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Message Content</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-lg bg-gray-50 p-4">
-                {/* The body a planter composed is rich text (COM-017), so it
+            {/* Recipients */}
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle>Recipients</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-muted/50 text-muted-foreground border-b text-left text-sm font-medium">
+                        <th className="px-4 py-3">Name</th>
+                        <th className="px-4 py-3">Email</th>
+                        <th className="px-4 py-3 text-center">Status</th>
+                        <th className="px-4 py-3">Timestamps</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recipients.map((r) => {
+                        return (
+                          <tr
+                            key={r.id}
+                            className="hover:bg-muted/40 border-b last:border-0"
+                          >
+                            <td className="px-4 py-3 font-medium">
+                              <Link
+                                href={`/people/${r.personId}`}
+                                className="cursor-pointer hover:underline"
+                              >
+                                {r.person.firstName} {r.person.lastName}
+                              </Link>
+                            </td>
+                            <td className="text-muted-foreground px-4 py-3 text-sm">
+                              {r.email}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <Badge
+                                variant="secondary"
+                                className={recipientStatusBadgeClass(r.status)}
+                              >
+                                {recipientStatusLabel(r.status)}
+                              </Badge>
+                            </td>
+                            <td className="text-muted-foreground px-4 py-3 text-xs">
+                              {r.deliveredAt &&
+                                `Delivered: ${formatDateTime(r.deliveredAt, "short", timeZone)}`}
+                              {r.openedAt &&
+                                ` · Opened: ${formatDateTime(r.openedAt, "short", timeZone)}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Message Content */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Message Content</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted/50 rounded-lg p-4">
+                  {/* The body a planter composed is rich text (COM-017), so it
                     is rendered, not printed — `RichText` sanitises, merges, and
                     carries the plain-text bodies sent before it shipped. It is
                     the same reader the task detail page mounts.
@@ -297,15 +299,16 @@ export default async function MessageDetailPage({
                     plain text — which is what `body` holds, because search
                     reads that column — for a row written before `body_html`
                     did. `toRichTextHtml` inside `RichText` converts either. */}
-                <RichText
-                  body={comm.bodyHtml ?? comm.body}
-                  mergeData={mergeData}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                  <RichText
+                    body={comm.bodyHtml ?? comm.body}
+                    mergeData={mergeData}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

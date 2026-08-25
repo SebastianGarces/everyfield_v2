@@ -18,7 +18,7 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
   const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
   return (
-    <div className="bg-card border-b p-6">
+    <div className="border-b p-4 sm:p-6">
       <div className="flex items-start gap-4">
         <div
           className={cn(

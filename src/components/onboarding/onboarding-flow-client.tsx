@@ -370,7 +370,7 @@ export function OnboardingFlowClient({
   const current = onboardingStep(step);
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6">
+    <div className="mx-auto w-full max-w-2xl space-y-6 py-1">
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="bg-primary/10 flex size-10 items-center justify-center rounded-lg">

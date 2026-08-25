@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Mail, Pencil } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -58,87 +59,89 @@ export default async function TemplatesPage() {
           { label: "Templates" },
         ]}
       />
-      <div className="flex h-full flex-col">
-        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Message Templates
-              </h1>
-              <p className="text-muted-foreground">
-                Pre-built templates for common communications
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-6">
-          {Object.entries(grouped).map(([category, categoryTemplates]) => (
-            <div key={category} className="mb-8">
-              <h2 className="mb-3 text-lg font-semibold">
-                {categoryLabels[category as TemplateCategory] ?? category}
-              </h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {categoryTemplates.map((template) => (
-                  <Card key={template.id}>
-                    <CardContent className="p-4">
-                      <div className="mb-2 flex items-start justify-between">
-                        <div>
-                          <p className="font-medium">{template.name}</p>
-                          {template.sourceTemplateId && (
-                            <Badge variant="outline" className="mt-1 text-xs">
-                              Customized
-                            </Badge>
-                          )}
-                        </div>
-                        <Badge variant="secondary" className="text-xs">
-                          {template.channel}
-                        </Badge>
-                      </div>
-                      {template.description && (
-                        <p className="text-muted-foreground mb-3 text-sm">
-                          {template.description}
-                        </p>
-                      )}
-                      {canSend && (
-                        <div className="flex items-center gap-2">
-                          <Button variant="default" size="sm" asChild>
-                            <Link
-                              href={`/communication/compose?templateId=${template.id}`}
-                              className="cursor-pointer"
-                            >
-                              <Mail className="mr-1 h-3 w-3" />
-                              Use
-                            </Link>
-                          </Button>
-                          <Button variant="outline" size="sm" asChild>
-                            <Link
-                              href={`/communication/templates/${template.id}/edit`}
-                              className="cursor-pointer"
-                            >
-                              <Pencil className="mr-1 h-3 w-3" />
-                              Edit
-                            </Link>
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+      <PageCanvas className="overflow-hidden">
+        <WorkspacePanel className="flex h-full flex-col overflow-hidden">
+          <div className="space-y-6 border-b p-4 pb-4 sm:p-6 sm:pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight">
+                  Message Templates
+                </h1>
+                <p className="text-muted-foreground">
+                  Pre-built templates for common communications
+                </p>
               </div>
             </div>
-          ))}
+          </div>
 
-          {templates.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Mail className="text-muted-foreground mb-4 h-12 w-12" />
-              <p className="text-muted-foreground text-lg font-medium">
-                No templates available
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            {Object.entries(grouped).map(([category, categoryTemplates]) => (
+              <div key={category} className="mb-8">
+                <h2 className="mb-3 text-lg font-semibold">
+                  {categoryLabels[category as TemplateCategory] ?? category}
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {categoryTemplates.map((template) => (
+                    <Card key={template.id}>
+                      <CardContent className="p-4">
+                        <div className="mb-2 flex items-start justify-between">
+                          <div>
+                            <p className="font-medium">{template.name}</p>
+                            {template.sourceTemplateId && (
+                              <Badge variant="outline" className="mt-1 text-xs">
+                                Customized
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge variant="secondary" className="text-xs">
+                            {template.channel}
+                          </Badge>
+                        </div>
+                        {template.description && (
+                          <p className="text-muted-foreground mb-3 text-sm">
+                            {template.description}
+                          </p>
+                        )}
+                        {canSend && (
+                          <div className="flex items-center gap-2">
+                            <Button variant="default" size="sm" asChild>
+                              <Link
+                                href={`/communication/compose?templateId=${template.id}`}
+                                className="cursor-pointer"
+                              >
+                                <Mail className="mr-1 h-3 w-3" />
+                                Use
+                              </Link>
+                            </Button>
+                            <Button variant="outline" size="sm" asChild>
+                              <Link
+                                href={`/communication/templates/${template.id}/edit`}
+                                className="cursor-pointer"
+                              >
+                                <Pencil className="mr-1 h-3 w-3" />
+                                Edit
+                              </Link>
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {templates.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Mail className="text-muted-foreground mb-4 h-12 w-12" />
+                <p className="text-muted-foreground text-lg font-medium">
+                  No templates available
+                </p>
+              </div>
+            )}
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

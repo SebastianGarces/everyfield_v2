@@ -1,6 +1,7 @@
 "use client";
 
 import { deletePersonAction } from "@/app/(dashboard)/people/actions";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import type { Household } from "@/db/schema";
 import type { PersonForClient, PersonStatus } from "@/lib/people/types";
 import { useRouter } from "next/navigation";
@@ -52,25 +53,28 @@ export function PersonProfileShell({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header hero panel */}
-      <div className="bg-card relative z-10 shadow-sm">
-        <div className="mx-auto max-w-4xl space-y-6 p-6">
-          <PersonHeader
-            person={optimisticPerson}
-            household={household ?? null}
-            onEdit={() => setIsEditOpen(true)}
-            onDelete={handleDelete}
-            onOptimisticStatusChange={updateOptimisticPerson}
-          />
-          <PersonTabs personId={person.id} activeTab={activeTab} />
+    <PageCanvas>
+      <WorkspacePanel className="min-h-full">
+        {/* The extra wrapper gives the profile one rounded surface while the
+            canvas remains the only vertical scroll owner. Dialog state and
+            every action remain owned by this component. */}
+        <div className="relative z-10 border-b">
+          <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
+            <PersonHeader
+              person={optimisticPerson}
+              household={household ?? null}
+              onEdit={() => setIsEditOpen(true)}
+              onDelete={handleDelete}
+              onOptimisticStatusChange={updateOptimisticPerson}
+            />
+            <PersonTabs personId={person.id} activeTab={activeTab} />
+          </div>
         </div>
-      </div>
 
-      {/* Content area on gray canvas */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="mx-auto max-w-4xl space-y-6">{children}</div>
-      </div>
+        <div className="p-4 sm:p-6">
+          <div className="mx-auto max-w-4xl space-y-6">{children}</div>
+        </div>
+      </WorkspacePanel>
 
       {/* Edit Dialog */}
       <PersonEditDialog
@@ -78,6 +82,6 @@ export function PersonProfileShell({
         open={isEditOpen}
         onOpenChange={setIsEditOpen}
       />
-    </div>
+    </PageCanvas>
   );
 }

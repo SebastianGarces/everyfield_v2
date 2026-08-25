@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button";
+import { PageCanvas } from "@/components/layout/page-frame";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import type { PersonForClient } from "@/lib/people/types";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -60,8 +60,8 @@ export async function AssessmentEntryShell({
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-6 pb-24">
-      <Card>
+    <PageCanvas className="pb-24">
+      <Card className="mx-auto max-w-4xl shadow-sm">
         <CardHeader>
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" asChild>
@@ -70,7 +70,7 @@ export async function AssessmentEntryShell({
               </Link>
             </Button>
             <div>
-              <CardTitle className="text-2xl">{title}</CardTitle>
+              <h1 className="text-2xl leading-none font-semibold">{title}</h1>
               <CardDescription>
                 {person.firstName} {person.lastName}
               </CardDescription>
@@ -79,6 +79,6 @@ export async function AssessmentEntryShell({
         </CardHeader>
         <CardContent>{renderForm(person)}</CardContent>
       </Card>
-    </div>
+    </PageCanvas>
   );
 }
