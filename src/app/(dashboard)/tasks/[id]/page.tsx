@@ -196,7 +196,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
         contextItems={breadcrumbs}
         frameClassName="mx-auto w-full max-w-4xl"
       >
-        <WorkspacePanel className="mb-3 min-h-full p-4 sm:mb-4 sm:p-6">
+        <WorkspacePanel className="min-h-full p-4 sm:p-6">
           {/* The task sections need one parent to share a rounded workspace
               boundary; CSS cannot establish that relationship across the old
               siblings. Reads, actions, forms, and permission gates stay in
@@ -380,6 +380,11 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             )}
           </div>
         </WorkspacePanel>
+        <div
+          aria-hidden="true"
+          className="h-3 shrink-0 sm:h-4"
+          data-slot="task-detail-end-inset"
+        />
       </PageCanvas>
     </>
   );

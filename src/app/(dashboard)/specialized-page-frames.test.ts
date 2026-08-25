@@ -416,16 +416,77 @@ test("task detail keeps a canvas-sized bottom inset after tall content", () => {
     path.join(process.cwd(), "src/app/(dashboard)/tasks/[id]/page.tsx"),
     "utf8"
   );
+  const sourceFile = ts.createSourceFile(
+    "tasks/[id]/page.tsx",
+    page,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  const canvases: ts.JsxElement[] = [];
+  const collectCanvases = (node: ts.Node) => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText(sourceFile) === "PageCanvas"
+    ) {
+      canvases.push(node);
+    }
+    ts.forEachChild(node, collectCanvases);
+  };
+  collectCanvases(sourceFile);
+
+  assert.equal(canvases.length, 1, "task detail must keep one PageCanvas");
+  const directElements = canvases[0].children.filter(
+    (child): child is ts.JsxElement | ts.JsxSelfClosingElement =>
+      ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)
+  );
+
+  assert.equal(
+    directElements.length,
+    2,
+    "the canvas content must end with one presentation spacer after its workspace"
+  );
+  const [workspace, endInset] = directElements;
+  assert.ok(
+    ts.isJsxElement(workspace),
+    "the task card must remain a JSX element"
+  );
+  assert.equal(
+    workspace.openingElement.tagName.getText(sourceFile),
+    "WorkspacePanel",
+    "the task card remains the first canvas-content box"
+  );
+  assert.ok(
+    ts.isJsxSelfClosingElement(endInset),
+    "the end inset must remain an empty presentation box"
+  );
+  assert.equal(
+    endInset.tagName.getText(sourceFile),
+    "div",
+    "a concrete box after the overflowing card must extend the scroll range"
+  );
+  const workspaceSource = workspace.getText(sourceFile);
+  const endInsetSource = endInset.getText(sourceFile);
 
   assert.match(
-    page,
-    /<WorkspacePanel className="[^"]*\bmb-3\b[^"]*\bsm:mb-4\b[^"]*"/,
-    "the overflowing workspace must carry PageCanvas's p-3/sm:p-4 bottom inset into the scroll range"
+    endInsetSource,
+    /aria-hidden="true"[\s\S]*className="h-3 shrink-0 sm:h-4"[\s\S]*data-slot="task-detail-end-inset"/,
+    "the non-shrinking post-card box must match PageCanvas's p-3/sm:p-4 bottom inset"
+  );
+  assert.match(
+    PAGE_FRAME_SOURCE,
+    /overflow-auto overscroll-y-none p-3 sm:p-4/,
+    "the spacer sizes must stay paired with the shared canvas inset"
+  );
+  assert.doesNotMatch(
+    workspaceSource,
+    /\bmb-3\b|\bsm:mb-4\b/,
+    "the fix must not restore the ineffective collapsing workspace margin"
   );
   assert.doesNotMatch(
     page,
     /(?:overflow-auto|overflow-y-auto)/,
-    "the spacing fix must not introduce a second vertical scroll owner"
+    "the fix must not add another vertical scroll owner"
   );
 });
 
