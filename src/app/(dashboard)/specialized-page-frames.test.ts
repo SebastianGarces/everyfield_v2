@@ -4,6 +4,8 @@ import path from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
 
+import { assertInOrder } from "@/lib/testing/source-span";
+
 interface SpecializedRouteFamily {
   routes: readonly string[];
   owner: string;
@@ -399,18 +401,10 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
     path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
     "utf8"
   );
-  const contextAt = source.indexOf(
-    '<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />'
-  );
-  const workspaceAt = source.indexOf("<SplitWorkspace>");
-
-  assert.notEqual(
-    contextAt,
-    -1,
-    "/wiki must not fall back to Dashboard context"
-  );
-  assert.ok(
-    contextAt < workspaceAt,
-    "/wiki must publish its context before rendering the split workspace"
+  assertInOrder(
+    source,
+    "wiki/layout.tsx",
+    ['<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />', "<SplitWorkspace>"],
+    "Wiki context must replace Dashboard before the split workspace renders"
   );
 });
