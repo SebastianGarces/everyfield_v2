@@ -57,6 +57,15 @@ test("the meeting header uses the shared detail-header hierarchy", () => {
     assert.ok(slots.includes(slot), `${slot} must stay in the meeting header`);
   }
 
+  const responsiveRow = parseElements(html).find((element) => {
+    const className = element.attrs["class"];
+    return className?.includes("flex-col") && className.includes("md:flex-row");
+  });
+  assert.ok(
+    responsiveRow,
+    "the title and trailing status must stack before the desktop breakpoint"
+  );
+
   assert.ok(
     html.indexOf("Vision Meeting</span>") <
       html.indexOf("Vision Meeting #4</h1>") &&

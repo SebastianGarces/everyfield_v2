@@ -33,6 +33,7 @@ export function MeetingHeader({ meeting, timeZone }: MeetingHeaderProps) {
 
   return (
     <DetailHeader
+      responsive
       eyebrow={
         <>
           <Badge
