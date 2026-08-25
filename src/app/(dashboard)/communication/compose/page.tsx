@@ -10,6 +10,7 @@ import { db } from "@/db";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { ComposeForm } from "./compose-form";
 
 export const dynamic = "force-dynamic";
@@ -119,15 +120,20 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
           { label: "New Message" },
         ]}
       />
-      <ComposeForm
-        templates={templates}
-        initialTemplate={selectedTemplate ?? autoTemplate}
-        meetingId={meetingId}
-        meetings={meetings}
-        initialRecipients={preloadedRecipients}
-        churchName={churchName}
-        teams={teams}
-      />
+      <PageCanvas className="overflow-hidden">
+        <h1 className="sr-only">New message</h1>
+        <WorkspacePanel className="h-full overflow-hidden">
+          <ComposeForm
+            templates={templates}
+            initialTemplate={selectedTemplate ?? autoTemplate}
+            meetingId={meetingId}
+            meetings={meetings}
+            initialRecipients={preloadedRecipients}
+            churchName={churchName}
+            teams={teams}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

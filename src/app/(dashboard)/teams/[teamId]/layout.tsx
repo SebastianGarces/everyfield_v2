@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TeamDetailHeader } from "@/components/ministry-teams/team-detail-header";
 import { TeamTabs } from "@/components/ministry-teams/team-tabs";
 import { verifySession } from "@/lib/auth/session";
@@ -36,13 +37,15 @@ export default async function TeamDetailLayout({
           { label: team.name },
         ]}
       />
-      <div className="flex h-full flex-col">
-        <TeamDetailHeader team={team} />
-        <div className="px-6 pt-0">
-          <TeamTabs teamId={teamId} />
-        </div>
-        <div className="flex-1 overflow-auto p-6">{children}</div>
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="min-h-full">
+          <TeamDetailHeader team={team} />
+          <div className="px-4 pt-0 sm:px-6">
+            <TeamTabs teamId={teamId} />
+          </div>
+          <div className="p-4 sm:p-6">{children}</div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

@@ -36,10 +36,10 @@ type TableOfContentsProps = {
  * Renders nothing below `TOC_MIN_HEADINGS` headings. Once the wiki layout's
  * content column can afford it — a container query, mirroring the card
  * widening in `wiki/layout.tsx`, so the prose keeps its 704px measure — it
- * is a sticky right rail beside the prose, capped to the viewport and scrolling
- * inside itself so a long TOC never has to be chased down the article; in
- * narrower columns it collapses into a closed disclosure above the article so it
- * never squeezes the text.
+ * is a sticky right rail beside the prose, capped to the wiki workspace and
+ * scrolling inside itself so a long TOC never has to be chased down the
+ * article; in narrower columns it collapses into a closed disclosure above the
+ * article so it never squeezes the text.
  *
  * Scroll position is *not* persisted here — reading progress is W-012's job
  * (`ProgressTracker`), and this component deliberately only reads scroll state.
@@ -75,20 +75,17 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
       {/* Wide column: sticky right rail, scrolling inside itself.
 
           The height cap is what makes the rail a scroll container rather than a
-          sticky column that simply runs off the bottom of the screen: without
-          it, a TOC taller than the viewport could only be read by scrolling the
-          ARTICLE, which moves the prose the reader was orienting in. The 8rem
-          is everything above the rail — topbar `h-16` + the content column's
-          `p-6` + the card's `py-10` — which is also the rail's unstuck offset,
-          so at the top of an article it ends flush with the viewport bottom and
-          once it sticks at `top-6` the difference becomes breathing room.
+          sticky column that runs past its panel. It uses the named size
+          container established by `wiki/layout.tsx`, so shell-bar or breadcrumb
+          changes cannot make the TOC overflow its actual workspace. Five rem
+          preserves the article's vertical padding at the top and bottom.
 
           Only the link list scrolls; "On this page" stays put, so a reader
           halfway down a long TOC still knows what they are looking at. */}
       <nav
         data-testid="wiki-toc"
         aria-label="Table of contents"
-        className="sticky top-6 hidden max-h-[calc(100vh-8rem)] w-48 shrink-0 flex-col self-start @min-[65rem]/wiki-content:flex @min-[67rem]/wiki-content:w-56"
+        className="sticky top-6 hidden max-h-[calc(100cqh-5rem)] w-48 shrink-0 flex-col self-start @min-[65rem]/wiki-content:flex @min-[67rem]/wiki-content:w-56"
       >
         <p className="text-muted-foreground mb-3 shrink-0 text-xs font-semibold tracking-wide uppercase">
           On this page
