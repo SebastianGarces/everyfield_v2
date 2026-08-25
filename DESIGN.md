@@ -101,7 +101,8 @@ typography:
     letterSpacing: 0.1em
 rounded:
   none: 0px
-  DEFAULT: 0px # radius is 0 everywhere, by ruling — edges are drawn, not implied
+  DEFAULT: 0px # marketing only — edges are drawn, not implied
+  app-default: 10px # authenticated app: shadcn's 0.625rem base radius
   shot-frame: 16px # the one exception: product-screenshot frames (see Shapes)
 spacing:
   xs: 8px
@@ -223,9 +224,15 @@ field paintings — never gray-bar skeletons — until real screenshots exist.
 
 **Scope:** this document governs the marketing surface (`(marketing)` routes).
 The in-app UI takes exactly two brand colors — green (the signal) and ink
-(text and primary) — plus the rectangle discipline (ruled 2026-07-31: cream
-grounds are marketing-only; the app keeps its neutral surfaces). Newsreader
-and the giant display scale never appear in UI.
+(text and primary) — while keeping its neutral surfaces. Marketing remains
+Sharp. The authenticated app uses shadcn's `0.625rem` base radius and native
+component geometry; pills and avatars retain their intentional shapes, and
+page-level workspace panels use `rounded-xl`. Newsreader and the giant display
+scale never appear in UI.
+
+The authenticated app bar is ink with its light foreground. Its 24px brand
+mark is the sole green-on-ink exception. That exception does not license green
+text, controls, or general icons on ink.
 
 ## Colors
 
@@ -256,7 +263,7 @@ else. All ratios below are measured (WCAG 2):
 | Ink on green — CTA, closing panel | 10.1:1 | PASS |
 | Field green on cream — links | 5.2:1 | PASS |
 | Text-secondary on cream | ~7:1 | PASS |
-| **Green on ink** | 10.1:1 | **BANNED** — retired by ruling, not by contrast. Legible, but too much. On ink, accents (registration squares, list ticks) turn cream. |
+| **Green on ink** | 10.1:1 | **BANNED**, except for the authenticated app bar's 24px brand mark. The logo is an identity exception, not a general text, control, or icon pairing. On marketing ink, accents turn cream. |
 | **Green on cream (as text)** | 1.7:1 | **FAIL** — illegible. Green is fill-only on light; field-green carries its meaning in text. |
 
 Green tints are allowed as quiet fills at low alpha (e.g. selection tint
@@ -348,15 +355,16 @@ The system is deliberately flat: **edges are drawn, not implied**.
 
 ## Shapes
 
-**Radius 0 everywhere.** Buttons, cards, panels, inputs, avatars, pills,
-kanban cards, chart bars, browser chrome, checkboxes — rectangles only, by
-ruling.
+**Radius 0 throughout marketing.** Marketing buttons, cards, panels, inputs,
+avatars, pills, kanban cards, chart bars, browser chrome, and checkboxes are
+rectangles by ruling. The authenticated app follows the rounded shadcn geometry
+defined in Scope above.
 
-Radius 0 governs UI elements. Product-screenshot frames are the one exception:
-a real app shot standing on a painting carries a 16px radius and an 8px white
-border at 70% (`shot-frame`), so the captured window reads as a photographed
-object rather than another panel of the page (recorded 2026-08-01; ruled in the
-#252 rounds).
+Radius 0 governs marketing UI elements. Product-screenshot frames are the one
+exception: a real app shot standing on a painting carries a 16px radius and an
+8px white border at 70% (`shot-frame`), so the captured window reads as a
+photographed object rather than another panel of the page (recorded 2026-08-01;
+ruled in the #252 rounds).
 
 - Defined 1px rings replace rounded softness: `edge` for cards and panels,
   `input-border` (45% ink) for inputs, 55% ink for app-mock frames.
@@ -459,8 +467,8 @@ disables smooth scroll.
   one ink panel.
 - Dark pairings are cream-on-ink and ink-on-green — nothing else.
 - Field green `#0B7A3F` carries green's meaning in text and links.
-- Rectangles everywhere: radius zero, defined 1px rings, corner marks on art
-  panels. Edges are drawn, not implied.
+- On marketing surfaces, use rectangles everywhere: radius zero, defined 1px
+  rings, corner marks on art panels. Edges are drawn, not implied.
 - CTAs are ink — fills or 1px outlines, hovers invert. Green fills exactly
   one closing panel per page, its button ink.
 - Display type is light and giant: Outfit 400 at −3%, line-height 1.
@@ -472,12 +480,14 @@ disables smooth scroll.
 
 ### Don't
 
-- **No green-on-ink** — 10:1 legible, but retired by ruling. On ink, accents
-  turn cream.
+- **No green-on-ink** beyond the authenticated app bar's 24px brand mark. It is
+  10:1 legible but remains retired for text, controls, general icons, and all
+  marketing accents; those turn cream on ink.
 - **No green text on cream** — 1.7:1, illegible. Fill or nothing.
 - No green buttons anywhere; ink is the CTA color.
-- No rounded corners, pills, or ground-line markers — the entire "radiant,
-  refined" world is retired (2026-07-30 side-by-side ruling).
+- On marketing surfaces, no rounded corners, pills, or ground-line markers —
+  the entire "radiant, refined" world is retired (2026-07-30 side-by-side
+  ruling).
 - No green-wash panels, radial glows, or soft gradients ("AI-looking").
 - No gray-bar skeletons as product stand-ins — full frames with real words.
 - No loud selection states — the v3 boxed list with a 3px edge rule read

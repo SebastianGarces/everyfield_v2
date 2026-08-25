@@ -9,8 +9,24 @@ import {
   mainNavItems,
   networkAdminNavItems,
   resolveActiveNavHref,
+  resolveTenancyShell,
   sendingChurchNavItems,
 } from "./navigation";
+
+test("the authenticated shell names each tenancy and its home", () => {
+  assert.deepEqual(resolveTenancyShell("church"), {
+    label: "Church Planting",
+    homeHref: "/dashboard",
+  });
+  assert.deepEqual(resolveTenancyShell("sending_church"), {
+    label: "Sending Church",
+    homeHref: "/oversight",
+  });
+  assert.deepEqual(resolveTenancyShell("network"), {
+    label: "Sending Network",
+    homeHref: "/oversight",
+  });
+});
 
 // ----------------------------------------------------------------------------
 // One active item per route
