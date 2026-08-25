@@ -111,13 +111,13 @@ export function SidebarIdentity({ user }: NavUserProps) {
   return (
     <div
       data-slot="sidebar-identity"
-      className="flex min-w-0 items-center gap-2 px-1 py-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+      className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-1 py-1 transition-[width,height,padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0"
     >
       <Avatar className="size-8 shrink-0 rounded-lg">
         <AvatarImage src={user.avatarSrc} alt="" className="rounded-lg" />
         <AvatarFallback className="rounded-lg">{user.initials}</AvatarFallback>
       </Avatar>
-      <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+      <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
         <span className="truncate font-semibold">{user.name}</span>
         <span className="text-muted-foreground truncate text-xs">
           {user.email}
