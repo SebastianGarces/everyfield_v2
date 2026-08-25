@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TaskForm } from "@/components/tasks";
 import { users } from "@/db/schema";
 import { db } from "@/db";
@@ -48,16 +49,18 @@ export default async function NewTaskPage() {
       <HeaderBreadcrumbs
         items={[{ label: "Tasks", href: "/tasks" }, { label: "New Task" }]}
       />
-      <div className="mx-auto max-w-2xl p-6">
-        <h1 className="mb-6 text-2xl font-bold tracking-tight">
-          Create New Task
-        </h1>
-        <TaskForm
-          users={churchUsers}
-          followUpAssignees={followUpAssignees}
-          prerequisiteCandidates={prerequisiteCandidates}
-        />
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto max-w-2xl p-4 sm:p-6">
+          <h1 className="mb-6 text-2xl font-semibold tracking-tight">
+            Create New Task
+          </h1>
+          <TaskForm
+            users={churchUsers}
+            followUpAssignees={followUpAssignees}
+            prerequisiteCandidates={prerequisiteCandidates}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

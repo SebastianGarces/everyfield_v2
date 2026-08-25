@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TeamsDashboard } from "@/components/ministry-teams/teams-dashboard";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
@@ -29,24 +30,26 @@ export default async function TeamsPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Ministry Teams" }]} />
-      <div className="flex h-full flex-col">
-        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Ministry Teams
-              </h1>
-              <p className="text-muted-foreground">
-                {teamsListSubtitle(canWrite)}
-              </p>
+      <PageCanvas className="overflow-hidden">
+        <WorkspacePanel className="flex h-full flex-col overflow-hidden">
+          <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Ministry Teams
+                </h1>
+                <p className="text-muted-foreground">
+                  {teamsListSubtitle(canWrite)}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex-1 overflow-auto p-6">
-          <TeamsDashboard teams={teams} staffingSummary={staffingSummary} />
-        </div>
-      </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            <TeamsDashboard teams={teams} staffingSummary={staffingSummary} />
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

@@ -29,6 +29,7 @@
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { EmptyPortfolio } from "@/components/oversight/empty-portfolio";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -76,7 +77,7 @@ export default async function OversightDashboardPage() {
     : "Overview of church plants sent by your church";
 
   return (
-    <div className="space-y-6 p-6">
+    <>
       {/*
         Same fix as /oversight/health (#261): without a declared trail the shell
         falls back to naming a different page ("Dashboard"). One crumb, because
@@ -86,22 +87,24 @@ export default async function OversightDashboardPage() {
         does not participate in `space-y-6`.
       */}
       <HeaderBreadcrumbs items={[{ label: title }]} />
-      <div>
-        <h1 className="text-3xl font-bold">{title}</h1>
-        <p className="text-muted-foreground mt-1">{description}</p>
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="min-h-full space-y-6 p-4 sm:p-6">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            <p className="text-muted-foreground mt-1">{description}</p>
+          </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total Church Plants</CardDescription>
-            <CardTitle className="text-4xl tabular-nums">
-              {portfolio.total}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/*
+          {/* Summary Cards */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Total Church Plants</CardDescription>
+                <CardTitle className="text-4xl tabular-nums">
+                  {portfolio.total}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/*
               ORIENTATION ONLY, in this slot (#636). The old caption ordered the
               reader to send invitations, which an org Member may not do. What
               replaces it is not the full sentence either: this is a 12px line
@@ -110,57 +113,59 @@ export default async function OversightDashboardPage() {
               version — the same sentence twice in one viewport reads as a
               rendering fault.
             */}
-            <p className="text-muted-foreground text-xs">
-              {portfolio.total === 0
-                ? EMPTY_PORTFOLIO_HEADLINE
-                : portfolioSpreadCaption(portfolio)}
-            </p>
-          </CardContent>
-        </Card>
+                <p className="text-muted-foreground text-xs">
+                  {portfolio.total === 0
+                    ? EMPTY_PORTFOLIO_HEADLINE
+                    : portfolioSpreadCaption(portfolio)}
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Pre-Launch</CardDescription>
-            <CardTitle className="text-4xl tabular-nums">
-              {portfolio.preLaunch}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/*
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Pre-Launch</CardDescription>
+                <CardTitle className="text-4xl tabular-nums">
+                  {portfolio.preLaunch}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/*
               The caption names the BOUNDARY, not the phases either side of it:
               "Plants in phases 0-4" was a second copy of the phase list that
               went stale the moment `PHASES` grew.
             */}
-            <p className="text-muted-foreground text-xs">
-              {PRE_LAUNCH_CAPTION}
-            </p>
-          </CardContent>
-        </Card>
+                <p className="text-muted-foreground text-xs">
+                  {PRE_LAUNCH_CAPTION}
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Launched</CardDescription>
-            <CardTitle className="text-4xl tabular-nums">
-              {portfolio.launched}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground text-xs">{LAUNCHED_CAPTION}</p>
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Launched</CardDescription>
+                <CardTitle className="text-4xl tabular-nums">
+                  {portfolio.launched}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground text-xs">
+                  {LAUNCHED_CAPTION}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Plants by Phase */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Plants by Phase</CardTitle>
-          <CardDescription>
-            Distribution of church plants across the launch journey
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {portfolio.total === 0 ? (
-            /*
+          {/* Plants by Phase */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Plants by Phase</CardTitle>
+              <CardDescription>
+                Distribution of church plants across the launch journey
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {portfolio.total === 0 ? (
+                /*
               The words and the seat gate belong to `EmptyPortfolio`, shared
               with `/oversight/plants` (#636). They were written out here as
               well, and the two copies had already drifted — which is the same
@@ -169,94 +174,104 @@ export default async function OversightDashboardPage() {
               it, and since #500 the promise is only made to whoever can keep it
               (`org.invitation.manage` is Owner-only).
             */
-            <div className="py-8 text-center">
-              <EmptyPortfolio
-                scopeLabel={scopeLabel}
-                canInvite={holdsSeatFor(user, "org.invitation.manage")}
-              />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {portfolio.distribution.map((row) => (
-                <div key={row.phase} className="flex items-center gap-4">
-                  <div className="w-48 text-sm font-medium">{row.label}</div>
-                  {/*
+                <div className="py-8 text-center">
+                  <EmptyPortfolio
+                    scopeLabel={scopeLabel}
+                    canInvite={holdsSeatFor(user, "org.invitation.manage")}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {portfolio.distribution.map((row) => (
+                    <div
+                      key={row.phase}
+                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:gap-4"
+                    >
+                      <div className="min-w-0 text-sm font-medium">
+                        {row.label}
+                      </div>
+                      {/*
                     A zero-count phase draws NO fill. The bar used to be
                     `Math.max(percentage, 2)%`, so every empty phase showed a
                     sliver — a visible claim that somebody is there, next to a
                     badge saying nobody is. An empty track is the honest answer,
                     and the count beside it is what carries the number.
                   */}
-                  <div className="bg-muted h-2 flex-1 rounded-full">
-                    {row.count > 0 ? (
-                      <div
-                        className="bg-primary h-2 rounded-full transition-all"
-                        style={{ width: `${Math.max(row.percentage, 2)}%` }}
-                      />
-                    ) : null}
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className="min-w-12 justify-center tabular-nums"
-                  >
-                    {row.count}
-                  </Badge>
+                      <div className="bg-muted col-span-2 row-start-2 h-2 rounded-full sm:col-span-1 sm:row-auto">
+                        {row.count > 0 ? (
+                          <div
+                            className="bg-primary h-2 rounded-full transition-[width]"
+                            style={{ width: `${Math.max(row.percentage, 2)}%` }}
+                          />
+                        ) : null}
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        className="col-start-2 row-start-1 min-w-12 justify-center tabular-nums sm:col-auto sm:row-auto"
+                      >
+                        {row.count}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Church Plants List */}
-      {portfolio.total > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Church Plants</CardTitle>
-            <CardDescription>
-              All church plants in your {scopeLabel}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {plants.map((plant) => (
-                <div
-                  key={plant.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                >
-                  <div className="min-w-0">
-                    {/*
+          {/* Church Plants List */}
+          {portfolio.total > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Church Plants</CardTitle>
+                <CardDescription>
+                  All church plants in your {scopeLabel}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {plants.map((plant) => (
+                    <div
+                      key={plant.id}
+                      className="flex items-center justify-between rounded-lg border p-3"
+                    >
+                      <div className="min-w-0">
+                        {/*
                       The row links to the plant it names. It used to be inert —
                       the same plants are clickable one nav item away on
                       /oversight/plants, so a dead row here read as a surface
                       that had lost its links rather than as a summary.
                     */}
-                    <p className="truncate font-medium">
-                      <Link
-                        href={`/oversight/plants/${plant.id}`}
-                        className="cursor-pointer hover:underline hover:underline-offset-4"
-                      >
-                        {plant.name}
-                      </Link>
-                    </p>
-                    {/*
+                        <p className="truncate font-medium">
+                          <Link
+                            href={`/oversight/plants/${plant.id}`}
+                            className="cursor-pointer hover:underline hover:underline-offset-4"
+                          >
+                            {plant.name}
+                          </Link>
+                        </p>
+                        {/*
                       `formatPhase`, never a bare `PHASES[...]` lookup: the
                       column is an unconstrained integer, and the raw lookup
                       rendered an out-of-range value as an empty cell.
                     */}
-                    <p className="text-muted-foreground text-sm">
-                      {formatPhase(plant.currentPhase)}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="shrink-0 tabular-nums">
-                    Phase {plant.currentPhase}
-                  </Badge>
+                        <p className="text-muted-foreground text-sm">
+                          {formatPhase(plant.currentPhase)}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 tabular-nums"
+                      >
+                        Phase {plant.currentPhase}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+              </CardContent>
+            </Card>
+          )}
+        </WorkspacePanel>
+      </PageCanvas>
+    </>
   );
 }

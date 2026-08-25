@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { MeetingList } from "@/components/meetings/meeting-list";
 import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -75,35 +76,39 @@ export default async function MeetingsPage({
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Meetings" }]} />
-      <div className="flex h-full flex-col">
-        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">Meetings</h1>
-              <p className="text-muted-foreground">
-                {meetingsListSubtitle(canWrite)}
-              </p>
+      <PageCanvas className="overflow-hidden">
+        <WorkspacePanel className="flex h-full flex-col overflow-hidden">
+          <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Meetings
+                </h1>
+                <p className="text-muted-foreground">
+                  {meetingsListSubtitle(canWrite)}
+                </p>
+              </div>
+              {canWrite && (
+                <Button asChild className="cursor-pointer sm:shrink-0">
+                  <Link href="/meetings/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Schedule Meeting
+                  </Link>
+                </Button>
+              )}
             </div>
-            {canWrite && (
-              <Button asChild className="cursor-pointer">
-                <Link href="/meetings/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Schedule Meeting
-                </Link>
-              </Button>
-            )}
           </div>
-        </div>
-        <div className="flex-1 overflow-auto p-6">
-          <MeetingList
-            upcomingMeetings={upcomingResult.meetings}
-            pastMeetings={pastResult.meetings}
-            initialView={view}
-            timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
-            now={now}
-          />
-        </div>
-      </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            <MeetingList
+              upcomingMeetings={upcomingResult.meetings}
+              pastMeetings={pastResult.meetings}
+              initialView={view}
+              timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
+              now={now}
+            />
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

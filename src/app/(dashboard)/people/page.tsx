@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import {
   ExportButton,
   ImportWizard,
@@ -88,69 +89,73 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "People & CRM" }]} />
-      <div className="flex h-full flex-col">
-        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">People</h1>
-              {/* Capability-matched header (#668). See @/lib/people/presentation. */}
-              <p className="text-muted-foreground">
-                {peopleDirectorySubtitle(canWrite)}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {canWrite && <ImportWizard />}
-              <ExportButton />
-              {canWrite && <QuickAddForm />}
-              {canWrite && (
-                <Button asChild>
-                  <Link href="/people/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Person
-                  </Link>
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-1 flex-col gap-4 md:flex-row md:items-center">
-              {!isPipelineView && (
-                <>
-                  <PeopleSearch />
-                  <PeopleFilters availableTags={availableTags} />
-                </>
-              )}
+      <PageCanvas>
+        <WorkspacePanel className="flex min-h-full flex-col overflow-hidden">
+          <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  People
+                </h1>
+                {/* Capability-matched header (#668). See @/lib/people/presentation. */}
+                <p className="text-muted-foreground">
+                  {peopleDirectorySubtitle(canWrite)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+                {canWrite && <ImportWizard />}
+                <ExportButton />
+                {canWrite && <QuickAddForm />}
+                {canWrite && (
+                  <Button asChild>
+                    <Link href="/people/new">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Person
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <ViewToggle currentView={view} />
-              <div className="text-muted-foreground text-sm font-medium">
-                {total} total
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-1 flex-col gap-4 md:flex-row md:items-center">
+                {!isPipelineView && (
+                  <>
+                    <PeopleSearch />
+                    <PeopleFilters availableTags={availableTags} />
+                  </>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <ViewToggle currentView={view} />
+                <div className="text-muted-foreground text-sm font-medium tabular-nums">
+                  {total} total
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex-1 overflow-auto p-6">
-          {isPipelineView && pipelineData ? (
-            <PipelineWrapper
-              data={pipelineData}
-              inactivityThresholds={{
-                warningDays: church?.inactivityWarningDays ?? 7,
-                alertDays: church?.inactivityAlertDays ?? 14,
-              }}
-            />
-          ) : (
-            <PeopleList
-              people={listResult.people}
-              total={listResult.total}
-              nextCursor={listResult.nextCursor}
-              searchParams={params}
-            />
-          )}
-        </div>
-      </div>
+          <div className="min-w-0 p-4 sm:p-6">
+            {isPipelineView && pipelineData ? (
+              <PipelineWrapper
+                data={pipelineData}
+                inactivityThresholds={{
+                  warningDays: church?.inactivityWarningDays ?? 7,
+                  alertDays: church?.inactivityAlertDays ?? 14,
+                }}
+              />
+            ) : (
+              <PeopleList
+                people={listResult.people}
+                total={listResult.total}
+                nextCursor={listResult.nextCursor}
+                searchParams={params}
+              />
+            )}
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }
