@@ -1,7 +1,6 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
 import {
   HeaderBreadcrumbs,
-  PageContext,
   type HeaderBreadcrumbItem,
 } from "@/components/header";
 import {
@@ -42,22 +41,14 @@ export default async function WikiLayout({
       contentClassName="h-full"
       context="none"
     >
-      {/* Header context is state, not paint: CSS cannot replace the dashboard
-          fallback with this route's page-context label. */}
+      {/* Preserve the route's declared context state for nested consumers even
+          though the ruled Wiki workspace renders no visible context row. */}
       <HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />
-      <SplitWorkspace
-        data-context-layout="single-suppressed"
-        className="grid-rows-[auto_minmax(0,1fr)] [[data-auth-page-hierarchy=b]_&]:gap-y-0"
-      >
-        <PageContext
-          attachment="attached"
-          className="col-span-full [[data-auth-page-hierarchy=b]_&]:lg:col-span-1 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2"
-          items={WIKI_BREADCRUMBS}
-        />
+      <SplitWorkspace className="grid-rows-[minmax(0,1fr)]">
         {/* The secondary navigation needs its own surface beside the article
             workspace. CSS alone could not separate it while the old sidebar
             and content were siblings on one uninterrupted canvas. */}
-        <WorkspacePanel className="hidden h-full overflow-hidden lg:block">
+        <WorkspacePanel className="hidden h-full overflow-hidden lg:col-start-1 lg:row-start-1 lg:block">
           <aside className="h-full overflow-y-auto p-4">
             <WikiSidebar
               groups={groups}
@@ -80,7 +71,7 @@ export default async function WikiLayout({
         <WorkspacePanel
           id={DASHBOARD_PAGE_CONTENT_ID}
           tabIndex={-1}
-          className="h-full overflow-y-auto outline-none [container:wiki-content/size] lg:col-start-2 lg:row-start-2"
+          className="row-start-1 h-full overflow-y-auto outline-none [container:wiki-content/size] lg:col-start-2"
         >
           <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
             {children}

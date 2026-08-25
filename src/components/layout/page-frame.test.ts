@@ -60,6 +60,8 @@ test("only an explicitly attached context removes the workspace's top seam", () 
   assert.match(html, /data-attachment="attached"/);
   assert.match(html, /rounded-t-none/);
   assert.match(html, /border-t-0/);
+  assert.match(html, /bg-card/);
+  assert.match(html, /min-h-14/);
 });
 
 test("attached context renders its server-known breadcrumb geometry in SSR", () => {
@@ -117,6 +119,20 @@ test("the canvas can delegate context placement to a specialized split workspace
   );
   assert.match(html, /data-slot="split-workspace"/);
   assert.match(html, />Specialized workspace<\/div>/);
+});
+
+test("a context-free Dashboard canvas can retain the shared focus target", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      PageCanvas,
+      { contentFocusTarget: true, context: "none" },
+      "Dashboard workspace"
+    )
+  );
+
+  assert.doesNotMatch(html, /data-slot="page-context"/);
+  assert.match(html, /id="dashboard-page-content"/);
+  assert.match(html, /tabindex="-1"/);
 });
 
 test("caller classes override presentation defaults through the shared merger", () => {

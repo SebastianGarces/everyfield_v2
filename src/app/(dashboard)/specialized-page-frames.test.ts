@@ -173,10 +173,6 @@ const NON_PRESENTATION_ROUTE_EXCLUSIONS = [
 ] as const satisfies readonly NonPresentationRouteExclusion[];
 
 const DASHBOARD_APP_ROOT = path.join(process.cwd(), "src/app/(dashboard)");
-const GLOBAL_STYLES = readFileSync(
-  path.join(process.cwd(), "src/app/globals.css"),
-  "utf8"
-);
 const PAGE_FRAME_SOURCE = readFileSync(
   path.join(process.cwd(), "src/components/layout/page-frame.tsx"),
   "utf8"
@@ -404,7 +400,7 @@ test("the wiki table of contents is capped by its workspace, not the viewport", 
   assert.doesNotMatch(tableOfContents, /100vh/);
 });
 
-test("the wiki layout publishes Wiki page context before its workspace", () => {
+test("Wiki preserves declared state without rendering a redundant context row", () => {
   const source = readFileSync(
     path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
     "utf8"
@@ -415,44 +411,34 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
     [
       "<HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />",
       "<SplitWorkspace",
-      'data-context-layout="single-suppressed"',
-      "<PageContext",
+      "id={DASHBOARD_PAGE_CONTENT_ID}",
+      "tabIndex={-1}",
     ],
-    "Wiki context must replace Dashboard before the split workspace renders"
+    "Wiki keeps the route declaration and places the settings focus target on its visible article workspace"
   );
-  assertInOrder(
-    source,
-    "wiki/layout.tsx",
-    ["<PageContext", "id={DASHBOARD_PAGE_CONTENT_ID}", "tabIndex={-1}"],
-    "the settings focus target must follow Wiki's manually placed context"
-  );
+  assert.doesNotMatch(source, /PageContext/);
 });
 
-test("Wiki keeps one full-height row at every width when B suppresses a one-item trail", () => {
+test("Wiki keeps both panes in one full-height row at every width", () => {
   const source = readFileSync(
     path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
     "utf8"
   );
 
-  assert.match(source, /data-context-layout="single-suppressed"/);
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /\[\[data-auth-page-hierarchy=b\]_&\]:lg:(?:row-start-2|row-span-2)/,
-    "B must not place either pane in a desktop-only second row"
-  );
-  const prototypeStyles = GLOBAL_STYLES.slice(
-    GLOBAL_STYLES.indexOf("/* #697 taste prototype."),
-    GLOBAL_STYLES.indexOf("@theme inline")
+    /<SplitWorkspace className="grid-rows-\[minmax\(0,1fr\)\]">/,
+    "the context-free workspace has one explicit flexible row"
   );
   assert.match(
-    prototypeStyles,
-    /\[data-slot="split-workspace"\]\[data-context-layout="single-suppressed"\] \{\s*grid-template-rows: minmax\(0, 1fr\);/,
-    "server-known suppression must directly collapse the grid to one flexible row without a breakpoint or relational selector"
+    source,
+    /<WorkspacePanel className="hidden h-full overflow-hidden lg:col-start-1 lg:row-start-1 lg:block">/,
+    "the desktop navigation occupies the first column of the only row"
   );
   assert.match(
-    prototypeStyles,
-    /\[data-context-layout="single-suppressed"\]\s*> \[data-slot="workspace-panel"\] \{\s*grid-row: 1;\s*min-height: 0;/,
-    "both the mobile article and desktop panes must occupy and shrink within the one full-height row"
+    source,
+    /className="row-start-1 h-full overflow-y-auto outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
+    "the article occupies that same row on mobile and desktop"
   );
 });
 
@@ -480,7 +466,7 @@ test("Wiki gives its size-contained mobile article a definite block size", () =>
   );
 });
 
-test("B only joins page context to workspaces with matching geometry", () => {
+test("only Message History attaches context to its same-width workspace", () => {
   const history = readFileSync(
     path.join(
       process.cwd(),
@@ -497,11 +483,7 @@ test("B only joins page context to workspaces with matching geometry", () => {
     /<PageCanvas[\s\S]*contextAttachment="attached"[\s\S]*contextItems=\{HISTORY_BREADCRUMBS\}/,
     "the full-width history workspace explicitly opts into the integrated seam"
   );
-  assert.match(
-    wiki,
-    /<PageContext[\s\S]*attachment="attached"[\s\S]*items=\{WIKI_BREADCRUMBS\}/,
-    "Wiki's one-item suppressed state must be correct in the server HTML"
-  );
+  assert.doesNotMatch(wiki, /PageContext|contextAttachment/);
 
   for (const relativePath of [
     "meetings/new/page.tsx",

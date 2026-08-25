@@ -210,10 +210,36 @@ test("every primary route declares page context and phase names Plant Intelligen
     "phase/page.tsx",
     [
       "items={PHASE_BREADCRUMBS}",
-      "suppressSingleCrumb",
       "id={DASHBOARD_PAGE_CONTENT_ID}",
       "tabIndex={-1}",
     ],
     "the settings focus target must follow Phase's manually placed context"
   );
+  assert.match(
+    phase,
+    /<header>\s*<PageContext className="mb-2" items=\{PHASE_BREADCRUMBS\} \/>/,
+    "Plant Intelligence keeps the ruled compact, unboxed context above its title"
+  );
+  assert.doesNotMatch(phase, /contextAttachment|attachment="attached"/);
+});
+
+test("Dashboard suppresses its redundant context without losing the settings focus target", () => {
+  for (const relativePath of [
+    "dashboard/no-plant-empty-state.tsx",
+    "dashboard/onboarding-dashboard.tsx",
+    "dashboard/plant-dashboard.tsx",
+  ]) {
+    const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
+    const canvases = source.match(/<PageCanvas(?:\s|>)/g) ?? [];
+    const suppressed =
+      source.match(/<PageCanvas context="none" contentFocusTarget>/g) ?? [];
+
+    assert.ok(canvases.length > 0, `${relativePath} must render a canvas`);
+    assert.equal(
+      suppressed.length,
+      canvases.length,
+      `${relativePath} must suppress every redundant Dashboard context row while preserving the post-Settings focus target`
+    );
+    assert.doesNotMatch(source, /PageContext/);
+  }
 });

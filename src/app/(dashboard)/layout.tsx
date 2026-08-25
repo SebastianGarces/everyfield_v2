@@ -6,7 +6,6 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { HeaderProvider } from "@/components/header";
 import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
-import { PageHierarchyPrototype } from "@/components/page-hierarchy-prototype";
 import { SettingsModal } from "@/components/settings/settings-modal";
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -186,7 +185,6 @@ export default async function DashboardLayout({
             </Suspense>
           )}
         </GlobalAppBar>
-        <PageHierarchyPrototype />
         <div className="flex min-h-0 flex-1">
           <AppSidebar
             user={sidebarUser}

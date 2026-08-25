@@ -13,6 +13,7 @@ export function PageCanvas({
   frameClassName,
   context = "default",
   contextAttachment = "standalone",
+  contentFocusTarget,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
@@ -21,7 +22,10 @@ export function PageCanvas({
   context?: "default" | "none";
   contextAttachment?: "standalone" | "attached";
   contextItems?: HeaderBreadcrumbItem[];
+  contentFocusTarget?: boolean;
 }) {
+  const hasContentFocusTarget = contentFocusTarget ?? context === "default";
+
   return (
     <div
       data-slot="page-canvas"
@@ -35,8 +39,7 @@ export function PageCanvas({
         data-slot="page-hierarchy-frame"
         className={cn(
           "flex h-full min-h-full min-w-0 flex-col gap-3",
-          contextAttachment === "attached" &&
-            "[[data-auth-page-hierarchy=b]_&]:gap-0",
+          contextAttachment === "attached" && "gap-0",
           frameClassName
         )}
       >
@@ -44,13 +47,13 @@ export function PageCanvas({
           <PageContext attachment={contextAttachment} items={contextItems} />
         )}
         <div
-          id={context === "default" ? DASHBOARD_PAGE_CONTENT_ID : undefined}
-          tabIndex={context === "default" ? -1 : undefined}
+          id={hasContentFocusTarget ? DASHBOARD_PAGE_CONTENT_ID : undefined}
+          tabIndex={hasContentFocusTarget ? -1 : undefined}
           data-slot="page-content"
           className={cn(
             "min-h-0 min-w-0 flex-1 outline-none",
             contextAttachment === "attached" &&
-              "[[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:border-t-0",
+              "[&>[data-slot=workspace-panel]]:rounded-t-none [&>[data-slot=workspace-panel]]:border-t-0",
             contentClassName
           )}
         >

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -17,6 +17,9 @@ const MOBILE_TRIGGER = read(
 );
 const PAGE_CONTEXT = read("components", "header", "page-context.tsx");
 const PAGE_FRAME = read("components", "layout", "page-frame.tsx");
+const GLOBAL_STYLES = read("app", "globals.css");
+const PHASE = read("app", "(dashboard)", "phase", "page.tsx");
+const WIKI = read("app", "(dashboard)", "wiki", "layout.tsx");
 const SETTINGS = read("components", "settings", "settings-modal.tsx");
 const SIDEBAR = read("components", "app-sidebar.tsx");
 const SIDEBAR_PRIMITIVE = read("components", "ui", "sidebar.tsx");
@@ -62,6 +65,27 @@ test("the page canvas owns breadcrumbs and the existing actions portal", () => {
     'data-slot="page-actions"',
   ]);
   assert.match(PAGE_CONTEXT, /ref=\{setActionsContainer\}/);
+});
+
+test("the hierarchy ruling leaves no runtime prototype artifacts", () => {
+  assert.equal(
+    existsSync(path.join(SRC, "components", "page-hierarchy-prototype.tsx")),
+    false
+  );
+  for (const [name, source] of [
+    ["dashboard layout", LAYOUT],
+    ["page context", PAGE_CONTEXT],
+    ["page frame", PAGE_FRAME],
+    ["global styles", GLOBAL_STYLES],
+    ["Plant Intelligence", PHASE],
+    ["Wiki", WIKI],
+  ] as const) {
+    assert.doesNotMatch(
+      source,
+      /PageHierarchyPrototype|data-auth-page-hierarchy|auth-page-hierarchy-prototype|data-context-layout|suppressSingleCrumb/,
+      `${name} still contains taste-prototype state or selectors`
+    );
+  }
 });
 
 test("global controls stay in the requested reading order", () => {
@@ -183,7 +207,7 @@ test("page context stays inside the focusable route-content main", () => {
 test("settings close resumes after page context instead of re-entering it", () => {
   assert.match(
     PAGE_FRAME,
-    /<PageContext[\s\S]*id=\{context === "default" \? DASHBOARD_PAGE_CONTENT_ID : undefined\}[\s\S]*tabIndex=\{context === "default" \? -1 : undefined\}/
+    /<PageContext[\s\S]*id=\{hasContentFocusTarget \? DASHBOARD_PAGE_CONTENT_ID : undefined\}[\s\S]*tabIndex=\{hasContentFocusTarget \? -1 : undefined\}/
   );
   assert.match(
     SETTINGS,

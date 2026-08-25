@@ -136,7 +136,7 @@ export async function PlantDashboard({
 
   if (wantsLeadershipStep && canAnswerLeadership) {
     return (
-      <PageCanvas>
+      <PageCanvas context="none" contentFocusTarget>
         <WorkspacePanel className="mx-auto min-h-full max-w-3xl p-4 sm:p-6">
           <LeadershipReentry leadershipStatus={church?.leadershipStatus} />
         </WorkspacePanel>
@@ -204,7 +204,7 @@ export async function PlantDashboard({
   ).filter((capability) => holdsSeatFor(viewer, capability));
 
   return (
-    <PageCanvas>
+    <PageCanvas context="none" contentFocusTarget>
       {showConfetti && <ChurchCreatedConfetti />}
 
       <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">

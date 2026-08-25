@@ -17,25 +17,20 @@ import { resolveBreadcrumbTrail } from "./breadcrumb-trail";
 import { useHeader, type HeaderBreadcrumbItem } from "./header-context";
 
 /**
- * The page-owned replacement for the retired 64px shell context bar.
- *
- * Direction A leaves this row unboxed in the canvas. On routes whose context
- * and primary surface share the same width, Direction B can attach the same DOM
- * to that surface. Other routes deliberately retain the safe unboxed row so a
- * full-width header can never float above a narrower, topless panel. Keeping one
- * node means breadcrumb state and the HeaderActions portal never remount when
- * the prototype switches.
+ * Compact page-owned context for the authenticated canvas. A standalone row
+ * sits in the canvas above independent surfaces; an attached row becomes the
+ * header of a same-width primary surface. Server-known `items` let attached
+ * pages render the correct trail and geometry in the initial HTML while the
+ * HeaderProvider continues to own the actions portal.
  */
 export function PageContext({
   attachment = "standalone",
   className,
   items,
-  suppressSingleCrumb = false,
 }: {
   attachment?: "standalone" | "attached";
   className?: string;
   items?: HeaderBreadcrumbItem[];
-  suppressSingleCrumb?: boolean;
 }) {
   const { breadcrumbs, setActionsContainer } = useHeader();
   const trail = resolveBreadcrumbTrail(items ?? breadcrumbs);
@@ -45,11 +40,10 @@ export function PageContext({
       data-slot="page-context"
       data-breadcrumb-depth={trail.length}
       data-attachment={attachment}
-      data-suppress-single-crumb={suppressSingleCrumb}
       className={cn(
         "flex min-h-10 shrink-0 items-center gap-3 px-1",
         attachment === "attached" &&
-          "[[data-auth-page-hierarchy=b]_&]:bg-card [[data-auth-page-hierarchy=b]_&]:min-h-14 [[data-auth-page-hierarchy=b]_&]:rounded-t-xl [[data-auth-page-hierarchy=b]_&]:border [[data-auth-page-hierarchy=b]_&]:border-b-0 [[data-auth-page-hierarchy=b]_&]:px-4",
+          "bg-card min-h-14 rounded-t-xl border border-b-0 px-4",
         className
       )}
     >

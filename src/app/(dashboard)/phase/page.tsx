@@ -250,12 +250,8 @@ export default async function PhasePage() {
           data-slot="plant-intelligence-content"
           className="min-h-full space-y-6"
         >
-          <header className="[[data-auth-page-hierarchy=b]_&]:bg-card [[data-auth-page-hierarchy=b]_&]:rounded-xl [[data-auth-page-hierarchy=b]_&]:border [[data-auth-page-hierarchy=b]_&]:p-4 [[data-auth-page-hierarchy=b]_&]:shadow-sm [[data-auth-page-hierarchy=b]_&]:sm:p-6">
-            <PageContext
-              className="mb-2"
-              items={PHASE_BREADCRUMBS}
-              suppressSingleCrumb
-            />
+          <header>
+            <PageContext className="mb-2" items={PHASE_BREADCRUMBS} />
             <h1
               id={DASHBOARD_PAGE_CONTENT_ID}
               tabIndex={-1}

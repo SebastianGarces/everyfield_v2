@@ -65,7 +65,7 @@ export async function OnboardingDashboard({
     : [false, null];
 
   return (
-    <PageCanvas>
+    <PageCanvas context="none" contentFocusTarget>
       <WorkspacePanel className="mx-auto min-h-full max-w-4xl p-5 sm:p-8">
         <OnboardingFlow
           initialStep={
