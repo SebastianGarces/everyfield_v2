@@ -42,9 +42,18 @@ html[data-auth-page-hierarchy="b"]
     > [data-slot="page-context"][data-breadcrumb-depth="1"]:not(
         :has(> [data-slot="page-actions"] > *)
       )
+  ) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+html[data-auth-page-hierarchy="b"]
+  [data-slot="split-workspace"]:has(
+    > [data-slot="page-context"][data-breadcrumb-depth="1"]:not(
+        :has(> [data-slot="page-actions"] > *)
+      )
   )
-  > [data-slot="workspace-panel"]:last-child {
-  grid-row: 1 / span 2;
+  > [data-slot="workspace-panel"] {
+  grid-row: 1;
 }
 
 @theme inline {

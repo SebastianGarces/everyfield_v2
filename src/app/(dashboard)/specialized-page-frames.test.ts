@@ -417,7 +417,7 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
   );
 });
 
-test("Wiki keeps the article pane full-height when B suppresses a one-item trail", () => {
+test("Wiki keeps one full-height row at every width when B suppresses a one-item trail", () => {
   const source = readFileSync(
     path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
     "utf8"
@@ -428,12 +428,18 @@ test("Wiki keeps the article pane full-height when B suppresses a one-item trail
     /\[\[data-auth-page-hierarchy=b\]_&\]:lg:col-start-2 \[\[data-auth-page-hierarchy=b\]_&\]:lg:row-start-2/,
     "a real ancestor trail must reserve the row above the article pane"
   );
-  const suppressedTrailRule = GLOBAL_STYLES.slice(
-    GLOBAL_STYLES.lastIndexOf('html[data-auth-page-hierarchy="b"]')
+  const prototypeStyles = GLOBAL_STYLES.slice(
+    GLOBAL_STYLES.indexOf("/* #697 taste prototype."),
+    GLOBAL_STYLES.indexOf("@theme inline")
   );
   assert.match(
-    suppressedTrailRule,
-    /\[data-slot="split-workspace"\]:has\([\s\S]*\[data-breadcrumb-depth="1"\][\s\S]*> \[data-slot="workspace-panel"\]:last-child \{[\s\S]*grid-row: 1 \/ span 2;/,
-    "a suppressed top-level trail must return the article pane to the full grid height"
+    prototypeStyles,
+    /\[data-slot="split-workspace"\]:has\([\s\S]*\[data-breadcrumb-depth="1"\][\s\S]*grid-template-rows: minmax\(0, 1fr\);/,
+    "the suppressed state must collapse to one flexible row without a breakpoint"
+  );
+  assert.match(
+    prototypeStyles,
+    /> \[data-slot="workspace-panel"\] \{\s*grid-row: 1;/,
+    "both the mobile article and desktop panes must occupy that one full-height row"
   );
 });
