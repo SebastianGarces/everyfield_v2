@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import ts from "typescript";
 
 interface SpecializedRouteFamily {
   routes: readonly string[];
@@ -147,11 +148,22 @@ const STAGE_3_PRIMARY_ROUTES = [
   "/verify-email/confirmed",
 ] as const;
 
+interface NonPresentationRouteExclusion {
+  route: string;
+  source: string;
+}
+
 /** These retired URLs render no interface; both permanently redirect. */
 const NON_PRESENTATION_ROUTE_EXCLUSIONS = [
-  "/settings",
-  "/settings/[section]",
-] as const;
+  {
+    route: "/settings",
+    source: "src/app/(dashboard)/settings/page.tsx",
+  },
+  {
+    route: "/settings/[section]",
+    source: "src/app/(dashboard)/settings/[section]/page.tsx",
+  },
+] as const satisfies readonly NonPresentationRouteExclusion[];
 
 const DASHBOARD_APP_ROOT = path.join(process.cwd(), "src/app/(dashboard)");
 
@@ -206,7 +218,7 @@ test("every authenticated page is assigned to a presentation stage or a non-rend
   const assignedRoutes = [
     ...specializedRoutes,
     ...STAGE_3_PRIMARY_ROUTES,
-    ...NON_PRESENTATION_ROUTE_EXCLUSIONS,
+    ...NON_PRESENTATION_ROUTE_EXCLUSIONS.map((exclusion) => exclusion.route),
   ];
 
   assert.equal(
@@ -219,6 +231,110 @@ test("every authenticated page is assigned to a presentation stage or a non-rend
     [...assignedRoutes].sort(),
     "every authenticated page.tsx needs an explicit presentation owner"
   );
+});
+
+test("non-presentation route exclusions remain permanentRedirect-only pages", () => {
+  for (const exclusion of NON_PRESENTATION_ROUTE_EXCLUSIONS) {
+    const source = readFileSync(
+      path.join(process.cwd(), exclusion.source),
+      "utf8"
+    );
+    const sourceFile = ts.createSourceFile(
+      exclusion.source,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const importsPermanentRedirect = sourceFile.statements.some(
+      (statement) =>
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === "next/navigation" &&
+        statement.importClause?.namedBindings &&
+        ts.isNamedImports(statement.importClause.namedBindings) &&
+        statement.importClause.namedBindings.elements.some(
+          (element) => element.name.text === "permanentRedirect"
+        )
+    );
+    const page = sourceFile.statements.find(
+      (statement): statement is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(statement) &&
+        statement.modifiers?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword
+        ) === true
+    );
+
+    assert.equal(
+      importsPermanentRedirect,
+      true,
+      `${exclusion.route} must import permanentRedirect from next/navigation`
+    );
+    assert.ok(page?.body, `${exclusion.route} must export a page function`);
+    const statements = [...page.body.statements];
+    const statement = statements.at(-1);
+    assert.ok(
+      statement &&
+        ts.isExpressionStatement(statement) &&
+        ts.isCallExpression(statement.expression) &&
+        ts.isIdentifier(statement.expression.expression) &&
+        statement.expression.expression.text === "permanentRedirect",
+      `${exclusion.route} must finish by calling permanentRedirect`
+    );
+    assert.equal(
+      statements.slice(0, -1).every(ts.isVariableStatement),
+      true,
+      `${exclusion.route} may only prepare redirect arguments before redirecting`
+    );
+
+    let redirectCalls = 0;
+    let rendersOrReturns = false;
+    const inspectPageBody = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "permanentRedirect"
+      ) {
+        redirectCalls += 1;
+      }
+      if (
+        ts.isReturnStatement(node) ||
+        ts.isJsxElement(node) ||
+        ts.isJsxSelfClosingElement(node) ||
+        ts.isJsxFragment(node)
+      ) {
+        rendersOrReturns = true;
+      }
+      ts.forEachChild(node, inspectPageBody);
+    };
+    inspectPageBody(page.body);
+
+    assert.equal(redirectCalls, 1, `${exclusion.route} redirects exactly once`);
+    assert.equal(
+      rendersOrReturns,
+      false,
+      `${exclusion.route} must remain non-rendering`
+    );
+  }
+});
+
+test("task detail header stacks and preserves long titles and action access", () => {
+  const page = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/tasks/[id]/page.tsx"),
+    "utf8"
+  );
+  const actions = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/app/(dashboard)/tasks/[id]/task-detail-actions.tsx"
+    ),
+    "utf8"
+  );
+
+  assert.match(page, /flex flex-col[^"]*md:flex-row/);
+  assert.match(page, /min-w-0 space-y-1/);
+  assert.match(page, /\[overflow-wrap:anywhere\]/);
+  assert.match(actions, /flex max-w-full flex-wrap/);
 });
 
 test("communication editors use their workspace height instead of viewport arithmetic", () => {
@@ -238,14 +354,22 @@ test("detail workspaces keep the canvas as their single vertical scroll owner", 
     "src/app/(dashboard)/meetings/[id]/layout.tsx",
     "src/app/(dashboard)/teams/[teamId]/layout.tsx",
     "src/app/(dashboard)/communication/[id]/page.tsx",
+    "src/app/(dashboard)/tasks/[id]/page.tsx",
   ]) {
     const source = readFileSync(path.join(process.cwd(), file), "utf8");
     assert.match(source, /<PageCanvas>/);
-    assert.match(source, /<WorkspacePanel className="min-h-full">/);
-    assert.doesNotMatch(source, /min-h-0 flex-1 overflow-auto/);
+    assert.match(
+      source,
+      /<WorkspacePanel className="[^"]*\bmin-h-full\b[^"]*"/
+    );
     assert.doesNotMatch(
       source,
       /<WorkspacePanel[^>]*(?<!min-)h-full|<WorkspacePanel[^>]*overflow-hidden/
+    );
+    assert.doesNotMatch(
+      source,
+      /(?:overflow-auto|overflow-y-auto)/,
+      `${file} must not introduce a nested vertical scroll owner`
     );
   }
 });

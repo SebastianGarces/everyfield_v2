@@ -197,11 +197,11 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               their original owners. */}
           <div className="mx-auto max-w-3xl space-y-6">
             {/* Header with actions */}
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
+            <div className="flex flex-col items-stretch gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="min-w-0 space-y-1">
                 <h1
                   className={cn(
-                    "text-2xl font-bold tracking-tight",
+                    "text-2xl font-bold tracking-tight [overflow-wrap:anywhere] break-words",
                     task.status === "complete" && "line-through opacity-60"
                   )}
                 >
