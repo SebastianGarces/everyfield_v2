@@ -76,7 +76,7 @@ export default async function MeetingsPage({
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Meetings" }]} />
-      <PageCanvas className="overflow-hidden">
+      <PageCanvas className="overflow-hidden" context="none" contentFocusTarget>
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
