@@ -29,6 +29,7 @@ export default async function DocumentsPage() {
     template,
     defaults: buildAutoFillDefaults(template, context.merge),
   }));
+  const breadcrumbs = [{ label: "Documents" }];
 
   // A contextual link (DOC-014) arrives with `?template=<id>` and opens that
   // template's generate dialog. The library reads that parameter itself with
@@ -38,8 +39,12 @@ export default async function DocumentsPage() {
   // ids still open nothing, which the library enforces against its own catalog.
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Documents" }]} />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           {/* Header */}
           <div className="space-y-1 border-b p-4 sm:p-6 sm:pb-4">

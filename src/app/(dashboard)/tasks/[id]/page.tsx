@@ -183,14 +183,20 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   const completedDate = task.completedAt
     ? formatDateTime(task.completedAt, "short")
     : null;
+  const breadcrumbs = [
+    { label: "Tasks", href: "/tasks" },
+    { label: task.title },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[{ label: "Tasks", href: "/tasks" }, { label: task.title }]}
-      />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto min-h-full max-w-4xl p-4 sm:p-6">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        frameClassName="mx-auto w-full max-w-4xl"
+      >
+        <WorkspacePanel className="min-h-full p-4 sm:p-6">
           {/* The task sections need one parent to share a rounded workspace
               boundary; CSS cannot establish that relationship across the old
               siblings. Reads, actions, forms, and permission gates stay in

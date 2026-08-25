@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -86,9 +86,17 @@ export default async function CommunicationPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Communication" }]} />
-      <PageCanvas className="overflow-hidden">
-        <WorkspacePanel className="flex h-full flex-col overflow-hidden">
-          <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
+      <PageCanvas className="overflow-hidden" context="none" contentFocusTarget>
+        {/* This overview is a collection of peer surfaces, not one workspace.
+            Removing the old outer panel is the only markup change: its
+            border/padding nested every metric and message card inside a false
+            second boundary that CSS could not remove without also changing
+            real Card boundaries. Data, actions, and scroll ownership stay put. */}
+        <div
+          data-slot="communication-overview"
+          className="flex h-full min-h-0 flex-col overflow-hidden"
+        >
+          <header className="shrink-0 pb-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <h1 className="text-2xl font-semibold tracking-tight">
@@ -110,9 +118,9 @@ export default async function CommunicationPage() {
                 </Button>
               )}
             </div>
-          </div>
+          </header>
 
-          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+          <div className="min-h-0 flex-1 overflow-auto pb-1">
             <div className="grid gap-6 md:grid-cols-3">
               {/* Stats Cards */}
               <Card>
@@ -273,7 +281,7 @@ export default async function CommunicationPage() {
               )}
             </div>
           </div>
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );
