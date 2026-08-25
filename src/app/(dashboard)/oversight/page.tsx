@@ -29,7 +29,7 @@
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { EmptyPortfolio } from "@/components/oversight/empty-portfolio";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -87,11 +87,14 @@ export default async function OversightDashboardPage() {
         does not participate in `space-y-6`.
       */}
       <HeaderBreadcrumbs items={[{ label: title }]} />
-      <PageCanvas>
-        <WorkspacePanel className="min-h-full space-y-6 p-4 sm:p-6">
+      <PageCanvas context="none" contentFocusTarget>
+        <div
+          data-slot="oversight-sibling-surfaces"
+          className="mx-auto min-h-full max-w-6xl space-y-6"
+        >
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            <p className="text-muted-foreground mt-1">{description}</p>
+            <p className="text-foreground mt-1 text-sm">{description}</p>
           </div>
 
           {/* Summary Cards */}
@@ -270,7 +273,7 @@ export default async function OversightDashboardPage() {
               </CardContent>
             </Card>
           )}
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );

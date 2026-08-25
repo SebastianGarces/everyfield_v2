@@ -57,12 +57,14 @@ import type {
   OversightSectionResult,
   OversightStat,
 } from "@/lib/oversight/types";
+import { cn } from "@/lib/utils";
 
 export function PlantDetail({
   detail,
   scopeLabel,
   history,
   canSever,
+  attachedContext = false,
 }: {
   detail: OversightPlantDetail;
   /** "network" or "sending church" — the caller's own org, in their words. */
@@ -85,6 +87,12 @@ export function PlantDetail({
    * scoped by the read. Never another org's history.
    */
   history: AssociationHistoryEntry[];
+  /**
+   * The route's attached PageContext replaces the local back trail and joins
+   * directly to the identity surface. Data, actions, and section ownership do
+   * not move; this prop only selects the detail page's ruled composition.
+   */
+  attachedContext?: boolean;
 }) {
   const { plant, sections } = detail;
   const sharedCount = sections.filter(
@@ -92,14 +100,21 @@ export function PlantDetail({
   ).length;
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
-      <Link
-        href="/oversight/plants"
-        className="text-foreground hover:text-muted-foreground inline-flex cursor-pointer items-center gap-1 text-sm font-medium transition-colors"
-      >
-        <ChevronLeft className="size-4" aria-hidden="true" />
-        All church plants
-      </Link>
+    <div
+      className={cn(
+        "container mx-auto max-w-6xl space-y-6 p-4 sm:p-6",
+        attachedContext && "p-0 sm:p-0"
+      )}
+    >
+      {!attachedContext && (
+        <Link
+          href="/oversight/plants"
+          className="text-foreground hover:text-muted-foreground inline-flex cursor-pointer items-center gap-1 text-sm font-medium transition-colors"
+        >
+          <ChevronLeft className="size-4" aria-hidden="true" />
+          All church plants
+        </Link>
+      )}
 
       {/*
         Identity and facts share ONE card rather than a bare header above a
@@ -111,7 +126,12 @@ export function PlantDetail({
         Putting the record on its own surface is what earns the secondary text
         its contrast, rather than promoting every gray to ink.
       */}
-      <Card className="gap-0 py-0 shadow-sm">
+      <Card
+        className={cn(
+          "gap-0 py-0 shadow-sm",
+          attachedContext && "rounded-t-none border-t-0"
+        )}
+      >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b p-6">
           <div className="min-w-0 space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">

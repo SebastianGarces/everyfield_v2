@@ -18,7 +18,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { PlantDetail } from "@/components/oversight/plant-detail";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
@@ -64,28 +64,30 @@ export default async function OversightPlantPage({
     { orgType: callerOrg.type, orgId: callerOrg.id },
     id
   );
+  const breadcrumbs = [
+    { label: "Church plants", href: "/oversight/plants" },
+    { label: detail.plant.name },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Church plants", href: "/oversight/plants" },
-          { label: detail.plant.name },
-        ]}
-      />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto min-h-full max-w-7xl">
-          <PlantDetail
-            detail={detail}
-            scopeLabel={scopeLabelForOrgType(callerOrg.type)}
-            history={history}
-            // THE SEVER IS OWNER-ONLY AND THE PAGE IS NOT (#500). Every seat in the
-            // org reads this plant; only the Owner may remove it from the portfolio
-            // (`org.association.sever`, ruling 185 (1)). Asked of the capability
-            // table so the button and `severAssociationAction` cannot disagree.
-            canSever={holdsSeatFor(user, "org.association.sever")}
-          />
-        </WorkspacePanel>
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        frameClassName="mx-auto w-full max-w-6xl"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
+        <PlantDetail
+          detail={detail}
+          scopeLabel={scopeLabelForOrgType(callerOrg.type)}
+          history={history}
+          attachedContext
+          // THE SEVER IS OWNER-ONLY AND THE PAGE IS NOT (#500). Every seat in the
+          // org reads this plant; only the Owner may remove it from the portfolio
+          // (`org.association.sever`, ruling 185 (1)). Asked of the capability
+          // table so the button and `severAssociationAction` cannot disagree.
+          canSever={holdsSeatFor(user, "org.association.sever")}
+        />
       </PageCanvas>
     </>
   );

@@ -16,7 +16,7 @@
 // ============================================================================
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { PlantHealthPortfolio } from "@/components/phase-engine/plant-health-portfolio";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { requireOversightUser } from "@/lib/oversight/session";
@@ -42,10 +42,8 @@ export default async function OversightHealthPage() {
         nav item and this page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Plant Health" }]} />
-      <PageCanvas>
-        <WorkspacePanel className="min-h-full">
-          <PlantHealthPortfolio plants={plants} scopeLabel={scopeLabel} />
-        </WorkspacePanel>
+      <PageCanvas className="p-0" context="none" contentFocusTarget>
+        <PlantHealthPortfolio plants={plants} scopeLabel={scopeLabel} />
       </PageCanvas>
     </>
   );

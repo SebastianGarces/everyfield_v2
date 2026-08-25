@@ -50,7 +50,7 @@ import { redirect } from "next/navigation";
 import type { LaunchStatus } from "@/db/schema/launch";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { LaunchDateCard } from "@/components/launch/launch-date-card";
 import { LaunchHistory } from "@/components/launch/launch-history";
 import { LaunchJournal } from "@/components/launch/launch-journal";
@@ -182,8 +182,11 @@ export default async function LaunchPage() {
     <>
       <HeaderBreadcrumbs items={[{ label: "Launch" }]} />
 
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto min-h-full max-w-4xl space-y-6 p-4 sm:p-6">
+      <PageCanvas context="none" contentFocusTarget>
+        <div
+          data-slot="launch-sibling-surfaces"
+          className="mx-auto min-h-full max-w-4xl space-y-6"
+        >
           {/* ---- The date, and the controls that change it -------------- */}
           <LaunchDateCard
             targetDate={launch?.targetDate ?? null}
@@ -310,7 +313,7 @@ export default async function LaunchPage() {
               history={<LaunchHistory entries={history} />}
             />
           )}
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );

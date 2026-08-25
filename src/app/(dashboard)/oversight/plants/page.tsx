@@ -20,7 +20,7 @@
 import type { Metadata } from "next";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { PlantsDirectory } from "@/components/oversight/plants-directory";
 import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import { listOversightPlants } from "@/lib/oversight/read";
@@ -46,14 +46,12 @@ export default async function OversightPlantsPage() {
         the page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Church plants" }]} />
-      <PageCanvas>
-        <WorkspacePanel className="min-h-full">
-          <PlantsDirectory
-            plants={plants}
-            scopeLabel={scopeLabelForOrgType(org.type)}
-            canInvite={holdsSeatFor(user, "org.invitation.manage")}
-          />
-        </WorkspacePanel>
+      <PageCanvas className="p-0" context="none" contentFocusTarget>
+        <PlantsDirectory
+          plants={plants}
+          scopeLabel={scopeLabelForOrgType(org.type)}
+          canInvite={holdsSeatFor(user, "org.invitation.manage")}
+        />
       </PageCanvas>
     </>
   );
