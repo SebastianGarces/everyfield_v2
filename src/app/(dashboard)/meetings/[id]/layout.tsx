@@ -43,7 +43,11 @@ export default async function MeetingLayout({
   return (
     <>
       <HeaderBreadcrumbs items={breadcrumbs} />
-      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        scrollLayout="flow"
+      >
         <WorkspacePanel className="min-h-full">
           <div className="border-b">
             <div className="p-4 pb-0 sm:p-6 sm:pb-0">

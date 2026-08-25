@@ -78,6 +78,7 @@ export default async function TaskTemplatesPage() {
         contextAttachment="attached"
         contextItems={breadcrumbs}
         frameClassName="mx-auto w-full max-w-3xl"
+        scrollLayout="flow"
       >
         <WorkspacePanel className="p-4 sm:p-6">
           <TaskTemplatePicker

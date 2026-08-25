@@ -86,7 +86,12 @@ export default async function CommunicationPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Communication" }]} />
-      <PageCanvas className="overflow-hidden" context="none" contentFocusTarget>
+      <PageCanvas
+        className="overflow-hidden"
+        context="none"
+        contentFocusTarget
+        scrollLayout="fixed"
+      >
         {/* This overview is a collection of peer surfaces, not one workspace.
             Removing the old outer panel is the only markup change: its
             border/padding nested every metric and message card inside a false

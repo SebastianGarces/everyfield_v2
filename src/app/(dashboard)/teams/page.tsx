@@ -30,7 +30,12 @@ export default async function TeamsPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Ministry Teams" }]} />
-      <PageCanvas className="overflow-hidden" context="none" contentFocusTarget>
+      <PageCanvas
+        className="overflow-hidden"
+        context="none"
+        contentFocusTarget
+        scrollLayout="fixed"
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
             <div className="flex items-center justify-between">

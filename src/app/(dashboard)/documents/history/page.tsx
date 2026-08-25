@@ -54,6 +54,7 @@ export default async function GeneratedDocumentsHistoryPage() {
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="fixed"
       >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-1 border-b p-4 pb-4 sm:p-6 sm:pb-4">

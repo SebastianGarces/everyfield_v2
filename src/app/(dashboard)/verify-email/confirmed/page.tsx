@@ -43,7 +43,7 @@ export default async function EmailChangeConfirmedPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: TITLE }]} />
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <WorkspacePanel className="mx-auto w-full max-w-xl space-y-4 p-4 sm:p-6">
           <h1 className="text-xl font-semibold tracking-tight">{TITLE}</h1>
           <p className="text-muted-foreground text-pretty">

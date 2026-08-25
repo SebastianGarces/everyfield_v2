@@ -96,6 +96,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={HISTORY_BREADCRUMBS}
+        scrollLayout="fixed"
       >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="border-b p-4 pb-4 sm:p-6 sm:pb-4">

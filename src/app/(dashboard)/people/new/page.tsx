@@ -38,6 +38,7 @@ export default async function NewPersonPage() {
         frameClassName="mx-auto w-full max-w-2xl"
         contextAttachment="attached"
         contextItems={BREADCRUMBS}
+        scrollLayout="flow"
       >
         <WorkspacePanel className="mx-auto max-w-2xl">
           <CardHeader>

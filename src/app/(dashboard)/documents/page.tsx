@@ -44,6 +44,7 @@ export default async function DocumentsPage() {
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="fixed"
       >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           {/* Header */}

@@ -182,7 +182,7 @@ export default async function LaunchPage() {
     <>
       <HeaderBreadcrumbs items={[{ label: "Launch" }]} />
 
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <div
           data-slot="launch-sibling-surfaces"
           className="mx-auto min-h-full max-w-4xl space-y-6"

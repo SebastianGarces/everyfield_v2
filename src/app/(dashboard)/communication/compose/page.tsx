@@ -124,6 +124,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="fixed"
       >
         <h1 className="sr-only">New message</h1>
         <WorkspacePanel className="h-full overflow-hidden">

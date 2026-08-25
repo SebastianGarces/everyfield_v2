@@ -76,7 +76,7 @@ export default async function NotificationsPage({
     <>
       <HeaderBreadcrumbs items={[{ label: "Notifications" }]} />
 
-      <PageCanvas context="none" contentFocusTarget>
+      <PageCanvas context="none" contentFocusTarget scrollLayout="flow">
         <WorkspacePanel className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">

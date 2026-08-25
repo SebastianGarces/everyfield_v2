@@ -43,6 +43,7 @@ export default async function EditTemplatePage({
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="fixed"
       >
         <h1 className="sr-only">Edit {template.name}</h1>
         <WorkspacePanel className="h-full overflow-hidden">

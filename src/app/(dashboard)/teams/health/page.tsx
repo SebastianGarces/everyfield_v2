@@ -35,6 +35,7 @@ export default async function TeamHealthPage() {
         className="overflow-hidden"
         contextAttachment="attached"
         contextItems={BREADCRUMBS}
+        scrollLayout="fixed"
       >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">

@@ -37,7 +37,11 @@ export default async function TeamDetailLayout({
   return (
     <>
       <HeaderBreadcrumbs items={breadcrumbs} />
-      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        scrollLayout="flow"
+      >
         <WorkspacePanel className="min-h-full">
           <TeamDetailHeader team={team} />
           <div className="px-4 pt-0 sm:px-6">

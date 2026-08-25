@@ -76,6 +76,7 @@ export default async function OversightPlantPage({
         frameClassName="mx-auto w-full max-w-6xl"
         contextAttachment="attached"
         contextItems={breadcrumbs}
+        scrollLayout="flow"
       >
         <PlantDetail
           detail={detail}

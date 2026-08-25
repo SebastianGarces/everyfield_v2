@@ -42,7 +42,12 @@ export default async function OversightHealthPage() {
         nav item and this page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Plant Health" }]} />
-      <PageCanvas className="p-0" context="none" contentFocusTarget>
+      <PageCanvas
+        className="p-0"
+        context="none"
+        contentFocusTarget
+        scrollLayout="flow"
+      >
         <PlantHealthPortfolio plants={plants} scopeLabel={scopeLabel} />
       </PageCanvas>
     </>

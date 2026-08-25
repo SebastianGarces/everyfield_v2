@@ -24,7 +24,7 @@ test("top-level mission and oversight routes suppress redundant shell context", 
 
     assert.match(
       source,
-      /<PageCanvas(?: className="p-0")? context="none" contentFocusTarget>/,
+      /<PageCanvas(?=[^>]*context="none")(?=[^>]*contentFocusTarget)(?=[^>]*scrollLayout="flow")[^>]*>/,
       `${relativePath} keeps its page identity in its own content header`
     );
     assert.doesNotMatch(

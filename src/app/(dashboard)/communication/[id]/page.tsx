@@ -149,7 +149,11 @@ export default async function MessageDetailPage({
   return (
     <>
       <HeaderBreadcrumbs items={breadcrumbs} />
-      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        scrollLayout="flow"
+      >
         <WorkspacePanel className="min-h-full">
           <div className="border-b p-4 sm:p-6">
             <Button
