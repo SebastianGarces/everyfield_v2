@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { DetailHeader } from "@/components/shared/detail-header";
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowRightLeft,
   Calendar,
+  House,
   MoreHorizontal,
   Pencil,
   Rocket,
@@ -91,108 +93,119 @@ export function PersonHeader({
   const showsBackgroundCheck = person.backgroundCheckStatus !== "not_started";
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div className="flex items-start gap-4">
-        <Avatar className="border-background h-16 w-16 border-2 shadow-sm">
+    <DetailHeader
+      className="pb-0"
+      responsive
+      leading={
+        <Avatar className="border-background size-16 shrink-0 border-2 shadow-sm">
           <AvatarImage src={person.photoSrc} alt={fullName} />
           <AvatarFallback className="text-lg font-semibold">
             {initials}
           </AvatarFallback>
         </Avatar>
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{fullName}</h1>
-            {statusBadge}
-            {showsBackgroundCheck && (
-              <BackgroundCheckBadge
-                status={person.backgroundCheckStatus}
-                labelled
-              />
-            )}
-          </div>
-          {household && (
-            <p className="text-muted-foreground text-sm">{household.name}</p>
+      }
+      eyebrow={
+        <>
+          {statusBadge}
+          {showsBackgroundCheck && (
+            <BackgroundCheckBadge
+              status={person.backgroundCheckStatus}
+              labelled
+            />
           )}
-          <div className="text-muted-foreground flex items-center gap-1 text-xs">
-            <Calendar className="h-3 w-3" />
-            <span>
-              Joined on{" "}
-              {person.createdAt
-                ? formatDateWithoutWeekday(new Date(person.createdAt), "short")
-                : "Unknown"}
+        </>
+      }
+      title={fullName}
+      metadata={
+        <>
+          {household && (
+            <span className="flex items-center gap-1.5">
+              <House className="h-4 w-4" />
+              {household.name}
             </span>
-          </div>
-        </div>
-      </div>
+          )}
+          <span className="flex items-center gap-1.5">
+            <Calendar className="h-4 w-4" />
+            Joined on{" "}
+            {person.createdAt
+              ? formatDateWithoutWeekday(new Date(person.createdAt), "short")
+              : "Unknown"}
+          </span>
+        </>
+      }
+      trailing={
+        canWrite && (
+          <>
+            <Button variant="outline" size="sm" onClick={onEdit}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
 
-      {canWrite && (
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Pencil className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">More actions</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem onClick={onEdit}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setIsStatusModalOpen(true)}>
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                  Change Status
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <DropdownMenuItem
+                      onSelect={(e) => e.preventDefault()}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash className="mr-2 h-4 w-4" />
+                      Delete Person
+                    </DropdownMenuItem>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Are you absolutely sure?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This will permanently
+                        delete <span className="font-semibold">{fullName}</span>{" "}
+                        and remove their data from our servers.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={onDelete}
+                        variant="destructive"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">More actions</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onEdit}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsStatusModalOpen(true)}>
-                <ArrowRightLeft className="mr-2 h-4 w-4" />
-                Change Status
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <DropdownMenuItem
-                    onSelect={(e) => e.preventDefault()}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash className="mr-2 h-4 w-4" />
-                    Delete Person
-                  </DropdownMenuItem>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      Are you absolutely sure?
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This action cannot be undone. This will permanently delete{" "}
-                      <span className="font-semibold">{fullName}</span> and
-                      remove their data from our servers.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={onDelete} variant="destructive">
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Status Change Modal — opened only by the menu item above, so it
+            {/* Status Change Modal — opened only by the menu item above, so it
               lives inside the same gate rather than mounting for a viewer with
               no way to reach it. */}
-          <StatusChangeModal
-            person={person}
-            open={isStatusModalOpen}
-            onOpenChange={setIsStatusModalOpen}
-            onOptimisticUpdate={onOptimisticStatusChange}
-          />
-        </div>
-      )}
-    </div>
+            <StatusChangeModal
+              person={person}
+              open={isStatusModalOpen}
+              onOpenChange={setIsStatusModalOpen}
+              onOptimisticUpdate={onOptimisticStatusChange}
+            />
+          </>
+        )
+      }
+    />
   );
 }

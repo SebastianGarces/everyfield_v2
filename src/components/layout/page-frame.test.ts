@@ -47,7 +47,7 @@ test("page-frame primitives contain presentation only and preserve caller props"
   assert.match(html, />Workspace<\/div>/);
 });
 
-test("flow layout grows the hierarchy so canvas padding extends the scroll range", () => {
+test("flow layout grows long pages and fills short direct workspaces", () => {
   const html = renderToStaticMarkup(
     createElement(
       PageCanvas,
@@ -77,6 +77,13 @@ test("flow layout grows the hierarchy so canvas padding extends the scroll range
   );
   assert.ok(contentClass, "the page content must render its classes");
   assert.match(contentClass, /(?:^| )flex-1(?: |$)/);
+  assert.match(contentClass, /(?:^| )flex(?: |$)/);
+  assert.match(contentClass, /(?:^| )flex-col(?: |$)/);
+  assert.match(
+    contentClass,
+    /\[&amp;&gt;\[data-slot=workspace-panel\]:only-child\]:flex-1/,
+    "a short direct workspace must consume the flow content's remaining height"
+  );
   assert.doesNotMatch(
     contentClass,
     /(?:^| )min-h-0(?: |$)/,
@@ -101,6 +108,38 @@ test("fixed layout preserves definite height for descendant scroll owners", () =
   assert.match(hierarchyClass, /(?:^| )min-h-full(?: |$)/);
   assert.ok(contentClass, "the page content must render its classes");
   assert.match(contentClass, /(?:^| )min-h-0(?: |$)/);
+  assert.doesNotMatch(
+    contentClass,
+    /\[&amp;&gt;\[data-slot=workspace-panel\]:only-child\]:flex-1/,
+    "fixed workspaces keep their existing descendant-owned scroll contract"
+  );
+});
+
+test("flow layout does not stretch one panel among sibling surfaces", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      PageCanvas,
+      { context: "none", scrollLayout: "flow" },
+      createElement(WorkspacePanel, null, "Summary"),
+      createElement("section", null, "Activity")
+    )
+  );
+  const contentClass = html.match(
+    /data-slot="page-content"[^>]*class="([^"]*)"/
+  )?.[1];
+
+  assert.ok(contentClass, "the page content must render its classes");
+  assert.match(
+    contentClass,
+    /\[&amp;&gt;\[data-slot=workspace-panel\]:only-child\]:flex-1/,
+    "fill must require the workspace to be the content's only rendered child"
+  );
+  assert.doesNotMatch(
+    contentClass,
+    /\[&amp;&gt;\[data-slot=workspace-panel\]\]:flex-1(?: |$)/,
+    "a multi-surface flow must not give one panel all remaining height"
+  );
+  assert.match(html, />Summary<\/div><section>Activity<\/section>/);
 });
 
 test("only an explicitly attached context removes the workspace's top seam", () => {
