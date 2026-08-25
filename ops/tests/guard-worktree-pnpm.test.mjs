@@ -77,7 +77,10 @@ function registeredFixture() {
     encoding: "utf8",
   });
   fs.mkdirSync(path.join(parent, "node_modules"));
-  fs.symlinkSync(path.join(parent, "node_modules"), path.join(wt, "node_modules"));
+  fs.symlinkSync(
+    path.join(parent, "node_modules"),
+    path.join(wt, "node_modules")
+  );
   return { parent, wt };
 }
 
