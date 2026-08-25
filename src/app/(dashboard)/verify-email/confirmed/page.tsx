@@ -4,6 +4,7 @@ import Link from "next/link";
 import { settingsSectionUrl } from "@/lib/settings/sections";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
 
@@ -42,21 +43,23 @@ export default async function EmailChangeConfirmedPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: TITLE }]} />
-      <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-10">
-        <h1 className="text-xl font-semibold tracking-tight">{TITLE}</h1>
-        <p className="text-muted-foreground text-pretty">
-          You now sign in as <strong>{user.email}</strong>. Your old address no
-          longer works, and we have told it about the change.
-        </p>
-        <Button asChild className="cursor-pointer">
-          {/* PATH AND FRAGMENT, not a bare `#settings/account` (#657): this
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto w-full max-w-xl space-y-4 p-4 sm:p-6">
+          <h1 className="text-xl font-semibold tracking-tight">{TITLE}</h1>
+          <p className="text-muted-foreground text-pretty">
+            You now sign in as <strong>{user.email}</strong>. Your old address
+            no longer works, and we have told it about the change.
+          </p>
+          <Button asChild className="cursor-pointer">
+            {/* PATH AND FRAGMENT, not a bare `#settings/account` (#657): this
               page is not a dashboard screen the modal should open OVER — the
               reader is finished here and is going back into the app. A real
               navigation also keeps Next's router holding the fragment, which a
               same-page `#`-link would not. */}
-          <Link href={settingsSectionUrl("account")}>Back to settings</Link>
-        </Button>
-      </div>
+            <Link href={settingsSectionUrl("account")}>Back to settings</Link>
+          </Button>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { VerifyEmailConfirm } from "@/components/settings/verify-email-confirm";
 import { EMAIL_CHANGE_LINK_DEAD_MESSAGE } from "@/lib/auth/email-change";
 import { verifySession } from "@/lib/auth/session";
@@ -66,18 +67,20 @@ export default async function VerifyEmailPage({
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Confirm your email address" }]} />
-      <div className="mx-auto w-full max-w-xl px-4 py-10">
-        {candidate === "" ? (
-          <p
-            role="alert"
-            className="bg-destructive/10 text-destructive rounded-md p-4 text-sm"
-          >
-            {EMAIL_CHANGE_LINK_DEAD_MESSAGE}
-          </p>
-        ) : (
-          <VerifyEmailConfirm token={candidate} currentEmail={user.email} />
-        )}
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto w-full max-w-xl p-4 sm:p-6">
+          {candidate === "" ? (
+            <p
+              role="alert"
+              className="bg-destructive/10 text-destructive rounded-md p-4 text-sm"
+            >
+              {EMAIL_CHANGE_LINK_DEAD_MESSAGE}
+            </p>
+          ) : (
+            <VerifyEmailConfirm token={candidate} currentEmail={user.email} />
+          )}
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

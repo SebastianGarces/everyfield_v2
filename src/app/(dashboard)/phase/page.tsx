@@ -20,7 +20,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
+import { HeaderBreadcrumbs } from "@/components/header";
 import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
 import { FocusPanel } from "@/components/phase-engine/focus-panel";
 import {
@@ -232,89 +234,94 @@ export default async function PhasePage() {
   });
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Plant Intelligence
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Your prioritized focus, phase control, and self-attestations — read
-          from the latest assessment.
-        </p>
-        {/* #485 (C20) — the scope, said out loud on the surface rather than
+    <>
+      <HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">
+          <header>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Plant Intelligence
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Your prioritized focus, phase control, and self-attestations —
+              read from the latest assessment.
+            </p>
+            {/* #485 (C20) — the scope, said out loud on the surface rather than
             only in the rubric. Bryan: "the product should be really clear
             about which of those two things it is claiming to assess." */}
-        <p className="text-muted-foreground mt-1 max-w-[70ch] text-sm text-pretty">
-          Plant Intelligence assesses your progress toward a healthy launch —
-          not the full health of a church.
-        </p>
-      </header>
+            <p className="text-muted-foreground mt-1 max-w-[70ch] text-sm text-pretty">
+              Plant Intelligence assesses your progress toward a healthy launch
+              — not the full health of a church.
+            </p>
+          </header>
 
-      {coldStart && (
-        <Card data-testid="assessment-cold-start">
-          <CardHeader>
-            <CardTitle>
-              <h2>{coldStart.title}</h2>
-            </CardTitle>
-            <CardDescription className="max-w-[65ch] text-pretty">
-              {coldStart.body}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
+          {coldStart && (
+            <Card data-testid="assessment-cold-start">
+              <CardHeader>
+                <CardTitle>
+                  <h2>{coldStart.title}</h2>
+                </CardTitle>
+                <CardDescription className="max-w-[65ch] text-pretty">
+                  {coldStart.body}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Scorecard, then exit criteria, then the trends, then the focus list:
+          <div className="grid gap-6 lg:grid-cols-3">
+            {/* Scorecard, then exit criteria, then the trends, then the focus list:
             where the plant stands → what is left before it moves on → which way
             it is moving → what to do about it. The trends sit above the focus
             list because they are evidence for it, and below the exit criteria
             because a direction only means something once the target is known. */}
-        <div className="space-y-6 lg:col-span-2">
-          <CsfScorecard scorecard={scorecard} />
-          <ExitCriteria progress={exitCriteria} />
-          <Trends trends={trends} />
-          <FocusPanel
-            assessment={latest?.assessment ?? null}
-            insights={planterInsights}
-            delta={delta}
-            feedbackByInsightId={feedbackByInsightId}
-          />
-        </div>
+            <div className="space-y-6 lg:col-span-2">
+              <CsfScorecard scorecard={scorecard} />
+              <ExitCriteria progress={exitCriteria} />
+              <Trends trends={trends} />
+              <FocusPanel
+                assessment={latest?.assessment ?? null}
+                insights={planterInsights}
+                delta={delta}
+                feedbackByInsightId={feedbackByInsightId}
+              />
+            </div>
 
-        <div className="space-y-6">
-          <PhaseControl
-            currentPhase={church.currentPhase}
-            readiness={readiness}
-          />
-          {/* The timeline sits under the phase control, not in the main column:
+            <div className="space-y-6">
+              <PhaseControl
+                currentPhase={church.currentPhase}
+                readiness={readiness}
+              />
+              {/* The timeline sits under the phase control, not in the main column:
               it is the dated record of the moves that control makes plus the day
               the plant is heading for, so the two read as one column about
               where the plant is in time. Keeping it out of the main column also
               leaves the focus list — the only part of the page a planter acts
               on — directly under the evidence for it. */}
-          {/* #484 — the private one. It sits in the same column as the
+              {/* #484 — the private one. It sits in the same column as the
               assessment, deliberately: launch-green may not be shown without
               the planter's own state beside it. */}
-          <PlanterCheckinCard
-            thisWeek={
-              answeredThisWeek && {
-                spiritually: answeredThisWeek.spiritually,
-                marriageFamily: answeredThisWeek.marriageFamily,
-                financially: answeredThisWeek.financially,
-                pace: answeredThisWeek.pace,
-                note: answeredThisWeek.note,
-              }
-            }
-            weeks={checkinWeeks}
-            nudges={checkinNudges(checkins)}
-          />
-          <MilestoneTimeline timeline={timeline} />
-          <SignalToggles
-            initialValues={booleanSignals}
-            attestedDaysAgo={attestationAges}
-          />
-        </div>
-      </div>
-    </div>
+              <PlanterCheckinCard
+                thisWeek={
+                  answeredThisWeek && {
+                    spiritually: answeredThisWeek.spiritually,
+                    marriageFamily: answeredThisWeek.marriageFamily,
+                    financially: answeredThisWeek.financially,
+                    pace: answeredThisWeek.pace,
+                    note: answeredThisWeek.note,
+                  }
+                }
+                weeks={checkinWeeks}
+                nudges={checkinNudges(checkins)}
+              />
+              <MilestoneTimeline timeline={timeline} />
+              <SignalToggles
+                initialValues={booleanSignals}
+                attestedDaysAgo={attestationAges}
+              />
+            </div>
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
+    </>
   );
 }

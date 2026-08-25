@@ -27,6 +27,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { SendingChurchesRoster } from "@/components/oversight/sending-churches-roster";
 import { listNetworkSendingChurches } from "@/lib/oversight/sending-churches";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -59,10 +60,14 @@ export default async function OversightSendingChurchesPage() {
         item and the page's own <h1>.
       */}
       <HeaderBreadcrumbs items={[{ label: "Sending churches" }]} />
-      <SendingChurchesRoster
-        sendingChurches={sendingChurches}
-        canInvite={holdsSeatFor(user, "org.invitation.manage")}
-      />
+      <PageCanvas>
+        <WorkspacePanel className="min-h-full">
+          <SendingChurchesRoster
+            sendingChurches={sendingChurches}
+            canInvite={holdsSeatFor(user, "org.invitation.manage")}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

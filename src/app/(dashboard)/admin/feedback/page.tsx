@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import {
   FeedbackStatusFilter,
   FeedbackStatusSelect,
@@ -91,136 +92,142 @@ export default async function AdminFeedbackPage({
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <>
       <HeaderBreadcrumbs items={[{ label: "Admin" }, { label: "Feedback" }]} />
+      <PageCanvas>
+        <WorkspacePanel className="flex min-h-full flex-col gap-6 overflow-hidden p-4 sm:p-6">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight">Feedback</h1>
+            <p className="text-muted-foreground text-sm">
+              Triage user-submitted feedback across all churches.
+            </p>
+          </div>
 
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Feedback</h1>
-        <p className="text-muted-foreground text-sm">
-          Triage user-submitted feedback across all churches.
-        </p>
-      </div>
+          <FeedbackStatusFilter activeStatus={status} category={category} />
 
-      <FeedbackStatusFilter activeStatus={status} category={category} />
-
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-40">Date</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Church</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Page</TableHead>
-              <TableHead className="min-w-72">Description</TableHead>
-              <TableHead className="w-24">Issue</TableHead>
-              <TableHead className="w-44">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-muted-foreground py-10 text-center"
-                >
-                  No feedback found.
-                </TableCell>
-              </TableRow>
-            ) : (
-              items.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
-                    {dateFormatter.format(item.createdAt)}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <div className="font-medium">
-                      {item.userName ?? "Unknown"}
-                    </div>
-                    <div className="text-muted-foreground">
-                      {item.userEmail}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {item.churchName ?? (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={categoryVariant[item.category]}>
-                      {item.category}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="max-w-40 truncate text-sm">
-                    {item.pageUrl ? (
-                      <span title={item.pageUrl}>{item.pageUrl}</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {/* Rendered as plain text — no HTML/markdown interpretation. */}
-                    <p className="max-w-md break-words whitespace-pre-wrap">
-                      {item.description}
-                    </p>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {item.githubIssueNumber ? (
-                      <a
-                        href={feedbackIssueUrl(item.githubIssueNumber)}
-                        target="_blank"
-                        rel="noreferrer"
-                        // The number was stamped under whatever repo the bridge
-                        // was pointed at; the link resolves against the current
-                        // one. Naming the repo makes a mismatch legible.
-                        title={`Opened on ${FEEDBACK_REPO}`}
-                        className="cursor-pointer font-medium underline-offset-4 hover:underline"
-                      >
-                        #{item.githubIssueNumber}
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <FeedbackStatusSelect id={item.id} status={item.status} />
-                  </TableCell>
+          <div className="overflow-x-auto rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">Date</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Church</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Page</TableHead>
+                  <TableHead className="min-w-72">Description</TableHead>
+                  <TableHead className="w-24">Issue</TableHead>
+                  <TableHead className="w-44">Status</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {items.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
+                      className="text-muted-foreground py-10 text-center"
+                    >
+                      No feedback found.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                        {dateFormatter.format(item.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        <div className="font-medium">
+                          {item.userName ?? "Unknown"}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {item.userEmail}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {item.churchName ?? (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={categoryVariant[item.category]}>
+                          {item.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-40 truncate text-sm">
+                        {item.pageUrl ? (
+                          <span title={item.pageUrl}>{item.pageUrl}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {/* Rendered as plain text — no HTML/markdown interpretation. */}
+                        <p className="max-w-md break-words whitespace-pre-wrap">
+                          {item.description}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {item.githubIssueNumber ? (
+                          <a
+                            href={feedbackIssueUrl(item.githubIssueNumber)}
+                            target="_blank"
+                            rel="noreferrer"
+                            // The number was stamped under whatever repo the bridge
+                            // was pointed at; the link resolves against the current
+                            // one. Naming the repo makes a mismatch legible.
+                            title={`Opened on ${FEEDBACK_REPO}`}
+                            className="cursor-pointer font-medium underline-offset-4 hover:underline"
+                          >
+                            #{item.githubIssueNumber}
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <FeedbackStatusSelect
+                          id={item.id}
+                          status={item.status}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-sm">Page {currentPage}</p>
-        <div className="flex items-center gap-2">
-          {currentPage > 1 ? (
-            <Link
-              href={buildPageHref(currentPage - 1)}
-              className="hover:bg-accent cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium"
-            >
-              Previous
-            </Link>
-          ) : (
-            <span className="text-muted-foreground rounded-md border px-3 py-1.5 text-sm font-medium opacity-50">
-              Previous
-            </span>
-          )}
-          {hasNextPage ? (
-            <Link
-              href={buildPageHref(currentPage + 1)}
-              className="hover:bg-accent cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium"
-            >
-              Next
-            </Link>
-          ) : (
-            <span className="text-muted-foreground rounded-md border px-3 py-1.5 text-sm font-medium opacity-50">
-              Next
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
+          <div className="flex items-center justify-between">
+            <p className="text-muted-foreground text-sm">Page {currentPage}</p>
+            <div className="flex items-center gap-2">
+              {currentPage > 1 ? (
+                <Link
+                  href={buildPageHref(currentPage - 1)}
+                  className="hover:bg-accent cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium"
+                >
+                  Previous
+                </Link>
+              ) : (
+                <span className="text-muted-foreground rounded-md border px-3 py-1.5 text-sm font-medium opacity-50">
+                  Previous
+                </span>
+              )}
+              {hasNextPage ? (
+                <Link
+                  href={buildPageHref(currentPage + 1)}
+                  className="hover:bg-accent cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium"
+                >
+                  Next
+                </Link>
+              ) : (
+                <span className="text-muted-foreground rounded-md border px-3 py-1.5 text-sm font-medium opacity-50">
+                  Next
+                </span>
+              )}
+            </div>
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
+    </>
   );
 }

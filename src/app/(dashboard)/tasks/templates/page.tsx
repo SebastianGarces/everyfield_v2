@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TaskTemplatePicker } from "@/components/tasks/template-picker";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
@@ -74,12 +75,14 @@ export default async function TaskTemplatesPage() {
           { label: TEMPLATES_LINK_LABEL },
         ]}
       />
-      <div className="mx-auto max-w-3xl p-6">
-        <TaskTemplatePicker
-          headingLevel="h1"
-          currentPhase={toPhaseNumber(church?.currentPhase)}
-        />
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto max-w-3xl p-4 sm:p-6">
+          <TaskTemplatePicker
+            headingLevel="h1"
+            currentPhase={toPhaseNumber(church?.currentPhase)}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

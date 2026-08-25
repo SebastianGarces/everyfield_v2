@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -85,191 +86,195 @@ export default async function CommunicationPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Communication" }]} />
-      <div className="flex h-full flex-col">
-        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Communication Hub
-              </h1>
-              {/* The header is capability-matched too (#666): a Member holds no
+      <PageCanvas className="overflow-hidden">
+        <WorkspacePanel className="flex h-full flex-col overflow-hidden">
+          <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Communication Hub
+                </h1>
+                {/* The header is capability-matched too (#666): a Member holds no
                   `communication.send`, and "Send messages…" is an instruction
                   for a write the server refuses them. */}
-              <p className="text-muted-foreground">
-                {communicationHubSubtitle(canSend)}
-              </p>
-            </div>
-            {canSend && (
-              <Button asChild>
-                <Link href="/communication/compose">
-                  <Plus className="mr-2 h-4 w-4" />
-                  New Message
-                </Link>
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-6">
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* Stats Cards */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Messages
-                </CardTitle>
-                <Mail className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{total}</div>
-                {loggedCount > 0 && (
-                  <Link
-                    href="/communication/history?status=logged"
-                    className="text-muted-foreground hover:text-foreground mt-1 inline-block cursor-pointer text-xs underline-offset-4 hover:underline"
-                  >
-                    {loggedCount === 1
-                      ? "Includes 1 logged contact"
-                      : `Includes ${loggedCount} logged contacts`}
-                  </Link>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Sent This Week
-                </CardTitle>
-                <Send className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{sentThisWeek}</div>
-                {loggedCount > 0 && (
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    Logged contacts are not counted here.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Templates Available
-                </CardTitle>
-                <Mail className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{templates.length}</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Delivery performance (COM-019) */}
-          <div className="mt-6">
-            <DeliveryOverview totals={deliveryTotals} canSend={canSend} />
-          </div>
-
-          {/* Quick Actions — every card is a link INTO the compose form with a
-              template preloaded, so the whole block is one write affordance
-              wearing four faces. The templates themselves stay readable at
-              /communication/templates. */}
-          {canSend && quickActions.length > 0 && (
-            <div className="mt-6">
-              <h2 className="mb-3 text-lg font-semibold">Quick Actions</h2>
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                {quickActions.map((template) => (
-                  <Link
-                    key={template.id}
-                    href={`/communication/compose?templateId=${template.id}`}
-                    className="cursor-pointer"
-                  >
-                    <Card className="cursor-pointer transition-shadow hover:shadow-md">
-                      <CardContent className="p-4">
-                        <p className="font-medium">{template.name}</p>
-                        <p className="text-muted-foreground mt-1 text-sm">
-                          {template.description}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ))}
+                <p className="text-muted-foreground">
+                  {communicationHubSubtitle(canSend)}
+                </p>
               </div>
+              {canSend && (
+                <Button asChild className="sm:shrink-0">
+                  <Link href="/communication/compose">
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Message
+                  </Link>
+                </Button>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Recent Messages */}
-          <div className="mt-6">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Recent Messages</h2>
-              <Link
-                href="/communication/history"
-                className="text-primary cursor-pointer text-sm hover:underline"
-              >
-                View All Messages
-              </Link>
-            </div>
-            {recentMessages.length === 0 ? (
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Stats Cards */}
               <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <Mail className="text-muted-foreground mb-4 h-12 w-12" />
-                  <p className="text-muted-foreground text-lg font-medium">
-                    No messages yet
-                  </p>
-                  {/* The fact is the same for everybody; the sentence under it
-                      states who sends messages rather than asking a viewer who
-                      cannot to send one. */}
-                  <p className="text-muted-foreground mt-1 text-sm">
-                    {communicationEmptyStateLine(canSend)}
-                  </p>
-                  {canSend && (
-                    <Button asChild className="mt-4">
-                      <Link href="/communication/compose">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Compose Message
-                      </Link>
-                    </Button>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Total Messages
+                  </CardTitle>
+                  <Mail className="text-muted-foreground h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{total}</div>
+                  {loggedCount > 0 && (
+                    <Link
+                      href="/communication/history?status=logged"
+                      className="text-muted-foreground hover:text-foreground mt-1 inline-block cursor-pointer text-xs underline-offset-4 hover:underline"
+                    >
+                      {loggedCount === 1
+                        ? "Includes 1 logged contact"
+                        : `Includes ${loggedCount} logged contacts`}
+                    </Link>
                   )}
                 </CardContent>
               </Card>
-            ) : (
-              <div className="space-y-2">
-                {recentMessages.map((msg) => (
-                  <Link
-                    key={msg.id}
-                    href={`/communication/${msg.id}`}
-                    className="cursor-pointer"
-                  >
-                    <Card className="cursor-pointer transition-shadow hover:shadow-md">
-                      <CardContent className="flex items-center justify-between p-4">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">
-                            {resolvedSubjectMap.get(msg.id) ??
-                              msg.subject ??
-                              "(No subject)"}
-                          </p>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Sent This Week
+                  </CardTitle>
+                  <Send className="text-muted-foreground h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{sentThisWeek}</div>
+                  {loggedCount > 0 && (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      Logged contacts are not counted here.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Templates Available
+                  </CardTitle>
+                  <Mail className="text-muted-foreground h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{templates.length}</div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Delivery performance (COM-019) */}
+            <div className="mt-6">
+              <DeliveryOverview totals={deliveryTotals} canSend={canSend} />
+            </div>
+
+            {/* Quick Actions — every card is a link INTO the compose form with a
+              template preloaded, so the whole block is one write affordance
+              wearing four faces. The templates themselves stay readable at
+              /communication/templates. */}
+            {canSend && quickActions.length > 0 && (
+              <div className="mt-6">
+                <h2 className="mb-3 text-lg font-semibold">Quick Actions</h2>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+                  {quickActions.map((template) => (
+                    <Link
+                      key={template.id}
+                      href={`/communication/compose?templateId=${template.id}`}
+                      className="cursor-pointer"
+                    >
+                      <Card className="cursor-pointer transition-shadow hover:shadow-md">
+                        <CardContent className="p-4">
+                          <p className="font-medium">{template.name}</p>
                           <p className="text-muted-foreground mt-1 text-sm">
-                            {msg.recipientCount ?? 0} recipient
-                            {(msg.recipientCount ?? 0) !== 1 ? "s" : ""}
-                            {msg.sentAt &&
-                              ` · ${formatRelativeTimestamp(msg.sentAt, now, timeZone)}`}
+                            {template.description}
                           </p>
-                        </div>
-                        <Badge
-                          variant="secondary"
-                          className={communicationStatusBadgeClass(msg.status)}
-                        >
-                          {communicationStatusLabel(msg.status)}
-                        </Badge>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ))}
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* Recent Messages */}
+            <div className="mt-6">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Recent Messages</h2>
+                <Link
+                  href="/communication/history"
+                  className="text-primary cursor-pointer text-sm hover:underline"
+                >
+                  View All Messages
+                </Link>
+              </div>
+              {recentMessages.length === 0 ? (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <Mail className="text-muted-foreground mb-4 h-12 w-12" />
+                    <p className="text-muted-foreground text-lg font-medium">
+                      No messages yet
+                    </p>
+                    {/* The fact is the same for everybody; the sentence under it
+                      states who sends messages rather than asking a viewer who
+                      cannot to send one. */}
+                    <p className="text-muted-foreground mt-1 text-sm">
+                      {communicationEmptyStateLine(canSend)}
+                    </p>
+                    {canSend && (
+                      <Button asChild className="mt-4">
+                        <Link href="/communication/compose">
+                          <Plus className="mr-2 h-4 w-4" />
+                          Compose Message
+                        </Link>
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {recentMessages.map((msg) => (
+                    <Link
+                      key={msg.id}
+                      href={`/communication/${msg.id}`}
+                      className="cursor-pointer"
+                    >
+                      <Card className="cursor-pointer transition-shadow hover:shadow-md">
+                        <CardContent className="flex items-center justify-between p-4">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">
+                              {resolvedSubjectMap.get(msg.id) ??
+                                msg.subject ??
+                                "(No subject)"}
+                            </p>
+                            <p className="text-muted-foreground mt-1 text-sm">
+                              {msg.recipientCount ?? 0} recipient
+                              {(msg.recipientCount ?? 0) !== 1 ? "s" : ""}
+                              {msg.sentAt &&
+                                ` · ${formatRelativeTimestamp(msg.sentAt, now, timeZone)}`}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={communicationStatusBadgeClass(
+                              msg.status
+                            )}
+                          >
+                            {communicationStatusLabel(msg.status)}
+                          </Badge>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

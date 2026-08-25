@@ -1,7 +1,7 @@
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { PersonForm } from "@/components/people/person-form";
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
@@ -34,8 +34,8 @@ export default async function NewPersonPage() {
           { label: "Add Person" },
         ]}
       />
-      <div className="mx-auto max-w-2xl p-6">
-        <Card>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto max-w-2xl">
           <CardHeader>
             <CardTitle className="text-2xl">Add Person</CardTitle>
             <CardDescription>Add a new person to your contacts</CardDescription>
@@ -43,8 +43,8 @@ export default async function NewPersonPage() {
           <CardContent>
             <PersonForm mode="create" />
           </CardContent>
-        </Card>
-      </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }
