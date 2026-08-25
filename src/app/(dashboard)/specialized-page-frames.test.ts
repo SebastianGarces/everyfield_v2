@@ -4,6 +4,10 @@ import path from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
 
+import {
+  assertPageCanvasContext,
+  pageCanvasOpenings,
+} from "@/lib/testing/page-canvas-source";
 import { assertInOrder } from "@/lib/testing/source-span";
 
 interface SpecializedRouteFamily {
@@ -232,6 +236,14 @@ test("all 32 specialized surfaces declare their ruled composition and owner", ()
 
   for (const family of SPECIALIZED_ROUTE_FAMILIES) {
     const source = readFileSync(path.join(process.cwd(), family.owner), "utf8");
+    const canvases = pageCanvasOpenings(source, family.owner);
+    assert.equal(
+      canvases.length,
+      1,
+      `${family.owner} must own exactly one PageCanvas`
+    );
+    const [canvas] = canvases;
+
     for (const marker of family.markers) {
       assert.match(
         source,
@@ -242,13 +254,11 @@ test("all 32 specialized surfaces declare their ruled composition and owner", ()
 
     switch (family.composition) {
       case "attached-workspace":
-        assert.match(source, /contextAttachment="attached"/);
-        assert.match(source, /contextItems=\{/);
+        assertPageCanvasContext(canvas, "attached", family.owner);
         assert.match(source, /<WorkspacePanel(?:\s|>)/);
         break;
       case "attached-delegated":
-        assert.match(source, /contextAttachment="attached"/);
-        assert.match(source, /contextItems=\{/);
+        assertPageCanvasContext(canvas, "attached", family.owner);
         assert.match(source, /attachedContext/);
         assert.doesNotMatch(
           source,
@@ -257,12 +267,17 @@ test("all 32 specialized surfaces declare their ruled composition and owner", ()
         );
         break;
       case "context-free-split":
-        assert.match(source, /<PageCanvas[\s\S]*context="none"/);
+        assertPageCanvasContext(canvas, "context-free", family.owner);
         assert.match(source, /SplitWorkspace/);
         assert.doesNotMatch(source, /PageContext|contextAttachment/);
         break;
       case "context-free-workspace":
-        assert.match(source, /<PageCanvas context="none" contentFocusTarget>/);
+        assertPageCanvasContext(canvas, "context-free", family.owner);
+        assert.equal(
+          canvas.hasContentFocusTarget,
+          true,
+          `${family.owner} must keep its settings focus target on the same PageCanvas`
+        );
         assert.match(source, /<WorkspacePanel(?:\s|>)/);
         assert.doesNotMatch(source, /PageContext|contextAttachment/);
         break;

@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+import {
+  assertPageCanvasContext,
+  pageCanvasOpenings,
+  type PageCanvasOpening,
+} from "@/lib/testing/page-canvas-source";
 import { assertInOrder } from "@/lib/testing/source-span";
 
 /**
@@ -71,26 +76,35 @@ const ROUTE_PRESENTATION_ROOTS = PRIMARY_PRESENTATION_ROOTS.map(
 function assertComposition(
   relativePath: string,
   composition: PrimaryComposition,
-  source: string
+  source: string,
+  canvases: readonly PageCanvasOpening[]
 ) {
   switch (composition) {
-    case "attached-workspace":
-      assert.match(source, /contextAttachment="attached"/);
-      assert.match(source, /contextItems=\{/);
+    case "attached-workspace": {
+      assert.equal(canvases.length, 1, `${relativePath} needs one canvas`);
+      assertPageCanvasContext(canvases[0], "attached", relativePath);
       assert.match(source, /<WorkspacePanel(?:\s|>)/);
       break;
-    case "context-free-workspace":
-      assert.match(
-        source,
-        /<PageCanvas[\s\S]*?context="none"[\s\S]*?contentFocusTarget[\s\S]*?>/
+    }
+    case "context-free-workspace": {
+      assert.equal(canvases.length, 1, `${relativePath} needs one canvas`);
+      assertPageCanvasContext(canvases[0], "context-free", relativePath);
+      assert.equal(
+        canvases[0].hasContentFocusTarget,
+        true,
+        `${relativePath} must keep its settings focus target on the same PageCanvas`
       );
       assert.match(source, /<WorkspacePanel(?:\s|>)/);
       assert.doesNotMatch(source, /PageContext/);
       break;
-    case "context-free-siblings":
-      assert.match(
-        source,
-        /<PageCanvas[\s\S]*?context="none"[\s\S]*?contentFocusTarget[\s\S]*?>/
+    }
+    case "context-free-siblings": {
+      assert.equal(canvases.length, 1, `${relativePath} needs one canvas`);
+      assertPageCanvasContext(canvases[0], "context-free", relativePath);
+      assert.equal(
+        canvases[0].hasContentFocusTarget,
+        true,
+        `${relativePath} must keep its settings focus target on the same PageCanvas`
       );
       assert.doesNotMatch(
         source,
@@ -99,37 +113,63 @@ function assertComposition(
       );
       assert.doesNotMatch(source, /PageContext/);
       break;
-    case "manual-standalone":
-      assert.match(source, /<PageCanvas[\s\S]*?context="none"/);
+    }
+    case "manual-standalone": {
+      assert.equal(canvases.length, 1, `${relativePath} needs one canvas`);
+      assertPageCanvasContext(canvases[0], "context-free", relativePath);
       assert.match(source, /<PageContext(?:\s|>)/);
       assert.doesNotMatch(source, /WorkspacePanel/);
       assert.doesNotMatch(source, /contextAttachment|attachment="attached"/);
       break;
-    case "dashboard-hybrid":
+    }
+    case "dashboard-hybrid": {
       // The leadership re-entry branch is one focused workspace; the completed
       // dashboard is an unboxed identity followed by sibling cards.
-      assert.match(source, /<PageCanvas context="none" contentFocusTarget>/);
+      assert.equal(canvases.length, 2, `${relativePath} needs both canvases`);
+      for (const [index, canvas] of canvases.entries()) {
+        assertPageCanvasContext(
+          canvas,
+          "context-free",
+          `${relativePath} canvas ${index + 1}`
+        );
+        assert.equal(
+          canvas.hasContentFocusTarget,
+          true,
+          `${relativePath} canvas ${index + 1} must keep its settings focus target`
+        );
+      }
       assert.match(source, /data-slot="completed-dashboard-content"/);
       break;
+    }
   }
 }
 
 test("every Stage 3 presentation root declares its ruled canvas composition", () => {
   for (const [relativePath, composition] of PRIMARY_PRESENTATION_ROOTS) {
     const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
+    const canvases = pageCanvasOpenings(source, relativePath);
 
-    assert.match(
-      source,
-      /<PageCanvas(?:\s|>)/,
-      `${relativePath} needs a canvas`
-    );
+    assert.ok(canvases.length > 0, `${relativePath} needs a canvas`);
     assert.doesNotMatch(
       source,
       /SplitWorkspace/,
       `${relativePath} is a primary route, not a specialized split workspace`
     );
-    assertComposition(relativePath, composition, source);
+    assertComposition(relativePath, composition, source, canvases);
   }
+});
+
+test("PageCanvas composition rejects contradictory context props", () => {
+  const [canvas] = pageCanvasOpenings(
+    `<PageCanvas context="none" contextAttachment="attached" contextItems={breadcrumbs}>content</PageCanvas>`,
+    "conflicting-page-canvas.tsx"
+  );
+
+  assert.ok(canvas, "the mutation fixture must contain a PageCanvas");
+  assert.throws(
+    () => assertPageCanvasContext(canvas, "attached", "mutation fixture"),
+    /cannot declare context="none" with attached context props/
+  );
 });
 
 test("list workspaces have one intentional scrolling content region", () => {
@@ -264,16 +304,21 @@ test("Dashboard suppresses its redundant context without losing the settings foc
     "dashboard/plant-dashboard.tsx",
   ]) {
     const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
-    const canvases = source.match(/<PageCanvas(?:\s|>)/g) ?? [];
-    const suppressed =
-      source.match(/<PageCanvas context="none" contentFocusTarget>/g) ?? [];
+    const canvases = pageCanvasOpenings(source, relativePath);
 
     assert.ok(canvases.length > 0, `${relativePath} must render a canvas`);
-    assert.equal(
-      suppressed.length,
-      canvases.length,
-      `${relativePath} must suppress every redundant Dashboard context row while preserving the post-Settings focus target`
-    );
+    for (const [index, canvas] of canvases.entries()) {
+      assertPageCanvasContext(
+        canvas,
+        "context-free",
+        `${relativePath} canvas ${index + 1}`
+      );
+      assert.equal(
+        canvas.hasContentFocusTarget,
+        true,
+        `${relativePath} canvas ${index + 1} must preserve the post-Settings focus target`
+      );
+    }
     assert.doesNotMatch(source, /PageContext/);
   }
 });
