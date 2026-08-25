@@ -11,6 +11,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const BREADCRUMBS = [
+  { label: "Ministry Teams", href: "/teams" },
+  { label: "Health Dashboard" },
+];
+
 export default async function TeamHealthPage() {
   const { user } = await verifySession();
 
@@ -25,13 +30,12 @@ export default async function TeamHealthPage() {
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Ministry Teams", href: "/teams" },
-          { label: "Health Dashboard" },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={BREADCRUMBS} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={BREADCRUMBS}
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-6 border-b p-4 sm:p-6 sm:pb-4">
             <div>

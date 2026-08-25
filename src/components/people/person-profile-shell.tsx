@@ -31,6 +31,8 @@ export function PersonProfileShell({
 }: PersonProfileShellProps) {
   const router = useRouter();
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const personName =
+    [person.firstName, person.lastName].filter(Boolean).join(" ") || "Person";
 
   const [optimisticPerson, updateOptimisticPerson] = useOptimistic(
     person,
@@ -53,7 +55,13 @@ export function PersonProfileShell({
   };
 
   return (
-    <PageCanvas>
+    <PageCanvas
+      contextAttachment="attached"
+      contextItems={[
+        { label: "People & CRM", href: "/people" },
+        { label: personName },
+      ]}
+    >
       <WorkspacePanel className="min-h-full">
         {/* The extra wrapper gives the profile one rounded surface while the
             canvas remains the only vertical scroll owner. Dialog state and

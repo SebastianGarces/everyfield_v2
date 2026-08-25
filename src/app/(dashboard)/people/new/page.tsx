@@ -11,6 +11,11 @@ import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 
+const BREADCRUMBS = [
+  { label: "People & CRM", href: "/people" },
+  { label: "Add Person" },
+];
+
 export default async function NewPersonPage() {
   const { user } = await verifySession();
 
@@ -28,13 +33,12 @@ export default async function NewPersonPage() {
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "People & CRM", href: "/people" },
-          { label: "Add Person" },
-        ]}
-      />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={BREADCRUMBS} />
+      <PageCanvas
+        frameClassName="mx-auto w-full max-w-2xl"
+        contextAttachment="attached"
+        contextItems={BREADCRUMBS}
+      >
         <WorkspacePanel className="mx-auto max-w-2xl">
           <CardHeader>
             <CardTitle className="text-2xl">Add Person</CardTitle>

@@ -89,7 +89,11 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "People & CRM" }]} />
-      <PageCanvas className={isPipelineView ? "overflow-hidden" : undefined}>
+      <PageCanvas
+        className={isPipelineView ? "overflow-hidden" : undefined}
+        context="none"
+        contentFocusTarget
+      >
         <WorkspacePanel
           className={
             isPipelineView

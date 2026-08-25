@@ -16,6 +16,11 @@ interface NewMeetingPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
+const BREADCRUMBS = [
+  { label: "Meetings", href: "/meetings" },
+  { label: "Schedule Meeting" },
+];
+
 export default async function NewMeetingPage({
   searchParams,
 }: NewMeetingPageProps) {
@@ -48,13 +53,12 @@ export default async function NewMeetingPage({
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Meetings", href: "/meetings" },
-          { label: "Schedule Meeting" },
-        ]}
-      />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={BREADCRUMBS} />
+      <PageCanvas
+        frameClassName="mx-auto w-full max-w-2xl"
+        contextAttachment="attached"
+        contextItems={BREADCRUMBS}
+      >
         <WorkspacePanel className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
