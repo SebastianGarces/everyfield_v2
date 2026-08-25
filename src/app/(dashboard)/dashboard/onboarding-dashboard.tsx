@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import type { ChurchLeadershipStatus } from "@/lib/onboarding/leadership";
 import {
   resolveOnboardingStepRequest,
@@ -64,23 +65,25 @@ export async function OnboardingDashboard({
     : [false, null];
 
   return (
-    <div className="p-6">
-      <OnboardingFlow
-        initialStep={
-          stepRequest.outcome === "honour"
-            ? stepRequest.step
-            : resolveResumeStep({
-                churchId,
-                leadershipStatus,
-                journey: {
-                  declaredInPhaseHistory,
-                  currentPhase: currentPhase ?? 0,
-                  hasLaunch: launch !== null,
-                },
-              })
-        }
-        leadershipStatus={leadershipStatus}
-      />
-    </div>
+    <PageCanvas>
+      <WorkspacePanel className="mx-auto min-h-full max-w-4xl p-5 sm:p-8">
+        <OnboardingFlow
+          initialStep={
+            stepRequest.outcome === "honour"
+              ? stepRequest.step
+              : resolveResumeStep({
+                  churchId,
+                  leadershipStatus,
+                  journey: {
+                    declaredInPhaseHistory,
+                    currentPhase: currentPhase ?? 0,
+                    hasLaunch: launch !== null,
+                  },
+                })
+          }
+          leadershipStatus={leadershipStatus}
+        />
+      </WorkspacePanel>
+    </PageCanvas>
   );
 }

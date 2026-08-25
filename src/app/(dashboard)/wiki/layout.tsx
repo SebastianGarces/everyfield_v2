@@ -1,4 +1,10 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
+import { HeaderBreadcrumbs } from "@/components/header";
+import {
+  PageCanvas,
+  SplitWorkspace,
+  WorkspacePanel,
+} from "@/components/layout/page-frame";
 import { getCurrentSession } from "@/lib/auth";
 import { getBookmarks, getRecentlyViewed, getWikiNavigation } from "@/lib/wiki";
 
@@ -24,23 +30,27 @@ export default async function WikiLayout({
   ]);
 
   return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <aside className="bg-card hidden w-72 shrink-0 border-r lg:block">
-        <div className="h-full overflow-y-auto px-4 py-4">
-          <WikiSidebar
-            groups={groups}
-            recentlyViewed={recentlyViewed}
-            bookmarks={bookmarks}
-          />
-        </div>
-      </aside>
+    <PageCanvas className="overflow-hidden">
+      {/* Header context is state, not paint: CSS cannot replace the dashboard
+          fallback with this route's page-context label. */}
+      <HeaderBreadcrumbs items={[{ label: "Wiki" }]} />
+      <SplitWorkspace>
+        {/* The secondary navigation needs its own surface beside the article
+            workspace. CSS alone could not separate it while the old sidebar
+            and content were siblings on one uninterrupted canvas. */}
+        <WorkspacePanel className="hidden h-full overflow-hidden lg:block">
+          <aside className="h-full overflow-y-auto p-4">
+            <WikiSidebar
+              groups={groups}
+              recentlyViewed={recentlyViewed}
+              bookmarks={bookmarks}
+            />
+          </aside>
+        </WorkspacePanel>
 
-      {/* Main content. When the page inside renders a right-rail TOC, the card
-          widens just enough that the prose keeps the same 704px measure it has
-          on a TOC-less page (card 48rem − 4rem padding) instead of being
-          squeezed beside the rail: 62rem − padding − w-48 rail − gap, or with
-          the wider rail 64rem − padding − w-56 rail − gap, both = 44rem.
+        {/* Main content. When the page inside renders a right-rail TOC, the
+          content widens just enough that the prose keeps the same 704px measure
+          it has on a TOC-less page instead of being squeezed beside the rail.
 
           The thresholds are CONTAINER queries on this column, not viewport
           breakpoints: the rail only exists once the column genuinely fits the
@@ -48,11 +58,12 @@ export default async function WikiLayout({
           compressed below its measure by a rail the viewport cannot afford —
           below that the TOC stays a disclosure above the article, whatever
           the surrounding sidebars are doing. */}
-      <div className="@container/wiki-content flex-1 overflow-y-auto p-6">
-        <div className="bg-card mx-auto max-w-3xl rounded-xl px-8 py-10 shadow-sm @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
-          {children}
-        </div>
-      </div>
-    </div>
+        <WorkspacePanel className="h-full overflow-y-auto [container:wiki-content/size]">
+          <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
+            {children}
+          </div>
+        </WorkspacePanel>
+      </SplitWorkspace>
+    </PageCanvas>
   );
 }

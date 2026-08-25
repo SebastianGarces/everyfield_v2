@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TaskForm } from "@/components/tasks";
 import { SubtaskList } from "@/components/tasks/subtask-list";
 import { RichText } from "@/components/shared/rich-text";
@@ -188,131 +189,143 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
       <HeaderBreadcrumbs
         items={[{ label: "Tasks", href: "/tasks" }, { label: task.title }]}
       />
-      <div className="mx-auto max-w-3xl space-y-6 p-6">
-        {/* Header with actions */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1
-              className={cn(
-                "text-2xl font-bold tracking-tight",
-                task.status === "complete" && "line-through opacity-60"
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto min-h-full max-w-4xl p-4 sm:p-6">
+          {/* The task sections need one parent to share a rounded workspace
+              boundary; CSS cannot establish that relationship across the old
+              siblings. Reads, actions, forms, and permission gates stay in
+              their original owners. */}
+          <div className="mx-auto max-w-3xl space-y-6">
+            {/* Header with actions */}
+            <div className="flex flex-col items-stretch gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="min-w-0 space-y-1">
+                <h1
+                  className={cn(
+                    "text-2xl font-bold tracking-tight [overflow-wrap:anywhere] break-words",
+                    task.status === "complete" && "line-through opacity-60"
+                  )}
+                >
+                  {task.title}
+                </h1>
+                <p className="text-muted-foreground text-sm">
+                  Created {createdDate}
+                </p>
+              </div>
+              <TaskDetailActions task={task} currentUserId={user.id} />
+            </div>
+
+            {/* Status badges */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className={cn("text-xs", statusConfig.color)}>
+                {statusConfig.label}
+              </Badge>
+              <Badge className={cn("text-xs", priorityConfig.color)}>
+                <Flag className="mr-1 h-3 w-3" />
+                {priorityConfig.label}
+              </Badge>
+              {task.category && (
+                <Badge variant="outline" className="text-xs">
+                  <CircleDot className="mr-1 h-3 w-3" />
+                  {CATEGORY_LABELS[task.category] ?? task.category}
+                </Badge>
               )}
-            >
-              {task.title}
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              Created {createdDate}
-            </p>
-          </div>
-          <TaskDetailActions task={task} currentUserId={user.id} />
-        </div>
-
-        {/* Status badges */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge className={cn("text-xs", statusConfig.color)}>
-            {statusConfig.label}
-          </Badge>
-          <Badge className={cn("text-xs", priorityConfig.color)}>
-            <Flag className="mr-1 h-3 w-3" />
-            {priorityConfig.label}
-          </Badge>
-          {task.category && (
-            <Badge variant="outline" className="text-xs">
-              <CircleDot className="mr-1 h-3 w-3" />
-              {CATEGORY_LABELS[task.category] ?? task.category}
-            </Badge>
-          )}
-          {isBlocked && (
-            <Badge className="bg-red-100 text-xs text-red-700">Blocked</Badge>
-          )}
-        </div>
-
-        {/* Detail cards */}
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Due date */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                <Calendar className="h-4 w-4" />
-                Due Date
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {dueDateFormatted ? (
-                <p className="text-sm">{dueDateFormatted}</p>
-              ) : (
-                <p className="text-muted-foreground text-sm">No due date set</p>
+              {isBlocked && (
+                <Badge className="bg-red-100 text-xs text-red-700">
+                  Blocked
+                </Badge>
               )}
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Assignee */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                <User className="h-4 w-4" />
-                Assigned To
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {task.assigneeName ? (
-                <p className="text-sm">{task.assigneeName}</p>
-              ) : (
-                <p className="text-muted-foreground text-sm">Unassigned</p>
+            {/* Detail cards */}
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Due date */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                    <Calendar className="h-4 w-4" />
+                    Due Date
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {dueDateFormatted ? (
+                    <p className="text-sm">{dueDateFormatted}</p>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      No due date set
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Assignee */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                    <User className="h-4 w-4" />
+                    Assigned To
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {task.assigneeName ? (
+                    <p className="text-sm">{task.assigneeName}</p>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">Unassigned</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Related entity */}
+              {task.relatedType && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                      <ExternalLink className="h-4 w-4" />
+                      {getRelatedLabel(task.relatedType)}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {relatedUrl ? (
+                      <Link
+                        href={relatedUrl}
+                        className="cursor-pointer text-sm text-blue-600 hover:underline"
+                      >
+                        View {task.relatedType} →
+                      </Link>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">
+                        Linked {task.relatedType}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
               )}
-            </CardContent>
-          </Card>
 
-          {/* Related entity */}
-          {task.relatedType && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                  <ExternalLink className="h-4 w-4" />
-                  {getRelatedLabel(task.relatedType)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {relatedUrl ? (
-                  <Link
-                    href={relatedUrl}
-                    className="cursor-pointer text-sm text-blue-600 hover:underline"
-                  >
-                    View {task.relatedType} →
-                  </Link>
-                ) : (
-                  <p className="text-muted-foreground text-sm">
-                    Linked {task.relatedType}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
+              {/* Completion info */}
+              {task.status === "complete" && completedDate && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Clock className="h-4 w-4" />
+                      Completed
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm">{completedDate}</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
 
-          {/* Completion info */}
-          {task.status === "complete" && completedDate && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                  <Clock className="h-4 w-4" />
-                  Completed
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm">{completedDate}</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Description */}
-        {task.description && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Description</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/*
+            {/* Description */}
+            {task.description && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    Description
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {/*
                 Rendered as rich text, not printed as markup (T-021), by the
                 SAME reader the sent-message detail page mounts. This block was
                 a hand-rolled second copy of it — its own
@@ -320,44 +333,48 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
                 drifted from the message page's in spacing and link colour
                 before either shipped.
               */}
-              <RichText body={task.description} />
-            </CardContent>
-          </Card>
-        )}
+                  <RichText body={task.description} />
+                </CardContent>
+              </Card>
+            )}
 
-        {/* Subtasks */}
-        <Card>
-          <CardContent>
-            <SubtaskList
-              parentTaskId={task.id}
-              subtasks={subtasks}
-              parentIsSubtask={task.parentTaskId !== null}
-              currentUserId={user.id}
-              parentAssignedToId={task.assignedToId}
-            />
-          </CardContent>
-        </Card>
+            {/* Subtasks */}
+            <Card>
+              <CardContent>
+                <SubtaskList
+                  parentTaskId={task.id}
+                  subtasks={subtasks}
+                  parentIsSubtask={task.parentTaskId !== null}
+                  currentUserId={user.id}
+                  parentAssignedToId={task.assignedToId}
+                />
+              </CardContent>
+            </Card>
 
-        {/* Edit form */}
-        {canWrite && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Edit Task</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <TaskForm
-                task={task}
-                users={churchUsers}
-                followUpAssignees={followUpAssignees}
-                prerequisiteCandidates={[...candidateById.values()]}
-                prerequisiteIds={prerequisites.map(
-                  (prerequisite) => prerequisite.id
-                )}
-              />
-            </CardContent>
-          </Card>
-        )}
-      </div>
+            {/* Edit form */}
+            {canWrite && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">
+                    Edit Task
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <TaskForm
+                    task={task}
+                    users={churchUsers}
+                    followUpAssignees={followUpAssignees}
+                    prerequisiteCandidates={[...candidateById.values()]}
+                    prerequisiteIds={prerequisites.map(
+                      (prerequisite) => prerequisite.id
+                    )}
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

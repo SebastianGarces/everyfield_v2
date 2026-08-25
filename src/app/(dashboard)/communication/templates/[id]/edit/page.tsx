@@ -3,6 +3,7 @@ import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplate } from "@/lib/communication/templates";
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TemplateEditor } from "./template-editor";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,12 @@ export default async function EditTemplatePage({
           { label: template.name },
         ]}
       />
-      <TemplateEditor template={template} />
+      <PageCanvas className="overflow-hidden">
+        <h1 className="sr-only">Edit {template.name}</h1>
+        <WorkspacePanel className="h-full overflow-hidden">
+          <TemplateEditor template={template} />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

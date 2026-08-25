@@ -91,13 +91,13 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   };
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col lg:flex-row">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row">
       {/* Left panel: Editor */}
-      <div className="flex-1 overflow-auto border-r p-6">
+      <div className="min-w-0 flex-1 overflow-auto p-4 sm:p-6 lg:border-r">
         <div className="mx-auto max-w-2xl space-y-6">
           {isSystem && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="text-sm text-blue-800">
+            <div className="border-primary/30 bg-primary/5 rounded-lg border p-3">
+              <p className="text-foreground text-sm">
                 This is a platform template. Editing will create a customized
                 copy for your church. The original will remain available to
                 other churches.
@@ -106,14 +106,14 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
           )}
 
           {isForked && (
-            <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-sm text-amber-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/50 bg-amber-50 p-3 dark:bg-amber-950/20">
+              <p className="text-sm text-amber-900 dark:text-amber-200">
                 This is a customized copy of a platform template.
               </p>
               <Button
                 variant="ghost"
                 size="sm"
-                className="cursor-pointer text-amber-800 hover:text-amber-900"
+                className="cursor-pointer text-amber-900 hover:text-amber-950 dark:text-amber-200 dark:hover:text-amber-100"
                 onClick={handleReset}
               >
                 <RotateCcw className="mr-1 h-3 w-3" />
@@ -168,7 +168,11 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
           {/* Merge fields */}
           <MergeFieldInserter onInsert={handleInsertMergeField} />
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -201,7 +205,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
       </div>
 
       {/* Right panel: Live Preview */}
-      <div className="hidden w-[480px] flex-shrink-0 lg:block">
+      <div className="hidden w-[42%] max-w-[30rem] min-w-[22rem] shrink-0 lg:block">
         <EmailPreview subject={subject} body={body} />
       </div>
     </div>

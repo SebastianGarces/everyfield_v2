@@ -85,7 +85,7 @@ export function TaskDetailActions({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center gap-2 md:justify-end">
       {canComplete &&
         (isComplete ? (
           <Button
