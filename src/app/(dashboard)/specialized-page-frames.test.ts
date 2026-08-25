@@ -177,6 +177,10 @@ const GLOBAL_STYLES = readFileSync(
   path.join(process.cwd(), "src/app/globals.css"),
   "utf8"
 );
+const PAGE_FRAME_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/components/layout/page-frame.tsx"),
+  "utf8"
+);
 
 function collectPageRoutes(
   directory: string,
@@ -410,7 +414,8 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
     "wiki/layout.tsx",
     [
       "<HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />",
-      '<SplitWorkspace className="grid-rows-[auto_minmax(0,1fr)] [[data-auth-page-hierarchy=b]_&]:gap-y-0">',
+      "<SplitWorkspace",
+      'data-context-layout="single-suppressed"',
       "<PageContext",
     ],
     "Wiki context must replace Dashboard before the split workspace renders"
@@ -429,10 +434,11 @@ test("Wiki keeps one full-height row at every width when B suppresses a one-item
     "utf8"
   );
 
-  assert.match(
+  assert.match(source, /data-context-layout="single-suppressed"/);
+  assert.doesNotMatch(
     source,
-    /\[\[data-auth-page-hierarchy=b\]_&\]:lg:col-start-2 \[\[data-auth-page-hierarchy=b\]_&\]:lg:row-start-2/,
-    "a real ancestor trail must reserve the row above the article pane"
+    /\[\[data-auth-page-hierarchy=b\]_&\]:lg:(?:row-start-2|row-span-2)/,
+    "B must not place either pane in a desktop-only second row"
   );
   const prototypeStyles = GLOBAL_STYLES.slice(
     GLOBAL_STYLES.indexOf("/* #697 taste prototype."),
@@ -440,13 +446,37 @@ test("Wiki keeps one full-height row at every width when B suppresses a one-item
   );
   assert.match(
     prototypeStyles,
-    /\[data-slot="split-workspace"\]:has\([\s\S]*\[data-breadcrumb-depth="1"\][\s\S]*grid-template-rows: minmax\(0, 1fr\);/,
-    "the suppressed state must collapse to one flexible row without a breakpoint"
+    /\[data-slot="split-workspace"\]\[data-context-layout="single-suppressed"\] \{\s*grid-template-rows: minmax\(0, 1fr\);/,
+    "server-known suppression must directly collapse the grid to one flexible row without a breakpoint or relational selector"
   );
   assert.match(
     prototypeStyles,
-    /> \[data-slot="workspace-panel"\] \{\s*grid-row: 1;/,
-    "both the mobile article and desktop panes must occupy that one full-height row"
+    /\[data-context-layout="single-suppressed"\]\s*> \[data-slot="workspace-panel"\] \{\s*grid-row: 1;\s*min-height: 0;/,
+    "both the mobile article and desktop panes must occupy and shrink within the one full-height row"
+  );
+});
+
+test("Wiki gives its size-contained mobile article a definite block size", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /<PageCanvas[\s\S]*contentClassName="h-full"[\s\S]*context="none"/,
+    "without an explicit full-height content wrapper, the only visible size-contained grid item cannot contribute intrinsic block size on mobile"
+  );
+  assert.match(source, /\[container:wiki-content\/size\]/);
+  assert.match(
+    PAGE_FRAME_SOURCE,
+    /data-slot="page-content"[\s\S]*contentClassName/,
+    "PageCanvas must apply the definite-height class to the flex child that directly contains SplitWorkspace"
+  );
+  assert.match(
+    PAGE_FRAME_SOURCE,
+    /data-slot="split-workspace"[\s\S]*"grid h-full min-h-0/,
+    "the grid must carry that definite height through to its rows"
   );
 });
 
