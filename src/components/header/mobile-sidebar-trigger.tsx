@@ -48,11 +48,17 @@ export function MobileSidebarTrigger() {
 
   return (
     <SidebarTrigger
-      ref={triggerRef}
       aria-label="Toggle sidebar"
       className="text-app-bar-foreground hover:text-app-bar-foreground hover:bg-white/10 focus-visible:ring-white/70 md:hidden"
-      onClick={() => {
-        if (isMobile && !openMobile) openedFromTrigger.current = true;
+      onClick={(event) => {
+        if (isMobile && !openMobile) {
+          // Capture the rendered button, not a ref forwarded through the
+          // SidebarTrigger and Button function-component layers. Radix has no
+          // Dialog.Trigger for this controlled Sheet, so this exact DOM node is
+          // the only reliable focus-return target after Escape.
+          triggerRef.current = event.currentTarget;
+          openedFromTrigger.current = true;
+        }
       }}
     />
   );

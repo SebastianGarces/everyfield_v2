@@ -93,10 +93,14 @@ test("the mobile shell trigger restores focus after its Sheet closes", () => {
   ]);
   assert.match(
     MOBILE_TRIGGER,
-    /if \(isMobile && !openMobile\) openedFromTrigger\.current = true/,
+    /if \(isMobile && !openMobile\) \{[\s\S]*triggerRef\.current = event\.currentTarget;[\s\S]*openedFromTrigger\.current = true;/,
     "only the top-bar trigger's own open should claim focus restoration"
   );
-  assert.match(MOBILE_TRIGGER, /<SidebarTrigger[\s\S]*ref=\{triggerRef\}/);
+  assert.doesNotMatch(
+    MOBILE_TRIGGER,
+    /<SidebarTrigger[\s\S]*ref=\{triggerRef\}/,
+    "focus restoration must capture the rendered button instead of relying on a ref forwarded through wrapper components"
+  );
 });
 
 test("notification streaming remains below its own Suspense boundary", () => {
