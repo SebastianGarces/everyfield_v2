@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useWikiGuide } from "./wiki-guide-provider";
 import { cn } from "@/lib/utils";
 
+export const WIKI_GUIDE_TRIGGER_ID = "wiki-guide-trigger";
+
 /**
  * Floating action button that appears when the current page
  * has contextual wiki articles available.
@@ -18,6 +20,7 @@ export function WikiGuideButton() {
 
   return (
     <Button
+      id={WIKI_GUIDE_TRIGGER_ID}
       onClick={toggle}
       variant="default"
       size="lg"

@@ -8,6 +8,7 @@ import { X, ExternalLink, Clock, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/wiki/callout";
+import { WIKI_GUIDE_TRIGGER_ID } from "./wiki-guide-button";
 import { useWikiGuide } from "./wiki-guide-provider";
 import { cn } from "@/lib/utils";
 import { wikiHref } from "@/lib/wiki/href";
@@ -196,6 +197,10 @@ export function WikiGuidePanel() {
   if (!isAvailable) return null;
 
   const hasMultipleArticles = entry && entry.slugs.length > 1;
+  const closeAndRestoreFocus = () => {
+    close();
+    document.getElementById(WIKI_GUIDE_TRIGGER_ID)?.focus();
+  };
 
   return (
     <div
@@ -246,7 +251,7 @@ export function WikiGuidePanel() {
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={close}
+              onClick={closeAndRestoreFocus}
               className="cursor-pointer"
               aria-label="Close guide panel"
             >

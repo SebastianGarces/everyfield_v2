@@ -95,6 +95,11 @@ test("the closed wiki guide slides inside a viewport-sized clip rail", () => {
 test("the open wiki guide trigger stays inside narrow viewports", () => {
   assert.match(
     WIKI_GUIDE_BUTTON,
+    /export const WIKI_GUIDE_TRIGGER_ID = "wiki-guide-trigger";/
+  );
+  assert.match(WIKI_GUIDE_BUTTON, /id=\{WIKI_GUIDE_TRIGGER_ID\}/);
+  assert.match(
+    WIKI_GUIDE_BUTTON,
     /isOpen && "right-4 md:right-\[calc\(520px\+2rem\)\]"/,
     "only desktop has room to shift the trigger beside the 520px panel"
   );
@@ -108,5 +113,27 @@ test("the open wiki guide trigger stays inside narrow viewports", () => {
     WIKI_GUIDE_BUTTON,
     /aria-label=\{isOpen \? "Close wiki guide" : "Open wiki guide"\}/,
     "the responsive correction must preserve the trigger's action and accessible state"
+  );
+});
+
+test("the panel close action restores focus without replacing the trigger toggle", () => {
+  assert.match(
+    WIKI_GUIDE_PANEL,
+    /const closeAndRestoreFocus = \(\) => \{\s*close\(\);\s*document\.getElementById\(WIKI_GUIDE_TRIGGER_ID\)\?\.focus\(\);\s*\};/,
+    "focus must leave the subtree before it becomes inert and return to the visible trigger"
+  );
+  assert.match(
+    WIKI_GUIDE_PANEL,
+    /aria-label="Close guide panel"[\s\S]*?<X[^>]*>[\s\S]*?<\/Button>/
+  );
+  assert.match(
+    WIKI_GUIDE_PANEL,
+    /onClick=\{closeAndRestoreFocus\}[\s\S]*?aria-label="Close guide panel"/,
+    "only the internal close action needs explicit restoration"
+  );
+  assert.match(
+    WIKI_GUIDE_BUTTON,
+    /id=\{WIKI_GUIDE_TRIGGER_ID\}[\s\S]*?onClick=\{toggle\}/,
+    "the trigger must keep native focus when it closes its own panel"
   );
 });
