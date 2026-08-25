@@ -17,7 +17,7 @@ import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
  */
 export function NoPlantEmptyState() {
   return (
-    <PageCanvas>
+    <PageCanvas context="none" contentFocusTarget>
       <WorkspacePanel className="flex min-h-full items-center justify-center p-6">
         <div className="mx-auto max-w-md text-center">
           <Sprout

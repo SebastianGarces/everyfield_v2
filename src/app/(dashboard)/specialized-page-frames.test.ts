@@ -65,7 +65,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
     markers: [
-      /HeaderBreadcrumbs items=\{\[\{ label: "Wiki" \}\]\}/,
+      /HeaderBreadcrumbs items=\{WIKI_BREADCRUMBS\}/,
       /PageCanvas/,
       /SplitWorkspace/,
       /WorkspacePanel/,
@@ -173,6 +173,10 @@ const NON_PRESENTATION_ROUTE_EXCLUSIONS = [
 ] as const satisfies readonly NonPresentationRouteExclusion[];
 
 const DASHBOARD_APP_ROOT = path.join(process.cwd(), "src/app/(dashboard)");
+const PAGE_FRAME_SOURCE = readFileSync(
+  path.join(process.cwd(), "src/components/layout/page-frame.tsx"),
+  "utf8"
+);
 
 function collectPageRoutes(
   directory: string,
@@ -396,7 +400,7 @@ test("the wiki table of contents is capped by its workspace, not the viewport", 
   assert.doesNotMatch(tableOfContents, /100vh/);
 });
 
-test("the wiki layout publishes Wiki page context before its workspace", () => {
+test("Wiki preserves declared state without rendering a redundant context row", () => {
   const source = readFileSync(
     path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
     "utf8"
@@ -404,7 +408,97 @@ test("the wiki layout publishes Wiki page context before its workspace", () => {
   assertInOrder(
     source,
     "wiki/layout.tsx",
-    ['<HeaderBreadcrumbs items={[{ label: "Wiki" }]} />', "<SplitWorkspace>"],
-    "Wiki context must replace Dashboard before the split workspace renders"
+    [
+      "<HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />",
+      "<SplitWorkspace",
+      "id={DASHBOARD_PAGE_CONTENT_ID}",
+      "tabIndex={-1}",
+    ],
+    "Wiki keeps the route declaration and places the settings focus target on its visible article workspace"
   );
+  assert.doesNotMatch(source, /PageContext/);
+});
+
+test("Wiki keeps both panes in one full-height row at every width", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /<SplitWorkspace className="grid-rows-\[minmax\(0,1fr\)\]">/,
+    "the context-free workspace has one explicit flexible row"
+  );
+  assert.match(
+    source,
+    /<WorkspacePanel className="hidden h-full overflow-hidden lg:col-start-1 lg:row-start-1 lg:block">/,
+    "the desktop navigation occupies the first column of the only row"
+  );
+  assert.match(
+    source,
+    /className="row-start-1 h-full overflow-y-auto outline-none \[container:wiki-content\/size\] lg:col-start-2"/,
+    "the article occupies that same row on mobile and desktop"
+  );
+});
+
+test("Wiki gives its size-contained mobile article a definite block size", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /<PageCanvas[\s\S]*contentClassName="h-full"[\s\S]*context="none"/,
+    "without an explicit full-height content wrapper, the only visible size-contained grid item cannot contribute intrinsic block size on mobile"
+  );
+  assert.match(source, /\[container:wiki-content\/size\]/);
+  assert.match(
+    PAGE_FRAME_SOURCE,
+    /data-slot="page-content"[\s\S]*contentClassName/,
+    "PageCanvas must apply the definite-height class to the flex child that directly contains SplitWorkspace"
+  );
+  assert.match(
+    PAGE_FRAME_SOURCE,
+    /data-slot="split-workspace"[\s\S]*"grid h-full min-h-0/,
+    "the grid must carry that definite height through to its rows"
+  );
+});
+
+test("only Message History attaches context to its same-width workspace", () => {
+  const history = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/app/(dashboard)/communication/history/page.tsx"
+    ),
+    "utf8"
+  );
+  const wiki = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
+    "utf8"
+  );
+  assert.match(
+    history,
+    /<PageCanvas[\s\S]*contextAttachment="attached"[\s\S]*contextItems=\{HISTORY_BREADCRUMBS\}/,
+    "the full-width history workspace explicitly opts into the integrated seam"
+  );
+  assert.doesNotMatch(wiki, /PageContext|contextAttachment/);
+
+  for (const relativePath of [
+    "meetings/new/page.tsx",
+    "people/new/page.tsx",
+    "tasks/[id]/page.tsx",
+    "coaching/[churchId]/page.tsx",
+  ]) {
+    const source = readFileSync(
+      path.join(DASHBOARD_APP_ROOT, relativePath),
+      "utf8"
+    );
+    assert.doesNotMatch(
+      source,
+      /contextAttachment="attached"/,
+      `${relativePath} has a centered or route-specific workspace and must keep complete independent surfaces`
+    );
+  }
 });

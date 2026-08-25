@@ -20,9 +20,13 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
-import { HeaderBreadcrumbs } from "@/components/header";
+import {
+  HeaderBreadcrumbs,
+  PageContext,
+  type HeaderBreadcrumbItem,
+} from "@/components/header";
 import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { ExitCriteria } from "@/components/phase-engine/exit-criteria";
 import { FocusPanel } from "@/components/phase-engine/focus-panel";
 import {
@@ -53,6 +57,7 @@ import { db } from "@/db";
 import { churches, insightFeedback } from "@/db/schema";
 import type { InsightFeedbackRating } from "@/db/schema";
 import { verifySession } from "@/lib/auth";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import {
   buildCsfScorecard,
   buildExitCriteriaProgress,
@@ -70,6 +75,10 @@ export const metadata = {
   title: "Plant Intelligence",
   description: "Your prioritized focus, phase control, and self-attestations.",
 };
+
+const PHASE_BREADCRUMBS: HeaderBreadcrumbItem[] = [
+  { label: "Plant Intelligence" },
+];
 
 export default async function PhasePage() {
   // The `(dashboard)` layout is what bounces a signed-out reader, and it is
@@ -235,11 +244,19 @@ export default async function PhasePage() {
 
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">
+      <HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />
+      <PageCanvas frameClassName="mx-auto w-full max-w-6xl" context="none">
+        <div
+          data-slot="plant-intelligence-content"
+          className="min-h-full space-y-6"
+        >
           <header>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <PageContext className="mb-2" items={PHASE_BREADCRUMBS} />
+            <h1
+              id={DASHBOARD_PAGE_CONTENT_ID}
+              tabIndex={-1}
+              className="text-2xl font-semibold tracking-tight outline-none"
+            >
               Plant Intelligence
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
@@ -320,7 +337,7 @@ export default async function PhasePage() {
               />
             </div>
           </div>
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );

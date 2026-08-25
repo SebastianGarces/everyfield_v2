@@ -56,25 +56,22 @@ const CANVAS_SCROLL_ROOTS = ["tasks/page.tsx"] as const;
 const ROUTE_PRESENTATION_ROOTS = PRIMARY_PRESENTATION_ROOTS.filter(
   (relativePath) => !relativePath.startsWith("dashboard/")
 );
+const SIBLING_SURFACE_ROOTS = ["phase/page.tsx"] as const;
+const SINGLE_WORKSPACE_ROOTS = PRIMARY_PRESENTATION_ROOTS.filter(
+  (relativePath) =>
+    !SIBLING_SURFACE_ROOTS.includes(
+      relativePath as (typeof SIBLING_SURFACE_ROOTS)[number]
+    )
+);
 
-test("every Stage 3 presentation root composes the shared canvas and workspace panel", () => {
+test("every Stage 3 presentation root declares its canvas composition", () => {
   for (const relativePath of PRIMARY_PRESENTATION_ROOTS) {
     const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
 
     assert.match(
       source,
-      /import \{ PageCanvas, WorkspacePanel \} from "@\/components\/layout\/page-frame";/,
-      `${relativePath} must use the shared page-frame primitives`
-    );
-    assert.match(
-      source,
       /<PageCanvas(?:\s|>)/,
       `${relativePath} needs a canvas`
-    );
-    assert.match(
-      source,
-      /<WorkspacePanel(?:\s|>)/,
-      `${relativePath} needs one primary workspace panel`
     );
     assert.doesNotMatch(
       source,
@@ -82,6 +79,23 @@ test("every Stage 3 presentation root composes the shared canvas and workspace p
       `${relativePath} is a primary route, not a specialized split workspace`
     );
   }
+
+  for (const relativePath of SINGLE_WORKSPACE_ROOTS) {
+    const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
+    assert.match(
+      source,
+      /<WorkspacePanel(?:\s|>)/,
+      `${relativePath} is classified as one primary workspace`
+    );
+  }
+
+  const phase = readFileSync(join(DASHBOARD_ROOT, "phase/page.tsx"), "utf8");
+  assert.doesNotMatch(
+    phase,
+    /WorkspacePanel/,
+    "Plant Intelligence is classified as sibling feature surfaces, not one false outer card"
+  );
+  assert.match(phase, /data-slot="plant-intelligence-content"/);
 });
 
 test("list workspaces have one intentional scrolling content region", () => {
@@ -185,9 +199,47 @@ test("every primary route declares page context and phase names Plant Intelligen
     phase,
     "phase/page.tsx",
     [
-      '<HeaderBreadcrumbs items={[{ label: "Plant Intelligence" }]} />',
-      "<PageCanvas>",
+      "<HeaderBreadcrumbs items={PHASE_BREADCRUMBS} />",
+      "<PageCanvas",
+      "<PageContext",
     ],
     "phase context must be declared before its canvas"
   );
+  assertInOrder(
+    phase,
+    "phase/page.tsx",
+    [
+      "items={PHASE_BREADCRUMBS}",
+      "id={DASHBOARD_PAGE_CONTENT_ID}",
+      "tabIndex={-1}",
+    ],
+    "the settings focus target must follow Phase's manually placed context"
+  );
+  assert.match(
+    phase,
+    /<header>\s*<PageContext className="mb-2" items=\{PHASE_BREADCRUMBS\} \/>/,
+    "Plant Intelligence keeps the ruled compact, unboxed context above its title"
+  );
+  assert.doesNotMatch(phase, /contextAttachment|attachment="attached"/);
+});
+
+test("Dashboard suppresses its redundant context without losing the settings focus target", () => {
+  for (const relativePath of [
+    "dashboard/no-plant-empty-state.tsx",
+    "dashboard/onboarding-dashboard.tsx",
+    "dashboard/plant-dashboard.tsx",
+  ]) {
+    const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
+    const canvases = source.match(/<PageCanvas(?:\s|>)/g) ?? [];
+    const suppressed =
+      source.match(/<PageCanvas context="none" contentFocusTarget>/g) ?? [];
+
+    assert.ok(canvases.length > 0, `${relativePath} must render a canvas`);
+    assert.equal(
+      suppressed.length,
+      canvases.length,
+      `${relativePath} must suppress every redundant Dashboard context row while preserving the post-Settings focus target`
+    );
+    assert.doesNotMatch(source, /PageContext/);
+  }
 });

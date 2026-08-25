@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -15,7 +15,12 @@ const MOBILE_TRIGGER = read(
   "header",
   "mobile-sidebar-trigger.tsx"
 );
-const CONTEXT_BAR = read("components", "header", "dashboard-header.tsx");
+const PAGE_CONTEXT = read("components", "header", "page-context.tsx");
+const PAGE_FRAME = read("components", "layout", "page-frame.tsx");
+const GLOBAL_STYLES = read("app", "globals.css");
+const PHASE = read("app", "(dashboard)", "phase", "page.tsx");
+const WIKI = read("app", "(dashboard)", "wiki", "layout.tsx");
+const SETTINGS = read("components", "settings", "settings-modal.tsx");
 const SIDEBAR = read("components", "app-sidebar.tsx");
 const SIDEBAR_PRIMITIVE = read("components", "ui", "sidebar.tsx");
 const ACCOUNT = read("components", "nav-user.tsx");
@@ -31,14 +36,56 @@ function assertInOrder(source: string, needles: string[]) {
   }
 }
 
-test("the two shell bars keep their ruled geometry", () => {
+test("the one shell bar keeps its ruled geometry", () => {
   assert.match(GLOBAL_BAR, /\bh-10\b/, "the global bar must remain 40px");
   assert.match(
     GLOBAL_BAR,
     /<Mark className="[^"]*\bw-6\b/,
     "the green mark must remain 24px wide"
   );
-  assert.match(CONTEXT_BAR, /\bh-16\b/, "the context bar must remain 64px");
+  assert.doesNotMatch(
+    LAYOUT,
+    /DashboardHeader/,
+    "the retired 64px context bar must not consume shell height"
+  );
+});
+
+test("the page canvas owns breadcrumbs and the existing actions portal", () => {
+  assert.match(
+    PAGE_FRAME,
+    /<PageContext attachment=\{contextAttachment\} items=\{contextItems\} \/>/
+  );
+  assert.doesNotMatch(
+    PAGE_CONTEXT,
+    /<header\b/,
+    "page context must not create a second banner landmark inside page headers"
+  );
+  assertInOrder(PAGE_CONTEXT, [
+    '<Breadcrumb className="min-w-0 overflow-hidden">',
+    'data-slot="page-actions"',
+  ]);
+  assert.match(PAGE_CONTEXT, /ref=\{setActionsContainer\}/);
+});
+
+test("the hierarchy ruling leaves no runtime prototype artifacts", () => {
+  assert.equal(
+    existsSync(path.join(SRC, "components", "page-hierarchy-prototype.tsx")),
+    false
+  );
+  for (const [name, source] of [
+    ["dashboard layout", LAYOUT],
+    ["page context", PAGE_CONTEXT],
+    ["page frame", PAGE_FRAME],
+    ["global styles", GLOBAL_STYLES],
+    ["Plant Intelligence", PHASE],
+    ["Wiki", WIKI],
+  ] as const) {
+    assert.doesNotMatch(
+      source,
+      /PageHierarchyPrototype|data-auth-page-hierarchy|auth-page-hierarchy-prototype|data-context-layout|suppressSingleCrumb/,
+      `${name} still contains taste-prototype state or selectors`
+    );
+  }
 });
 
 test("global controls stay in the requested reading order", () => {
@@ -144,14 +191,33 @@ test("the dashboard has one main landmark and a skip target", () => {
   assert.match(inset, /<main\b/);
 });
 
-test("page context stays outside the focusable route-content main", () => {
+test("page context stays inside the focusable route-content main", () => {
   assertInOrder(LAYOUT, [
-    "<DashboardHeader />",
     "<SidebarInset",
     "{children}",
     "</SidebarInset>",
     "<SettingsModal",
   ]);
+  assert.match(
+    PAGE_FRAME,
+    /data-slot="page-canvas"[\s\S]*<PageContext attachment=\{contextAttachment\} items=\{contextItems\} \/>/
+  );
+});
+
+test("settings close resumes after page context instead of re-entering it", () => {
+  assert.match(
+    PAGE_FRAME,
+    /<PageContext[\s\S]*id=\{hasContentFocusTarget \? DASHBOARD_PAGE_CONTENT_ID : undefined\}[\s\S]*tabIndex=\{hasContentFocusTarget \? -1 : undefined\}/
+  );
+  assert.match(
+    SETTINGS,
+    /document\.getElementById\(DASHBOARD_PAGE_CONTENT_ID\)\?\.focus\(\)/
+  );
+  assert.doesNotMatch(
+    SETTINGS,
+    /document\.getElementById\(DASHBOARD_MAIN_ID\)/,
+    "focusing main would put breadcrumb links before route content on the next Tab"
+  );
 });
 
 test("the viewport caps the shell and leaves route scrolling to the main pane", () => {

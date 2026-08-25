@@ -1,15 +1,21 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
-import { HeaderBreadcrumbs } from "@/components/header";
+import {
+  HeaderBreadcrumbs,
+  type HeaderBreadcrumbItem,
+} from "@/components/header";
 import {
   PageCanvas,
   SplitWorkspace,
   WorkspacePanel,
 } from "@/components/layout/page-frame";
 import { getCurrentSession } from "@/lib/auth";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import { getBookmarks, getRecentlyViewed, getWikiNavigation } from "@/lib/wiki";
 
 // Force dynamic rendering for recently viewed data
 export const dynamic = "force-dynamic";
+
+const WIKI_BREADCRUMBS: HeaderBreadcrumbItem[] = [{ label: "Wiki" }];
 
 export default async function WikiLayout({
   children,
@@ -30,15 +36,19 @@ export default async function WikiLayout({
   ]);
 
   return (
-    <PageCanvas className="overflow-hidden">
-      {/* Header context is state, not paint: CSS cannot replace the dashboard
-          fallback with this route's page-context label. */}
-      <HeaderBreadcrumbs items={[{ label: "Wiki" }]} />
-      <SplitWorkspace>
+    <PageCanvas
+      className="overflow-hidden"
+      contentClassName="h-full"
+      context="none"
+    >
+      {/* Preserve the route's declared context state for nested consumers even
+          though the ruled Wiki workspace renders no visible context row. */}
+      <HeaderBreadcrumbs items={WIKI_BREADCRUMBS} />
+      <SplitWorkspace className="grid-rows-[minmax(0,1fr)]">
         {/* The secondary navigation needs its own surface beside the article
             workspace. CSS alone could not separate it while the old sidebar
             and content were siblings on one uninterrupted canvas. */}
-        <WorkspacePanel className="hidden h-full overflow-hidden lg:block">
+        <WorkspacePanel className="hidden h-full overflow-hidden lg:col-start-1 lg:row-start-1 lg:block">
           <aside className="h-full overflow-y-auto p-4">
             <WikiSidebar
               groups={groups}
@@ -58,7 +68,11 @@ export default async function WikiLayout({
           compressed below its measure by a rail the viewport cannot afford —
           below that the TOC stays a disclosure above the article, whatever
           the surrounding sidebars are doing. */}
-        <WorkspacePanel className="h-full overflow-y-auto [container:wiki-content/size]">
+        <WorkspacePanel
+          id={DASHBOARD_PAGE_CONTENT_ID}
+          tabIndex={-1}
+          className="row-start-1 h-full overflow-y-auto outline-none [container:wiki-content/size] lg:col-start-2"
+        >
           <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
             {children}
           </div>

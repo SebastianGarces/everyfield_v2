@@ -1,12 +1,31 @@
 import * as React from "react";
 
+import type { HeaderBreadcrumbItem } from "@/components/header/header-context";
+import { PageContext } from "@/components/header/page-context";
+import { DASHBOARD_PAGE_CONTENT_ID } from "@/lib/dashboard/main-region";
 import { cn } from "@/lib/utils";
 
 /** Gray, padded scroll frame shared by authenticated page bodies. */
 export function PageCanvas({
   className,
+  contentClassName,
+  contextItems,
+  frameClassName,
+  context = "default",
+  contextAttachment = "standalone",
+  contentFocusTarget,
+  children,
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & {
+  frameClassName?: string;
+  contentClassName?: string;
+  context?: "default" | "none";
+  contextAttachment?: "standalone" | "attached";
+  contextItems?: HeaderBreadcrumbItem[];
+  contentFocusTarget?: boolean;
+}) {
+  const hasContentFocusTarget = contentFocusTarget ?? context === "default";
+
   return (
     <div
       data-slot="page-canvas"
@@ -15,7 +34,33 @@ export function PageCanvas({
         className
       )}
       {...props}
-    />
+    >
+      <div
+        data-slot="page-hierarchy-frame"
+        className={cn(
+          "flex h-full min-h-full min-w-0 flex-col gap-3",
+          contextAttachment === "attached" && "gap-0",
+          frameClassName
+        )}
+      >
+        {context === "default" && (
+          <PageContext attachment={contextAttachment} items={contextItems} />
+        )}
+        <div
+          id={hasContentFocusTarget ? DASHBOARD_PAGE_CONTENT_ID : undefined}
+          tabIndex={hasContentFocusTarget ? -1 : undefined}
+          data-slot="page-content"
+          className={cn(
+            "min-h-0 min-w-0 flex-1 outline-none",
+            contextAttachment === "attached" &&
+              "[&>[data-slot=workspace-panel]]:rounded-t-none [&>[data-slot=workspace-panel]]:border-t-0",
+            contentClassName
+          )}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }
 
