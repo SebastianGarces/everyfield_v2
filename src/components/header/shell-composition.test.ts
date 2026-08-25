@@ -15,7 +15,8 @@ const MOBILE_TRIGGER = read(
   "header",
   "mobile-sidebar-trigger.tsx"
 );
-const CONTEXT_BAR = read("components", "header", "dashboard-header.tsx");
+const PAGE_CONTEXT = read("components", "header", "page-context.tsx");
+const PAGE_FRAME = read("components", "layout", "page-frame.tsx");
 const SIDEBAR = read("components", "app-sidebar.tsx");
 const SIDEBAR_PRIMITIVE = read("components", "ui", "sidebar.tsx");
 const ACCOUNT = read("components", "nav-user.tsx");
@@ -31,14 +32,32 @@ function assertInOrder(source: string, needles: string[]) {
   }
 }
 
-test("the two shell bars keep their ruled geometry", () => {
+test("the one shell bar keeps its ruled geometry", () => {
   assert.match(GLOBAL_BAR, /\bh-10\b/, "the global bar must remain 40px");
   assert.match(
     GLOBAL_BAR,
     /<Mark className="[^"]*\bw-6\b/,
     "the green mark must remain 24px wide"
   );
-  assert.match(CONTEXT_BAR, /\bh-16\b/, "the context bar must remain 64px");
+  assert.doesNotMatch(
+    LAYOUT,
+    /DashboardHeader/,
+    "the retired 64px context bar must not consume shell height"
+  );
+});
+
+test("the page canvas owns breadcrumbs and the existing actions portal", () => {
+  assert.match(PAGE_FRAME, /<PageContext \/>/);
+  assert.doesNotMatch(
+    PAGE_CONTEXT,
+    /<header\b/,
+    "page context must not create a second banner landmark inside page headers"
+  );
+  assertInOrder(PAGE_CONTEXT, [
+    '<Breadcrumb className="min-w-0 overflow-hidden">',
+    'data-slot="page-actions"',
+  ]);
+  assert.match(PAGE_CONTEXT, /ref=\{setActionsContainer\}/);
 });
 
 test("global controls stay in the requested reading order", () => {
@@ -144,14 +163,14 @@ test("the dashboard has one main landmark and a skip target", () => {
   assert.match(inset, /<main\b/);
 });
 
-test("page context stays outside the focusable route-content main", () => {
+test("page context stays inside the focusable route-content main", () => {
   assertInOrder(LAYOUT, [
-    "<DashboardHeader />",
     "<SidebarInset",
     "{children}",
     "</SidebarInset>",
     "<SettingsModal",
   ]);
+  assert.match(PAGE_FRAME, /data-slot="page-canvas"[\s\S]*<PageContext \/>/);
 });
 
 test("the viewport caps the shell and leaves route scrolling to the main pane", () => {

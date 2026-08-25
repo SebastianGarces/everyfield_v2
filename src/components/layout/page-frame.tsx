@@ -1,12 +1,19 @@
 import * as React from "react";
 
+import { PageContext } from "@/components/header/page-context";
 import { cn } from "@/lib/utils";
 
 /** Gray, padded scroll frame shared by authenticated page bodies. */
 export function PageCanvas({
   className,
+  frameClassName,
+  context = "default",
+  children,
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & {
+  frameClassName?: string;
+  context?: "default" | "none";
+}) {
   return (
     <div
       data-slot="page-canvas"
@@ -15,7 +22,27 @@ export function PageCanvas({
         className
       )}
       {...props}
-    />
+    >
+      <div
+        data-slot="page-hierarchy-frame"
+        className={cn(
+          "flex h-full min-h-full min-w-0 flex-col gap-3",
+          "[[data-auth-page-hierarchy=b]_&]:gap-0",
+          frameClassName
+        )}
+      >
+        {context === "default" && <PageContext />}
+        <div
+          data-slot="page-content"
+          className={cn(
+            "min-h-0 min-w-0 flex-1",
+            "[[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:[&>[data-slot=workspace-panel]]:border-t-0"
+          )}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }
 
