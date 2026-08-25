@@ -4,11 +4,20 @@ import path from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
 
+import {
+  assertPageCanvasContext,
+  pageCanvasOpenings,
+} from "@/lib/testing/page-canvas-source";
 import { assertInOrder } from "@/lib/testing/source-span";
 
 interface SpecializedRouteFamily {
   routes: readonly string[];
   owner: string;
+  composition:
+    | "attached-delegated"
+    | "attached-workspace"
+    | "context-free-split"
+    | "context-free-workspace";
   markers: readonly RegExp[];
 }
 
@@ -27,6 +36,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
       "/people/[id]/teams",
     ],
     owner: "src/components/people/person-profile-shell.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
   {
@@ -36,7 +46,8 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
       "/people/[id]/assessments/commitment",
     ],
     owner: "src/components/people/assessment-entry-shell.tsx",
-    markers: [/PageCanvas/, /Card className="mx-auto max-w-4xl shadow-sm"/],
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/, /shadow-sm/],
   },
   {
     routes: [
@@ -49,6 +60,7 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
       "/meetings/[id]/evaluation",
     ],
     owner: "src/app/(dashboard)/meetings/[id]/layout.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
   {
@@ -59,11 +71,13 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
       "/teams/[teamId]/meetings",
     ],
     owner: "src/app/(dashboard)/teams/[teamId]/layout.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
   {
     routes: ["/wiki", "/wiki/[...slug]", "/wiki/progress"],
     owner: "src/app/(dashboard)/wiki/layout.tsx",
+    composition: "context-free-split",
     markers: [
       /HeaderBreadcrumbs items=\{WIKI_BREADCRUMBS\}/,
       /PageCanvas/,
@@ -74,51 +88,61 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
   {
     routes: ["/dashboard (onboarding)"],
     owner: "src/app/(dashboard)/dashboard/onboarding-dashboard.tsx",
+    composition: "context-free-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/communication/compose"],
     owner: "src/app/(dashboard)/communication/compose/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/communication/templates"],
     owner: "src/app/(dashboard)/communication/templates/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/communication/templates/[id]/edit"],
     owner: "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/communication/history"],
     owner: "src/app/(dashboard)/communication/history/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/communication/[id]"],
     owner: "src/app/(dashboard)/communication/[id]/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/documents/history"],
     owner: "src/app/(dashboard)/documents/history/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/oversight/plants/[id]"],
     owner: "src/app/(dashboard)/oversight/plants/[id]/page.tsx",
-    markers: [/PageCanvas/, /WorkspacePanel/],
+    composition: "attached-delegated",
+    markers: [/PageCanvas/, /PlantDetail/, /attachedContext/],
   },
   {
     routes: ["/coaching/[churchId]"],
     owner: "src/app/(dashboard)/coaching/[churchId]/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
   {
     routes: ["/tasks/[id]"],
     owner: "src/app/(dashboard)/tasks/[id]/page.tsx",
+    composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
 ];
@@ -200,7 +224,7 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 32 specialized surfaces delegate to a rounded workspace owner", () => {
+test("all 32 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
   assert.equal(routes.length, 32);
@@ -212,12 +236,51 @@ test("all 32 specialized surfaces delegate to a rounded workspace owner", () => 
 
   for (const family of SPECIALIZED_ROUTE_FAMILIES) {
     const source = readFileSync(path.join(process.cwd(), family.owner), "utf8");
+    const canvases = pageCanvasOpenings(source, family.owner);
+    assert.equal(
+      canvases.length,
+      1,
+      `${family.owner} must own exactly one PageCanvas`
+    );
+    const [canvas] = canvases;
+
     for (const marker of family.markers) {
       assert.match(
         source,
         marker,
         `${family.routes.join(", ")} must keep ${String(marker)} in ${family.owner}`
       );
+    }
+
+    switch (family.composition) {
+      case "attached-workspace":
+        assertPageCanvasContext(canvas, "attached", family.owner);
+        assert.match(source, /<WorkspacePanel(?:\s|>)/);
+        break;
+      case "attached-delegated":
+        assertPageCanvasContext(canvas, "attached", family.owner);
+        assert.match(source, /attachedContext/);
+        assert.doesNotMatch(
+          source,
+          /<WorkspacePanel(?:\s|>)/,
+          `${family.owner} delegates the attached seam to its first owned surface`
+        );
+        break;
+      case "context-free-split":
+        assertPageCanvasContext(canvas, "context-free", family.owner);
+        assert.match(source, /SplitWorkspace/);
+        assert.doesNotMatch(source, /PageContext|contextAttachment/);
+        break;
+      case "context-free-workspace":
+        assertPageCanvasContext(canvas, "context-free", family.owner);
+        assert.equal(
+          canvas.hasContentFocusTarget,
+          true,
+          `${family.owner} must keep its settings focus target on the same PageCanvas`
+        );
+        assert.match(source, /<WorkspacePanel(?:\s|>)/);
+        assert.doesNotMatch(source, /PageContext|contextAttachment/);
+        break;
     }
   }
 });
@@ -368,7 +431,9 @@ test("detail workspaces keep the canvas as their single vertical scroll owner", 
     "src/app/(dashboard)/tasks/[id]/page.tsx",
   ]) {
     const source = readFileSync(path.join(process.cwd(), file), "utf8");
-    assert.match(source, /<PageCanvas>/);
+    assert.match(source, /<PageCanvas(?:\s|>)/);
+    assert.match(source, /contextAttachment="attached"/);
+    assert.match(source, /contextItems=\{/);
     assert.match(
       source,
       /<WorkspacePanel className="[^"]*\bmin-h-full\b[^"]*"/
@@ -466,7 +531,7 @@ test("Wiki gives its size-contained mobile article a definite block size", () =>
   );
 });
 
-test("only Message History attaches context to its same-width workspace", () => {
+test("attached context shares the full or centered workspace width", () => {
   const history = readFileSync(
     path.join(
       process.cwd(),
@@ -474,31 +539,31 @@ test("only Message History attaches context to its same-width workspace", () => 
     ),
     "utf8"
   );
-  const wiki = readFileSync(
-    path.join(process.cwd(), "src/app/(dashboard)/wiki/layout.tsx"),
-    "utf8"
-  );
   assert.match(
     history,
     /<PageCanvas[\s\S]*contextAttachment="attached"[\s\S]*contextItems=\{HISTORY_BREADCRUMBS\}/,
     "the full-width history workspace explicitly opts into the integrated seam"
   );
-  assert.doesNotMatch(wiki, /PageContext|contextAttachment/);
 
-  for (const relativePath of [
-    "meetings/new/page.tsx",
-    "people/new/page.tsx",
-    "tasks/[id]/page.tsx",
-    "coaching/[churchId]/page.tsx",
-  ]) {
+  for (const [relativePath, width] of [
+    ["meetings/new/page.tsx", "max-w-2xl"],
+    ["people/new/page.tsx", "max-w-2xl"],
+    ["tasks/[id]/page.tsx", "max-w-4xl"],
+    ["coaching/[churchId]/page.tsx", "max-w-6xl"],
+  ] as const) {
     const source = readFileSync(
       path.join(DASHBOARD_APP_ROOT, relativePath),
       "utf8"
     );
-    assert.doesNotMatch(
+    assert.match(
       source,
       /contextAttachment="attached"/,
-      `${relativePath} has a centered or route-specific workspace and must keep complete independent surfaces`
+      `${relativePath} must opt into the integrated context seam`
+    );
+    assert.match(
+      source,
+      new RegExp(`frameClassName="[^"]*${width}[^"]*"`),
+      `${relativePath} must center the context and workspace on one ${width} frame`
     );
   }
 });

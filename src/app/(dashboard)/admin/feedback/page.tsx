@@ -90,11 +90,12 @@ export default async function AdminFeedbackPage({
     const qs = next.toString();
     return qs ? `/admin/feedback?${qs}` : "/admin/feedback";
   };
+  const breadcrumbs = [{ label: "Admin" }, { label: "Feedback" }];
 
   return (
     <>
-      <HeaderBreadcrumbs items={[{ label: "Admin" }, { label: "Feedback" }]} />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
         <WorkspacePanel className="flex min-h-full flex-col gap-6 overflow-hidden p-4 sm:p-6">
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-tight">Feedback</h1>

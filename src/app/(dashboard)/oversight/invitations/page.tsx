@@ -40,7 +40,7 @@
 // ============================================================================
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { PageCanvas } from "@/components/layout/page-frame";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
 import { InvitationsList } from "@/components/oversight/invitations-list";
 import {
@@ -81,8 +81,11 @@ export default async function OversightInvitationsPage() {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Invitations" }]} />
-      <PageCanvas>
-        <WorkspacePanel className="min-h-full space-y-6 p-4 sm:p-6">
+      <PageCanvas context="none" contentFocusTarget>
+        <div
+          data-slot="oversight-invitation-surfaces"
+          className="mx-auto min-h-full max-w-6xl space-y-6"
+        >
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               Invitations
@@ -91,7 +94,7 @@ export default async function OversightInvitationsPage() {
           `scopeLabelForOrgType` is the ONE spelling of these two words across
           the oversight surface; this sentence used to re-derive them inline.
         */}
-            <p className="text-muted-foreground mt-1">
+            <p className="text-foreground mt-1 text-sm">
               {canManageInvitations
                 ? `Invite church plants to associate with your ${scopeLabelForOrgType(org.type)}, and track what you have sent.`
                 : `Every invitation your ${scopeLabelForOrgType(org.type)} has sent, and where each one stands.`}
@@ -106,7 +109,7 @@ export default async function OversightInvitationsPage() {
           )}
 
           <InvitationsList rows={rows} canAct={canManageInvitations} />
-        </WorkspacePanel>
+        </div>
       </PageCanvas>
     </>
   );

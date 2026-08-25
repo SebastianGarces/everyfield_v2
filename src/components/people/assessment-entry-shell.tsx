@@ -1,11 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { PageCanvas } from "@/components/layout/page-frame";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/components/ui/card";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import type { PersonForClient } from "@/lib/people/types";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
@@ -26,8 +21,8 @@ interface AssessmentEntryShellProps {
 /**
  * Server component shared by the three assessment entry routes (4 C's,
  * interview, commitment): the session check, the person lookup with
- * notFound(), and the Card + back-arrow header exist once here — each route
- * only names its title, back tab and form.
+ * notFound(), and the workspace + back-arrow header exist once here — each
+ * route only names its title, back tab and form.
  */
 export async function AssessmentEntryShell({
   personId,
@@ -59,14 +54,33 @@ export async function AssessmentEntryShell({
     notFound();
   }
 
+  const personName =
+    [person.firstName, person.lastName].filter(Boolean).join(" ") || "Person";
+
   return (
-    <PageCanvas className="pb-24">
-      <Card className="mx-auto max-w-4xl shadow-sm">
+    <PageCanvas
+      className="pb-24"
+      frameClassName="mx-auto w-full max-w-4xl"
+      contextAttachment="attached"
+      contextItems={[
+        { label: "People & CRM", href: "/people" },
+        { label: personName, href: `/people/${personId}` },
+        { label: title },
+      ]}
+    >
+      {/* The attached context and form need one rounded workspace boundary;
+          CSS cannot join the context to a shadcn Card whose slot remains an
+          independent surface. The form, action, and server-owned data stay in
+          their existing components. */}
+      <WorkspacePanel className="flex flex-col gap-6 py-6 shadow-sm">
         <CardHeader>
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" asChild>
-              <Link href={`/people/${personId}/assessments?tab=${backTab}`}>
-                <ArrowLeft className="h-4 w-4" />
+              <Link
+                href={`/people/${personId}/assessments?tab=${backTab}`}
+                aria-label={`Back to ${backTab}`}
+              >
+                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
               </Link>
             </Button>
             <div>
@@ -78,7 +92,7 @@ export async function AssessmentEntryShell({
           </div>
         </CardHeader>
         <CardContent>{renderForm(person)}</CardContent>
-      </Card>
+      </WorkspacePanel>
     </PageCanvas>
   );
 }

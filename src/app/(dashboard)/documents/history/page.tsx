@@ -42,16 +42,19 @@ export default async function GeneratedDocumentsHistoryPage() {
   ]);
 
   const timeZone = church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE;
+  const breadcrumbs = [
+    { label: "Documents", href: "/documents" },
+    { label: "History" },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Documents", href: "/documents" },
-          { label: "History" },
-        ]}
-      />
-      <PageCanvas className="overflow-hidden">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        className="overflow-hidden"
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+      >
         <WorkspacePanel className="flex h-full flex-col overflow-hidden">
           <div className="space-y-1 border-b p-4 pb-4 sm:p-6 sm:pb-4">
             <h1 className="text-3xl font-bold tracking-tight">

@@ -66,17 +66,20 @@ export default async function TaskTemplatesPage() {
   // session user's own `churchId` and is `React.cache`d, so the dashboard
   // layout has usually already paid for this read.
   const church = await getCurrentUserChurch();
+  const breadcrumbs = [
+    { label: "Tasks", href: "/tasks" },
+    { label: TEMPLATES_LINK_LABEL },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Tasks", href: "/tasks" },
-          { label: TEMPLATES_LINK_LABEL },
-        ]}
-      />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto max-w-3xl p-4 sm:p-6">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        frameClassName="mx-auto w-full max-w-3xl"
+      >
+        <WorkspacePanel className="p-4 sm:p-6">
           <TaskTemplatePicker
             headingLevel="h1"
             currentPhase={toPhaseNumber(church?.currentPhase)}

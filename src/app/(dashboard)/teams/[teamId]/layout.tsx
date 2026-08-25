@@ -29,15 +29,15 @@ export default async function TeamDetailLayout({
     notFound();
   }
 
+  const breadcrumbs = [
+    { label: "Ministry Teams", href: "/teams" },
+    { label: team.name },
+  ];
+
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[
-          { label: "Ministry Teams", href: "/teams" },
-          { label: team.name },
-        ]}
-      />
-      <PageCanvas>
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas contextAttachment="attached" contextItems={breadcrumbs}>
         <WorkspacePanel className="min-h-full">
           <TeamDetailHeader team={team} />
           <div className="px-4 pt-0 sm:px-6">

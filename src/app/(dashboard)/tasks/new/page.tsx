@@ -43,14 +43,20 @@ export default async function NewTaskPage() {
       listFollowUpAssignees(user.churchId),
       listPrerequisiteCandidates(user.churchId),
     ]);
+  const breadcrumbs = [
+    { label: "Tasks", href: "/tasks" },
+    { label: "New Task" },
+  ];
 
   return (
     <>
-      <HeaderBreadcrumbs
-        items={[{ label: "Tasks", href: "/tasks" }, { label: "New Task" }]}
-      />
-      <PageCanvas>
-        <WorkspacePanel className="mx-auto max-w-2xl p-4 sm:p-6">
+      <HeaderBreadcrumbs items={breadcrumbs} />
+      <PageCanvas
+        contextAttachment="attached"
+        contextItems={breadcrumbs}
+        frameClassName="mx-auto w-full max-w-2xl"
+      >
+        <WorkspacePanel className="p-4 sm:p-6">
           <h1 className="mb-6 text-2xl font-semibold tracking-tight">
             Create New Task
           </h1>
