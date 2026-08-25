@@ -59,7 +59,7 @@ export default async function WikiLayout({
           compressed below its measure by a rail the viewport cannot afford —
           below that the TOC stays a disclosure above the article, whatever
           the surrounding sidebars are doing. */}
-        <WorkspacePanel className="h-full overflow-y-auto [container:wiki-content/size] [[data-auth-page-hierarchy=b]_&]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:border-t-0">
+        <WorkspacePanel className="h-full overflow-y-auto [container:wiki-content/size] [[data-auth-page-hierarchy=b]_&]:rounded-t-none [[data-auth-page-hierarchy=b]_&]:border-t-0 [[data-auth-page-hierarchy=b]_&]:lg:col-start-2 [[data-auth-page-hierarchy=b]_&]:lg:row-start-2">
           <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
             {children}
           </div>
