@@ -13,33 +13,45 @@ import { assertInOrder } from "@/lib/testing/source-span";
  * Stage 4 sweep and are deliberately absent. `/coaching` has no index route;
  * its only route is the plant detail workspace owned by Stage 4.
  */
+type PrimaryComposition =
+  | "attached-workspace"
+  | "context-free-workspace"
+  | "context-free-siblings"
+  | "dashboard-hybrid"
+  | "manual-standalone";
+
+/**
+ * The canonical route-to-composition inventory for authenticated primary
+ * surfaces. Each entry names one ruled hierarchy rather than accepting any
+ * PageCanvas/WorkspacePanel combination that happens to compile.
+ */
 const PRIMARY_PRESENTATION_ROOTS = [
-  "dashboard/no-plant-empty-state.tsx",
-  "dashboard/plant-dashboard.tsx",
-  "phase/page.tsx",
-  "launch/page.tsx",
-  "tasks/page.tsx",
-  "tasks/new/page.tsx",
-  "tasks/templates/page.tsx",
-  "people/page.tsx",
-  "people/new/page.tsx",
-  "meetings/page.tsx",
-  "meetings/new/page.tsx",
-  "teams/page.tsx",
-  "teams/health/page.tsx",
-  "teams/org-chart/page.tsx",
-  "documents/page.tsx",
-  "communication/page.tsx",
-  "notifications/page.tsx",
-  "oversight/page.tsx",
-  "oversight/plants/page.tsx",
-  "oversight/health/page.tsx",
-  "oversight/invitations/page.tsx",
-  "oversight/sending-churches/page.tsx",
-  "admin/feedback/page.tsx",
-  "verify-email/page.tsx",
-  "verify-email/confirmed/page.tsx",
-] as const;
+  ["dashboard/no-plant-empty-state.tsx", "context-free-workspace"],
+  ["dashboard/plant-dashboard.tsx", "dashboard-hybrid"],
+  ["phase/page.tsx", "manual-standalone"],
+  ["launch/page.tsx", "context-free-siblings"],
+  ["tasks/page.tsx", "attached-workspace"],
+  ["tasks/new/page.tsx", "attached-workspace"],
+  ["tasks/templates/page.tsx", "attached-workspace"],
+  ["people/page.tsx", "context-free-workspace"],
+  ["people/new/page.tsx", "attached-workspace"],
+  ["meetings/page.tsx", "context-free-workspace"],
+  ["meetings/new/page.tsx", "attached-workspace"],
+  ["teams/page.tsx", "context-free-workspace"],
+  ["teams/health/page.tsx", "attached-workspace"],
+  ["teams/org-chart/page.tsx", "attached-workspace"],
+  ["documents/page.tsx", "attached-workspace"],
+  ["communication/page.tsx", "context-free-siblings"],
+  ["notifications/page.tsx", "context-free-workspace"],
+  ["oversight/page.tsx", "context-free-siblings"],
+  ["oversight/plants/page.tsx", "context-free-siblings"],
+  ["oversight/health/page.tsx", "context-free-siblings"],
+  ["oversight/invitations/page.tsx", "context-free-siblings"],
+  ["oversight/sending-churches/page.tsx", "context-free-siblings"],
+  ["admin/feedback/page.tsx", "attached-workspace"],
+  ["verify-email/page.tsx", "context-free-workspace"],
+  ["verify-email/confirmed/page.tsx", "context-free-workspace"],
+] as const satisfies readonly (readonly [string, PrimaryComposition])[];
 
 const DASHBOARD_ROOT = join(process.cwd(), "src/app/(dashboard)");
 
@@ -49,23 +61,61 @@ const FIXED_WORKSPACE_ROOTS = [
   "teams/health/page.tsx",
   "teams/org-chart/page.tsx",
   "documents/page.tsx",
-  "communication/page.tsx",
 ] as const;
 
 const CANVAS_SCROLL_ROOTS = ["tasks/page.tsx"] as const;
-const ROUTE_PRESENTATION_ROOTS = PRIMARY_PRESENTATION_ROOTS.filter(
-  (relativePath) => !relativePath.startsWith("dashboard/")
-);
-const SIBLING_SURFACE_ROOTS = ["phase/page.tsx"] as const;
-const SINGLE_WORKSPACE_ROOTS = PRIMARY_PRESENTATION_ROOTS.filter(
-  (relativePath) =>
-    !SIBLING_SURFACE_ROOTS.includes(
-      relativePath as (typeof SIBLING_SURFACE_ROOTS)[number]
-    )
-);
+const ROUTE_PRESENTATION_ROOTS = PRIMARY_PRESENTATION_ROOTS.map(
+  ([relativePath]) => relativePath
+).filter((relativePath) => !relativePath.startsWith("dashboard/"));
 
-test("every Stage 3 presentation root declares its canvas composition", () => {
-  for (const relativePath of PRIMARY_PRESENTATION_ROOTS) {
+function assertComposition(
+  relativePath: string,
+  composition: PrimaryComposition,
+  source: string
+) {
+  switch (composition) {
+    case "attached-workspace":
+      assert.match(source, /contextAttachment="attached"/);
+      assert.match(source, /contextItems=\{/);
+      assert.match(source, /<WorkspacePanel(?:\s|>)/);
+      break;
+    case "context-free-workspace":
+      assert.match(
+        source,
+        /<PageCanvas[\s\S]*?context="none"[\s\S]*?contentFocusTarget[\s\S]*?>/
+      );
+      assert.match(source, /<WorkspacePanel(?:\s|>)/);
+      assert.doesNotMatch(source, /PageContext/);
+      break;
+    case "context-free-siblings":
+      assert.match(
+        source,
+        /<PageCanvas[\s\S]*?context="none"[\s\S]*?contentFocusTarget[\s\S]*?>/
+      );
+      assert.doesNotMatch(
+        source,
+        /<WorkspacePanel(?:\s|>)/,
+        `${relativePath} must not wrap sibling surfaces in a false outer workspace`
+      );
+      assert.doesNotMatch(source, /PageContext/);
+      break;
+    case "manual-standalone":
+      assert.match(source, /<PageCanvas[\s\S]*?context="none"/);
+      assert.match(source, /<PageContext(?:\s|>)/);
+      assert.doesNotMatch(source, /WorkspacePanel/);
+      assert.doesNotMatch(source, /contextAttachment|attachment="attached"/);
+      break;
+    case "dashboard-hybrid":
+      // The leadership re-entry branch is one focused workspace; the completed
+      // dashboard is an unboxed identity followed by sibling cards.
+      assert.match(source, /<PageCanvas context="none" contentFocusTarget>/);
+      assert.match(source, /data-slot="completed-dashboard-content"/);
+      break;
+  }
+}
+
+test("every Stage 3 presentation root declares its ruled canvas composition", () => {
+  for (const [relativePath, composition] of PRIMARY_PRESENTATION_ROOTS) {
     const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
 
     assert.match(
@@ -78,24 +128,8 @@ test("every Stage 3 presentation root declares its canvas composition", () => {
       /SplitWorkspace/,
       `${relativePath} is a primary route, not a specialized split workspace`
     );
+    assertComposition(relativePath, composition, source);
   }
-
-  for (const relativePath of SINGLE_WORKSPACE_ROOTS) {
-    const source = readFileSync(join(DASHBOARD_ROOT, relativePath), "utf8");
-    assert.match(
-      source,
-      /<WorkspacePanel(?:\s|>)/,
-      `${relativePath} is classified as one primary workspace`
-    );
-  }
-
-  const phase = readFileSync(join(DASHBOARD_ROOT, "phase/page.tsx"), "utf8");
-  assert.doesNotMatch(
-    phase,
-    /WorkspacePanel/,
-    "Plant Intelligence is classified as sibling feature surfaces, not one false outer card"
-  );
-  assert.match(phase, /data-slot="plant-intelligence-content"/);
 });
 
 test("list workspaces have one intentional scrolling content region", () => {
@@ -104,7 +138,7 @@ test("list workspaces have one intentional scrolling content region", () => {
 
     assert.match(
       source,
-      /<PageCanvas className="overflow-hidden">/,
+      /<PageCanvas[\s\S]*?className="overflow-hidden"[\s\S]*?>/,
       `${relativePath} must keep the canvas fixed around its list`
     );
     assert.match(
@@ -131,7 +165,7 @@ test("tall action and filter headers scroll with their content", () => {
 
     assert.match(
       source,
-      /<PageCanvas>/,
+      /<PageCanvas[\s\S]*?contextAttachment="attached"[\s\S]*?contextItems=\{breadcrumbs\}[\s\S]*?>/,
       `${relativePath} must leave vertical scrolling with the canvas`
     );
     assert.match(
@@ -160,7 +194,7 @@ test("people keeps list headers in canvas flow and bounds pipeline column scroll
 
   assert.match(
     page,
-    /<PageCanvas className=\{isPipelineView \? "overflow-hidden" : undefined\}>/,
+    /<PageCanvas[\s\S]*?className=\{isPipelineView \? "overflow-hidden" : undefined\}[\s\S]*?context="none"[\s\S]*?contentFocusTarget[\s\S]*?>/,
     "only the pipeline view fixes the canvas around the board"
   );
   assert.match(
