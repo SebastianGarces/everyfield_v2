@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -108,12 +108,79 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     owner: "src/app/(dashboard)/coaching/[churchId]/page.tsx",
     markers: [/PageCanvas/, /WorkspacePanel/],
   },
+  {
+    routes: ["/tasks/[id]"],
+    owner: "src/app/(dashboard)/tasks/[id]/page.tsx",
+    markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
+  },
 ];
 
-test("all 31 specialized routes delegate to a rounded workspace owner", () => {
+/**
+ * Presentation roots implemented on Stage 3. Keeping this assignment explicit
+ * lets the filesystem audit below cover the complete authenticated route tree
+ * without making this branch edit files owned by the parallel stage.
+ */
+const STAGE_3_PRIMARY_ROUTES = [
+  "/admin/feedback",
+  "/communication",
+  "/dashboard",
+  "/documents",
+  "/launch",
+  "/meetings",
+  "/meetings/new",
+  "/notifications",
+  "/oversight",
+  "/oversight/health",
+  "/oversight/invitations",
+  "/oversight/plants",
+  "/oversight/sending-churches",
+  "/people",
+  "/people/new",
+  "/phase",
+  "/tasks",
+  "/tasks/new",
+  "/tasks/templates",
+  "/teams",
+  "/teams/health",
+  "/teams/org-chart",
+  "/verify-email",
+  "/verify-email/confirmed",
+] as const;
+
+/** These retired URLs render no interface; both permanently redirect. */
+const NON_PRESENTATION_ROUTE_EXCLUSIONS = [
+  "/settings",
+  "/settings/[section]",
+] as const;
+
+const DASHBOARD_APP_ROOT = path.join(process.cwd(), "src/app/(dashboard)");
+
+function collectPageRoutes(
+  directory: string,
+  routeSegments: readonly string[] = []
+): string[] {
+  const routes: string[] = [];
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      routes.push(
+        ...collectPageRoutes(path.join(directory, entry.name), [
+          ...routeSegments,
+          entry.name,
+        ])
+      );
+    } else if (entry.isFile() && entry.name === "page.tsx") {
+      routes.push(`/${routeSegments.join("/")}`);
+    }
+  }
+
+  return routes.sort();
+}
+
+test("all 32 specialized surfaces delegate to a rounded workspace owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 31);
+  assert.equal(routes.length, 32);
   assert.equal(
     new Set(routes).size,
     routes.length,
@@ -130,6 +197,28 @@ test("all 31 specialized routes delegate to a rounded workspace owner", () => {
       );
     }
   }
+});
+
+test("every authenticated page is assigned to a presentation stage or a non-rendering redirect", () => {
+  const specializedRoutes = SPECIALIZED_ROUTE_FAMILIES.flatMap(
+    (family) => family.routes
+  ).filter((route) => route !== "/dashboard (onboarding)");
+  const assignedRoutes = [
+    ...specializedRoutes,
+    ...STAGE_3_PRIMARY_ROUTES,
+    ...NON_PRESENTATION_ROUTE_EXCLUSIONS,
+  ];
+
+  assert.equal(
+    new Set(assignedRoutes).size,
+    assignedRoutes.length,
+    "authenticated route assignments must not overlap"
+  );
+  assert.deepEqual(
+    collectPageRoutes(DASHBOARD_APP_ROOT),
+    [...assignedRoutes].sort(),
+    "every authenticated page.tsx needs an explicit presentation owner"
+  );
 });
 
 test("communication editors use their workspace height instead of viewport arithmetic", () => {
