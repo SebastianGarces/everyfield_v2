@@ -411,6 +411,24 @@ test("task detail header stacks and preserves long titles and action access", ()
   assert.match(actions, /flex max-w-full flex-wrap/);
 });
 
+test("task detail keeps a canvas-sized bottom inset after tall content", () => {
+  const page = readFileSync(
+    path.join(process.cwd(), "src/app/(dashboard)/tasks/[id]/page.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    page,
+    /<WorkspacePanel className="[^"]*\bmb-3\b[^"]*\bsm:mb-4\b[^"]*"/,
+    "the overflowing workspace must carry PageCanvas's p-3/sm:p-4 bottom inset into the scroll range"
+  );
+  assert.doesNotMatch(
+    page,
+    /(?:overflow-auto|overflow-y-auto)/,
+    "the spacing fix must not introduce a second vertical scroll owner"
+  );
+});
+
 test("communication editors use their workspace height instead of viewport arithmetic", () => {
   for (const file of [
     "src/app/(dashboard)/communication/compose/compose-form.tsx",
