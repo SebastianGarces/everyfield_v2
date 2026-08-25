@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquarePlus } from "lucide-react";
+import { Send } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -23,11 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
 import { Textarea } from "@/components/ui/textarea";
 
 const CATEGORIES = [
@@ -67,109 +62,101 @@ export function FeedbackButton() {
   }
 
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <Dialog
-          open={open}
-          onOpenChange={(next) => {
-            setOpen(next);
-            if (!next) resetForm();
-          }}
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) resetForm();
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Send Feedback"
+          className="text-app-bar-foreground hover:text-app-bar-foreground h-8 cursor-pointer gap-1.5 px-2 hover:bg-white/10 focus-visible:ring-white/70"
         >
-          <DialogTrigger asChild>
-            <SidebarMenuButton
-              tooltip="Send Feedback"
-              className="cursor-pointer"
-            >
-              <MessageSquarePlus />
-              <span>Send Feedback</span>
-            </SidebarMenuButton>
-          </DialogTrigger>
+          <Send aria-hidden="true" className="size-4" />
+          <span className="hidden sm:inline">Send Feedback</span>
+        </Button>
+      </DialogTrigger>
 
-          <DialogContent className="sm:max-w-[480px]">
-            <DialogHeader>
-              <DialogTitle>Send Feedback</DialogTitle>
-              <DialogDescription>
-                Help us improve EveryField. What you write here is posted to our
-                public issue tracker so the team can work on it. Your name,
-                email, and church are not.
-              </DialogDescription>
-            </DialogHeader>
+      <DialogContent className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>Send Feedback</DialogTitle>
+          <DialogDescription>
+            Help us improve EveryField. What you write here is posted to our
+            public issue tracker so the team can work on it. Your name, email,
+            and church are not.
+          </DialogDescription>
+        </DialogHeader>
 
-            <form ref={formRef} action={handleSubmit} className="space-y-4">
-              {/* Category */}
-              <div className="space-y-2">
-                <label
-                  htmlFor="feedback-category"
-                  className="text-sm font-medium"
-                >
-                  Category
-                </label>
-                <Select value={category} onValueChange={setCategory}>
-                  <SelectTrigger
-                    id="feedback-category"
+        <form ref={formRef} action={handleSubmit} className="space-y-4">
+          {/* Category */}
+          <div className="space-y-2">
+            <label htmlFor="feedback-category" className="text-sm font-medium">
+              Category
+            </label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger id="feedback-category" className="cursor-pointer">
+                <SelectValue placeholder="Select a category" />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((c) => (
+                  <SelectItem
+                    key={c.value}
+                    value={c.value}
                     className="cursor-pointer"
                   >
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem
-                        key={c.value}
-                        value={c.value}
-                        className="cursor-pointer"
-                      >
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              {/* Description */}
-              <div className="space-y-2">
-                <label
-                  htmlFor="feedback-description"
-                  className="text-sm font-medium"
-                >
-                  Description
-                </label>
-                <Textarea
-                  id="feedback-description"
-                  name="description"
-                  placeholder="Tell us what's on your mind..."
-                  required
-                  minLength={1}
-                  maxLength={5000}
-                  rows={5}
-                  className="resize-y"
-                />
-              </div>
+          {/* Description */}
+          <div className="space-y-2">
+            <label
+              htmlFor="feedback-description"
+              className="text-sm font-medium"
+            >
+              Description
+            </label>
+            <Textarea
+              id="feedback-description"
+              name="description"
+              placeholder="Tell us what's on your mind..."
+              required
+              minLength={1}
+              maxLength={5000}
+              rows={5}
+              className="resize-y"
+            />
+          </div>
 
-              {/* Page context */}
-              <p className="text-muted-foreground text-xs">Page: {pathname}</p>
+          {/* Page context */}
+          <p className="text-muted-foreground text-xs">Page: {pathname}</p>
 
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOpen(false)}
-                  className="cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isPending}
-                  className="cursor-pointer"
-                >
-                  {isPending ? "Sending..." : "Submit Feedback"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </SidebarMenuItem>
-    </SidebarMenu>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              className="cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={isPending}
+              className="cursor-pointer"
+            >
+              {isPending ? "Sending..." : "Submit Feedback"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
