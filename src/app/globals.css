@@ -5,6 +5,7 @@
 
 html:has([data-authenticated-shell]),
 body:has([data-authenticated-shell]) {
+  overscroll-behavior-x: none;
   overscroll-behavior-y: none;
 }
 

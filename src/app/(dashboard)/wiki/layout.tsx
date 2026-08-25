@@ -36,8 +36,11 @@ export default async function WikiLayout({
   ]);
 
   return (
+    /* `overflow-clip` is load-bearing: unlike `hidden`, it does not make this
+       persistent canvas a scroll container that a nested route transition can
+       offset. The navigation and article panes below remain the scroll owners. */
     <PageCanvas
-      className="overflow-hidden"
+      className="overflow-clip"
       contentClassName="h-full"
       context="none"
     >

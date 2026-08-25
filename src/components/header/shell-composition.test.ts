@@ -221,22 +221,38 @@ test("settings close resumes after page context instead of re-entering it", () =
 });
 
 test("the viewport caps the shell and leaves route scrolling to page canvases", () => {
+  const shellMain = LAYOUT.slice(
+    LAYOUT.indexOf("<SidebarInset"),
+    LAYOUT.indexOf("</SidebarInset>") + "</SidebarInset>".length
+  );
+
   assert.match(
     LAYOUT,
     /<SidebarProvider[\s\S]*data-authenticated-shell[\s\S]*className="[^"]*\bh-svh\b[^"]*\boverflow-hidden\b[^"]*"/
   );
   assert.match(
-    LAYOUT,
-    /<SidebarInset[\s\S]*className="[^"]*\bmin-h-0\b[^"]*\boverflow-hidden\b[^"]*\boverscroll-y-none\b[^"]*"[\s\S]*{children}[\s\S]*<\/SidebarInset>/
+    shellMain,
+    /className="[^"]*\bmin-h-0\b[^"]*\boverflow-clip\b[^"]*\boverscroll-y-none\b[^"]*"[\s\S]*{children}/,
+    "the shell main must clip without becoming a programmatic scroll ancestor"
+  );
+  assert.doesNotMatch(
+    shellMain,
+    /\boverflow-(?:auto|hidden|scroll)\b/,
+    "PageCanvas and specialized panes, not the persistent shell main, own route scrolling"
   );
   assert.match(
     GLOBAL_STYLES,
-    /html:has\(\[data-authenticated-shell\]\),\s*body:has\(\[data-authenticated-shell\]\)\s*\{[^}]*overscroll-behavior-y:\s*none;/,
-    "the viewport must not rubber-band past the authenticated shell"
+    /html:has\(\[data-authenticated-shell\]\),\s*body:has\(\[data-authenticated-shell\]\)\s*\{[^}]*overscroll-behavior-x:\s*none;[^}]*overscroll-behavior-y:\s*none;/,
+    "the viewport must not rubber-band past the authenticated shell on either axis"
   );
   assert.doesNotMatch(
     GLOBAL_STYLES,
-    /(?:^|\n)html,\s*body\s*\{[^}]*overscroll-behavior-y:/,
+    /(?:^|\n)html,\s*body\s*\{[^}]*(?:overscroll-behavior(?:-[xy])?):/,
     "public pages must retain their native viewport overscroll behavior"
+  );
+  assert.doesNotMatch(
+    GLOBAL_STYLES,
+    /\[data-authenticated-shell\][^}]*overflow-x:\s*hidden/,
+    "contain viewport chaining without clipping intentional horizontal scrollers"
   );
 });

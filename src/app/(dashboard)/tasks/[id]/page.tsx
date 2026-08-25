@@ -380,6 +380,11 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             )}
           </div>
         </WorkspacePanel>
+        <div
+          aria-hidden="true"
+          className="h-3 shrink-0 sm:h-4"
+          data-slot="task-detail-end-inset"
+        />
       </PageCanvas>
     </>
   );

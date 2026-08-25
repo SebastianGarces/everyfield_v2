@@ -199,11 +199,16 @@ export default async function DashboardLayout({
               {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
                 settings modal has a narrower focus target inside PageCanvas:
                 page content AFTER breadcrumb/actions, so its next Tab cannot
-                re-enter contextual navigation. */}
+                re-enter contextual navigation.
+
+                `overflow-clip` is load-bearing. `hidden` is still a programmatic
+                scroll container, so a nested route transition can offset this
+                persistent shell and erase PageCanvas's visual inset. Route
+                canvases and specialized panes own scrolling below this clip. */}
               <SidebarInset
                 id={DASHBOARD_MAIN_ID}
                 tabIndex={-1}
-                className="min-h-0 overflow-hidden overscroll-y-none outline-none"
+                className="min-h-0 overflow-clip overscroll-y-none outline-none"
               >
                 {children}
               </SidebarInset>
