@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { MeetingForm } from "@/components/meetings/meeting-form";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
@@ -53,10 +54,10 @@ export default async function NewMeetingPage({
           { label: "Schedule Meeting" },
         ]}
       />
-      <div className="mx-auto max-w-2xl p-6">
-        <div className="space-y-6">
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-2xl font-semibold tracking-tight">
               Schedule Meeting
             </h1>
             <p className="text-muted-foreground mt-1">
@@ -69,8 +70,8 @@ export default async function NewMeetingPage({
             defaultType={defaultType}
             defaultTeamId={defaultTeamId}
           />
-        </div>
-      </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

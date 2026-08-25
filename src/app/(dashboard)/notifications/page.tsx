@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { NotificationFeed } from "@/components/notifications/notification-feed";
 import { verifySession } from "@/lib/auth/session";
 import {
@@ -75,46 +76,52 @@ export default async function NotificationsPage({
     <>
       <HeaderBreadcrumbs items={[{ label: "Notifications" }]} />
 
-      <div className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Notifications
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            What happened while you were away.
-          </p>
-        </div>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Notifications
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              What happened while you were away.
+            </p>
+          </div>
 
-        {hasAny && (
-          <nav
-            aria-label="Filter notifications"
-            className="bg-muted inline-flex items-center gap-1 rounded-lg p-1"
-          >
-            <FilterTab href="/notifications" active={!unreadOnly} testId="all">
-              All
-            </FilterTab>
-            <FilterTab
-              href="/notifications?filter=unread"
-              active={unreadOnly}
-              testId="unread"
+          {hasAny && (
+            <nav
+              aria-label="Filter notifications"
+              className="bg-muted inline-flex items-center gap-1 rounded-lg p-1"
             >
-              Unread
-            </FilterTab>
-          </nav>
-        )}
+              <FilterTab
+                href="/notifications"
+                active={!unreadOnly}
+                testId="all"
+              >
+                All
+              </FilterTab>
+              <FilterTab
+                href="/notifications?filter=unread"
+                active={unreadOnly}
+                testId="unread"
+              >
+                Unread
+              </FilterTab>
+            </nav>
+          )}
 
-        <NotificationFeed
-          // Remount when the tab changes: the appended pages and the cursor
-          // below belong to ONE filtered list, and carrying them across a
-          // switch would splice unread-only rows into the All tab.
-          key={unreadOnly ? "unread" : "all"}
-          rows={rows.map((row) => toFeedRow(row, now))}
-          nextCursor={serializeFeedCursor(nextCursor)}
-          unreadCount={unreadCount}
-          hasAny={hasAny}
-          unreadOnly={unreadOnly}
-        />
-      </div>
+          <NotificationFeed
+            // Remount when the tab changes: the appended pages and the cursor
+            // below belong to ONE filtered list, and carrying them across a
+            // switch would splice unread-only rows into the All tab.
+            key={unreadOnly ? "unread" : "all"}
+            rows={rows.map((row) => toFeedRow(row, now))}
+            nextCursor={serializeFeedCursor(nextCursor)}
+            unreadCount={unreadCount}
+            hasAny={hasAny}
+            unreadOnly={unreadOnly}
+          />
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

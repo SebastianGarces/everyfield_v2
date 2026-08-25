@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { TaskFilters, TaskList, TaskQuickAdd } from "@/components/tasks";
 import { FollowUpAssignments } from "@/components/tasks/follow-up-assignments";
 import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
@@ -107,51 +108,52 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Tasks" }]} />
-      <div className="flex h-full flex-col">
-        {/* Header */}
-        <div className="bg-card space-y-4 p-6 pb-4 shadow-sm">
-          {/*
+      <PageCanvas>
+        <WorkspacePanel className="flex min-h-full flex-col overflow-hidden">
+          {/* Header */}
+          <div className="space-y-4 border-b p-4 sm:p-6 sm:pb-4">
+            {/*
             The title and the two actions sit on one line once there is room
             for them. Below `sm` they stack instead of competing: side by side
             at that width the heading wraps mid-phrase and the buttons crush.
           */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
-              {/* Capability-matched header (#668). See @/lib/tasks/presentation. */}
-              <p className="text-muted-foreground text-pretty">
-                {taskListSubtitle(canWrite)}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-              <TaskQuickAdd />
-              {/*
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
+                {/* Capability-matched header (#668). See @/lib/tasks/presentation. */}
+                <p className="text-muted-foreground text-pretty">
+                  {taskListSubtitle(canWrite)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+                <TaskQuickAdd />
+                {/*
                 T-011/T-012. The catalog's standing entrance. The phase prompt
                 below offers one stage's checklists at the moment the stage
                 changes and is then gone, so without this link a planter who
                 declined it — or who wants an earlier stage's list — has no way
                 back to the catalog at all.
               */}
-              {canWrite && (
-                <Button asChild variant="outline" className="cursor-pointer">
-                  <Link href={TEMPLATES_ROUTE}>
-                    <ListChecks className="mr-2 h-4 w-4" />
-                    {TEMPLATES_LINK_LABEL}
-                  </Link>
-                </Button>
-              )}
-              {canWrite && (
-                <Button asChild className="cursor-pointer">
-                  <Link href="/tasks/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Task
-                  </Link>
-                </Button>
-              )}
+                {canWrite && (
+                  <Button asChild variant="outline" className="cursor-pointer">
+                    <Link href={TEMPLATES_ROUTE}>
+                      <ListChecks className="mr-2 h-4 w-4" />
+                      {TEMPLATES_LINK_LABEL}
+                    </Link>
+                  </Button>
+                )}
+                {canWrite && (
+                  <Button asChild className="cursor-pointer">
+                    <Link href="/tasks/new">
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Task
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
 
-          {/*
+            {/*
             Summary badges.
 
             These count TASKS only — `getTaskCounts` excludes subtasks, so the
@@ -164,94 +166,99 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             Checklist progress is real work, so it is still reported, but on its
             own quiet line where two adjacent numbers cannot be misread as one.
           */}
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              {counts.overdue > 0 && (
-                <Badge variant="destructive" className="text-xs">
-                  {counts.overdue} overdue
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                {counts.overdue > 0 && (
+                  <Badge variant="destructive" className="text-xs tabular-nums">
+                    {counts.overdue} overdue
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-xs tabular-nums">
+                  {counts.notStarted + counts.inProgress + counts.blocked}{" "}
+                  active
                 </Badge>
-              )}
-              <Badge variant="outline" className="text-xs">
-                {counts.notStarted + counts.inProgress + counts.blocked} active
-              </Badge>
-              {counts.blocked > 0 && (
-                <Badge variant="outline" className="text-xs text-red-600">
-                  {counts.blocked} blocked
+                {counts.blocked > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="text-destructive text-xs tabular-nums"
+                  >
+                    {counts.blocked} blocked
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-xs tabular-nums">
+                  {counts.complete} completed
                 </Badge>
+              </div>
+
+              {counts.checklistTotal > 0 && (
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="checklist-summary"
+                >
+                  Checklists: {counts.checklistComplete} of{" "}
+                  {counts.checklistTotal}{" "}
+                  {counts.checklistTotal === 1 ? "item" : "items"} done
+                </p>
               )}
-              <Badge variant="outline" className="text-xs text-green-600">
-                {counts.complete} completed
-              </Badge>
             </div>
 
-            {counts.checklistTotal > 0 && (
-              <p
-                className="text-muted-foreground text-xs"
-                data-testid="checklist-summary"
-              >
-                Checklists: {counts.checklistComplete} of{" "}
-                {counts.checklistTotal}{" "}
-                {counts.checklistTotal === 1 ? "item" : "items"} done
-              </p>
-            )}
-          </div>
-
-          {/*
+            {/*
             AC-4. Renders only when something is actually uncovered, and says
             only what is measured: how many follow-ups have no owner. It does
             NOT say who is carrying the rest — that claim is what #470 exists to
             delete (rubric v1, Lens 2).
           */}
-          {needsOwnerCount > 0 && view !== "assignments" && (
-            <Link
-              href={`/tasks?view=${ASSIGNMENTS_VIEW}#needs-owner`}
-              className="border-destructive/30 bg-destructive/5 hover:bg-destructive/10 flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors"
-            >
-              <AlertCircle className="text-destructive h-4 w-4 shrink-0" />
-              <span>
-                <strong>
-                  {needsOwnerCount === 1
-                    ? "1 follow-up needs an owner"
-                    : `${needsOwnerCount} follow-ups need an owner`}
-                </strong>{" "}
-                — give each one a committed member.
-              </span>
-            </Link>
-          )}
+            {needsOwnerCount > 0 && view !== "assignments" && (
+              <Link
+                href={`/tasks?view=${ASSIGNMENTS_VIEW}#needs-owner`}
+                className="border-destructive/30 bg-destructive/5 hover:bg-destructive/10 flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors"
+              >
+                <AlertCircle className="text-destructive h-4 w-4 shrink-0" />
+                <span>
+                  <strong>
+                    {needsOwnerCount === 1
+                      ? "1 follow-up needs an owner"
+                      : `${needsOwnerCount} follow-ups need an owner`}
+                  </strong>{" "}
+                  — give each one a committed member.
+                </span>
+              </Link>
+            )}
 
-          {/* Filters */}
-          <TaskFilters currentView={view} showCompleted={showCompleted} />
-        </div>
+            {/* Filters */}
+            <TaskFilters currentView={view} showCompleted={showCompleted} />
+          </div>
 
-        {/* Task list */}
-        <div className="flex-1 space-y-6 overflow-auto p-6">
-          {/*
+          {/* Task list */}
+          <div className="min-w-0 space-y-6 p-4 sm:p-6">
+            {/*
             T-020. Renders nothing unless the plant has just changed stage and
             the prompt has not been answered, so it costs an unprompted planter
             one query and no pixels. It sits ABOVE the list because accepting
             it changes that list.
           */}
-          <PhaseTemplatePrompt />
+            <PhaseTemplatePrompt />
 
-          {view === "assignments" ? (
-            <FollowUpAssignments
-              groups={ownerGroups}
-              uncovered={uncovered}
-              assignees={assignees}
-            />
-          ) : (
-            <TaskList
-              tasks={result.tasks}
-              total={result.total}
-              nextCursor={result.nextCursor}
-              personNotes={result.personNotes}
-              searchParams={params}
-              now={now}
-              currentUserId={user.id}
-            />
-          )}
-        </div>
-      </div>
+            {view === "assignments" ? (
+              <FollowUpAssignments
+                groups={ownerGroups}
+                uncovered={uncovered}
+                assignees={assignees}
+              />
+            ) : (
+              <TaskList
+                tasks={result.tasks}
+                total={result.total}
+                nextCursor={result.nextCursor}
+                personNotes={result.personNotes}
+                searchParams={params}
+                now={now}
+                currentUserId={user.id}
+              />
+            )}
+          </div>
+        </WorkspacePanel>
+      </PageCanvas>
     </>
   );
 }

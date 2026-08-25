@@ -40,6 +40,7 @@
 // ============================================================================
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
 import { InvitationsList } from "@/components/oversight/invitations-list";
 import {
@@ -78,29 +79,35 @@ export default async function OversightInvitationsPage() {
   const rows = invitations.map(toInvitationListRow);
 
   return (
-    <div className="space-y-6 p-6">
+    <>
       <HeaderBreadcrumbs items={[{ label: "Invitations" }]} />
-      <div>
-        <h1 className="text-3xl font-bold">Invitations</h1>
-        {/*
+      <PageCanvas>
+        <WorkspacePanel className="min-h-full space-y-6 p-4 sm:p-6">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Invitations
+            </h1>
+            {/*
           `scopeLabelForOrgType` is the ONE spelling of these two words across
           the oversight surface; this sentence used to re-derive them inline.
         */}
-        <p className="text-muted-foreground mt-1">
-          {canManageInvitations
-            ? `Invite church plants to associate with your ${scopeLabelForOrgType(org.type)}, and track what you have sent.`
-            : `Every invitation your ${scopeLabelForOrgType(org.type)} has sent, and where each one stands.`}
-        </p>
-      </div>
+            <p className="text-muted-foreground mt-1">
+              {canManageInvitations
+                ? `Invite church plants to associate with your ${scopeLabelForOrgType(org.type)}, and track what you have sent.`
+                : `Every invitation your ${scopeLabelForOrgType(org.type)} has sent, and where each one stands.`}
+            </p>
+          </div>
 
-      {canManageInvitations && (
-        <InvitationCreateForm
-          canInviteSendingChurches={org.type === "network"}
-          expiryDays={INVITATION_EXPIRY_DAYS}
-        />
-      )}
+          {canManageInvitations && (
+            <InvitationCreateForm
+              canInviteSendingChurches={org.type === "network"}
+              expiryDays={INVITATION_EXPIRY_DAYS}
+            />
+          )}
 
-      <InvitationsList rows={rows} canAct={canManageInvitations} />
-    </div>
+          <InvitationsList rows={rows} canAct={canManageInvitations} />
+        </WorkspacePanel>
+      </PageCanvas>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import type { Church } from "@/db/schema";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { LaunchStatusCard } from "@/components/launch/launch-status-card";
@@ -135,9 +136,11 @@ export async function PlantDashboard({
 
   if (wantsLeadershipStep && canAnswerLeadership) {
     return (
-      <div className="p-6">
-        <LeadershipReentry leadershipStatus={church?.leadershipStatus} />
-      </div>
+      <PageCanvas>
+        <WorkspacePanel className="mx-auto min-h-full max-w-3xl p-4 sm:p-6">
+          <LeadershipReentry leadershipStatus={church?.leadershipStatus} />
+        </WorkspacePanel>
+      </PageCanvas>
     );
   }
 
@@ -201,10 +204,10 @@ export async function PlantDashboard({
   ).filter((capability) => holdsSeatFor(viewer, capability));
 
   return (
-    <div className="p-6">
+    <PageCanvas>
       {showConfetti && <ChurchCreatedConfetti />}
 
-      <div className="mx-auto max-w-6xl space-y-6">
+      <WorkspacePanel className="mx-auto min-h-full max-w-6xl space-y-6 p-4 sm:p-6">
         {/* OV-005 — first, and not dismissible. An unanswered invitation
             decides who can see this plant, so it outranks every other banner
             here and stays until it is ANSWERED. */}
@@ -223,7 +226,7 @@ export async function PlantDashboard({
 
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight">
             {church?.name ?? "Dashboard"}
           </h1>
           <p className="text-muted-foreground mt-1">{phaseLabel}</p>
@@ -301,7 +304,7 @@ export async function PlantDashboard({
             <QuickActions capabilities={quickActionCapabilities} />
           </div>
         </div>
-      </div>
-    </div>
+      </WorkspacePanel>
+    </PageCanvas>
   );
 }
