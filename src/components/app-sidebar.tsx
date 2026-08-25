@@ -2,14 +2,12 @@
 
 import { MessageSquare } from "lucide-react";
 
-import { Mark } from "@/components/logo";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 
-import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { NavMain } from "@/components/nav-main";
-import { NavUser } from "@/components/nav-user";
+import { SidebarIdentity } from "@/components/nav-user";
 import {
   Sidebar,
   SidebarContent,
@@ -19,8 +17,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarHeader,
-  SidebarRail,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import type { AssociationOrgType } from "@/db/schema";
 import type { AssignedPlant } from "@/lib/coaching/assignments";
@@ -85,22 +82,16 @@ function getNavConfig(orgType: AssociationOrgType | null) {
       return {
         items: sendingChurchNavItems,
         label: "Management",
-        subtitle: "Sending Church",
-        homeHref: "/oversight",
       };
     case "network":
       return {
         items: networkAdminNavItems,
         label: "Management",
-        subtitle: "Network",
-        homeHref: "/oversight",
       };
     default:
       return {
         items: mainNavItems,
         label: "Platform",
-        subtitle: "Church Planting",
-        homeHref: "/dashboard",
       };
   }
 }
@@ -171,24 +162,11 @@ export function AppSidebar({
   const adminActive = isPathWithin(pathname, "/admin");
 
   return (
-    <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link href={navConfig.homeHref}>
-                <div className="bg-ef text-ef-dark flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <Mark className="h-3.5 w-auto" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">EveryField</span>
-                  <span className="truncate text-xs">{navConfig.subtitle}</span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
+    <Sidebar
+      collapsible="icon"
+      className="top-10 h-[calc(100svh-2.5rem)]"
+      {...props}
+    >
       <SidebarContent>
         <NavMain
           items={navConfig.items}
@@ -223,11 +201,12 @@ export function AppSidebar({
           </SidebarGroup>
         )}
       </SidebarContent>
-      <SidebarFooter>
-        <FeedbackButton />
-        <NavUser user={user} />
+      <SidebarFooter className="border-sidebar-border border-t">
+        <div className="flex justify-end group-data-[collapsible=icon]:justify-center">
+          <SidebarTrigger aria-label="Toggle sidebar" />
+        </div>
+        <SidebarIdentity user={user} />
       </SidebarFooter>
-      <SidebarRail />
     </Sidebar>
   );
 }

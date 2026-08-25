@@ -4,6 +4,7 @@ import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
+import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SettingsModal } from "@/components/settings/settings-modal";
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
@@ -19,13 +20,18 @@ import { accountInitials, userAvatarSrc } from "@/lib/profile-photo";
 import { ROUTED_URL_HEADER } from "@/lib/routed-url";
 import { settingsSectionsFor } from "@/lib/settings/sections";
 import { DASHBOARD_MAIN_ID } from "@/lib/dashboard/main-region";
+import { sidebarDefaultOpen } from "@/lib/dashboard/sidebar-preference";
 import {
   notificationViewer,
   type NotificationViewer,
 } from "@/lib/notifications/feed";
+import { resolveTenancyShell } from "@/lib/navigation";
 
 import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
+
+const APP_BAR_ICON_CLASS =
+  "text-app-bar-foreground hover:bg-white/10 hover:text-app-bar-foreground focus-visible:ring-white/70";
 
 /**
  * The badge, read inside its own boundary rather than in the layout body.
@@ -43,7 +49,8 @@ async function NotificationBellSlot({
   viewer: NotificationViewer;
 }) {
   const unreadCount = await loadUnreadBadgeCountSafely(viewer);
-  return <NotificationBell unreadCount={unreadCount} />;
+  const bellProps = { unreadCount, className: APP_BAR_ICON_CLASS };
+  return <NotificationBell {...bellProps} />;
 }
 
 export default async function DashboardLayout({
@@ -100,7 +107,9 @@ export default async function DashboardLayout({
   }
 
   const cookieStore = await cookies();
-  const defaultOpen = cookieStore.get("sidebar_state")?.value === "true";
+  const defaultOpen = sidebarDefaultOpen(
+    cookieStore.get("sidebar_state")?.value
+  );
 
   // Whether there is a bell at all (N-008). Resolved here, in the one place
   // that already holds the session, so the bell itself stays a presentational
@@ -113,7 +122,7 @@ export default async function DashboardLayout({
   const viewer = notificationViewer({ user });
 
   // The picture is resolved to a ROUTE here, never handed down as a key: the
-  // sidebar is a client component, and a storage key in its props is a key in
+  // shell components are clients, and a storage key in their props is a key in
   // the RSC payload (CS-004, #617).
   const sidebarUser = {
     name: user.name || user.email.split("@")[0],
@@ -126,6 +135,7 @@ export default async function DashboardLayout({
   // the org KIND, and the Wiki guide is hidden for an oversight account because
   // the wiki is the plant's own library.
   const org = oversightOrgOf(user);
+  const shell = resolveTenancyShell(org?.type ?? "church");
 
   const userIsPlatformAdmin = isPlatformAdmin(user);
 
@@ -151,50 +161,57 @@ export default async function DashboardLayout({
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
-      <SidebarProvider defaultOpen={defaultOpen}>
-        <AppSidebar
-          user={sidebarUser}
-          orgType={org?.type ?? null}
-          hasChurch={!!user.churchId}
-          assignedPlants={assignedPlants}
-          isPlatformAdmin={userIsPlatformAdmin}
-        />
-        <SidebarInset className="flex h-screen flex-col overflow-hidden">
-          <HeaderProvider>
-            <DashboardHeader>
-              {viewer && (
-                // The fallback is the bell in its LOADING state, so the header's
-                // geometry and its link to /notifications are there from the
-                // first byte while the count itself stays unclaimed until it
-                // arrives.
-                //
-                // It is NOT a zero (#308 WS2, from #232; #528). A failed read
-                // and a not-yet-finished one both used to arrive here as the
-                // number the FAILURE path returned, which announces
-                // "Notifications, none unread" to a screen reader and then
-                // corrects itself to "1 unread" a moment later. Both are values
-                // of `UnreadCount` now, so neither can be spelled as a count; see
-                // `notification-bell.tsx`'s header for the rest of the argument.
-                <Suspense fallback={<NotificationBell unreadCount="loading" />}>
-                  <NotificationBellSlot viewer={viewer} />
-                </Suspense>
-              )}
-            </DashboardHeader>
-            {/* `tabIndex={-1}` so the settings modal has somewhere to put focus
-              when it closes. The control that opened it — a Settings item
-              inside the avatar dropdown — is gone by then, so Radix's
-              restore-to-trigger lands on `<body>` and a keyboard reader has to
-              tab from the top of the document. Focusing the main region instead
-              is the SPA-navigation answer, and it is `-1` so nothing joins the
-              tab order. */}
-            <main
-              id={DASHBOARD_MAIN_ID}
-              tabIndex={-1}
-              className="flex-1 overflow-auto outline-none"
+      <SidebarProvider
+        defaultOpen={defaultOpen}
+        className="h-svh flex-col overflow-hidden"
+      >
+        <a
+          href={`#${DASHBOARD_MAIN_ID}`}
+          className="bg-card text-foreground focus-visible:ring-ring fixed top-1 left-2 z-50 -translate-y-12 rounded-md px-3 py-2 text-sm font-medium shadow-md focus:translate-y-0 focus-visible:ring-2 focus-visible:outline-none"
+        >
+          Skip to content
+        </a>
+        <GlobalAppBar shell={shell} user={sidebarUser}>
+          {viewer && (
+            <Suspense
+              fallback={
+                <NotificationBell
+                  unreadCount="loading"
+                  className={APP_BAR_ICON_CLASS}
+                />
+              }
             >
-              {children}
-            </main>
-            {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
+              <NotificationBellSlot viewer={viewer} />
+            </Suspense>
+          )}
+        </GlobalAppBar>
+        <div className="flex min-h-0 flex-1">
+          <AppSidebar
+            user={sidebarUser}
+            orgType={org?.type ?? null}
+            hasChurch={!!user.churchId}
+            assignedPlants={assignedPlants}
+            isPlatformAdmin={userIsPlatformAdmin}
+          />
+          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            <HeaderProvider>
+              <DashboardHeader />
+              {/* The route-content main carries `tabIndex={-1}` so the settings
+                modal has somewhere to put focus when it closes. The control
+                that opened it — a Settings item inside the account dropdown —
+                is gone by then, so Radix's restore-to-trigger lands on `<body>`
+                and a keyboard reader has to tab from the top of the document.
+                Focusing route content instead is the SPA-navigation answer: the
+                next Tab reaches the page rather than re-entering breadcrumbs or
+                page actions, and `-1` keeps the main itself out of tab order. */}
+              <SidebarInset
+                id={DASHBOARD_MAIN_ID}
+                tabIndex={-1}
+                className="min-h-0 overflow-auto outline-none"
+              >
+                {children}
+              </SidebarInset>
+              {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
               (#657). It draws nothing until `location.hash` names a section, so
               this costs one client component and no read; it lives beside
               `<main>` rather than inside it because the modal covers the screen
@@ -212,16 +229,17 @@ export default async function DashboardLayout({
               so the document survives it. Without an identity in the cache key,
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
-            <SettingsModal
-              visibleIds={settingsSectionsFor(user).map(
-                (section) => section.id
-              )}
-              serverRenderId={crypto.randomUUID()}
-              scope={user.id}
-            />
-            {!org && <WikiGuide />}
-          </HeaderProvider>
-        </SidebarInset>
+              <SettingsModal
+                visibleIds={settingsSectionsFor(user).map(
+                  (section) => section.id
+                )}
+                serverRenderId={crypto.randomUUID()}
+                scope={user.id}
+              />
+              {!org && <WikiGuide />}
+            </HeaderProvider>
+          </div>
+        </div>
       </SidebarProvider>
     </ViewerCapabilitiesProvider>
   );
