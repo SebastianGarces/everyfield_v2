@@ -24,8 +24,9 @@ export function PageCanvas({
   contextAttachment?: "standalone" | "attached";
   /**
    * `flow` lets the hierarchy grow so the canvas padding remains inside the
-   * page's scroll range. `fixed` keeps a definite-height hierarchy for
-   * workspaces whose descendants own their scrolling.
+   * page's scroll range, and lets a lone workspace fill the short-page
+   * remainder. `fixed` keeps a definite-height hierarchy for workspaces whose
+   * descendants own their scrolling.
    */
   scrollLayout?: "flow" | "fixed";
   contextItems?: HeaderBreadcrumbItem[];
@@ -62,6 +63,8 @@ export function PageCanvas({
           className={cn(
             "min-w-0 flex-1 outline-none",
             scrollLayout === "fixed" && "min-h-0",
+            scrollLayout === "flow" &&
+              "flex flex-col [&>[data-slot=workspace-panel]:only-child]:flex-1",
             contextAttachment === "attached" &&
               "[&>[data-slot=workspace-panel]]:rounded-t-none [&>[data-slot=workspace-panel]]:border-t-0",
             contentClassName
