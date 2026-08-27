@@ -5,6 +5,8 @@ import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import {
   FeedbackStatusFilter,
   FeedbackStatusSelect,
+  feedbackStatusSelectAccessibleName,
+  feedbackStatusSubmitter,
 } from "@/components/admin/feedback";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -193,6 +195,15 @@ export default async function AdminFeedbackPage({
                         <FeedbackStatusSelect
                           id={item.id}
                           status={item.status}
+                          accessibleName={feedbackStatusSelectAccessibleName({
+                            id: item.id,
+                            category: item.category,
+                            submitter: feedbackStatusSubmitter(
+                              item.userName,
+                              item.userEmail
+                            ),
+                            submittedAt: dateFormatter.format(item.createdAt),
+                          })}
                         />
                       </TableCell>
                     </TableRow>

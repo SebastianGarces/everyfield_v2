@@ -3,61 +3,44 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { feedbackStatuses, type FeedbackStatus } from "@/db/schema";
 import { updateFeedbackStatusAction } from "@/app/(dashboard)/admin/feedback/actions";
+import type { FeedbackStatus } from "@/db/schema";
 
-const STATUS_LABELS: Record<FeedbackStatus, string> = {
-  new: "New",
-  reviewed: "Reviewed",
-  resolved: "Resolved",
-  dismissed: "Dismissed",
-};
+import { FeedbackStatusSelectControl } from "./feedback-status-select-control";
+import { submitFeedbackStatusChange } from "./feedback-status-select-workflow";
 
 export function FeedbackStatusSelect({
   id,
   status,
+  accessibleName,
 }: {
   id: string;
   status: FeedbackStatus;
+  accessibleName: string;
 }) {
   const [isPending, startTransition] = useTransition();
 
   const handleChange = (next: string) => {
     if (next === status) return;
 
-    const formData = new FormData();
-    formData.set("id", id);
-    formData.set("status", next);
-
     startTransition(async () => {
-      const result = await updateFeedbackStatusAction(formData);
-      if (result.success) {
-        toast.success("Status updated");
-      } else {
-        toast.error(result.error);
-      }
+      await submitFeedbackStatusChange({
+        id,
+        status,
+        next,
+        updateStatus: updateFeedbackStatusAction,
+        onSuccess: () => toast.success("Status updated"),
+        onError: toast.error,
+      });
     });
   };
 
   return (
-    <Select value={status} onValueChange={handleChange} disabled={isPending}>
-      <SelectTrigger className="w-40 cursor-pointer" size="sm">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {feedbackStatuses.map((value) => (
-          <SelectItem key={value} value={value} className="cursor-pointer">
-            {STATUS_LABELS[value]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <FeedbackStatusSelectControl
+      accessibleName={accessibleName}
+      isPending={isPending}
+      onValueChange={handleChange}
+      status={status}
+    />
   );
 }
