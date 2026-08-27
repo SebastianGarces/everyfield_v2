@@ -144,10 +144,76 @@ function noDisabledButtons(html: string, what: string): void {
 const NO_MEETINGS = {
   upcomingMeetings: [],
   pastMeetings: [],
+  hasMeetingHistory: false,
   initialView: "upcoming" as const,
   timeZone: "America/New_York",
   now: new Date("2026-03-01T12:00:00Z"),
 };
+
+const FOUR_PAST_MEETINGS = Array.from(
+  { length: 4 },
+  () => ({}) as Parameters<typeof MeetingList>[0]["pastMeetings"][number]
+);
+
+const UPCOMING_MEETING = {
+  id: "meeting-1",
+  title: "Vision Night",
+  type: "vision_meeting" as const,
+  status: "planning" as const,
+  datetime: new Date("2026-03-10T23:00:00Z"),
+  meetingNumber: 1,
+  locationName: null,
+  location: null,
+  teamName: null,
+  actualAttendance: null,
+  estimatedAttendance: null,
+  newAttendees: 0,
+} as Parameters<typeof MeetingList>[0]["upcomingMeetings"][number];
+
+test("four completed meetings with no upcoming result do not render a first-meeting empty state", () => {
+  const { member, admin } = bothWays(() =>
+    createElement(MeetingList, {
+      ...NO_MEETINGS,
+      pastMeetings: FOUR_PAST_MEETINGS,
+      hasMeetingHistory: true,
+    })
+  );
+
+  for (const html of [member, admin]) {
+    assert.ok(html.includes("No upcoming meetings scheduled."));
+    assert.equal(html.includes("No meetings yet"), false);
+    assert.equal(html.includes("Schedule your first meeting"), false);
+  }
+});
+
+test("the history signal survives the page omitting the non-selected result bucket", () => {
+  // On the Upcoming view, the page avoids loading past rows. History is a
+  // separate fact so that optimization cannot turn this into "first meeting".
+  const html = render(
+    ADMIN,
+    createElement(MeetingList, {
+      ...NO_MEETINGS,
+      hasMeetingHistory: true,
+    })
+  );
+
+  assert.ok(html.includes("No upcoming meetings scheduled."));
+  assert.equal(html.includes("No meetings yet"), false);
+  assert.equal(html.includes("Schedule your first meeting"), false);
+});
+
+test("a visible meeting wins over a stale false history signal", () => {
+  const html = render(
+    ADMIN,
+    createElement(MeetingList, {
+      ...NO_MEETINGS,
+      upcomingMeetings: [UPCOMING_MEETING],
+    })
+  );
+
+  assert.equal(html.includes("No meetings yet"), false);
+  assert.ok(html.includes('href="/meetings/meeting-1"'));
+});
 
 test("the meetings empty state offers no create CTA to a Member", () => {
   const { member, admin } = bothWays(() =>

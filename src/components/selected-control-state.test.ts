@@ -135,6 +135,7 @@ test("meeting filter and view choices expose their URL-selected state", () => {
     createElement(MeetingList, {
       upcomingMeetings: [],
       pastMeetings: [],
+      hasMeetingHistory: false,
       initialView: "upcoming",
       timeZone: "America/New_York",
       now: new Date("2026-08-01T00:00:00Z"),

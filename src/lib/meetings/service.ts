@@ -308,6 +308,23 @@ export async function listMeetings(
   return { meetings, total };
 }
 
+/**
+ * Whether a church has ever scheduled a meeting.
+ *
+ * This deliberately ignores list-view status and type filters: an empty
+ * Upcoming tab means something different for a church with completed meetings
+ * than it does for a church that has never met.
+ */
+export async function hasMeetingHistory(churchId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: churchMeetings.id })
+    .from(churchMeetings)
+    .where(eq(churchMeetings.churchId, churchId))
+    .limit(1);
+
+  return rows.length > 0;
+}
+
 // ============================================================================
 // Mutations
 // ============================================================================

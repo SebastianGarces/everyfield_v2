@@ -17,6 +17,9 @@ import {
 interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
   pastMeetings: MeetingWithCounts[];
+  /** Whether the church has any meeting record, independent of this view's
+   *  time and type filters. */
+  hasMeetingHistory: boolean;
   initialView: "upcoming" | "past" | "all";
   timeZone: string;
   /** Instant the relative-day badge is measured against. Minted on the
@@ -28,6 +31,7 @@ interface MeetingListProps {
 export function MeetingList({
   upcomingMeetings,
   pastMeetings,
+  hasMeetingHistory,
   initialView,
   timeZone,
   now,
@@ -46,7 +50,11 @@ export function MeetingList({
 
   const showUpcoming = view === "upcoming" || view === "all";
   const showPast = view === "past" || view === "all";
-  const hasAny = upcomingMeetings.length > 0 || pastMeetings.length > 0;
+  // The history probe runs alongside the list query. A meeting created between
+  // those reads can make it stale, but a visible row is definitive evidence
+  // that this is not the first-meeting empty state.
+  const hasAnyMeeting =
+    hasMeetingHistory || upcomingMeetings.length > 0 || pastMeetings.length > 0;
 
   function updateParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -119,7 +127,7 @@ export function MeetingList({
         ))}
       </div>
 
-      {!hasAny ? (
+      {!hasAnyMeeting ? (
         <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-12 text-center">
           <CalendarCheck className="text-muted-foreground/50 h-12 w-12" />
           <h3 className="mt-4 font-semibold">No meetings yet</h3>
