@@ -36,7 +36,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
+import {
+  TEAM_ICONS,
+  teamStaffingDisplay,
+} from "@/lib/ministry-teams/team-display";
 import type { TeamStatus, TeamType } from "@/db/schema";
 
 /**
@@ -82,10 +85,7 @@ export interface TeamCardViewProps {
  */
 export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffing = staffingPercent(team.filledRoles, team.totalRoles);
-
-  const staffingLevel =
-    staffing < 40 ? "red" : staffing < 60 ? "yellow" : "green";
+  const staffing = teamStaffingDisplay(team.filledRoles, team.totalRoles);
 
   const card = (
     <Card className="flex h-full cursor-pointer flex-col gap-0 py-0 shadow-sm transition-all duration-200 hover:shadow-md">
@@ -105,15 +105,17 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
             <h3 className="truncate text-sm leading-none font-semibold tracking-tight">
               {team.name}
             </h3>
-            <span
-              className={cn(
-                "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
-                staffingLevel === "red" && "bg-red-500",
-                staffingLevel === "yellow" && "bg-yellow-500",
-                staffingLevel === "green" && "bg-green-500"
-              )}
-              title={`Staffing: ${staffingLevel}`}
-            />
+            {staffing.kind === "configured" && (
+              <span
+                className={cn(
+                  "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
+                  staffing.level === "red" && "bg-red-500",
+                  staffing.level === "yellow" && "bg-yellow-500",
+                  staffing.level === "green" && "bg-green-500"
+                )}
+                title={`Staffing: ${staffing.level}`}
+              />
+            )}
           </div>
           <p className="text-muted-foreground mt-1 truncate text-xs">
             {team.leaderName
@@ -127,10 +129,12 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Staffing</span>
             <span className="font-medium">
-              {team.filledRoles}/{team.totalRoles}
+              {staffing.kind === "no_roles"
+                ? staffing.label
+                : `${team.filledRoles}/${team.totalRoles}`}
             </span>
           </div>
-          <Progress value={staffing} className="h-2" />
+          <Progress value={staffing.percentage} className="h-2" />
         </div>
 
         <div className="mt-auto flex items-center justify-between pt-1">
@@ -175,7 +179,7 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const hooks = {
     "data-slot": "team-card",
     "data-status": team.status,
-    "data-staffing": staffingLevel,
+    "data-staffing": staffing.kind === "no_roles" ? "neutral" : staffing.level,
   } as const;
 
   return linkStatic ? (
