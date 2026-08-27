@@ -75,15 +75,18 @@ type QuickActionsProps =
     };
 
 /**
- * The row's own width class, so a filtered set fills the card instead of
- * leaving the columns a full set would have occupied.
+ * The row's own container-query classes, so a filtered set fills the card
+ * instead of leaving the columns a full set would have occupied.
  *
- * Two reads carry no `requires`, so the set is never smaller than two.
+ * `@sm` measures the card's usable content width, not the viewport. Three
+ * padded tiles fit at that point; four wait for `@lg`, where their labels have
+ * room beside the 40px icons. Two reads carry no `requires`, so the set is
+ * never smaller than two.
  */
 const COLUMNS: Record<number, string> = {
-  2: "sm:grid-cols-2",
-  3: "sm:grid-cols-3",
-  4: "sm:grid-cols-4",
+  2: "",
+  3: "@sm:grid-cols-3",
+  4: "@sm:grid-cols-3 @lg:grid-cols-4",
 };
 
 export function QuickActions(props: QuickActionsProps) {
@@ -99,7 +102,7 @@ export function QuickActions(props: QuickActionsProps) {
       );
 
   return (
-    <div className="bg-card rounded-xl border p-6 shadow-sm">
+    <div className="bg-card @container rounded-xl border p-6 shadow-sm">
       <h2 className="text-lg font-semibold">Quick Actions</h2>
       <div className={`mt-4 grid grid-cols-2 gap-3 ${COLUMNS[shown.length]}`}>
         {shown.map((action) => {
