@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { verifySession } from "@/lib/auth/session";
 import { getCurrentUserChurch } from "@/lib/auth/session";
+import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
 import {
   parsePeopleListSearchParams,
   PEOPLE_PAGE_SIZE,
@@ -62,6 +63,10 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
 
   // Fetch data based on view
   const isPipelineView = view === "pipeline";
+  // Pipeline cards hydrate in the browser, so their relative-day label takes
+  // one server-minted instant and the church's calendar rather than reading
+  // either from the client runtime.
+  const now = new Date();
 
   // For pipeline view, get pipeline data + church thresholds; for list view, get paginated list
   const [listResult, pipelineData, availableTags, church] = await Promise.all([
@@ -161,6 +166,8 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
                   warningDays: church?.inactivityWarningDays ?? 7,
                   alertDays: church?.inactivityAlertDays ?? 14,
                 }}
+                now={now}
+                timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
               />
             ) : (
               <PeopleList

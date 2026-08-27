@@ -32,6 +32,8 @@ interface PipelineViewProps {
   ) => Promise<void>;
   onReorder: (orderedPersonIds: string[]) => Promise<void>;
   inactivityThresholds?: InactivityThresholds;
+  now: Date;
+  timeZone: string;
 }
 
 interface PendingTransition {
@@ -91,6 +93,8 @@ export function PipelineView({
   onStatusChange,
   onReorder,
   inactivityThresholds,
+  now,
+  timeZone,
 }: PipelineViewProps) {
   const [items, setItems] = useState<Record<string, PersonWithTags[]>>(
     data.people
@@ -399,6 +403,8 @@ export function PipelineView({
             column={column}
             people={items[column.id] || []}
             inactivityThresholds={inactivityThresholds}
+            now={now}
+            timeZone={timeZone}
           />
         ))}
       </div>

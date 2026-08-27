@@ -45,12 +45,16 @@ interface PipelineColumnProps {
   column: PipelineColumnType;
   people: PersonWithTags[];
   inactivityThresholds?: InactivityThresholds;
+  now: Date;
+  timeZone: string;
 }
 
 export function PipelineColumn({
   column,
   people,
   inactivityThresholds,
+  now,
+  timeZone,
 }: PipelineColumnProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [isDraggedOver, setIsDraggedOver] = useState(false);
@@ -120,6 +124,8 @@ export function PipelineColumn({
               person={person}
               columnId={column.id}
               inactivityThresholds={inactivityThresholds}
+              now={now}
+              timeZone={timeZone}
             />
           ))
         )}

@@ -2,6 +2,7 @@
 
 import { useCan } from "@/components/shared/viewer-capabilities";
 import { Badge } from "@/components/ui/badge";
+import { relativeDayOffset } from "@/lib/datetime";
 import { PersonWithTags } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import {
@@ -91,15 +92,19 @@ interface PipelineCardProps {
   person: PersonWithTags;
   columnId: string;
   inactivityThresholds?: InactivityThresholds;
+  now: Date;
+  timeZone: string;
 }
 
 /**
  * Compute inactivity info for a person.
  * Uses lastActivityAt from person_activities, falls back to person.createdAt.
  */
-function getInactivityInfo(
+export function getInactivityInfo(
   person: PersonWithTags,
-  thresholds?: InactivityThresholds
+  thresholds: InactivityThresholds | undefined,
+  now: Date,
+  timeZone: string
 ): { level: "none" | "warning" | "alert"; daysSince: number } | null {
   if (!thresholds) return null;
 
@@ -107,9 +112,7 @@ function getInactivityInfo(
     ? new Date(person.lastActivityAt)
     : person.createdAt;
 
-  const now = new Date();
-  const diffMs = now.getTime() - referenceDate.getTime();
-  const daysSince = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const daysSince = -relativeDayOffset(referenceDate, now, timeZone);
 
   if (daysSince >= thresholds.alertDays) {
     return { level: "alert", daysSince };
@@ -124,6 +127,8 @@ export function PipelineCard({
   person,
   columnId,
   inactivityThresholds,
+  now,
+  timeZone,
 }: PipelineCardProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<CardState>(idle);
@@ -196,7 +201,12 @@ export function PipelineCard({
   }, [canWrite, person, columnId]);
 
   const isDragging = state.type === "dragging";
-  const inactivity = getInactivityInfo(person, inactivityThresholds);
+  const inactivity = getInactivityInfo(
+    person,
+    inactivityThresholds,
+    now,
+    timeZone
+  );
 
   return (
     <>
@@ -241,19 +251,19 @@ export function PipelineCard({
               </span>
               <div className="flex shrink-0 items-center gap-1">
                 {inactivity && inactivity.level === "alert" && (
-                  <span
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
-                    title={`No activity in ${inactivity.daysSince} days`}
-                  >
-                    <AlertTriangle className="h-3 w-3" />
+                  <span className="flex items-center gap-1 text-xs font-medium whitespace-nowrap text-red-600 dark:text-red-400">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40">
+                      <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+                    </span>
+                    No activity · {inactivity.daysSince}d
                   </span>
                 )}
                 {inactivity && inactivity.level === "warning" && (
-                  <span
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400"
-                    title={`No activity in ${inactivity.daysSince} days`}
-                  >
-                    <Clock className="h-3 w-3" />
+                  <span className="flex items-center gap-1 text-xs font-medium whitespace-nowrap text-amber-700 dark:text-amber-400">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
+                      <Clock aria-hidden="true" className="h-3 w-3" />
+                    </span>
+                    No activity · {inactivity.daysSince}d
                   </span>
                 )}
                 {person.status === "leader" && (
