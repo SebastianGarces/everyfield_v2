@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
 import { contextualTemplateHref } from "@/lib/documents/contextual";
+import { parseElements } from "@/lib/testing/rendered-markup";
 
 import {
+  DocumentLibraryFilters,
   TEMPLATE_SEARCH_PARAM,
   urlWithoutTemplateParam,
 } from "./documents-library";
@@ -87,4 +92,28 @@ test("a ReadonlyURLSearchParams-shaped value is accepted (only toString is used)
     urlWithoutTemplateParam("/documents", readonlyish),
     "/documents?view=grid"
   );
+});
+
+test("the template search retains its accessible name without its placeholder", () => {
+  const html = renderToStaticMarkup(
+    createElement(DocumentLibraryFilters, {
+      search: "",
+      onSearchChange: () => {},
+      category: "all",
+      onCategoryChange: () => {},
+      phase: "all",
+      onPhaseChange: () => {},
+      format: "all",
+      onFormatChange: () => {},
+      categories: [],
+      phases: [],
+      formats: [],
+    })
+  );
+  const search = parseElements(html).find(
+    (element) => element.attrs.placeholder === "Search templates..."
+  );
+
+  assert.ok(search, "template search is missing");
+  assert.equal(search.attrs["aria-label"], "Search templates");
 });

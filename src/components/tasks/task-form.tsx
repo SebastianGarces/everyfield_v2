@@ -75,6 +75,8 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const DESCRIPTION_ID = "description";
 const DESCRIPTION_LABEL_ID = "description-label";
+const PREREQUISITES_LABEL_ID = "prerequisites-label";
+const PREREQUISITES_DESCRIPTION_ID = "prerequisites-description";
 
 interface TaskDescriptionFieldProps {
   /** HTML, or a legacy plain-text description, already converted by the caller. */
@@ -165,6 +167,7 @@ export function TaskPrerequisitesField({
 
   return (
     <div className="space-y-2">
+      <Label id={PREREQUISITES_LABEL_ID}>Prerequisites</Label>
       <input
         type="hidden"
         name="prerequisiteTaskIds"
@@ -199,7 +202,11 @@ export function TaskPrerequisitesField({
           onValueChange={add}
           disabled={disabled}
         >
-          <SelectTrigger className="cursor-pointer">
+          <SelectTrigger
+            aria-labelledby={PREREQUISITES_LABEL_ID}
+            aria-describedby={PREREQUISITES_DESCRIPTION_ID}
+            className="cursor-pointer"
+          >
             <SelectValue placeholder="Add a prerequisite…" />
           </SelectTrigger>
           <SelectContent>
@@ -220,7 +227,10 @@ export function TaskPrerequisitesField({
         </p>
       ) : null}
 
-      <p className="text-muted-foreground text-sm">
+      <p
+        id={PREREQUISITES_DESCRIPTION_ID}
+        className="text-muted-foreground text-sm"
+      >
         This task stays blocked until every prerequisite is complete.
       </p>
     </div>
@@ -391,9 +401,15 @@ export function TaskForm({
       {/* Status and Priority row */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="status">Status</Label>
+          <Label id="status-label" htmlFor="status">
+            Status
+          </Label>
           <Select name="status" defaultValue={task?.status ?? "not_started"}>
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger
+              id="status"
+              aria-labelledby="status-label"
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -407,9 +423,15 @@ export function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="priority">Priority</Label>
+          <Label id="priority-label" htmlFor="priority">
+            Priority
+          </Label>
           <Select name="priority" defaultValue={task?.priority ?? "medium"}>
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger
+              id="priority"
+              aria-labelledby="priority-label"
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -437,13 +459,19 @@ export function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="category">Category</Label>
+          <Label id="category-label" htmlFor="category">
+            Category
+          </Label>
           <Select
             name="category"
             value={category}
             onValueChange={chooseCategory}
           >
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger
+              id="category"
+              aria-labelledby="category-label"
+              className="cursor-pointer"
+            >
               <SelectValue placeholder="Select category..." />
             </SelectTrigger>
             <SelectContent>
@@ -460,13 +488,22 @@ export function TaskForm({
       {/* Assignee */}
       {users.length > 0 && (
         <div className="space-y-2">
-          <Label htmlFor="assignedToId">Assigned To</Label>
+          <Label id="assignedToId-label" htmlFor="assignedToId">
+            Assigned To
+          </Label>
           <Select
             name="assignedToId"
             value={assignedToId}
             onValueChange={setAssignedToId}
           >
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger
+              id="assignedToId"
+              aria-labelledby="assignedToId-label"
+              aria-describedby={
+                isFollowUp ? "assignedToId-description" : undefined
+              }
+              className="cursor-pointer"
+            >
               <SelectValue placeholder="Select assignee..." />
             </SelectTrigger>
             <SelectContent>
@@ -478,7 +515,10 @@ export function TaskForm({
             </SelectContent>
           </Select>
           {isFollowUp && (
-            <p className="text-muted-foreground text-xs">
+            <p
+              id="assignedToId-description"
+              className="text-muted-foreground text-xs"
+            >
               {assigneeOptions.length === 0
                 ? "Nobody has a committed status yet, so no one can own a follow-up."
                 : "Follow-ups can only be owned by Core Group, Launch Team or Leader members."}
@@ -488,8 +528,7 @@ export function TaskForm({
       )}
 
       {/* Prerequisites (T-015) */}
-      <div className="space-y-2">
-        <Label>Prerequisites</Label>
+      <div>
         <TaskPrerequisitesField
           candidates={prerequisiteCandidates}
           selectedIds={prerequisiteIds}
@@ -500,13 +539,20 @@ export function TaskForm({
       {/* Repeat (T-017) */}
       <div className="space-y-4 rounded-md border p-4">
         <div className="space-y-2">
-          <Label htmlFor="recurrenceInterval">Repeat</Label>
+          <Label id="recurrenceInterval-label" htmlFor="recurrenceInterval">
+            Repeat
+          </Label>
           <Select
             name="recurrenceInterval"
             value={interval}
             onValueChange={setInterval}
           >
-            <SelectTrigger id="recurrenceInterval" className="cursor-pointer">
+            <SelectTrigger
+              id="recurrenceInterval"
+              aria-labelledby="recurrenceInterval-label"
+              aria-describedby="recurrenceInterval-description"
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -524,7 +570,10 @@ export function TaskForm({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground text-sm">
+          <p
+            id="recurrenceInterval-description"
+            className="text-muted-foreground text-sm"
+          >
             The next one is created when you complete this task, so a repeating
             task never piles up while you are away. Its subtasks come across
             too, with every box unticked.
@@ -540,8 +589,12 @@ export function TaskForm({
               type="date"
               defaultValue={savedRule?.endDate ?? ""}
               disabled={isPending}
+              aria-describedby="recurrenceEndDate-description"
             />
-            <p className="text-muted-foreground text-sm">
+            <p
+              id="recurrenceEndDate-description"
+              className="text-muted-foreground text-sm"
+            >
               Leave this empty to repeat indefinitely. Past the end date the
               task stops repeating; everything already completed stays on the
               record.

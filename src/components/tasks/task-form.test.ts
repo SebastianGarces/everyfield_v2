@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RICH_TEXT_CONTROLS } from "@/components/shared/rich-text-editor-controls";
+import type { Task } from "@/db/schema";
 import {
   namedButtons,
   parseElements,
   type RenderedElement,
 } from "@/lib/testing/rendered-markup";
 
-import { TaskDescriptionField, TaskPrerequisitesField } from "./task-form";
+import {
+  TaskDescriptionField,
+  TaskForm,
+  TaskPrerequisitesField,
+} from "./task-form";
 
 // ----------------------------------------------------------------------------
 // The task description field (T-021), asserted against the markup the browser
@@ -153,4 +159,167 @@ test("a selected prerequisite can be removed, and another can be added", () => {
     (el) => el.attrs["data-slot"] === "select-trigger"
   );
   assert.ok(trigger, "no select trigger to add a prerequisite");
+});
+
+// ----------------------------------------------------------------------------
+// Field names and descriptions. `SelectTrigger` is a button with combobox
+// semantics, so the visible `<Label>` must be its ARIA name as well as sharing
+// its id. The router provider lets this render exercise the complete form
+// without allowing a static render to navigate.
+// ----------------------------------------------------------------------------
+
+const STATIC_ROUTER = new Proxy({} as never, {
+  get() {
+    return () => {
+      throw new Error("a static render must not navigate");
+    };
+  },
+});
+
+const FOLLOW_UP_RECURRING_TASK: Task = {
+  id: "22222222-2222-4222-8222-222222222222",
+  churchId: "33333333-3333-4333-8333-333333333333",
+  title: "Follow up with Avery",
+  description: null,
+  status: "not_started",
+  priority: "medium",
+  dueDate: "2026-09-01",
+  dueTime: null,
+  assignedToId: null,
+  category: "follow_up",
+  relatedType: null,
+  relatedId: null,
+  parentTaskId: null,
+  isRecurring: true,
+  recurrenceRule: {
+    interval: "weekly",
+    endDate: "2026-12-31",
+    seriesId: "22222222-2222-4222-8222-222222222222",
+  },
+  completionEvent: null,
+  completedAt: null,
+  completedById: null,
+  createdById: "44444444-4444-4444-8444-444444444444",
+  createdAt: new Date("2026-08-27T12:00:00.000Z"),
+  updatedAt: new Date("2026-08-27T12:00:00.000Z"),
+  deletedAt: null,
+};
+
+const AVERY = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Avery Planter",
+  email: "avery@example.com",
+};
+
+function renderTaskForm({
+  followUpAssignees = [AVERY],
+}: {
+  followUpAssignees?: (typeof AVERY)[];
+} = {}) {
+  return renderToStaticMarkup(
+    createElement(
+      AppRouterContext.Provider,
+      { value: STATIC_ROUTER },
+      createElement(TaskForm, {
+        task: FOLLOW_UP_RECURRING_TASK,
+        users: [AVERY],
+        followUpAssignees,
+        prerequisiteCandidates: [
+          {
+            id: PREREQ_A,
+            title: "Book the room",
+            status: "not_started",
+          },
+        ],
+      })
+    )
+  );
+}
+
+test("task form labels every select and keeps its help text as a description", () => {
+  const elements = parseElements(renderTaskForm());
+  const renderedIds = elements
+    .map((element) => element.attrs.id)
+    .filter(Boolean);
+  const ids = new Set(renderedIds);
+
+  assert.equal(
+    ids.size,
+    renderedIds.length,
+    "every nonempty id in the rendered form must be unique"
+  );
+
+  for (const id of ["status", "priority", "category", "assignedToId"]) {
+    const control = elements.find((element) => element.attrs.id === id);
+    assert.ok(control, `${id} trigger is missing`);
+    assert.equal(control.attrs["aria-labelledby"], `${id}-label`);
+    assert.ok(
+      ids.has(control.attrs["aria-labelledby"]),
+      `${id} is named by a missing label`
+    );
+  }
+
+  const prerequisites = elements.find(
+    (element) => element.attrs["aria-labelledby"] === "prerequisites-label"
+  );
+  assert.ok(prerequisites, "prerequisite picker is unnamed");
+  assert.equal(
+    prerequisites.attrs["aria-describedby"],
+    "prerequisites-description"
+  );
+
+  const repeat = elements.find(
+    (element) => element.attrs.id === "recurrenceInterval"
+  );
+  assert.ok(repeat, "repeat picker is missing");
+  assert.equal(
+    repeat.attrs["aria-describedby"],
+    "recurrenceInterval-description"
+  );
+
+  const assignee = elements.find(
+    (element) => element.attrs.id === "assignedToId"
+  );
+  assert.ok(assignee, "assignee picker is missing");
+  assert.equal(assignee.attrs["aria-describedby"], "assignedToId-description");
+
+  const recurrenceEndDate = elements.find(
+    (element) => element.attrs.id === "recurrenceEndDate"
+  );
+  assert.ok(recurrenceEndDate, "recurrence end date is missing");
+  assert.equal(
+    recurrenceEndDate.attrs["aria-describedby"],
+    "recurrenceEndDate-description"
+  );
+
+  for (const id of [
+    "prerequisites-label",
+    "prerequisites-description",
+    "assignedToId-description",
+    "recurrenceInterval-label",
+    "recurrenceInterval-description",
+    "recurrenceEndDate-description",
+  ]) {
+    assert.ok(ids.has(id), `${id} is missing from the rendered form`);
+  }
+
+  assert.match(
+    renderTaskForm(),
+    /Follow-ups can only be owned by Core Group, Launch Team or Leader members\./
+  );
+  const noEligibleAssignee = parseElements(
+    renderTaskForm({ followUpAssignees: [] })
+  ).find((element) => element.attrs.id === "assignedToId");
+  assert.ok(
+    noEligibleAssignee,
+    "assignee picker is missing without candidates"
+  );
+  assert.equal(
+    noEligibleAssignee.attrs["aria-describedby"],
+    "assignedToId-description"
+  );
+  assert.match(
+    renderTaskForm({ followUpAssignees: [] }),
+    /Nobody has a committed status yet, so no one can own a follow-up\./
+  );
 });
