@@ -224,7 +224,10 @@ export function RegisterForm({
             </div>
           )}
           {state.error && (
-            <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
+            <div
+              role="alert"
+              className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+            >
               {state.error}
             </div>
           )}
@@ -280,9 +283,17 @@ export function RegisterForm({
                 value={organizationName}
                 onChange={(e) => setOrganizationName(e.target.value)}
                 aria-invalid={!!state.fieldErrors?.organizationName}
+                aria-describedby={
+                  state.fieldErrors?.organizationName
+                    ? "register-organization-name-error"
+                    : undefined
+                }
               />
               {state.fieldErrors?.organizationName && (
-                <p className="text-destructive text-sm">
+                <p
+                  id="register-organization-name-error"
+                  className="text-destructive text-sm"
+                >
                   {state.fieldErrors.organizationName}
                 </p>
               )}
@@ -302,9 +313,12 @@ export function RegisterForm({
               value={name}
               onChange={(e) => setName(e.target.value)}
               aria-invalid={!!state.fieldErrors?.name}
+              aria-describedby={
+                state.fieldErrors?.name ? "register-name-error" : undefined
+              }
             />
             {state.fieldErrors?.name && (
-              <p className="text-destructive text-sm">
+              <p id="register-name-error" className="text-destructive text-sm">
                 {state.fieldErrors.name}
               </p>
             )}
@@ -325,7 +339,12 @@ export function RegisterForm({
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!state.fieldErrors?.email}
               aria-describedby={
-                emailLockedToInvitation ? "email-invitation-note" : undefined
+                [
+                  emailLockedToInvitation ? "email-invitation-note" : undefined,
+                  state.fieldErrors?.email ? "register-email-error" : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
               }
             />
             {emailLockedToInvitation && (
@@ -339,7 +358,7 @@ export function RegisterForm({
               </p>
             )}
             {state.fieldErrors?.email && (
-              <p className="text-destructive text-sm">
+              <p id="register-email-error" className="text-destructive text-sm">
                 {state.fieldErrors.email}
               </p>
             )}
@@ -358,9 +377,17 @@ export function RegisterForm({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               aria-invalid={!!state.fieldErrors?.password}
+              aria-describedby={
+                state.fieldErrors?.password
+                  ? "register-password-error"
+                  : undefined
+              }
             />
             {state.fieldErrors?.password && (
-              <p className="text-destructive text-sm">
+              <p
+                id="register-password-error"
+                className="text-destructive text-sm"
+              >
                 {state.fieldErrors.password}
               </p>
             )}
