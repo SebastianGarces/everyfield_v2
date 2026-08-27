@@ -34,6 +34,7 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
+import { recipientIdsPayload } from "@/lib/communication/recipient-payload";
 // The body is rich text (COM-017). Templates and drafts written before it are
 // plain text; `toRichTextHtml` is the one door that converts them on the way in.
 import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
@@ -214,7 +215,7 @@ export function ComposeForm({
     formData.set("subject", subject);
     formData.set("body", body);
     formData.set("channel", "email");
-    formData.set("recipientIds", JSON.stringify(recipients.map((r) => r.id)));
+    formData.set("recipientIds", recipientIdsPayload(recipients));
     if (selectedTemplateId) formData.set("templateId", selectedTemplateId);
     if (selectedMeetingId) formData.set("meetingId", selectedMeetingId);
 

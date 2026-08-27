@@ -218,25 +218,30 @@ export function RecipientPicker({
             selected
           </p>
           <div
-            className="flex flex-wrap gap-1.5"
+            aria-label="Selected recipients"
+            className="max-h-48 overflow-y-auto"
             data-testid="selected-recipients"
+            role="region"
           >
-            {selected.slice(0, 20).map((person) => (
-              <Badge key={person.id} variant="secondary" className="gap-1 py-1">
-                {person.firstName} {person.lastName}
-                <button
-                  type="button"
-                  aria-label={`Remove ${person.firstName} ${person.lastName}`}
-                  className="hover:bg-muted-foreground/25 cursor-pointer rounded-full p-0.5"
-                  onClick={() => removeRecipient(person.id)}
+            <div className="flex flex-wrap gap-1.5">
+              {selected.map((person) => (
+                <Badge
+                  key={person.id}
+                  variant="secondary"
+                  className="gap-1 py-1"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
-            {selected.length > 20 && (
-              <Badge variant="secondary">+{selected.length - 20} more</Badge>
-            )}
+                  {person.firstName} {person.lastName}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${person.firstName} ${person.lastName}`}
+                    className="hover:bg-muted-foreground/25 cursor-pointer rounded-full p-0.5"
+                    onClick={() => removeRecipient(person.id)}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
           </div>
         </div>
       )}
