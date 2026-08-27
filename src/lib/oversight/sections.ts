@@ -76,20 +76,17 @@ export const OVERSIGHT_SECTIONS_BY_KEY = Object.fromEntries(
 // Explain-why copy (OV-002).
 //
 // "Never a bare blank" is the requirement, and a bare blank includes a card
-// that says only "No data". Each of the two empty states below has to answer a
-// different question, so they are two different sentences:
+// that says only "No data". The two states answer different questions:
 //
-//   withheld → why can't I see this, and who can change it? (the plant can)
+//   withheld → the section intro explains the plant's control once; each row
+//               then labels the specific category as not shared.
 //   empty    → they DO share this; there is simply nothing in it yet.
 //
 // Collapsing them would tell an admin that a plant is hiding something when it
 // is not, which is the misreading most likely to cost the org a conversation.
 //
-// The copy says WHO decides, not where to click, and that survives #619 giving
-// the pull toggles their first edit surface: the reader of this sentence is the
-// oversight admin, and the panel is on the planter's settings screen, which is
-// somewhere they cannot go. "Until they change it" is now literally true rather
-// than aspirational.
+// The shared-empty copy says the plant shares this category, so an oversight
+// admin never mistakes absent data for a withheld decision.
 // ----------------------------------------------------------------------------
 
 /** Heading on a section the plant has not shared. */
@@ -97,18 +94,6 @@ export const WITHHELD_HEADLINE = "Not shared";
 
 /** Heading on a shared section with nothing recorded yet. */
 export const EMPTY_HEADLINE = "Nothing recorded yet";
-
-/**
- * Why a section is hidden, and who controls that. `scopeLabel` is the caller's
- * own org in the reader's words — "network" or "sending church".
- */
-export function withheldExplanation(
-  section: OversightSectionDefinition,
-  plantName: string,
-  scopeLabel: string
-): string {
-  return `${plantName} has not opened ${section.subject} to your ${scopeLabel}. Each plant decides what it shares, so this stays hidden until they change it.`;
-}
 
 /** Why a shared section shows nothing — sharing is on; the data is not there. */
 export function emptyExplanation(
