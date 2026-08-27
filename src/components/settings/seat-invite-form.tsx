@@ -74,6 +74,13 @@ const SEAT_CHOICE_COPY = {
   },
 } as const satisfies Record<SeatTenancyType, Record<InvitableSeat, string>>;
 
+// What the closed chooser shows. The descriptions stay in the menu and below
+// the trigger, where they can wrap instead of being ellipsized by SelectValue.
+const SEAT_LABEL = {
+  member: "Member",
+  admin: "Admin",
+} as const satisfies Record<InvitableSeat, string>;
+
 export function SeatInviteForm({
   expiryDays,
   tenancyType,
@@ -87,7 +94,6 @@ export function SeatInviteForm({
   tenancyType: SeatTenancyType;
 }) {
   const noun = TENANCY_NOUN[tenancyType];
-  const seatCopy = SEAT_CHOICE_COPY[tenancyType];
 
   const [state, formAction, pending] = useActionState(
     createSeatInvitationAction,
@@ -145,31 +151,11 @@ export function SeatInviteForm({
 
             <div className="space-y-2">
               <Label htmlFor="seat">Seat</Label>
-              {/*
-                The Select is a client widget, so the value it holds is mirrored
-                into a hidden input for the form POST — a plain `name` on the
-                trigger would not be submitted.
-              */}
-              <input type="hidden" name="seat" value={seat} />
-              <Select
-                value={seat}
-                onValueChange={(value) => setSeat(value as InvitableSeat)}
-              >
-                <SelectTrigger
-                  id="seat"
-                  className="w-full cursor-pointer @md:w-56"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member" className="cursor-pointer">
-                    {seatCopy.member}
-                  </SelectItem>
-                  <SelectItem value="admin" className="cursor-pointer">
-                    {seatCopy.admin}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <SeatPicker
+                tenancyType={tenancyType}
+                seat={seat}
+                onSeatChange={setSeat}
+              />
             </div>
           </div>
 
@@ -184,6 +170,60 @@ export function SeatInviteForm({
         </form>
       </SettingsBlock>
     </section>
+  );
+}
+
+/**
+ * The controlled seat choice. Keeping it separate lets the form own its
+ * submission state while this control keeps its selected label, helper text,
+ * and hidden form value in lockstep.
+ */
+export function SeatPicker({
+  tenancyType,
+  seat,
+  onSeatChange,
+}: {
+  tenancyType: SeatTenancyType;
+  seat: InvitableSeat;
+  onSeatChange: (seat: InvitableSeat) => void;
+}) {
+  const seatCopy = SEAT_CHOICE_COPY[tenancyType];
+
+  return (
+    <>
+      {/*
+        The Select is a client widget, so the value it holds is mirrored into a
+        hidden input for the form POST — a plain `name` on the trigger would
+        not be submitted.
+      */}
+      <input type="hidden" name="seat" value={seat} />
+      <Select
+        value={seat}
+        onValueChange={(value) => onSeatChange(value as InvitableSeat)}
+      >
+        <SelectTrigger
+          id="seat"
+          className="w-full cursor-pointer @md:w-56"
+          aria-describedby="seat-description"
+        >
+          <SelectValue>{SEAT_LABEL[seat]}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="member" className="cursor-pointer">
+            {seatCopy.member}
+          </SelectItem>
+          <SelectItem value="admin" className="cursor-pointer">
+            {seatCopy.admin}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <p
+        id="seat-description"
+        className="text-muted-foreground text-xs leading-5"
+      >
+        {seatCopy[seat]}
+      </p>
+    </>
   );
 }
 
