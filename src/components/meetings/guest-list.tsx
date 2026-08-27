@@ -281,9 +281,9 @@ export function GuestList({
       {/* Guest List Card */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base">Guest List</CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* Gated on the verb it INVOKES, which is not this card's own:
                   the link leaves for /communication/compose, whose page and
                   send action are `communication.send`. Same ADMIN_PLUS answer
