@@ -8,7 +8,6 @@ import {
   WITHHELD_HEADLINE,
   emptyExplanation,
   sectionsIntro,
-  withheldExplanation,
 } from "./sections";
 import { SHARING_PULL_TOGGLES } from "@/lib/sharing/toggles";
 
@@ -60,42 +59,20 @@ test("section keys are unique and the lookup is total over them", () => {
 // Explain-why copy (OV-002): "never a bare blank"
 // ----------------------------------------------------------------------------
 
-test("the withheld state says why it is hidden AND who controls that", () => {
-  for (const section of OVERSIGHT_SECTIONS) {
-    const copy = withheldExplanation(section, "Hope City Church", "network");
-    assert.match(copy, /Hope City Church/, "names the plant");
-    assert.match(copy, /your network/, "names who it was withheld from");
-    assert.match(
-      copy,
-      /Each plant decides what it shares/,
-      "says who controls sharing"
-    );
-    // It must not promise a screen the planter does not have: the per-feature
-    // pull toggles have no UI yet (board #187).
-    assert.doesNotMatch(copy, /settings|Settings/);
-  }
-});
-
 test("shared-but-empty is a different sentence from withheld", () => {
   const section = OVERSIGHT_SECTIONS[0];
-  const withheld = withheldExplanation(section, "Hope City Church", "network");
   const empty = emptyExplanation(section, "Hope City Church");
 
-  assert.notEqual(withheld, empty);
   assert.notEqual(WITHHELD_HEADLINE, EMPTY_HEADLINE);
   // The distinction that matters to the reader: sharing IS on here.
   assert.match(empty, /shares/);
   assert.match(empty, /not recorded anything/);
 });
 
-test("no empty state is blank", () => {
+test("a shared-empty state is never blank", () => {
   for (const section of OVERSIGHT_SECTIONS) {
-    for (const copy of [
-      withheldExplanation(section, "Hope City Church", "sending church"),
-      emptyExplanation(section, "Hope City Church"),
-    ]) {
-      assert.ok(copy.trim().length > 40, `too terse to explain: "${copy}"`);
-    }
+    const copy = emptyExplanation(section, "Hope City Church");
+    assert.ok(copy.trim().length > 40, `too terse to explain: "${copy}"`);
   }
 });
 

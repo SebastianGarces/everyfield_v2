@@ -28,7 +28,7 @@
 // single hairline between rows does the work no amount of margin can.
 // ============================================================================
 
-import { ChevronLeft, EyeOff, Inbox } from "lucide-react";
+import { ChevronLeft, Inbox } from "lucide-react";
 import Link from "next/link";
 
 import { AssociationHistory } from "@/components/oversight/association-history";
@@ -50,7 +50,6 @@ import {
   WITHHELD_HEADLINE,
   emptyExplanation,
   sectionsIntro,
-  withheldExplanation,
 } from "@/lib/oversight/sections";
 import type {
   OversightPlantDetail,
@@ -201,16 +200,7 @@ export function PlantDetail({
           </p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {sections.map((section) => (
-            <SectionCard
-              key={section.key}
-              section={section}
-              plantName={plant.name}
-              scopeLabel={scopeLabel}
-            />
-          ))}
-        </div>
+        <OversightSections sections={sections} plantName={plant.name} />
       </section>
 
       {/*
@@ -225,14 +215,102 @@ export function PlantDetail({
   );
 }
 
+/**
+ * Withheld sections contain no statistics by type, so they are gathered into
+ * one compact status list instead of repeating the same privacy explanation
+ * in every card. The introduction above remains the single explanation of
+ * who controls sharing; shared sections keep their existing card treatment.
+ */
+export function OversightSections({
+  sections,
+  plantName,
+}: {
+  sections: OversightSectionResult[];
+  plantName: string;
+}) {
+  const sectionRuns = groupSectionRuns(sections);
+
+  return (
+    <div className="space-y-4">
+      {sectionRuns.map((run) =>
+        run.state === "withheld" ? (
+          <WithheldSectionList
+            key={run.sections[0].key}
+            sections={run.sections}
+          />
+        ) : (
+          <div key={run.sections[0].key} className="grid gap-4 lg:grid-cols-2">
+            {run.sections.map((section) => (
+              <SectionCard
+                key={section.key}
+                section={section}
+                plantName={plantName}
+              />
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+type WithheldSection = Extract<OversightSectionResult, { state: "withheld" }>;
+type SharedSection = Extract<OversightSectionResult, { state: "shared" }>;
+type SectionRun =
+  | { state: "withheld"; sections: WithheldSection[] }
+  | { state: "shared"; sections: SharedSection[] };
+
+/** Consecutive runs keep mixed shared/withheld sections in their original order. */
+function groupSectionRuns(sections: OversightSectionResult[]): SectionRun[] {
+  return sections.reduce<SectionRun[]>((runs, section) => {
+    const lastRun = runs.at(-1);
+
+    if (section.state === "withheld") {
+      if (lastRun?.state === "withheld") {
+        lastRun.sections.push(section);
+      } else {
+        runs.push({ state: "withheld", sections: [section] });
+      }
+    } else if (lastRun?.state === "shared") {
+      lastRun.sections.push(section);
+    } else {
+      runs.push({ state: "shared", sections: [section] });
+    }
+
+    return runs;
+  }, []);
+}
+
+function WithheldSectionList({ sections }: { sections: WithheldSection[] }) {
+  return (
+    <dl className="divide-border bg-muted/50 rounded-lg border border-dashed px-4">
+      {sections.map((section) => {
+        const definition = OVERSIGHT_SECTIONS_BY_KEY[section.key];
+
+        return (
+          <div
+            key={section.key}
+            className="flex items-baseline justify-between gap-6 py-3"
+          >
+            <dt className="text-foreground min-w-0 text-sm font-medium">
+              {definition.title}
+            </dt>
+            <dd className="text-muted-foreground shrink-0 text-sm">
+              {WITHHELD_HEADLINE}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
 function SectionCard({
   section,
   plantName,
-  scopeLabel,
 }: {
-  section: OversightSectionResult;
+  section: SharedSection;
   plantName: string;
-  scopeLabel: string;
 }) {
   const definition = OVERSIGHT_SECTIONS_BY_KEY[section.key];
 
@@ -245,13 +323,7 @@ function SectionCard({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {section.state === "withheld" ? (
-          <SectionNotice
-            icon={<EyeOff className="size-4" aria-hidden="true" />}
-            headline={WITHHELD_HEADLINE}
-            body={withheldExplanation(definition, plantName, scopeLabel)}
-          />
-        ) : section.isEmpty ? (
+        {section.isEmpty ? (
           <SectionNotice
             icon={<Inbox className="size-4" aria-hidden="true" />}
             headline={EMPTY_HEADLINE}
