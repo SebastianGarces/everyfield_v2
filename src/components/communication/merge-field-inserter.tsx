@@ -51,14 +51,16 @@ export function MergeFieldInserter({
             {groupLabels[group]}:
           </span>
           {fields.map((field) => (
-            <Badge
-              key={field.name}
-              variant="outline"
-              className="hover:bg-primary hover:text-primary-foreground cursor-pointer font-mono text-xs transition-colors"
-              onClick={() => onInsert(`{{${field.name}}}`)}
-              title={field.description}
-            >
-              {`{{${field.name}}}`}
+            <Badge asChild key={field.name} variant="outline">
+              <button
+                type="button"
+                className="hover:bg-primary hover:text-primary-foreground min-h-6 cursor-pointer font-mono text-xs transition-colors"
+                onClick={() => onInsert(`{{${field.name}}}`)}
+                title={field.description}
+                aria-label={`Insert {{${field.name}}}`}
+              >
+                {`{{${field.name}}}`}
+              </button>
             </Badge>
           ))}
         </div>
