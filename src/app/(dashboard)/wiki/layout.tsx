@@ -1,4 +1,5 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
+import { WikiMobileNavigation } from "@/components/wiki/wiki-mobile-navigation";
 import {
   HeaderBreadcrumbs,
   type HeaderBreadcrumbItem,
@@ -57,6 +58,7 @@ export default async function WikiLayout({
               groups={groups}
               recentlyViewed={recentlyViewed}
               bookmarks={bookmarks}
+              shortcutScope="desktop"
             />
           </aside>
         </WorkspacePanel>
@@ -76,6 +78,13 @@ export default async function WikiLayout({
           tabIndex={-1}
           className="row-start-1 h-full overflow-y-auto overscroll-x-none overscroll-y-none outline-none [container:wiki-content/size] lg:col-start-2"
         >
+          <div className="px-5 pt-5 sm:px-8 lg:hidden">
+            <WikiMobileNavigation
+              groups={groups}
+              recentlyViewed={recentlyViewed}
+              bookmarks={bookmarks}
+            />
+          </div>
           <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-10 @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl [&>*]:scroll-mt-8 sm:[&>*]:scroll-mt-10">
             {children}
           </div>
