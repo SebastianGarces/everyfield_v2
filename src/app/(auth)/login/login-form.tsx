@@ -117,9 +117,12 @@ export function LoginForm({
                   setPicked(null);
                 }}
                 aria-invalid={!!state.fieldErrors?.email}
+                aria-describedby={
+                  state.fieldErrors?.email ? "login-email-error" : undefined
+                }
               />
               {state.fieldErrors?.email && (
-                <p className="text-destructive text-sm">
+                <p id="login-email-error" className="text-destructive text-sm">
                   {state.fieldErrors.email}
                 </p>
               )}
@@ -144,13 +147,23 @@ export function LoginForm({
                 // The picker's hint says where this account's password is
                 // recorded; a reader sent here by the focus move below hears it.
                 aria-describedby={
-                  picked?.password === null
-                    ? "preview-account-password-hint"
-                    : undefined
+                  [
+                    picked?.password === null
+                      ? "preview-account-password-hint"
+                      : undefined,
+                    state.fieldErrors?.password
+                      ? "login-password-error"
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined
                 }
               />
               {state.fieldErrors?.password && (
-                <p className="text-destructive text-sm">
+                <p
+                  id="login-password-error"
+                  className="text-destructive text-sm"
+                >
                   {state.fieldErrors.password}
                 </p>
               )}
