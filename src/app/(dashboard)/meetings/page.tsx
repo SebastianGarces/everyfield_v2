@@ -10,7 +10,7 @@ import { holdsSeatFor } from "@/lib/auth/seat-rules";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
 import { DEFAULT_CHURCH_TIME_ZONE } from "@/lib/datetime";
 import { meetingsListSubtitle } from "@/lib/meetings/copy";
-import { listMeetings } from "@/lib/meetings/service";
+import { hasMeetingHistory, listMeetings } from "@/lib/meetings/service";
 import {
   analyticsMeetingTypeArg,
   parseListMeetingTypeFilter,
@@ -55,7 +55,7 @@ export default async function MeetingsPage({
   // memory/invariants.md → Date & Time Rendering.
   const now = new Date();
 
-  const [church, upcomingResult, pastResult] = await Promise.all([
+  const [church, upcomingResult, pastResult, hasHistory] = await Promise.all([
     getCurrentUserChurch(),
     view !== "past"
       ? listMeetings(user.churchId, {
@@ -71,6 +71,7 @@ export default async function MeetingsPage({
           limit: 50,
         })
       : Promise.resolve({ meetings: [], total: 0 }),
+    hasMeetingHistory(user.churchId),
   ]);
 
   return (
@@ -107,6 +108,7 @@ export default async function MeetingsPage({
             <MeetingList
               upcomingMeetings={upcomingResult.meetings}
               pastMeetings={pastResult.meetings}
+              hasMeetingHistory={hasHistory}
               initialView={view}
               timeZone={church?.timeZone ?? DEFAULT_CHURCH_TIME_ZONE}
               now={now}
