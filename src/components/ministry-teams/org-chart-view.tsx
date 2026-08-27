@@ -8,7 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { LEADERSHIP_TEAM_KEY } from "@/lib/ministry-teams/role-templates";
-import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
+import {
+  TEAM_ICONS,
+  teamStaffingDisplay,
+} from "@/lib/ministry-teams/team-display";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
 
 interface OrgChartViewProps {
@@ -67,7 +70,7 @@ function OrgNode({
   isRoot?: boolean;
 }) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffing = staffingPercent(team.filledRoles, team.totalRoles);
+  const staffing = teamStaffingDisplay(team.filledRoles, team.totalRoles);
 
   return (
     <Link href={`/teams/${team.id}`} className="w-full">
@@ -116,15 +119,20 @@ function OrgNode({
             variant="secondary"
             className={cn(
               "text-[10px]",
-              staffing === 100 &&
+              staffing.kind === "configured" &&
+                staffing.percentage === 100 &&
                 "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
-              staffing < 60 &&
+              staffing.kind === "configured" &&
+                staffing.percentage < 60 &&
                 "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-              staffing < 40 &&
+              staffing.kind === "configured" &&
+                staffing.percentage < 40 &&
                 "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
             )}
           >
-            {team.filledRoles}/{team.totalRoles} roles
+            {staffing.kind === "no_roles"
+              ? staffing.label
+              : `${team.filledRoles}/${team.totalRoles} roles`}
           </Badge>
         </CardContent>
       </Card>
