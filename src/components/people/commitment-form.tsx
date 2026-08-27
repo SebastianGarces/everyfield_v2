@@ -158,13 +158,18 @@ export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
       {/* Commitment Type */}
       <div className="space-y-3">
         <Label>Commitment Type</Label>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div
+          aria-label="Commitment type"
+          className="grid gap-3 sm:grid-cols-2"
+          role="group"
+        >
           {COMMITMENT_TYPES.map((type) => (
             <button
               key={type.value}
               type="button"
               onClick={() => setCommitmentType(type.value)}
               disabled={isPending}
+              aria-pressed={commitmentType === type.value}
               className={cn(
                 "flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors",
                 "hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",

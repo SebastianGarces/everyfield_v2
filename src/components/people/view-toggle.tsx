@@ -29,7 +29,11 @@ export function ViewToggle({ currentView }: ViewToggleProps) {
   };
 
   return (
-    <div className="bg-muted text-foreground/60 flex items-center rounded-lg border p-1">
+    <div
+      aria-label="People view"
+      className="bg-muted text-foreground/60 flex items-center rounded-lg border p-1"
+      role="group"
+    >
       <Button
         variant={currentView === "list" ? "secondary" : "ghost"}
         size="sm"
@@ -38,6 +42,7 @@ export function ViewToggle({ currentView }: ViewToggleProps) {
           currentView === "list" && "shadow-sm"
         )}
         onClick={() => handleViewChange("list")}
+        aria-pressed={currentView === "list"}
       >
         List
       </Button>
@@ -49,6 +54,7 @@ export function ViewToggle({ currentView }: ViewToggleProps) {
           currentView === "pipeline" && "shadow-sm"
         )}
         onClick={() => handleViewChange("pipeline")}
+        aria-pressed={currentView === "pipeline"}
       >
         Pipeline
       </Button>

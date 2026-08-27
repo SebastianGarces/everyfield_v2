@@ -90,23 +90,26 @@ const RESULT_OPTIONS: { value: InterviewResult; label: string }[] = [
   { value: "follow_up", label: "Follow-up Needed" },
 ];
 
-function StatusSelector({
+export function StatusSelector({
   value,
   onChange,
   disabled,
+  label,
 }: {
   value: InterviewStatus | null;
   onChange: (status: InterviewStatus) => void;
   disabled?: boolean;
+  label: string;
 }) {
   return (
-    <div className="flex gap-2">
+    <div aria-label={`${label} status`} className="flex gap-2" role="group">
       {STATUS_OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
           disabled={disabled}
           onClick={() => onChange(option.value)}
+          aria-pressed={value === option.value}
           className={cn(
             "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
             "hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
@@ -270,6 +273,7 @@ export function InterviewForm({ person, onSuccess }: InterviewFormProps) {
               value={criteria[criterion.key].status}
               onChange={(status) => updateStatus(criterion.key, status)}
               disabled={isPending}
+              label={criterion.label}
             />
 
             <div className="space-y-2">

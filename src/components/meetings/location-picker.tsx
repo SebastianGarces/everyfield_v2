@@ -35,10 +35,11 @@ export function LocationPicker({
     <div className="space-y-3">
       <Label>Location</Label>
 
-      <div className="flex gap-2">
+      <div aria-label="Location mode" className="flex gap-2" role="group">
         <button
           type="button"
           onClick={() => setMode("select")}
+          aria-pressed={mode === "select"}
           className={`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             mode === "select"
               ? "bg-primary text-primary-foreground"
@@ -54,6 +55,7 @@ export function LocationPicker({
             setMode("new");
             setLocationId("");
           }}
+          aria-pressed={mode === "new"}
           className={`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             mode === "new"
               ? "bg-primary text-primary-foreground"
