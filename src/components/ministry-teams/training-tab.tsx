@@ -118,12 +118,13 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
         matrix={matrix}
         incompleteCell={
           canWrite
-            ? ({ personId, programId }) => (
+            ? ({ personId, personName, programId, programName }) => (
                 <button
                   type="button"
                   className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
                   onClick={() => handleMarkComplete(personId, programId)}
-                  title="Mark as complete"
+                  aria-label={`Mark ${personName} as complete for ${programName}`}
+                  title={`Mark ${personName} as complete for ${programName}`}
                 >
                   <TrainingMatrixIncompleteMarker />
                 </button>

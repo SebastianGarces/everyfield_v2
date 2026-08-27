@@ -15,7 +15,7 @@ import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.s
 
 import { ViewerCapabilitiesProvider } from "@/components/shared/viewer-capabilities";
 import type { Capability } from "@/lib/auth/seat-rules";
-import { namedButtons } from "@/lib/testing/rendered-markup";
+import { namedButtons, parseElements } from "@/lib/testing/rendered-markup";
 
 import { MeetingsTab } from "./meetings-tab";
 import { MembersRolesTab } from "./members-roles-tab";
@@ -524,8 +524,39 @@ test("a Member reads the training matrix but marks nothing complete", () => {
   );
 
   assert.ok(
-    admin.includes("Mark as complete"),
-    "the cell is still clickable by somebody who may record training"
+    controlLabels(admin).includes(
+      "Mark Ada Lovelace as complete for Child Safety"
+    ),
+    "the cell names the member and program for somebody who may record training"
+  );
+});
+
+test("the training matrix names its headers, completion states, and write controls", () => {
+  const mixedMatrix = [
+    ...MATRIX,
+    {
+      personId: "person-2",
+      personName: "Grace Hopper",
+      completions: { "program-1": true },
+    },
+  ];
+  const { member, admin } = bothWays(() => training(PROGRAMS, mixedMatrix));
+  const headers = parseElements(member).filter(
+    (element) => element.tag === "th"
+  );
+
+  assert.deepEqual(
+    headers.map((header) => header.attrs.scope),
+    ["col", "col", "row", "row"],
+    "the first row supplies column headers and each person supplies a row header"
+  );
+  assert.match(member, /class="sr-only">Not complete<\/span>/);
+  assert.match(member, /class="sr-only">Complete<\/span>/);
+  assert.ok(
+    controlLabels(admin).includes(
+      "Mark Ada Lovelace as complete for Child Safety"
+    ),
+    "the mark-complete control names the exact member and training program"
   );
 });
 
