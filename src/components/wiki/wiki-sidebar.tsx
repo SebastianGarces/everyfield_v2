@@ -12,7 +12,9 @@ import { wikiHref } from "@/lib/wiki/href";
 import { Bookmark, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { MouseEvent } from "react";
 import { WikiSearchTrigger } from "./wiki-search";
+import type { WikiSearchShortcutScope } from "./wiki-search-shortcut";
 
 interface RecentlyViewedItem {
   slug: string;
@@ -32,24 +34,35 @@ interface WikiSidebarProps {
   groups: NavGroup[];
   recentlyViewed?: RecentlyViewedItem[];
   bookmarks?: BookmarkItem[];
+  onNavigate?: () => void;
+  shortcutScope: WikiSearchShortcutScope;
 }
 
 export function WikiSidebar({
   groups,
   recentlyViewed = [],
   bookmarks = [],
+  onNavigate,
+  shortcutScope,
 }: WikiSidebarProps) {
   const pathname = usePathname();
 
   return (
     <nav className="space-y-3">
       {/* Search */}
-      <WikiSearchTrigger />
+      <WikiSearchTrigger
+        onNavigate={onNavigate}
+        shortcutScope={shortcutScope}
+      />
 
       {groups.map((group, index) => (
         <div key={group.slug}>
           {index > 0 && <Separator className="mb-3" />}
-          <SidebarGroup group={group} pathname={pathname} />
+          <SidebarGroup
+            group={group}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
         </div>
       ))}
 
@@ -95,6 +108,7 @@ export function WikiSidebar({
                       "bg-muted text-foreground font-medium"
                   )}
                   title={item.title}
+                  onClick={(event) => closeAfterNavigation(event, onNavigate)}
                 >
                   {item.title}
                 </Link>
@@ -129,6 +143,7 @@ export function WikiSidebar({
                       "bg-muted text-foreground font-medium"
                   )}
                   title={item.title}
+                  onClick={(event) => closeAfterNavigation(event, onNavigate)}
                 >
                   {item.title}
                 </Link>
@@ -152,9 +167,11 @@ export function WikiSidebar({
 function SidebarGroup({
   group,
   pathname,
+  onNavigate,
 }: {
   group: NavGroup;
   pathname: string;
+  onNavigate?: () => void;
 }) {
   return (
     <div>
@@ -167,6 +184,7 @@ function SidebarGroup({
             key={section.slug}
             section={section}
             pathname={pathname}
+            onNavigate={onNavigate}
           />
         ))}
       </div>
@@ -177,9 +195,11 @@ function SidebarGroup({
 function SidebarSection({
   section,
   pathname,
+  onNavigate,
 }: {
   section: ArticleNavSection;
   pathname: string;
+  onNavigate?: () => void;
 }) {
   // Check if any article in this section is active
   const hasActiveChild = section.items.some(
@@ -196,7 +216,12 @@ function SidebarSection({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1 space-y-0.5">
         {section.items.map((item) => (
-          <SidebarItem key={item.slug} item={item} pathname={pathname} />
+          <SidebarItem
+            key={item.slug}
+            item={item}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
         ))}
       </CollapsibleContent>
     </Collapsible>
@@ -206,9 +231,11 @@ function SidebarSection({
 function SidebarItem({
   item,
   pathname,
+  onNavigate,
 }: {
   item: ArticleNavSection["items"][number];
   pathname: string;
+  onNavigate?: () => void;
 }) {
   const hasChildren = item.children && item.children.length > 0;
   const isActive = pathname === item.href;
@@ -230,7 +257,12 @@ function SidebarItem({
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-0.5">
           {item.children!.map((child) => (
-            <SidebarItem key={child.slug} item={child} pathname={pathname} />
+            <SidebarItem
+              key={child.slug}
+              item={child}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
           ))}
         </CollapsibleContent>
       </Collapsible>
@@ -240,6 +272,7 @@ function SidebarItem({
   return (
     <Link
       href={item.href}
+      onClick={(event) => closeAfterNavigation(event, onNavigate)}
       className={cn(
         "text-muted-foreground hover:bg-muted hover:text-foreground relative block rounded px-2 py-1 text-sm before:absolute before:top-0 before:left-0 before:h-full before:w-[4px] before:bg-transparent",
         isActive && "bg-muted text-foreground before:bg-ef font-medium"
@@ -248,4 +281,22 @@ function SidebarItem({
       {item.title}
     </Link>
   );
+}
+
+function closeAfterNavigation(
+  event: MouseEvent<HTMLAnchorElement>,
+  onNavigate?: () => void
+) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+
+  onNavigate?.();
 }

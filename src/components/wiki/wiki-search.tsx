@@ -34,10 +34,15 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  shouldHandleWikiSearchShortcut,
+  type WikiSearchShortcutScope,
+} from "./wiki-search-shortcut";
 
 interface WikiSearchProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onNavigate?: () => void;
 }
 
 /**
@@ -106,7 +111,11 @@ function announcementFor(view: View): string {
   }
 }
 
-export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
+export function WikiSearch({
+  open,
+  onOpenChange,
+  onNavigate,
+}: WikiSearchProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [view, setView] = useState<View>({ kind: "idle" });
@@ -178,9 +187,10 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
       // Hide immediately via CSS, then close and navigate
       setIsNavigating(true);
       onOpenChange(false);
+      onNavigate?.();
       router.push(wikiHref(slug));
     },
-    [onOpenChange, router]
+    [onNavigate, onOpenChange, router]
   );
 
   // When navigating, render nothing to prevent any flash
@@ -340,7 +350,13 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
  * Uses the key pattern from React docs to reset WikiSearch state on each open:
  * https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
  */
-export function WikiSearchTrigger() {
+export function WikiSearchTrigger({
+  onNavigate,
+  shortcutScope,
+}: {
+  onNavigate?: () => void;
+  shortcutScope: WikiSearchShortcutScope;
+}) {
   const [open, setOpen] = useState(false);
   // Increment key each time we open to force fresh state in WikiSearch
   const [searchKey, setSearchKey] = useState(0);
@@ -361,6 +377,15 @@ export function WikiSearchTrigger() {
   // Global keyboard shortcut (Cmd+K or Ctrl+K)
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (
+        !shouldHandleWikiSearchShortcut(
+          shortcutScope,
+          window.matchMedia("(min-width: 1024px)").matches
+        )
+      ) {
+        return;
+      }
+
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         if (!open) {
@@ -373,7 +398,7 @@ export function WikiSearchTrigger() {
 
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, [open, handleOpen]);
+  }, [open, handleOpen, shortcutScope]);
 
   return (
     <>
@@ -385,7 +410,12 @@ export function WikiSearchTrigger() {
         <span className="flex-1 text-left">Search...</span>
         <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
       </button>
-      <WikiSearch key={searchKey} open={open} onOpenChange={handleOpenChange} />
+      <WikiSearch
+        key={searchKey}
+        open={open}
+        onOpenChange={handleOpenChange}
+        onNavigate={onNavigate}
+      />
     </>
   );
 }
