@@ -332,9 +332,9 @@ export function AttendanceCapture({
       {canWrite && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">Add Walk-in</CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
                   <DialogTrigger asChild>
                     <Button
@@ -685,7 +685,7 @@ export function AttendanceCapture({
               {finalizeOutcome}
             </p>
           )}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             {/* A live region, because this count is the only feedback a
                 toggle produces (#361). The checkbox announces its own state,
                 but the running total — which is what the Finalize button is

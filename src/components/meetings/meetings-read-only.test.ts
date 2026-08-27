@@ -270,6 +270,26 @@ function guestList(): ReactElement {
   return createElement(GuestList, { meetingId: "meeting-1", guests: GUESTS });
 }
 
+test("guest-list actions stack under the heading before the small breakpoint", () => {
+  const { admin } = bothWays(guestList);
+
+  assert.match(
+    admin,
+    /class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"/,
+    "the heading must occupy its own row below 640px, where three actions do not fit beside it"
+  );
+  assert.match(
+    admin,
+    /class="flex flex-wrap items-center gap-2"/,
+    "the action group must wrap instead of clipping when all three actions are available"
+  );
+  assert.ok(
+    admin.indexOf("Send Email (1)") < admin.indexOf("Quick Add Person") &&
+      admin.indexOf("Quick Add Person") < admin.indexOf("Add Existing"),
+    "responsive layout preserves the existing action order and recipient count"
+  );
+});
+
 test("a Member cannot toggle somebody else's RSVP from the guest list", () => {
   const { member, admin } = bothWays(guestList);
 
@@ -337,6 +357,31 @@ function attendance(): ReactElement {
     responseCards: { "person-1": "ready_commit" as const },
   });
 }
+
+test("attendance actions and finalization stack without changing the register gate", () => {
+  const { admin, member } = bothWays(attendance);
+
+  assert.equal(
+    (
+      admin.match(
+        /class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"/g
+      ) ?? []
+    ).length,
+    2,
+    "both the walk-in controls and the attended-count/finalize row stack below 640px"
+  );
+  assert.match(admin, /class="flex flex-wrap items-center gap-2"/);
+  assert.ok(
+    admin.indexOf("Quick Add Person") < admin.indexOf("Add Existing"),
+    "the walk-in actions keep their current order"
+  );
+  assert.match(admin, /Finalize Attendance[^]*?\(1\)/);
+  assert.equal(
+    member.includes("Finalize Attendance"),
+    false,
+    "the responsive wrapper does not expose the write-only finalization action"
+  );
+});
 
 test("a Member is offered no Finalize Attendance control", () => {
   const { member, admin } = bothWays(attendance);
