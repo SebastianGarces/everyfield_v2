@@ -28,6 +28,29 @@ interface InsightFeedbackProps {
   initialComment?: string | null;
 }
 
+export function InsightFeedbackCommentField({
+  comment,
+  onChange,
+  disabled,
+}: {
+  comment: string;
+  onChange: (comment: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <Textarea
+      value={comment}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label="Feedback comment (optional)"
+      placeholder="What made this insight useful or not? (optional)"
+      rows={2}
+      maxLength={2000}
+      disabled={disabled}
+      className="min-h-0 resize-none text-sm"
+    />
+  );
+}
+
 export function InsightFeedback({
   insightId,
   initialRating = null,
@@ -136,14 +159,10 @@ export function InsightFeedback({
 
       {showComment && rating && (
         <div className="mt-2 space-y-2">
-          <Textarea
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            placeholder="What made this insight useful or not? (optional)"
-            rows={2}
-            maxLength={2000}
+          <InsightFeedbackCommentField
+            comment={comment}
+            onChange={setComment}
             disabled={isPending}
-            className="min-h-0 resize-none text-sm"
           />
           <div className="flex justify-end gap-2">
             <Button

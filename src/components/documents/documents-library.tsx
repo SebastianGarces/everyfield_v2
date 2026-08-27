@@ -133,6 +133,7 @@ export function DocumentLibraryFilters({
         <Input
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          aria-label="Search templates"
           placeholder="Search templates..."
           className="pl-9"
         />

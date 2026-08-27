@@ -95,6 +95,7 @@ test("quick add retains its fields, native date, and action handlers in responsi
   }) as ReactElement<ElementProps>;
   const [title, details, actions] = childElements(form.props.children);
   const [dueDate, priority] = childElements(details.props.children);
+  const [priorityTrigger] = childElements(priority.props.children);
   const [add, cancel] = childElements(actions.props.children);
   const formData = new FormData();
 
@@ -103,6 +104,7 @@ test("quick add retains its fields, native date, and action handlers in responsi
     "bg-card flex flex-wrap items-center gap-2 rounded-lg border p-3"
   );
   assert.equal(title.props.name, "title");
+  assert.equal(title.props["aria-label"], "Task title");
   assert.equal(title.props.required, true);
   assert.equal(title.props.autoFocus, true);
   assert.equal(
@@ -112,8 +114,10 @@ test("quick add retains its fields, native date, and action handlers in responsi
   );
   assert.equal(dueDate.props.name, "dueDate");
   assert.equal(dueDate.props.type, "date");
+  assert.equal(dueDate.props["aria-label"], "Due date");
   assert.equal(priority.props.name, "priority");
   assert.equal(priority.props.defaultValue, "medium");
+  assert.equal(priorityTrigger.props["aria-label"], "Priority");
   assert.equal(add.props.type, "submit");
   assert.equal(cancel.props.type, "button");
 

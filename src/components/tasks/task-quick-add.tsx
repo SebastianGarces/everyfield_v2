@@ -68,6 +68,7 @@ export function TaskQuickAddForm({
       <Input
         ref={titleRef}
         name="title"
+        aria-label="Task title"
         placeholder="Task title..."
         className="h-8 w-full text-sm sm:w-auto sm:flex-1"
         autoFocus
@@ -78,11 +79,15 @@ export function TaskQuickAddForm({
         <Input
           name="dueDate"
           type="date"
+          aria-label="Due date"
           className="h-8 w-[140px] text-sm"
           disabled={isPending}
         />
         <Select name="priority" defaultValue="medium">
-          <SelectTrigger className="h-8 w-[110px] cursor-pointer text-xs">
+          <SelectTrigger
+            aria-label="Priority"
+            className="h-8 w-[110px] cursor-pointer text-xs"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

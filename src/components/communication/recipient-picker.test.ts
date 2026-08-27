@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { recipientIdsPayload } from "@/lib/communication/recipient-payload";
+import { parseElements } from "@/lib/testing/rendered-markup";
 
 import { RecipientPicker } from "./recipient-picker";
 
@@ -41,4 +42,17 @@ test("the send payload preserves the selected recipient ids and their order", ()
     recipientIdsPayload(recipients),
     JSON.stringify(recipients.map((recipient) => recipient.id))
   );
+});
+
+test("the recipient search keeps a specific accessible name after its placeholder clears", () => {
+  const html = renderToStaticMarkup(
+    createElement(RecipientPicker, { selected: [], onChange: () => {} })
+  );
+  const search = parseElements(html).find(
+    (element) =>
+      element.attrs.placeholder === "Search people by name or email..."
+  );
+
+  assert.ok(search, "recipient search is missing");
+  assert.equal(search.attrs["aria-label"], "Search people by name or email");
 });
