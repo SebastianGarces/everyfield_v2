@@ -63,23 +63,27 @@ function getScoreLabel(totalScore: number): string {
   return "Needs Growth";
 }
 
-function ScoreSelector({
+export function ScoreSelector({
   value,
   onChange,
   disabled,
+  label,
 }: {
   value: number;
   onChange: (score: number) => void;
   disabled?: boolean;
+  label: string;
 }) {
   return (
-    <div className="flex gap-2">
+    <div aria-label={`${label} score`} className="flex gap-2" role="group">
       {SCORE_LABELS.map(({ value: score, label }) => (
         <button
           key={score}
           type="button"
           disabled={disabled}
           onClick={() => onChange(score)}
+          aria-label={`${score}: ${label}`}
+          aria-pressed={value === score}
           className={cn(
             "h-10 w-10 rounded-full text-sm font-medium transition-colors",
             "hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
@@ -228,6 +232,7 @@ export function AssessmentForm({ person, onSuccess }: AssessmentFormProps) {
               value={scores[criterion.key].score}
               onChange={(score) => updateScore(criterion.key, score)}
               disabled={isPending}
+              label={criterion.label}
             />
 
             <div className="space-y-2">

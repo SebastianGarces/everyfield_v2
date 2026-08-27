@@ -83,7 +83,7 @@ export function MeetingList({
           <button
             key={f.value}
             onClick={() => updateParams({ type: f.value })}
-            aria-current={activeType === f.value ? "true" : undefined}
+            aria-pressed={activeType === f.value}
             className={cn(
               "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               activeType === f.value
@@ -97,11 +97,16 @@ export function MeetingList({
       </div>
 
       {/* View Toggle */}
-      <div className="bg-muted flex w-fit gap-1 rounded-lg p-1">
+      <div
+        aria-label="Filter meetings by time"
+        className="bg-muted flex w-fit gap-1 rounded-lg p-1"
+        role="group"
+      >
         {(["upcoming", "past", "all"] as const).map((v) => (
           <button
             key={v}
             onClick={() => updateParams({ view: v })}
+            aria-pressed={view === v}
             className={cn(
               "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               view === v

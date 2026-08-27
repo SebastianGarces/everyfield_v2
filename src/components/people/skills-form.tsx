@@ -68,6 +68,50 @@ const PROFICIENCY_COLORS: Record<SkillProficiency, string> = {
     "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
 };
 
+export function nextProficiency(
+  current: SkillProficiency | "",
+  selected: SkillProficiency
+): SkillProficiency | "" {
+  return current === selected ? "" : selected;
+}
+
+export function ProficiencySelector({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: SkillProficiency | "";
+  onChange: (proficiency: SkillProficiency | "") => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      aria-label="Proficiency level"
+      className="grid grid-cols-2 gap-2"
+      role="group"
+    >
+      {skillProficiencies.map((prof) => (
+        <button
+          key={prof}
+          type="button"
+          onClick={() => onChange(nextProficiency(value, prof))}
+          disabled={disabled}
+          aria-pressed={value === prof}
+          className={cn(
+            "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+            "hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
+            value === prof
+              ? cn("ring-primary ring-2", PROFICIENCY_COLORS[prof])
+              : "border-input bg-background"
+          )}
+        >
+          {PROFICIENCY_LABELS[prof]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SkillsForm({
   personId,
   skill,
@@ -191,27 +235,11 @@ export function SkillsForm({
           {/* Proficiency */}
           <div className="space-y-2">
             <Label>Proficiency Level (Optional)</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {skillProficiencies.map((prof) => (
-                <button
-                  key={prof}
-                  type="button"
-                  onClick={() =>
-                    setProficiency(proficiency === prof ? "" : prof)
-                  }
-                  disabled={isPending}
-                  className={cn(
-                    "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-                    "hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
-                    proficiency === prof
-                      ? cn("ring-primary ring-2", PROFICIENCY_COLORS[prof])
-                      : "border-input bg-background"
-                  )}
-                >
-                  {PROFICIENCY_LABELS[prof]}
-                </button>
-              ))}
-            </div>
+            <ProficiencySelector
+              value={proficiency}
+              onChange={setProficiency}
+              disabled={isPending}
+            />
           </div>
 
           {/* Notes */}
