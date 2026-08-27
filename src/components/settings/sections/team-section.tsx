@@ -68,21 +68,6 @@ import {
 export function TeamSection({ view }: { view: TeamSectionView }) {
   return (
     <div className="space-y-8">
-      <SeatInviteForm
-        expiryDays={view.expiryDays}
-        tenancyType={view.tenancyType}
-      />
-
-      {/*
-        THE PLANT'S ALONE (#500). It was unconditional while this surface was a
-        plant's only: `coach.assignment.manage` carried the same seat set on the
-        same tenancy as the gate, so a guard could never read false. Widening
-        the gate to an org broke that equality — the coach verb is still
-        `tenancy: "plant"` — so the section is now keyed on the tenancy that can
-        actually hold a coach.
-      */}
-      {view.isPlant && <CoachInviteForm expiryDays={view.expiryDays} />}
-
       <SeatRoster
         rows={view.roster}
         canManageSeats={view.canManageSeats}
@@ -101,6 +86,21 @@ export function TeamSection({ view }: { view: TeamSectionView }) {
           endAssignment={endCoachAssignmentAction}
         />
       )}
+
+      <SeatInviteForm
+        expiryDays={view.expiryDays}
+        tenancyType={view.tenancyType}
+      />
+
+      {/*
+        THE PLANT'S ALONE (#500). It was unconditional while this surface was a
+        plant's only: `coach.assignment.manage` carried the same seat set on the
+        same tenancy as the gate, so a guard could never read false. Widening
+        the gate to an org broke that equality — the coach verb is still
+        `tenancy: "plant"` — so the section is now keyed on the tenancy that can
+        actually hold a coach.
+      */}
+      {view.isPlant && <CoachInviteForm expiryDays={view.expiryDays} />}
 
       <InvitationsList
         rows={view.seatInvitations}
