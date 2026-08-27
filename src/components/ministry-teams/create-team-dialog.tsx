@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,25 +16,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createTeamAction } from "@/app/(dashboard)/teams/actions";
+import { useDialogSaveLifecycle } from "./dialog-save-lifecycle";
 
 export function CreateTeamDialog() {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { open, loading, error, onOpenChange, submit } =
+    useDialogSaveLifecycle();
 
   async function handleSubmit(formData: FormData) {
-    setLoading(true);
-    try {
-      const result = await createTeamAction(formData);
-      if (result.success) {
-        setOpen(false);
-      }
-    } finally {
-      setLoading(false);
-    }
+    await submit(() => createTeamAction(formData));
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" className="cursor-pointer">
           <Plus className="mr-2 h-4 w-4" />
@@ -70,11 +62,16 @@ export function CreateTeamDialog() {
               />
             </div>
           </div>
+          {error && (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              onClick={() => setOpen(false)}
+              onClick={() => onOpenChange(false)}
               className="cursor-pointer"
             >
               Cancel

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { importRoleTemplatesAction } from "@/app/(dashboard)/teams/actions";
 import { TEAM_TEMPLATES } from "@/lib/ministry-teams/role-templates";
+import { useDialogSaveLifecycle } from "./dialog-save-lifecycle";
 
 interface RoleTemplateImportProps {
   teamId: string;
@@ -26,8 +27,8 @@ export function RoleTemplateImport({
   teamId,
   teamName,
 }: RoleTemplateImportProps) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { open, loading, error, onOpenChange, submit } =
+    useDialogSaveLifecycle();
 
   // Find the matching template by team name
   const template = TEAM_TEMPLATES.find(
@@ -54,26 +55,20 @@ export function RoleTemplateImport({
 
   async function handleImport() {
     if (!template || selectedKeys.size === 0) return;
-    setLoading(true);
-    try {
-      const result = await importRoleTemplatesAction(
+    await submit(() =>
+      importRoleTemplatesAction(
         teamId,
         template.teamKey,
         Array.from(selectedKeys)
-      );
-      if (result.success) {
-        setOpen(false);
-      }
-    } finally {
-      setLoading(false);
-    }
+      )
+    );
   }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(value) => {
-        setOpen(value);
+        onOpenChange(value);
         // Reset selections when dialog opens
         if (value && template) {
           setSelectedKeys(new Set(template.roles.map((r) => r.key)));
@@ -115,11 +110,16 @@ export function RoleTemplateImport({
             })}
           </div>
         </div>
+        {error && (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
-            onClick={() => setOpen(false)}
+            onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
             Cancel

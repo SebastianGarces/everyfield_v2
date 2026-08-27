@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { GraduationCap, Plus } from "lucide-react";
 
 import { useCan } from "@/components/shared/viewer-capabilities";
@@ -30,6 +29,7 @@ import {
 } from "@/app/(dashboard)/teams/actions";
 import type { TrainingProgram } from "@/db/schema";
 import type { TrainingMatrixRow } from "@/lib/ministry-teams/service";
+import { useDialogSaveLifecycle } from "./dialog-save-lifecycle";
 
 interface TrainingTabProps {
   teamId: string;
@@ -38,8 +38,13 @@ interface TrainingTabProps {
 }
 
 export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
-  const [addOpen, setAddOpen] = useState(false);
-  const [addLoading, setAddLoading] = useState(false);
+  const {
+    open: addOpen,
+    loading: addLoading,
+    error: addError,
+    onOpenChange: onAddOpenChange,
+    submit: submitAddProgram,
+  } = useDialogSaveLifecycle();
 
   // `createTrainingProgramAction` and `markTrainingCompleteAction` are both
   // `teams.write` (AS-020, #499). The MATRIX is the read — who has completed
@@ -48,16 +53,8 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
   const canWrite = useCan("teams.write");
 
   async function handleAddProgram(formData: FormData) {
-    setAddLoading(true);
     formData.set("teamId", teamId);
-    try {
-      const result = await createTrainingProgramAction(formData);
-      if (result.success) {
-        setAddOpen(false);
-      }
-    } finally {
-      setAddLoading(false);
-    }
+    await submitAddProgram(() => createTrainingProgramAction(formData));
   }
 
   async function handleMarkComplete(personId: string, programId: string) {
@@ -72,8 +69,9 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
           {canWrite && (
             <AddProgramDialog
               open={addOpen}
-              onOpenChange={setAddOpen}
+              onOpenChange={onAddOpenChange}
               loading={addLoading}
+              error={addError}
               onSubmit={handleAddProgram}
             />
           )}
@@ -100,8 +98,9 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
         {canWrite && (
           <AddProgramDialog
             open={addOpen}
-            onOpenChange={setAddOpen}
+            onOpenChange={onAddOpenChange}
             loading={addLoading}
+            error={addError}
             onSubmit={handleAddProgram}
           />
         )}
@@ -151,11 +150,13 @@ function AddProgramDialog({
   open,
   onOpenChange,
   loading,
+  error,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   loading: boolean;
+  error: string | null;
   onSubmit: (formData: FormData) => void;
 }) {
   return (
@@ -205,6 +206,11 @@ function AddProgramDialog({
               </Label>
             </div>
           </div>
+          {error && (
+            <p role="alert" className="text-destructive text-sm">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button
               type="button"

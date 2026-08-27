@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { CalendarDays, Clock, ExternalLink, MapPin, Plus } from "lucide-react";
 
 import { useCan } from "@/components/shared/viewer-capabilities";
@@ -35,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { createMeetingAction } from "@/app/(dashboard)/teams/actions";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import Link from "next/link";
+import { useDialogSaveLifecycle } from "./dialog-save-lifecycle";
 
 const SUBTYPE_LABELS: Record<string, string> = {
   regular: "Regular",
@@ -59,8 +59,13 @@ interface MeetingsTabProps {
 }
 
 export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
-  const [addOpen, setAddOpen] = useState(false);
-  const [addLoading, setAddLoading] = useState(false);
+  const {
+    open: addOpen,
+    loading: addLoading,
+    error: addError,
+    onOpenChange: onAddOpenChange,
+    submit: submitMeeting,
+  } = useDialogSaveLifecycle();
 
   // `teams.write`, NOT `meetings.write` (AS-020, #499). The action this dialog
   // posts to is the ministry-teams one — `createMeetingAction` in
@@ -73,15 +78,7 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
   const pastMeetings = meetings.filter((m) => new Date(m.datetime) < now);
 
   async function handleCreate(formData: FormData) {
-    setAddLoading(true);
-    try {
-      const result = await createMeetingAction(teamId, formData);
-      if (result.success) {
-        setAddOpen(false);
-      }
-    } finally {
-      setAddLoading(false);
-    }
+    await submitMeeting(() => createMeetingAction(teamId, formData));
   }
 
   return (
@@ -89,7 +86,7 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Meetings</h2>
         {canWrite && (
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <Dialog open={addOpen} onOpenChange={onAddOpenChange}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="cursor-pointer">
                 <Plus className="mr-2 h-4 w-4" />
@@ -192,11 +189,16 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
                     />
                   </div>
                 </div>
+                {addError && (
+                  <p role="alert" className="text-destructive text-sm">
+                    {addError}
+                  </p>
+                )}
                 <DialogFooter>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setAddOpen(false)}
+                    onClick={() => onAddOpenChange(false)}
                     className="cursor-pointer"
                   >
                     Cancel
