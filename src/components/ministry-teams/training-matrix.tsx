@@ -52,7 +52,12 @@ interface TrainingMatrixProps {
    * program. The app passes a button that fires the mark-complete action;
    * omitting it renders an inert marker.
    */
-  incompleteCell?: (cell: { personId: string; programId: string }) => ReactNode;
+  incompleteCell?: (cell: {
+    personId: string;
+    personName: string;
+    programId: string;
+    programName: string;
+  }) => ReactNode;
 }
 
 /**
@@ -60,7 +65,7 @@ interface TrainingMatrixProps {
  * through `incompleteCell` draws the exact same glyph this file would.
  */
 export function TrainingMatrixIncompleteMarker() {
-  return <X className="text-muted-foreground/30 h-5 w-5" />;
+  return <X aria-hidden="true" className="text-muted-foreground/30 h-5 w-5" />;
 }
 
 export function TrainingMatrix({
@@ -73,10 +78,13 @@ export function TrainingMatrix({
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-muted/50 border-b">
-            <th className="px-4 py-3 text-left font-medium">Team Member</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">
+              Team Member
+            </th>
             {programs.map((program) => (
               <th
                 key={program.id}
+                scope="col"
                 className="px-3 py-3 text-center font-medium"
               >
                 <div className="flex flex-col items-center gap-1">
@@ -94,25 +102,37 @@ export function TrainingMatrix({
         <tbody>
           {matrix.map((row) => (
             <tr key={row.personId} className="border-b last:border-b-0">
-              <td className="px-4 py-3 font-medium">{row.personName}</td>
+              <th scope="row" className="px-4 py-3 text-left font-medium">
+                {row.personName}
+              </th>
               {programs.map((program) => {
                 const isComplete = row.completions[program.id];
                 return (
                   <td key={program.id} className="px-3 py-3 text-center">
                     {isComplete ? (
                       <div className="flex items-center justify-center">
-                        <Check className="h-5 w-5 text-green-500" />
+                        <Check
+                          aria-hidden="true"
+                          className="h-5 w-5 text-green-500"
+                        />
+                        <span className="sr-only">Complete</span>
                       </div>
                     ) : incompleteCell ? (
-                      incompleteCell({
-                        personId: row.personId,
-                        programId: program.id,
-                      })
+                      <>
+                        <span className="sr-only">Not complete</span>
+                        {incompleteCell({
+                          personId: row.personId,
+                          personName: row.personName,
+                          programId: program.id,
+                          programName: program.name,
+                        })}
+                      </>
                     ) : (
                       // Same box as the button the app injects, minus the
                       // affordances — so a read-only render sits identically.
                       <span className="inline-flex items-center justify-center rounded p-1">
                         <TrainingMatrixIncompleteMarker />
+                        <span className="sr-only">Not complete</span>
                       </span>
                     )}
                   </td>
