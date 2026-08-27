@@ -43,8 +43,10 @@ export default function PrivacyPage() {
         <h2>What we don&rsquo;t do</h2>
         <p>
           We don&rsquo;t sell your data. We don&rsquo;t hand it to advertisers
-          or data brokers, and we don&rsquo;t run ad tracking on this site. The
-          only cookie we set is the one that keeps you signed in.
+          or data brokers, and we don&rsquo;t run advertising or tracking
+          cookies on this site. We use cookies to keep you signed in, remember
+          whether your sidebar is open or closed, and briefly show a task-import
+          receipt.
         </p>
 
         <h2>Who can see your plant&rsquo;s data</h2>
