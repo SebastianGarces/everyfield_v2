@@ -31,6 +31,7 @@
 import {
   formatAssociationProvenance,
   formatLaunchCountdown,
+  formatPhase,
 } from "@/lib/oversight/presentation";
 import type { OversightPlantSummary } from "@/lib/oversight/types";
 import { cn } from "@/lib/utils";
@@ -38,12 +39,18 @@ import { cn } from "@/lib/utils";
 export function PlantFacts({
   plant,
   className,
+  includePhase = false,
 }: {
   plant: OversightPlantSummary;
   className?: string;
+  /** The directory's narrow layout labels all five comparison facts. */
+  includePhase?: boolean;
 }) {
   return (
     <dl className={cn("grid gap-x-8 gap-y-4 sm:grid-cols-2", className)}>
+      {includePhase ? (
+        <Fact label="Phase" value={formatPhase(plant.currentPhase)} />
+      ) : null}
       <Fact
         label="Planter"
         value={plant.planterName ?? "No planter assigned yet"}

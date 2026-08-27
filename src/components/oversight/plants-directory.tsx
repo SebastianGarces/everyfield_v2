@@ -34,8 +34,13 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { EmptyPortfolio } from "@/components/oversight/empty-portfolio";
 import { PlantFacts } from "@/components/oversight/plant-facts";
-import { formatPhase } from "@/lib/oversight/presentation";
+import {
+  formatAssociationProvenance,
+  formatLaunchCountdown,
+  formatPhase,
+} from "@/lib/oversight/presentation";
 import type { OversightPlantSummary } from "@/lib/oversight/types";
+import { cn } from "@/lib/utils";
 
 export function PlantsDirectory({
   plants,
@@ -81,11 +86,14 @@ export function PlantsDirectory({
           <EmptyPortfolio scopeLabel={scopeLabel} canInvite={canInvite} />
         </div>
       ) : (
-        <ul className="grid gap-4">
-          {plants.map((plant) => (
-            <PlantRow key={plant.churchId} plant={plant} />
-          ))}
-        </ul>
+        <>
+          <PlantsComparisonTable plants={plants} />
+          <ul className="grid gap-4 lg:hidden">
+            {plants.map((plant) => (
+              <PlantRow key={plant.churchId} plant={plant} />
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
@@ -94,39 +102,145 @@ export function PlantsDirectory({
 function PlantRow({ plant }: { plant: OversightPlantSummary }) {
   return (
     <li className="bg-card hover:border-foreground/20 relative space-y-4 rounded-xl border p-5 shadow-sm transition-[border-color,box-shadow] hover:shadow-md">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <dl className="space-y-1">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-xl font-semibold tracking-tight">
-            <Link
-              href={`/oversight/plants/${plant.churchId}`}
-              className="cursor-pointer after:absolute after:inset-0 after:content-['']"
-            >
-              {plant.name}
-            </Link>
-          </h2>
-          {/*
-            An unset location renders NOTHING here rather than "Location not
-            set". Repeated verbatim down every row, that line carried no
-            information and competed with the plant's own name for the eye. The
-            detail page still states it outright — there it is a fact about the
-            one plant you are reading, not noise multiplied by the row count.
-          */}
-          {plant.location ? (
-            <p className="text-muted-foreground text-sm">{plant.location}</p>
-          ) : null}
+          <dt className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Plant
+          </dt>
+          <dd>
+            <h2 className="text-xl font-semibold tracking-tight">
+              <Link
+                href={`/oversight/plants/${plant.churchId}`}
+                className="cursor-pointer after:absolute after:inset-0 after:content-['']"
+              >
+                {plant.name}
+              </Link>
+            </h2>
+            {/*
+              An unset location renders NOTHING here rather than "Location not
+              set". Repeated verbatim down every row, that line carried no
+              information and competed with the plant's own name for the eye.
+              The detail page still states it outright — there it is a fact
+              about the one plant you are reading, not noise multiplied by the
+              row count.
+            */}
+            {plant.location ? (
+              <p className="text-muted-foreground mt-1 text-sm">
+                {plant.location}
+              </p>
+            ) : null}
+          </dd>
         </div>
-        {/*
-          Filled, not outlined. Phase is the one attribute an admin compares
-          straight down the list, so it holds a fixed trailing position and
-          needs enough weight to be found there — an outline chip on a white
-          card had neither containment nor presence.
-        */}
-        <Badge variant="secondary" className="shrink-0 font-medium">
+      </dl>
+
+      <PlantFacts plant={plant} includePhase />
+    </li>
+  );
+}
+
+function PlantsComparisonTable({
+  plants,
+}: {
+  plants: OversightPlantSummary[];
+}) {
+  return (
+    <div className="hidden lg:block">
+      <table className="w-full table-fixed border-separate border-spacing-y-3 text-left">
+        <colgroup>
+          <col className="w-[19%]" />
+          <col className="w-[12%]" />
+          <col className="w-[17%]" />
+          <col className="w-[16%]" />
+          <col className="w-[36%]" />
+        </colgroup>
+        <thead>
+          <tr className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            <th scope="col" className="px-5 pb-1">
+              Plant
+            </th>
+            <th scope="col" className="px-5 pb-1">
+              Phase
+            </th>
+            <th scope="col" className="px-5 pb-1">
+              Planter
+            </th>
+            <th scope="col" className="px-5 pb-1">
+              Launch
+            </th>
+            <th scope="col" className="px-5 pb-1">
+              Association
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {plants.map((plant) => (
+            <ComparisonRow key={plant.churchId} plant={plant} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComparisonRow({ plant }: { plant: OversightPlantSummary }) {
+  return (
+    <tr className="group hover:[&>td]:border-foreground/20 [&>td]:bg-card [&>td]:border-y [&>td]:p-5 [&>td]:align-top [&>td]:shadow-sm">
+      <td className="rounded-l-xl border-l">
+        <h2 className="text-lg font-semibold tracking-tight">
+          <Link
+            href={`/oversight/plants/${plant.churchId}`}
+            className="hover:text-muted-foreground cursor-pointer transition-colors"
+          >
+            {plant.name}
+          </Link>
+        </h2>
+        {plant.location ? (
+          <p className="text-muted-foreground mt-1 text-sm">{plant.location}</p>
+        ) : null}
+      </td>
+      <td>
+        <Badge variant="secondary" className="font-medium">
           {formatPhase(plant.currentPhase)}
         </Badge>
-      </div>
+      </td>
+      <FactCell
+        value={plant.planterName ?? "No planter assigned yet"}
+        isMuted={plant.planterName === null}
+      />
+      <FactCell
+        value={formatLaunchCountdown(plant.daysUntilLaunch)}
+        isMuted={plant.daysUntilLaunch === null}
+        isNumeric
+      />
+      <FactCell
+        value={formatAssociationProvenance(plant.provenance)}
+        className="rounded-r-xl border-r"
+      />
+    </tr>
+  );
+}
 
-      <PlantFacts plant={plant} />
-    </li>
+function FactCell({
+  value,
+  isMuted = false,
+  isNumeric = false,
+  className,
+}: {
+  value: string;
+  isMuted?: boolean;
+  isNumeric?: boolean;
+  className?: string;
+}) {
+  return (
+    <td className={cn(isNumeric && "tabular-nums", className)}>
+      <span
+        className={cn(
+          "text-sm",
+          isMuted ? "text-muted-foreground" : "text-foreground font-medium"
+        )}
+      >
+        {value}
+      </span>
+    </td>
   );
 }
