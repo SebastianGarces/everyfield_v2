@@ -17,11 +17,15 @@ export interface InactivityThresholds {
 interface PipelineWrapperProps {
   data: PipelineData;
   inactivityThresholds?: InactivityThresholds;
+  now: Date;
+  timeZone: string;
 }
 
 export function PipelineWrapper({
   data,
   inactivityThresholds,
+  now,
+  timeZone,
 }: PipelineWrapperProps) {
   const router = useRouter();
   // The drag-and-drop board is the SECOND way a demotion happens (#470 Q2), and
@@ -72,6 +76,8 @@ export function PipelineWrapper({
         onStatusChange={handleStatusChange}
         onReorder={handleReorder}
         inactivityThresholds={inactivityThresholds}
+        now={now}
+        timeZone={timeZone}
       />
     </>
   );
