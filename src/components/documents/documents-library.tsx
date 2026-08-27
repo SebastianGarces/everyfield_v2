@@ -101,6 +101,88 @@ function FilterSelect({
   );
 }
 
+export function DocumentLibraryFilters({
+  search,
+  onSearchChange,
+  category,
+  onCategoryChange,
+  phase,
+  onPhaseChange,
+  format,
+  onFormatChange,
+  categories,
+  phases,
+  formats,
+}: {
+  search: string;
+  onSearchChange: (value: string) => void;
+  category: string;
+  onCategoryChange: (value: string) => void;
+  phase: string;
+  onPhaseChange: (value: string) => void;
+  format: string;
+  onFormatChange: (value: string) => void;
+  categories: DocumentCategory[];
+  phases: number[];
+  formats: DocumentFormat[];
+}) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="relative flex-1">
+        <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+        <Input
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search templates..."
+          className="pl-9"
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <FilterSelect
+          value={category}
+          onValueChange={onCategoryChange}
+          ariaLabel="Filter templates by category"
+          placeholder="Category"
+          allLabel="All categories"
+          widthClass="w-[160px]"
+          options={categories.map((c) => ({
+            value: c,
+            label: CATEGORY_LABELS[c],
+          }))}
+        />
+
+        {phases.length > 0 && (
+          <FilterSelect
+            value={phase}
+            onValueChange={onPhaseChange}
+            ariaLabel="Filter templates by phase"
+            placeholder="Phase"
+            allLabel="All phases"
+            widthClass="w-[130px]"
+            options={phases.map((p) => ({
+              value: String(p),
+              label: `Phase ${p}`,
+            }))}
+          />
+        )}
+
+        <FilterSelect
+          value={format}
+          onValueChange={onFormatChange}
+          ariaLabel="Filter templates by file format"
+          placeholder="Format"
+          allLabel="All formats"
+          widthClass="w-[120px]"
+          options={formats.map((f) => ({
+            value: f,
+            label: FORMAT_LABELS[f],
+          }))}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -204,59 +286,19 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
       )}
 
       {/* Filter bar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates..."
-            className="pl-9"
-          />
-        </div>
-        <div className="flex gap-2">
-          <FilterSelect
-            value={category}
-            onValueChange={setCategory}
-            ariaLabel="Filter templates by category"
-            placeholder="Category"
-            allLabel="All categories"
-            widthClass="w-[160px]"
-            options={categories.map((c) => ({
-              value: c,
-              label: CATEGORY_LABELS[c],
-            }))}
-          />
-
-          {phases.length > 0 && (
-            <FilterSelect
-              value={phase}
-              onValueChange={setPhase}
-              ariaLabel="Filter templates by phase"
-              placeholder="Phase"
-              allLabel="All phases"
-              widthClass="w-[130px]"
-              options={phases.map((p) => ({
-                value: String(p),
-                label: `Phase ${p}`,
-              }))}
-            />
-          )}
-
-          <FilterSelect
-            value={format}
-            onValueChange={setFormat}
-            ariaLabel="Filter templates by file format"
-            placeholder="Format"
-            allLabel="All formats"
-            widthClass="w-[120px]"
-            options={formats.map((f) => ({
-              value: f,
-              label: FORMAT_LABELS[f],
-            }))}
-          />
-        </div>
-      </div>
+      <DocumentLibraryFilters
+        search={search}
+        onSearchChange={setSearch}
+        category={category}
+        onCategoryChange={setCategory}
+        phase={phase}
+        onPhaseChange={setPhase}
+        format={format}
+        onFormatChange={setFormat}
+        categories={categories}
+        phases={phases}
+        formats={formats}
+      />
 
       {/* Results */}
       {groups.length === 0 ? (
