@@ -21,7 +21,7 @@ export const EVRY_PAGE_CONTEXT_KINDS = [
 export const evryPageContextSchema = z
   .object({
     kind: z.enum(EVRY_PAGE_CONTEXT_KINDS),
-    recordId: z.string().min(1),
+    recordId: z.string().min(1).max(160),
   })
   .strict();
 

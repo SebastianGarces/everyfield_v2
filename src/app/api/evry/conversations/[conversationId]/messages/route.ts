@@ -1,0 +1,109 @@
+import { z } from "zod";
+
+import {
+  EvryConversationIdempotencyError,
+  EvryConversationStateConflictError,
+} from "@/lib/evry/conversations/repository";
+import { continueEvryConversation } from "@/lib/evry/conversations/service";
+import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
+import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
+
+import {
+  evryConversationFailure,
+  evryConversationJson,
+  publicEvryConversation,
+} from "../../shared";
+
+export const dynamic = "force-dynamic";
+
+const routeParamsSchema = z.strictObject({
+  conversationId: z.string().uuid(),
+});
+const continueConversationBodySchema = z
+  .object({
+    requestKey: z.string().uuid(),
+    message: z.string().min(1).max(8_000),
+    pageContext: evryPageContextSchema.nullable().optional(),
+  })
+  .strict();
+type RouteContext = Readonly<{
+  params: Promise<{ conversationId: string }>;
+}>;
+
+export type EvryConversationMessagePostOptions = Readonly<{
+  continueConversation?: typeof continueEvryConversation;
+  now?: () => Date;
+}>;
+
+/** Persist and compile one authenticated continuation without running a model. */
+export function createEvryConversationMessagePost({
+  continueConversation = continueEvryConversation,
+  now = () => new Date(),
+}: EvryConversationMessagePostOptions = {}): (
+  request: Request,
+  context: RouteContext
+) => Promise<Response> {
+  return async function evryConversationMessagePost(request, context) {
+    try {
+      // FIRST. Both path identity and literal message bytes remain unread until
+      // a fresh session-backed plant actor exists.
+      const actor = await requireEvryPlantViewer();
+      const params = routeParamsSchema.safeParse(await context.params);
+      if (!params.success) {
+        return evryConversationJson({ status: "invalid" }, 400);
+      }
+
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return evryConversationJson({ status: "invalid" }, 400);
+      }
+      const parsed = continueConversationBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return evryConversationJson({ status: "invalid" }, 400);
+      }
+
+      const result = await continueConversation({
+        actor,
+        conversationId: params.data.conversationId,
+        requestKey: parsed.data.requestKey,
+        message: parsed.data.message,
+        pageContext: parsed.data.pageContext ?? null,
+        now: now(),
+      });
+      if (!result) {
+        return evryConversationJson({ status: "unavailable" }, 404);
+      }
+
+      return evryConversationJson({
+        status: result.status,
+        conversation: publicEvryConversation(result.resumed),
+        reference:
+          result.reference.status === "not_applicable"
+            ? { status: "not_applicable" }
+            : result.reference.status === "resolved"
+              ? {
+                  status: "resolved",
+                  entityType: result.reference.reference.entityType,
+                  entityId: result.reference.reference.entityId,
+                }
+              : {
+                  status: "clarification",
+                  reason: result.reference.reason,
+                  artifact: result.reference.artifact,
+                },
+      });
+    } catch (error) {
+      if (
+        error instanceof EvryConversationStateConflictError ||
+        error instanceof EvryConversationIdempotencyError
+      ) {
+        return evryConversationJson({ status: "stale" }, 409);
+      }
+      return evryConversationFailure(error);
+    }
+  };
+}
+
+export const POST = createEvryConversationMessagePost();
