@@ -4,6 +4,8 @@ import test from "node:test";
 import type { LanguageModelUsage } from "ai";
 
 import type { EvryNormalizedUsage } from "@/lib/evry/observability/contract";
+import { evryLocalEvalObservationForSpan } from "@/lib/evry/observability/langfuse";
+import { EVRY_POLICY_SYSTEM_PROMPT } from "@/lib/evry/policy/prompt";
 
 import {
   assertEvryBenchmarkRemainingBudget,
@@ -174,13 +176,14 @@ test("Langfuse policy traces retain production refusal semantics", () => {
     "runtime semantics come from actual output, not benchmark grading"
   );
 
+  const wrongAllowanceResult: EvryPolicyBenchmarkCaseResult = {
+    ...caseResult({ classification: "application_read" }),
+    expected: { classification: "unrelated" },
+    passed: false,
+  };
   const wrongAllowance = evryBenchmarkTraceDocument({
     environment: "local-eval",
-    result: {
-      ...caseResult({ classification: "application_read" }),
-      expected: { classification: "unrelated" },
-      passed: false,
-    },
+    result: wrongAllowanceResult,
     startedAt,
     endedAt,
   });
@@ -188,10 +191,31 @@ test("Langfuse policy traces retain production refusal semantics", () => {
     wrongAllowance.spans.find(({ stage }) => stage === "policy")?.resultCode,
     "policy_allowed"
   );
-  assert.match(
-    wrongAllowance.spans.find(({ stage }) => stage === "reporting")?.observation
-      ?.output ?? "",
-    /"passed":false/
+  const reporting = wrongAllowance.spans.find(
+    ({ stage }) => stage === "reporting"
+  );
+  assert.ok(reporting);
+  assert.deepEqual(
+    evryLocalEvalObservationForSpan(
+      {
+        kind: "policy-benchmark",
+        fixtureId: wrongAllowanceResult.fixtureId,
+        systemPrompt: EVRY_POLICY_SYSTEM_PROMPT,
+        request: wrongAllowanceResult.request,
+        expected: wrongAllowanceResult.expected,
+        actual: wrongAllowanceResult.actual,
+        structuredOutput: wrongAllowanceResult.structuredOutput,
+        passed: wrongAllowanceResult.passed,
+        errorCode: wrongAllowanceResult.errorCode,
+      },
+      reporting
+    ).output,
+    {
+      expected: { classification: "unrelated" },
+      actual: { classification: "application_read" },
+      passed: false,
+      errorCode: null,
+    }
   );
 });
 
@@ -204,7 +228,7 @@ test("Langfuse plan traces expose the model output and compiled plan result", ()
       meetingId: FIXTURE_RECIPE_VALUES.meeting_id,
       startsAt: FIXTURE_RECIPE_VALUES.starts_at,
       audience: FIXTURE_RECIPE_VALUES.person_ids,
-      recipientIds: [FIXTURE_RECIPE_VALUES.recipient_ids[0]],
+      recipientId: FIXTURE_RECIPE_VALUES.recipient_ids[0],
       subject: FIXTURE_RECIPE_VALUES.subject,
       body: FIXTURE_RECIPE_VALUES.body,
     },
@@ -227,5 +251,33 @@ test("Langfuse plan traces expose the model output and compiled plan result", ()
   assert.equal(trace.recipeIdentity, RECIPE_IDENTITY);
   const planning = trace.spans.find(({ stage }) => stage === "planning");
   assert.equal(planning?.details.kind, "generation");
-  assert.match(planning?.observation?.output ?? "", /"steps":3/);
+  assert.ok(planning);
+  assert.deepEqual(
+    evryLocalEvalObservationForSpan(
+      {
+        kind: "plan-benchmark",
+        probeId: result.probeId,
+        systemPrompt: "fixture system prompt",
+        request: "fixture request",
+        expectedRecipeIdentity: RECIPE_IDENTITY,
+        actual: result.actual,
+        structuredOutput: result.structuredOutput,
+        passed: result.passed,
+        planSteps: result.planSteps,
+        confirmationArtifactLatencyMs: result.confirmationArtifactLatencyMs,
+        errorCode: result.errorCode,
+      },
+      planning
+    ).output,
+    {
+      actual: result.actual,
+      structuredOutput: true,
+      compiledPlan: {
+        passed: true,
+        steps: 3,
+        confirmationArtifactLatencyMs: 2,
+      },
+      errorCode: null,
+    }
+  );
 });

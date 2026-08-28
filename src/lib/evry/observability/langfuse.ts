@@ -4,6 +4,7 @@ import {
   type ObservationLevel,
 } from "@langfuse/tracing";
 import { TraceFlags, type Span } from "@opentelemetry/api";
+import { z } from "zod";
 
 import {
   configuredLangfuseEnvironment,
@@ -18,6 +19,69 @@ import {
 } from "./contract";
 import { evryObservationName } from "./naming";
 import type { EvryTraceSink } from "./recorder";
+
+const localEvalDecisionSchema = z
+  .object({
+    classification: z.enum([
+      "application_read",
+      "application_action",
+      "settings",
+      "theology_or_spiritual_guidance",
+      "unrelated",
+      "mixed",
+      "ambiguous",
+    ]),
+    settingsSectionId: z.string().min(1).max(160).optional(),
+  })
+  .strict();
+const localEvalPlanOutputSchema = z
+  .object({
+    recipeIdentity: z.string().min(1).max(160),
+    meetingId: z.uuid(),
+    startsAt: z.iso.datetime({ offset: true }),
+    audience: z.string().min(1).max(500),
+    recipientId: z.uuid(),
+    subject: z.string().min(1).max(500),
+    body: z.string().min(1).max(2_000),
+  })
+  .strict();
+
+export const evryLocalEvalPayloadSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("policy-benchmark"),
+      fixtureId: z.string().min(1).max(160),
+      systemPrompt: z.string().min(1).max(10_000),
+      request: z.string().min(1).max(2_000),
+      expected: localEvalDecisionSchema,
+      actual: localEvalDecisionSchema.nullable(),
+      structuredOutput: z.boolean(),
+      passed: z.boolean(),
+      errorCode: z.literal("provider_or_shape_failure").nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("plan-benchmark"),
+      probeId: z.string().min(1).max(160),
+      systemPrompt: z.string().min(1).max(10_000),
+      request: z.string().min(1).max(10_000),
+      expectedRecipeIdentity: z.string().min(1).max(160),
+      actual: localEvalPlanOutputSchema.nullable(),
+      structuredOutput: z.boolean(),
+      passed: z.boolean(),
+      planSteps: z.number().int().min(0).max(100),
+      confirmationArtifactLatencyMs: z
+        .number()
+        .nonnegative()
+        .finite()
+        .nullable(),
+      errorCode: z.literal("provider_shape_or_compile_failure").nullable(),
+    })
+    .strict(),
+]);
+
+export type EvryLocalEvalPayload = z.infer<typeof evryLocalEvalPayloadSchema>;
 
 function levelFor(span: EvryTraceSpan): ObservationLevel {
   if (span.status === "failed") return "ERROR";
@@ -53,25 +117,88 @@ function metadataFor(trace: EvryTraceDocument, span: EvryTraceSpan) {
   });
 }
 
-function displayPayload(value: string | null | undefined): unknown {
-  if (value === null || value === undefined) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
+export function evryLocalEvalObservationForSpan(
+  unsafePayload: EvryLocalEvalPayload,
+  span: EvryTraceSpan
+): Readonly<{ input?: unknown; output?: unknown }> {
+  const payload = evryLocalEvalPayloadSchema.parse(unsafePayload);
+  if (payload.kind === "policy-benchmark") {
+    if (span.stage === "request") {
+      return {
+        input: {
+          fixtureId: payload.fixtureId,
+          systemPrompt: payload.systemPrompt,
+          request: payload.request,
+        },
+      };
+    }
+    if (span.stage === "policy") {
+      return {
+        input: { fixtureId: payload.fixtureId, request: payload.request },
+        output: {
+          actual: payload.actual,
+          structuredOutput: payload.structuredOutput,
+          errorCode: payload.errorCode,
+        },
+      };
+    }
+    if (span.stage === "reporting") {
+      return {
+        output: {
+          expected: payload.expected,
+          actual: payload.actual,
+          passed: payload.passed,
+          errorCode: payload.errorCode,
+        },
+      };
+    }
+    return {};
   }
-}
 
-function observationPayloadFor(span: EvryTraceSpan) {
-  return {
-    input: displayPayload(span.observation?.input),
-    output: displayPayload(span.observation?.output),
-  };
+  if (span.stage === "request") {
+    return {
+      input: {
+        probeId: payload.probeId,
+        systemPrompt: payload.systemPrompt,
+        request: payload.request,
+      },
+    };
+  }
+  if (span.stage === "planning") {
+    return {
+      input: { probeId: payload.probeId, request: payload.request },
+      output: {
+        actual: payload.actual,
+        structuredOutput: payload.structuredOutput,
+        compiledPlan: {
+          passed: payload.passed,
+          steps: payload.planSteps,
+          confirmationArtifactLatencyMs: payload.confirmationArtifactLatencyMs,
+        },
+        errorCode: payload.errorCode,
+      },
+    };
+  }
+  if (span.stage === "reporting") {
+    return {
+      output: {
+        probeId: payload.probeId,
+        expectedRecipeIdentity: payload.expectedRecipeIdentity,
+        actual: payload.actual,
+        passed: payload.passed,
+        planSteps: payload.planSteps,
+        confirmationArtifactLatencyMs: payload.confirmationArtifactLatencyMs,
+        errorCode: payload.errorCode,
+      },
+    };
+  }
+  return {};
 }
 
 async function captureLangfuseTrace(
   expectedEnvironment: string,
-  unsafeTrace: EvryTraceDocument
+  unsafeTrace: EvryTraceDocument,
+  localEvalPayload?: EvryLocalEvalPayload
 ): Promise<void> {
   const trace = parseEvryTraceDocument(unsafeTrace);
   if (trace.environment !== expectedEnvironment) {
@@ -113,7 +240,9 @@ async function captureLangfuseTrace(
         level: levelFor(requestSpan),
         statusMessage: requestSpan.resultCode,
         metadata: metadataFor(trace, requestSpan),
-        ...observationPayloadFor(requestSpan),
+        ...(localEvalPayload
+          ? evryLocalEvalObservationForSpan(localEvalPayload, requestSpan)
+          : {}),
       },
       {
         startTime: new Date(requestSpan.startedAt),
@@ -132,7 +261,9 @@ async function captureLangfuseTrace(
               level: levelFor(span),
               statusMessage: span.resultCode,
               metadata: metadataFor(trace, span),
-              ...observationPayloadFor(span),
+              ...(localEvalPayload
+                ? evryLocalEvalObservationForSpan(localEvalPayload, span)
+                : {}),
               model: span.details.usage.model,
               usageDetails: langfuseUsageDetails(span.details.usage),
               costDetails: { total: span.details.usage.costUsd },
@@ -160,7 +291,9 @@ async function captureLangfuseTrace(
               level: levelFor(span),
               statusMessage: span.resultCode,
               metadata: metadataFor(trace, span),
-              ...observationPayloadFor(span),
+              ...(localEvalPayload
+                ? evryLocalEvalObservationForSpan(localEvalPayload, span)
+                : {}),
             },
             {
               startTime: new Date(span.startedAt),
@@ -185,6 +318,14 @@ export type ConfiguredEvryLangfuseSink = Readonly<{
   sink: EvryTraceSink;
 }>;
 
+export type ConfiguredEvryLocalEvalLangfuseSink = Readonly<{
+  environment: "local-eval";
+  capture(
+    trace: EvryTraceDocument,
+    payload: EvryLocalEvalPayload
+  ): Promise<void>;
+}>;
+
 /** Returns null with absent or refused config and performs no network work. */
 export function createEvryLangfuseSink(): ConfiguredEvryLangfuseSink | null {
   const environment = configuredLangfuseEnvironment();
@@ -195,5 +336,21 @@ export function createEvryLangfuseSink(): ConfiguredEvryLangfuseSink | null {
       capture: (trace: EvryTraceDocument) =>
         captureLangfuseTrace(environment, trace),
     }),
+  });
+}
+
+/** Eval payloads are accepted only by the closed local-eval export boundary. */
+export function createEvryLocalEvalLangfuseSink(): ConfiguredEvryLocalEvalLangfuseSink | null {
+  const environment = configuredLangfuseEnvironment();
+  if (!environment) return null;
+  if (environment !== "local-eval") {
+    throw new Error("Evry benchmark observations require local-eval Langfuse");
+  }
+  return Object.freeze({
+    environment,
+    capture(trace: EvryTraceDocument, unsafePayload: EvryLocalEvalPayload) {
+      const payload = evryLocalEvalPayloadSchema.parse(unsafePayload);
+      return captureLangfuseTrace(environment, trace, payload);
+    },
   });
 }

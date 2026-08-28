@@ -21,7 +21,7 @@ Registered recipe: ${RECIPE_IDENTITY}
 Known meeting id: ${FIXTURE_RECIPE_VALUES.meeting_id}
 Known start: ${FIXTURE_RECIPE_VALUES.starts_at}
 Audience expression to resolve: ${FIXTURE_RECIPE_VALUES.person_ids}
-Known recipient ids: ${FIXTURE_RECIPE_VALUES.recipient_ids.join(", ")}
+Known recipient id: ${FIXTURE_RECIPE_VALUES.recipient_ids[0]}
 Subject: ${FIXTURE_RECIPE_VALUES.subject}
 Body: ${FIXTURE_RECIPE_VALUES.body}
 
@@ -33,7 +33,7 @@ export const evryPlanProbeProviderOutputSchema = z
     meetingId: z.literal(FIXTURE_RECIPE_VALUES.meeting_id),
     startsAt: z.literal(FIXTURE_RECIPE_VALUES.starts_at),
     audience: z.literal(FIXTURE_RECIPE_VALUES.person_ids),
-    recipientIds: z.tuple([z.literal(FIXTURE_RECIPE_VALUES.recipient_ids[0])]),
+    recipientId: z.literal(FIXTURE_RECIPE_VALUES.recipient_ids[0]),
     subject: z.literal(FIXTURE_RECIPE_VALUES.subject),
     body: z.literal(FIXTURE_RECIPE_VALUES.body),
   })
@@ -80,7 +80,7 @@ export async function compileEvryPlanProbe(
       meeting_id: output.meetingId,
       starts_at: output.startsAt,
       person_ids: output.audience,
-      recipient_ids: output.recipientIds,
+      recipient_ids: [output.recipientId],
       subject: output.subject,
       body: output.body,
     },

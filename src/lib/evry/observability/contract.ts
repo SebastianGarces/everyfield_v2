@@ -20,12 +20,6 @@ const safeIdentitySchema = z
   .regex(/^[a-z0-9][a-z0-9._:/-]*$/i);
 const instantSchema = z.iso.datetime({ offset: true });
 const tokenSchema = z.number().int().nonnegative().finite();
-const observationPayloadSchema = z
-  .object({
-    input: z.string().max(20_000).nullable(),
-    output: z.string().max(20_000).nullable(),
-  })
-  .strict();
 
 export const evryNormalizedUsageSchema = z
   .object({
@@ -95,7 +89,6 @@ export const evryTraceSpanFieldsSchema = z
       "reported",
     ]),
     capabilityIdentity: safeIdentitySchema.nullable(),
-    observation: observationPayloadSchema.optional(),
     details: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("operation") }).strict(),
       z

@@ -4,7 +4,10 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { Output, streamText, type LanguageModelUsage } from "ai";
 
 import type { EvryTraceDocument } from "@/lib/evry/observability/contract";
-import { createEvryLangfuseSink } from "@/lib/evry/observability/langfuse";
+import {
+  createEvryLocalEvalLangfuseSink,
+  type ConfiguredEvryLocalEvalLangfuseSink,
+} from "@/lib/evry/observability/langfuse";
 import { evryTraceIdForCorrelation } from "@/lib/evry/observability/recorder";
 import { normalizeEvryModelUsage } from "@/lib/evry/observability/usage";
 import type { EvryNormalizedUsage } from "@/lib/evry/observability/contract";
@@ -336,13 +339,6 @@ function policyTraceSemantics(result: EvryPolicyBenchmarkCaseResult): Readonly<{
   return { status: "refused", resultCode: "policy_refused" };
 }
 
-function observation(input: unknown, output: unknown) {
-  return Object.freeze({
-    input: input === null ? null : JSON.stringify(input),
-    output: output === null ? null : JSON.stringify(output),
-  });
-}
-
 export function evryBenchmarkTraceDocument(input: {
   environment: string;
   result: EvryPolicyBenchmarkCaseResult;
@@ -373,14 +369,6 @@ export function evryBenchmarkTraceDocument(input: {
         status: "succeeded",
         resultCode: "request_received",
         capabilityIdentity: null,
-        observation: observation(
-          {
-            fixtureId: input.result.fixtureId,
-            systemPrompt: EVRY_POLICY_SYSTEM_PROMPT,
-            request: input.result.request,
-          },
-          null
-        ),
         details: { kind: "operation" },
       },
       {
@@ -393,17 +381,6 @@ export function evryBenchmarkTraceDocument(input: {
         status: policy.status,
         resultCode: policy.resultCode,
         capabilityIdentity: null,
-        observation: observation(
-          {
-            fixtureId: input.result.fixtureId,
-            request: input.result.request,
-          },
-          {
-            actual: input.result.actual,
-            structuredOutput: input.result.structuredOutput,
-            errorCode: input.result.errorCode,
-          }
-        ),
         details: {
           kind: "generation",
           grouping: { kind: "request-policy" },
@@ -420,12 +397,6 @@ export function evryBenchmarkTraceDocument(input: {
         status: reportStatus,
         resultCode: input.result.passed ? "reported" : "request_failed",
         capabilityIdentity: null,
-        observation: observation(null, {
-          expected: input.result.expected,
-          actual: input.result.actual,
-          passed: input.result.passed,
-          errorCode: input.result.errorCode,
-        }),
         details: { kind: "operation" },
       },
     ],
@@ -433,18 +404,29 @@ export function evryBenchmarkTraceDocument(input: {
 }
 
 async function captureBenchmarkTrace(input: {
-  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
+  configuredSink: ConfiguredEvryLocalEvalLangfuseSink;
   result: EvryPolicyBenchmarkCaseResult;
   startedAt: Date;
   endedAt: Date;
 }): Promise<void> {
-  await input.configuredSink.sink.capture(
+  await input.configuredSink.capture(
     evryBenchmarkTraceDocument({
       environment: input.configuredSink.environment,
       result: input.result,
       startedAt: input.startedAt,
       endedAt: input.endedAt,
-    })
+    }),
+    {
+      kind: "policy-benchmark",
+      fixtureId: input.result.fixtureId,
+      systemPrompt: EVRY_POLICY_SYSTEM_PROMPT,
+      request: input.result.request,
+      expected: input.result.expected,
+      actual: input.result.actual,
+      structuredOutput: input.result.structuredOutput,
+      passed: input.result.passed,
+      errorCode: input.result.errorCode,
+    }
   );
 }
 
@@ -478,14 +460,6 @@ export function evryPlanBenchmarkTraceDocument(input: {
         status: "succeeded",
         resultCode: "request_received",
         capabilityIdentity: null,
-        observation: observation(
-          {
-            probeId: input.result.probeId,
-            systemPrompt: EVRY_PLAN_PROBE_SYSTEM_PROMPT,
-            request: EVRY_PLAN_PROBE_PROMPT,
-          },
-          null
-        ),
         details: { kind: "operation" },
       },
       {
@@ -510,22 +484,6 @@ export function evryPlanBenchmarkTraceDocument(input: {
         status,
         resultCode: input.result.passed ? "plan_proposed" : "request_failed",
         capabilityIdentity: null,
-        observation: observation(
-          {
-            probeId: input.result.probeId,
-            request: EVRY_PLAN_PROBE_PROMPT,
-          },
-          {
-            actual: input.result.actual,
-            compiledPlan: {
-              passed: input.result.passed,
-              steps: input.result.planSteps,
-              confirmationArtifactLatencyMs:
-                input.result.confirmationArtifactLatencyMs,
-            },
-            errorCode: input.result.errorCode,
-          }
-        ),
         details: {
           kind: "generation",
           grouping: {
@@ -545,16 +503,6 @@ export function evryPlanBenchmarkTraceDocument(input: {
         status,
         resultCode: input.result.passed ? "reported" : "request_failed",
         capabilityIdentity: null,
-        observation: observation(null, {
-          probeId: input.result.probeId,
-          expectedRecipeIdentity: EVRY_PLAN_PROBE_RECIPE_ID,
-          actual: input.result.actual,
-          passed: input.result.passed,
-          planSteps: input.result.planSteps,
-          confirmationArtifactLatencyMs:
-            input.result.confirmationArtifactLatencyMs,
-          errorCode: input.result.errorCode,
-        }),
         details: { kind: "operation" },
       },
     ],
@@ -562,18 +510,31 @@ export function evryPlanBenchmarkTraceDocument(input: {
 }
 
 async function capturePlanBenchmarkTrace(input: {
-  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
+  configuredSink: ConfiguredEvryLocalEvalLangfuseSink;
   result: EvryPlanBenchmarkCaseResult;
   startedAt: Date;
   endedAt: Date;
 }): Promise<void> {
-  await input.configuredSink.sink.capture(
+  await input.configuredSink.capture(
     evryPlanBenchmarkTraceDocument({
       environment: input.configuredSink.environment,
       result: input.result,
       startedAt: input.startedAt,
       endedAt: input.endedAt,
-    })
+    }),
+    {
+      kind: "plan-benchmark",
+      probeId: input.result.probeId,
+      systemPrompt: EVRY_PLAN_PROBE_SYSTEM_PROMPT,
+      request: EVRY_PLAN_PROBE_PROMPT,
+      expectedRecipeIdentity: EVRY_PLAN_PROBE_RECIPE_ID,
+      actual: input.result.actual,
+      structuredOutput: input.result.structuredOutput,
+      passed: input.result.passed,
+      planSteps: input.result.planSteps,
+      confirmationArtifactLatencyMs: input.result.confirmationArtifactLatencyMs,
+      errorCode: input.result.errorCode,
+    }
   );
 }
 
@@ -743,7 +704,7 @@ async function runPolicyCase(input: {
   apiKey: string;
   candidate: EvryModelCandidate;
   fixture: (typeof EVRY_POLICY_EVAL_FIXTURES)[number];
-  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
+  configuredSink: ConfiguredEvryLocalEvalLangfuseSink;
 }): Promise<EvryPolicyBenchmarkCaseResult> {
   const startedAt = new Date();
   const started = performance.now();
@@ -862,7 +823,7 @@ async function runPolicyCase(input: {
 async function runPlanCase(input: {
   apiKey: string;
   candidate: EvryModelCandidate;
-  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
+  configuredSink: ConfiguredEvryLocalEvalLangfuseSink;
 }): Promise<EvryPlanBenchmarkCaseResult> {
   const startedAt = new Date();
   const started = performance.now();
@@ -1124,7 +1085,7 @@ export async function runEvryModelBenchmark(input: {
     result: EvryPolicyBenchmarkCaseResult | EvryPlanBenchmarkCaseResult;
   }) => void;
 }): Promise<EvryModelBenchmarkReport> {
-  const configuredSink = createEvryLangfuseSink();
+  const configuredSink = createEvryLocalEvalLangfuseSink();
   if (!configuredSink) {
     throw new Error("Langfuse must be configured before a live benchmark");
   }
