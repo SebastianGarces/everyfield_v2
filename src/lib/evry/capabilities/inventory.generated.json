@@ -1,0 +1,2529 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:inventory",
+  "authoritativeSources": {
+    "routes": "src/app/**/page.tsx",
+    "guardedActions": "src/lib/auth/capability-map.ts",
+    "exemptActions": "src/lib/auth/seat-rules.ts#UNSEATED_EXPORTS"
+  },
+  "registries": {
+    "plantNavigation": [
+      "/communication",
+      "/dashboard",
+      "/documents",
+      "/launch",
+      "/meetings",
+      "/people",
+      "/phase",
+      "/tasks",
+      "/teams",
+      "/wiki"
+    ],
+    "settingsSections": [
+      {
+        "id": "account",
+        "label": "Account",
+        "keywords": ["email", "name", "password", "photo", "profile", "sign in"]
+      },
+      {
+        "id": "association",
+        "label": "Association",
+        "keywords": ["invitation", "join", "leave", "network", "sending church"]
+      },
+      {
+        "id": "church",
+        "label": "Church",
+        "keywords": [
+          "address",
+          "city",
+          "clock",
+          "consent",
+          "country",
+          "digest",
+          "inactive",
+          "inactivity",
+          "location",
+          "name",
+          "network",
+          "oversight",
+          "privacy",
+          "quiet",
+          "region",
+          "schedule",
+          "sending church",
+          "sharing",
+          "state",
+          "street",
+          "time zone",
+          "timezone",
+          "weekday"
+        ]
+      },
+      {
+        "id": "notifications",
+        "label": "Notifications",
+        "keywords": ["digest", "email", "in-app", "preferences", "unsubscribe"]
+      },
+      {
+        "id": "team",
+        "label": "Team",
+        "keywords": ["admin", "coach", "invite", "remove", "roster", "seats"]
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "id": "boundary.coaching",
+      "classification": { "state": "excluded", "reason": "coaching" }
+    },
+    {
+      "id": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "id": "boundary.platform-admin",
+      "classification": {
+        "state": "unreachable",
+        "reason": "platform_admin_only"
+      }
+    },
+    {
+      "id": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "id": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "id": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    { "id": "communication", "classification": { "state": "supported" } },
+    { "id": "dashboard", "classification": { "state": "supported" } },
+    { "id": "documents-and-files", "classification": { "state": "supported" } },
+    { "id": "launch", "classification": { "state": "supported" } },
+    { "id": "meetings", "classification": { "state": "supported" } },
+    { "id": "notifications", "classification": { "state": "supported" } },
+    { "id": "people", "classification": { "state": "supported" } },
+    { "id": "plant-intelligence", "classification": { "state": "supported" } },
+    { "id": "product-feedback", "classification": { "state": "supported" } },
+    { "id": "tasks", "classification": { "state": "supported" } },
+    { "id": "teams", "classification": { "state": "supported" } },
+    { "id": "wiki", "classification": { "state": "supported" } }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(auth)/coach-invitation/actions.ts → acceptCoachInvitationAction",
+      "source": "src/app/(auth)/coach-invitation/actions.ts",
+      "exportName": "acceptCoachInvitationAction",
+      "applicationCapability": "coach.invitation.answer",
+      "exemption": null,
+      "parityCapability": "boundary.coaching",
+      "classification": { "state": "excluded", "reason": "coaching" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(auth)/login/actions.ts → login",
+      "source": "src/app/(auth)/login/actions.ts",
+      "exportName": "login",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "signing in — there is no session to check yet"
+      },
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(auth)/login/dev-actions.ts → devLoginAs",
+      "source": "src/app/(auth)/login/dev-actions.ts",
+      "exportName": "devLoginAs",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "the development sign-in shortcut, refused outright unless the dev flag is on"
+      },
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(auth)/register/actions.ts → register",
+      "source": "src/app/(auth)/register/actions.ts",
+      "exportName": "register",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "creating the account — this is where the first seat is granted"
+      },
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/admin/feedback/actions.ts → updateFeedbackStatusAction",
+      "source": "src/app/(dashboard)/admin/feedback/actions.ts",
+      "exportName": "updateFeedbackStatusAction",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "guarded by requirePlatformAdmin — an allowlist of platform operators, which demands a session but is not a seat in any tenancy"
+      },
+      "parityCapability": "boundary.platform-admin",
+      "classification": {
+        "state": "unreachable",
+        "reason": "platform_admin_only"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → createTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "createTemplateAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → deleteTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "deleteTemplateAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → forkTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "forkTemplateAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → getTemplatesAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "getTemplatesAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → resendToNonOpenersAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "resendToNonOpenersAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → resolveGroupAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "resolveGroupAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → searchPeopleAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "searchPeopleAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "sendMessageAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → updateTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "updateTemplateAction",
+      "applicationCapability": "communication.send",
+      "exemption": null,
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → completeOnboarding",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "completeOnboarding",
+      "applicationCapability": "church.create",
+      "exemption": null,
+      "parityCapability": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → confirmLeadership",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "confirmLeadership",
+      "applicationCapability": "church.claim",
+      "exemption": null,
+      "parityCapability": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → createChurchBasics",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "createChurchBasics",
+      "applicationCapability": "church.create",
+      "exemption": null,
+      "parityCapability": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/dashboard/actions.ts → declareJourney",
+      "source": "src/app/(dashboard)/dashboard/actions.ts",
+      "exportName": "declareJourney",
+      "applicationCapability": "church.create",
+      "exemption": null,
+      "parityCapability": "boundary.pre-tenancy-onboarding",
+      "classification": {
+        "state": "excluded",
+        "reason": "pre_tenancy_onboarding"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/documents/actions.ts → getGeneratedDocumentDownloadUrlAction",
+      "source": "src/app/(dashboard)/documents/actions.ts",
+      "exportName": "getGeneratedDocumentDownloadUrlAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/feedback/actions.ts → submitFeedbackAction",
+      "source": "src/app/(dashboard)/feedback/actions.ts",
+      "exportName": "submitFeedbackAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "product-feedback",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → completeMilestoneAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "completeMilestoneAction",
+      "applicationCapability": "launch.milestone",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → recordLaunchOutcomeAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "recordLaunchOutcomeAction",
+      "applicationCapability": "launch.schedule",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → reopenMilestoneAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "reopenMilestoneAction",
+      "applicationCapability": "launch.milestone",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "scheduleLaunchAction",
+      "applicationCapability": "launch.schedule",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → setLaunchTaskCompleteAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "setLaunchTaskCompleteAction",
+      "applicationCapability": "launch.milestone",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/launch/actions.ts → updateLaunchOutcomeAction",
+      "source": "src/app/(dashboard)/launch/actions.ts",
+      "exportName": "updateLaunchOutcomeAction",
+      "applicationCapability": "launch.schedule",
+      "exemption": null,
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "addAttendeeAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addAttendeeNoteAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "addAttendeeNoteAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "addToGuestListAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → addWalkInAttendeeAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "addWalkInAttendeeAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → clearResponseCardAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "clearResponseCardAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createEvaluationAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "createEvaluationAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createLocationAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "createLocationAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "createMeetingAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → deleteMeetingAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "deleteMeetingAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → finalizeAttendanceAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "finalizeAttendanceAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "quickAddAttendeeAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddPersonToGuestListAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "quickAddPersonToGuestListAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → quickAddWalkInAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "quickAddWalkInAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "recordAttendanceBatchAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → recordResponseCardAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "recordResponseCardAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → removeAttendeeAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "removeAttendeeAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → removeFromGuestListAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "removeFromGuestListAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → saveAgendaAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "saveAgendaAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → toggleAttendanceStatusAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "toggleAttendanceStatusAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → toggleChecklistItemAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "toggleChecklistItemAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "updateChecklistItemAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateLocationAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "updateLocationAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "updateMeetingAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateMeetingStatusAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "updateMeetingStatusAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/meetings/actions.ts → updateRsvpStatusAction",
+      "source": "src/app/(dashboard)/meetings/actions.ts",
+      "exportName": "updateRsvpStatusAction",
+      "applicationCapability": "meetings.write",
+      "exemption": null,
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → loadMoreNotificationsAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "loadMoreNotificationsAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "notifications",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → markAllNotificationsReadAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "markAllNotificationsReadAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "notifications",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/notifications/actions.ts → markNotificationReadAction",
+      "source": "src/app/(dashboard)/notifications/actions.ts",
+      "exportName": "markNotificationReadAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "notifications",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/oversight/invitations/actions.ts → createInvitationAction",
+      "source": "src/app/(dashboard)/oversight/invitations/actions.ts",
+      "exportName": "createInvitationAction",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/oversight/invitations/actions.ts → resendInvitationEmailAction",
+      "source": "src/app/(dashboard)/oversight/invitations/actions.ts",
+      "exportName": "resendInvitationEmailAction",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/oversight/invitations/actions.ts → revokeInvitationAction",
+      "source": "src/app/(dashboard)/oversight/invitations/actions.ts",
+      "exportName": "revokeInvitationAction",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/oversight/plants/[id]/actions.ts → removePlantFromOrg",
+      "source": "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
+      "exportName": "removePlantFromOrg",
+      "applicationCapability": "org.association.sever",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → changeStatusAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "changeStatusAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → changeStatusWithReasonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "changeStatusWithReasonAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → checkForDuplicatesAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "checkForDuplicatesAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → createPersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "createPersonAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → deletePersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "deletePersonAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "loadMorePeopleAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → quickAddPersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "quickAddPersonAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → removePersonPhotoAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "removePersonPhotoAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → updatePersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "updatePersonAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → uploadPersonPhotoAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "uploadPersonPhotoAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → addNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "addNoteAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → deleteNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "deleteNoteAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → editNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "editNoteAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → getMoreActivitiesAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "getMoreActivitiesAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createAssessmentAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createAssessmentAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createCommitmentAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createCommitmentAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createInterviewAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createInterviewAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → getCommitmentDownloadUrlAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "getCommitmentDownloadUrlAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → addToHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "addToHouseholdAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → createHouseholdWithHeadAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "createHouseholdWithHeadAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → deleteHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "deleteHouseholdAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → getHouseholdMembersAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "getHouseholdMembersAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → listHouseholdsAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "listHouseholdsAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → propagateAddressAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "propagateAddressAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → removeFromHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "removeFromHouseholdAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → updateHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "updateHouseholdAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "downloadCsvTemplateAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "executeBulkImportAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "exportPeopleAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "previewImportAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/pipeline-actions.ts → reorderPipelineAction",
+      "source": "src/app/(dashboard)/people/pipeline-actions.ts",
+      "exportName": "reorderPipelineAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → addSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "addSkillAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → getPersonSkillsAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "getPersonSkillsAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → removeSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "removeSkillAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → updateSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "updateSkillAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → assignTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "assignTagAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → createTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "createTagAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → deleteTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "deleteTagAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → listTagsAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "listTagsAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → removeTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "removeTagAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → updateTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "updateTagAction",
+      "applicationCapability": "people.write",
+      "exemption": null,
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/actions.ts → transitionPhaseAction",
+      "source": "src/app/(dashboard)/phase/actions.ts",
+      "exportName": "transitionPhaseAction",
+      "applicationCapability": "phase.declare",
+      "exemption": null,
+      "parityCapability": "plant-intelligence",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/checkin-actions.ts → saveCheckinAction",
+      "source": "src/app/(dashboard)/phase/checkin-actions.ts",
+      "exportName": "saveCheckinAction",
+      "applicationCapability": "phase.signal",
+      "exemption": null,
+      "parityCapability": "plant-intelligence",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction",
+      "source": "src/app/(dashboard)/phase/feedback-actions.ts",
+      "exportName": "submitInsightFeedbackAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "plant-intelligence",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction",
+      "source": "src/app/(dashboard)/phase/signals-actions.ts",
+      "exportName": "setManualSignalAction",
+      "applicationCapability": "phase.signal",
+      "exemption": null,
+      "parityCapability": "plant-intelligence",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/account/actions.ts → changePasswordAction",
+      "source": "src/app/(dashboard)/settings/account/actions.ts",
+      "exportName": "changePasswordAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/account/actions.ts → confirmEmailChangeAction",
+      "source": "src/app/(dashboard)/settings/account/actions.ts",
+      "exportName": "confirmEmailChangeAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/account/actions.ts → removeAvatarAction",
+      "source": "src/app/(dashboard)/settings/account/actions.ts",
+      "exportName": "removeAvatarAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/account/actions.ts → requestEmailChangeAction",
+      "source": "src/app/(dashboard)/settings/account/actions.ts",
+      "exportName": "requestEmailChangeAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/account/actions.ts → uploadAvatarAction",
+      "source": "src/app/(dashboard)/settings/account/actions.ts",
+      "exportName": "uploadAvatarAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → clearMyEmailSuppressionAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "clearMyEmailSuppressionAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setChurchDigestScheduleAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setChurchDigestScheduleAction",
+      "applicationCapability": "church.profile",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setChurchInactivityThresholdsAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setChurchInactivityThresholdsAction",
+      "applicationCapability": "church.profile",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setChurchProfileFieldAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setChurchProfileFieldAction",
+      "applicationCapability": "church.profile",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setChurchTimeZoneAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setChurchTimeZoneAction",
+      "applicationCapability": "church.profile",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setDigestCadenceAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setDigestCadenceAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setNotificationPreferenceAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setNotificationPreferenceAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/actions.ts → setSharingToggleAction",
+      "source": "src/app/(dashboard)/settings/actions.ts",
+      "exportName": "setSharingToggleAction",
+      "applicationCapability": "sharing.toggle",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/association/actions.ts → acceptAssociationInvitation",
+      "source": "src/app/(dashboard)/settings/association/actions.ts",
+      "exportName": "acceptAssociationInvitation",
+      "applicationCapability": "association.answer",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/association/actions.ts → declineAssociationInvitation",
+      "source": "src/app/(dashboard)/settings/association/actions.ts",
+      "exportName": "declineAssociationInvitation",
+      "applicationCapability": "association.answer",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/association/actions.ts → leaveNetwork",
+      "source": "src/app/(dashboard)/settings/association/actions.ts",
+      "exportName": "leaveNetwork",
+      "applicationCapability": "org.association.leave",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/association/actions.ts → leaveOversightOrg",
+      "source": "src/app/(dashboard)/settings/association/actions.ts",
+      "exportName": "leaveOversightOrg",
+      "applicationCapability": "association.leave",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → appointAdminAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "appointAdminAction",
+      "applicationCapability": "seat.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → createCoachInvitationAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "createCoachInvitationAction",
+      "applicationCapability": "coach.assignment.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → createSeatInvitationAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "createSeatInvitationAction",
+      "applicationCapability": "seat.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → demoteToMemberAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "demoteToMemberAction",
+      "applicationCapability": "seat.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → endCoachAssignmentAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "endCoachAssignmentAction",
+      "applicationCapability": "coach.assignment.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → removeSeatAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "removeSeatAction",
+      "applicationCapability": "seat.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → resendSeatInvitationEmailAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "resendSeatInvitationEmailAction",
+      "applicationCapability": "seat.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/settings/team/actions.ts → revokeSeatInvitationAction",
+      "source": "src/app/(dashboard)/settings/team/actions.ts",
+      "exportName": "revokeSeatInvitationAction",
+      "applicationCapability": "seat.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "addSubtaskAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "bulkCompleteTasksAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "bulkRescheduleTasksAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "completeTaskAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → createTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "createTaskAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → deleteTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "deleteTaskAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → importTaskTemplateAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "importTaskTemplateAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "loadMoreTasksAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "quickAddTaskAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → reopenTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "reopenTaskAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → setSubtaskCompletionAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "setSubtaskCompletionAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → updateTaskAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "updateTaskAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/actions.ts → updateTaskStatusAction",
+      "source": "src/app/(dashboard)/tasks/actions.ts",
+      "exportName": "updateTaskStatusAction",
+      "applicationCapability": "tasks.own",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → assignFollowUpAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "assignFollowUpAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → createAndAssignFollowUpAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "createAndAssignFollowUpAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/follow-up-actions.ts → handOffFollowUpsAction",
+      "source": "src/app/(dashboard)/tasks/follow-up-actions.ts",
+      "exportName": "handOffFollowUpsAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction",
+      "source": "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+      "exportName": "dismissPhaseTemplatePromptAction",
+      "applicationCapability": "phase.signal",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction",
+      "source": "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+      "exportName": "importPhaseTemplatesAction",
+      "applicationCapability": "tasks.write",
+      "exemption": null,
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → assignMemberAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "assignMemberAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → assignTeamLeaderAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "assignTeamLeaderAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createMeetingAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createMeetingAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createResponsibilityAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createRoleAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createTeamAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createTeamAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "createTrainingProgramAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "deleteResponsibilityAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → deleteRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "deleteRoleAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → importRoleTemplatesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "importRoleTemplatesAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "initializeTeamsAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → initializeTeamsWithRolesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "initializeTeamsWithRolesAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → listTeamsAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "listTeamsAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "markTrainingCompleteAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → removeMemberAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "removeMemberAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → searchTeamCandidatesAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "searchTeamCandidatesAction",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → setResponsibilityCompleteAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "setResponsibilityCompleteAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateResponsibilityAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateResponsibilityAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateRoleAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateRoleAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/teams/actions.ts → updateTeamAction",
+      "source": "src/app/(dashboard)/teams/actions.ts",
+      "exportName": "updateTeamAction",
+      "applicationCapability": "teams.write",
+      "exemption": null,
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/wiki/actions.ts → searchWikiArticles",
+      "source": "src/app/(dashboard)/wiki/actions.ts",
+      "exportName": "searchWikiArticles",
+      "applicationCapability": "read",
+      "exemption": null,
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/wiki/actions.ts → submitArticleFeedbackAction",
+      "source": "src/app/(dashboard)/wiki/actions.ts",
+      "exportName": "submitArticleFeedbackAction",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(marketing)/actions.ts → requestInviteAction",
+      "source": "src/app/(marketing)/actions.ts",
+      "exportName": "requestInviteAction",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "the public waitlist form on the marketing site"
+      },
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/unsubscribe/actions.ts → confirmUnsubscribeAction",
+      "source": "src/app/unsubscribe/actions.ts",
+      "exportName": "confirmUnsubscribeAction",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "authorised by the emailed unsubscribe token, which the recipient holds instead of a session"
+      },
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/unsubscribe/actions.ts → undoUnsubscribeAction",
+      "source": "src/app/unsubscribe/actions.ts",
+      "exportName": "undoUnsubscribeAction",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "sessionless",
+        "reason": "the same token, undoing the same change"
+      },
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/auth/actions.ts → logout",
+      "source": "src/lib/auth/actions.ts",
+      "exportName": "logout",
+      "applicationCapability": null,
+      "exemption": {
+        "kind": "non-seat-guard",
+        "reason": "it READS the session cookie and ends it; the operation must converge whether or not one is still valid, so there is nothing to refuse"
+      },
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/invitations/service.ts → acceptInvitation",
+      "source": "src/lib/invitations/service.ts",
+      "exportName": "acceptInvitation",
+      "applicationCapability": "association.answer",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/invitations/service.ts → createInvitation",
+      "source": "src/lib/invitations/service.ts",
+      "exportName": "createInvitation",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/invitations/service.ts → declineInvitation",
+      "source": "src/lib/invitations/service.ts",
+      "exportName": "declineInvitation",
+      "applicationCapability": "association.answer",
+      "exemption": null,
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/invitations/service.ts → resendInvitationEmail",
+      "source": "src/lib/invitations/service.ts",
+      "exportName": "resendInvitationEmail",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/invitations/service.ts → revokeInvitation",
+      "source": "src/lib/invitations/service.ts",
+      "exportName": "revokeInvitation",
+      "applicationCapability": "org.invitation.manage",
+      "exemption": null,
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/bookmarks.ts → toggleBookmark",
+      "source": "src/lib/wiki/bookmarks.ts",
+      "exportName": "toggleBookmark",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/progress.ts → recordView",
+      "source": "src/lib/wiki/progress.ts",
+      "exportName": "recordView",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/lib/wiki/progress.ts → updateProgress",
+      "source": "src/lib/wiki/progress.ts",
+      "exportName": "updateProgress",
+      "applicationCapability": "self.write",
+      "exemption": null,
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/",
+      "path": "/",
+      "sources": ["src/app/(marketing)/page.tsx"],
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/admin/feedback",
+      "path": "/admin/feedback",
+      "sources": ["src/app/(dashboard)/admin/feedback/page.tsx"],
+      "parityCapability": "boundary.platform-admin",
+      "classification": {
+        "state": "unreachable",
+        "reason": "platform_admin_only"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/coach-invitation",
+      "path": "/coach-invitation",
+      "sources": ["src/app/(auth)/coach-invitation/page.tsx"],
+      "parityCapability": "boundary.coaching",
+      "classification": { "state": "excluded", "reason": "coaching" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/coaching/[churchId]",
+      "path": "/coaching/[churchId]",
+      "sources": ["src/app/(dashboard)/coaching/[churchId]/page.tsx"],
+      "parityCapability": "boundary.coaching",
+      "classification": { "state": "excluded", "reason": "coaching" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication",
+      "path": "/communication",
+      "sources": ["src/app/(dashboard)/communication/page.tsx"],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/[id]",
+      "path": "/communication/[id]",
+      "sources": ["src/app/(dashboard)/communication/[id]/page.tsx"],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/compose",
+      "path": "/communication/compose",
+      "sources": ["src/app/(dashboard)/communication/compose/page.tsx"],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/history",
+      "path": "/communication/history",
+      "sources": ["src/app/(dashboard)/communication/history/page.tsx"],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/templates",
+      "path": "/communication/templates",
+      "sources": ["src/app/(dashboard)/communication/templates/page.tsx"],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/templates/[id]/edit",
+      "path": "/communication/templates/[id]/edit",
+      "sources": [
+        "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx"
+      ],
+      "parityCapability": "communication",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/dashboard",
+      "path": "/dashboard",
+      "sources": ["src/app/(dashboard)/dashboard/page.tsx"],
+      "parityCapability": "dashboard",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/documents",
+      "path": "/documents",
+      "sources": ["src/app/(dashboard)/documents/page.tsx"],
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/documents/history",
+      "path": "/documents/history",
+      "sources": ["src/app/(dashboard)/documents/history/page.tsx"],
+      "parityCapability": "documents-and-files",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/launch",
+      "path": "/launch",
+      "sources": ["src/app/(dashboard)/launch/page.tsx"],
+      "parityCapability": "launch",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/login",
+      "path": "/login",
+      "sources": ["src/app/(auth)/login/page.tsx"],
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings",
+      "path": "/meetings",
+      "sources": ["src/app/(dashboard)/meetings/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]",
+      "path": "/meetings/[id]",
+      "sources": ["src/app/(dashboard)/meetings/[id]/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/analytics",
+      "path": "/meetings/[id]/analytics",
+      "sources": ["src/app/(dashboard)/meetings/[id]/analytics/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/attendance",
+      "path": "/meetings/[id]/attendance",
+      "sources": ["src/app/(dashboard)/meetings/[id]/attendance/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/evaluation",
+      "path": "/meetings/[id]/evaluation",
+      "sources": ["src/app/(dashboard)/meetings/[id]/evaluation/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/invitations",
+      "path": "/meetings/[id]/invitations",
+      "sources": ["src/app/(dashboard)/meetings/[id]/invitations/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/logistics",
+      "path": "/meetings/[id]/logistics",
+      "sources": ["src/app/(dashboard)/meetings/[id]/logistics/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/[id]/outcomes",
+      "path": "/meetings/[id]/outcomes",
+      "sources": ["src/app/(dashboard)/meetings/[id]/outcomes/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/meetings/new",
+      "path": "/meetings/new",
+      "sources": ["src/app/(dashboard)/meetings/new/page.tsx"],
+      "parityCapability": "meetings",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/notifications",
+      "path": "/notifications",
+      "sources": ["src/app/(dashboard)/notifications/page.tsx"],
+      "parityCapability": "notifications",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight",
+      "path": "/oversight",
+      "sources": ["src/app/(dashboard)/oversight/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight/health",
+      "path": "/oversight/health",
+      "sources": ["src/app/(dashboard)/oversight/health/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight/invitations",
+      "path": "/oversight/invitations",
+      "sources": ["src/app/(dashboard)/oversight/invitations/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight/plants",
+      "path": "/oversight/plants",
+      "sources": ["src/app/(dashboard)/oversight/plants/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight/plants/[id]",
+      "path": "/oversight/plants/[id]",
+      "sources": ["src/app/(dashboard)/oversight/plants/[id]/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/oversight/sending-churches",
+      "path": "/oversight/sending-churches",
+      "sources": ["src/app/(dashboard)/oversight/sending-churches/page.tsx"],
+      "parityCapability": "boundary.oversight",
+      "classification": { "state": "excluded", "reason": "oversight" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people",
+      "path": "/people",
+      "sources": ["src/app/(dashboard)/people/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]",
+      "path": "/people/[id]",
+      "sources": ["src/app/(dashboard)/people/[id]/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/activity",
+      "path": "/people/[id]/activity",
+      "sources": ["src/app/(dashboard)/people/[id]/activity/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments",
+      "path": "/people/[id]/assessments",
+      "sources": ["src/app/(dashboard)/people/[id]/assessments/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/commitment",
+      "path": "/people/[id]/assessments/commitment",
+      "sources": [
+        "src/app/(dashboard)/people/[id]/assessments/commitment/page.tsx"
+      ],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/interview",
+      "path": "/people/[id]/assessments/interview",
+      "sources": [
+        "src/app/(dashboard)/people/[id]/assessments/interview/page.tsx"
+      ],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/new",
+      "path": "/people/[id]/assessments/new",
+      "sources": ["src/app/(dashboard)/people/[id]/assessments/new/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/communication",
+      "path": "/people/[id]/communication",
+      "sources": ["src/app/(dashboard)/people/[id]/communication/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/teams",
+      "path": "/people/[id]/teams",
+      "sources": ["src/app/(dashboard)/people/[id]/teams/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/new",
+      "path": "/people/new",
+      "sources": ["src/app/(dashboard)/people/new/page.tsx"],
+      "parityCapability": "people",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/phase",
+      "path": "/phase",
+      "sources": ["src/app/(dashboard)/phase/page.tsx"],
+      "parityCapability": "plant-intelligence",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/privacy",
+      "path": "/privacy",
+      "sources": ["src/app/(marketing)/privacy/page.tsx"],
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/register",
+      "path": "/register",
+      "sources": ["src/app/(auth)/register/page.tsx"],
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/rsvp/[token]",
+      "path": "/rsvp/[token]",
+      "sources": ["src/app/rsvp/[token]/page.tsx"],
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/settings",
+      "path": "/settings",
+      "sources": ["src/app/(dashboard)/settings/page.tsx"],
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/settings/[section]",
+      "path": "/settings/[section]",
+      "sources": ["src/app/(dashboard)/settings/[section]/page.tsx"],
+      "parityCapability": "boundary.settings",
+      "classification": { "state": "excluded", "reason": "settings" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks",
+      "path": "/tasks",
+      "sources": ["src/app/(dashboard)/tasks/page.tsx"],
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/[id]",
+      "path": "/tasks/[id]",
+      "sources": ["src/app/(dashboard)/tasks/[id]/page.tsx"],
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/new",
+      "path": "/tasks/new",
+      "sources": ["src/app/(dashboard)/tasks/new/page.tsx"],
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/tasks/templates",
+      "path": "/tasks/templates",
+      "sources": ["src/app/(dashboard)/tasks/templates/page.tsx"],
+      "parityCapability": "tasks",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams",
+      "path": "/teams",
+      "sources": ["src/app/(dashboard)/teams/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]",
+      "path": "/teams/[teamId]",
+      "sources": ["src/app/(dashboard)/teams/[teamId]/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/meetings",
+      "path": "/teams/[teamId]/meetings",
+      "sources": ["src/app/(dashboard)/teams/[teamId]/meetings/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/responsibilities",
+      "path": "/teams/[teamId]/responsibilities",
+      "sources": [
+        "src/app/(dashboard)/teams/[teamId]/responsibilities/page.tsx"
+      ],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/[teamId]/training",
+      "path": "/teams/[teamId]/training",
+      "sources": ["src/app/(dashboard)/teams/[teamId]/training/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/health",
+      "path": "/teams/health",
+      "sources": ["src/app/(dashboard)/teams/health/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/teams/org-chart",
+      "path": "/teams/org-chart",
+      "sources": ["src/app/(dashboard)/teams/org-chart/page.tsx"],
+      "parityCapability": "teams",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/terms",
+      "path": "/terms",
+      "sources": ["src/app/(marketing)/terms/page.tsx"],
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/unsubscribe",
+      "path": "/unsubscribe",
+      "sources": ["src/app/unsubscribe/page.tsx"],
+      "parityCapability": "boundary.public-sessionless",
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/verify-email",
+      "path": "/verify-email",
+      "sources": ["src/app/(dashboard)/verify-email/page.tsx"],
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/verify-email/confirmed",
+      "path": "/verify-email/confirmed",
+      "sources": ["src/app/(dashboard)/verify-email/confirmed/page.tsx"],
+      "parityCapability": "boundary.authentication",
+      "classification": { "state": "excluded", "reason": "authentication" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki",
+      "path": "/wiki",
+      "sources": ["src/app/(dashboard)/wiki/page.tsx"],
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki/[...slug]",
+      "path": "/wiki/[...slug]",
+      "sources": ["src/app/(dashboard)/wiki/[...slug]/page.tsx"],
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/wiki/progress",
+      "path": "/wiki/progress",
+      "sources": ["src/app/(dashboard)/wiki/progress/page.tsx"],
+      "parityCapability": "wiki",
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "routes": 65,
+    "actions": 180,
+    "supported": 178,
+    "excluded": 65,
+    "unreachable": 2,
+    "unclassified": 0
+  }
+}

@@ -14,6 +14,8 @@
     "test": "tsx --env-file-if-exists=.env.local --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"ops/**/*.test.mjs\"",
     "test:ci": "DATABASE_URL=postgresql://ci:ci@localhost:5432/ci RESEND_API_KEY=re_ci_placeholder tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"ops/**/*.test.mjs\"",
     "test:live": "tsx --env-file-if-exists=.env.local ./scripts/live-db-run.ts",
+    "evry:inventory": "tsx ops/evry/generate-inventory.ts",
+    "evry:inventory:check": "tsx ops/evry/generate-inventory.ts --check",
     "db:generate": "drizzle-kit generate && tsx scripts/restamp-migration.ts && prettier --write --log-level warn \"src/db/migrations/meta/*.json\"",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:push": "drizzle-kit push",
