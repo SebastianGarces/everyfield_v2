@@ -8,6 +8,7 @@ export {
   getCurrentSession,
   getCurrentUserChurch,
   verifySession,
+  verifyFreshSession,
   type SessionMetadata,
   type SessionValidationResult,
   type SessionValidationFailure,

@@ -117,7 +117,7 @@ test("captures the complete Evry path against only redacted audit evidence", asy
       eventName: "attempt",
       capabilityIdentity: "fixture:meeting.read",
       status: "completed",
-      resultCode: "noop_completed",
+      resultCode: "effect_completed",
       affectedCount: 1,
       excludedCount: 0,
       occurredAt: instant(90).toISOString(),

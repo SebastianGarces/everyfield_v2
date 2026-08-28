@@ -57,7 +57,8 @@ export const evryExecutionOutcomeStatuses = [
   "skipped",
 ] as const;
 export const evryExecutionResultCodes = [
-  "noop_completed",
+  "effect_completed",
+  "execution_completed",
   "precondition_refused",
   "effect_failed",
   "dependency_skipped",
@@ -520,6 +521,10 @@ export const evryExecutionOutcomes = pgTable(
       sql`${table.affectedCount} >= 0 and ${table.excludedCount} >= 0`
     ),
     check(
+      "evry_execution_outcomes_attempt_counts_check",
+      sql`${table.subject} <> 'attempt' or (${table.affectedCount} = 0 and ${table.excludedCount} = 0)`
+    ),
+    check(
       "evry_execution_outcomes_subject_fields_check",
       sql`(
         ${table.subject} = 'attempt'
@@ -537,11 +542,13 @@ export const evryExecutionOutcomes = pgTable(
     ),
     check(
       "evry_execution_outcomes_effect_check",
-      sql`(${table.status} = 'completed' and ${table.effectKey} is not null) or (${table.status} <> 'completed' and ${table.effectKey} is null)`
+      sql`(${table.subject} = 'step' and ${table.status} = 'completed' and ${table.effectKey} is not null)
+        or (not (${table.subject} = 'step' and ${table.status} = 'completed') and ${table.effectKey} is null)`
     ),
     check(
       "evry_execution_outcomes_status_result_check",
-      sql`(${table.status} = 'completed' and ${table.resultCode} = 'noop_completed')
+      sql`(${table.subject} = 'step' and ${table.status} = 'completed' and ${table.resultCode} = 'effect_completed')
+        or (${table.subject} = 'attempt' and ${table.status} = 'completed' and ${table.resultCode} = 'execution_completed')
         or (${table.status} = 'refused' and ${table.resultCode} = 'precondition_refused')
         or (${table.status} in ('failed', 'partially_failed') and ${table.resultCode} = 'effect_failed')
         or (${table.status} = 'skipped' and ${table.resultCode} = 'dependency_skipped')`

@@ -130,6 +130,20 @@ export async function validateSessionToken(
 ): Promise<SessionValidationResult | SessionValidationFailure> {
   const sessionId = await hashToken(token);
 
+  return validateSessionId(sessionId);
+}
+
+/**
+ * Reload one already-authenticated session identity and its current user row.
+ *
+ * This deliberately is not React-cached. Sensitive multi-step operations use
+ * it after the request's cached session has established which exact session is
+ * speaking, so a seat, tenancy, revocation, or expiry change becomes visible
+ * before the next lasting effect.
+ */
+async function validateSessionId(
+  sessionId: string
+): Promise<SessionValidationResult | SessionValidationFailure> {
   const result = await db
     .select({
       session: sessions,
@@ -219,6 +233,27 @@ export async function verifySession(): Promise<SessionValidationResult> {
   }
 
   return result as SessionValidationResult;
+}
+
+/**
+ * Preserve the request's authenticated session identity while bypassing its
+ * cached user snapshot. No actor, user id, or session id is accepted from the
+ * caller: the exact session comes only from `verifySession()`.
+ */
+export async function verifyFreshSession(): Promise<SessionValidationResult> {
+  const authenticated = await verifySession();
+  const fresh = await validateSessionId(authenticated.session.id);
+
+  if (
+    !fresh.session ||
+    !fresh.user ||
+    fresh.session.id !== authenticated.session.id ||
+    fresh.user.id !== authenticated.user.id
+  ) {
+    throw new UnauthorizedError();
+  }
+
+  return fresh as SessionValidationResult;
 }
 
 /**

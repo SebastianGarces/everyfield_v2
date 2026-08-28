@@ -9,6 +9,7 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import {
   correlationForPlanRequest,
+  executionAttemptOutcomeKey,
   mintEvryAuditRequest,
   noopAttemptKey,
   noopEffectKey,
@@ -60,6 +61,7 @@ test("the no-op statement gates attempt and outcome on the winning effect CAS", 
       attemptId: "40000000-0000-4000-8000-000000000001",
       attemptKey: noopAttemptKey(PLAN_ID),
       outcomeKey: noopOutcomeKey(PLAN_ID),
+      attemptOutcomeKey: executionAttemptOutcomeKey(PLAN_ID, "a".repeat(64)),
       effectKey: noopEffectKey(PLAN_ID),
       occurredAt: new Date("2026-08-28T12:00:00.000Z"),
     })

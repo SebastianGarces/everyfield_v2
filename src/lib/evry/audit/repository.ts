@@ -13,6 +13,7 @@ import {
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
 import {
+  executionAttemptOutcomeKey,
   noopAttemptKey,
   noopEffectKey,
   noopOutcomeKey,
@@ -225,6 +226,10 @@ export async function completeConfirmedNoop(input: {
       attemptId: randomUUID(),
       attemptKey: noopAttemptKey(input.planId),
       outcomeKey: noopOutcomeKey(input.planId),
+      attemptOutcomeKey: executionAttemptOutcomeKey(
+        input.planId,
+        input.fingerprint
+      ),
       effectKey: noopEffectKey(input.planId),
     })
   );

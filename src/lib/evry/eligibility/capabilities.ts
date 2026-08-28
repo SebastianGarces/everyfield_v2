@@ -5,14 +5,23 @@ import {
   type Capability,
 } from "@/lib/auth/seat-rules";
 import { tenancyColumns, type SeatFields } from "@/lib/auth/tenancy";
+import { isUnauthorized } from "@/lib/auth/unauthorized";
 
-import { requireEvryPlantViewer, type EvryPlantActor } from "./viewer";
+import {
+  EvryPlantViewerRefusalError,
+  requireEvryPlantViewer,
+  requireFreshEvryPlantViewer,
+  type EvryPlantActor,
+} from "./viewer";
 
 const EVRY_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
   "EvryCapabilityAuthorization"
 );
 const EVRY_READ_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
   "EvryReadCapabilityAuthorization"
+);
+const EVRY_EFFECT_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
+  "EvryEffectCapabilityAuthorization"
 );
 
 const APPLICATION_CAPABILITIES = new Set<string>(ALL_CAPABILITIES);
@@ -54,6 +63,16 @@ export type EvryReadCapabilityAuthorization = Readonly<{
   [EVRY_READ_CAPABILITY_AUTHORIZATION]: true;
 }>;
 
+export type EvryEffectCapabilityRegistration = EvryCapabilityRegistration &
+  Readonly<{ applicationCapability: Exclude<Capability, "read"> }>;
+
+/** Fresh authorization that may reach a lasting-effect adapter. */
+export type EvryEffectCapabilityAuthorization = Readonly<{
+  actor: EvryPlantActor;
+  registration: EvryEffectCapabilityRegistration;
+  [EVRY_EFFECT_CAPABILITY_AUTHORIZATION]: true;
+}>;
+
 function buildRegistry(): ReadonlyMap<string, EvryCapabilityRegistration> {
   const registrations = new Map<string, EvryCapabilityRegistration>();
 
@@ -90,6 +109,12 @@ function isReadRegistration(
   registration: EvryCapabilityRegistration
 ): registration is EvryReadCapabilityRegistration {
   return registration.applicationCapability === "read";
+}
+
+function isEffectRegistration(
+  registration: EvryCapabilityRegistration
+): registration is EvryEffectCapabilityRegistration {
+  return registration.applicationCapability !== "read";
 }
 
 export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
@@ -161,6 +186,12 @@ export function isEvryReadCapabilityIdentity(identity: string): boolean {
   return registration !== undefined && isReadRegistration(registration);
 }
 
+/** Only inventory-backed application effects may be installed in an executor. */
+export function isEvryEffectCapabilityIdentity(identity: string): boolean {
+  const registration = REGISTRY.get(identity);
+  return registration !== undefined && isEffectRegistration(registration);
+}
+
 /** Re-mint the actor and recheck that the selected inventory entry is a read. */
 export async function authorizeEvryReadCapability(
   identity: string
@@ -180,5 +211,35 @@ export async function authorizeEvryReadCapability(
     actor,
     registration,
     [EVRY_READ_CAPABILITY_AUTHORIZATION]: true as const,
+  });
+}
+
+/** Re-mint the actor and recheck a selected lasting-effect registration. */
+export async function authorizeEvryEffectCapability(
+  identity: string
+): Promise<EvryEffectCapabilityAuthorization | null> {
+  let actor: EvryPlantActor;
+  try {
+    actor = await requireFreshEvryPlantViewer();
+  } catch (error) {
+    if (error instanceof EvryPlantViewerRefusalError || isUnauthorized(error)) {
+      return null;
+    }
+    throw error;
+  }
+  const registration = REGISTRY.get(identity);
+
+  if (
+    !registration ||
+    !isEffectRegistration(registration) ||
+    !actorHolds(actor, registration.applicationCapability)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    actor,
+    registration,
+    [EVRY_EFFECT_CAPABILITY_AUTHORIZATION]: true as const,
   });
 }
