@@ -88,11 +88,12 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
   );
 });
 
-test("workspace URL updates stay in the App Router and conversation loads use the latest-attempt gate", () => {
+test("workspace URL sync cannot compete with App Router navigation and loads use the latest-attempt gate", () => {
   assert.match(
     workspace,
-    /evryWorkspaceConversationHref\([\s\S]*conversationId,[\s\S]*conversation\?\.id \?\? null[\s\S]*router\.replace\(href\)/
+    /syncEvryWorkspaceConversationHistory\([\s\S]*window\.history\.state,[\s\S]*window\.History\.prototype\.replaceState\.call\([\s\S]*window\.history,[\s\S]*conversationId,[\s\S]*conversation\?\.id \?\? null/
   );
+  assert.doesNotMatch(workspace, /useRouter|router\.replace|router\.push/);
   assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
     shell,
@@ -125,6 +126,7 @@ test("the mounted workspace owns query sync and send preserves in-flight edits",
     interaction,
     /urlConversationId === null && mountedConversationId !== null[\s\S]*`\/evry\?conversation=\$\{mountedConversationId\}`[\s\S]*: null/
   );
+  assert.match(interaction, /nativeReplaceState\(historyState, "", href\)/);
   assert.match(
     interaction,
     /currentDraft === submittedDraft \? "" : currentDraft/

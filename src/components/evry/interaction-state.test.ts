@@ -13,6 +13,7 @@ import {
   isEvryConversationLoading,
   isLatestEvryConversationLoad,
   pendingEvrySubmissionFor,
+  syncEvryWorkspaceConversationHistory,
   type EvrySubmission,
 } from "./interaction-state";
 
@@ -72,20 +73,45 @@ test("the mounted workspace attaches a conversation created after expansion", ()
   );
 });
 
-test("a sidebar transition unmounts the only owner of workspace URL sync", () => {
-  const replacements: string[] = [];
-  let workspaceMounted = true;
-  let conversationId: string | null = null;
-  const commitWorkspaceEffect = () => {
-    if (!workspaceMounted) return;
-    const href = evryWorkspaceConversationHref(null, conversationId);
-    if (href) replacements.push(href);
+test("workspace query sync cannot dispatch router navigation during a pending transition", () => {
+  const routerNavigations: string[] = [];
+  const historyReplacements: Array<{
+    state: unknown;
+    unused: string;
+    href: string | URL | null | undefined;
+  }> = [];
+  const patchedHistoryReplacements: string[] = [];
+  const historyState = { __NA: true, nextInternalState: "preserved" };
+  const pendingSidebarDestination = "/people";
+  const navigation = {
+    state: historyState,
+    replaceState(_state: unknown, _unused: string, href?: string | URL | null) {
+      patchedHistoryReplacements.push(String(href));
+    },
+    replace(href: string) {
+      routerNavigations.push(href);
+    },
   };
+  const didSync = syncEvryWorkspaceConversationHistory(
+    navigation.state,
+    (state, unused, href) => {
+      historyReplacements.push({ state, unused, href });
+    },
+    null,
+    "conversation-arrived-during-transition"
+  );
 
-  workspaceMounted = false;
-  conversationId = "conversation-arrived-after-unmount";
-  commitWorkspaceEffect();
-  assert.deepEqual(replacements, []);
+  assert.equal(didSync, true);
+  assert.deepEqual(historyReplacements, [
+    {
+      state: historyState,
+      unused: "",
+      href: "/evry?conversation=conversation-arrived-during-transition",
+    },
+  ]);
+  assert.equal(pendingSidebarDestination, "/people");
+  assert.deepEqual(patchedHistoryReplacements, []);
+  assert.deepEqual(routerNavigations, []);
 });
 
 test("changing any semantic request input rotates the retry key", () => {

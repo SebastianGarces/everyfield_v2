@@ -31,6 +31,27 @@ export function evryWorkspaceConversationHref(
     : null;
 }
 
+/** Attach a newly created conversation without dispatching an App Router transition. */
+export function syncEvryWorkspaceConversationHistory(
+  historyState: unknown,
+  nativeReplaceState: (
+    data: unknown,
+    unused: string,
+    url?: string | URL | null
+  ) => void,
+  urlConversationId: string | null,
+  mountedConversationId: string | null
+): boolean {
+  const href = evryWorkspaceConversationHref(
+    urlConversationId,
+    mountedConversationId
+  );
+  if (href === null) return false;
+
+  nativeReplaceState(historyState, "", href);
+  return true;
+}
+
 function samePageContext(
   left: EvryPageContext | null,
   right: EvryPageContext | null
