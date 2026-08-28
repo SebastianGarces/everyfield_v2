@@ -33,9 +33,11 @@ export function completeConfirmedNoopStatement(input: {
   attemptId: string;
   attemptKey: EvryAuditKey;
   outcomeKey: EvryAuditKey;
+  attemptOutcomeKey: EvryAuditKey;
   effectKey: EvryAuditKey;
   occurredAt: Date;
 }): SQL {
+  const terminalOccurredAt = new Date(input.occurredAt.getTime() + 1);
   return sql`
     with eligible as materialized (
       select
@@ -90,20 +92,35 @@ export function completeConfirmedNoopStatement(input: {
       returning
         id, plan_id, church_id, actor_user_id, plan_fingerprint,
         correlation_id
-    ), recorded as (
+    ), recorded_step as (
       insert into evry_execution_outcomes (
         attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
-        correlation_id, outcome_key, effect_key, subject, status,
-        result_code, affected_count, excluded_count, occurred_at
+        correlation_id, outcome_key, effect_key, subject, step_id,
+        capability_identity, status, result_code, affected_count,
+        excluded_count, occurred_at
       )
       select
         id, plan_id, church_id, actor_user_id, plan_fingerprint,
         correlation_id, ${input.outcomeKey}, ${input.effectKey},
-        'attempt', 'completed', 'noop_completed', 0, 0,
+        'step', 'audit_noop', 'fixture:evry.audit.noop',
+        'completed', 'effect_completed', 0, 0,
         ${input.occurredAt}
       from attempted
       returning id, attempt_id
+    ), recorded_attempt as (
+      insert into evry_execution_outcomes (
+        attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
+        correlation_id, outcome_key, subject, status, result_code,
+        affected_count, excluded_count, occurred_at
+      )
+      select
+        a.id, a.plan_id, a.church_id, a.actor_user_id, a.plan_fingerprint,
+        a.correlation_id, ${input.attemptOutcomeKey}, 'attempt', 'completed',
+        'execution_completed', 0, 0, ${terminalOccurredAt}
+      from attempted a
+      join recorded_step s on s.attempt_id = a.id
+      returning id, attempt_id
     )
-    select id, attempt_id from recorded
+    select id, attempt_id from recorded_attempt
   `;
 }

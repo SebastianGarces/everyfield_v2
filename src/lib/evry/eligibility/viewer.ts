@@ -1,5 +1,5 @@
 import type { User, UserSeat } from "@/db/schema";
-import { verifySession } from "@/lib/auth/session";
+import { verifyFreshSession, verifySession } from "@/lib/auth/session";
 import { tenancyOf, type SeatFields } from "@/lib/auth/tenancy";
 
 const EVRY_PLANT_ACTOR: unique symbol = Symbol("EvryPlantActor");
@@ -66,6 +66,10 @@ export class EvryPlantViewerRefusalError extends Error {
  */
 export async function requireEvryPlantViewer(): Promise<EvryPlantActor> {
   const { user } = await verifySession();
+  return plantActorFromSessionUser(user);
+}
+
+function plantActorFromSessionUser(user: EvrySessionUser): EvryPlantActor {
   const standing = evryPlantStandingOf(user);
 
   if (standing.status === "ineligible") {
@@ -80,4 +84,14 @@ export async function requireEvryPlantViewer(): Promise<EvryPlantActor> {
   };
 
   return Object.freeze(actor);
+}
+
+/**
+ * Re-authenticate the request's original session and reload its current plant
+ * standing. This is intentionally separate from the cached route viewer: an
+ * executor calls it again immediately before every lasting effect.
+ */
+export async function requireFreshEvryPlantViewer(): Promise<EvryPlantActor> {
+  const { user } = await verifyFreshSession();
+  return plantActorFromSessionUser(user);
 }

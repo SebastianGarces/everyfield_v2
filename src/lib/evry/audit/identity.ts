@@ -67,3 +67,37 @@ export function noopOutcomeKey(planId: string): EvryAuditKey {
 export function noopEffectKey(planId: string): EvryAuditKey {
   return auditKey(["noop-effect", planId]);
 }
+
+/** One durable execution attempt per exact immutable plan. */
+export function executionAttemptKey(
+  planId: string,
+  fingerprint: string
+): EvryAuditKey {
+  return auditKey(["execution-attempt", planId, fingerprint]);
+}
+
+/** One append-only terminal result for an exact execution attempt. */
+export function executionAttemptOutcomeKey(
+  planId: string,
+  fingerprint: string
+): EvryAuditKey {
+  return auditKey(["execution-outcome", planId, fingerprint, "attempt"]);
+}
+
+/** One append-only result for an exact named plan step. */
+export function executionStepOutcomeKey(
+  planId: string,
+  fingerprint: string,
+  stepId: string
+): EvryAuditKey {
+  return auditKey(["execution-outcome", planId, fingerprint, "step", stepId]);
+}
+
+/** The idempotency identity a capability adapter must claim before its effect. */
+export function executionEffectKey(
+  planId: string,
+  fingerprint: string,
+  stepId: string
+): EvryAuditKey {
+  return auditKey(["execution-effect", planId, fingerprint, stepId]);
+}

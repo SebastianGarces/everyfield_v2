@@ -33,6 +33,7 @@ import {
 
 import {
   correlationForPlanRequest,
+  executionAttemptOutcomeKey,
   mintEvryAuditRequest,
   noopAttemptKey,
   noopEffectKey,
@@ -309,14 +310,26 @@ test(
     assert.equal(completed.attempts.length, 1);
     assert.deepEqual(completed.attempts[0].outcomes, [
       {
+        subject: "step",
+        stepId: "audit_noop",
+        capabilityIdentity: "fixture:evry.audit.noop",
+        status: "completed",
+        resultCode: "effect_completed",
+        affectedCount: 0,
+        excludedCount: 0,
+        occurredAt: completed.attempts[0].startedAt,
+      },
+      {
         subject: "attempt",
         stepId: null,
         capabilityIdentity: null,
         status: "completed",
-        resultCode: "noop_completed",
+        resultCode: "execution_completed",
         affectedCount: 0,
         excludedCount: 0,
-        occurredAt: completed.attempts[0].startedAt,
+        occurredAt: new Date(
+          new Date(completed.attempts[0].startedAt).getTime() + 1
+        ).toISOString(),
       },
     ]);
 
@@ -325,7 +338,13 @@ test(
     );
     assert.deepEqual(
       redacted.map(({ recordKind }) => recordKind),
-      ["audit_event", "audit_event", "execution_attempt", "execution_outcome"]
+      [
+        "audit_event",
+        "audit_event",
+        "execution_attempt",
+        "execution_outcome",
+        "execution_outcome",
+      ]
     );
     assert.equal(
       redacted.some((record) =>
@@ -383,6 +402,10 @@ test(
             attemptId: randomUUID(),
             attemptKey: noopAttemptKey(rolledBackPlan.id),
             outcomeKey: noopOutcomeKey(rolledBackPlan.id),
+            attemptOutcomeKey: executionAttemptOutcomeKey(
+              rolledBackPlan.id,
+              rolledBackPlan.fingerprint
+            ),
             // A completed effect already owns this key. The unique refusal must
             // roll back this other plan's state change and attempt together.
             effectKey: noopEffectKey(completedPlan.id),
@@ -446,7 +469,7 @@ test(
           stepId: "create-meeting",
           capabilityIdentity: MEETING_IDENTITY,
           status: "completed",
-          resultCode: "noop_completed",
+          resultCode: "effect_completed",
           affectedCount: 1,
           excludedCount: 2,
           occurredAt: partialPlan.occurredAt,
@@ -479,8 +502,8 @@ test(
           subject: "attempt",
           status: "partially_failed",
           resultCode: "effect_failed",
-          affectedCount: 1,
-          excludedCount: 3,
+          affectedCount: 0,
+          excludedCount: 0,
           occurredAt: new Date(partialPlan.occurredAt.getTime() + 2),
         },
       ]),

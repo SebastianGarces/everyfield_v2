@@ -69,6 +69,45 @@ test("the exported viewer boundary has no caller-supplied session dependency", (
   assert.doesNotMatch(source, /ViewerDeps|DEFAULT_DEPS|deps\.verifySession/);
 });
 
+test("effect authorization bypasses the cached user snapshot without accepting authority", () => {
+  const viewerSource = readFileSync(
+    path.join(process.cwd(), "src/lib/evry/eligibility/viewer.ts"),
+    "utf8"
+  );
+  const capabilitySource = readFileSync(
+    path.join(process.cwd(), "src/lib/evry/eligibility/capabilities.ts"),
+    "utf8"
+  );
+  const sessionSource = readFileSync(
+    path.join(process.cwd(), "src/lib/auth/session.ts"),
+    "utf8"
+  );
+  const effectStart = capabilitySource.indexOf(
+    "export async function authorizeEvryEffectCapability"
+  );
+  const effectBody = capabilitySource.slice(effectStart);
+
+  assert.match(
+    sessionSource,
+    /export async function verifyFreshSession\(\): Promise<SessionValidationResult>/
+  );
+  assert.match(
+    sessionSource,
+    /const authenticated = await verifySession\(\);[\s\S]*validateSessionId\(authenticated\.session\.id\)/
+  );
+  assert.match(
+    viewerSource,
+    /export async function requireFreshEvryPlantViewer\(\): Promise<EvryPlantActor>/
+  );
+  assert.match(effectBody, /actor = await requireFreshEvryPlantViewer\(\)/);
+  const effectHeader = effectBody.slice(0, effectBody.indexOf("{") + 1);
+  assert.match(effectHeader, /\(\s*identity: string\s*\)/);
+  assert.doesNotMatch(
+    effectHeader,
+    /actor:\s*EvryPlantActor|sessionId:|userId:/
+  );
+});
+
 test("spend APIs accept identities or record ids, never an actor or mapping", () => {
   const capabilitySource = readFileSync(
     path.join(process.cwd(), "src/lib/evry/eligibility/capabilities.ts"),
