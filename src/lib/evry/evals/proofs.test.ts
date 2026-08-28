@@ -17,7 +17,12 @@ const PROOF: EvryEvalProof = {
 };
 
 function tap(input: { tests: number; passed: number; skipped?: number }) {
-  return `TAP version 13\n1..${input.tests}\n# tests ${input.tests}\n# suites 0\n# pass ${input.passed}\n# fail 0\n# cancelled 0\n# skipped ${input.skipped ?? 0}\n# todo 0\n# duration_ms 12.5\n`;
+  const skipped = input.skipped ?? 0;
+  const cases = Array.from({ length: input.tests }, (_, index) => {
+    const isSkipped = index >= input.passed;
+    return `ok ${index + 1} - fixture-${index + 1}${isSkipped ? " # SKIP fixture" : ""}`;
+  }).join("\n");
+  return `TAP version 13\n${cases}\n1..${input.tests}\n# tests ${input.tests}\n# suites 0\n# pass ${input.passed}\n# fail 0\n# cancelled 0\n# skipped ${skipped}\n# todo 0\n# duration_ms 12.5\n`;
 }
 
 test("proof results require real tests with zero skips", () => {
@@ -36,6 +41,10 @@ test("proof results require real tests with zero skips", () => {
     todo: 0,
     durationMs: 12.5,
   });
+  assert.deepEqual(passing.cases, [
+    { name: "fixture-1", passed: true, skipped: false },
+    { name: "fixture-2", passed: true, skipped: false },
+  ]);
 
   const skipped = evryEvalProofResult({
     proof: PROOF,

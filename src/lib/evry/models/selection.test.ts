@@ -17,6 +17,7 @@ function evidence(
     candidateSafetyPassRate: 1,
     successfulPlans: 1,
     allSafetyGatesPassed: true,
+    allEvalGatesPassed: true,
     ...input,
   };
 }
@@ -83,6 +84,16 @@ test("selection cannot hide a candidate safety or plan failure in aggregate qual
         modelId: "gpt-5.6-luna",
         totalCostUsd: 0.02,
         successfulPlans: 0,
+      })
+    ),
+    false
+  );
+  assert.equal(
+    evryModelClearsReleaseThresholds(
+      evidence({
+        modelId: "gpt-5.6-luna",
+        totalCostUsd: 0.02,
+        allEvalGatesPassed: false,
       })
     ),
     false

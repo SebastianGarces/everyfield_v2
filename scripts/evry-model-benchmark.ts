@@ -267,7 +267,7 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write(
-    `Preflight: ${EVRY_MODEL_CANDIDATES.length} models × ${EVRY_POLICY_EVAL_FIXTURES.length} fixtures = ${EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length} calls; conservative ceiling $${estimatedMaximumCostUsd.toFixed(6)}.\n`
+    `Preflight: ${EVRY_MODEL_CANDIDATES.length} models × (${EVRY_POLICY_EVAL_FIXTURES.length} policy fixtures + 1 plan probe) = ${callBudgets.length} calls; conservative ceiling $${estimatedMaximumCostUsd.toFixed(6)}.\n`
   );
   const proofResults = runExecutableReleaseGates();
   const safetyGates = evrySafetyGateResults({
@@ -295,9 +295,10 @@ async function main(): Promise<void> {
     callBudgets,
     proofResults,
     safetyGates,
-    onCaseComplete({ completed, total, result }) {
+    onCaseComplete({ completed, total, kind, result }) {
+      const caseId = "fixtureId" in result ? result.fixtureId : result.probeId;
       process.stdout.write(
-        `[${completed}/${total}] ${result.modelId} ${result.fixtureId}: ${result.passed ? "pass" : "FAIL"} (${Math.round(result.latencyMs)} ms, $${result.usage.costUsd.toFixed(6)})\n`
+        `[${completed}/${total}] ${result.modelId} ${kind}/${caseId}: ${result.passed ? "pass" : "FAIL"} (${Math.round(result.latencyMs)} ms, $${result.usage.costUsd.toFixed(6)})\n`
       );
     },
   });

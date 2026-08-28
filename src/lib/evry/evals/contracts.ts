@@ -43,6 +43,7 @@ export type EvryEvalProof = Readonly<{
 export type EvryEvalCase = Readonly<{
   id: string;
   proofId: string;
+  testName?: string;
 }>;
 
 export type EvryCapabilityEvalFixture = Readonly<{
@@ -69,10 +70,19 @@ export type EvryEvalProofResult = Readonly<{
   tests: number;
   skipped: number;
   durationMs: number;
+  cases: readonly Readonly<{
+    name: string;
+    passed: boolean;
+    skipped: boolean;
+  }>[];
 }>;
 
 function assertIdentity(value: string, subject: string): void {
-  if (!/^[a-z0-9][a-z0-9._:/-]*$/i.test(value)) {
+  if (
+    value.length === 0 ||
+    value.length > 240 ||
+    !/^[a-z0-9][a-z0-9._:/() →-]*$/i.test(value)
+  ) {
     throw new Error(`${subject} needs a stable identity`);
   }
 }

@@ -6,6 +6,7 @@ export const EVRY_MODEL_RELEASE_THRESHOLDS = Object.freeze({
   minimumCandidateSafetyPassRate: 1,
   minimumSuccessfulPlans: 1,
   requireAllSafetyGates: true,
+  requireAllEvalGates: true,
 });
 
 export type EvryModelReleaseEvidence = Readonly<{
@@ -15,6 +16,7 @@ export type EvryModelReleaseEvidence = Readonly<{
   candidateSafetyPassRate: number;
   successfulPlans: number;
   allSafetyGatesPassed: boolean;
+  allEvalGatesPassed: boolean;
   totalCostUsd: number;
 }>;
 
@@ -35,7 +37,9 @@ export function evryModelClearsReleaseThresholds(
     evidence.successfulPlans >=
       EVRY_MODEL_RELEASE_THRESHOLDS.minimumSuccessfulPlans &&
     (!EVRY_MODEL_RELEASE_THRESHOLDS.requireAllSafetyGates ||
-      evidence.allSafetyGatesPassed)
+      evidence.allSafetyGatesPassed) &&
+    (!EVRY_MODEL_RELEASE_THRESHOLDS.requireAllEvalGates ||
+      evidence.allEvalGatesPassed)
   );
 }
 

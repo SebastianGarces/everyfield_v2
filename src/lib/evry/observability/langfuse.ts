@@ -53,6 +53,22 @@ function metadataFor(trace: EvryTraceDocument, span: EvryTraceSpan) {
   });
 }
 
+function displayPayload(value: string | null | undefined): unknown {
+  if (value === null || value === undefined) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function observationPayloadFor(span: EvryTraceSpan) {
+  return {
+    input: displayPayload(span.observation?.input),
+    output: displayPayload(span.observation?.output),
+  };
+}
+
 async function captureLangfuseTrace(
   expectedEnvironment: string,
   unsafeTrace: EvryTraceDocument
@@ -97,6 +113,7 @@ async function captureLangfuseTrace(
         level: levelFor(requestSpan),
         statusMessage: requestSpan.resultCode,
         metadata: metadataFor(trace, requestSpan),
+        ...observationPayloadFor(requestSpan),
       },
       {
         startTime: new Date(requestSpan.startedAt),
@@ -115,6 +132,7 @@ async function captureLangfuseTrace(
               level: levelFor(span),
               statusMessage: span.resultCode,
               metadata: metadataFor(trace, span),
+              ...observationPayloadFor(span),
               model: span.details.usage.model,
               usageDetails: langfuseUsageDetails(span.details.usage),
               costDetails: { total: span.details.usage.costUsd },
@@ -142,6 +160,7 @@ async function captureLangfuseTrace(
               level: levelFor(span),
               statusMessage: span.resultCode,
               metadata: metadataFor(trace, span),
+              ...observationPayloadFor(span),
             },
             {
               startTime: new Date(span.startedAt),

@@ -68,17 +68,3 @@ test("every prohibited or non-routable request is a per-candidate safety gate", 
     );
   }
 });
-
-test("the canonical meeting action owns the one successful-plan probe", () => {
-  assert.deepEqual(
-    EVRY_POLICY_EVAL_FIXTURES.filter(({ planProbe }) => planProbe !== null).map(
-      ({ id, planProbe }) => ({ id, planProbe })
-    ),
-    [
-      {
-        id: "action-create-meeting",
-        planProbe: "meeting_invitation_reference",
-      },
-    ]
-  );
-});

@@ -1,4 +1,8 @@
-import { EVRY_SUPPORTED_CAPABILITIES } from "@/lib/evry/policy/inventory";
+import {
+  ADD_GUESTS_IDENTITY,
+  CREATE_MEETING_IDENTITY,
+  SEND_MESSAGE_IDENTITY,
+} from "@/lib/evry/recipes/fixtures.test-helper";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -33,6 +37,18 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   {
     id: "candidate-selection",
     testFile: "src/lib/evry/models/selection.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "reference-capability-contract",
+    testFile: "src/lib/evry/evals/reference-capabilities.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "candidate-plan-probe-contract",
+    testFile: "src/lib/evry/evals/plan-probe.test.ts",
     lane: "deterministic",
     safetyGates: [],
   },
@@ -98,23 +114,11 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   },
 ]);
 
-const PROOF_BY_LAYER = Object.freeze({
-  policy: "policy-boundary",
-  selection: "capability-selection",
-  arguments: "plan-arguments",
-  tenancy: "tenant-and-permission",
-  permission: "tenant-and-permission",
-  confirmation: "exact-plan-confirmation",
-  execution: "executor-live",
-  idempotency: "executor-core",
-  errors: "executor-core",
-  ui_artifact: "request-ui-artifact",
-} as const);
-
-function proofCase(identity: string, layer: keyof typeof PROOF_BY_LAYER) {
+function proofCase(identity: string, layer: string) {
   return Object.freeze({
     id: `${identity}:${layer}`,
-    proofId: PROOF_BY_LAYER[layer],
+    proofId: "reference-capability-contract",
+    testName: `${identity}:${layer}`,
   });
 }
 
@@ -139,12 +143,14 @@ function capabilityFixture(
 }
 
 /**
- * The generated parity registry is the source of capability-family identities.
- * Every slot points to an executable shared-boundary proof above. The runner
- * executes those files and rejects failures or skips before any provider call.
+ * Only concrete effect registrations exercised by the reference recipe enter
+ * this release corpus. Each slot names its own node:test outcome; shared live
+ * framework proofs remain additional release gates, not stand-ins for rows.
  */
 export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze(
-  EVRY_SUPPORTED_CAPABILITIES.map(capabilityFixture)
+  [CREATE_MEETING_IDENTITY, ADD_GUESTS_IDENTITY, SEND_MESSAGE_IDENTITY].map(
+    capabilityFixture
+  )
 );
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =

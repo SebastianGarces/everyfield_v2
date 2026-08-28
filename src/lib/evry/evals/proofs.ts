@@ -36,6 +36,20 @@ export function parseEvryNodeTestSummary(output: string): NodeTestSummary {
   });
 }
 
+function parseNodeTestCases(output: string): EvryEvalProofResult["cases"] {
+  return Object.freeze(
+    [
+      ...output.matchAll(/^(ok|not ok) \d+ - (.+?)(?: # (SKIP|TODO).*)?$/gm),
+    ].map((match) =>
+      Object.freeze({
+        name: match[2] ?? "",
+        passed: match[1] === "ok" && match[3] === undefined,
+        skipped: match[3] === "SKIP",
+      })
+    )
+  );
+}
+
 export function evryEvalProofResult(input: {
   proof: EvryEvalProof;
   exitCode: number | null;
@@ -58,6 +72,7 @@ export function evryEvalProofResult(input: {
     tests: summary.tests,
     skipped: summary.skipped,
     durationMs: summary.durationMs,
+    cases: parseNodeTestCases(input.output),
   });
 }
 

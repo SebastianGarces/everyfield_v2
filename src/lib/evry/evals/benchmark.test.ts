@@ -9,11 +9,17 @@ import {
   assertEvryBenchmarkRemainingBudget,
   assertEvryBenchmarkUsage,
   evryBenchmarkCallBudgets,
+  evryPlanBenchmarkTraceDocument,
   evryBenchmarkTraceDocument,
+  type EvryPlanBenchmarkCaseResult,
   type EvryPolicyBenchmarkCaseResult,
 } from "./benchmark";
 import { EVRY_POLICY_EVAL_FIXTURES } from "./policy/fixtures";
 import { EVRY_MODEL_CANDIDATES } from "../models/candidates";
+import {
+  FIXTURE_RECIPE_VALUES,
+  RECIPE_IDENTITY,
+} from "../recipes/fixtures.test-helper";
 
 const COMPLETE_USAGE: LanguageModelUsage = {
   inputTokens: 10,
@@ -47,12 +53,12 @@ function caseResult(
   return {
     modelId: "gpt-5.6-luna",
     fixtureId: "fixture",
+    request: "fixture request",
     expected: classification ?? { classification: "ambiguous" },
     actual: classification,
     passed: classification !== null,
     structuredOutput: classification !== null,
     prohibitedRequestSafety: true,
-    successfulPlan: false,
     errorCode: classification === null ? "provider_or_shape_failure" : null,
     latencyMs: 25,
     usage: NORMALIZED_USAGE,
@@ -107,7 +113,11 @@ test("preflight captures the exact SDK request envelope without network access",
   const budgets = await evryBenchmarkCallBudgets();
   assert.equal(
     budgets.length,
-    EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length
+    EVRY_MODEL_CANDIDATES.length * (EVRY_POLICY_EVAL_FIXTURES.length + 1)
+  );
+  assert.equal(
+    budgets.filter(({ kind }) => kind === "plan_probe").length,
+    EVRY_MODEL_CANDIDATES.length
   );
   assert.equal(
     budgets.every(
@@ -147,4 +157,75 @@ test("Langfuse policy traces retain production refusal semantics", () => {
     allowed.spans.find(({ stage }) => stage === "policy")?.resultCode,
     "policy_allowed"
   );
+
+  const wrongRefusal = evryBenchmarkTraceDocument({
+    environment: "local-eval",
+    result: {
+      ...caseResult({ classification: "unrelated" }),
+      expected: { classification: "application_action" },
+      passed: false,
+    },
+    startedAt,
+    endedAt,
+  });
+  assert.equal(
+    wrongRefusal.spans.find(({ stage }) => stage === "policy")?.resultCode,
+    "policy_refused",
+    "runtime semantics come from actual output, not benchmark grading"
+  );
+
+  const wrongAllowance = evryBenchmarkTraceDocument({
+    environment: "local-eval",
+    result: {
+      ...caseResult({ classification: "application_read" }),
+      expected: { classification: "unrelated" },
+      passed: false,
+    },
+    startedAt,
+    endedAt,
+  });
+  assert.equal(
+    wrongAllowance.spans.find(({ stage }) => stage === "policy")?.resultCode,
+    "policy_allowed"
+  );
+  assert.match(
+    wrongAllowance.spans.find(({ stage }) => stage === "reporting")?.observation
+      ?.output ?? "",
+    /"passed":false/
+  );
+});
+
+test("Langfuse plan traces expose the model output and compiled plan result", () => {
+  const result: EvryPlanBenchmarkCaseResult = {
+    modelId: "gpt-5.6-luna",
+    probeId: "meeting-invitation-reference",
+    actual: {
+      recipeIdentity: RECIPE_IDENTITY,
+      meetingId: FIXTURE_RECIPE_VALUES.meeting_id,
+      startsAt: FIXTURE_RECIPE_VALUES.starts_at,
+      audience: FIXTURE_RECIPE_VALUES.person_ids,
+      recipientIds: [FIXTURE_RECIPE_VALUES.recipient_ids[0]],
+      subject: FIXTURE_RECIPE_VALUES.subject,
+      body: FIXTURE_RECIPE_VALUES.body,
+    },
+    passed: true,
+    structuredOutput: true,
+    errorCode: null,
+    latencyMs: 50,
+    confirmationArtifactLatencyMs: 2,
+    planSteps: 3,
+    usage: NORMALIZED_USAGE,
+    correlationId: "10000000-0000-4000-8000-000000000001",
+    traceId: "0123456789abcdef0123456789abcdef",
+  };
+  const trace = evryPlanBenchmarkTraceDocument({
+    environment: "local-eval",
+    result,
+    startedAt: new Date("2026-08-28T12:00:00.000Z"),
+    endedAt: new Date("2026-08-28T12:00:00.050Z"),
+  });
+  assert.equal(trace.recipeIdentity, RECIPE_IDENTITY);
+  const planning = trace.spans.find(({ stage }) => stage === "planning");
+  assert.equal(planning?.details.kind, "generation");
+  assert.match(planning?.observation?.output ?? "", /"steps":3/);
 });

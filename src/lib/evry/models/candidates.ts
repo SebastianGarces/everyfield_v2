@@ -52,6 +52,7 @@ export type EvryModelCandidate = (typeof EVRY_MODEL_CANDIDATES)[number];
 export type EvryModelCandidateId = EvryModelCandidate["id"];
 
 export const EVRY_POLICY_MAX_OUTPUT_TOKENS = 100 as const;
+export const EVRY_PLAN_PROBE_MAX_OUTPUT_TOKENS = 400 as const;
 export const EVRY_POLICY_TIMEOUT_MS = 60_000 as const;
 
 /** Keep benchmark and production provider conditions on one source of truth. */
