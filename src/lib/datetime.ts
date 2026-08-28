@@ -395,7 +395,7 @@ export function addCalendarDays(from: Date, days: number): string {
 }
 
 // ----------------------------------------------------------------------------
-// WALL CLOCKS IN A REAL ZONE — the two primitives, and the only two
+// WALL CLOCKS IN A REAL ZONE — the four primitives, and the only four
 // ----------------------------------------------------------------------------
 //
 // `toCalendarDate` answers "which day is this instant?" in a zone. These answer
@@ -467,6 +467,73 @@ function offsetMsAt(date: Date, timeZone: string): number {
   );
 }
 
+/**
+ * Every real instant at which `calendarDate` reads `hour`:`minute` in
+ * `timeZone`, in chronological order.
+ *
+ * Most wall clocks name one instant. A spring-forward gap names none and an
+ * autumn fold names two. Callers that need an unambiguous human choice must
+ * inspect that cardinality rather than accepting `instantAtZonedHour`'s
+ * deliberate digest-window normalization.
+ *
+ * The candidates come from `Intl`'s timezone data, never a hand-maintained
+ * offset. Probing the requested day and one day on either side sees both
+ * regimes on a transition day; re-formatting each candidate proves whether it
+ * really reads as the requested wall clock.
+ */
+export function instantsAtZonedTime(
+  calendarDate: string,
+  hour: number,
+  minute: number,
+  timeZone: string
+): readonly Date[] {
+  const [year, month, day] = calendarDate.split("-").map(Number);
+  const wall = Date.UTC(year, month - 1, day, hour, minute);
+
+  const candidates = [wall - MS_PER_DAY, wall, wall + MS_PER_DAY].map(
+    (probe) => wall - offsetMsAt(new Date(probe), timeZone)
+  );
+
+  return Object.freeze(
+    [...new Set(candidates)]
+      .filter(
+        (candidate) => wallClockOf(new Date(candidate), timeZone) === wall
+      )
+      .sort((left, right) => left - right)
+      .map((candidate) => new Date(candidate))
+  );
+}
+
+/**
+ * The exact UTC offset joining a civil wall clock to its resolved instant.
+ * Modern zones usually stop at minutes, while historical IANA data can carry
+ * seconds (for example New York's `-04:56:02` before standard time).
+ */
+export function utcOffsetForZonedTime(
+  calendarDate: string,
+  hour: number,
+  minute: number,
+  instant: Date
+): string {
+  const [year, month, day] = calendarDate.split("-").map(Number);
+  const wall = Date.UTC(year, month - 1, day, hour, minute);
+  const offsetMilliseconds = wall - instant.getTime();
+  if (offsetMilliseconds % 1000 !== 0) {
+    throw new Error("A zoned UTC offset must resolve to whole seconds");
+  }
+
+  const offsetSeconds = offsetMilliseconds / 1000;
+  const sign = offsetSeconds >= 0 ? "+" : "-";
+  const absolute = Math.abs(offsetSeconds);
+  const hours = Math.floor(absolute / 3600);
+  const minutes = Math.floor((absolute % 3600) / 60);
+  const seconds = absolute % 60;
+  const minuteOffset = `${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  return seconds === 0
+    ? minuteOffset
+    : `${minuteOffset}:${String(seconds).padStart(2, "0")}`;
+}
+
 /** The hour (0–23) `date` reads on the wall clock in `timeZone`. */
 export function zonedHour(date: Date, timeZone: string): number {
   return zonedParts(date, timeZone).hour;
@@ -510,19 +577,15 @@ export function instantAtZonedHour(
   hour: number,
   timeZone: string
 ): Date {
+  const real = instantsAtZonedTime(calendarDate, hour, 0, timeZone);
+  if (real.length > 0) return real[0];
+
   const [year, month, day] = calendarDate.split("-").map(Number);
   const wall = Date.UTC(year, month - 1, day, hour);
-
-  const candidates = [wall - MS_PER_DAY, wall, wall + MS_PER_DAY].map(
+  const normalized = [wall - MS_PER_DAY, wall, wall + MS_PER_DAY].map(
     (probe) => wall - offsetMsAt(new Date(probe), timeZone)
   );
-  const real = candidates.filter(
-    (candidate) => wallClockOf(new Date(candidate), timeZone) === wall
-  );
-
-  return new Date(
-    real.length > 0 ? Math.min(...real) : Math.max(...candidates)
-  );
+  return new Date(Math.max(...normalized));
 }
 
 /**

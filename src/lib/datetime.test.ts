@@ -13,11 +13,13 @@ import {
   formatRelativeTimestamp,
   formatTime,
   groupedTimeZones,
+  instantsAtZonedTime,
   isValidTimeZone,
   parseDateTimeLocalValue,
   relativeDayOffset,
   toCalendarDate,
   toDateTimeLocalValue,
+  utcOffsetForZonedTime,
 } from "./datetime";
 
 const EVENING = new Date("2026-07-30T19:00:00Z");
@@ -398,6 +400,47 @@ test("toCalendarDate in a church zone is not the UTC day", () => {
   assert.equal(toCalendarDate(lateUtc), "2026-03-02");
   assert.equal(toCalendarDate(lateUtc, "America/Chicago"), "2026-03-01");
   assert.equal(toCalendarDate(lateUtc, "Asia/Tokyo"), "2026-03-02");
+});
+
+test("zoned wall-clock candidates preserve daylight-saving cardinality", () => {
+  const ordinary = instantsAtZonedTime("2026-08-05", 10, 0, "America/New_York");
+  assert.deepEqual(
+    ordinary.map((instant) => instant.toISOString()),
+    ["2026-08-05T14:00:00.000Z"]
+  );
+
+  const springGap = instantsAtZonedTime(
+    "2026-03-08",
+    2,
+    30,
+    "America/New_York"
+  );
+  assert.deepEqual(springGap, []);
+
+  const autumnFold = instantsAtZonedTime(
+    "2026-11-01",
+    1,
+    30,
+    "America/New_York"
+  );
+  assert.deepEqual(
+    autumnFold.map((instant) => instant.toISOString()),
+    ["2026-11-01T05:30:00.000Z", "2026-11-01T06:30:00.000Z"]
+  );
+});
+
+test("zoned offsets preserve historical IANA seconds exactly", () => {
+  const [instant] = instantsAtZonedTime(
+    "1880-01-01",
+    12,
+    0,
+    "America/New_York"
+  );
+  assert.equal(instant.toISOString(), "1880-01-01T16:56:02.000Z");
+  assert.equal(
+    utcOffsetForZonedTime("1880-01-01", 12, 0, instant),
+    "-04:56:02"
+  );
 });
 
 test("a hostile process TZ does not move a church-zoned format", () => {
