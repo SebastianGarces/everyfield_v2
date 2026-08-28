@@ -3,10 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
-import {
-  eligibleEvryCapabilitiesFor,
-  type EvryCapabilityRegistration,
-} from "@/lib/evry/eligibility/capabilities";
+import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
 import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,
@@ -15,11 +12,19 @@ import {
   classifyEvryRequest,
   type EvryPolicyDecision,
 } from "@/lib/evry/policy";
+import type {
+  EvryReadContinuation,
+  EvryReadContinuationContext,
+} from "@/lib/evry/reads/contract";
+import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
 
 export const dynamic = "force-dynamic";
 
 const evryRequestBodySchema = z
-  .object({ requestText: z.string().min(1) })
+  .object({
+    requestText: z.string().min(1),
+    pageContext: evryPageContextSchema.nullable().optional(),
+  })
   .strict();
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" } as const;
@@ -38,14 +43,11 @@ function viewerRefusal(error: unknown): NextResponse | null {
   return null;
 }
 
-export type EvryRequestContinuationContext = Readonly<{
-  eligibleCapabilities: readonly EvryCapabilityRegistration[];
-  literalUserText: string;
-}>;
+export type EvryRequestContinuationContext = EvryReadContinuationContext;
 
-export type EvryRequestContinuation = (
+export type EvryRequestActionContinuation = (
   context: EvryRequestContinuationContext
-) => Promise<unknown>;
+) => Promise<unknown | null>;
 
 const EVRY_REQUEST_CLASSIFIER: unique symbol = Symbol("EvryRequestClassifier");
 
@@ -64,8 +66,8 @@ function defineEvryRequestClassifier(
 
 export type EvryRequestPostOptions = Readonly<{
   classify: EvryRequestClassifier;
-  continueRead: EvryRequestContinuation;
-  continueAction: EvryRequestContinuation;
+  continueRead: EvryReadContinuation | null;
+  continueAction: EvryRequestActionContinuation | null;
 }>;
 
 /** Bind #769's selected working model to the one policy classifier. */
@@ -126,11 +128,20 @@ export function createEvryRequestPost({
       const context: EvryRequestContinuationContext = {
         eligibleCapabilities,
         literalUserText: policy.continuation.literalUserText,
+        pageContext: parsed.data.pageContext ?? null,
       };
-      const artifact =
+      const continuation =
         policy.classification === "application_read"
-          ? await continueRead(context)
-          : await continueAction(context);
+          ? continueRead
+          : continueAction;
+      if (continuation === null) {
+        return privateJson({ status: "unavailable" }, 503);
+      }
+
+      const artifact = await continuation(context);
+      if (artifact === null) {
+        return privateJson({ status: "unavailable" }, 503);
+      }
 
       return privateJson({
         status: "continued",
@@ -154,10 +165,6 @@ const unavailableClassifier = defineEvryRequestClassifier(async () => {
   throw new EvryRequestUnavailableError();
 });
 
-const unavailableContinuation: EvryRequestContinuation = async () => {
-  throw new EvryRequestUnavailableError();
-};
-
 /**
  * #769 owns production model selection and will instantiate the factory above.
  * Until then the same auth-first, strict-body surface terminates at an explicit
@@ -165,6 +172,6 @@ const unavailableContinuation: EvryRequestContinuation = async () => {
  */
 export const POST = createEvryRequestPost({
   classify: unavailableClassifier,
-  continueRead: unavailableContinuation,
-  continueAction: unavailableContinuation,
+  continueRead: null,
+  continueAction: null,
 });

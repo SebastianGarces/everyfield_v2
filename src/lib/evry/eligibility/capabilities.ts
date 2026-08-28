@@ -11,6 +11,9 @@ import { requireEvryPlantViewer, type EvryPlantActor } from "./viewer";
 const EVRY_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
   "EvryCapabilityAuthorization"
 );
+const EVRY_READ_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
+  "EvryReadCapabilityAuthorization"
+);
 
 const APPLICATION_CAPABILITIES = new Set<string>(ALL_CAPABILITIES);
 
@@ -36,6 +39,19 @@ export type EvryCapabilityAuthorization = Readonly<{
   actor: EvryPlantActor;
   registration: EvryCapabilityRegistration;
   [EVRY_CAPABILITY_AUTHORIZATION]: true;
+}>;
+
+export type EvryReadCapabilityRegistration = Readonly<
+  Omit<EvryCapabilityRegistration, "applicationCapability"> & {
+    applicationCapability: "read";
+  }
+>;
+
+/** Fresh authorization that can reach a read adapter and no effect adapter. */
+export type EvryReadCapabilityAuthorization = Readonly<{
+  actor: EvryPlantActor;
+  registration: EvryReadCapabilityRegistration;
+  [EVRY_READ_CAPABILITY_AUTHORIZATION]: true;
 }>;
 
 function buildRegistry(): ReadonlyMap<string, EvryCapabilityRegistration> {
@@ -69,6 +85,12 @@ function buildRegistry(): ReadonlyMap<string, EvryCapabilityRegistration> {
 }
 
 const REGISTRY = buildRegistry();
+
+function isReadRegistration(
+  registration: EvryCapabilityRegistration
+): registration is EvryReadCapabilityRegistration {
+  return registration.applicationCapability === "read";
+}
 
 export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
   "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction";
@@ -131,4 +153,32 @@ export async function authorizeEvryCapability(
   };
 
   return Object.freeze(authorization);
+}
+
+/** Check a pack registration against the generated inventory before exposure. */
+export function isEvryReadCapabilityIdentity(identity: string): boolean {
+  const registration = REGISTRY.get(identity);
+  return registration !== undefined && isReadRegistration(registration);
+}
+
+/** Re-mint the actor and recheck that the selected inventory entry is a read. */
+export async function authorizeEvryReadCapability(
+  identity: string
+): Promise<EvryReadCapabilityAuthorization | null> {
+  const actor = await requireEvryPlantViewer();
+  const registration = REGISTRY.get(identity);
+
+  if (
+    !registration ||
+    !isReadRegistration(registration) ||
+    !actorHolds(actor, registration.applicationCapability)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    actor,
+    registration,
+    [EVRY_READ_CAPABILITY_AUTHORIZATION]: true as const,
+  });
 }
