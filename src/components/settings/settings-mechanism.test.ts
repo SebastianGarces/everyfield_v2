@@ -13,7 +13,7 @@ import { test } from "node:test";
 // mechanism is a second copy or a silent navigation, and both look fine in a
 // diff.
 //
-// FOUR CLAIMS, EACH THE NEGATIVE OF A REAL WAY TO LOSE THIS:
+// FIVE CLAIMS, EACH THE NEGATIVE OF A REAL WAY TO LOSE THIS:
 //
 //   1. ONE MOUNT. The modal is rendered by the dashboard layout and by nothing
 //      else, so there is exactly one on any screen. A second mount is #646 with
@@ -30,6 +30,9 @@ import { test } from "node:test";
 //   4. ONE PLACE WRITES HISTORY. The open/switch/close policy is the modal's
 //      alone. A `pushState` or a `router.push` naming settings anywhere else is
 //      how "settings occupies one history entry" stops being true.
+//   5. NO INDIRECT SETTINGS HREF. A serialized artifact carries a section id,
+//      never a prebuilt address, so a dynamic raw anchor cannot hide from the
+//      direct-href scan. The UI validates the id and renders `SettingsLink`.
 // ============================================================================
 
 const SRC = path.join(process.cwd(), "src");
@@ -68,6 +71,19 @@ const STORE = path.join(SRC, "lib", "settings", "settings-hash.ts");
 const LINK = path.join(SRC, "components", "settings", "settings-link.tsx");
 const LAYOUT = path.join(SRC, "app", "(dashboard)", "layout.tsx");
 const SETTINGS_ROUTES = path.join(SRC, "app", "(dashboard)", "settings");
+const EVRY_BOUNDARY = path.join(
+  SRC,
+  "components",
+  "evry",
+  "boundary-message.tsx"
+);
+const EVRY_POLICY_ARTIFACTS = path.join(
+  SRC,
+  "lib",
+  "evry",
+  "policy",
+  "artifacts.ts"
+);
 
 test("the settings modal is mounted once, by the dashboard layout", () => {
   const mounts = FILES.filter(
@@ -280,4 +296,33 @@ test("every in-app settings link goes through SettingsLink", () => {
     "SettingsLink must accept and forward every anchor prop, for `asChild`"
   );
   assert.match(link, /\{\.\.\.props\}/, "…and actually spread them");
+});
+
+test("Evry cannot smuggle a Settings href around SettingsLink", () => {
+  // An earlier handoff put `/dashboard#settings/<id>` in a policy artifact and
+  // rendered it through `<a href={artifact.destination.href}>`. The direct-href
+  // scan above could not see across that data boundary, so it passed while Evry
+  // had a second Settings-link mechanism. Hold both ends: the serialized policy
+  // artifact carries an id but no href, and the UI resolves that id through the
+  // one canonical component.
+  const artifact = stripComments(read(EVRY_POLICY_ARTIFACTS));
+  assert.match(artifact, /destination:[\s\S]*sectionId: string/);
+  assert.doesNotMatch(
+    artifact,
+    /destination:[\s\S]*\bhref\s*:/,
+    "a Settings artifact carries an id, never a prebuilt address"
+  );
+
+  const boundary = stripComments(read(EVRY_BOUNDARY));
+  assert.match(boundary, /<SettingsLink\b/);
+  assert.match(
+    boundary,
+    /resolveSettingsDestination\(artifact\.destination\.sectionId\)/,
+    "Evry uses the canonical live/retired/unknown resolver"
+  );
+  assert.doesNotMatch(
+    boundary,
+    /<a\b/,
+    "Evry delegates the address and router-aware click to SettingsLink"
+  );
 });
