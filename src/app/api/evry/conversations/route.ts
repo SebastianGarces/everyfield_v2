@@ -4,6 +4,7 @@ import { EvryConversationIdempotencyError } from "@/lib/evry/conversations/repos
 import { createEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
 import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
+import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
 
 import {
   evryConversationFailure,
@@ -24,12 +25,14 @@ const createConversationBodySchema = z
 export type EvryConversationCreatePostOptions = Readonly<{
   create?: typeof createEvryConversation;
   now?: () => Date;
+  resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
 }>;
 
 /** Build the auth-first conversation creation endpoint. */
 export function createEvryConversationCreatePost({
   create = createEvryConversation,
   now = () => new Date(),
+  resolvePageContext = resolveAuthorizedEvryPageContext,
 }: EvryConversationCreatePostOptions = {}): (
   request: Request
 ) => Promise<Response> {
@@ -50,11 +53,16 @@ export function createEvryConversationCreatePost({
         return evryConversationJson({ status: "invalid" }, 400);
       }
 
+      const pageContext = await resolvePageContext({
+        actor,
+        pageContext: parsed.data.pageContext ?? null,
+      });
+
       const resumed = await create({
         actor,
         requestKey: parsed.data.requestKey,
         message: parsed.data.message,
-        pageContext: parsed.data.pageContext ?? null,
+        pageContext,
         now: now(),
       });
       return evryConversationJson(

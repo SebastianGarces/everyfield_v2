@@ -145,6 +145,12 @@ const SPECIALIZED_ROUTE_FAMILIES: readonly SpecializedRouteFamily[] = [
     composition: "attached-workspace",
     markers: [/PageCanvas/, /WorkspacePanel/, /min-h-full/],
   },
+  {
+    routes: ["/evry"],
+    owner: "src/components/evry/evry-workspace.tsx",
+    composition: "attached-workspace",
+    markers: [/PageCanvas/, /WorkspacePanel/, /ConversationSurface/],
+  },
 ];
 
 /**
@@ -224,10 +230,10 @@ function collectPageRoutes(
   return routes.sort();
 }
 
-test("all 32 specialized surfaces declare their ruled composition and owner", () => {
+test("all 33 specialized surfaces declare their ruled composition and owner", () => {
   const routes = SPECIALIZED_ROUTE_FAMILIES.flatMap((family) => family.routes);
 
-  assert.equal(routes.length, 32);
+  assert.equal(routes.length, 33);
   assert.equal(
     new Set(routes).size,
     routes.length,

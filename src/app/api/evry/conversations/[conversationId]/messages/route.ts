@@ -7,6 +7,7 @@ import {
 import { continueEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
 import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
+import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
 
 import {
   evryConversationFailure,
@@ -33,12 +34,14 @@ type RouteContext = Readonly<{
 export type EvryConversationMessagePostOptions = Readonly<{
   continueConversation?: typeof continueEvryConversation;
   now?: () => Date;
+  resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
 }>;
 
 /** Persist and compile one authenticated continuation without running a model. */
 export function createEvryConversationMessagePost({
   continueConversation = continueEvryConversation,
   now = () => new Date(),
+  resolvePageContext = resolveAuthorizedEvryPageContext,
 }: EvryConversationMessagePostOptions = {}): (
   request: Request,
   context: RouteContext
@@ -64,12 +67,17 @@ export function createEvryConversationMessagePost({
         return evryConversationJson({ status: "invalid" }, 400);
       }
 
+      const pageContext = await resolvePageContext({
+        actor,
+        pageContext: parsed.data.pageContext ?? null,
+      });
+
       const result = await continueConversation({
         actor,
         conversationId: params.data.conversationId,
         requestKey: parsed.data.requestKey,
         message: parsed.data.message,
-        pageContext: parsed.data.pageContext ?? null,
+        pageContext,
         now: now(),
       });
       if (!result) {
