@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createOpenAI } from "@ai-sdk/openai";
 import { Output, streamText, type LanguageModelUsage } from "ai";
 
+import type { EvryTraceDocument } from "@/lib/evry/observability/contract";
 import { createEvryLangfuseSink } from "@/lib/evry/observability/langfuse";
 import { evryTraceIdForCorrelation } from "@/lib/evry/observability/recorder";
 import { normalizeEvryModelUsage } from "@/lib/evry/observability/usage";
@@ -26,11 +27,13 @@ import {
   evryPolicyDecisionFromProviderOutput,
   evryPolicyProviderOutputSchema,
 } from "@/lib/evry/policy/schema";
+import { fixtureDocument } from "@/lib/evry/plans/fixtures.test-helper";
 
 import {
   EVRY_ABSOLUTE_SAFETY_GATES,
   EVRY_CAPABILITY_EVAL_LAYERS,
   EVRY_RECIPE_EVAL_LAYERS,
+  type EvryEvalProofResult,
   type EvrySafetyGateResult,
 } from "./contracts";
 import {
@@ -39,11 +42,13 @@ import {
 } from "./policy/fixtures";
 import {
   EVRY_CAPABILITY_EVAL_FIXTURES,
+  EVRY_EVAL_PROOFS,
   EVRY_RECIPE_EVAL_FIXTURES,
 } from "./registry";
+import { assertEvryEvalProofResults } from "./proofs";
 
-const BENCHMARK_SCHEMA_VERSION = 1 as const;
-const BENCHMARK_RUNNER_VERSION = "evry-model-benchmark-v1" as const;
+const BENCHMARK_SCHEMA_VERSION = 2 as const;
+const BENCHMARK_RUNNER_VERSION = "evry-model-benchmark-v2" as const;
 type BenchmarkPolicyDecision = EvryPolicyEvalFixture["expected"];
 
 const EMPTY_USAGE: LanguageModelUsage = {
@@ -65,6 +70,8 @@ export type EvryPolicyBenchmarkCaseResult = Readonly<{
   actual: BenchmarkPolicyDecision | null;
   passed: boolean;
   structuredOutput: boolean;
+  prohibitedRequestSafety: boolean;
+  successfulPlan: boolean;
   errorCode: "provider_or_shape_failure" | null;
   latencyMs: number;
   usage: EvryNormalizedUsage;
@@ -79,6 +86,13 @@ export type EvryModelBenchmarkAggregate = Readonly<{
   passed: number;
   policyPassRate: number;
   structuredOutputRate: number;
+  candidateSafetyPassRate: number;
+  candidateSafety: Readonly<{
+    passed: number;
+    total: number;
+    passRate: number;
+  }>;
+  successfulPlans: number;
   correctApplicationActionHandoffs: number;
   latencyMs: Readonly<{
     median: number;
@@ -99,9 +113,17 @@ export type EvryModelBenchmarkAggregate = Readonly<{
     total: number;
   }>;
   totalCostUsd: number;
-  costPerSuccessfulPlanHandoffUsd: number | null;
+  costPerSuccessfulPlanUsd: number | null;
   allSafetyGatesPassed: boolean;
   qualifies: boolean;
+}>;
+
+export type EvryRegisteredEvalCaseResult = Readonly<{
+  subjectIdentity: string;
+  layer: string;
+  caseId: string;
+  proofId: string;
+  passed: boolean;
 }>;
 
 export type EvryModelBenchmarkReport = Readonly<{
@@ -113,9 +135,12 @@ export type EvryModelBenchmarkReport = Readonly<{
     hash: string;
     policyCases: number;
     capabilityFixtures: number;
+    capabilityCases: number;
     capabilityLayersPerFixture: number;
     recipeFixtures: number;
+    recipeCases: number;
     recipeLayersPerFixture: number;
+    executableProofs: number;
   }>;
   conditions: Readonly<{
     hash: string;
@@ -127,12 +152,23 @@ export type EvryModelBenchmarkReport = Readonly<{
     timeoutMs: number;
     promptsIdenticalAcrossCandidates: true;
     toolsExposedDuringPolicy: 0;
+    maximumSerializedInputBytes: number;
+  }>;
+  budget: Readonly<{
+    maximumCostUsd: number;
+    estimatedMaximumCostUsd: number;
+    measuredCostUsd: number;
   }>;
   thresholds: typeof EVRY_MODEL_RELEASE_THRESHOLDS;
+  proofResults: readonly EvryEvalProofResult[];
+  capabilityResults: readonly EvryRegisteredEvalCaseResult[];
+  recipeResults: readonly EvryRegisteredEvalCaseResult[];
   safetyGates: readonly EvrySafetyGateResult[];
   candidates: readonly EvryModelBenchmarkAggregate[];
   cases: readonly EvryPolicyBenchmarkCaseResult[];
   cheapestQualifiedModelId: EvryModelCandidateId | null;
+  productionModelId: EvryModelCandidateId;
+  productionSelectionMatches: boolean;
   caveat: string;
 }>;
 
@@ -215,21 +251,70 @@ function rounded(value: number): number {
   return Number(value.toFixed(6));
 }
 
-async function captureBenchmarkTrace(input: {
-  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
-  candidate: EvryModelCandidate;
+function exactCount(value: number | undefined, subject: string): number {
+  if (value === undefined) return 0;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Benchmark usage has invalid ${subject}`);
+  }
+  return value;
+}
+
+/** A priced benchmark call must carry complete, internally reconciled usage. */
+export function assertEvryBenchmarkUsage(usage: LanguageModelUsage): void {
+  const input = exactCount(usage.inputTokens, "input tokens");
+  const output = exactCount(usage.outputTokens, "output tokens");
+  const total = exactCount(usage.totalTokens, "total tokens");
+  const inputParts =
+    exactCount(usage.inputTokenDetails.noCacheTokens, "uncached input tokens") +
+    exactCount(usage.inputTokenDetails.cacheReadTokens, "cache read tokens") +
+    exactCount(usage.inputTokenDetails.cacheWriteTokens, "cache write tokens");
+  const outputParts =
+    exactCount(usage.outputTokenDetails.textTokens, "output text tokens") +
+    exactCount(
+      usage.outputTokenDetails.reasoningTokens,
+      "output reasoning tokens"
+    );
+  if (
+    total === 0 ||
+    input !== inputParts ||
+    output !== outputParts ||
+    total !== input + output
+  ) {
+    throw new Error("Benchmark usage is missing or does not reconcile");
+  }
+}
+
+function policyTraceSemantics(result: EvryPolicyBenchmarkCaseResult): Readonly<{
+  status: "succeeded" | "refused" | "failed";
+  resultCode: "policy_allowed" | "policy_refused" | "request_failed";
+}> {
+  if (!result.passed || result.actual === null) {
+    return { status: "failed", resultCode: "request_failed" };
+  }
+  if (
+    result.actual.classification === "application_read" ||
+    result.actual.classification === "application_action"
+  ) {
+    return { status: "succeeded", resultCode: "policy_allowed" };
+  }
+  return { status: "refused", resultCode: "policy_refused" };
+}
+
+export function evryBenchmarkTraceDocument(input: {
+  environment: string;
   result: EvryPolicyBenchmarkCaseResult;
   startedAt: Date;
   endedAt: Date;
-}): Promise<void> {
-  const status = input.result.passed ? "succeeded" : "failed";
+}): EvryTraceDocument {
+  const policy = policyTraceSemantics(input.result);
+  const reportStatus = input.result.passed ? "succeeded" : "failed";
   const reportInstant = input.endedAt.toISOString();
-  await input.configuredSink.sink.capture({
+  return {
     schemaVersion: 1,
     traceId: input.result.traceId,
     correlationId: input.result.correlationId,
-    environment: input.configuredSink.environment,
-    recipeIdentity: `eval.policy.${input.candidate.id}`,
+    environment: input.environment,
+    recipeIdentity: null,
     startedAt: input.startedAt.toISOString(),
     endedAt: reportInstant,
     durationMs: input.result.latencyMs,
@@ -254,8 +339,8 @@ async function captureBenchmarkTrace(input: {
         startedAt: input.startedAt.toISOString(),
         endedAt: reportInstant,
         durationMs: input.result.latencyMs,
-        status,
-        resultCode: input.result.passed ? "policy_allowed" : "request_failed",
+        status: policy.status,
+        resultCode: policy.resultCode,
         capabilityIdentity: null,
         details: {
           kind: "generation",
@@ -270,13 +355,133 @@ async function captureBenchmarkTrace(input: {
         startedAt: reportInstant,
         endedAt: reportInstant,
         durationMs: 0,
-        status,
+        status: reportStatus,
         resultCode: input.result.passed ? "reported" : "request_failed",
         capabilityIdentity: null,
         details: { kind: "operation" },
       },
     ],
+  };
+}
+
+async function captureBenchmarkTrace(input: {
+  configuredSink: NonNullable<ReturnType<typeof createEvryLangfuseSink>>;
+  result: EvryPolicyBenchmarkCaseResult;
+  startedAt: Date;
+  endedAt: Date;
+}): Promise<void> {
+  await input.configuredSink.sink.capture(
+    evryBenchmarkTraceDocument({
+      environment: input.configuredSink.environment,
+      result: input.result,
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+    })
+  );
+}
+
+export type EvryBenchmarkCallBudget = Readonly<{
+  modelId: EvryModelCandidateId;
+  fixtureId: string;
+  requestHash: string;
+  maximumInputTokens: number;
+  maximumCostUsd: number;
+}>;
+
+async function serializedPolicyRequestBody(input: {
+  candidate: EvryModelCandidate;
+  fixture: EvryPolicyEvalFixture;
+}): Promise<string> {
+  let requestBody: string | null = null;
+  const captureFetch = async (
+    _request: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    if (typeof init?.body !== "string") {
+      throw new Error("Benchmark preflight could not serialize the request");
+    }
+    requestBody = init.body;
+    throw new Error("Evry benchmark preflight capture complete");
+  };
+  const provider = createOpenAI({
+    apiKey: "benchmark-preflight-not-sent",
+    fetch: captureFetch,
   });
+  const result = streamText({
+    model: provider(input.candidate.id),
+    output: Output.object({ schema: evryPolicyProviderOutputSchema }),
+    system: EVRY_POLICY_SYSTEM_PROMPT,
+    prompt: input.fixture.request,
+    maxOutputTokens: EVRY_POLICY_MAX_OUTPUT_TOKENS,
+    maxRetries: 0,
+    timeout: EVRY_POLICY_TIMEOUT_MS,
+    providerOptions: evryPolicyProviderOptions(input.candidate),
+    onError() {
+      // The capture fetch intentionally ends before a response exists.
+    },
+  });
+  await Promise.allSettled([result.output, result.usage]);
+  if (requestBody === null) {
+    throw new Error("Benchmark preflight did not capture a request body");
+  }
+  return requestBody;
+}
+
+/**
+ * Capture the exact SDK request JSON without network access. UTF-8 byte length
+ * is a conservative token ceiling because each billed input token consumes at
+ * least one byte from this body, which also includes unbilled JSON framing.
+ */
+export async function evryBenchmarkCallBudgets(): Promise<
+  readonly EvryBenchmarkCallBudget[]
+> {
+  const budgets: EvryBenchmarkCallBudget[] = [];
+  for (const candidate of EVRY_MODEL_CANDIDATES) {
+    for (const fixture of EVRY_POLICY_EVAL_FIXTURES) {
+      const requestBody = await serializedPolicyRequestBody({
+        candidate,
+        fixture,
+      });
+      const maximumInputTokens = Buffer.byteLength(requestBody, "utf8");
+      budgets.push(
+        Object.freeze({
+          modelId: candidate.id,
+          fixtureId: fixture.id,
+          requestHash: stableHash(requestBody),
+          maximumInputTokens,
+          maximumCostUsd: calculateEvryModelCostUsd({
+            candidate,
+            inputUncachedTokens: maximumInputTokens,
+            inputCacheReadTokens: 0,
+            inputCacheWriteTokens: 0,
+            outputTokens: EVRY_POLICY_MAX_OUTPUT_TOKENS,
+          }),
+        })
+      );
+    }
+  }
+  return Object.freeze(budgets);
+}
+
+export function assertEvryBenchmarkRemainingBudget(input: {
+  maximumCostUsd: number;
+  measuredCostUsd: number;
+  remainingMaximumCostUsd: number;
+}): void {
+  if (
+    !Number.isFinite(input.maximumCostUsd) ||
+    input.maximumCostUsd <= 0 ||
+    !Number.isFinite(input.measuredCostUsd) ||
+    input.measuredCostUsd < 0 ||
+    !Number.isFinite(input.remainingMaximumCostUsd) ||
+    input.remainingMaximumCostUsd < 0 ||
+    input.measuredCostUsd + input.remainingMaximumCostUsd >
+      input.maximumCostUsd + Number.EPSILON
+  ) {
+    throw new Error(
+      "Benchmark remaining worst-case cost exceeds the authorized budget"
+    );
+  }
 }
 
 async function runPolicyCase(input: {
@@ -338,11 +543,14 @@ async function runPolicyCase(input: {
     } catch {
       usage = EMPTY_USAGE;
     }
-    if ((usage.totalTokens ?? 0) === 0) {
-      throw new Error(
-        `Benchmark ${input.candidate.id} failed without usage (${closedErrorName(failure)}); aborting before the next call`
-      );
-    }
+  }
+
+  try {
+    assertEvryBenchmarkUsage(usage);
+  } catch {
+    throw new Error(
+      `Benchmark ${input.candidate.id} returned invalid usage (${closedErrorName(streamError)}); aborting before the next call`
+    );
   }
 
   const ended = performance.now();
@@ -370,13 +578,22 @@ async function runPolicyCase(input: {
       firstTokenAt === null ? null : rounded(firstTokenAt - started),
   });
   const correlationId = randomUUID();
+  const passed =
+    actual !== null && sameDecision(input.fixture.expected, actual);
+  let successfulPlan = false;
+  if (passed && input.fixture.planProbe === "meeting_invitation_reference") {
+    const document = fixtureDocument();
+    successfulPlan = document.steps.length > 0;
+  }
   const benchmarkResult: EvryPolicyBenchmarkCaseResult = Object.freeze({
     modelId: input.candidate.id,
     fixtureId: input.fixture.id,
     expected: input.fixture.expected,
     actual,
-    passed: actual !== null && sameDecision(input.fixture.expected, actual),
+    passed,
     structuredOutput,
+    prohibitedRequestSafety: input.fixture.prohibitedRequestSafety,
+    successfulPlan,
     errorCode: structuredOutput ? null : "provider_or_shape_failure",
     latencyMs: rounded(ended - started),
     usage: normalizedUsage,
@@ -385,7 +602,6 @@ async function runPolicyCase(input: {
   });
   await captureBenchmarkTrace({
     configuredSink: input.configuredSink,
-    candidate: input.candidate,
     result: benchmarkResult,
     startedAt,
     endedAt,
@@ -406,6 +622,15 @@ function aggregateCandidate(input: {
     ({ passed, expected }) =>
       passed && expected.classification === "application_action"
   ).length;
+  const candidateSafetyCases = input.cases.filter(
+    ({ prohibitedRequestSafety }) => prohibitedRequestSafety
+  );
+  const candidateSafetyPassed = candidateSafetyCases.filter(
+    ({ passed }) => passed
+  ).length;
+  const successfulPlans = input.cases.filter(
+    ({ successfulPlan }) => successfulPlan
+  ).length;
   const totalCostUsd = input.cases.reduce(
     (total, result) => total + result.usage.costUsd,
     0
@@ -416,6 +641,9 @@ function aggregateCandidate(input: {
     structuredOutputRate:
       input.cases.filter(({ structuredOutput }) => structuredOutput).length /
       input.cases.length,
+    candidateSafetyPassRate:
+      candidateSafetyPassed / candidateSafetyCases.length,
+    successfulPlans,
     allSafetyGatesPassed: input.allSafetyGatesPassed,
     totalCostUsd,
   };
@@ -426,6 +654,13 @@ function aggregateCandidate(input: {
     passed: passing.length,
     policyPassRate: evidence.policyPassRate,
     structuredOutputRate: evidence.structuredOutputRate,
+    candidateSafetyPassRate: evidence.candidateSafetyPassRate,
+    candidateSafety: {
+      passed: candidateSafetyPassed,
+      total: candidateSafetyCases.length,
+      passRate: evidence.candidateSafetyPassRate,
+    },
+    successfulPlans,
     correctApplicationActionHandoffs: actionHandoffs,
     latencyMs: {
       median: rounded(
@@ -474,8 +709,8 @@ function aggregateCandidate(input: {
       ),
     },
     totalCostUsd: rounded(totalCostUsd),
-    costPerSuccessfulPlanHandoffUsd:
-      actionHandoffs === 0 ? null : rounded(totalCostUsd / actionHandoffs),
+    costPerSuccessfulPlanUsd:
+      successfulPlans === 0 ? null : rounded(totalCostUsd / successfulPlans),
     allSafetyGatesPassed: input.allSafetyGatesPassed,
     qualifies: evryModelClearsReleaseThresholds(evidence),
   });
@@ -484,6 +719,10 @@ function aggregateCandidate(input: {
 export async function runEvryModelBenchmark(input: {
   apiKey: string;
   gitSha: string;
+  productionModelId: EvryModelCandidateId;
+  maximumCostUsd: number;
+  callBudgets: readonly EvryBenchmarkCallBudget[];
+  proofResults: readonly EvryEvalProofResult[];
   safetyGates: readonly EvrySafetyGateResult[];
   onCaseComplete?: (progress: {
     completed: number;
@@ -495,14 +734,39 @@ export async function runEvryModelBenchmark(input: {
   if (!configuredSink) {
     throw new Error("Langfuse must be configured before a live benchmark");
   }
+  assertEvryEvalProofResults(EVRY_EVAL_PROOFS, input.proofResults);
   const allSafetyGatesPassed = EVRY_ABSOLUTE_SAFETY_GATES.every(
     (gate) => input.safetyGates.find((result) => result.gate === gate)?.passed
   );
   const cases: EvryPolicyBenchmarkCaseResult[] = [];
   const total = EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length;
+  if (input.callBudgets.length !== total) {
+    throw new Error("Benchmark budget matrix does not match the call matrix");
+  }
+  const estimatedMaximumCostUsd = input.callBudgets.reduce(
+    (sum, budget) => sum + budget.maximumCostUsd,
+    0
+  );
 
   for (const candidate of EVRY_MODEL_CANDIDATES) {
     for (const fixture of EVRY_POLICY_EVAL_FIXTURES) {
+      const callIndex = cases.length;
+      const budget = input.callBudgets[callIndex];
+      if (budget?.modelId !== candidate.id || budget.fixtureId !== fixture.id) {
+        throw new Error(
+          "Benchmark budget order does not match the call matrix"
+        );
+      }
+      assertEvryBenchmarkRemainingBudget({
+        maximumCostUsd: input.maximumCostUsd,
+        measuredCostUsd: cases.reduce(
+          (sum, result) => sum + result.usage.costUsd,
+          0
+        ),
+        remainingMaximumCostUsd: input.callBudgets
+          .slice(callIndex)
+          .reduce((sum, remaining) => sum + remaining.maximumCostUsd, 0),
+      });
       const result = await runPolicyCase({
         apiKey: input.apiKey,
         candidate,
@@ -510,6 +774,16 @@ export async function runEvryModelBenchmark(input: {
         configuredSink,
       });
       cases.push(result);
+      assertEvryBenchmarkRemainingBudget({
+        maximumCostUsd: input.maximumCostUsd,
+        measuredCostUsd: cases.reduce(
+          (sum, completed) => sum + completed.usage.costUsd,
+          0
+        ),
+        remainingMaximumCostUsd: input.callBudgets
+          .slice(callIndex + 1)
+          .reduce((sum, remaining) => sum + remaining.maximumCostUsd, 0),
+      });
       input.onCaseComplete?.({ completed: cases.length, total, result });
     }
   }
@@ -522,12 +796,22 @@ export async function runEvryModelBenchmark(input: {
     })
   );
   const selected = selectCheapestQualifiedEvryModel(candidates);
-  const corpusIdentity = EVRY_POLICY_EVAL_FIXTURES.map((fixture) => ({
-    id: fixture.id,
-    family: fixture.family,
-    request: fixture.request,
-    expected: fixture.expected,
-  }));
+  const corpusIdentity = {
+    policy: EVRY_POLICY_EVAL_FIXTURES.map((fixture) => ({
+      id: fixture.id,
+      family: fixture.family,
+      request: fixture.request,
+      expected: fixture.expected,
+      prohibitedRequestSafety: fixture.prohibitedRequestSafety,
+      planProbe: fixture.planProbe,
+    })),
+    capabilities: EVRY_CAPABILITY_EVAL_FIXTURES,
+    recipes: EVRY_RECIPE_EVAL_FIXTURES,
+    proofs: EVRY_EVAL_PROOFS,
+  };
+  const maximumSerializedInputBytes = Math.max(
+    ...input.callBudgets.map(({ maximumInputTokens }) => maximumInputTokens)
+  );
   const conditions = {
     provider: "openai-responses" as const,
     retries: 0 as const,
@@ -537,7 +821,59 @@ export async function runEvryModelBenchmark(input: {
     timeoutMs: EVRY_POLICY_TIMEOUT_MS,
     promptsIdenticalAcrossCandidates: true as const,
     toolsExposedDuringPolicy: 0 as const,
+    maximumSerializedInputBytes,
   };
+  const capabilityCases = EVRY_CAPABILITY_EVAL_FIXTURES.reduce(
+    (totalCases, fixture) =>
+      totalCases +
+      Object.values(fixture.cases).reduce(
+        (fixtureCases, casesForLayer) => fixtureCases + casesForLayer.length,
+        0
+      ),
+    0
+  );
+  const recipeCases = EVRY_RECIPE_EVAL_FIXTURES.reduce(
+    (totalCases, fixture) =>
+      totalCases +
+      Object.values(fixture.cases).reduce(
+        (fixtureCases, casesForLayer) => fixtureCases + casesForLayer.length,
+        0
+      ),
+    0
+  );
+  const measuredCostUsd = candidates.reduce(
+    (sum, candidate) => sum + candidate.totalCostUsd,
+    0
+  );
+  const proofResultById = new Map(
+    input.proofResults.map((result) => [result.proofId, result])
+  );
+  const capabilityResults = EVRY_CAPABILITY_EVAL_FIXTURES.flatMap((fixture) =>
+    Object.entries(fixture.cases).flatMap(([layer, evalCases]) =>
+      evalCases.map(
+        (evalCase): EvryRegisteredEvalCaseResult => ({
+          subjectIdentity: fixture.capabilityIdentity,
+          layer,
+          caseId: evalCase.id,
+          proofId: evalCase.proofId,
+          passed: proofResultById.get(evalCase.proofId)?.passed === true,
+        })
+      )
+    )
+  );
+  const recipeResults = EVRY_RECIPE_EVAL_FIXTURES.flatMap((fixture) =>
+    Object.entries(fixture.cases).flatMap(([layer, evalCases]) =>
+      evalCases.map(
+        (evalCase): EvryRegisteredEvalCaseResult => ({
+          subjectIdentity: fixture.recipeIdentity,
+          layer,
+          caseId: evalCase.id,
+          proofId: evalCase.proofId,
+          passed: proofResultById.get(evalCase.proofId)?.passed === true,
+        })
+      )
+    )
+  );
   return Object.freeze({
     schemaVersion: BENCHMARK_SCHEMA_VERSION,
     runnerVersion: BENCHMARK_RUNNER_VERSION,
@@ -547,21 +883,44 @@ export async function runEvryModelBenchmark(input: {
       hash: stableHash(corpusIdentity),
       policyCases: EVRY_POLICY_EVAL_FIXTURES.length,
       capabilityFixtures: EVRY_CAPABILITY_EVAL_FIXTURES.length,
+      capabilityCases,
       capabilityLayersPerFixture: EVRY_CAPABILITY_EVAL_LAYERS.length,
       recipeFixtures: EVRY_RECIPE_EVAL_FIXTURES.length,
+      recipeCases,
       recipeLayersPerFixture: EVRY_RECIPE_EVAL_LAYERS.length,
+      executableProofs: EVRY_EVAL_PROOFS.length,
     },
     conditions: {
-      hash: stableHash({ ...conditions, EVRY_POLICY_SYSTEM_PROMPT }),
+      hash: stableHash({
+        ...conditions,
+        EVRY_POLICY_SYSTEM_PROMPT,
+        requests: input.callBudgets.map(
+          ({ modelId, fixtureId, requestHash }) => ({
+            modelId,
+            fixtureId,
+            requestHash,
+          })
+        ),
+      }),
       ...conditions,
     },
+    budget: {
+      maximumCostUsd: rounded(input.maximumCostUsd),
+      estimatedMaximumCostUsd: rounded(estimatedMaximumCostUsd),
+      measuredCostUsd: rounded(measuredCostUsd),
+    },
     thresholds: EVRY_MODEL_RELEASE_THRESHOLDS,
+    proofResults: input.proofResults,
+    capabilityResults,
+    recipeResults,
     safetyGates: input.safetyGates,
     candidates,
     cases,
     cheapestQualifiedModelId: selected?.modelId ?? null,
+    productionModelId: input.productionModelId,
+    productionSelectionMatches: selected?.modelId === input.productionModelId,
     caveat:
-      "This live corpus measures the policy gate. Cost per successful plan handoff means cost divided by correct application-action continuations; it is not a generated-plan or argument-quality score.",
+      "The candidate model owns only request-policy classification. Capability, argument, tenancy, confirmation, execution, and recipe gates are shared deterministic proofs. Cost per successful plan divides the candidate's full policy-corpus cost by its successful reference meeting-invitation plan probe.",
   });
 }
 
@@ -583,7 +942,7 @@ export function evryModelBenchmarkMarkdown(
   const rows = report.candidates
     .map(
       (candidate) =>
-        `| ${candidate.label} | ${candidate.passed}/${candidate.calls} (${percent(candidate.policyPassRate)}) | ${percent(candidate.structuredOutputRate)} | ${duration(candidate.timeToFirstTokenMs.median)} | ${duration(candidate.latencyMs.median)} | ${candidate.tokens.total.toLocaleString("en-US")} | ${candidate.tokens.inputCacheRead.toLocaleString("en-US")} | ${money(candidate.totalCostUsd)} | ${money(candidate.costPerSuccessfulPlanHandoffUsd)} | ${candidate.qualifies ? "Yes" : "No"} |`
+        `| ${candidate.label} | ${candidate.passed}/${candidate.calls} (${percent(candidate.policyPassRate)}) | ${candidate.candidateSafety.passed}/${candidate.candidateSafety.total} (${percent(candidate.candidateSafety.passRate)}) | ${percent(candidate.structuredOutputRate)} | ${candidate.successfulPlans} | ${duration(candidate.timeToFirstTokenMs.median)} | ${duration(candidate.latencyMs.median)} | ${candidate.tokens.total.toLocaleString("en-US")} | ${candidate.tokens.inputCacheRead.toLocaleString("en-US")} | ${money(candidate.totalCostUsd)} | ${money(candidate.costPerSuccessfulPlanUsd)} | ${candidate.qualifies ? "Yes" : "No"} |`
     )
     .join("\n");
   const failures = report.cases
@@ -593,5 +952,5 @@ export function evryModelBenchmarkMarkdown(
         `- ${modelId} / ${fixtureId}: expected ${expected.classification}, got ${actual?.classification ?? errorCode ?? "unknown"}`
     )
     .join("\n");
-  return `# Evry model benchmark\n\nGenerated ${report.generatedAt} from \`${report.gitSha}\`. Corpus \`${report.corpus.hash.slice(0, 12)}\`, conditions \`${report.conditions.hash.slice(0, 12)}\`.\n\n## Decision table\n\n| Candidate | Policy | Structured | Median TTFT | Median latency | Tokens | Cache reads | Total cost | Cost / successful plan handoff | Qualifies |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---|\n${rows}\n\nConfigured cheapest qualifying candidate: **${report.cheapestQualifiedModelId ?? "none"}**. This is benchmark output, not a production model change.\n\n## Release gates\n\n- Capability fixtures: ${report.corpus.capabilityFixtures} × ${report.corpus.capabilityLayersPerFixture} required layers\n- Recipe fixtures: ${report.corpus.recipeFixtures} × ${report.corpus.recipeLayersPerFixture} required layers\n- Absolute safety: ${report.safetyGates.map(({ gate, passed }) => `${gate}=${passed ? "pass" : "FAIL"}`).join(", ")}\n- Minimum policy pass rate: ${percent(report.thresholds.minimumPolicyPassRate)}\n- Required structured-output rate: ${percent(report.thresholds.minimumStructuredOutputRate)}\n\n## Failed policy cases\n\n${failures || "None."}\n\n## Interpretation limit\n\n${report.caveat}\n`;
+  return `# Evry model benchmark\n\nGenerated ${report.generatedAt} from \`${report.gitSha}\`. Corpus \`${report.corpus.hash.slice(0, 12)}\`, conditions \`${report.conditions.hash.slice(0, 12)}\`.\n\n## Decision table\n\n| Candidate | Policy | Candidate safety | Structured | Successful plans | Median TTFT | Median latency | Tokens | Cache reads | Total cost | Cost / successful plan | Qualifies |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n${rows}\n\nCheapest qualifying candidate: **${report.cheapestQualifiedModelId ?? "none"}**. Production is configured to **${report.productionModelId}** (${report.productionSelectionMatches ? "match" : "MISMATCH"}).\n\n## Release gates\n\n- Executable proofs: ${report.proofResults.filter(({ passed }) => passed).length}/${report.corpus.executableProofs} passed, zero skips required\n- Capability fixtures: ${report.corpus.capabilityFixtures} fixtures, ${report.corpus.capabilityCases} executable-linked cases across ${report.corpus.capabilityLayersPerFixture} required layers\n- Recipe fixtures: ${report.corpus.recipeFixtures} fixtures, ${report.corpus.recipeCases} executable-linked cases across ${report.corpus.recipeLayersPerFixture} required layers\n- Absolute safety: ${report.safetyGates.map(({ gate, passed }) => `${gate}=${passed ? "pass" : "FAIL"}`).join(", ")}\n- Candidate prohibited-request safety: ${percent(report.thresholds.minimumCandidateSafetyPassRate)} required\n- Minimum policy pass rate: ${percent(report.thresholds.minimumPolicyPassRate)}\n- Required structured-output rate: ${percent(report.thresholds.minimumStructuredOutputRate)}\n- Cost authorization: ${money(report.budget.measuredCostUsd)} measured / ${money(report.budget.maximumCostUsd)} authorized; ${money(report.budget.estimatedMaximumCostUsd)} conservative ceiling\n\n## Failed policy cases\n\n${failures || "None."}\n\n## Interpretation limit\n\n${report.caveat}\n`;
 }

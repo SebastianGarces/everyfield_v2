@@ -6,61 +6,46 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  evryBenchmarkCallBudgets,
   evryModelBenchmarkMarkdown,
   runEvryModelBenchmark,
 } from "@/lib/evry/evals/benchmark";
 import {
   assertEvryAbsoluteSafetyGates,
-  type EvrySafetyGateResult,
+  type EvryEvalProof,
+  type EvryEvalProofResult,
 } from "@/lib/evry/evals/contracts";
-import { assertEvryEvalRegistryComplete } from "@/lib/evry/evals/registry";
-import { EVRY_POLICY_EVAL_FIXTURES } from "@/lib/evry/evals/policy/fixtures";
 import {
-  estimateEvryBenchmarkCostUsd,
-  EVRY_MODEL_CANDIDATES,
-} from "@/lib/evry/models/candidates";
+  assertEvryEvalProofResults,
+  evryEvalProofResult,
+  evrySafetyGateResults,
+} from "@/lib/evry/evals/proofs";
+import {
+  assertEvryEvalRegistryComplete,
+  EVRY_EVAL_PROOFS,
+} from "@/lib/evry/evals/registry";
+import { EVRY_POLICY_EVAL_FIXTURES } from "@/lib/evry/evals/policy/fixtures";
+import { EVRY_MODEL_CANDIDATES } from "@/lib/evry/models/candidates";
+import { EVRY_POLICY_MODEL_ID } from "@/lib/evry/models/provider";
 
-const DETERMINISTIC_TESTS = [
-  "src/lib/evry/evals/contracts.test.ts",
-  "src/lib/evry/models/selection.test.ts",
-  "src/lib/evry/eligibility/eligibility.test.ts",
-  "src/lib/evry/policy/core.test.ts",
-  "src/lib/evry/plans/confirmation-race.test.ts",
-  "src/lib/evry/executor/core.test.ts",
-  "src/lib/evry/recipes/runner.test.ts",
-] as const;
-
-const SAFETY_GATE_PROOF: readonly EvrySafetyGateResult[] = [
-  {
-    gate: "cross_tenant_access",
-    passed: true,
-    proof: "src/lib/evry/eligibility/eligibility.test.ts",
-  },
-  {
-    gate: "unconfirmed_effect",
-    passed: true,
-    proof: "src/lib/evry/executor/core.test.ts",
-  },
-  {
-    gate: "prohibited_tool_access",
-    passed: true,
-    proof: "src/lib/evry/policy/core.test.ts",
-  },
-  {
-    gate: "plan_approval_mismatch",
-    passed: true,
-    proof: "src/lib/evry/plans/confirmation-race.test.ts",
-  },
-] as const;
+const LIVE_DATABASE_ENVIRONMENT = Object.freeze({
+  LIVE_DB_NETWORK: "everyfield-evry-benchmark",
+  LIVE_DB_PG_CONTAINER: "everyfield-evry-benchmark-pg",
+  LIVE_DB_PROXY_CONTAINER: "everyfield-evry-benchmark-proxy",
+  LIVE_DB_PG_PORT: "55433",
+  LIVE_DB_PROXY_PORT: "4445",
+});
 
 type CliOptions = Readonly<{
   live: boolean;
-  maximumCostUsd: number;
+  proofsOnly: boolean;
+  maximumCostUsd: number | null;
   outputDirectory: string;
 }>;
 
 function parseCli(argv: readonly string[]): CliOptions {
   let live = false;
+  let proofsOnly = false;
   let maximumCostUsd: number | null = null;
   let outputDirectory = path.resolve(".lavish", "evry-model-benchmark");
 
@@ -68,6 +53,10 @@ function parseCli(argv: readonly string[]): CliOptions {
     if (argument === "--") continue;
     if (argument === "--live") {
       live = true;
+      continue;
+    }
+    if (argument === "--proofs-only") {
+      proofsOnly = true;
       continue;
     }
     if (argument.startsWith("--max-cost-usd=")) {
@@ -81,19 +70,23 @@ function parseCli(argv: readonly string[]): CliOptions {
     throw new Error(`Unknown benchmark argument: ${argument}`);
   }
 
-  if (!live) {
+  if (!live && !proofsOnly) {
     throw new Error(
-      "Live provider access is opt-in: pass --live and --max-cost-usd=<amount>"
+      "Pass --proofs-only, or opt into provider access with --live and --max-cost-usd=<amount>"
     );
   }
-  if (
-    maximumCostUsd === null ||
-    !Number.isFinite(maximumCostUsd) ||
-    maximumCostUsd <= 0
-  ) {
+  if (live && (maximumCostUsd === null || maximumCostUsd <= 0)) {
     throw new Error("--max-cost-usd must be a positive finite amount");
   }
-  return Object.freeze({ live, maximumCostUsd, outputDirectory });
+  if (maximumCostUsd !== null && !Number.isFinite(maximumCostUsd)) {
+    throw new Error("--max-cost-usd must be a positive finite amount");
+  }
+  return Object.freeze({
+    live,
+    proofsOnly,
+    maximumCostUsd,
+    outputDirectory,
+  });
 }
 
 function parseLocalLangfuseEnvironment(contents: string): Readonly<{
@@ -152,31 +145,122 @@ async function configureAndCheckLangfuse(): Promise<void> {
   process.env.LANGFUSE_TRACING_ENVIRONMENT = "local-eval";
 }
 
-function runDeterministicReleaseGates(): void {
-  assertEvryEvalRegistryComplete();
+function runProof(
+  proof: EvryEvalProof,
+  environment: NodeJS.ProcessEnv
+): EvryEvalProofResult {
+  const imports =
+    proof.lane === "live_database"
+      ? ["--import", "./scripts/live-db-endpoint.ts"]
+      : [];
   const result = spawnSync(
     process.execPath,
-    ["--import", "tsx", "--test", ...DETERMINISTIC_TESTS],
-    { cwd: process.cwd(), stdio: "inherit", env: process.env }
+    [
+      "--no-warnings",
+      "--experimental-test-module-mocks",
+      "--import",
+      "tsx",
+      ...imports,
+      "--test",
+      "--test-reporter=tap",
+      proof.testFile,
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: environment,
+      timeout: 180_000,
+    }
   );
   if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error("Deterministic Evry release gates failed");
+  let proofResult: EvryEvalProofResult;
+  try {
+    proofResult = evryEvalProofResult({
+      proof,
+      exitCode: result.status,
+      output: result.stdout,
+    });
+  } catch (error) {
+    process.stderr.write(result.stdout);
+    process.stderr.write(result.stderr);
+    throw error;
   }
-  assertEvryAbsoluteSafetyGates(SAFETY_GATE_PROOF);
+  process.stdout.write(
+    `Proof ${proof.id}: ${proofResult.passed ? "pass" : "FAIL"} (${proofResult.tests} tests, ${proofResult.skipped} skipped)\n`
+  );
+  if (!proofResult.passed) {
+    process.stderr.write(result.stdout);
+    process.stderr.write(result.stderr);
+  }
+  return proofResult;
+}
+
+function runLiveStack(
+  action: "up" | "down",
+  environment: NodeJS.ProcessEnv
+): void {
+  const result = spawnSync("./scripts/live-db-stack.sh", [action], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: environment,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Evry benchmark live database stack ${action} failed`);
+  }
+}
+
+function runExecutableReleaseGates(): readonly EvryEvalProofResult[] {
+  assertEvryEvalRegistryComplete();
+  const deterministic = EVRY_EVAL_PROOFS.filter(
+    ({ lane }) => lane === "deterministic"
+  ).map((proof) => runProof(proof, process.env));
+  const stackEnvironment = {
+    ...process.env,
+    ...LIVE_DATABASE_ENVIRONMENT,
+  };
+  const liveEnvironment = {
+    ...stackEnvironment,
+    LIVE_DB_TESTS: "1",
+    NEON_HTTP_PROXY_URL: `http://localhost:${LIVE_DATABASE_ENVIRONMENT.LIVE_DB_PROXY_PORT}/sql`,
+    DATABASE_URL: `postgresql://postgres:postgres@localhost:${LIVE_DATABASE_ENVIRONMENT.LIVE_DB_PG_PORT}/main`,
+    RESEND_API_KEY: "re_ci_placeholder",
+  };
+  const live: EvryEvalProofResult[] = [];
+  runLiveStack("up", stackEnvironment);
+  try {
+    for (const proof of EVRY_EVAL_PROOFS.filter(
+      ({ lane }) => lane === "live_database"
+    )) {
+      live.push(runProof(proof, liveEnvironment));
+    }
+  } finally {
+    runLiveStack("down", stackEnvironment);
+  }
+  const results = [...deterministic, ...live];
+  assertEvryEvalProofResults(EVRY_EVAL_PROOFS, results);
+  return results;
+}
+
+function estimatedMaximumCost(
+  budgets: Awaited<ReturnType<typeof evryBenchmarkCallBudgets>>
+): number {
+  return budgets.reduce((total, budget) => total + budget.maximumCostUsd, 0);
 }
 
 async function main(): Promise<void> {
   const options = parseCli(process.argv.slice(2));
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required for --live");
+  if (options.live && !apiKey) {
+    throw new Error("OPENAI_API_KEY is required for --live");
+  }
 
-  const estimatedMaximumCostUsd = estimateEvryBenchmarkCostUsd({
-    callsPerCandidate: EVRY_POLICY_EVAL_FIXTURES.length,
-    maximumInputTokensPerCall: 2_500,
-    maximumOutputTokensPerCall: 100,
-  });
-  if (estimatedMaximumCostUsd > options.maximumCostUsd) {
+  const callBudgets = await evryBenchmarkCallBudgets();
+  const estimatedMaximumCostUsd = estimatedMaximumCost(callBudgets);
+  if (
+    options.maximumCostUsd !== null &&
+    estimatedMaximumCostUsd > options.maximumCostUsd
+  ) {
     throw new Error(
       `Conservative preflight $${estimatedMaximumCostUsd.toFixed(6)} exceeds --max-cost-usd=$${options.maximumCostUsd.toFixed(6)}`
     );
@@ -185,8 +269,20 @@ async function main(): Promise<void> {
   process.stdout.write(
     `Preflight: ${EVRY_MODEL_CANDIDATES.length} models × ${EVRY_POLICY_EVAL_FIXTURES.length} fixtures = ${EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length} calls; conservative ceiling $${estimatedMaximumCostUsd.toFixed(6)}.\n`
   );
-  runDeterministicReleaseGates();
+  const proofResults = runExecutableReleaseGates();
+  const safetyGates = evrySafetyGateResults({
+    proofs: EVRY_EVAL_PROOFS,
+    results: proofResults,
+  });
+  assertEvryAbsoluteSafetyGates(safetyGates);
   await configureAndCheckLangfuse();
+  if (options.proofsOnly && !options.live) {
+    process.stdout.write("PROOFS_ONLY=pass\n");
+    return;
+  }
+  if (!apiKey || options.maximumCostUsd === null) {
+    throw new Error("Live benchmark authorization is incomplete");
+  }
 
   const gitSha = execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
@@ -194,7 +290,11 @@ async function main(): Promise<void> {
   const report = await runEvryModelBenchmark({
     apiKey,
     gitSha,
-    safetyGates: SAFETY_GATE_PROOF,
+    productionModelId: EVRY_POLICY_MODEL_ID,
+    maximumCostUsd: options.maximumCostUsd,
+    callBudgets,
+    proofResults,
+    safetyGates,
     onCaseComplete({ completed, total, result }) {
       process.stdout.write(
         `[${completed}/${total}] ${result.modelId} ${result.fixtureId}: ${result.passed ? "pass" : "FAIL"} (${Math.round(result.latencyMs)} ms, $${result.usage.costUsd.toFixed(6)})\n`
@@ -206,11 +306,11 @@ async function main(): Promise<void> {
   await mkdir(options.outputDirectory, { recursive: true });
   const jsonPath = path.join(
     options.outputDirectory,
-    `${runId}.evry-model-benchmark.v1.json`
+    `${runId}.evry-model-benchmark.v2.json`
   );
   const markdownPath = path.join(
     options.outputDirectory,
-    `${runId}.evry-model-benchmark.v1.md`
+    `${runId}.evry-model-benchmark.v2.md`
   );
   await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   await writeFile(markdownPath, evryModelBenchmarkMarkdown(report), "utf8");
@@ -223,7 +323,12 @@ async function main(): Promise<void> {
   process.stdout.write(
     `CHEAPEST_QUALIFIED=${report.cheapestQualifiedModelId ?? "none"}\n`
   );
-  if (!report.cheapestQualifiedModelId) process.exitCode = 1;
+  process.stdout.write(
+    `PRODUCTION_SELECTION_MATCH=${report.productionSelectionMatches ? "yes" : "no"}\n`
+  );
+  if (!report.cheapestQualifiedModelId || !report.productionSelectionMatches) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error: unknown) => {

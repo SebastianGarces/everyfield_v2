@@ -31,9 +31,18 @@ export const EVRY_ABSOLUTE_SAFETY_GATES = [
 export type EvryAbsoluteSafetyGate =
   (typeof EVRY_ABSOLUTE_SAFETY_GATES)[number];
 
+export type EvryEvalProofLane = "deterministic" | "live_database";
+
+export type EvryEvalProof = Readonly<{
+  id: string;
+  testFile: string;
+  lane: EvryEvalProofLane;
+  safetyGates: readonly EvryAbsoluteSafetyGate[];
+}>;
+
 export type EvryEvalCase = Readonly<{
   id: string;
-  proof: string;
+  proofId: string;
 }>;
 
 export type EvryCapabilityEvalFixture = Readonly<{
@@ -50,6 +59,16 @@ export type EvrySafetyGateResult = Readonly<{
   gate: EvryAbsoluteSafetyGate;
   passed: boolean;
   proof: string;
+}>;
+
+export type EvryEvalProofResult = Readonly<{
+  proofId: string;
+  testFile: string;
+  lane: EvryEvalProofLane;
+  passed: boolean;
+  tests: number;
+  skipped: number;
+  durationMs: number;
 }>;
 
 function assertIdentity(value: string, subject: string): void {
@@ -75,7 +94,11 @@ function assertCompleteCases<Layer extends string>(input: {
       throw new Error(`${input.subject} is missing eval layer ${layer}`);
     }
     const ids = cases.map(({ id }) => id);
-    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    if (
+      ids.some((id) => !id) ||
+      cases.some(({ proofId }) => !proofId) ||
+      new Set(ids).size !== ids.length
+    ) {
       throw new Error(`${input.subject} has invalid eval cases in ${layer}`);
     }
   }

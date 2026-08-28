@@ -14,6 +14,8 @@ function evidence(
   return {
     policyPassRate: 1,
     structuredOutputRate: 1,
+    candidateSafetyPassRate: 1,
+    successfulPlans: 1,
     allSafetyGatesPassed: true,
     ...input,
   };
@@ -60,5 +62,29 @@ test("selection returns null rather than bypassing safety or shape gates", () =>
       }),
     ]),
     null
+  );
+});
+
+test("selection cannot hide a candidate safety or plan failure in aggregate quality", () => {
+  assert.equal(
+    evryModelClearsReleaseThresholds(
+      evidence({
+        modelId: "gpt-5.6-luna",
+        totalCostUsd: 0.02,
+        policyPassRate: 0.99,
+        candidateSafetyPassRate: 0.99,
+      })
+    ),
+    false
+  );
+  assert.equal(
+    evryModelClearsReleaseThresholds(
+      evidence({
+        modelId: "gpt-5.6-luna",
+        totalCostUsd: 0.02,
+        successfulPlans: 0,
+      })
+    ),
+    false
   );
 });

@@ -19,7 +19,10 @@ import {
 
 function casesFor<Layer extends string>(layers: readonly Layer[]) {
   return Object.fromEntries(
-    layers.map((layer) => [layer, [{ id: `fixture:${layer}`, proof: "test" }]])
+    layers.map((layer) => [
+      layer,
+      [{ id: `fixture:${layer}`, proofId: "test" }],
+    ])
   );
 }
 
@@ -33,7 +36,7 @@ test("capability registry rejects each missing required layer", () => {
   for (const missing of EVRY_CAPABILITY_EVAL_LAYERS) {
     const cases = casesFor(EVRY_CAPABILITY_EVAL_LAYERS) as Record<
       string,
-      readonly { id: string; proof: string }[]
+      readonly { id: string; proofId: string }[]
     >;
     delete cases[missing];
     assert.throws(
@@ -51,7 +54,7 @@ test("recipe registry rejects end-to-end or partial-failure gaps", () => {
   for (const missing of EVRY_RECIPE_EVAL_LAYERS) {
     const cases = casesFor(EVRY_RECIPE_EVAL_LAYERS) as Record<
       string,
-      readonly { id: string; proof: string }[]
+      readonly { id: string; proofId: string }[]
     >;
     delete cases[missing];
     assert.throws(
