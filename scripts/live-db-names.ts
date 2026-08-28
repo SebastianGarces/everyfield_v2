@@ -57,6 +57,7 @@ export const LIVE_SUITES = [
   "src/lib/auth/access.test.ts",
   "src/lib/auth/email-change-live.test.ts",
   "src/lib/communication/fork-and-token-race.test.ts",
+  "src/lib/evry/plans/confirmation-race.test.ts",
   "src/lib/ministry-teams/leader-sync-live.test.ts",
   "src/lib/ministry-teams/leadership-fill-live.test.ts",
   "src/lib/ministry-teams/responsibilities-live.test.ts",

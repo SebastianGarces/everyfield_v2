@@ -22,3 +22,4 @@ export * from "./email-change-request";
 export * from "./phase-engine";
 export * from "./methodology-embeddings";
 export * from "./documents";
+export * from "./evry";
