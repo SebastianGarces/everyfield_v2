@@ -167,13 +167,10 @@ export async function runAssessment(
   //    version + model id. The trace records what the run STARTED from; a
   //    re-prompt is reported through `onSchemaRejection`.
   const trace = startJudgeTrace({
-    churchId: snapshot.churchId,
     phase,
     rubricVersion: rubric.version,
     modelId: JUDGE_MODEL_ID,
     snapshotVersion: snapshot.snapshotVersion,
-    systemPrompt: system,
-    userPrompt: prompt,
   });
 
   // Everything earlier drafts broke, carried forward (see the catch below).
