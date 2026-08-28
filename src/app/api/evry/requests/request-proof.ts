@@ -124,14 +124,14 @@ async function main(): Promise<void> {
 
   let readCalls = 0;
   let planCalls = 0;
-  let lastLiteralText: string | null = null;
+  let lastActionLiteralText: string | null = null;
 
   function reset(user: SessionUser | null = PLANT_USER) {
     events.length = 0;
     sessions = [user];
     readCalls = 0;
     planCalls = 0;
-    lastLiteralText = null;
+    lastActionLiteralText = null;
   }
 
   function postFor(scripted: ReturnType<typeof scriptedModel>) {
@@ -141,18 +141,18 @@ async function main(): Promise<void> {
         assert.equal("actor" in context, false);
         events.push("read");
         readCalls++;
-        lastLiteralText = context.literalUserText;
         return {
-          kind: "fixture_read",
-          literalUserText: context.literalUserText,
-          eligibleCapabilityCount: context.eligibleCapabilities.length,
+          kind: "clarification",
+          mode: "missing",
+          entityType: "fixture",
+          prompt: context.literalUserText,
         };
       },
       async continueAction(context) {
         assert.equal("actor" in context, false);
         events.push("plan");
         planCalls++;
-        lastLiteralText = context.literalUserText;
+        lastActionLiteralText = context.literalUserText;
         return {
           kind: "fixture_plan",
           literalUserText: context.literalUserText,
@@ -162,8 +162,6 @@ async function main(): Promise<void> {
     });
   }
 
-  // Authentication precedes even a malformed body, and both authenticated
-  // accounts outside a plant seat and sessionless requests stop there.
   for (const refusal of [
     { user: null, status: 401 },
     { user: { ...PLANT_USER, seat: null }, status: 404 },
@@ -180,7 +178,6 @@ async function main(): Promise<void> {
     assert.equal(scripted.calls, 0);
   }
 
-  // The JSON object is strict and parsed before a model can run.
   for (const invalid of [
     malformedRequest(),
     requestWithBody({}),
@@ -269,7 +266,7 @@ async function main(): Promise<void> {
     assert.deepEqual(
       events,
       ["auth", "body", "policy"],
-      `${fixture.name}: one policy span and zero capability spans`
+      `${fixture.name}: zero eligibility or continuation calls`
     );
     assert.equal(readCalls, 0, fixture.name);
     assert.equal(planCalls, 0, fixture.name);
@@ -281,8 +278,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // A provider error and a schema-invalid response are ordinary ambiguity
-  // artifacts after exactly one call, with the same zero-access trace.
   for (const failure of [
     new Error("provider unavailable"),
     {
@@ -308,8 +303,6 @@ async function main(): Promise<void> {
     assert.equal(planCalls, 0);
   }
 
-  // The two allowed classes are the only branches that evaluate capability
-  // eligibility and reach a deterministic continuation.
   reset();
   const readModel = scriptedModel({
     decision: { classification: "application_read" },
@@ -344,10 +337,8 @@ async function main(): Promise<void> {
   assert.equal(readCalls, 0);
   assert.equal(planCalls, 1);
   assert.equal(actionModel.calls, 1);
-  assert.equal(lastLiteralText, literalTaskText);
+  assert.equal(lastActionLiteralText, literalTaskText);
 
-  // Production uses the same factory and is explicitly unavailable until #769
-  // supplies the selected model-backed classifier.
   reset();
   const unavailable = await responseOf(
     route.POST,
