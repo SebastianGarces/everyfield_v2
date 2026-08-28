@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mock } from "node:test";
 
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+
 import type {
   EvryHydratedConversationArtifact,
   StoredEvryConversationArtifactDocument,
@@ -19,6 +22,10 @@ import type {
 } from "@/lib/evry/conversations/repository";
 import type { EvryConversationStore } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type {
+  EvryPageContext,
+  EvryResolvedPageContext,
+} from "@/lib/evry/resolvers/contract";
 import {
   ELIGIBLE_FIXTURE_CAPABILITIES,
   fixtureDocument,
@@ -38,6 +45,9 @@ type SessionUser = Readonly<{
 const PLANT_ID = "10000000-0000-4000-8000-000000000001";
 const USER_ID = "20000000-0000-4000-8000-000000000001";
 const OTHER_USER_ID = "20000000-0000-4000-8000-000000000002";
+const LOCAL_TASK_ID = "50000000-0000-4000-8000-000000000001";
+const FOREIGN_TASK_ID = "50000000-0000-4000-8000-000000000002";
+const LOCAL_LAUNCH_ID = "60000000-0000-4000-8000-000000000001";
 const CONVERSATION_ID = evryConversationIdSchema.parse(
   "30000000-0000-4000-8000-000000000001"
 );
@@ -66,6 +76,8 @@ const user = (id = USER_ID): SessionUser => ({
 const events: string[] = [];
 let sessions: Array<SessionUser | null> = [];
 const sessionRefusal = new Error("Unauthorized");
+const contextQueries: Array<Readonly<{ sql: string; params: unknown[] }>> = [];
+const dialect = new PgDialect();
 let parseArtifactDocument: (
   input: unknown
 ) => StoredEvryConversationArtifactDocument;
@@ -84,6 +96,48 @@ mock.module("@/lib/auth/session", {
   },
 });
 
+const fakeDatabase = {
+  select() {
+    return {
+      from() {
+        return {
+          where(predicate: SQL) {
+            const query = dialect.sqlToQuery(predicate);
+            contextQueries.push({ sql: query.sql, params: query.params });
+            return {
+              async limit() {
+                if (query.sql.includes('"tasks"')) {
+                  const [recordId, plantId] = query.params;
+                  if (recordId === LOCAL_TASK_ID && plantId === PLANT_ID) {
+                    return [{ id: LOCAL_TASK_ID, title: "Scoped task" }];
+                  }
+                  if (
+                    recordId === FOREIGN_TASK_ID &&
+                    plantId === "10000000-0000-4000-8000-000000000002"
+                  ) {
+                    return [{ id: FOREIGN_TASK_ID }];
+                  }
+                  return [];
+                }
+
+                if (
+                  query.sql.includes('"launches"') &&
+                  query.params[0] === PLANT_ID
+                ) {
+                  return [{ id: LOCAL_LAUNCH_ID }];
+                }
+                return [];
+              },
+            };
+          },
+        };
+      },
+    };
+  },
+};
+
+mock.module("@/db", { namedExports: { db: fakeDatabase } });
+
 class TracedRequest extends Request {
   override async json(): Promise<unknown> {
     events.push("body");
@@ -100,6 +154,22 @@ function request(url: string, body: unknown): Request {
 }
 
 let stored: EvryStoredConversation | null = null;
+const requestPageContexts = new Map<string, EvryPageContext | null>();
+
+function rememberRequestPageContext(
+  requestKey: string,
+  pageContext: EvryPageContext | null
+): void {
+  if (pageContext !== null) {
+    assert.deepEqual(Object.keys(pageContext).sort(), ["kind", "recordId"]);
+  }
+  const existing = requestPageContexts.get(requestKey);
+  if (existing !== undefined) {
+    assert.deepEqual(pageContext, existing);
+    return;
+  }
+  requestPageContexts.set(requestKey, pageContext);
+}
 
 function newMessage(input: {
   id?: string;
@@ -141,6 +211,15 @@ function newMessage(input: {
 const store = {
   async create(input) {
     events.push("create");
+    rememberRequestPageContext(input.requestKey, input.requestPageContext);
+    const replay = stored?.messages.find(
+      ({ requestKey }) => requestKey === input.requestKey
+    );
+    if (replay) {
+      assert.equal(replay.body, input.body);
+      assert.ok(stored);
+      return stored;
+    }
     const initial = newMessage({
       requestKey: input.requestKey,
       sequence: 0,
@@ -177,6 +256,7 @@ const store = {
   },
   async append(input) {
     events.push("append");
+    rememberRequestPageContext(input.requestKey, input.requestPageContext);
     if (
       !stored ||
       stored.id !== input.conversationId ||
@@ -241,10 +321,31 @@ async function main(): Promise<void> {
   const createRoute = await import("./route");
   const getRoute = await import("./[conversationId]/route");
   const messageRoute = await import("./[conversationId]/messages/route");
+  const pageContextResolver = await import("@/lib/evry/resolvers/page-context");
 
   let capturedActor: EvryPlantActor | null = null;
+  let pageContextRecordState: "available" | "missing" | "renamed" = "available";
+  const resolvePageContext = async (input: {
+    actor: EvryPlantActor;
+    pageContext: EvryPageContext | null;
+  }): Promise<EvryResolvedPageContext | null> => {
+    if (input.pageContext === null) return null;
+    events.push("context");
+    assert.equal(input.actor.plantId, PLANT_ID);
+    return input.pageContext.recordId === "foreign-task" ||
+      pageContextRecordState === "missing"
+      ? null
+      : {
+          ...input.pageContext,
+          label:
+            pageContextRecordState === "renamed"
+              ? `Renamed ${input.pageContext.kind}`
+              : `Scoped ${input.pageContext.kind}`,
+        };
+  };
   const createPost = createRoute.createEvryConversationCreatePost({
     now: () => START,
+    resolvePageContext,
     create: async (input) => {
       capturedActor = input.actor;
       return conversations.createEvryConversation({ ...input, store });
@@ -290,6 +391,7 @@ async function main(): Promise<void> {
   });
   const messagePost = messageRoute.createEvryConversationMessagePost({
     now: () => RETURN,
+    resolvePageContext,
     continueConversation: (input) =>
       conversations.continueEvryConversation({
         ...input,
@@ -316,6 +418,7 @@ async function main(): Promise<void> {
   });
 
   const conflictingCreatePost = createRoute.createEvryConversationCreatePost({
+    resolvePageContext,
     create: async () => {
       events.push("idempotency-conflict");
       throw new repository.EvryConversationIdempotencyError();
@@ -332,7 +435,7 @@ async function main(): Promise<void> {
       })
     )
   );
-  assert.deepEqual(events, ["auth", "body", "idempotency-conflict"]);
+  assert.deepEqual(events, ["auth", "body", "context", "idempotency-conflict"]);
   assert.deepEqual(createConflict, {
     status: 409,
     cacheControl: "private, no-store",
@@ -355,9 +458,165 @@ async function main(): Promise<void> {
   assert.equal(created.cacheControl, "private, no-store");
   assert.equal(created.body.status, "created");
   assert.equal(created.body.conversation.messages[0].body, LITERAL);
-  assert.deepEqual(events, ["auth", "body", "create"]);
+  assert.deepEqual(created.body.conversation.messages[0].pageContext, {
+    kind: "task",
+    recordId: "task-1",
+    label: "Scoped task",
+  });
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
   assert.ok(capturedActor);
   assert.ok(stored);
+
+  pageContextRecordState = "missing";
+  sessions = [user()];
+  events.length = 0;
+  const replayedCreateAfterDelete = await response(
+    await createPost(
+      request("http://localhost/api/evry/conversations", {
+        requestKey: firstRequestKey,
+        message: LITERAL,
+        pageContext: { kind: "task", recordId: "task-1" },
+      })
+    )
+  );
+  assert.equal(replayedCreateAfterDelete.status, 201);
+  assert.equal(replayedCreateAfterDelete.body.conversation.id, CONVERSATION_ID);
+  assert.equal(replayedCreateAfterDelete.body.conversation.messages.length, 1);
+  assert.equal(
+    replayedCreateAfterDelete.body.conversation.messages[0].pageContext.label,
+    "Scoped task"
+  );
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+  pageContextRecordState = "available";
+
+  contextQueries.length = 0;
+  assert.equal(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "task", recordId: "not-a-uuid" },
+    }),
+    null
+  );
+  assert.equal(contextQueries.length, 0, "invalid ids must not reach the DB");
+
+  assert.deepEqual(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "task", recordId: LOCAL_TASK_ID },
+    }),
+    { kind: "task", recordId: LOCAL_TASK_ID, label: "Scoped task" }
+  );
+  assert.equal(contextQueries.at(-1)?.sql.includes('"tasks"'), true);
+  assert.deepEqual(contextQueries.at(-1)?.params.slice(0, 2), [
+    LOCAL_TASK_ID,
+    PLANT_ID,
+  ]);
+
+  assert.equal(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "task", recordId: FOREIGN_TASK_ID },
+    }),
+    null
+  );
+  assert.deepEqual(contextQueries.at(-1)?.params.slice(0, 2), [
+    FOREIGN_TASK_ID,
+    PLANT_ID,
+  ]);
+
+  assert.deepEqual(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "launch", recordId: "current" },
+    }),
+    {
+      kind: "launch",
+      recordId: LOCAL_LAUNCH_ID,
+      label: "Launch Sunday",
+    }
+  );
+
+  sessions = [user()];
+  events.length = 0;
+  const forgedContext = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: randomUUID(),
+          message: "Keep working on this request.",
+          pageContext: { kind: "task", recordId: "foreign-task" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(forgedContext.status, 200);
+  assert.equal(
+    forgedContext.body.conversation.messages.at(-1).pageContext,
+    null
+  );
+  assert.deepEqual(events.slice(0, 4), ["auth", "body", "context", "find"]);
+
+  const appendRetryKey = randomUUID();
+  const appendRetryBody = "Keep the scoped task in this request.";
+  sessions = [user()];
+  events.length = 0;
+  const firstAppend = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: appendRetryKey,
+          message: appendRetryBody,
+          pageContext: { kind: "task", recordId: "task-1" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(firstAppend.status, 200);
+  assert.equal(
+    firstAppend.body.conversation.messages.at(-1).pageContext.label,
+    "Scoped task"
+  );
+  const messageCountAfterFirstAppend =
+    firstAppend.body.conversation.messages.length;
+
+  pageContextRecordState = "renamed";
+  sessions = [user()];
+  events.length = 0;
+  const replayedAppendAfterRename = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: appendRetryKey,
+          message: appendRetryBody,
+          pageContext: { kind: "task", recordId: "task-1" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(replayedAppendAfterRename.status, 200);
+  assert.equal(
+    replayedAppendAfterRename.body.conversation.messages.length,
+    messageCountAfterFirstAppend
+  );
+  assert.equal(
+    replayedAppendAfterRename.body.conversation.messages.at(-1).pageContext
+      .label,
+    "Scoped task"
+  );
+  assert.deepEqual(events.slice(0, 5), [
+    "auth",
+    "body",
+    "context",
+    "find",
+    "append",
+  ]);
+  pageContextRecordState = "available";
 
   const permissionLost = planResume.createEvryConversationPlanResumeRevalidator(
     {
@@ -453,6 +712,7 @@ async function main(): Promise<void> {
     author: "assistant",
     body: "Review the task before creating it.",
     pageContext: null,
+    requestPageContext: null,
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [confirmation],
@@ -477,6 +737,10 @@ async function main(): Promise<void> {
   assert.equal(reopened.body.conversation.activePlan.status, "expired");
   assert.equal(reopened.body.conversation.activePlan.confirmable, false);
   assert.equal(reopened.body.conversation.messages[0].body, LITERAL);
+  assert.equal(
+    reopened.body.conversation.messages[0].pageContext.label,
+    "Scoped task"
+  );
   assert.deepEqual(events, ["auth", "find", "plan-read"]);
 
   sessions = [user()];

@@ -208,6 +208,7 @@ async function createProof(): Promise<void> {
     author: "assistant",
     body: "Which person do you mean?",
     pageContext: null,
+    requestPageContext: null,
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [clarification],
@@ -256,6 +257,7 @@ async function createProof(): Promise<void> {
     author: "user",
     body: "Sam Lee",
     pageContext: null,
+    requestPageContext: null,
     relevanceKeys: [
       contract.evryConversationRelevanceKeySchema.parse("person.sam"),
     ],
@@ -287,6 +289,7 @@ async function createProof(): Promise<void> {
     author: "assistant",
     body: "Review the task before creating it.",
     pageContext: null,
+    requestPageContext: null,
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [confirmation],

@@ -2085,6 +2085,14 @@
     },
     {
       "kind": "route",
+      "identity": "route:/evry",
+      "path": "/evry",
+      "sources": ["src/app/(dashboard)/evry/page.tsx"],
+      "parityCapability": "dashboard",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
       "identity": "route:/launch",
       "path": "/launch",
       "sources": ["src/app/(dashboard)/launch/page.tsx"],
@@ -2519,9 +2527,9 @@
     }
   ],
   "summary": {
-    "routes": 65,
+    "routes": 66,
     "actions": 180,
-    "supported": 178,
+    "supported": 179,
     "excluded": 65,
     "unreachable": 2,
     "unclassified": 0

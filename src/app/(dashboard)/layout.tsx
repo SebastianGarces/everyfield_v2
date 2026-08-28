@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { EvryLauncher } from "@/components/evry/evry-launcher";
+import { EvryShell } from "@/components/evry/evry-shell";
 import { HeaderProvider } from "@/components/header";
 import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -26,6 +28,7 @@ import {
   type NotificationViewer,
 } from "@/lib/notifications/feed";
 import { resolveTenancyShell } from "@/lib/navigation";
+import { evryPlantStandingOf } from "@/lib/evry/eligibility/viewer";
 
 import { assignedPlantsSafely } from "./assigned-plants";
 import { loadUnreadBadgeCountSafely } from "./notification-badge";
@@ -158,6 +161,7 @@ export default async function DashboardLayout({
   // `holdsSeatFor` with this same `user`; only the client half needs carrying,
   // and it is carried from here so no screen re-derives it.
   const capabilities = heldCapabilities(user);
+  const evryEnabled = evryPlantStandingOf(user).status === "eligible";
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
@@ -172,31 +176,33 @@ export default async function DashboardLayout({
         >
           Skip to content
         </a>
-        <GlobalAppBar shell={shell} user={sidebarUser}>
-          {viewer && (
-            <Suspense
-              fallback={
-                <NotificationBell
-                  unreadCount="loading"
-                  className={APP_BAR_ICON_CLASS}
-                />
-              }
-            >
-              <NotificationBellSlot viewer={viewer} />
-            </Suspense>
-          )}
-        </GlobalAppBar>
-        <div className="flex min-h-0 flex-1">
-          <AppSidebar
-            user={sidebarUser}
-            orgType={org?.type ?? null}
-            hasChurch={!!user.churchId}
-            assignedPlants={assignedPlants}
-            isPlatformAdmin={userIsPlatformAdmin}
-          />
-          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-            <HeaderProvider>
-              {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
+        <HeaderProvider>
+          <EvryShell enabled={evryEnabled}>
+            <GlobalAppBar shell={shell} user={sidebarUser}>
+              {viewer && (
+                <Suspense
+                  fallback={
+                    <NotificationBell
+                      unreadCount="loading"
+                      className={APP_BAR_ICON_CLASS}
+                    />
+                  }
+                >
+                  <NotificationBellSlot viewer={viewer} />
+                </Suspense>
+              )}
+              <EvryLauncher />
+            </GlobalAppBar>
+            <div className="flex min-h-0 flex-1">
+              <AppSidebar
+                user={sidebarUser}
+                orgType={org?.type ?? null}
+                hasChurch={!!user.churchId}
+                assignedPlants={assignedPlants}
+                isPlatformAdmin={userIsPlatformAdmin}
+              />
+              <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+                {/* `tabIndex={-1}` makes the main a reliable skip-link target. The
                 settings modal has a narrower focus target inside PageCanvas:
                 page content AFTER breadcrumb/actions, so its next Tab cannot
                 re-enter contextual navigation.
@@ -205,14 +211,14 @@ export default async function DashboardLayout({
                 scroll container, so a nested route transition can offset this
                 persistent shell and erase PageCanvas's visual inset. Route
                 canvases and specialized panes own scrolling below this clip. */}
-              <SidebarInset
-                id={DASHBOARD_MAIN_ID}
-                tabIndex={-1}
-                className="min-h-0 overflow-clip overscroll-y-none outline-none"
-              >
-                {children}
-              </SidebarInset>
-              {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
+                <SidebarInset
+                  id={DASHBOARD_MAIN_ID}
+                  tabIndex={-1}
+                  className="min-h-0 overflow-clip overscroll-y-none outline-none"
+                >
+                  {children}
+                </SidebarInset>
+                {/* SETTINGS, MOUNTED ON EVERY DASHBOARD SCREEN AND OPEN ON NONE
               (#657). It draws nothing until `location.hash` names a section, so
               this costs one client component and no read; it lives beside
               `<main>` rather than inside it because the modal covers the screen
@@ -230,17 +236,18 @@ export default async function DashboardLayout({
               so the document survives it. Without an identity in the cache key,
               the next account to sign in on this tab was shown the previous
               one's settings while its own read was in flight (#673). */}
-              <SettingsModal
-                visibleIds={settingsSectionsFor(user).map(
-                  (section) => section.id
-                )}
-                serverRenderId={crypto.randomUUID()}
-                scope={user.id}
-              />
-              {!org && <WikiGuide />}
-            </HeaderProvider>
-          </div>
-        </div>
+                <SettingsModal
+                  visibleIds={settingsSectionsFor(user).map(
+                    (section) => section.id
+                  )}
+                  serverRenderId={crypto.randomUUID()}
+                  scope={user.id}
+                />
+                {!org && <WikiGuide />}
+              </div>
+            </div>
+          </EvryShell>
+        </HeaderProvider>
       </SidebarProvider>
     </ViewerCapabilitiesProvider>
   );
