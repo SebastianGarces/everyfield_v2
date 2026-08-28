@@ -68,14 +68,17 @@ function scriptedModel(output: unknown) {
 
 test("one stored-output-disabled model call is the policy decision", async () => {
   const scripted = scriptedModel({
-    decision: { classification: "application_action" },
+    decision: {
+      classification: "application_action",
+      settingsSectionId: null,
+    },
   });
   const literalUserText =
     "  Create a task named ‘Pray for the launch’.\r\nKeep spacing.  ";
 
   const result = await classifyEvryRequest({
     literalUserText,
-    model: scripted.model,
+    getModel: () => scripted.model,
   });
 
   assert.equal(
@@ -83,7 +86,13 @@ test("one stored-output-disabled model call is the policy decision", async () =>
     1,
     "there is no supervisor or second model call"
   );
-  assert.deepEqual(scripted.providerOptions, { openai: { store: false } });
+  assert.deepEqual(scripted.providerOptions, {
+    openai: {
+      store: false,
+      serviceTier: "default",
+      reasoningEffort: "none",
+    },
+  });
   const responseFormat = scripted.responseFormat;
   assert.ok(responseFormat && typeof responseFormat === "object");
   assert.ok("type" in responseFormat);
@@ -109,13 +118,14 @@ test("schema rejection fails closed after one draft", async () => {
   const scripted = scriptedModel({
     decision: {
       classification: "application_read",
+      settingsSectionId: null,
       literalUserText: "provider-tampered text",
     },
   });
 
   const result = await classifyEvryRequest({
     literalUserText: "Show overdue tasks.",
-    model: scripted.model,
+    getModel: () => scripted.model,
   });
 
   assert.equal(scripted.calls, 1, "SDK retries are disabled");
@@ -134,7 +144,7 @@ test("provider failure uses the same fixed ambiguity artifact", async () => {
 
   const result = await classifyEvryRequest({
     literalUserText: "Show overdue tasks.",
-    model,
+    getModel: () => model,
   });
 
   assert.equal(calls, 1);

@@ -1,12 +1,23 @@
 import { generateText, Output, type LanguageModel } from "ai";
 
 import {
+  evryModelCandidate,
+  evryPolicyProviderOptions,
+  EVRY_POLICY_MAX_OUTPUT_TOKENS,
+  EVRY_POLICY_TIMEOUT_MS,
+} from "@/lib/evry/models/candidates";
+import { EVRY_POLICY_MODEL_ID } from "@/lib/evry/models/provider";
+
+import {
   failClosedEvryPolicyDecision,
   resolveEvryPolicyDecision,
   type EvryPolicyDecision,
 } from "./core";
 import { EVRY_POLICY_SYSTEM_PROMPT } from "./prompt";
-import { evryPolicyModelOutputSchema } from "./schema";
+import {
+  evryPolicyDecisionFromProviderOutput,
+  evryPolicyProviderOutputSchema,
+} from "./schema";
 
 /**
  * The first working-model output is the policy decision. This call receives no
@@ -15,22 +26,29 @@ import { evryPolicyModelOutputSchema } from "./schema";
  */
 export async function classifyEvryRequest({
   literalUserText,
-  model,
+  getModel,
 }: {
   literalUserText: string;
-  model: LanguageModel;
+  getModel: () => LanguageModel;
 }): Promise<EvryPolicyDecision> {
   try {
+    const candidate = evryModelCandidate(EVRY_POLICY_MODEL_ID);
+    if (candidate === null) throw new Error("Unknown Evry policy model");
     const result = await generateText({
-      model,
-      output: Output.object({ schema: evryPolicyModelOutputSchema }),
+      model: getModel(),
+      output: Output.object({ schema: evryPolicyProviderOutputSchema }),
       system: EVRY_POLICY_SYSTEM_PROMPT,
       prompt: literalUserText,
+      maxOutputTokens: EVRY_POLICY_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
-      providerOptions: { openai: { store: false } },
+      timeout: EVRY_POLICY_TIMEOUT_MS,
+      providerOptions: evryPolicyProviderOptions(candidate),
     });
 
-    return resolveEvryPolicyDecision(literalUserText, result.output.decision);
+    return resolveEvryPolicyDecision(
+      literalUserText,
+      evryPolicyDecisionFromProviderOutput(result.output)
+    );
   } catch {
     return failClosedEvryPolicyDecision();
   }

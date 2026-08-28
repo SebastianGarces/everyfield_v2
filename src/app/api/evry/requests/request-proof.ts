@@ -21,6 +21,17 @@ const PLANT_USER: SessionUser = {
 
 const events: string[] = [];
 let sessions: Array<SessionUser | null> = [];
+let productionModel: MockLanguageModelV3 | null = null;
+
+mock.module("@/lib/evry/models/provider", {
+  namedExports: {
+    EVRY_POLICY_MODEL_ID: "gpt-5.6-luna",
+    getEvryPolicyModel: () => {
+      if (productionModel === null) throw new Error("Missing proof model");
+      return productionModel;
+    },
+  },
+});
 
 mock.module("@/lib/auth/session", {
   namedExports: {
@@ -100,8 +111,22 @@ function scriptedModel(output: unknown | Error) {
       calls++;
       events.push("policy");
       if (output instanceof Error) throw output;
+      const providerOutput =
+        output &&
+        typeof output === "object" &&
+        "decision" in output &&
+        output.decision &&
+        typeof output.decision === "object" &&
+        !("settingsSectionId" in output.decision)
+          ? {
+              ...output,
+              decision: { ...output.decision, settingsSectionId: null },
+            }
+          : output;
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(output) }],
+        content: [
+          { type: "text" as const, text: JSON.stringify(providerOutput) },
+        ],
         finishReason: { unified: "stop" as const, raw: "stop" },
         usage: {
           inputTokens: {
@@ -160,7 +185,7 @@ async function main(): Promise<void> {
     withAudit: boolean = false
   ) {
     return route.createEvryRequestPost({
-      classify: route.evryRequestClassifierForModel(scripted.model),
+      classify: route.evryRequestClassifierForModel(() => scripted.model),
       async continueRead(context) {
         assert.equal("actor" in context, false);
         events.push("read");
@@ -407,6 +432,10 @@ async function main(): Promise<void> {
   ]);
 
   reset();
+  const productionScripted = scriptedModel({
+    decision: { classification: "application_read" },
+  });
+  productionModel = productionScripted.model;
   const unavailable = await responseOf(
     route.POST,
     requestWithBody({ requestText: "Show overdue tasks." })
@@ -414,7 +443,14 @@ async function main(): Promise<void> {
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.cacheControl, "private, no-store");
   assert.deepEqual(unavailable.body, { status: "unavailable" });
-  assert.deepEqual(events, ["auth", "body", "audit:request_failed"]);
+  assert.equal(productionScripted.calls, 1);
+  assert.deepEqual(events, [
+    "auth",
+    "body",
+    "policy",
+    "capability",
+    "audit:request_failed",
+  ]);
 
   console.log("Evry request route proof passed");
 }

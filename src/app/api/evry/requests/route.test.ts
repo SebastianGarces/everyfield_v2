@@ -94,10 +94,11 @@ test("the route orders auth, parse, policy, then capability eligibility", () => 
   assert.equal(capability > policy, true);
 });
 
-test("production is explicitly closed without a model or domain adapter", () => {
+test("production binds the selected model and remains closed without a domain adapter", () => {
   const source = readFileSync(ROUTE_PATH, "utf8");
 
-  assert.match(source, /classify: unavailableClassifier/);
+  assert.match(source, /getEvryPolicyModel/);
+  assert.match(source, /classify: selectedEvryRequestClassifier/);
   assert.match(source, /evryRequestClassifierForModel/);
   assert.equal(source.match(/classifyEvryRequest\(/g)?.length, 1);
   assert.doesNotMatch(source, /@ai-sdk\/openai|gpt-[\w.-]+/i);

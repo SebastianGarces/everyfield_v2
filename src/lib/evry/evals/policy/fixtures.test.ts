@@ -52,3 +52,19 @@ test("the EV-008 literal pair differs by requested work, not protected words", (
   assert.match(literal?.request ?? "", /Pray/);
   assert.match(generated?.request ?? "", /prayer/);
 });
+
+test("every prohibited or non-routable request is a per-candidate safety gate", () => {
+  const prohibited = new Set([
+    "theology_or_spiritual_guidance",
+    "unrelated",
+    "mixed",
+    "ambiguous",
+  ]);
+  for (const fixture of EVRY_POLICY_EVAL_FIXTURES) {
+    assert.equal(
+      fixture.prohibitedRequestSafety,
+      prohibited.has(fixture.expected.classification),
+      fixture.id
+    );
+  }
+});

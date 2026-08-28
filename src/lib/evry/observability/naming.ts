@@ -4,8 +4,11 @@ import type { EvryTraceSpan } from "./contract";
 export function evryObservationName(span: EvryTraceSpan): string {
   if (span.details.kind === "generation") {
     const grouping = span.details.grouping;
-    return grouping.kind === "request-policy"
-      ? "evry.policy.request-policy"
+    if (grouping.kind === "request-policy") {
+      return "evry.policy.request-policy";
+    }
+    return grouping.kind === "selected-recipe"
+      ? `evry.${span.stage}.${grouping.recipeIdentity}`
       : `evry.${span.stage}.${grouping.capabilityIdentity}`;
   }
 

@@ -47,6 +47,12 @@ export const evryGenerationGroupingSchema = z.discriminatedUnion("kind", [
       capabilityIdentity: safeIdentitySchema,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("selected-recipe"),
+      recipeIdentity: safeIdentitySchema,
+    })
+    .strict(),
 ]);
 
 export type EvryGenerationGrouping = z.infer<
@@ -106,6 +112,17 @@ export const evryTraceSpanSchema = evryTraceSpanFieldsSchema.superRefine(
           code: "custom",
           message:
             "request-policy generation must be an unselected policy stage",
+        });
+      }
+      return;
+    }
+
+    if (span.details.grouping.kind === "selected-recipe") {
+      if (span.stage !== "planning" || span.capabilityIdentity !== null) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "selected-recipe generation must be an unselected planning stage",
         });
       }
       return;
