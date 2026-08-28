@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   uuid,
@@ -63,6 +64,27 @@ export const evryExecutionResultCodes = [
   "effect_failed",
   "dependency_skipped",
 ] as const;
+
+export const evryConversationAuthors = ["user", "assistant"] as const;
+export const evryConversationDeliveryStatuses = [
+  "complete",
+  "interrupted",
+] as const;
+export const evryConversationArtifactKinds = [
+  "read",
+  "clarification",
+  "settings_handoff",
+  "confirmation",
+  "progress",
+  "result",
+  "boundary",
+] as const;
+
+export type EvryConversationAuthor = (typeof evryConversationAuthors)[number];
+export type EvryConversationDeliveryStatus =
+  (typeof evryConversationDeliveryStatuses)[number];
+export type EvryConversationArtifactKind =
+  (typeof evryConversationArtifactKinds)[number];
 
 /**
  * The exact plan a person may approve.
@@ -556,6 +578,251 @@ export const evryExecutionOutcomes = pgTable(
   ]
 );
 
+/**
+ * One actor-private conversation in one plant.
+ *
+ * The active-plan columns deliberately repeat the full immutable plan tuple.
+ * A naked plan UUID is not authority and cannot cross this foreign key.
+ */
+export const evryConversations = pgTable(
+  "evry_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    actorUserId: uuid("actor_user_id")
+      .references(() => users.id)
+      .notNull(),
+    title: varchar("title", { length: 160 }).notNull(),
+    nextMessageSequence: integer("next_message_sequence").default(0).notNull(),
+    activePlanId: uuid("active_plan_id"),
+    activePlanFingerprint: varchar("active_plan_fingerprint", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    lastActivityAt: timestamp("last_activity_at", {
+      withTimezone: true,
+    }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("evry_conversations_exact_identity_unique_idx").on(
+      table.id,
+      table.churchId,
+      table.actorUserId
+    ),
+    index("evry_conversations_actor_activity_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.lastActivityAt
+    ),
+    foreignKey({
+      name: "evry_conversations_active_plan_fk",
+      columns: [
+        table.activePlanId,
+        table.churchId,
+        table.actorUserId,
+        table.activePlanFingerprint,
+      ],
+      foreignColumns: [
+        evryActionPlans.id,
+        evryActionPlans.churchId,
+        evryActionPlans.actorUserId,
+        evryActionPlans.fingerprint,
+      ],
+    }),
+    check(
+      "evry_conversations_title_check",
+      sql`length(btrim(${table.title})) between 1 and 160`
+    ),
+    check(
+      "evry_conversations_sequence_check",
+      sql`${table.nextMessageSequence} >= 0`
+    ),
+    check(
+      "evry_conversations_activity_check",
+      sql`${table.lastActivityAt} >= ${table.createdAt}`
+    ),
+    check(
+      "evry_conversations_active_plan_shape_check",
+      sql`(${table.activePlanId} is null and ${table.activePlanFingerprint} is null)
+        or (${table.activePlanId} is not null and ${table.activePlanFingerprint} ~ '^[0-9a-f]{64}$')`
+    ),
+  ]
+);
+
+/** Strict JSON is parsed at every repository read; this row is the latest state. */
+export const evryConversationStates = pgTable(
+  "evry_conversation_states",
+  {
+    conversationId: uuid("conversation_id").primaryKey(),
+    churchId: uuid("church_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    version: integer("version").default(0).notNull(),
+    document: jsonb("document").$type<unknown>().notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "evry_conversation_states_conversation_fk",
+      columns: [table.conversationId, table.churchId, table.actorUserId],
+      foreignColumns: [
+        evryConversations.id,
+        evryConversations.churchId,
+        evryConversations.actorUserId,
+      ],
+    }),
+    check("evry_conversation_states_version_check", sql`${table.version} >= 0`),
+    check(
+      "evry_conversation_states_document_check",
+      sql`jsonb_typeof(${table.document}) = 'object'`
+    ),
+  ]
+);
+
+/** Ordered transcript bytes plus visible page context and relevance metadata. */
+export const evryConversationMessages = pgTable(
+  "evry_conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id").notNull(),
+    churchId: uuid("church_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    bodyFingerprint: varchar("body_fingerprint", { length: 64 }).notNull(),
+    sequence: integer("sequence").notNull(),
+    author: varchar("author", { length: 16 })
+      .$type<EvryConversationAuthor>()
+      .notNull(),
+    body: text("body").notNull(),
+    pageContext: jsonb("page_context").$type<unknown>(),
+    relevanceKeys: jsonb("relevance_keys")
+      .$type<unknown>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
+    deliveryStatus: varchar("delivery_status", { length: 16 })
+      .$type<EvryConversationDeliveryStatus>()
+      .default("complete")
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("evry_conversation_messages_sequence_unique_idx").on(
+      table.conversationId,
+      table.sequence
+    ),
+    uniqueIndex("evry_conversation_messages_request_unique_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.requestKey
+    ),
+    uniqueIndex("evry_conversation_messages_exact_identity_unique_idx").on(
+      table.id,
+      table.conversationId,
+      table.churchId,
+      table.actorUserId
+    ),
+    index("evry_conversation_messages_scope_time_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.conversationId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "evry_conversation_messages_conversation_fk",
+      columns: [table.conversationId, table.churchId, table.actorUserId],
+      foreignColumns: [
+        evryConversations.id,
+        evryConversations.churchId,
+        evryConversations.actorUserId,
+      ],
+    }),
+    check(
+      "evry_conversation_messages_sequence_check",
+      sql`${table.sequence} >= 0`
+    ),
+    check(
+      "evry_conversation_messages_author_check",
+      sql`${table.author} in (${inList(evryConversationAuthors)})`
+    ),
+    check(
+      "evry_conversation_messages_body_check",
+      sql`length(${table.body}) <= 8000`
+    ),
+    check(
+      "evry_conversation_messages_fingerprint_check",
+      sql`${table.bodyFingerprint} ~ '^[0-9a-f]{64}$'`
+    ),
+    check(
+      "evry_conversation_messages_page_context_check",
+      sql`${table.pageContext} is null or jsonb_typeof(${table.pageContext}) = 'object'`
+    ),
+    check(
+      "evry_conversation_messages_relevance_check",
+      sql`jsonb_typeof(${table.relevanceKeys}) = 'array'`
+    ),
+    check(
+      "evry_conversation_messages_delivery_check",
+      sql`${table.deliveryStatus} in (${inList(evryConversationDeliveryStatuses)})`
+    ),
+  ]
+);
+
+/** One closed artifact document attached to one exact actor-owned message. */
+export const evryConversationArtifacts = pgTable(
+  "evry_conversation_artifacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    messageId: uuid("message_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    churchId: uuid("church_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    kind: varchar("kind", { length: 32 })
+      .$type<EvryConversationArtifactKind>()
+      .notNull(),
+    document: jsonb("document").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("evry_conversation_artifacts_message_ordinal_unique_idx").on(
+      table.messageId,
+      table.ordinal
+    ),
+    index("evry_conversation_artifacts_scope_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.conversationId,
+      table.messageId
+    ),
+    foreignKey({
+      name: "evry_conversation_artifacts_message_fk",
+      columns: [
+        table.messageId,
+        table.conversationId,
+        table.churchId,
+        table.actorUserId,
+      ],
+      foreignColumns: [
+        evryConversationMessages.id,
+        evryConversationMessages.conversationId,
+        evryConversationMessages.churchId,
+        evryConversationMessages.actorUserId,
+      ],
+    }),
+    check(
+      "evry_conversation_artifacts_ordinal_check",
+      sql`${table.ordinal} >= 0`
+    ),
+    check(
+      "evry_conversation_artifacts_kind_check",
+      sql`${table.kind} in (${inList(evryConversationArtifactKinds)})`
+    ),
+    check(
+      "evry_conversation_artifacts_document_check",
+      sql`jsonb_typeof(${table.document}) = 'object' and ${table.document}->>'kind' = ${table.kind}`
+    ),
+  ]
+);
+
 export type EvryActionPlan = typeof evryActionPlans.$inferSelect;
 export type NewEvryActionPlan = typeof evryActionPlans.$inferInsert;
 export type EvryActionPlanState = typeof evryActionPlanStates.$inferSelect;
@@ -563,3 +830,10 @@ export type EvryPlanConfirmation = typeof evryPlanConfirmations.$inferSelect;
 export type EvryProductAuditEvent = typeof evryProductAuditEvents.$inferSelect;
 export type EvryExecutionAttempt = typeof evryExecutionAttempts.$inferSelect;
 export type EvryExecutionOutcome = typeof evryExecutionOutcomes.$inferSelect;
+export type EvryConversation = typeof evryConversations.$inferSelect;
+export type NewEvryConversation = typeof evryConversations.$inferInsert;
+export type EvryConversationState = typeof evryConversationStates.$inferSelect;
+export type EvryConversationMessage =
+  typeof evryConversationMessages.$inferSelect;
+export type EvryConversationArtifact =
+  typeof evryConversationArtifacts.$inferSelect;
