@@ -5,10 +5,6 @@ import type {
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import {
-  findExactEvryActionPlan,
-  type StoredEvryActionPlan,
-} from "@/lib/evry/plans/repository";
 import type { EvryPageContext } from "@/lib/evry/resolvers/contract";
 
 import {
@@ -23,15 +19,19 @@ import {
 import {
   evryConversationIdSchema,
   evryConversationMessageIdSchema,
-  evryConversationPlanIdentitySchema,
   evryConversationRequestKeySchema,
   type EvryConversationId,
   type EvryConversationMessageId,
+  type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
   type EvryConversationRelevanceKey,
   type EvryConversationRequestKey,
   type EvryConversationStateDocument,
 } from "./contract";
+import {
+  revalidateProductionEvryConversationPlan,
+  type EvryConversationPlanResumeRevalidator,
+} from "./plan-resume";
 import {
   appendEvryConversationRecord,
   createEvryConversationRecord,
@@ -55,38 +55,11 @@ export const evryConversationStore: EvryConversationStore = Object.freeze({
   append: appendEvryConversationRecord,
 });
 
-export type EvryConversationPlanLoader = (input: {
-  planId: string;
-  actorUserId: string;
-  plantId: string;
-  fingerprint: string;
-}) => Promise<StoredEvryActionPlan | null>;
-
 export type EvryResumedConversation = Readonly<{
   conversation: EvryStoredConversation;
   activePlan: EvryRevalidatedActivePlan | null;
   context: EvryCompiledConversationContext;
 }>;
-
-function revalidatedPlan(
-  stored: StoredEvryActionPlan,
-  now: Date
-): EvryRevalidatedActivePlan {
-  const expiredBeforeExecution =
-    (stored.status === "awaiting_confirmation" ||
-      stored.status === "approved") &&
-    stored.expiresAt <= now;
-  const status = expiredBeforeExecution ? "expired" : stored.status;
-  return Object.freeze({
-    identity: evryConversationPlanIdentitySchema.parse({
-      planId: stored.id,
-      fingerprint: stored.fingerprint,
-    }),
-    status,
-    expiresAt: stored.expiresAt.toISOString(),
-    confirmable: status === "awaiting_confirmation",
-  });
-}
 
 export async function resumeEvryConversation(input: {
   actor: EvryPlantActor;
@@ -94,7 +67,7 @@ export async function resumeEvryConversation(input: {
   now: Date;
   focusRelevanceKeys?: readonly EvryConversationRelevanceKey[];
   store?: EvryConversationStore;
-  loadPlan?: EvryConversationPlanLoader;
+  revalidatePlan?: EvryConversationPlanResumeRevalidator;
 }): Promise<EvryResumedConversation | null> {
   const store = input.store ?? evryConversationStore;
   const conversation = await store.find({
@@ -106,22 +79,13 @@ export async function resumeEvryConversation(input: {
 
   let activePlan: EvryRevalidatedActivePlan | null = null;
   if (conversation.activePlan) {
-    const storedPlan = await (input.loadPlan ?? findExactEvryActionPlan)({
-      planId: conversation.activePlan.planId,
-      fingerprint: conversation.activePlan.fingerprint,
-      actorUserId: input.actor.userId,
-      plantId: input.actor.plantId,
+    activePlan = await (
+      input.revalidatePlan ?? revalidateProductionEvryConversationPlan
+    )({
+      actor: input.actor,
+      identity: conversation.activePlan,
+      checkedAt: input.now,
     });
-    if (
-      !storedPlan ||
-      storedPlan.id !== conversation.activePlan.planId ||
-      storedPlan.fingerprint !== conversation.activePlan.fingerprint ||
-      storedPlan.actorUserId !== input.actor.userId ||
-      storedPlan.plantId !== input.actor.plantId
-    ) {
-      return null;
-    }
-    activePlan = revalidatedPlan(storedPlan, input.now);
   }
 
   return Object.freeze({
@@ -175,6 +139,7 @@ export async function appendTrustedEvryConversationMessage(input: {
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
+  idempotencyContext: EvryConversationMessageIdempotencyContext;
   activePlan?:
     | Readonly<{ mode: "preserve" }>
     | Readonly<{ mode: "clear" }>
@@ -196,6 +161,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     relevanceKeys: input.relevanceKeys,
     deliveryStatus: input.deliveryStatus,
     artifacts: input.artifacts,
+    idempotencyContext: input.idempotencyContext,
     activePlan: input.activePlan,
     createdAt: input.now,
   });
@@ -247,7 +213,7 @@ export async function continueEvryConversation(input: {
   pageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
-  loadPlan?: EvryConversationPlanLoader;
+  revalidatePlan?: EvryConversationPlanResumeRevalidator;
 }): Promise<EvryConversationContinuation | null> {
   const store = input.store ?? evryConversationStore;
   const conversationId = evryConversationIdSchema.safeParse(
@@ -272,6 +238,17 @@ export async function continueEvryConversation(input: {
   });
   const relevanceKeys =
     reference.status === "resolved" ? reference.relevanceKeys : [];
+  const idempotencyContext: EvryConversationMessageIdempotencyContext =
+    reference.status === "resolved"
+      ? {
+          status: "resolved",
+          referenceKey: reference.reference.key,
+          entityType: reference.reference.entityType,
+          entityId: reference.reference.entityId,
+        }
+      : reference.status === "clarification"
+        ? { status: "clarification", reason: reference.reason }
+        : { status: "not_applicable" };
   let appended = await appendTrustedEvryConversationMessage({
     messageId: evryConversationMessageIdSchema.parse(randomUUID()),
     actor: input.actor,
@@ -285,6 +262,7 @@ export async function continueEvryConversation(input: {
     relevanceKeys,
     deliveryStatus: "complete",
     artifacts: [],
+    idempotencyContext,
     activePlan: { mode: "preserve" },
     now: input.now,
     store,
@@ -304,6 +282,7 @@ export async function continueEvryConversation(input: {
       relevanceKeys: [],
       deliveryStatus: "complete",
       artifacts: [storedEvryClarificationArtifactDocument(reference.artifact)],
+      idempotencyContext: { status: "none" },
       activePlan: { mode: "preserve" },
       now: input.now,
       store,
@@ -316,7 +295,7 @@ export async function continueEvryConversation(input: {
     now: input.now,
     focusRelevanceKeys: relevanceKeys,
     store,
-    loadPlan: input.loadPlan,
+    revalidatePlan: input.revalidatePlan,
   });
   if (!resumed) return null;
   return reference.status === "clarification"

@@ -19,6 +19,12 @@ import type {
 } from "@/lib/evry/conversations/repository";
 import type { EvryConversationStore } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import {
+  ELIGIBLE_FIXTURE_CAPABILITIES,
+  fixtureDocument,
+  PLAN_FIXTURE_REGISTRY,
+} from "@/lib/evry/plans/fixtures.test-helper";
+import { fingerprintEvryActionPlan } from "@/lib/evry/plans/fingerprint";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans/request-key";
 
 type SessionUser = Readonly<{
@@ -35,9 +41,15 @@ const OTHER_USER_ID = "20000000-0000-4000-8000-000000000002";
 const CONVERSATION_ID = evryConversationIdSchema.parse(
   "30000000-0000-4000-8000-000000000001"
 );
+const PLAN_EXPIRES = new Date("2026-08-20T12:15:00.000Z");
 const PLAN = evryConversationPlanIdentitySchema.parse({
   planId: "40000000-0000-4000-8000-000000000001",
-  fingerprint: "a".repeat(64),
+  fingerprint: fingerprintEvryActionPlan({
+    actorUserId: USER_ID,
+    plantId: PLANT_ID,
+    document: fixtureDocument(),
+    expiresAt: PLAN_EXPIRES,
+  }),
 });
 const START = new Date("2026-08-20T12:00:00.000Z");
 const RETURN = new Date("2026-08-28T12:00:00.000Z");
@@ -221,7 +233,11 @@ async function main(): Promise<void> {
   parseArtifactDocument =
     artifactContract.parseEvryConversationArtifactDocument;
   hydrateArtifact = artifactContract.hydrateStoredEvryConversationArtifact;
+  const repository = await import("@/lib/evry/conversations/repository");
   const conversations = await import("@/lib/evry/conversations/service");
+  const planResume = await import("@/lib/evry/conversations/plan-resume");
+  const planLifecycle = await import("@/lib/evry/plans/lifecycle");
+  const planRegistry = await import("@/lib/evry/plans/registry");
   const createRoute = await import("./route");
   const getRoute = await import("./[conversationId]/route");
   const messageRoute = await import("./[conversationId]/messages/route");
@@ -243,24 +259,43 @@ async function main(): Promise<void> {
       requestKey: mintEvryPlanRequestKey(),
       intentFingerprint: "b".repeat(64),
       fingerprint: PLAN.fingerprint,
-      document: { version: 1, steps: [] },
+      document: fixtureDocument(),
       createdAt: START,
-      expiresAt: new Date("2026-08-20T12:15:00.000Z"),
+      expiresAt: PLAN_EXPIRES,
       supersedesPlanId: null,
       status: "approved" as const,
       stateVersion: 0,
       stateChangedAt: START,
     };
   };
+  const revalidatePlan = planResume.createEvryConversationPlanResumeRevalidator(
+    {
+      registry: PLAN_FIXTURE_REGISTRY,
+      loadExact: loadPlan,
+      eligibleCapabilitiesForActor: () => ELIGIBLE_FIXTURE_CAPABILITIES,
+      targetIsCurrent: async () => {
+        events.push("target-read");
+        return true;
+      },
+    }
+  );
   const get = getRoute.createEvryConversationGet({
     now: () => RETURN,
     resume: (input) =>
-      conversations.resumeEvryConversation({ ...input, store, loadPlan }),
+      conversations.resumeEvryConversation({
+        ...input,
+        store,
+        revalidatePlan,
+      }),
   });
   const messagePost = messageRoute.createEvryConversationMessagePost({
     now: () => RETURN,
     continueConversation: (input) =>
-      conversations.continueEvryConversation({ ...input, store, loadPlan }),
+      conversations.continueEvryConversation({
+        ...input,
+        store,
+        revalidatePlan,
+      }),
   });
 
   sessions = [null];
@@ -278,6 +313,30 @@ async function main(): Promise<void> {
     status: 401,
     cacheControl: "private, no-store",
     body: { status: "unavailable" },
+  });
+
+  const conflictingCreatePost = createRoute.createEvryConversationCreatePost({
+    create: async () => {
+      events.push("idempotency-conflict");
+      throw new repository.EvryConversationIdempotencyError();
+    },
+  });
+  sessions = [user()];
+  events.length = 0;
+  const createConflict = await response(
+    await conflictingCreatePost(
+      request("http://localhost/api/evry/conversations", {
+        requestKey: randomUUID(),
+        message: "Create this conversation.",
+        pageContext: { kind: "task", recordId: "task-2" },
+      })
+    )
+  );
+  assert.deepEqual(events, ["auth", "body", "idempotency-conflict"]);
+  assert.deepEqual(createConflict, {
+    status: 409,
+    cacheControl: "private, no-store",
+    body: { status: "stale" },
   });
 
   const firstRequestKey = randomUUID();
@@ -300,6 +359,82 @@ async function main(): Promise<void> {
   assert.ok(capturedActor);
   assert.ok(stored);
 
+  const permissionLost = planResume.createEvryConversationPlanResumeRevalidator(
+    {
+      registry: PLAN_FIXTURE_REGISTRY,
+      loadExact: loadPlan,
+      eligibleCapabilitiesForActor: () => [],
+      targetIsCurrent: async () => {
+        assert.fail("an ineligible plan must not reach target validation");
+      },
+    }
+  );
+  const stalePlan = await permissionLost({
+    actor: capturedActor,
+    identity: PLAN,
+    checkedAt: new Date("2026-08-20T12:05:00.000Z"),
+  });
+  assert.equal(stalePlan.status, "stale");
+  assert.equal(stalePlan.confirmable, false);
+
+  const terminalStatuses = planLifecycle.EVRY_PLAN_STATUSES.filter(
+    planLifecycle.isTerminalEvryPlanStatus
+  );
+  let terminalAuthorityChecks = 0;
+  for (const terminalStatus of terminalStatuses) {
+    const historicalPlan =
+      planResume.createEvryConversationPlanResumeRevalidator({
+        registry: planRegistry.createEvryPlanCapabilityRegistry([]),
+        loadExact: async () => ({
+          ...(await loadPlan()),
+          status: terminalStatus,
+        }),
+        eligibleCapabilitiesForActor: () => {
+          terminalAuthorityChecks += 1;
+          return [];
+        },
+        targetIsCurrent: async () => {
+          terminalAuthorityChecks += 1;
+          return false;
+        },
+      });
+    const historical = await historicalPlan({
+      actor: capturedActor,
+      identity: PLAN,
+      checkedAt: new Date("2026-08-20T12:05:00.000Z"),
+    });
+    assert.equal(historical.status, terminalStatus);
+    assert.equal(historical.confirmable, false);
+  }
+  assert.deepEqual(terminalStatuses, [
+    "completed",
+    "partially_failed",
+    "failed",
+    "cancelled",
+    "superseded",
+    "expired",
+  ]);
+  assert.equal(terminalAuthorityChecks, 0);
+
+  let targetChecks = 0;
+  const staleTarget = planResume.createEvryConversationPlanResumeRevalidator({
+    registry: PLAN_FIXTURE_REGISTRY,
+    loadExact: loadPlan,
+    eligibleCapabilitiesForActor: () => ELIGIBLE_FIXTURE_CAPABILITIES,
+    targetIsCurrent: async () => {
+      targetChecks += 1;
+      return false;
+    },
+  });
+  const changedTargetPlan = await staleTarget({
+    actor: capturedActor,
+    identity: PLAN,
+    checkedAt: new Date("2026-08-20T12:05:00.000Z"),
+  });
+  assert.equal(changedTargetPlan.status, "stale");
+  assert.equal(changedTargetPlan.confirmable, false);
+  assert.equal(targetChecks, 1);
+
   const confirmation = parseArtifactDocument({
     kind: "confirmation",
     plan: PLAN,
@@ -321,6 +456,7 @@ async function main(): Promise<void> {
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [confirmation],
+    idempotencyContext: { status: "none" },
     activePlan: { mode: "set", plan: PLAN },
     now: START,
     store,

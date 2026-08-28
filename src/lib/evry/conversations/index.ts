@@ -20,10 +20,12 @@ export {
 } from "./context";
 export {
   EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS,
+  EVRY_CONVERSATION_DURABLE_RESULT_CODES,
   EVRY_CONVERSATION_STATE_VERSION,
   EvryConversationStorageError,
   evryConversationIdSchema,
   evryConversationMessageIdSchema,
+  evryConversationMessageIdempotencyContextSchema,
   evryConversationPlanIdentitySchema,
   evryConversationReferenceKeySchema,
   evryConversationRelevanceKeySchema,
@@ -34,6 +36,7 @@ export {
   parseStoredEvryConversationState,
   type EvryConversationId,
   type EvryConversationMessageId,
+  type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
   type EvryConversationReferenceKey,
   type EvryConversationRelevanceKey,
@@ -56,13 +59,18 @@ export {
   type EvryConversationReferenceResolution,
 } from "./references";
 export {
+  createEvryConversationPlanResumeRevalidator,
+  revalidateProductionEvryConversationPlan,
+  type EvryConversationPlanResumeRevalidator,
+  type EvryConversationPlanTargetValidator,
+} from "./plan-resume";
+export {
   appendTrustedEvryConversationMessage,
   continueEvryConversation,
   createEvryConversation,
   evryConversationStore,
   resumeEvryConversation,
   type EvryConversationContinuation,
-  type EvryConversationPlanLoader,
   type EvryConversationStore,
   type EvryResumedConversation,
 } from "./service";

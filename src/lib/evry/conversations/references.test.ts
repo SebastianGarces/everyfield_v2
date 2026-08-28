@@ -99,7 +99,19 @@ test("an exact explicit choice resolves a prior ambiguity", () => {
       [
         {
           id: "20000000-0000-4000-8000-000000000001",
-          clarificationId: "30000000-0000-4000-8000-000000000001",
+          clarificationArtifactId: "30000000-0000-4000-8000-000000000001",
+          offeredReferences: [
+            {
+              referenceKey: "person.alex",
+              entityType: "person",
+              entityId: "alex",
+            },
+            {
+              referenceKey: "person.sam",
+              entityType: "person",
+              entityId: "sam",
+            },
+          ],
           referenceKey: "person.sam",
           selectedEntityId: "sam",
           sourceMessageId: MESSAGE_ID,

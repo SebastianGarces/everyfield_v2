@@ -198,6 +198,147 @@ test("context stays bounded as the visible transcript grows", () => {
   }
 });
 
+test("every maximum-size stored state and artifact projection stays reopenable", () => {
+  const escapeHeavy = (length: number) =>
+    [...`x${'\\"\u0001'.repeat(length)}`].slice(0, length).join("");
+  const base = conversation(12);
+  const sourceMessageId = base.messages[0]?.id;
+  assert.ok(sourceMessageId);
+  const references = Array.from({ length: 16 }, (_, index) => ({
+    key: `person.p${index}`,
+    entityType: "person",
+    entityId: `${index}-${escapeHeavy(150)}`,
+    label: escapeHeavy(160),
+    distinguishingFacts: Array.from({ length: 6 }, (_, fact) => ({
+      label: `Fact ${fact}`,
+      value: escapeHeavy(500),
+    })),
+    sourceLink: {
+      label: escapeHeavy(160),
+      href: `/people/${index}/${"x".repeat(470)}`,
+    },
+    aliases: Array.from({ length: 8 }, (_, alias) => `p${index}-${alias}`),
+    sourceMessageId,
+    resolvedAt: CREATED.toISOString(),
+    validThrough: "2026-09-20T12:00:00.000Z",
+  }));
+  const state = evryConversationStateDocumentSchema.parse({
+    version: 1,
+    resolvedReferences: references,
+    explicitChoices: Array.from({ length: 16 }, (_, index) => {
+      const selectedIndex = (index % (references.length - 1)) + 1;
+      return {
+        id: uuid(8, index + 1),
+        clarificationArtifactId: uuid(9, index + 1),
+        offeredReferences: [
+          {
+            referenceKey: "person.p0",
+            entityType: "person",
+            entityId: references[0]?.entityId,
+          },
+          {
+            referenceKey: `person.p${selectedIndex}`,
+            entityType: "person",
+            entityId: references[selectedIndex]?.entityId,
+          },
+        ],
+        referenceKey: `person.p${selectedIndex}`,
+        selectedEntityId: references[selectedIndex]?.entityId,
+        sourceMessageId,
+        selectedAt: new Date(CREATED.valueOf() + index).toISOString(),
+      };
+    }),
+    activeRecipe: {
+      identity: "recipe.maximum",
+      inputs: Array.from({ length: 16 }, (_, index) => ({
+        key: `input.${index}`,
+        value: escapeHeavy(500),
+      })),
+      updatedAt: CREATED.toISOString(),
+    },
+    pendingClarification: {
+      id: uuid(7, 1),
+      entityType: "person",
+      prompt: escapeHeavy(500),
+      choiceReferenceKeys: references.slice(0, 8).map(({ key }) => key),
+      sourceMessageId,
+      askedAt: CREATED.toISOString(),
+    },
+    completedSteps: Array.from({ length: 32 }, (_, index) => ({
+      planId: PLAN.planId,
+      planFingerprint: PLAN.fingerprint,
+      stepId: `step.${index}`,
+      capabilityIdentity: escapeHeavy(200),
+      status: "completed",
+      resultCode: "effect_completed",
+      occurredAt: CREATED.toISOString(),
+    })),
+    summary: { text: escapeHeavy(2_000), throughSequence: 11 },
+  });
+  const maximumConfirmation = parseEvryConversationArtifactDocument({
+    kind: "confirmation",
+    plan: PLAN,
+    title: escapeHeavy(200),
+    actionLabel: escapeHeavy(160),
+    items: Array.from({ length: 32 }, () => ({
+      label: escapeHeavy(160),
+      value: escapeHeavy(1_000),
+    })),
+    consequences: Array.from({ length: 16 }, () => escapeHeavy(500)),
+  });
+  const messages = base.messages.map((storedMessage, sequence) => ({
+    ...storedMessage,
+    body: escapeHeavy(8_000),
+    pageContext: {
+      kind: "person" as const,
+      recordId: escapeHeavy(160),
+    },
+    artifacts: Object.freeze(
+      Array.from({ length: 16 }, (_, ordinal) =>
+        Object.freeze({
+          id: uuid(6, sequence * 16 + ordinal + 1),
+          ordinal,
+          kind: maximumConfirmation.kind,
+          document: maximumConfirmation,
+          artifact: hydrateStoredEvryConversationArtifact(maximumConfirmation),
+        })
+      )
+    ),
+  }));
+
+  const compiled = compileEvryConversationContext({
+    conversation: Object.freeze({
+      ...base,
+      state,
+      messages: Object.freeze(messages),
+    }),
+    activePlan: ACTIVE_PLAN,
+    focusRelevanceKeys: evryConversationRelevanceKeysSchema.parse([
+      "person.p0",
+    ]),
+  });
+  assert.equal(
+    JSON.stringify(compiled).length <=
+      EVRY_CONVERSATION_CONTEXT_LIMITS.serializedCharacters,
+    true
+  );
+  assert.equal(
+    compiled.recentTurns.every(
+      ({ artifacts }) =>
+        artifacts.length <= EVRY_CONVERSATION_CONTEXT_LIMITS.artifactsPerTurn
+    ),
+    true
+  );
+  assert.equal(
+    compiled.structuredState.document.resolvedReferences[0]?.key,
+    "person.p0"
+  );
+  assert.equal(
+    compiled.structuredState.document.explicitChoices[0]?.id,
+    uuid(8, 16)
+  );
+});
+
 test("only key-intersecting older turns survive and the active tuple selects its artifact", () => {
   const compiled = compileEvryConversationContext({
     conversation: conversation(20),

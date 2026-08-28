@@ -644,7 +644,7 @@ export const evryConversations = pgTable(
     check(
       "evry_conversations_active_plan_shape_check",
       sql`(${table.activePlanId} is null and ${table.activePlanFingerprint} is null)
-        or (${table.activePlanId} is not null and ${table.activePlanFingerprint} ~ '^[0-9a-f]{64}$')`
+        or (${table.activePlanId} is not null and ${table.activePlanFingerprint} is not null and ${table.activePlanFingerprint} ~ '^[0-9a-f]{64}$')`
     ),
   ]
 );
@@ -688,6 +688,9 @@ export const evryConversationMessages = pgTable(
     actorUserId: uuid("actor_user_id").notNull(),
     requestKey: uuid("request_key").notNull(),
     bodyFingerprint: varchar("body_fingerprint", { length: 64 }).notNull(),
+    requestFingerprint: varchar("request_fingerprint", {
+      length: 64,
+    }).notNull(),
     sequence: integer("sequence").notNull(),
     author: varchar("author", { length: 16 })
       .$type<EvryConversationAuthor>()
@@ -750,6 +753,10 @@ export const evryConversationMessages = pgTable(
     check(
       "evry_conversation_messages_fingerprint_check",
       sql`${table.bodyFingerprint} ~ '^[0-9a-f]{64}$'`
+    ),
+    check(
+      "evry_conversation_messages_request_fingerprint_check",
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`
     ),
     check(
       "evry_conversation_messages_page_context_check",

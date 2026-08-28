@@ -30,6 +30,7 @@ import {
   EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS,
   EvryConversationStorageError,
   evryConversationIdSchema,
+  evryConversationMessageIdempotencyContextSchema,
   evryConversationMessageIdSchema,
   evryConversationPlanIdentitySchema,
   evryConversationRelevanceKeysSchema,
@@ -38,6 +39,7 @@ import {
   parseStoredEvryConversationState,
   type EvryConversationId,
   type EvryConversationMessageId,
+  type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
   type EvryConversationRelevanceKey,
   type EvryConversationRequestKey,
@@ -50,6 +52,11 @@ const deliverySchema = z.enum(["complete", "interrupted"]);
 const expectedStateVersionSchema = z.number().int().nonnegative();
 const MAX_ARTIFACTS_PER_MESSAGE = 16;
 const MESSAGE_REQUEST_UNIQUE = "evry_conversation_messages_request_unique_idx";
+
+type ActivePlanMutation =
+  | Readonly<{ mode: "preserve" }>
+  | Readonly<{ mode: "clear" }>
+  | Readonly<{ mode: "set"; plan: EvryConversationPlanIdentity }>;
 
 export type EvryStoredConversationArtifact = Readonly<{
   id: string;
@@ -101,6 +108,22 @@ export class EvryConversationIdempotencyError extends Error {
 
 function bodyFingerprint(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
+}
+
+function requestFingerprint(input: {
+  author: EvryConversationAuthor;
+  body: string;
+  pageContext: EvryPageContext | null;
+  relevanceKeys: readonly EvryConversationRelevanceKey[];
+  deliveryStatus: EvryConversationDeliveryStatus;
+  artifacts: readonly StoredEvryConversationArtifactDocument[];
+  idempotencyContext: EvryConversationMessageIdempotencyContext;
+  state: EvryConversationStateDocument;
+  activePlan: ActivePlanMutation;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify(input), "utf8")
+    .digest("hex");
 }
 
 function automaticTitle(body: string): string {
@@ -285,7 +308,42 @@ async function findEvryConversationRecordAttempt(
     throw new EvryConversationStorageError();
   }
   const state = parseStoredEvryConversationState(row.state.document);
-  const messageIds = new Set(messages.map(({ id }) => id));
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const artifactById = new Map(
+    messages.flatMap((message) =>
+      message.artifacts.map((artifact) => [
+        artifact.id,
+        Object.freeze({ artifact, message }),
+      ])
+    )
+  );
+  const choicesAreBound = state.explicitChoices.every((choice) => {
+    const choiceMessage = messageById.get(choice.sourceMessageId);
+    const clarification = artifactById.get(choice.clarificationArtifactId);
+    if (
+      !choiceMessage ||
+      choiceMessage.author !== "user" ||
+      !clarification ||
+      clarification.message.sequence >= choiceMessage.sequence ||
+      clarification.artifact.document.kind !== "clarification" ||
+      clarification.artifact.document.mode !== "choice" ||
+      choice.selectedAt < choiceMessage.createdAt.toISOString() ||
+      clarification.artifact.document.choices.length !==
+        choice.offeredReferences.length
+    ) {
+      return false;
+    }
+
+    return clarification.artifact.document.choices.every((offered, index) => {
+      const reference = choice.offeredReferences[index];
+      return (
+        reference !== undefined &&
+        offered.entityType === reference.entityType &&
+        offered.id === reference.entityId
+      );
+    });
+  });
+  const messageIds = new Set(messageById.keys());
   const sourceMessageIds = [
     ...state.resolvedReferences.map(({ sourceMessageId }) => sourceMessageId),
     ...state.explicitChoices.map(({ sourceMessageId }) => sourceMessageId),
@@ -295,6 +353,7 @@ async function findEvryConversationRecordAttempt(
   ];
   if (
     row.state.version !== messages.length - 1 ||
+    !choicesAreBound ||
     sourceMessageIds.some((messageId) => !messageIds.has(messageId)) ||
     (state.summary !== null && state.summary.throughSequence >= messages.length)
   ) {
@@ -336,9 +395,21 @@ export async function createEvryConversationRecord(input: {
   createdAt: Date;
 }): Promise<EvryStoredConversation> {
   const body = bodySchema.parse(input.body);
+  const pageContext = evryPageContextSchema.nullable().parse(input.pageContext);
+  const state = initialEvryConversationState();
+  const semanticFingerprint = requestFingerprint({
+    author: "user",
+    body,
+    pageContext,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    artifacts: [],
+    idempotencyContext: { status: "none" },
+    state,
+    activePlan: { mode: "preserve" },
+  });
   const conversationId = evryConversationIdSchema.parse(randomUUID());
   const messageId = evryConversationMessageIdSchema.parse(randomUUID());
-  const state = initialEvryConversationState();
 
   try {
     await db.batch([
@@ -366,10 +437,11 @@ export async function createEvryConversationRecord(input: {
         actorUserId: input.actorUserId,
         requestKey: input.requestKey,
         bodyFingerprint: bodyFingerprint(body),
+        requestFingerprint: semanticFingerprint,
         sequence: 0,
         author: "user",
         body,
-        pageContext: input.pageContext,
+        pageContext,
         relevanceKeys: [],
         deliveryStatus: "complete",
         createdAt: input.createdAt,
@@ -382,7 +454,11 @@ export async function createEvryConversationRecord(input: {
       plantId: input.plantId,
       requestKey: input.requestKey,
     });
-    if (!existing || existing.bodyFingerprint !== bodyFingerprint(body)) {
+    if (
+      !existing ||
+      existing.bodyFingerprint !== bodyFingerprint(body) ||
+      existing.requestFingerprint !== semanticFingerprint
+    ) {
       throw new EvryConversationIdempotencyError();
     }
     const replay = await findEvryConversationRecord({
@@ -403,11 +479,6 @@ export async function createEvryConversationRecord(input: {
   return created;
 }
 
-type ActivePlanMutation =
-  | Readonly<{ mode: "preserve" }>
-  | Readonly<{ mode: "clear" }>
-  | Readonly<{ mode: "set"; plan: EvryConversationPlanIdentity }>;
-
 interface AppendedMessageRow extends Record<string, unknown> {
   id: string;
 }
@@ -420,12 +491,14 @@ async function findMessageByRequestKey(input: {
   id: string;
   conversationId: string;
   bodyFingerprint: string;
+  requestFingerprint: string;
 }> | null> {
   const [message] = await db
     .select({
       id: evryConversationMessages.id,
       conversationId: evryConversationMessages.conversationId,
       bodyFingerprint: evryConversationMessages.bodyFingerprint,
+      requestFingerprint: evryConversationMessages.requestFingerprint,
     })
     .from(evryConversationMessages)
     .where(
@@ -453,16 +526,22 @@ export async function appendEvryConversationRecord(input: {
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
+  idempotencyContext: EvryConversationMessageIdempotencyContext;
   activePlan?: ActivePlanMutation;
   createdAt: Date;
 }): Promise<EvryStoredConversation> {
   const body = bodySchema.parse(input.body);
   const fingerprint = bodyFingerprint(body);
   const activePlan = input.activePlan ?? { mode: "preserve" };
-  const parsedActivePlan =
+  const normalizedActivePlan: ActivePlanMutation =
     activePlan.mode === "set"
-      ? evryConversationPlanIdentitySchema.parse(activePlan.plan)
-      : null;
+      ? {
+          mode: "set",
+          plan: evryConversationPlanIdentitySchema.parse(activePlan.plan),
+        }
+      : activePlan;
+  const parsedActivePlan =
+    normalizedActivePlan.mode === "set" ? normalizedActivePlan.plan : null;
   const expectedStateVersion = expectedStateVersionSchema.parse(
     input.expectedStateVersion
   );
@@ -473,6 +552,10 @@ export async function appendEvryConversationRecord(input: {
     input.relevanceKeys
   );
   const deliveryStatus = deliverySchema.parse(input.deliveryStatus);
+  const idempotencyContext =
+    evryConversationMessageIdempotencyContextSchema.parse(
+      input.idempotencyContext
+    );
   const messageId = evryConversationMessageIdSchema.parse(input.messageId);
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   if (input.artifacts.length > MAX_ARTIFACTS_PER_MESSAGE) {
@@ -487,15 +570,28 @@ export async function appendEvryConversationRecord(input: {
       document,
     };
   });
-  const existing = await findMessageByRequestKey({
-    actorUserId: input.actorUserId,
-    plantId: input.plantId,
-    requestKey,
+  const semanticFingerprint = requestFingerprint({
+    author,
+    body,
+    pageContext,
+    relevanceKeys,
+    deliveryStatus,
+    artifacts: artifacts.map(({ document }) => document),
+    idempotencyContext,
+    state: parsedState,
+    activePlan: normalizedActivePlan,
   });
-  if (existing) {
+  async function exactReplay(): Promise<EvryStoredConversation | null> {
+    const existing = await findMessageByRequestKey({
+      actorUserId: input.actorUserId,
+      plantId: input.plantId,
+      requestKey,
+    });
+    if (!existing) return null;
     if (
       existing.conversationId !== input.conversationId ||
-      existing.bodyFingerprint !== fingerprint
+      existing.bodyFingerprint !== fingerprint ||
+      existing.requestFingerprint !== semanticFingerprint
     ) {
       throw new EvryConversationIdempotencyError();
     }
@@ -503,6 +599,9 @@ export async function appendEvryConversationRecord(input: {
     if (!replay) throw new EvryConversationStorageError();
     return replay;
   }
+
+  const existingReplay = await exactReplay();
+  if (existingReplay) return existingReplay;
 
   const setPlan = activePlan.mode === "set" ? parsedActivePlan : null;
   let result: Awaited<ReturnType<typeof db.execute<AppendedMessageRow>>>;
@@ -540,13 +639,14 @@ export async function appendEvryConversationRecord(input: {
     ), message_inserted as (
       insert into evry_conversation_messages (
         id, conversation_id, church_id, actor_user_id, request_key,
-        body_fingerprint, sequence, author, body, page_context,
+        body_fingerprint, request_fingerprint, sequence, author, body, page_context,
         relevance_keys, delivery_status, created_at
       )
       select
         ${messageId}::uuid, ${input.conversationId}::uuid, ${input.plantId}::uuid,
-        ${input.actorUserId}::uuid, ${requestKey}::uuid, ${fingerprint}, sequence,
-        ${author}, ${body}, ${JSON.stringify(pageContext)}::jsonb,
+        ${input.actorUserId}::uuid, ${requestKey}::uuid, ${fingerprint},
+        ${semanticFingerprint}, sequence,
+        ${author}, ${body}, ${pageContext === null ? null : JSON.stringify(pageContext)}::jsonb,
         ${JSON.stringify(relevanceKeys)}::jsonb, ${deliveryStatus},
         ${input.createdAt}
       from conversation_updated
@@ -572,23 +672,17 @@ export async function appendEvryConversationRecord(input: {
     `);
   } catch (error) {
     if (!isUniqueViolation(error, MESSAGE_REQUEST_UNIQUE)) throw error;
-    const winner = await findMessageByRequestKey({
-      actorUserId: input.actorUserId,
-      plantId: input.plantId,
-      requestKey,
-    });
-    if (
-      winner?.conversationId !== input.conversationId ||
-      winner.bodyFingerprint !== fingerprint
-    ) {
-      throw new EvryConversationIdempotencyError();
-    }
-    const replay = await findEvryConversationRecord(input);
+    const replay = await exactReplay();
     if (!replay) throw new EvryConversationStorageError();
     return replay;
   }
 
   if (!result.rows[0]) {
+    // A same-key contender can win the state CAS while this statement waits
+    // on the row lock. Its request key becomes visible only to this fresh
+    // statement, so recognize the exact replay before reporting stale state.
+    const replay = await exactReplay();
+    if (replay) return replay;
     throw new EvryConversationStateConflictError();
   }
 

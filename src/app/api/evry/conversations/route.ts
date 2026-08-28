@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { EvryConversationIdempotencyError } from "@/lib/evry/conversations/repository";
 import { createEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
 import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
@@ -64,6 +65,9 @@ export function createEvryConversationCreatePost({
         201
       );
     } catch (error) {
+      if (error instanceof EvryConversationIdempotencyError) {
+        return evryConversationJson({ status: "stale" }, 409);
+      }
       return evryConversationFailure(error);
     }
   };

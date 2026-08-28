@@ -74,12 +74,16 @@ test("append atomically orders state CAS, activity, message, and artifacts", () 
   assert.match(append, /parseEvryConversationArtifactDocument/);
   assert.match(
     append,
+    /pageContext === null \? null : JSON\.stringify\(pageContext\)/
+  );
+  assert.match(
+    append,
     /evryConversationMessageIdSchema\.parse\(input\.messageId\)/
   );
   assert.doesNotMatch(append, /db\.transaction/);
 });
 
-test("message idempotency binds exact body bytes to an actor-scoped request key", () => {
+test("message idempotency binds exact bytes and the full semantic append", () => {
   const repository = source(REPOSITORY);
   assert.match(
     repository,
@@ -97,6 +101,15 @@ test("message idempotency binds exact body bytes to an actor-scoped request key"
     /existing\.conversationId !== input\.conversationId/
   );
   assert.match(repository, /existing\.bodyFingerprint !== fingerprint/);
+  assert.match(
+    repository,
+    /existing\.requestFingerprint !== semanticFingerprint/
+  );
+  assert.match(
+    repository,
+    /requestFingerprint\(\{[\s\S]*state: parsedState,[\s\S]*activePlan: normalizedActivePlan/
+  );
+  assert.match(repository, /const replay = await exactReplay\(\)/);
   assert.match(repository, /EvryConversationIdempotencyError/);
 });
 

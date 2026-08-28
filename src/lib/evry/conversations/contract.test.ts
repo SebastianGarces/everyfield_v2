@@ -44,11 +44,33 @@ test("conversation state is closed and choices name exact persisted references",
   };
   const valid = evryConversationStateDocumentSchema.parse({
     ...initial,
-    resolvedReferences: [reference],
+    resolvedReferences: [
+      reference,
+      {
+        ...reference,
+        key: "person.sam",
+        entityId: "person-2",
+        label: "Sam Lee",
+        sourceLink: { label: "Sam Lee", href: "/people/person-2" },
+        aliases: ["sam"],
+      },
+    ],
     explicitChoices: [
       {
         id: "20000000-0000-4000-8000-000000000001",
-        clarificationId: "30000000-0000-4000-8000-000000000001",
+        clarificationArtifactId: "30000000-0000-4000-8000-000000000001",
+        offeredReferences: [
+          {
+            referenceKey: "person.alex",
+            entityType: "person",
+            entityId: "person-1",
+          },
+          {
+            referenceKey: "person.sam",
+            entityType: "person",
+            entityId: "person-2",
+          },
+        ],
         referenceKey: "person.alex",
         selectedEntityId: "person-1",
         sourceMessageId: MESSAGE_ID,
@@ -198,7 +220,7 @@ test("confirmation, progress, and result documents have closed plan identities",
           stepId: "meeting.create",
           label: "Create meeting",
           status: "completed",
-          resultCode: "noop_completed",
+          resultCode: "effect_completed",
           affectedCount: 1,
           excludedCount: 0,
           sourceLinks: [{ label: "Meeting", href: "/meetings/meeting-1" }],
@@ -218,4 +240,45 @@ test("confirmation, progress, and result documents have closed plan identities",
       false
     );
   }
+
+  assert.equal(
+    evryConversationArtifactDocumentSchema.safeParse({
+      kind: "result",
+      plan,
+      title: "Meeting refused",
+      status: "refused",
+      steps: [
+        {
+          stepId: "meeting.create",
+          label: "Create meeting",
+          status: "refused",
+          resultCode: "effect_completed",
+          affectedCount: 0,
+          excludedCount: 0,
+          sourceLinks: [],
+        },
+      ],
+    }).success,
+    false
+  );
+  assert.equal(
+    evryConversationArtifactDocumentSchema.safeParse({
+      kind: "result",
+      plan,
+      title: "Contradictory result",
+      status: "completed",
+      steps: [
+        {
+          stepId: "meeting.create",
+          label: "Create meeting",
+          status: "failed",
+          resultCode: "effect_failed",
+          affectedCount: 0,
+          excludedCount: 0,
+          sourceLinks: [],
+        },
+      ],
+    }).success,
+    false
+  );
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { evryExecutionResultCodes } from "@/db/schema/evry";
 import {
   buildEvryReadArtifact,
   trustedEvryApplicationSourceLink,
@@ -20,6 +21,7 @@ import { evrySettingsSectionIdSchema } from "@/lib/evry/policy/schema";
 
 import {
   EvryConversationStorageError,
+  evryConversationResultCodeFor,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
   storedEvrySourceLinkSchema,
@@ -189,12 +191,21 @@ const resultStepSchema = z
     stepId: z.string().regex(/^[a-z][a-z0-9_.:-]{0,127}$/),
     label: labelSchema,
     status: z.enum(["completed", "failed", "refused", "skipped"]),
-    resultCode: z.string().regex(/^[a-z][a-z0-9_.:-]{0,127}$/),
+    resultCode: z.enum(evryExecutionResultCodes),
     affectedCount: z.number().int().nonnegative(),
     excludedCount: z.number().int().nonnegative(),
     sourceLinks: z.array(storedEvrySourceLinkSchema).max(16),
   })
   .strict()
+  .superRefine((step, context) => {
+    if (step.resultCode !== evryConversationResultCodeFor(step.status)) {
+      context.addIssue({
+        code: "custom",
+        path: ["resultCode"],
+        message: "Evry result status and result code must describe one outcome",
+      });
+    }
+  })
   .readonly();
 
 const resultArtifactDocumentSchema = z
@@ -206,6 +217,24 @@ const resultArtifactDocumentSchema = z
     steps: z.array(resultStepSchema).min(1).max(32),
   })
   .strict()
+  .superRefine((artifact, context) => {
+    const expectedStatus = artifact.steps.every(
+      ({ status }) => status === "completed"
+    )
+      ? "completed"
+      : artifact.steps.some(({ status }) => status === "completed")
+        ? "partially_failed"
+        : artifact.steps.some(({ status }) => status === "refused")
+          ? "refused"
+          : "failed";
+    if (artifact.status !== expectedStatus) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Evry result status must match its durable step outcomes",
+      });
+    }
+  })
   .readonly();
 
 export const evryConversationArtifactDocumentSchema = z.union([

@@ -2,7 +2,9 @@ import type { StoredEvryConversationArtifactDocument } from "./artifacts";
 import type {
   EvryConversationPlanIdentity,
   EvryConversationRelevanceKey,
+  EvryConversationStateDocument,
 } from "./contract";
+import { evryConversationRelevanceKeySchema } from "./contract";
 import type {
   EvryStoredConversation,
   EvryStoredConversationMessage,
@@ -21,7 +23,13 @@ Continuity boundary: structured references and explicit choices are the only ref
 export const EVRY_CONVERSATION_CONTEXT_LIMITS = Object.freeze({
   recentTurns: 8,
   relevantOlderTurns: 4,
-  bodyCharactersPerTurn: 2_000,
+  bodyCharactersPerTurn: 1_000,
+  artifactsPerTurn: 1,
+  artifactItems: 2,
+  artifactSteps: 4,
+  structuredReferences: 8,
+  structuredChoices: 8,
+  structuredCompletedSteps: 32,
   serializedCharacters: 96_000,
 });
 
@@ -37,13 +45,37 @@ export type EvryRevalidatedActivePlan = Readonly<{
     | "failed"
     | "cancelled"
     | "superseded"
-    | "expired";
-  expiresAt: string;
+    | "expired"
+    | "stale";
+  expiresAt: string | null;
   confirmable: boolean;
 }>;
 
+type ContextStateDocument = Readonly<{
+  version: EvryConversationStateDocument["version"];
+  resolvedReferences: readonly Readonly<{
+    key: string;
+    entityType: string;
+    entityId: string;
+    label: string;
+    aliases: readonly string[];
+    sourceMessageId: string;
+    resolvedAt: string;
+    validThrough: string | null;
+  }>[];
+  explicitChoices: readonly EvryConversationStateDocument["explicitChoices"][number][];
+  activeRecipe: null | Readonly<{
+    identity: string;
+    inputs: readonly Readonly<{ key: string; value: string }>[];
+    updatedAt: string;
+  }>;
+  pendingClarification: EvryConversationStateDocument["pendingClarification"];
+  completedSteps: readonly EvryConversationStateDocument["completedSteps"][number][];
+  summary: null | Readonly<{ text: string; throughSequence: number }>;
+}>;
+
 type ContextArtifact =
-  | Readonly<{ kind: StoredEvryConversationArtifactDocument["kind"] }>
+  | Readonly<{ kind: "settings_handoff" | "boundary" }>
   | Readonly<{
       kind: "read";
       title: string;
@@ -91,18 +123,28 @@ export type EvryCompiledConversationContext = Readonly<{
   stablePrefix: string;
   structuredState: Readonly<{
     summaryAuthority: "context_only";
-    document: EvryStoredConversation["state"];
+    document: ContextStateDocument;
   }>;
   pendingPlan: null | Readonly<{
     revalidated: EvryRevalidatedActivePlan;
-    confirmation: Extract<
-      StoredEvryConversationArtifactDocument,
-      { kind: "confirmation" }
-    > | null;
+    confirmation: Extract<ContextArtifact, { kind: "confirmation" }> | null;
   }>;
   relevantOlderTurns: readonly EvryContextTurn[];
   recentTurns: readonly EvryContextTurn[];
 }>;
+
+/** Keep projected context text bounded even when JSON escaping expands it. */
+function contextText(value: string, characters: number): string {
+  return [...value]
+    .map((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+        ? " "
+        : character;
+    })
+    .slice(0, characters)
+    .join("");
+}
 
 function artifactForContext(
   document: StoredEvryConversationArtifactDocument
@@ -111,7 +153,7 @@ function artifactForContext(
     case "read":
       return {
         kind: "read",
-        title: document.title,
+        title: contextText(document.title, 160),
         counts: document.counts,
       };
     case "clarification":
@@ -120,39 +162,63 @@ function artifactForContext(
             kind: "clarification",
             mode: "missing",
             entityType: document.entityType,
-            prompt: document.prompt,
+            prompt: contextText(document.prompt, 240),
           }
         : {
             kind: "clarification",
             mode: "choice",
             entityType: document.entityType,
-            prompt: document.prompt,
-            choices: document.choices.map(({ id, label }) => ({ id, label })),
+            prompt: contextText(document.prompt, 240),
+            choices: document.choices.slice(0, 4).map(({ id, label }) => ({
+              id,
+              label: contextText(label, 80),
+            })),
           };
     case "confirmation":
-      return document;
+      return {
+        kind: "confirmation",
+        plan: document.plan,
+        title: contextText(document.title, 160),
+        actionLabel: contextText(document.actionLabel, 80),
+        items: document.items
+          .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactItems)
+          .map(({ label, value }) => ({
+            label: contextText(label, 80),
+            value: contextText(value, 160),
+          })),
+        consequences: document.consequences
+          .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactItems)
+          .map((consequence) => contextText(consequence, 240)),
+      };
     case "progress":
       return {
         kind: "progress",
         plan: document.plan,
-        title: document.title,
+        title: contextText(document.title, 160),
         steps: [
           ...(document.activeStep ? [document.activeStep] : []),
           ...document.completedSteps,
-        ],
+        ]
+          .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactSteps)
+          .map(({ stepId, label }) => ({
+            stepId,
+            label: contextText(label, 80),
+          })),
       };
     case "result":
       return {
         kind: "result",
         plan: document.plan,
-        title: document.title,
+        title: contextText(document.title, 160),
         status: document.status,
-        steps: document.steps.map(({ stepId, label, status, resultCode }) => ({
-          stepId,
-          label,
-          status,
-          resultCode,
-        })),
+        steps: document.steps
+          .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactSteps)
+          .map(({ stepId, label, status, resultCode }) => ({
+            stepId,
+            label: contextText(label, 80),
+            status,
+            resultCode,
+          })),
       };
     case "settings_handoff":
     case "boundary":
@@ -164,24 +230,139 @@ function contextTurn(message: EvryStoredConversationMessage): EvryContextTurn {
   return Object.freeze({
     sequence: message.sequence,
     author: message.author,
-    body: [...message.body]
-      .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.bodyCharactersPerTurn)
-      .join(""),
-    pageContext: message.pageContext,
+    body: contextText(
+      message.body,
+      EVRY_CONVERSATION_CONTEXT_LIMITS.bodyCharactersPerTurn
+    ),
+    pageContext:
+      message.pageContext === null
+        ? null
+        : Object.freeze({
+            kind: message.pageContext.kind,
+            recordId: contextText(message.pageContext.recordId, 160),
+          }),
     deliveryStatus: message.deliveryStatus,
     artifacts: Object.freeze(
-      message.artifacts.map(({ document }) => artifactForContext(document))
+      message.artifacts
+        .slice(-EVRY_CONVERSATION_CONTEXT_LIMITS.artifactsPerTurn)
+        .map(({ document }) => artifactForContext(document))
     ),
   });
+}
+
+function stateForContext(
+  state: EvryConversationStateDocument,
+  focus: ReadonlySet<EvryConversationRelevanceKey>
+): ContextStateDocument {
+  const focusedReferences = state.resolvedReferences.filter(({ key }) =>
+    focus.has(evryConversationRelevanceKey(key))
+  );
+  const otherReferences = [
+    ...state.resolvedReferences.filter(
+      ({ key }) => !focus.has(evryConversationRelevanceKey(key))
+    ),
+  ].reverse();
+  const focusedChoices = [
+    ...state.explicitChoices.filter((choice) =>
+      choice.offeredReferences.some(({ referenceKey }) =>
+        focus.has(evryConversationRelevanceKey(referenceKey))
+      )
+    ),
+  ].reverse();
+  const otherChoices = [
+    ...state.explicitChoices.filter(
+      (choice) =>
+        !choice.offeredReferences.some(({ referenceKey }) =>
+          focus.has(evryConversationRelevanceKey(referenceKey))
+        )
+    ),
+  ].reverse();
+  return Object.freeze({
+    version: state.version,
+    resolvedReferences: Object.freeze(
+      [...focusedReferences, ...otherReferences]
+        .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.structuredReferences)
+        .map((reference) =>
+          Object.freeze({
+            key: reference.key,
+            entityType: reference.entityType,
+            entityId: contextText(reference.entityId, 160),
+            label: contextText(reference.label, 160),
+            aliases: Object.freeze(
+              reference.aliases
+                .slice(0, 4)
+                .map((alias) => contextText(alias, 80))
+            ),
+            sourceMessageId: reference.sourceMessageId,
+            resolvedAt: reference.resolvedAt,
+            validThrough: reference.validThrough,
+          })
+        )
+    ),
+    explicitChoices: Object.freeze(
+      [...focusedChoices, ...otherChoices]
+        .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.structuredChoices)
+        .map((choice) =>
+          Object.freeze({
+            ...choice,
+            offeredReferences: Object.freeze(
+              choice.offeredReferences.map((offered) =>
+                Object.freeze({
+                  ...offered,
+                  entityId: contextText(offered.entityId, 160),
+                })
+              )
+            ),
+            selectedEntityId: contextText(choice.selectedEntityId, 160),
+          })
+        )
+    ),
+    activeRecipe:
+      state.activeRecipe === null
+        ? null
+        : Object.freeze({
+            identity: state.activeRecipe.identity,
+            inputs: Object.freeze(
+              state.activeRecipe.inputs.map((recipeInput) =>
+                Object.freeze({
+                  key: recipeInput.key,
+                  value: contextText(recipeInput.value, 160),
+                })
+              )
+            ),
+            updatedAt: state.activeRecipe.updatedAt,
+          }),
+    pendingClarification: state.pendingClarification,
+    completedSteps: Object.freeze(
+      state.completedSteps
+        .slice(-EVRY_CONVERSATION_CONTEXT_LIMITS.structuredCompletedSteps)
+        .map((step) =>
+          Object.freeze({
+            ...step,
+            capabilityIdentity: contextText(step.capabilityIdentity, 160),
+          })
+        )
+    ),
+    summary:
+      state.summary === null
+        ? null
+        : Object.freeze({
+            text: contextText(state.summary.text, 1_000),
+            throughSequence: state.summary.throughSequence,
+          }),
+  });
+}
+
+function evryConversationRelevanceKey(
+  key: string
+): EvryConversationRelevanceKey {
+  return evryConversationRelevanceKeySchema.parse(key);
 }
 
 function latestMatchingConfirmation(
   conversation: EvryStoredConversation,
   plan: EvryRevalidatedActivePlan
-): Extract<
-  StoredEvryConversationArtifactDocument,
-  { kind: "confirmation" }
-> | null {
+): Extract<ContextArtifact, { kind: "confirmation" }> | null {
   for (const message of [...conversation.messages].reverse()) {
     for (const { document } of [...message.artifacts].reverse()) {
       if (
@@ -189,7 +370,11 @@ function latestMatchingConfirmation(
         document.plan.planId === plan.identity.planId &&
         document.plan.fingerprint === plan.identity.fingerprint
       ) {
-        return document;
+        const projected = artifactForContext(document);
+        if (projected.kind !== "confirmation") {
+          throw new Error("Evry confirmation projection changed kind");
+        }
+        return projected;
       }
     }
   }
@@ -216,6 +401,7 @@ function remainsDecisionRelevant(plan: EvryRevalidatedActivePlan): boolean {
     case "partially_failed":
     case "failed":
     case "expired":
+    case "stale":
       return true;
     default: {
       const exhaustive: never = plan.status;
@@ -248,7 +434,7 @@ export function compileEvryConversationContext(input: {
     stablePrefix: EVRY_CONVERSATION_STABLE_PREFIX,
     structuredState: Object.freeze({
       summaryAuthority: "context_only" as const,
-      document: input.conversation.state,
+      document: stateForContext(input.conversation.state, focus),
     }),
     pendingPlan:
       input.activePlan && remainsDecisionRelevant(input.activePlan)
