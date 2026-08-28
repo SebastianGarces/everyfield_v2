@@ -168,6 +168,9 @@ function closedErrorName(error: unknown): string {
   if (typeof error === "string") return "StringError";
   if (error && typeof error === "object") {
     const record = error as Record<string, unknown>;
+    if ("error" in record && record.error !== error) {
+      return `Object_${closedErrorName(record.error)}`;
+    }
     const tags = [record.type, record.code].filter(
       (value): value is string =>
         typeof value === "string" && /^[a-z0-9_-]{1,64}$/i.test(value)
