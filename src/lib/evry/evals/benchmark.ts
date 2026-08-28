@@ -158,6 +158,12 @@ function isProviderBoundaryRejection(error: unknown): boolean {
   return "cause" in error && isProviderBoundaryRejection(error.cause);
 }
 
+function closedErrorName(error: unknown): string {
+  return error instanceof Error && /^[A-Za-z0-9_]+$/.test(error.name)
+    ? error.name
+    : "UnknownError";
+}
+
 function candidateProviderOptions(candidate: EvryModelCandidate) {
   return {
     openai: {
@@ -263,6 +269,7 @@ async function runPolicyCase(input: {
   const startedAt = new Date();
   const started = performance.now();
   let firstTokenAt: number | null = null;
+  let streamError: unknown;
   const provider = createOpenAI({ apiKey: input.apiKey });
   const result = streamText({
     model: provider(input.candidate.id),
@@ -282,9 +289,10 @@ async function runPolicyCase(input: {
         firstTokenAt = performance.now();
       }
     },
-    onError() {
+    onError({ error }) {
       // Results receive a closed error code. Provider bodies stay out of logs
       // and out of Langfuse metadata.
+      streamError = error;
     },
   });
 
@@ -300,7 +308,8 @@ async function runPolicyCase(input: {
     usage = measuredUsage;
     structuredOutput = true;
   } catch (error) {
-    if (isProviderBoundaryRejection(error)) {
+    const failure = streamError ?? error;
+    if (isProviderBoundaryRejection(failure)) {
       throw new Error(
         `Benchmark provider boundary rejected ${input.candidate.id}; aborting before the next call`
       );
@@ -309,6 +318,11 @@ async function runPolicyCase(input: {
       usage = await result.usage;
     } catch {
       usage = EMPTY_USAGE;
+    }
+    if ((usage.totalTokens ?? 0) === 0) {
+      throw new Error(
+        `Benchmark ${input.candidate.id} failed without usage (${closedErrorName(failure)}); aborting before the next call`
+      );
     }
   }
 
