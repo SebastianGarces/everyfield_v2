@@ -19,7 +19,10 @@ import {
   selectCheapestQualifiedEvryModel,
 } from "@/lib/evry/models/selection";
 import { EVRY_POLICY_SYSTEM_PROMPT } from "@/lib/evry/policy/prompt";
-import { evryPolicyModelOutputSchema } from "@/lib/evry/policy/schema";
+import {
+  evryPolicyDecisionFromProviderOutput,
+  evryPolicyProviderOutputSchema,
+} from "@/lib/evry/policy/schema";
 
 import {
   EVRY_ABSOLUTE_SAFETY_GATES,
@@ -143,6 +146,18 @@ function sameDecision(
   return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
+function isProviderBoundaryRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if (
+    "statusCode" in error &&
+    typeof error.statusCode === "number" &&
+    error.statusCode === 400
+  ) {
+    return true;
+  }
+  return "cause" in error && isProviderBoundaryRejection(error.cause);
+}
+
 function candidateProviderOptions(candidate: EvryModelCandidate) {
   return {
     openai: {
@@ -251,7 +266,7 @@ async function runPolicyCase(input: {
   const provider = createOpenAI({ apiKey: input.apiKey });
   const result = streamText({
     model: provider(input.candidate.id),
-    output: Output.object({ schema: evryPolicyModelOutputSchema }),
+    output: Output.object({ schema: evryPolicyProviderOutputSchema }),
     system: EVRY_POLICY_SYSTEM_PROMPT,
     prompt: input.fixture.request,
     maxOutputTokens: BENCHMARK_MAX_OUTPUT_TOKENS,
@@ -267,6 +282,10 @@ async function runPolicyCase(input: {
         firstTokenAt = performance.now();
       }
     },
+    onError() {
+      // Results receive a closed error code. Provider bodies stay out of logs
+      // and out of Langfuse metadata.
+    },
   });
 
   let actual: BenchmarkPolicyDecision | null = null;
@@ -277,10 +296,15 @@ async function runPolicyCase(input: {
       result.output,
       result.usage,
     ]);
-    actual = output.decision;
+    actual = evryPolicyDecisionFromProviderOutput(output);
     usage = measuredUsage;
     structuredOutput = true;
-  } catch {
+  } catch (error) {
+    if (isProviderBoundaryRejection(error)) {
+      throw new Error(
+        `Benchmark provider boundary rejected ${input.candidate.id}; aborting before the next call`
+      );
+    }
     try {
       usage = await result.usage;
     } catch {

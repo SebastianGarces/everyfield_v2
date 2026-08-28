@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Output } from "ai";
+
 import { EVRY_SETTINGS_CATALOG } from "./inventory";
 import {
   EVRY_POLICY_CLASSIFICATIONS,
+  evryPolicyDecisionFromProviderOutput,
   evryPolicyModelOutputSchema,
+  evryPolicyProviderOutputSchema,
 } from "./schema";
 
 test("the model schema accepts exactly the seven closed decisions", () => {
@@ -78,4 +82,30 @@ test("the structured output refuses extra, missing, and cross-class fields", () 
       JSON.stringify(value)
     );
   }
+});
+
+test("the provider wire schema avoids unsupported JSON Schema unions", async () => {
+  const responseFormat = await Output.object({
+    schema: evryPolicyProviderOutputSchema,
+  }).responseFormat;
+  assert.doesNotMatch(JSON.stringify(responseFormat), /"oneOf"/);
+
+  assert.deepEqual(
+    evryPolicyDecisionFromProviderOutput({
+      decision: {
+        classification: "application_action",
+        settingsSectionId: null,
+      },
+    }),
+    { classification: "application_action" }
+  );
+  assert.equal(
+    evryPolicyProviderOutputSchema.safeParse({
+      decision: {
+        classification: "settings",
+        settingsSectionId: null,
+      },
+    }).success,
+    false
+  );
 });

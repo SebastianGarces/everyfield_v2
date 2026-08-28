@@ -6,7 +6,10 @@ import {
   type EvryPolicyDecision,
 } from "./core";
 import { EVRY_POLICY_SYSTEM_PROMPT } from "./prompt";
-import { evryPolicyModelOutputSchema } from "./schema";
+import {
+  evryPolicyDecisionFromProviderOutput,
+  evryPolicyProviderOutputSchema,
+} from "./schema";
 
 /**
  * The first working-model output is the policy decision. This call receives no
@@ -23,14 +26,17 @@ export async function classifyEvryRequest({
   try {
     const result = await generateText({
       model,
-      output: Output.object({ schema: evryPolicyModelOutputSchema }),
+      output: Output.object({ schema: evryPolicyProviderOutputSchema }),
       system: EVRY_POLICY_SYSTEM_PROMPT,
       prompt: literalUserText,
       maxRetries: 0,
       providerOptions: { openai: { store: false } },
     });
 
-    return resolveEvryPolicyDecision(literalUserText, result.output.decision);
+    return resolveEvryPolicyDecision(
+      literalUserText,
+      evryPolicyDecisionFromProviderOutput(result.output)
+    );
   } catch {
     return failClosedEvryPolicyDecision();
   }

@@ -65,3 +65,54 @@ export const evryPolicyModelOutputSchema = z
 export type EvryPolicyModelDecision = z.infer<
   typeof evryPolicyModelOutputSchema
 >["decision"];
+
+/**
+ * OpenAI strict structured outputs reject nested JSON Schema unions. Keep that
+ * provider limitation at this boundary: one flat wire object crosses the API,
+ * then the adapter below restores the narrower internal discriminated union.
+ */
+const evryPolicyProviderDecisionSchema = z
+  .object({
+    classification: z.enum(EVRY_POLICY_CLASSIFICATIONS),
+    settingsSectionId: evrySettingsSectionIdSchema.nullable(),
+  })
+  .strict()
+  .superRefine((decision, context) => {
+    const valid =
+      decision.classification === "settings"
+        ? decision.settingsSectionId !== null
+        : decision.settingsSectionId === null;
+    if (!valid) {
+      context.addIssue({
+        code: "custom",
+        message: "Settings section must be present only for Settings",
+      });
+    }
+  });
+
+export const evryPolicyProviderOutputSchema = z
+  .object({ decision: evryPolicyProviderDecisionSchema })
+  .strict();
+
+export function evryPolicyDecisionFromProviderOutput(
+  input: unknown
+): EvryPolicyModelDecision {
+  const { decision } = evryPolicyProviderOutputSchema.parse(input);
+  switch (decision.classification) {
+    case "settings":
+      if (decision.settingsSectionId === null) {
+        throw new Error("Settings provider decision is missing its section");
+      }
+      return {
+        classification: decision.classification,
+        settingsSectionId: decision.settingsSectionId,
+      };
+    case "application_read":
+    case "application_action":
+    case "theology_or_spiritual_guidance":
+    case "unrelated":
+    case "mixed":
+    case "ambiguous":
+      return { classification: decision.classification };
+  }
+}

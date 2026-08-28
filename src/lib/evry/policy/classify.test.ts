@@ -68,7 +68,10 @@ function scriptedModel(output: unknown) {
 
 test("one stored-output-disabled model call is the policy decision", async () => {
   const scripted = scriptedModel({
-    decision: { classification: "application_action" },
+    decision: {
+      classification: "application_action",
+      settingsSectionId: null,
+    },
   });
   const literalUserText =
     "  Create a task named ‘Pray for the launch’.\r\nKeep spacing.  ";
@@ -109,6 +112,7 @@ test("schema rejection fails closed after one draft", async () => {
   const scripted = scriptedModel({
     decision: {
       classification: "application_read",
+      settingsSectionId: null,
       literalUserText: "provider-tampered text",
     },
   });
