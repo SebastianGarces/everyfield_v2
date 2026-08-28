@@ -26,6 +26,7 @@ import { createEvryRecipeCompiler } from "./compiler";
 import {
   createFixtureRecipeRegistry,
   FIXTURE_RECIPE_VALUES,
+  fixtureRecipeDefinition,
   RECIPE_IDENTITY,
   SEND_MESSAGE_IDENTITY,
 } from "./fixtures.test-helper";
@@ -55,18 +56,54 @@ function effectAuthorization(
   } as unknown as EvryEffectCapabilityAuthorization;
 }
 
-test("a final communication retry reuses every completed dependency", async () => {
+type FinalBehavior = "retry-once" | "retry-always" | "throw-after-commit";
+
+async function createHarness(input: {
+  finalBehavior: FinalBehavior;
+  finalRetry: "same_plan" | "never";
+}) {
   const effectCalls = new Map<string, number>();
-  const registry = createFixtureRecipeRegistry(async (identity) => {
-    const call = (effectCalls.get(identity) ?? 0) + 1;
-    effectCalls.set(identity, call);
-    if (identity === SEND_MESSAGE_IDENTITY && call === 1) {
-      return { status: "retryable" };
-    }
-    return { status: "completed", affectedCount: 1, excludedCount: 0 };
-  });
-  const definition = registry.registrationFor(RECIPE_IDENTITY);
-  assert.ok(definition);
+  const committedEffectKeys = new Set<string>();
+  const observedEffectKeys = new Map<string, Set<string>>();
+  const definition = fixtureRecipeDefinition();
+  const steps = definition.steps as Array<{
+    id: string;
+    failurePolicy: { retry: "same_plan" | "never" };
+  }>;
+  const finalStep = steps.find(({ id }) => id === "send-invitations");
+  assert.ok(finalStep);
+  finalStep.failurePolicy = { retry: input.finalRetry };
+
+  const registry = createFixtureRecipeRegistry(
+    async (identity, effectInput) => {
+      const call = (effectCalls.get(identity) ?? 0) + 1;
+      effectCalls.set(identity, call);
+      const keys = observedEffectKeys.get(identity) ?? new Set<string>();
+      keys.add(effectInput.effectKey);
+      observedEffectKeys.set(identity, keys);
+
+      if (identity !== SEND_MESSAGE_IDENTITY) {
+        return { status: "completed", affectedCount: 1, excludedCount: 0 };
+      }
+      if (committedEffectKeys.has(effectInput.effectKey)) {
+        return { status: "completed", affectedCount: 1, excludedCount: 0 };
+      }
+      if (input.finalBehavior === "retry-always") {
+        return { status: "retryable" };
+      }
+      if (input.finalBehavior === "retry-once" && call === 1) {
+        return { status: "retryable" };
+      }
+      if (input.finalBehavior === "throw-after-commit") {
+        committedEffectKeys.add(effectInput.effectKey);
+        throw new Error("fixture response was lost after commit");
+      }
+      return { status: "completed", affectedCount: 1, excludedCount: 0 };
+    },
+    [definition]
+  );
+  const registeredDefinition = registry.registrationFor(RECIPE_IDENTITY);
+  assert.ok(registeredDefinition);
   const compile = createEvryRecipeCompiler({
     async authorizeResolver() {
       return readAuthorization();
@@ -77,9 +114,9 @@ test("a final communication retry reuses every completed dependency", async () =
     registry,
     recipeIdentity: RECIPE_IDENTITY,
     inputValues: FIXTURE_RECIPE_VALUES,
-    eligibleCapabilities: definition.eligibleCapabilities.map((identity) => ({
-      identity,
-    })),
+    eligibleCapabilities: registeredDefinition.eligibleCapabilities.map(
+      (identity) => ({ identity })
+    ),
   });
   const createdAt = new Date("2026-08-28T12:00:00.000Z");
   const expiresAt = new Date("2026-08-28T12:15:00.000Z");
@@ -177,12 +214,28 @@ test("a final communication retry reuses every completed dependency", async () =
     execute: createEvryExecutor(boundaries),
   });
 
-  const first = await runner({
-    actor: ACTOR,
-    planId: PLAN_ID,
-    fingerprint,
-    registry,
+  return {
+    durable,
+    effectCalls,
+    observedEffectKeys,
+    async run() {
+      return runner({
+        actor: ACTOR,
+        planId: PLAN_ID,
+        fingerprint,
+        registry,
+      });
+    },
+  };
+}
+
+test("a safe final communication retry reuses every completed dependency", async () => {
+  const harness = await createHarness({
+    finalBehavior: "retry-once",
+    finalRetry: "same_plan",
   });
+
+  const first = await harness.run();
   assert.equal(first.status, "retryable");
   assert.deepEqual(first.safeRetryStepIds, ["send-invitations"]);
   assert.deepEqual(
@@ -190,18 +243,64 @@ test("a final communication retry reuses every completed dependency", async () =
     ["completed", "completed", "retryable"]
   );
 
-  const second = await runner({
-    actor: ACTOR,
-    planId: PLAN_ID,
-    fingerprint,
-    registry,
-  });
+  const second = await harness.run();
   assert.equal(second.status, "completed");
   assert.deepEqual(second.safeRetryStepIds, []);
   assert.deepEqual(
-    [...effectCalls.values()],
+    [...harness.effectCalls.values()],
     [1, 1, 2],
     "the two completed dependencies execute once; only communication retries"
   );
-  assert.equal(durable.size, 3);
+  assert.equal(harness.durable.size, 3);
+});
+
+test("a never-retry result becomes durable and the adapter runs once across two calls", async () => {
+  const harness = await createHarness({
+    finalBehavior: "retry-always",
+    finalRetry: "never",
+  });
+
+  const first = await harness.run();
+  assert.equal(first.status, "partially_failed");
+  assert.deepEqual(first.safeRetryStepIds, []);
+  assert.deepEqual(
+    first.steps.map(({ status, durable }) => [status, durable]),
+    [
+      ["completed", true],
+      ["completed", true],
+      ["failed", true],
+    ]
+  );
+
+  const second = await harness.run();
+  assert.equal(second.status, "partially_failed");
+  assert.deepEqual(second.safeRetryStepIds, []);
+  assert.deepEqual(
+    [...harness.effectCalls.values()],
+    [1, 1, 1],
+    "the explicit never-retry result is not sent to its adapter twice"
+  );
+  assert.equal(harness.durable.size, 3);
+});
+
+test("a never-retry step may replay the same effect key after a lost commit response", async () => {
+  const harness = await createHarness({
+    finalBehavior: "throw-after-commit",
+    finalRetry: "never",
+  });
+
+  const first = await harness.run();
+  assert.equal(first.status, "retryable");
+  assert.deepEqual(first.safeRetryStepIds, []);
+  assert.equal(harness.durable.size, 2);
+
+  const second = await harness.run();
+  assert.equal(second.status, "completed");
+  assert.deepEqual([...harness.effectCalls.values()], [1, 1, 2]);
+  assert.equal(
+    harness.observedEffectKeys.get(SEND_MESSAGE_IDENTITY)?.size,
+    1,
+    "transport recovery reuses the exact idempotency key"
+  );
+  assert.equal(harness.durable.size, 3);
 });

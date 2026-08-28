@@ -1,6 +1,6 @@
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
-  executeEvryActionPlan,
+  executeEvryRecipePlan,
   type ExecuteEvryActionPlanResult,
 } from "@/lib/evry/executor";
 import { parseStoredEvryActionPlan } from "@/lib/evry/plans";
@@ -9,7 +9,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 
-import { storedDocumentMatchesEvryRecipe } from "./compiler";
+import { storedDocumentMatchesEvryRecipe } from "./contract";
 import type { EvryRecipeRegistry } from "./schema";
 
 export type EvryRecipeRunResult = ExecuteEvryActionPlanResult &
@@ -20,12 +20,12 @@ export type EvryRecipeRunResult = ExecuteEvryActionPlanResult &
 
 export type EvryRecipeRunnerBoundaries = Readonly<{
   findExactPlan: typeof findExactEvryActionPlan;
-  execute: typeof executeEvryActionPlan;
+  execute: typeof executeEvryRecipePlan;
 }>;
 
 const productionBoundaries: EvryRecipeRunnerBoundaries = Object.freeze({
   findExactPlan: findExactEvryActionPlan,
-  execute: executeEvryActionPlan,
+  execute: executeEvryRecipePlan,
 });
 
 function unavailable(): EvryRecipeRunResult {
@@ -105,12 +105,11 @@ export function createEvryRecipeRunner(boundaries: EvryRecipeRunnerBoundaries) {
     ) {
       return unavailable();
     }
-
     const result = await boundaries.execute({
       actor: input.actor,
       planId: input.planId,
       fingerprint: input.fingerprint,
-      registry: input.registry.executionRegistry,
+      recipeRegistry: input.registry,
     });
     return Object.freeze({
       ...result,
