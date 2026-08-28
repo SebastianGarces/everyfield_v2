@@ -1,7 +1,7 @@
 # EveryField - Product Requirements Document Index
 
-**Version:** 2.3  
-**Date:** August 10, 2026
+**Version:** 2.4
+**Date:** August 27, 2026
 
 ---
 
@@ -47,7 +47,7 @@ product-docs/
     ├── oversight/                # OV: Oversight (Sending Church & Network)
     ├── launch/                   # LS: Launch (Launch Sunday)
     └── church-plant-agent/
-        └── vision.md             # Planned (pre-FRD): conversational tool-calling agent
+        └── frd.md                # EV: Evry application-action workspace
 ```
 
 Working and historical documents also live in `product-docs/` but are not requirements documents and are not indexed here: `gap.md`, `gap-report-2026-06.md`, `sprints/`, `alpha-release-2026-07.md`, `docs-audit-2026-07.md`, the brainlifts and market research, and the `wiki/` content sources. Most carry a banner saying how far they can be trusted; all of them are point-in-time records, so read the date before believing a claim.
@@ -137,6 +137,7 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 | F12 | [Planter Onboarding](./features/planter-onboarding/frd.md) | First-run journey from account creation to a usable plant |
 | OV | [Oversight (Sending Church & Network)](./features/oversight/frd.md) | The overseer's surface: plant directory and detail, privacy-gated aggregates, association invite/accept/sever with audit |
 | LS | [Launch (Launch Sunday)](./features/launch/frd.md) | Launch as a first-class entity — target date, status lifecycle, readiness milestones, and the day's outcome |
+| EV | [Evry](./features/church-plant-agent/frd.md) | Plant-tenancy application-action workspace with broad interface parity, strict application-only scope, durable conversations, and exact-plan confirmation before every lasting effect |
 
 ### Archival FRDs (not live features)
 
@@ -146,12 +147,6 @@ These documents are kept as a record of the design. Do not build from them, and 
 |------|---------|--------------------|
 | F4 | [Progress Dashboard](./features/progress-dashboard/frd.md) | Retired into the Phase Engine. Its surviving presentation requirements moved across as Phase Engine display requirements ([`decisions.md`](./decisions.md), decision #4) |
 | F10 | [Facility Management](./features/facility-management/frd.md) | Cut — off the roadmap, not deferred ([`decisions.md`](./decisions.md), decision #3) |
-
-### Planned (pre-FRD)
-
-| Feature | Doc | Status |
-|---------|-----|--------|
-| Church Plant Agent | [vision](./features/church-plant-agent/vision.md) | Vision capture. Conversational tool-calling agent that *executes* multi-step ops (the "chat-first ops" / action half of the AI direction; insight→action loop with the Phase Engine). FRD pending prioritization (post-beta). |
 
 ---
 
@@ -201,6 +196,10 @@ Read the GitHub board — `gh issue list --label feature`. No document in `produ
 ---
 
 ## Changelog
+
+### v2.4 (August 27, 2026)
+- Replaced the Church Plant Agent vision capture with the Evry FRD and added EV to the live feature index.
+- Recorded Evry's plant-tenancy parity contract, application-only boundary, confirmation artifacts, durable conversations, recipes, UI requirements, and eval/observability requirements.
 
 ### v2.3 (August 10, 2026)
 - **Index re-trued against the repo.** Added the four FRDs that existed on disk but were missing here: F11 Notifications & Digest, F12 Planter Onboarding, OV Oversight, LS Launch. Moved F4 Progress Dashboard (retired into the Phase Engine) and F10 Facility Management (cut) out of the live feature table into a new *Archival FRDs* section.
