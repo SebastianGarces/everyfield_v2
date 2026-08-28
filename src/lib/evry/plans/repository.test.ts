@@ -10,6 +10,7 @@ import { codeOf } from "@/lib/auth/server-action-surface";
 import { fixtureDocument } from "./fixtures.test-helper";
 import { mintEvryPlanRequestKey } from "./request-key";
 import {
+  cancelEvryActionPlanStatement,
   confirmEvryActionPlanStatement,
   reviseEvryActionPlanStatement,
 } from "./statements";
@@ -34,6 +35,8 @@ test("confirmation is one exact-scope state CAS and confirmation insert", () => 
       plantId: PLANT_ID,
       fingerprint: "a".repeat(64),
       decidedAt: new Date("2026-08-28T12:00:00.000Z"),
+      approvedEventKey: "b".repeat(64),
+      expiredEventKey: "c".repeat(64),
     })
   );
 
@@ -50,6 +53,8 @@ test("confirmation is one exact-scope state CAS and confirmation insert", () => 
   assert.match(query, /s\.status = 'approved'\s+and p\.expires_at <= \$\d+/i);
   assert.match(query, /when p\.expires_at <= \$\d+ then 'expired'/i);
   assert.match(query, /insert into evry_plan_confirmations/i);
+  assert.match(query, /insert into evry_product_audit_events/i);
+  assert.match(query, /root\.event_type = 'plan_proposed'/i);
   assert.match(query, /where t\.status = 'approved'/i);
 });
 
@@ -67,6 +72,8 @@ test("revision supersedes by exact CAS before inserting one successor", () => {
       replacementDocument: fixtureDocument(),
       createdAt: new Date("2026-08-28T12:00:00.000Z"),
       expiresAt: new Date("2026-08-28T12:15:00.000Z"),
+      supersededEventKey: "d".repeat(64),
+      proposedEventKey: "e".repeat(64),
     })
   );
 
@@ -84,6 +91,31 @@ test("revision supersedes by exact CAS before inserting one successor", () => {
     /s\.status in \('draft', 'awaiting_confirmation', 'approved'\)/i
   );
   assert.match(query, /supersedes_plan_id/i);
+  assert.equal(
+    (query.match(/insert into evry_product_audit_events/gi) ?? []).length,
+    2
+  );
+  assert.match(query, /'plan_superseded'/i);
+  assert.match(query, /'plan_proposed'/i);
+});
+
+test("cancellation writes its event only from the winning exact CAS", () => {
+  const query = render(
+    cancelEvryActionPlanStatement({
+      planId: PLAN_ID,
+      actorUserId: ACTOR_ID,
+      plantId: PLANT_ID,
+      fingerprint: "a".repeat(64),
+      cancelledAt: new Date("2026-08-28T12:00:00.000Z"),
+      eventKey: "f".repeat(64),
+    })
+  );
+  const cas = query.indexOf("update evry_action_plan_states");
+  const audit = query.indexOf("insert into evry_product_audit_events");
+  assert.equal(cas >= 0, true);
+  assert.equal(audit > cas, true);
+  assert.match(query, /from cancelled/i);
+  assert.match(query, /'plan_cancelled'/i);
 });
 
 test("only the lifecycle table has a repository mutation path", () => {
@@ -115,6 +147,7 @@ test("the public plan surface exposes neither prepared nor raw persistence", () 
   assert.doesNotMatch(service, /createdAt:\s*Date|expiresAt:\s*Date/);
   assert.doesNotMatch(barrel, /createEvryActionPlanRecord/);
   assert.doesNotMatch(barrel, /prepareEvryActionPlan|persistEvryActionPlan/);
+  assert.match(repository, /\.insert\(evryProductAuditEvents\)/);
 });
 
 test("0065 enforces exact TTL and append-only rows in Postgres", () => {

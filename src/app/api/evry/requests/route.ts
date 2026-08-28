@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
+import {
+  mintEvryAuditRequest,
+  recordEvryRequestAudit,
+  type EvryAuditRequest,
+  type EvryCorrelationId,
+  type EvryRequestAuditResult,
+} from "@/lib/evry/audit";
 import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
 import {
   EvryPlantViewerRefusalError,
@@ -43,11 +50,21 @@ function viewerRefusal(error: unknown): NextResponse | null {
   return null;
 }
 
-export type EvryRequestContinuationContext = EvryReadContinuationContext;
+export type EvryRequestContinuationContext = EvryReadContinuationContext &
+  Readonly<{
+    correlationId: EvryCorrelationId;
+    planRequestKey: EvryAuditRequest["planRequestKey"];
+  }>;
 
 export type EvryRequestActionContinuation = (
   context: EvryRequestContinuationContext
 ) => Promise<unknown | null>;
+
+export type EvryRequestAuditRecorder = (input: {
+  actor: Awaited<ReturnType<typeof requireEvryPlantViewer>>;
+  request: EvryAuditRequest;
+  result: EvryRequestAuditResult;
+}) => Promise<void>;
 
 const EVRY_REQUEST_CLASSIFIER: unique symbol = Symbol("EvryRequestClassifier");
 
@@ -68,6 +85,7 @@ export type EvryRequestPostOptions = Readonly<{
   classify: EvryRequestClassifier;
   continueRead: EvryReadContinuation | null;
   continueAction: EvryRequestActionContinuation | null;
+  audit?: EvryRequestAuditRecorder | null;
 }>;
 
 /** Bind #769's selected working model to the one policy classifier. */
@@ -91,22 +109,45 @@ export function createEvryRequestPost({
   classify,
   continueRead,
   continueAction,
+  audit = null,
 }: EvryRequestPostOptions): (request: Request) => Promise<NextResponse> {
   return async function evryRequestPost(request: Request) {
+    let auditContext:
+      | Readonly<{
+          actor: Awaited<ReturnType<typeof requireEvryPlantViewer>>;
+          request: EvryAuditRequest;
+        }>
+      | undefined;
+    let auditAttempted = false;
+
     try {
       // FIRST, before the body is parsed or sent to a model. The actor is fresh
       // for this request and is the only input capability eligibility accepts.
       const actor = await requireEvryPlantViewer();
+      auditContext = { actor, request: mintEvryAuditRequest() };
+      const record = async (result: EvryRequestAuditResult) => {
+        if (audit === null) return;
+        auditAttempted = true;
+        await audit({ ...auditContext!, result });
+      };
 
       let body: unknown;
       try {
         body = await request.json();
       } catch {
+        await record({
+          eventType: "request_refused",
+          resultCode: "request_invalid",
+        });
         return privateJson({ status: "invalid" }, 400);
       }
 
       const parsed = evryRequestBodySchema.safeParse(body);
       if (!parsed.success) {
+        await record({
+          eventType: "request_refused",
+          resultCode: "request_invalid",
+        });
         return privateJson({ status: "invalid" }, 400);
       }
 
@@ -115,6 +156,10 @@ export function createEvryRequestPost({
       const policy = await classify(parsed.data.requestText);
 
       if (!("continuation" in policy)) {
+        await record({
+          eventType: "request_refused",
+          resultCode: "policy_refused",
+        });
         return privateJson({
           status: "stopped",
           classification: policy.classification,
@@ -126,21 +171,38 @@ export function createEvryRequestPost({
       // allowed continuations. Reads and plans remain injected until #765/#762.
       const eligibleCapabilities = eligibleEvryCapabilitiesFor(actor);
       const context: EvryRequestContinuationContext = {
+        correlationId: auditContext.request.correlationId,
         eligibleCapabilities,
         literalUserText: policy.continuation.literalUserText,
         pageContext: parsed.data.pageContext ?? null,
+        planRequestKey: auditContext.request.planRequestKey,
       };
       const continuation =
         policy.classification === "application_read"
           ? continueRead
           : continueAction;
       if (continuation === null) {
+        await record({
+          eventType: "request_failed",
+          resultCode: "request_failed",
+        });
         return privateJson({ status: "unavailable" }, 503);
       }
 
       const artifact = await continuation(context);
       if (artifact === null) {
+        await record({
+          eventType: "request_failed",
+          resultCode: "request_failed",
+        });
         return privateJson({ status: "unavailable" }, 503);
+      }
+
+      if (policy.classification === "application_read") {
+        await record({
+          eventType: "request_read_completed",
+          resultCode: "read_completed",
+        });
       }
 
       return privateJson({
@@ -149,6 +211,16 @@ export function createEvryRequestPost({
         artifact,
       });
     } catch (error) {
+      if (audit !== null && auditContext && !auditAttempted) {
+        auditAttempted = true;
+        await audit({
+          ...auditContext,
+          result: {
+            eventType: "request_failed",
+            resultCode: "request_failed",
+          },
+        });
+      }
       if (error instanceof EvryRequestUnavailableError) {
         return privateJson({ status: "unavailable" }, 503);
       }
@@ -174,4 +246,5 @@ export const POST = createEvryRequestPost({
   classify: unavailableClassifier,
   continueRead: null,
   continueAction: null,
+  audit: recordEvryRequestAudit,
 });

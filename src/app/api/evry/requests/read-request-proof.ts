@@ -44,6 +44,23 @@ mock.module("@/lib/auth/session", {
   },
 });
 
+mock.module("@/lib/evry/audit", {
+  namedExports: {
+    mintEvryAuditRequest: () => ({
+      correlationId: "90000000-0000-4000-8000-000000000001",
+      eventKey: "a".repeat(64),
+      planRequestKey: "90000000-0000-4000-8000-000000000001",
+    }),
+    recordEvryRequestAudit: async ({
+      result,
+    }: {
+      result: { eventType: string };
+    }) => {
+      events.push(`audit:${result.eventType}`);
+    },
+  },
+});
+
 class TracedRequest extends Request {
   override async json(): Promise<unknown> {
     events.push("body");
@@ -602,7 +619,7 @@ async function main(): Promise<void> {
   );
   assert.equal(unavailable.status, 503);
   assert.deepEqual(unavailable.body, { status: "unavailable" });
-  assert.deepEqual(events, ["auth", "body"]);
+  assert.deepEqual(events, ["auth", "body", "audit:request_failed"]);
 
   console.log("Evry read request proof passed");
 }

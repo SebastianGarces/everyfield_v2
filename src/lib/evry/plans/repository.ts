@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
@@ -8,8 +8,14 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryPlanConfirmations,
+  evryProductAuditEvents,
   type EvryPlanStatus,
 } from "@/db/schema";
+
+import {
+  correlationForPlanRequest,
+  planEventKey,
+} from "@/lib/evry/audit/identity";
 
 import {
   fingerprintEvryActionPlan,
@@ -19,11 +25,13 @@ import type { EvryPlanRequestKey } from "./request-key";
 import { evryPlanExpiresAt, type EvryActionPlanDocument } from "./schema";
 import {
   confirmEvryActionPlanStatement,
+  cancelEvryActionPlanStatement,
   reviseEvryActionPlanStatement,
 } from "./statements";
 
 export {
   confirmEvryActionPlanStatement,
+  cancelEvryActionPlanStatement,
   reviseEvryActionPlanStatement,
 } from "./statements";
 
@@ -158,6 +166,16 @@ async function insertPreparedEvryActionPlan(
           changedAt: prepared.createdAt,
         })
         .returning(),
+      db.insert(evryProductAuditEvents).values({
+        planId: id,
+        churchId: prepared.plantId,
+        actorUserId: prepared.actorUserId,
+        planFingerprint: prepared.fingerprint,
+        correlationId: correlationForPlanRequest(prepared.requestKey),
+        eventKey: planEventKey(id, "plan_proposed"),
+        eventType: "plan_proposed",
+        occurredAt: prepared.createdAt,
+      }),
     ]);
 
     return toStoredPlan({ plan, state });
@@ -221,7 +239,11 @@ export async function confirmExactEvryActionPlan(input: {
   decidedAt: Date;
 }): Promise<ConfirmEvryActionPlanResult> {
   const transition = await db.execute<ConfirmationTransitionRow>(
-    confirmEvryActionPlanStatement(input)
+    confirmEvryActionPlanStatement({
+      ...input,
+      approvedEventKey: planEventKey(input.planId, "plan_approved"),
+      expiredEventKey: planEventKey(input.planId, "plan_expired"),
+    })
   );
   const changed = transition.rows[0];
 
@@ -309,6 +331,8 @@ export async function reviseExactEvryActionPlan(input: {
         replacementFingerprint,
         createdAt,
         expiresAt,
+        supersededEventKey: planEventKey(input.oldPlanId, "plan_superseded"),
+        proposedEventKey: planEventKey(replacementId, "plan_proposed"),
       })
     );
     if (result.rows[0]) {
@@ -384,27 +408,14 @@ export async function cancelExactEvryActionPlan(input: {
   fingerprint: string;
   cancelledAt: Date;
 }): Promise<boolean> {
-  const [cancelled] = await db
-    .update(evryActionPlanStates)
-    .set({
-      status: "cancelled",
-      version: sql`${evryActionPlanStates.version} + 1`,
-      changedAt: input.cancelledAt,
+  const cancelled = await db.execute<{ id: string }>(
+    cancelEvryActionPlanStatement({
+      ...input,
+      eventKey: planEventKey(input.planId, "plan_cancelled"),
     })
-    .from(evryActionPlans)
-    .where(
-      and(
-        eq(evryActionPlanStates.planId, evryActionPlans.id),
-        eq(evryActionPlans.id, input.planId),
-        eq(evryActionPlans.actorUserId, input.actorUserId),
-        eq(evryActionPlans.churchId, input.plantId),
-        eq(evryActionPlans.fingerprint, input.fingerprint),
-        sql`${evryActionPlanStates.status} in ('draft', 'awaiting_confirmation', 'approved')`
-      )
-    )
-    .returning({ id: evryActionPlanStates.planId });
+  );
 
-  if (cancelled) return true;
+  if (cancelled.rows[0]) return true;
   const exact = await findExactEvryActionPlan(input);
   return exact?.status === "cancelled";
 }

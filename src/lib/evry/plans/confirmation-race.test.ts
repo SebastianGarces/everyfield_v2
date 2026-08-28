@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, test, type TestContext } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import { and, eq, sql } from "drizzle-orm";
 
@@ -10,8 +10,13 @@ import {
   evryActionPlans,
   evryActionPlanStates,
   evryPlanConfirmations,
+  evryProductAuditEvents,
   users,
 } from "@/db/schema";
+import {
+  correlationForPlanRequest,
+  planEventKey,
+} from "@/lib/evry/audit/identity";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
 import {
@@ -58,22 +63,6 @@ async function databaseReachable(): Promise<boolean> {
     return false;
   }
 }
-
-async function sweep(): Promise<void> {
-  // This suite owns its database (`LIVE_SUITES`), so TRUNCATE shares no state
-  // with another writer. Row DELETE is deliberately impossible: these tables
-  // are the append-only artifacts the suite proves.
-  await db.execute(
-    sql`truncate table evry_plan_confirmations, evry_action_plan_states, evry_action_plans`
-  );
-  await db.delete(users).where(eq(users.name, SCRATCH_NAME));
-  await db.delete(churches).where(eq(churches.name, SCRATCH_NAME));
-}
-
-after(async () => {
-  if (!LIVE_DB || !(await databaseReachable())) return;
-  await sweep();
-});
 
 interface Fixture {
   actor: EvryPlantActor;
@@ -184,6 +173,16 @@ async function insertFixturePlan(input: {
         changedAt: input.createdAt,
       })
       .returning(),
+    db.insert(evryProductAuditEvents).values({
+      planId: id,
+      churchId: input.actor.plantId,
+      actorUserId: input.actor.userId,
+      planFingerprint: fingerprint,
+      correlationId: correlationForPlanRequest(requestKey),
+      eventKey: planEventKey(id, "plan_proposed"),
+      eventType: "plan_proposed",
+      occurredAt: input.createdAt,
+    }),
   ]);
   return {
     id: plan.id,
@@ -213,7 +212,6 @@ test(
   { skip },
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
-    await sweep();
     const fixture = await seedActors();
 
     const requestKey = mintEvryPlanRequestKey();
@@ -291,7 +289,6 @@ test(
   { skip },
   async (t: TestContext) => {
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
-    await sweep();
     const fixture = await seedActors();
 
     const createdAt = new Date();

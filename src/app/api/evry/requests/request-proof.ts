@@ -48,6 +48,23 @@ mock.module("@/lib/evry/eligibility/capabilities", {
   },
 });
 
+mock.module("@/lib/evry/audit", {
+  namedExports: {
+    mintEvryAuditRequest: () => ({
+      correlationId: "90000000-0000-4000-8000-000000000001",
+      eventKey: "a".repeat(64),
+      planRequestKey: "90000000-0000-4000-8000-000000000001",
+    }),
+    recordEvryRequestAudit: async ({
+      result,
+    }: {
+      result: { eventType: string };
+    }) => {
+      events.push(`audit:${result.eventType}`);
+    },
+  },
+});
+
 class TracedRequest extends Request {
   override async json(): Promise<unknown> {
     events.push("body");
@@ -125,6 +142,9 @@ async function main(): Promise<void> {
   let readCalls = 0;
   let planCalls = 0;
   let lastActionLiteralText: string | null = null;
+  const auditResults: Array<
+    Readonly<{ eventType: string; resultCode: string }>
+  > = [];
 
   function reset(user: SessionUser | null = PLANT_USER) {
     events.length = 0;
@@ -132,9 +152,13 @@ async function main(): Promise<void> {
     readCalls = 0;
     planCalls = 0;
     lastActionLiteralText = null;
+    auditResults.length = 0;
   }
 
-  function postFor(scripted: ReturnType<typeof scriptedModel>) {
+  function postFor(
+    scripted: ReturnType<typeof scriptedModel>,
+    withAudit: boolean = false
+  ) {
     return route.createEvryRequestPost({
       classify: route.evryRequestClassifierForModel(scripted.model),
       async continueRead(context) {
@@ -153,12 +177,22 @@ async function main(): Promise<void> {
         events.push("plan");
         planCalls++;
         lastActionLiteralText = context.literalUserText;
+        assert.equal(context.correlationId, context.planRequestKey);
+        assert.equal(
+          context.correlationId,
+          "90000000-0000-4000-8000-000000000001"
+        );
         return {
           kind: "fixture_plan",
           literalUserText: context.literalUserText,
           eligibleCapabilityCount: context.eligibleCapabilities.length,
         };
       },
+      audit: withAudit
+        ? async ({ result }) => {
+            auditResults.push(result);
+          }
+        : null,
     });
   }
 
@@ -340,6 +374,39 @@ async function main(): Promise<void> {
   assert.equal(lastActionLiteralText, literalTaskText);
 
   reset();
+  await responseOf(
+    postFor(
+      scriptedModel({ decision: { classification: "application_read" } }),
+      true
+    ),
+    requestWithBody({})
+  );
+  assert.deepEqual(auditResults, [
+    { eventType: "request_refused", resultCode: "request_invalid" },
+  ]);
+
+  reset();
+  await responseOf(
+    postFor(scriptedModel({ decision: { classification: "unrelated" } }), true),
+    requestWithBody({ requestText: "Dinner ideas" })
+  );
+  assert.deepEqual(auditResults, [
+    { eventType: "request_refused", resultCode: "policy_refused" },
+  ]);
+
+  reset();
+  await responseOf(
+    postFor(
+      scriptedModel({ decision: { classification: "application_read" } }),
+      true
+    ),
+    requestWithBody({ requestText: "Show overdue tasks" })
+  );
+  assert.deepEqual(auditResults, [
+    { eventType: "request_read_completed", resultCode: "read_completed" },
+  ]);
+
+  reset();
   const unavailable = await responseOf(
     route.POST,
     requestWithBody({ requestText: "Show overdue tasks." })
@@ -347,7 +414,7 @@ async function main(): Promise<void> {
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.cacheControl, "private, no-store");
   assert.deepEqual(unavailable.body, { status: "unavailable" });
-  assert.deepEqual(events, ["auth", "body"]);
+  assert.deepEqual(events, ["auth", "body", "audit:request_failed"]);
 
   console.log("Evry request route proof passed");
 }

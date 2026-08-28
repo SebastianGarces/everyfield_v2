@@ -104,6 +104,7 @@ test("production is explicitly closed without a model or domain adapter", () => 
   assert.doesNotMatch(source, /eligibility\/repository|\/plan|\/tool|\/effect/);
   assert.match(source, /continueRead: null/);
   assert.match(source, /continueAction: null/);
+  assert.match(source, /audit: recordEvryRequestAudit/);
   assert.match(source, /"cache-control": "private, no-store"/);
 });
 
