@@ -15,8 +15,8 @@ import {
   type EvryConversationDeliveryStatus,
 } from "@/db/schema";
 import {
-  evryPageContextSchema,
-  type EvryPageContext,
+  evryResolvedPageContextSchema,
+  type EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
 
 import {
@@ -72,7 +72,7 @@ export type EvryStoredConversationMessage = Readonly<{
   sequence: number;
   author: EvryConversationAuthor;
   body: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   createdAt: Date;
@@ -113,7 +113,7 @@ function bodyFingerprint(body: string): string {
 function requestFingerprint(input: {
   author: EvryConversationAuthor;
   body: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
@@ -122,7 +122,19 @@ function requestFingerprint(input: {
   activePlan: ActivePlanMutation;
 }): string {
   return createHash("sha256")
-    .update(JSON.stringify(input), "utf8")
+    .update(
+      JSON.stringify({
+        ...input,
+        pageContext:
+          input.pageContext === null
+            ? null
+            : {
+                kind: input.pageContext.kind,
+                recordId: input.pageContext.recordId,
+              },
+      }),
+      "utf8"
+    )
     .digest("hex");
 }
 
@@ -133,9 +145,9 @@ function automaticTitle(body: string): string {
   return title;
 }
 
-function parsePageContext(input: unknown): EvryPageContext | null {
+function parsePageContext(input: unknown): EvryResolvedPageContext | null {
   if (input === null) return null;
-  const parsed = evryPageContextSchema.safeParse(input);
+  const parsed = evryResolvedPageContextSchema.safeParse(input);
   if (!parsed.success) throw new EvryConversationStorageError();
   return parsed.data;
 }
@@ -391,11 +403,13 @@ export async function createEvryConversationRecord(input: {
   plantId: string;
   requestKey: EvryConversationRequestKey;
   body: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   createdAt: Date;
 }): Promise<EvryStoredConversation> {
   const body = bodySchema.parse(input.body);
-  const pageContext = evryPageContextSchema.nullable().parse(input.pageContext);
+  const pageContext = evryResolvedPageContextSchema
+    .nullable()
+    .parse(input.pageContext);
   const state = initialEvryConversationState();
   const semanticFingerprint = requestFingerprint({
     author: "user",
@@ -522,7 +536,7 @@ export async function appendEvryConversationRecord(input: {
   state: EvryConversationStateDocument;
   author: EvryConversationAuthor;
   body: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
@@ -547,7 +561,9 @@ export async function appendEvryConversationRecord(input: {
   );
   const parsedState = parseStoredEvryConversationState(input.state);
   const author = authorSchema.parse(input.author);
-  const pageContext = evryPageContextSchema.nullable().parse(input.pageContext);
+  const pageContext = evryResolvedPageContextSchema
+    .nullable()
+    .parse(input.pageContext);
   const relevanceKeys = evryConversationRelevanceKeysSchema.parse(
     input.relevanceKeys
   );

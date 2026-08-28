@@ -27,6 +27,19 @@ export const evryPageContextSchema = z
 
 export type EvryPageContext = z.infer<typeof evryPageContextSchema>;
 
+/** A page-context hint after the server has scoped it and named the row. */
+export const evryResolvedPageContextSchema = z
+  .object({
+    kind: z.enum(EVRY_PAGE_CONTEXT_KINDS),
+    recordId: z.string().min(1).max(160),
+    label: z.string().trim().min(1).max(160),
+  })
+  .strict();
+
+export type EvryResolvedPageContext = z.infer<
+  typeof evryResolvedPageContextSchema
+>;
+
 export type EvryResolverCandidate = Readonly<{
   id: string;
   match: "exact" | "fuzzy";

@@ -87,7 +87,7 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
   );
 });
 
-test("workspace URL updates stay in the App Router and failed loads do not loop", () => {
+test("workspace URL updates stay in the App Router and conversation loads use the latest-attempt gate", () => {
   assert.match(
     shell,
     /router\.replace\(`\/evry\?conversation=\$\{nextConversation\.id\}`\)/
@@ -95,11 +95,55 @@ test("workspace URL updates stay in the App Router and failed loads do not loop"
   assert.doesNotMatch(shell, /window\.history\.replaceState/);
   assert.match(
     shell,
-    /const loadingConversationIdRef = useRef<string \| null>\(null\)/
+    /const conversationLoadStateRef = useRef\([\s\S]*initialEvryConversationLoadState\(\)/
   );
-  assert.match(shell, /loadingConversationIdRef\.current === conversationId/);
+  assert.match(shell, /isLatestEvryConversationLoad\([\s\S]*load\.attempt/);
+  assert.match(shell, /finishEvryConversationLoad\([\s\S]*load\.attempt/);
+  assert.match(
+    shell,
+    /canApplyEvryConversationLoadResponse\([\s\S]*loadedConversation\.id/
+  );
+  assert.match(
+    shell,
+    /conversationLoadStateRef\.current = load\.state;[\s\S]*setConversation\(null\);[\s\S]*setRequestedConversationId\(conversationId\)/
+  );
+  assert.match(
+    shell,
+    /requestedConversationId !== null \|\|[\s\S]*conversationLoadStateRef\.current\.latest !== null/
+  );
   assert.match(shell, /\[conversation\?\.id\]\s*\)/);
   assert.doesNotMatch(shell, /\[conversation\?\.id, isLoading\]/);
+});
+
+test("message retries keep their semantic request identity until success", () => {
+  assert.match(
+    shell,
+    /const pendingSubmissionRef = useRef<PendingEvrySubmission \| null>\(null\)/
+  );
+  assert.match(
+    shell,
+    /pendingEvrySubmissionFor\([\s\S]*pendingSubmissionRef\.current[\s\S]*conversationId:[\s\S]*message,[\s\S]*pageContext/
+  );
+  assert.match(shell, /requestKey: pendingSubmission\.requestKey/);
+  assert.match(
+    shell,
+    /const nextConversation = await responseConversation\(response\);[\s\S]*pendingSubmissionRef\.current = null/
+  );
+  assert.doesNotMatch(shell, /requestKey: crypto\.randomUUID\(\)/);
+  assert.match(
+    surface,
+    /draft\.trim\(\)\.length === 0 \|\| isSending \|\| isComposerBlocked/
+  );
+  assert.match(shell, /const message = evrySubmissionMessage\(draft\)/);
+});
+
+test("the transcript is a live attributed log and renders server-owned context labels", () => {
+  assert.match(surface, /role="log"/);
+  assert.match(surface, /aria-live="polite"/);
+  assert.match(surface, /aria-relevant="additions text"/);
+  assert.match(surface, /message\.author === "user" \? "You" : "Evry"/);
+  assert.match(surface, /message\.pageContext\.label/);
+  assert.doesNotMatch(surface, /CONTEXT_KIND_LABELS/);
 });
 
 test("removing context removes it from the request body", () => {
@@ -108,7 +152,10 @@ test("removing context removes it from the request body", () => {
     shell,
     /const clearContext = useCallback\(\(\) => setActiveContext\(null\), \[\]\)/
   );
-  assert.match(shell, /pageContext: activeContext\?\.wire \?\? null/);
+  assert.match(
+    shell,
+    /const pageContext = activeContext\?\.wire \?\? null[\s\S]*JSON\.stringify\(\{[\s\S]*pageContext,/
+  );
 });
 
 test("both conversation writes resolve the untrusted hint after auth and before persistence", () => {
@@ -132,5 +179,10 @@ test("both conversation writes resolve the untrusted hint after auth and before 
   assert.match(resolver, /eq\(ministryTeams\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(tasks\.churchId, actor\.plantId\)/);
   assert.match(resolver, /eq\(launches\.churchId, actor\.plantId\)/);
-  assert.match(resolver, /recordId === null[\s\S]*\? null/);
+  assert.match(resolver, /record === null[\s\S]*\? null/);
+  assert.match(resolver, /firstName: persons\.firstName/);
+  assert.match(resolver, /title: churchMeetings\.title/);
+  assert.match(resolver, /name: ministryTeams\.name/);
+  assert.match(resolver, /title: tasks\.title/);
+  assert.match(resolver, /label: "Launch Sunday"/);
 });

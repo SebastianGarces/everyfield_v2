@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
+import { evryResolvedPageContextSchema } from "@/lib/evry/resolvers/contract";
 
 const publicArtifactSchema = z
   .object({ kind: z.string().min(1) })
@@ -21,7 +21,7 @@ const publicConversationSchema = z
         sequence: z.number().int().nonnegative(),
         author: z.enum(["user", "assistant"]),
         body: z.string(),
-        pageContext: evryPageContextSchema.nullable(),
+        pageContext: evryResolvedPageContextSchema.nullable(),
         deliveryStatus: z.enum(["complete", "interrupted"]),
         createdAt: z.string().datetime(),
         artifacts: z.array(

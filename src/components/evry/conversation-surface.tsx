@@ -11,14 +11,6 @@ import { cn } from "@/lib/utils";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
 
-const CONTEXT_KIND_LABELS = {
-  person: "Person",
-  meeting: "Meeting",
-  team: "Team",
-  task: "Task",
-  launch: "Launch",
-} as const;
-
 export function EvryContextChip({
   context,
   onRemove,
@@ -57,6 +49,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     conversation,
     draft,
     error,
+    isComposerBlocked,
     isLoading,
     isSending,
     sendMessage,
@@ -82,7 +75,13 @@ export function ConversationSurface({ className }: { className?: string }) {
             Opening conversation…
           </div>
         ) : conversation?.messages.length ? (
-          <ol className="space-y-4" aria-label="Conversation messages">
+          <ol
+            role="log"
+            aria-label="Conversation messages"
+            aria-live="polite"
+            aria-relevant="additions text"
+            className="space-y-4"
+          >
             {conversation.messages.map((message) => (
               <li
                 key={message.id}
@@ -99,10 +98,16 @@ export function ConversationSurface({ className }: { className?: string }) {
                       : "bg-muted text-foreground"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{message.body}</p>
+                  <p className="whitespace-pre-wrap">
+                    <span className="sr-only">
+                      {message.author === "user" ? "You" : "Evry"}:{" "}
+                    </span>
+                    {message.body}
+                  </p>
                   {message.pageContext ? (
-                    <p className="mt-2 text-xs opacity-75">
-                      {CONTEXT_KIND_LABELS[message.pageContext.kind]} context
+                    <p className="mt-2 flex items-center gap-1 text-xs opacity-75">
+                      <MapPin aria-hidden="true" className="size-3" />
+                      <span>{message.pageContext.label}</span>
                     </p>
                   ) : null}
                 </div>
@@ -172,7 +177,9 @@ export function ConversationSurface({ className }: { className?: string }) {
           </div>
           <Button
             type="submit"
-            disabled={isSending}
+            disabled={
+              draft.trim().length === 0 || isSending || isComposerBlocked
+            }
             className="cursor-pointer active:scale-[0.96]"
           >
             {isSending ? (

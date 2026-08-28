@@ -17,6 +17,18 @@ import { useHeader } from "@/components/header/header-context";
 
 import type { PublicEvryConversation } from "./client-contract";
 import {
+  beginEvryConversationLoad,
+  canApplyEvryConversationLoadResponse,
+  cancelEvryConversationLoads,
+  evrySubmissionMessage,
+  finishEvryConversationLoad,
+  initialEvryConversationLoadState,
+  isEvryConversationLoading,
+  isLatestEvryConversationLoad,
+  pendingEvrySubmissionFor,
+  type PendingEvrySubmission,
+} from "./interaction-state";
+import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
@@ -34,6 +46,7 @@ type EvryShellValue = Readonly<{
   error: string | null;
   expandToWorkspace: () => void;
   isEnabled: boolean;
+  isComposerBlocked: boolean;
   isLoading: boolean;
   isPanelOpen: boolean;
   isSending: boolean;
@@ -80,23 +93,35 @@ export function EvryShell({
   const [hasOpenedPanel, setHasOpenedPanel] = useState(false);
   const [isSending, setSending] = useState(false);
   const [isLoading, setLoading] = useState(false);
+  const [requestedConversationId, setRequestedConversationId] = useState<
+    string | null
+  >(null);
   const [expandedFromPanel, setExpandedFromPanel] = useState(false);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
-  const loadingConversationIdRef = useRef<string | null>(null);
+  const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
+  const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const previousPathnameRef = useRef(pathname);
+
+  const cancelActiveConversationLoads = useCallback(() => {
+    conversationLoadStateRef.current = cancelEvryConversationLoads(
+      conversationLoadStateRef.current
+    );
+    setLoading(false);
+    setRequestedConversationId(null);
+    setError(null);
+  }, []);
 
   useEffect(() => {
     const previousPathname = previousPathnameRef.current;
     previousPathnameRef.current = pathname;
-    if (
-      expandedFromPanel &&
-      previousPathname === "/evry" &&
-      pathname !== "/evry"
-    ) {
-      setExpandedFromPanel(false);
-      setPanelOpen(true);
+    if (previousPathname === "/evry" && pathname !== "/evry") {
+      cancelActiveConversationLoads();
+      if (expandedFromPanel) {
+        setExpandedFromPanel(false);
+        setPanelOpen(true);
+      }
     }
-  }, [expandedFromPanel, pathname]);
+  }, [cancelActiveConversationLoads, expandedFromPanel, pathname]);
 
   const openPanel = useCallback(
     (trigger: HTMLButtonElement) => {
@@ -128,25 +153,38 @@ export function EvryShell({
 
   const returnToPage = useCallback(() => {
     if (expandedFromPanel) {
+      cancelActiveConversationLoads();
       setExpandedFromPanel(false);
       setPanelOpen(true);
       router.back();
       return;
     }
     router.push("/dashboard");
-  }, [expandedFromPanel, router]);
+  }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
   const clearContext = useCallback(() => setActiveContext(null), []);
 
   const loadConversation = useCallback(
     async (conversationId: string) => {
+      if (conversation?.id === conversationId) {
+        setRequestedConversationId(null);
+        return;
+      }
       if (
-        conversation?.id === conversationId ||
-        loadingConversationIdRef.current === conversationId
+        isEvryConversationLoading(
+          conversationLoadStateRef.current,
+          conversationId
+        )
       ) {
         return;
       }
-      loadingConversationIdRef.current = conversationId;
+      const load = beginEvryConversationLoad(
+        conversationLoadStateRef.current,
+        conversationId
+      );
+      conversationLoadStateRef.current = load.state;
+      setConversation(null);
+      setRequestedConversationId(conversationId);
       setLoading(true);
       setError(null);
       try {
@@ -154,31 +192,82 @@ export function EvryShell({
           `/api/evry/conversations/${encodeURIComponent(conversationId)}`,
           { cache: "no-store" }
         );
-        setConversation(await responseConversation(response));
-      } catch {
-        setError("Unable to open this conversation. Try again.");
-      } finally {
-        if (loadingConversationIdRef.current === conversationId) {
-          loadingConversationIdRef.current = null;
+        const loadedConversation = await responseConversation(response);
+        if (
+          !isLatestEvryConversationLoad(
+            conversationLoadStateRef.current,
+            load.attempt
+          )
+        ) {
+          return;
         }
-        setLoading(false);
+        if (
+          !canApplyEvryConversationLoadResponse(
+            conversationLoadStateRef.current,
+            load.attempt,
+            loadedConversation.id
+          )
+        ) {
+          throw new Error("Conversation response did not match its request.");
+        }
+        setConversation(loadedConversation);
+        setRequestedConversationId(null);
+      } catch {
+        if (
+          isLatestEvryConversationLoad(
+            conversationLoadStateRef.current,
+            load.attempt
+          )
+        ) {
+          setError(
+            "Unable to open this conversation. Reload the page to try again."
+          );
+        }
+      } finally {
+        const completion = finishEvryConversationLoad(
+          conversationLoadStateRef.current,
+          load.attempt
+        );
+        conversationLoadStateRef.current = completion.state;
+        if (completion.applies) {
+          setLoading(false);
+        }
       }
     },
     [conversation?.id]
   );
 
   const sendMessage = useCallback(async () => {
-    const message = draft.trim();
-    if (!message || isSending) return;
+    const message = evrySubmissionMessage(draft);
+    if (
+      message === null ||
+      isSending ||
+      isLoading ||
+      requestedConversationId !== null ||
+      conversationLoadStateRef.current.latest !== null
+    ) {
+      return;
+    }
 
     setSending(true);
     setError(null);
     setStatusMessage("Saving your request…");
     try {
+      const pageContext = activeContext?.wire ?? null;
+      const pendingSubmission = pendingEvrySubmissionFor(
+        pendingSubmissionRef.current,
+        {
+          conversationId: conversation?.id ?? null,
+          message,
+          pageContext,
+        },
+        () => crypto.randomUUID()
+      );
+      pendingSubmissionRef.current = pendingSubmission;
       const body = JSON.stringify({
-        requestKey: crypto.randomUUID(),
+        requestKey: pendingSubmission.requestKey,
         message,
-        pageContext: activeContext?.wire ?? null,
+        pageContext,
       });
       const response = await fetch(
         conversation
@@ -191,6 +280,7 @@ export function EvryShell({
         }
       );
       const nextConversation = await responseConversation(response);
+      pendingSubmissionRef.current = null;
       setConversation(nextConversation);
       setDraft("");
       setStatusMessage("Added to this conversation.");
@@ -206,7 +296,16 @@ export function EvryShell({
     } finally {
       setSending(false);
     }
-  }, [activeContext, conversation, draft, isSending, pathname, router]);
+  }, [
+    activeContext,
+    conversation,
+    draft,
+    isLoading,
+    isSending,
+    pathname,
+    requestedConversationId,
+    router,
+  ]);
 
   const value = useMemo<EvryShellValue>(
     () => ({
@@ -218,6 +317,7 @@ export function EvryShell({
       error,
       expandToWorkspace,
       isEnabled: enabled,
+      isComposerBlocked: isLoading || requestedConversationId !== null,
       isLoading,
       isPanelOpen,
       isSending,
@@ -243,6 +343,7 @@ export function EvryShell({
       isSending,
       loadConversation,
       openPanel,
+      requestedConversationId,
       restoreLauncherFocus,
       returnToPage,
       sendMessage,

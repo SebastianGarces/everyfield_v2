@@ -5,7 +5,7 @@ import type {
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import type { EvryPageContext } from "@/lib/evry/resolvers/contract";
+import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
 
 import {
   storedEvryClarificationArtifactDocument,
@@ -103,7 +103,7 @@ export async function createEvryConversation(input: {
   actor: EvryPlantActor;
   requestKey: string;
   message: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   now: Date;
   store?: EvryConversationStore;
 }): Promise<EvryResumedConversation> {
@@ -135,7 +135,7 @@ export async function appendTrustedEvryConversationMessage(input: {
   state: EvryConversationStateDocument;
   author: EvryConversationAuthor;
   body: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
@@ -210,7 +210,7 @@ export async function continueEvryConversation(input: {
   conversationId: string;
   requestKey: string;
   message: string;
-  pageContext: EvryPageContext | null;
+  pageContext: EvryResolvedPageContext | null;
   now: Date;
   store?: EvryConversationStore;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;

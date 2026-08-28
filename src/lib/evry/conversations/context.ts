@@ -240,6 +240,7 @@ function contextTurn(message: EvryStoredConversationMessage): EvryContextTurn {
         : Object.freeze({
             kind: message.pageContext.kind,
             recordId: contextText(message.pageContext.recordId, 160),
+            label: contextText(message.pageContext.label, 160),
           }),
     deliveryStatus: message.deliveryStatus,
     artifacts: Object.freeze(

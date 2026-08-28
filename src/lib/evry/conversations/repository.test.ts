@@ -109,6 +109,17 @@ test("message idempotency binds exact bytes and the full semantic append", () =>
     repository,
     /requestFingerprint\(\{[\s\S]*state: parsedState,[\s\S]*activePlan: normalizedActivePlan/
   );
+  assert.match(
+    repository,
+    /pageContext:[\s\S]*kind: input\.pageContext\.kind,[\s\S]*recordId: input\.pageContext\.recordId/
+  );
+  assert.doesNotMatch(
+    repository.slice(
+      repository.indexOf("function requestFingerprint"),
+      repository.indexOf("function automaticTitle")
+    ),
+    /input\.pageContext\.label/
+  );
   assert.match(repository, /const replay = await exactReplay\(\)/);
   assert.match(repository, /EvryConversationIdempotencyError/);
 });

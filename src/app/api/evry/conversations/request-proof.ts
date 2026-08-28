@@ -22,6 +22,10 @@ import type {
 } from "@/lib/evry/conversations/repository";
 import type { EvryConversationStore } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type {
+  EvryPageContext,
+  EvryResolvedPageContext,
+} from "@/lib/evry/resolvers/contract";
 import {
   ELIGIBLE_FIXTURE_CAPABILITIES,
   fixtureDocument,
@@ -105,7 +109,7 @@ const fakeDatabase = {
                 if (query.sql.includes('"tasks"')) {
                   const [recordId, plantId] = query.params;
                   if (recordId === LOCAL_TASK_ID && plantId === PLANT_ID) {
-                    return [{ id: LOCAL_TASK_ID }];
+                    return [{ id: LOCAL_TASK_ID, title: "Scoped task" }];
                   }
                   if (
                     recordId === FOREIGN_TASK_ID &&
@@ -296,14 +300,14 @@ async function main(): Promise<void> {
   let capturedActor: EvryPlantActor | null = null;
   const resolvePageContext = async (input: {
     actor: EvryPlantActor;
-    pageContext: EvryStoredConversationMessage["pageContext"];
-  }) => {
+    pageContext: EvryPageContext | null;
+  }): Promise<EvryResolvedPageContext | null> => {
     if (input.pageContext === null) return null;
     events.push("context");
     assert.equal(input.actor.plantId, PLANT_ID);
     return input.pageContext.recordId === "foreign-task"
       ? null
-      : input.pageContext;
+      : { ...input.pageContext, label: `Scoped ${input.pageContext.kind}` };
   };
   const createPost = createRoute.createEvryConversationCreatePost({
     now: () => START,
@@ -420,6 +424,11 @@ async function main(): Promise<void> {
   assert.equal(created.cacheControl, "private, no-store");
   assert.equal(created.body.status, "created");
   assert.equal(created.body.conversation.messages[0].body, LITERAL);
+  assert.deepEqual(created.body.conversation.messages[0].pageContext, {
+    kind: "task",
+    recordId: "task-1",
+    label: "Scoped task",
+  });
   assert.deepEqual(events, ["auth", "body", "context", "create"]);
   assert.ok(capturedActor);
   assert.ok(stored);
@@ -439,7 +448,7 @@ async function main(): Promise<void> {
       actor: capturedActor,
       pageContext: { kind: "task", recordId: LOCAL_TASK_ID },
     }),
-    { kind: "task", recordId: LOCAL_TASK_ID }
+    { kind: "task", recordId: LOCAL_TASK_ID, label: "Scoped task" }
   );
   assert.equal(contextQueries.at(-1)?.sql.includes('"tasks"'), true);
   assert.deepEqual(contextQueries.at(-1)?.params.slice(0, 2), [
@@ -464,7 +473,11 @@ async function main(): Promise<void> {
       actor: capturedActor,
       pageContext: { kind: "launch", recordId: "current" },
     }),
-    { kind: "launch", recordId: LOCAL_LAUNCH_ID }
+    {
+      kind: "launch",
+      recordId: LOCAL_LAUNCH_ID,
+      label: "Launch Sunday",
+    }
   );
 
   sessions = [user()];
@@ -607,6 +620,10 @@ async function main(): Promise<void> {
   assert.equal(reopened.body.conversation.activePlan.status, "expired");
   assert.equal(reopened.body.conversation.activePlan.confirmable, false);
   assert.equal(reopened.body.conversation.messages[0].body, LITERAL);
+  assert.equal(
+    reopened.body.conversation.messages[0].pageContext.label,
+    "Scoped task"
+  );
   assert.deepEqual(events, ["auth", "find", "plan-read"]);
 
   sessions = [user()];

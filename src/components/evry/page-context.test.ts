@@ -15,6 +15,15 @@ test("record pages produce a visible label and a strict minimal wire hint", () =
       wire: { kind: "person", recordId: "person-1" },
     }
   );
+  assert.equal(
+    JSON.stringify(
+      visibleEvryPageContextFor("/people/person-1", [
+        { label: "Browser-owned label" },
+      ])?.wire
+    ).includes("Browser-owned label"),
+    false,
+    "display labels must never cross the request boundary"
+  );
 
   for (const [pathname, kind] of [
     ["/meetings/meeting-1", "meeting"],

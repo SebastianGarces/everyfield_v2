@@ -10,22 +10,36 @@ import {
   tasks,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
-import type { EvryPageContext } from "./contract";
+import type { EvryPageContext, EvryResolvedPageContext } from "./contract";
 
 const recordIdSchema = z.string().uuid();
 
-async function scopedRecordId(
+function safeDisplayLabel(value: string, fallback: string): string {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  return [...(normalized || fallback)].slice(0, 160).join("");
+}
+
+async function scopedRecord(
   actor: EvryPlantActor,
   pageContext: EvryPageContext
-): Promise<string | null> {
+): Promise<Readonly<{ recordId: string; label: string }> | null> {
   const parsedRecordId = recordIdSchema.safeParse(pageContext.recordId);
 
   switch (pageContext.kind) {
     case "person": {
       if (!parsedRecordId.success) return null;
       const [record] = await db
-        .select({ id: persons.id })
+        .select({
+          id: persons.id,
+          firstName: persons.firstName,
+          lastName: persons.lastName,
+        })
         .from(persons)
         .where(
           and(
@@ -35,13 +49,34 @@ async function scopedRecordId(
           )
         )
         .limit(1);
-      return record?.id ?? null;
+      return record
+        ? {
+            recordId: record.id,
+            label: safeDisplayLabel(
+              `${record.firstName} ${record.lastName}`,
+              "Person record"
+            ),
+          }
+        : null;
     }
     case "meeting": {
       if (!parsedRecordId.success) return null;
       const [record] = await db
-        .select({ id: churchMeetings.id })
+        .select({
+          id: churchMeetings.id,
+          type: churchMeetings.type,
+          title: churchMeetings.title,
+          meetingNumber: churchMeetings.meetingNumber,
+          teamName: ministryTeams.name,
+        })
         .from(churchMeetings)
+        .leftJoin(
+          ministryTeams,
+          and(
+            eq(ministryTeams.id, churchMeetings.teamId),
+            eq(ministryTeams.churchId, actor.plantId)
+          )
+        )
         .where(
           and(
             eq(churchMeetings.id, parsedRecordId.data),
@@ -49,12 +84,20 @@ async function scopedRecordId(
           )
         )
         .limit(1);
-      return record?.id ?? null;
+      return record
+        ? {
+            recordId: record.id,
+            label: safeDisplayLabel(
+              meetingDisplayTitle(record),
+              "Meeting record"
+            ),
+          }
+        : null;
     }
     case "team": {
       if (!parsedRecordId.success) return null;
       const [record] = await db
-        .select({ id: ministryTeams.id })
+        .select({ id: ministryTeams.id, name: ministryTeams.name })
         .from(ministryTeams)
         .where(
           and(
@@ -63,12 +106,17 @@ async function scopedRecordId(
           )
         )
         .limit(1);
-      return record?.id ?? null;
+      return record
+        ? {
+            recordId: record.id,
+            label: safeDisplayLabel(record.name, "Team record"),
+          }
+        : null;
     }
     case "task": {
       if (!parsedRecordId.success) return null;
       const [record] = await db
-        .select({ id: tasks.id })
+        .select({ id: tasks.id, title: tasks.title })
         .from(tasks)
         .where(
           and(
@@ -78,7 +126,12 @@ async function scopedRecordId(
           )
         )
         .limit(1);
-      return record?.id ?? null;
+      return record
+        ? {
+            recordId: record.id,
+            label: safeDisplayLabel(record.title, "Task record"),
+          }
+        : null;
     }
     case "launch": {
       if (pageContext.recordId !== "current") return null;
@@ -87,7 +140,7 @@ async function scopedRecordId(
         .from(launches)
         .where(eq(launches.churchId, actor.plantId))
         .limit(1);
-      return record?.id ?? null;
+      return record ? { recordId: record.id, label: "Launch Sunday" } : null;
     }
   }
 }
@@ -103,8 +156,8 @@ async function scopedRecordId(
 export async function resolveAuthorizedEvryPageContext(input: {
   actor: EvryPlantActor;
   pageContext: EvryPageContext | null;
-}): Promise<EvryPageContext | null> {
+}): Promise<EvryResolvedPageContext | null> {
   if (input.pageContext === null) return null;
-  const recordId = await scopedRecordId(input.actor, input.pageContext);
-  return recordId === null ? null : { kind: input.pageContext.kind, recordId };
+  const record = await scopedRecord(input.actor, input.pageContext);
+  return record === null ? null : { kind: input.pageContext.kind, ...record };
 }

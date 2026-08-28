@@ -292,6 +292,7 @@ test("every maximum-size stored state and artifact projection stays reopenable",
     pageContext: {
       kind: "person" as const,
       recordId: escapeHeavy(160),
+      label: escapeHeavy(160),
     },
     artifacts: Object.freeze(
       Array.from({ length: 16 }, (_, ordinal) =>
