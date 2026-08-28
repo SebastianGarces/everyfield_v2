@@ -159,9 +159,22 @@ function isProviderBoundaryRejection(error: unknown): boolean {
 }
 
 function closedErrorName(error: unknown): string {
+  if (
+    typeof error === "string" &&
+    /^text part [A-Za-z0-9_-]+ not found$/.test(error)
+  ) {
+    return "TextPartNotFound";
+  }
+  if (typeof error === "string") return "StringError";
   return error instanceof Error && /^[A-Za-z0-9_]+$/.test(error.name)
     ? error.name
-    : "UnknownError";
+    : error &&
+        typeof error === "object" &&
+        "constructor" in error &&
+        typeof error.constructor === "function" &&
+        /^[A-Za-z0-9_]+$/.test(error.constructor.name)
+      ? error.constructor.name
+      : "UnknownError";
 }
 
 function candidateProviderOptions(candidate: EvryModelCandidate) {
