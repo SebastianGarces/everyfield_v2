@@ -173,13 +173,10 @@ rulings themselves are from June 2026.
 | Cron | **Vercel Cron** → secret-guarded route, ~daily | Selects dirty-or-stale plants only (NFR-PE-2). |
 | Embed scope | **Wiki articles + playbook** | The **rubric is NOT embedded** — it goes into the judge context *whole* every run. Historical assessments are a *future* embed (benchmarking, PE-021). |
 
-**Related future work.** The **Church Plant Agent** — a conversational, tool-calling agent (with
-human confirmation + generative UI) that *executes* multi-step operations — is the action half of
-the app's chat-first AI direction and forms an insight→action loop with the phase engine (the judge
-surfaces what to do; the agent does it). It is captured in
-`product-docs/features/church-plant-agent/vision.md`, which is where the agent-framework decision
-(AI SDK agent primitives vs. LangGraph vs. Vercel Workflow DevKit) is framed. The Plant Intelligence
-judge itself needs none of those.
+**Related capability.** **Evry** is the application-action half of the product's AI direction and
+forms an insight-to-action handoff with the Phase Engine. Its product contract lives in
+`product-docs/features/church-plant-agent/frd.md`. Evry's orchestration choices do not change the
+Plant Intelligence judge described above.
 
 ### Ruled 2026-08-10 — the onboarding flow's `?step=` URL (#373, PR 390)
 
@@ -431,3 +428,21 @@ unchanged.
 | # | Decision | Consequence |
 |---|----------|-------------|
 | 688 | **The authenticated app restores shadcn's `0.625rem` base radius and keeps native component geometry. Marketing remains Sharp.** Pills and avatars keep their intentional shapes, while page-level workspace panels use `rounded-xl`. The app bar is ink with a light foreground; its 24px green brand mark is the sole green-on-ink exception and does not license green text, controls, or general icons on ink. | The change is CSS-first: shared tokens, Tailwind classes, layout composition, and presentation wrappers. shadcn internals, feature behavior, data flow, actions, permissions, routes, and public component contracts stay unchanged unless markup alone prevents the required shell structure. |
+
+## 2026-08-27 — Evry product and architecture rulings
+
+Ruled by Sebastian through the Evry planning review. The FRD states the product end state; this
+section keeps the implementation choices and the rationale that must not drift into requirement
+text.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 758 | **Evry's parity contract covers operational work available to accounts in a plant tenancy. Settings, coaching, oversight, sessionless flows, and pre-tenancy onboarding are outside the contract.** | Every authenticated plant route and action is classified as supported, excluded, or unreachable. Settings receives a deep-link handoff only. Coaching and oversight require separate product decisions before Evry may reach them. |
+| 758 (1) | **Evry is an application-action system, not a general assistant. Theology, doctrine, prayer composition or guidance, spiritual counsel, and every unrelated request produce a soft fixed boundary with zero application access. Mixed and ambiguous requests fail closed.** | The policy boundary runs before domain tools are eligible. Exact user-supplied text may still populate an eligible application field; Evry may transcribe “Pray for the launch” into a task title without writing a prayer. |
+| 758 (2) | **Reads and navigation run without confirmation. Every database or file mutation, outbound communication, or other lasting effect requires a dynamic confirmation artifact bound to the exact immutable plan.** | Editing a date, target, recipient, body, or step supersedes the confirmation. Execution rechecks actor, plant, capability, target state, expiration, and plan identity and remains idempotent under retry. |
+| 758 (3) | **Broad interface parity is a generated coverage contract, not a hand-maintained list. Recipes compose registered capabilities and never bypass their permission, confirmation, executor, audit, or eval contracts.** | The first reference slice is meeting creation plus People/CRM recipient resolution and a confirmed email invitation. Module capability work can fan out only after the shared contracts are stable. |
+| 758 (4) | **The UI is part of the product contract.** Evry has a global authenticated-app entry, a contextual panel, a dedicated durable-history workspace, visible page-context chips, typed clarification/read/Settings/confirmation/progress/result/boundary artifacts, and responsive accessible behavior. | A pending plan and every execution receipt survive reopening. The confirmation artifact shows absolute time and timezone, resolved records, recipient counts and exclusions, content previews, material consequences, and effect-specific Confirm/Edit/Cancel controls. |
+| 758 (5) | **EveryField's database owns durable conversation and plan state. Provider conversation state and prompt caching are optimizations, never the product's source of history.** | The model context is compiled from a stable prefix, structured conversation state, the pending plan, recent turns, and only relevant older messages. A person can return days later without depending on provider cache retention. Active-stream reconnection is optional and cannot duplicate a run. |
+| 758 (6) | **Use deterministic eligibility plus small single-goal domain agents, with no separate supervisor-model call on the common path. Start with Vercel AI SDK plus a TypeScript plan runtime; add LangGraph only when concrete cyclic, branching, or cross-session graph state earns it.** | Code filters eligible domains from policy, plant tenancy, capability, active-plan state, and visible context. The working model selects or hands off only within that set. A durable queue may complement execution for high-volume or long-running work without becoming the decision-maker. |
+| 758 (7) | **Model choice is evidence-based and cost-sensitive. GPT-4o mini remains a benchmark candidate beside GPT-5.6 Luna, GPT-5.4 mini, and GPT-4o.** | The cheapest model that clears the same policy, routing, argument, recipe, latency, and cost evaluation wins. Time to first token, time to confirmation artifact, full latency, cache use, and cost per successful plan are release evidence. |
+| 758 (8) | **Model observability uses self-hosted Langfuse with a production trace contract and repeatable read-only cost reporting.** | Traces correlate policy, eligibility, handoffs, reads, planning, confirmation, execution, and reporting while redacting private content by default. The implementation adds an operator script that reports cost, token and cache use, latency, model, capability, recipe, and environment over a chosen period. |

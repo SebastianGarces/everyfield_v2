@@ -78,73 +78,44 @@ Also part of the product's scope. Check the board for where each one stands.
 
 The biggest opportunity with EveryField is reducing the operational burden on the planter. Church planters are typically not administrators — they're pastors, visionaries, and relationship builders. Every minute spent clicking through forms, writing follow-up emails, or hunting for the right wiki article is a minute not spent casting vision or meeting with people.
 
-The AI direction has two halves. The **judgment half** is the Phase Engine (see Core Features above): a RAG-grounded LLM-as-judge (OpenAI gpt-4o via the Vercel AI SDK, over embedded methodology content) that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half** is a conversational tool-calling agent that executes multi-step operations from natural language — still pre-FRD, with the direction captured in [features/church-plant-agent/vision.md](./features/church-plant-agent/vision.md). The sections below describe that agent.
+The AI direction has two separate halves. The **judgment half** is the Phase Engine (see Core Features above): a retrieval-grounded judge that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half** is [Evry](./features/church-plant-agent/frd.md), a conversational application-action workspace for accounts in a plant tenancy.
 
-### Chat-First Interface (Planned)
+### Evry Application Actions
 
-A conversational AI interface (sidebar or full-screen) could become the primary way planters interact with the platform. Instead of navigating menus and filling forms, the planter simply says what they need:
+Evry is available as a contextual panel and a dedicated conversation workspace. A person describes the EveryField work they need, reviews any lasting effects in a structured confirmation artifact, and confirms before Evry changes data, stores a file, or sends a communication.
 
-**Meeting management via tool calls:**
+**Meeting work:**
 
-- *"Schedule a vision meeting for next Thursday at 7pm at the Johnson's house"* → AI creates the meeting, sets the location, auto-generates a preparation checklist.
-- *"Invite everyone who attended the last vision meeting plus the 5 new prospects I added this week"* → AI queries the CRM, composes invitations, and sends them.
-- *"Send a reminder to everyone who hasn't RSVP'd to Thursday's meeting"* → AI filters unconfirmed attendees and sends reminder emails.
+- *"Schedule a vision meeting for next Thursday at 7pm at the Johnson's house"* → Evry resolves the date, location, and meeting details, then presents the meeting for confirmation.
+- *"Invite everyone who attended the last vision meeting plus the 5 new prospects I added this week"* → Evry resolves and previews the exact recipient set and communication before confirmation.
+- *"Send a reminder to everyone who hasn't RSVP'd to Thursday's meeting"* → Evry finds the eligible recipients, reports exclusions, and previews the reminder before confirmation.
 
-**People management via tool calls:**
+**People work:**
 
-- *"Add John and Sarah Miller — they came to the vision meeting last night, got their info from Mike Davis"* → AI creates both person records, links them as a household, sets source to vision_meeting, records Mike as the referrer, and marks them as attendees.
-- *"Move everyone who's attended 3+ vision meetings to Following Up status"* → AI queries attendance, identifies qualifying people, and batch-updates their pipeline status.
-- *"Who haven't I followed up with in the last 2 weeks?"* → AI queries activity history and surfaces stale contacts.
+- *"Add John and Sarah Miller — they came to the vision meeting last night and Mike Davis referred them"* → Evry prepares the two People/CRM records, household link, source, referrer, and attendance effects for confirmation.
+- *"Move everyone who's attended three Vision Meetings to Following Up"* → Evry identifies the qualifying people and shows the complete before-and-after set before confirmation.
+- *"Who haven't I followed up with in the last two weeks?"* → Evry returns the application result directly because the request is a read.
 
-**Communication via tool calls:**
+**Communication and task work:**
 
-- *"Send a thank-you email to everyone who came last night"* → AI pulls the attendance list, drafts an email using the follow-up template, and sends it.
-- *"Draft a mass invitation for our next vision meeting and send it to all prospects and attendees"* → AI composes the email with meeting details, selects the right recipient segments, and queues it.
-- *"Text the core group that we're moving the meeting to Wednesday"* → AI sends an SMS blast to all core group members.
-
-**Task management via tool calls:**
-
-- *"What do I need to do before the meeting on Thursday?"* → AI shows the meeting's checklist plus any related tasks.
-- *"Create follow-up tasks for everyone who attended last night — due in 48 hours"* → AI batch-creates personalized follow-up tasks linked to each attendee.
-
-### RAG-Powered Wiki & Coaching
-
-The Phase Engine does the retrieval-grounded judgment half of this: methodology content is embedded and retrieved to ground phase-aware assessments and insights. The conversational layer sits on top:
-
-- **Contextual coaching:** When a planter asks *"How do I handle someone who wants to join the core group but fails the chemistry interview?"*, the AI retrieves relevant wiki content about the 5 Interview Criteria and the process for handling a "not qualified" result, then synthesizes a practical, personalized answer.
-- **Phase-aware guidance:** The AI knows what phase the planter is in (stored in the church record) and proactively surfaces relevant articles, frameworks, and checklists. *"You're in Phase 1 with 30 core group members. Here are the 3 things the Launch Playbook says to focus on right now."*
-- **Methodology Q&A:** *"What are the 8 Critical Success Factors and how am I doing on each?"* → AI retrieves the framework definitions via RAG, then queries the planter's actual data to score them against each factor.
-- **Template generation:** *"Help me write a vision meeting talk for next week"* → AI uses RAG to pull the Meeting Objectives framework (Inspire, Instill, Inform) and relevant content from the Launch Playbook, then generates a talk outline tailored to the planter's current phase and goals.
+- *"Send a thank-you email to everyone who came last night"* → Evry resolves attendance, drafts the email, and shows recipients and content before confirmation.
+- *"What do I need to do before the meeting on Thursday?"* → Evry shows the meeting checklist and related tasks without a confirmation pause.
+- *"Create follow-up tasks for everyone who attended last night, due in 48 hours"* → Evry shows every proposed task, assignee, and due date before confirmation.
 
 ### Reducing Clicks to Zero
 
-The overarching goal is to make the planter's most common workflows require **zero navigation and zero form-filling**. The AI layer sits between the planter and the database, turning natural language intent into structured actions:
+The goal is to make common workflows require **zero navigation and zero form-filling** while keeping the same permissions and making every effect visible before it happens:
 
 
-| Traditional Flow                                                                                                         | AI-Assisted Flow                                                             |
-| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Navigate to Meetings → Click New → Fill form → Save → Navigate to Communication → Select recipients → Write email → Send | *"Schedule a vision meeting next Thursday at 7pm and invite all prospects"*  |
-| Navigate to People → Click Add → Fill form → Save → Navigate to Person → Add Note → Save                                 | *"Add Jane Doe, met her at church today, she's interested in kids ministry"* |
-| Navigate to People → Filter by status → Select multiple → Bulk action → Change status → Confirm                          | *"Move everyone who signed a commitment card to Core Group"*                 |
-| Navigate to Tasks → Review each → Check off → Navigate to next                                                           | *"Mark all the prep tasks for last night's meeting as done"*                 |
+| Traditional flow | Evry flow |
+|---|---|
+| Navigate to Meetings → New → Complete form → Save → Communication → Select recipients → Write email → Send | *"Schedule a Vision Meeting next Thursday at 7 PM and invite all prospects"* → review one combined plan → confirm |
+| Navigate to People → Add → Complete form → Save → Person → Add note → Save | *"Add Jane Doe, met her today, interested in kids ministry"* → review the record and note → confirm |
+| People → Filter by stage → Select multiple → Bulk action → Change stage → Confirm | *"Move everyone who signed a commitment card to Core Group"* → review the exact people and prior stages → confirm |
+| Tasks → Review each → Complete → Open next | *"Mark all prep tasks for last night's meeting complete"* → review the exact tasks → confirm |
 
+### Boundary, Scope, and Interface
 
-### Network & Sending Church Intelligence
+Evry covers operational work available to an authenticated account in a plant tenancy. Settings, coaching, oversight, sessionless flows, and pre-tenancy onboarding are outside its contract. It does not answer theology, prayer-guidance, pastoral-advice, or general-purpose questions; those requests produce a brief application-only message and no application access.
 
-The oversight health view surfaces Phase Engine assessment-derived health signals per plant. Beyond that, AI can provide:
-
-- **Portfolio health summaries:** *"Which of my planters are at risk?"* → AI analyzes activity recency, core group growth velocity, meeting frequency, and task completion rates across all plants.
-- **Comparative analytics:** *"How is Pastor Mike doing compared to other planters at the same phase?"* → AI benchmarks against network-wide averages.
-- **Coaching recommendations:** *"What should I focus on in my next call with Pastor Mike?"* → AI identifies areas where the planter is lagging and retrieves relevant coaching content.
-
-### Implementation Approach
-
-The planned agent would be implemented as a **tool-calling architecture** where:
-
-1. The chat interface accepts natural language input from the planter.
-2. An LLM interprets the intent and selects from a set of defined tools (create_meeting, add_person, send_email, query_people, update_status, create_task, search_wiki, etc.).
-3. Each tool maps to existing service functions in the codebase — the same business logic that powers the traditional UI.
-4. RAG reuses the Phase Engine's existing embedding pipeline (methodology embeddings already power the judge), extended to wiki articles for semantic retrieval alongside the existing full-text search index.
-5. The AI maintains conversation context so planters can have multi-turn interactions: *"Add her to Thursday's meeting too"* (referring to the person just created).
-
-This approach means the AI layer is additive — the traditional UI continues to work for users who prefer it or need fine-grained control, while the chat interface dramatically accelerates the most common workflows.
+EveryField's standard interface remains available for direct, fine-grained work. Evry adds durable conversation history, visible page context, structured read results, focused clarification choices, dynamic confirmation artifacts, execution progress, and per-step receipts. A person can return days later and see the same messages, plan state, and outcomes without risking a replay.

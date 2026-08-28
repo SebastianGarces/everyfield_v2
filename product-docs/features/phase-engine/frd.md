@@ -43,7 +43,7 @@ The engine is two layers that must never blur:
 ### Non-Goals
 
 - Not an automatic phase advancer — transitions are always planter-initiated/confirmed.
-- Not an actor: the engine advises, it does not execute multi-step operations on the plant's behalf. The conversational agent that would is separate scope (`features/church-plant-agent/vision.md`).
+- Not an actor: the engine advises, it does not execute multi-step operations on the plant's behalf. Evry owns application actions as a separate capability.
 - Not a hard gate — it never blocks a planter from advancing or acting.
 - Not a real-time/on-page LLM call — assessments are precomputed and cached; pages read snapshots.
 - Not the owner of the oversight UI surfaces; this feature produces the insights those surfaces render. It does own its own presentation requirements (§4, Presentation).
