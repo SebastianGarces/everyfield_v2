@@ -22,12 +22,12 @@ export function evryDraftAfterSubmission(
   return currentDraft === submittedDraft ? "" : currentDraft;
 }
 
-export function evryConversationCompletionHref(
-  currentPathname: string,
-  conversationId: string
+export function evryWorkspaceConversationHref(
+  urlConversationId: string | null,
+  mountedConversationId: string | null
 ): string | null {
-  return currentPathname === "/evry"
-    ? `/evry?conversation=${conversationId}`
+  return urlConversationId === null && mountedConversationId !== null
+    ? `/evry?conversation=${mountedConversationId}`
     : null;
 }
 

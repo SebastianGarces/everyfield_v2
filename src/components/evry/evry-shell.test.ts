@@ -90,10 +90,10 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
 
 test("workspace URL updates stay in the App Router and conversation loads use the latest-attempt gate", () => {
   assert.match(
-    shell,
-    /const completionHref = evryConversationCompletionHref\([\s\S]*currentPathnameRef\.current,[\s\S]*nextConversation\.id[\s\S]*if \(completionHref\) router\.replace\(completionHref\)/
+    workspace,
+    /evryWorkspaceConversationHref\([\s\S]*conversationId,[\s\S]*conversation\?\.id \?\? null[\s\S]*router\.replace\(href\)/
   );
-  assert.doesNotMatch(shell, /window\.history\.replaceState/);
+  assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
     shell,
     /const conversationLoadStateRef = useRef\([\s\S]*initialEvryConversationLoadState\(\)/
@@ -116,19 +116,14 @@ test("workspace URL updates stay in the App Router and conversation loads use th
   assert.doesNotMatch(shell, /\[conversation\?\.id, isLoading\]/);
 });
 
-test("send completion follows current navigation and preserves in-flight edits", () => {
-  assert.match(shell, /const currentPathnameRef = useRef\(pathname\)/);
-  assert.match(
-    shell,
-    /currentPathnameRef\.current = "\/evry";[\s\S]*router\.push\(`\/evry/
-  );
+test("the mounted workspace owns query sync and send preserves in-flight edits", () => {
   assert.match(
     shell,
     /setDraft\(evryDraftAfterSubmission\(draftRef\.current, message\)\)/
   );
   assert.match(
     interaction,
-    /currentPathname === "\/evry"[\s\S]*`\/evry\?conversation=\$\{conversationId\}`[\s\S]*: null/
+    /urlConversationId === null && mountedConversationId !== null[\s\S]*`\/evry\?conversation=\$\{mountedConversationId\}`[\s\S]*: null/
   );
   assert.match(
     interaction,

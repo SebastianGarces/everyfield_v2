@@ -20,7 +20,6 @@ import {
   beginEvryConversationLoad,
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
-  evryConversationCompletionHref,
   evryDraftAfterSubmission,
   evrySubmissionMessage,
   finishEvryConversationLoad,
@@ -103,7 +102,6 @@ export function EvryShell({
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const previousPathnameRef = useRef(pathname);
-  const currentPathnameRef = useRef(pathname);
   const draftRef = useRef(draft);
 
   const setDraft = useCallback((nextDraft: string) => {
@@ -119,10 +117,6 @@ export function EvryShell({
     setRequestedConversationId(null);
     setError(null);
   }, []);
-
-  useEffect(() => {
-    currentPathnameRef.current = pathname;
-  }, [pathname]);
 
   useEffect(() => {
     const previousPathname = previousPathnameRef.current;
@@ -158,7 +152,6 @@ export function EvryShell({
   );
 
   const expandToWorkspace = useCallback(() => {
-    currentPathnameRef.current = "/evry";
     setExpandedFromPanel(true);
     setPanelOpen(false);
     const query = conversation ? `?conversation=${conversation.id}` : "";
@@ -166,7 +159,6 @@ export function EvryShell({
   }, [conversation, router]);
 
   const returnToPage = useCallback(() => {
-    currentPathnameRef.current = "";
     if (expandedFromPanel) {
       cancelActiveConversationLoads();
       setExpandedFromPanel(false);
@@ -299,12 +291,6 @@ export function EvryShell({
       setConversation(nextConversation);
       setDraft(evryDraftAfterSubmission(draftRef.current, message));
       setStatusMessage("Added to this conversation.");
-
-      const completionHref = evryConversationCompletionHref(
-        currentPathnameRef.current,
-        nextConversation.id
-      );
-      if (completionHref) router.replace(completionHref);
     } catch {
       setError(
         "Unable to save your request. Check your connection and try again."
@@ -320,7 +306,6 @@ export function EvryShell({
     isLoading,
     isSending,
     requestedConversationId,
-    router,
     setDraft,
   ]);
 

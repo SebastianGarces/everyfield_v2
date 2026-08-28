@@ -5,9 +5,9 @@ import {
   beginEvryConversationLoad,
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
-  evryConversationCompletionHref,
   evryDraftAfterSubmission,
   evrySubmissionMessage,
+  evryWorkspaceConversationHref,
   finishEvryConversationLoad,
   initialEvryConversationLoadState,
   isEvryConversationLoading,
@@ -61,17 +61,31 @@ test("a successful request clears only the submitted draft snapshot", () => {
   );
 });
 
-test("completion routing follows the current route, not the source route", () => {
+test("the mounted workspace attaches a conversation created after expansion", () => {
   assert.equal(
-    evryConversationCompletionHref("/people", "conversation-1"),
-    null,
-    "leaving the workspace while a send is pending must not pull the user back"
+    evryWorkspaceConversationHref(null, "conversation-1"),
+    "/evry?conversation=conversation-1"
   );
   assert.equal(
-    evryConversationCompletionHref("/evry", "conversation-1"),
-    "/evry?conversation=conversation-1",
-    "expanding a panel send must attach the new conversation to the workspace"
+    evryWorkspaceConversationHref("conversation-1", "conversation-1"),
+    null
   );
+});
+
+test("a sidebar transition unmounts the only owner of workspace URL sync", () => {
+  const replacements: string[] = [];
+  let workspaceMounted = true;
+  let conversationId: string | null = null;
+  const commitWorkspaceEffect = () => {
+    if (!workspaceMounted) return;
+    const href = evryWorkspaceConversationHref(null, conversationId);
+    if (href) replacements.push(href);
+  };
+
+  workspaceMounted = false;
+  conversationId = "conversation-arrived-after-unmount";
+  commitWorkspaceEffect();
+  assert.deepEqual(replacements, []);
 });
 
 test("changing any semantic request input rotates the retry key", () => {

@@ -1,10 +1,12 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { ConversationSurface } from "@/components/evry/conversation-surface";
 import { useEvryShell } from "@/components/evry/evry-shell";
+import { evryWorkspaceConversationHref } from "@/components/evry/interaction-state";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
 
@@ -13,11 +15,20 @@ export function EvryWorkspace({
 }: {
   conversationId: string | null;
 }) {
-  const { loadConversation, returnToPage } = useEvryShell();
+  const router = useRouter();
+  const { conversation, loadConversation, returnToPage } = useEvryShell();
 
   useEffect(() => {
     if (conversationId) void loadConversation(conversationId);
   }, [conversationId, loadConversation]);
+
+  useEffect(() => {
+    const href = evryWorkspaceConversationHref(
+      conversationId,
+      conversation?.id ?? null
+    );
+    if (href) router.replace(href);
+  }, [conversation?.id, conversationId, router]);
 
   return (
     <PageCanvas
