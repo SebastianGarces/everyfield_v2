@@ -166,6 +166,20 @@ function closedErrorName(error: unknown): string {
     return "TextPartNotFound";
   }
   if (typeof error === "string") return "StringError";
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const tags = [record.type, record.code].filter(
+      (value): value is string =>
+        typeof value === "string" && /^[a-z0-9_-]{1,64}$/i.test(value)
+    );
+    const keys = Object.keys(record)
+      .filter((key) => /^[A-Za-z0-9_]{1,32}$/.test(key))
+      .toSorted()
+      .slice(0, 8);
+    if (tags.length > 0 || keys.length > 0) {
+      return `Object_${[...tags, ...keys].join("_")}`;
+    }
+  }
   return error instanceof Error && /^[A-Za-z0-9_]+$/.test(error.name)
     ? error.name
     : error &&
