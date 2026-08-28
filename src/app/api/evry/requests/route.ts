@@ -15,6 +15,7 @@ import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,
 } from "@/lib/evry/eligibility/viewer";
+import { getEvryPolicyModel } from "@/lib/evry/models/provider";
 import {
   classifyEvryRequest,
   type EvryPolicyDecision,
@@ -90,10 +91,10 @@ export type EvryRequestPostOptions = Readonly<{
 
 /** Bind #769's selected working model to the one policy classifier. */
 export function evryRequestClassifierForModel(
-  model: LanguageModel
+  getModel: () => LanguageModel
 ): EvryRequestClassifier {
   return defineEvryRequestClassifier((literalUserText) =>
-    classifyEvryRequest({ literalUserText, model })
+    classifyEvryRequest({ literalUserText, getModel })
   );
 }
 
@@ -221,9 +222,6 @@ export function createEvryRequestPost({
           },
         });
       }
-      if (error instanceof EvryRequestUnavailableError) {
-        return privateJson({ status: "unavailable" }, 503);
-      }
       const refusal = viewerRefusal(error);
       if (refusal) return refusal;
       throw error;
@@ -231,19 +229,11 @@ export function createEvryRequestPost({
   };
 }
 
-class EvryRequestUnavailableError extends Error {}
+const selectedEvryRequestClassifier =
+  evryRequestClassifierForModel(getEvryPolicyModel);
 
-const unavailableClassifier = defineEvryRequestClassifier(async () => {
-  throw new EvryRequestUnavailableError();
-});
-
-/**
- * #769 owns production model selection and will instantiate the factory above.
- * Until then the same auth-first, strict-body surface terminates at an explicit
- * unavailable classifier and exposes no model, capability, read, or plan.
- */
 export const POST = createEvryRequestPost({
-  classify: unavailableClassifier,
+  classify: selectedEvryRequestClassifier,
   continueRead: null,
   continueAction: null,
   audit: recordEvryRequestAudit,

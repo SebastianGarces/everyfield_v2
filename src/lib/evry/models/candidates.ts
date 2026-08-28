@@ -51,6 +51,22 @@ export const EVRY_MODEL_CANDIDATES = [
 export type EvryModelCandidate = (typeof EVRY_MODEL_CANDIDATES)[number];
 export type EvryModelCandidateId = EvryModelCandidate["id"];
 
+export const EVRY_POLICY_MAX_OUTPUT_TOKENS = 100 as const;
+export const EVRY_POLICY_TIMEOUT_MS = 60_000 as const;
+
+/** Keep benchmark and production provider conditions on one source of truth. */
+export function evryPolicyProviderOptions(candidate: EvryModelCandidate) {
+  return {
+    openai: {
+      store: false,
+      serviceTier: "default",
+      ...(candidate.reasoningEffort
+        ? { reasoningEffort: candidate.reasoningEffort }
+        : {}),
+    },
+  } as const;
+}
+
 export function evryModelCandidate(id: string): EvryModelCandidate | null {
   return EVRY_MODEL_CANDIDATES.find((candidate) => candidate.id === id) ?? null;
 }

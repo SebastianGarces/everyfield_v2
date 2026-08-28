@@ -18,6 +18,7 @@
     "evry:inventory:check": "tsx ops/evry/generate-inventory.ts --check",
     "evry:cost:audit": "node ops/evry-cost-audit.mjs",
     "evry:benchmark": "tsx --env-file-if-exists=.env.local scripts/evry-model-benchmark.ts",
+    "evry:verify-selected-model": "node --no-warnings --experimental-test-module-mocks --import tsx --env-file-if-exists=.env.local src/app/api/evry/requests/selected-model-live-proof.ts",
     "evry:langfuse:smoke": "tsx ops/evry-langfuse-smoke.ts",
     "db:generate": "drizzle-kit generate && tsx scripts/restamp-migration.ts && prettier --write --log-level warn \"src/db/migrations/meta/*.json\"",
     "db:migrate": "tsx scripts/db-migrate.ts",

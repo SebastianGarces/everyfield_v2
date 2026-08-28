@@ -9,7 +9,10 @@ import { normalizeEvryModelUsage } from "@/lib/evry/observability/usage";
 import type { EvryNormalizedUsage } from "@/lib/evry/observability/contract";
 import {
   calculateEvryModelCostUsd,
+  evryPolicyProviderOptions,
   EVRY_MODEL_CANDIDATES,
+  EVRY_POLICY_MAX_OUTPUT_TOKENS,
+  EVRY_POLICY_TIMEOUT_MS,
   type EvryModelCandidate,
   type EvryModelCandidateId,
 } from "@/lib/evry/models/candidates";
@@ -41,8 +44,6 @@ import {
 
 const BENCHMARK_SCHEMA_VERSION = 1 as const;
 const BENCHMARK_RUNNER_VERSION = "evry-model-benchmark-v1" as const;
-const BENCHMARK_MAX_OUTPUT_TOKENS = 100;
-const BENCHMARK_TIMEOUT_MS = 60_000;
 type BenchmarkPolicyDecision = EvryPolicyEvalFixture["expected"];
 
 const EMPTY_USAGE: LanguageModelUsage = {
@@ -194,18 +195,6 @@ function closedErrorName(error: unknown): string {
       : "UnknownError";
 }
 
-function candidateProviderOptions(candidate: EvryModelCandidate) {
-  return {
-    openai: {
-      store: false,
-      serviceTier: "default",
-      ...(candidate.reasoningEffort
-        ? { reasoningEffort: candidate.reasoningEffort }
-        : {}),
-    },
-  } as const;
-}
-
 function percentile(values: readonly number[], proportion: number): number {
   if (values.length === 0) return 0;
   const sorted = values.toSorted((left, right) => left - right);
@@ -306,10 +295,10 @@ async function runPolicyCase(input: {
     output: Output.object({ schema: evryPolicyProviderOutputSchema }),
     system: EVRY_POLICY_SYSTEM_PROMPT,
     prompt: input.fixture.request,
-    maxOutputTokens: BENCHMARK_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: EVRY_POLICY_MAX_OUTPUT_TOKENS,
     maxRetries: 0,
-    timeout: BENCHMARK_TIMEOUT_MS,
-    providerOptions: candidateProviderOptions(input.candidate),
+    timeout: EVRY_POLICY_TIMEOUT_MS,
+    providerOptions: evryPolicyProviderOptions(input.candidate),
     onChunk({ chunk }) {
       if (
         firstTokenAt === null &&
@@ -544,8 +533,8 @@ export async function runEvryModelBenchmark(input: {
     retries: 0 as const,
     store: false as const,
     serviceTier: "default" as const,
-    maxOutputTokens: BENCHMARK_MAX_OUTPUT_TOKENS,
-    timeoutMs: BENCHMARK_TIMEOUT_MS,
+    maxOutputTokens: EVRY_POLICY_MAX_OUTPUT_TOKENS,
+    timeoutMs: EVRY_POLICY_TIMEOUT_MS,
     promptsIdenticalAcrossCandidates: true as const,
     toolsExposedDuringPolicy: 0 as const,
   };

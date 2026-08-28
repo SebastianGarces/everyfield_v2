@@ -178,12 +178,12 @@ async function main(): Promise<void> {
   });
   if (estimatedMaximumCostUsd > options.maximumCostUsd) {
     throw new Error(
-      `Conservative preflight $${estimatedMaximumCostUsd.toFixed(4)} exceeds --max-cost-usd=$${options.maximumCostUsd.toFixed(4)}`
+      `Conservative preflight $${estimatedMaximumCostUsd.toFixed(6)} exceeds --max-cost-usd=$${options.maximumCostUsd.toFixed(6)}`
     );
   }
 
   process.stdout.write(
-    `Preflight: ${EVRY_MODEL_CANDIDATES.length} models × ${EVRY_POLICY_EVAL_FIXTURES.length} fixtures = ${EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length} calls; conservative ceiling $${estimatedMaximumCostUsd.toFixed(4)}.\n`
+    `Preflight: ${EVRY_MODEL_CANDIDATES.length} models × ${EVRY_POLICY_EVAL_FIXTURES.length} fixtures = ${EVRY_MODEL_CANDIDATES.length * EVRY_POLICY_EVAL_FIXTURES.length} calls; conservative ceiling $${estimatedMaximumCostUsd.toFixed(6)}.\n`
   );
   runDeterministicReleaseGates();
   await configureAndCheckLangfuse();
