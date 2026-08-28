@@ -154,6 +154,22 @@ function request(url: string, body: unknown): Request {
 }
 
 let stored: EvryStoredConversation | null = null;
+const requestPageContexts = new Map<string, EvryPageContext | null>();
+
+function rememberRequestPageContext(
+  requestKey: string,
+  pageContext: EvryPageContext | null
+): void {
+  if (pageContext !== null) {
+    assert.deepEqual(Object.keys(pageContext).sort(), ["kind", "recordId"]);
+  }
+  const existing = requestPageContexts.get(requestKey);
+  if (existing !== undefined) {
+    assert.deepEqual(pageContext, existing);
+    return;
+  }
+  requestPageContexts.set(requestKey, pageContext);
+}
 
 function newMessage(input: {
   id?: string;
@@ -195,6 +211,15 @@ function newMessage(input: {
 const store = {
   async create(input) {
     events.push("create");
+    rememberRequestPageContext(input.requestKey, input.requestPageContext);
+    const replay = stored?.messages.find(
+      ({ requestKey }) => requestKey === input.requestKey
+    );
+    if (replay) {
+      assert.equal(replay.body, input.body);
+      assert.ok(stored);
+      return stored;
+    }
     const initial = newMessage({
       requestKey: input.requestKey,
       sequence: 0,
@@ -231,6 +256,7 @@ const store = {
   },
   async append(input) {
     events.push("append");
+    rememberRequestPageContext(input.requestKey, input.requestPageContext);
     if (
       !stored ||
       stored.id !== input.conversationId ||
@@ -298,6 +324,7 @@ async function main(): Promise<void> {
   const pageContextResolver = await import("@/lib/evry/resolvers/page-context");
 
   let capturedActor: EvryPlantActor | null = null;
+  let pageContextRecordState: "available" | "missing" | "renamed" = "available";
   const resolvePageContext = async (input: {
     actor: EvryPlantActor;
     pageContext: EvryPageContext | null;
@@ -305,9 +332,16 @@ async function main(): Promise<void> {
     if (input.pageContext === null) return null;
     events.push("context");
     assert.equal(input.actor.plantId, PLANT_ID);
-    return input.pageContext.recordId === "foreign-task"
+    return input.pageContext.recordId === "foreign-task" ||
+      pageContextRecordState === "missing"
       ? null
-      : { ...input.pageContext, label: `Scoped ${input.pageContext.kind}` };
+      : {
+          ...input.pageContext,
+          label:
+            pageContextRecordState === "renamed"
+              ? `Renamed ${input.pageContext.kind}`
+              : `Scoped ${input.pageContext.kind}`,
+        };
   };
   const createPost = createRoute.createEvryConversationCreatePost({
     now: () => START,
@@ -433,6 +467,28 @@ async function main(): Promise<void> {
   assert.ok(capturedActor);
   assert.ok(stored);
 
+  pageContextRecordState = "missing";
+  sessions = [user()];
+  events.length = 0;
+  const replayedCreateAfterDelete = await response(
+    await createPost(
+      request("http://localhost/api/evry/conversations", {
+        requestKey: firstRequestKey,
+        message: LITERAL,
+        pageContext: { kind: "task", recordId: "task-1" },
+      })
+    )
+  );
+  assert.equal(replayedCreateAfterDelete.status, 201);
+  assert.equal(replayedCreateAfterDelete.body.conversation.id, CONVERSATION_ID);
+  assert.equal(replayedCreateAfterDelete.body.conversation.messages.length, 1);
+  assert.equal(
+    replayedCreateAfterDelete.body.conversation.messages[0].pageContext.label,
+    "Scoped task"
+  );
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+  pageContextRecordState = "available";
+
   contextQueries.length = 0;
   assert.equal(
     await pageContextResolver.resolveAuthorizedEvryPageContext({
@@ -501,6 +557,66 @@ async function main(): Promise<void> {
     null
   );
   assert.deepEqual(events.slice(0, 4), ["auth", "body", "context", "find"]);
+
+  const appendRetryKey = randomUUID();
+  const appendRetryBody = "Keep the scoped task in this request.";
+  sessions = [user()];
+  events.length = 0;
+  const firstAppend = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: appendRetryKey,
+          message: appendRetryBody,
+          pageContext: { kind: "task", recordId: "task-1" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(firstAppend.status, 200);
+  assert.equal(
+    firstAppend.body.conversation.messages.at(-1).pageContext.label,
+    "Scoped task"
+  );
+  const messageCountAfterFirstAppend =
+    firstAppend.body.conversation.messages.length;
+
+  pageContextRecordState = "renamed";
+  sessions = [user()];
+  events.length = 0;
+  const replayedAppendAfterRename = await response(
+    await messagePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+        {
+          requestKey: appendRetryKey,
+          message: appendRetryBody,
+          pageContext: { kind: "task", recordId: "task-1" },
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.equal(replayedAppendAfterRename.status, 200);
+  assert.equal(
+    replayedAppendAfterRename.body.conversation.messages.length,
+    messageCountAfterFirstAppend
+  );
+  assert.equal(
+    replayedAppendAfterRename.body.conversation.messages.at(-1).pageContext
+      .label,
+    "Scoped task"
+  );
+  assert.deepEqual(events.slice(0, 5), [
+    "auth",
+    "body",
+    "context",
+    "find",
+    "append",
+  ]);
+  pageContextRecordState = "available";
 
   const permissionLost = planResume.createEvryConversationPlanResumeRevalidator(
     {
@@ -596,6 +712,7 @@ async function main(): Promise<void> {
     author: "assistant",
     body: "Review the task before creating it.",
     pageContext: null,
+    requestPageContext: null,
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [confirmation],

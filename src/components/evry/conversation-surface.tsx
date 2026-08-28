@@ -71,7 +71,10 @@ export function ConversationSurface({ className }: { className?: string }) {
       >
         {isLoading ? (
           <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
-            <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+            <LoaderCircle
+              aria-hidden="true"
+              className="size-4 animate-spin motion-reduce:animate-none"
+            />
             Opening conversation…
           </div>
         ) : conversation?.messages.length ? (
@@ -183,7 +186,10 @@ export function ConversationSurface({ className }: { className?: string }) {
             className="cursor-pointer active:scale-[0.96]"
           >
             {isSending ? (
-              <LoaderCircle aria-hidden="true" className="animate-spin" />
+              <LoaderCircle
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              />
             ) : (
               <Send aria-hidden="true" />
             )}

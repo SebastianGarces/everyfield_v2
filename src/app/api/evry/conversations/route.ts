@@ -53,9 +53,10 @@ export function createEvryConversationCreatePost({
         return evryConversationJson({ status: "invalid" }, 400);
       }
 
+      const requestPageContext = parsed.data.pageContext ?? null;
       const pageContext = await resolvePageContext({
         actor,
-        pageContext: parsed.data.pageContext ?? null,
+        pageContext: requestPageContext,
       });
 
       const resumed = await create({
@@ -63,6 +64,7 @@ export function createEvryConversationCreatePost({
         requestKey: parsed.data.requestKey,
         message: parsed.data.message,
         pageContext,
+        requestPageContext,
         now: now(),
       });
       return evryConversationJson(

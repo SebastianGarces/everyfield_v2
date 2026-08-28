@@ -20,6 +20,8 @@ import {
   beginEvryConversationLoad,
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
+  evryConversationCompletionHref,
+  evryDraftAfterSubmission,
   evrySubmissionMessage,
   finishEvryConversationLoad,
   initialEvryConversationLoadState,
@@ -86,7 +88,7 @@ export function EvryShell({
     useState<VisibleEvryPageContext | null>(null);
   const [conversation, setConversation] =
     useState<PublicEvryConversation | null>(null);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraftState] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isPanelOpen, setPanelOpen] = useState(false);
@@ -101,6 +103,13 @@ export function EvryShell({
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const previousPathnameRef = useRef(pathname);
+  const currentPathnameRef = useRef(pathname);
+  const draftRef = useRef(draft);
+
+  const setDraft = useCallback((nextDraft: string) => {
+    draftRef.current = nextDraft;
+    setDraftState(nextDraft);
+  }, []);
 
   const cancelActiveConversationLoads = useCallback(() => {
     conversationLoadStateRef.current = cancelEvryConversationLoads(
@@ -110,6 +119,10 @@ export function EvryShell({
     setRequestedConversationId(null);
     setError(null);
   }, []);
+
+  useEffect(() => {
+    currentPathnameRef.current = pathname;
+  }, [pathname]);
 
   useEffect(() => {
     const previousPathname = previousPathnameRef.current;
@@ -145,6 +158,7 @@ export function EvryShell({
   );
 
   const expandToWorkspace = useCallback(() => {
+    currentPathnameRef.current = "/evry";
     setExpandedFromPanel(true);
     setPanelOpen(false);
     const query = conversation ? `?conversation=${conversation.id}` : "";
@@ -152,6 +166,7 @@ export function EvryShell({
   }, [conversation, router]);
 
   const returnToPage = useCallback(() => {
+    currentPathnameRef.current = "";
     if (expandedFromPanel) {
       cancelActiveConversationLoads();
       setExpandedFromPanel(false);
@@ -282,12 +297,14 @@ export function EvryShell({
       const nextConversation = await responseConversation(response);
       pendingSubmissionRef.current = null;
       setConversation(nextConversation);
-      setDraft("");
+      setDraft(evryDraftAfterSubmission(draftRef.current, message));
       setStatusMessage("Added to this conversation.");
 
-      if (pathname === "/evry") {
-        router.replace(`/evry?conversation=${nextConversation.id}`);
-      }
+      const completionHref = evryConversationCompletionHref(
+        currentPathnameRef.current,
+        nextConversation.id
+      );
+      if (completionHref) router.replace(completionHref);
     } catch {
       setError(
         "Unable to save your request. Check your connection and try again."
@@ -302,9 +319,9 @@ export function EvryShell({
     draft,
     isLoading,
     isSending,
-    pathname,
     requestedConversationId,
     router,
+    setDraft,
   ]);
 
   const value = useMemo<EvryShellValue>(
@@ -347,6 +364,7 @@ export function EvryShell({
       restoreLauncherFocus,
       returnToPage,
       sendMessage,
+      setDraft,
       statusMessage,
     ]
   );

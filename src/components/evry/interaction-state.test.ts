@@ -5,6 +5,8 @@ import {
   beginEvryConversationLoad,
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
+  evryConversationCompletionHref,
+  evryDraftAfterSubmission,
   evrySubmissionMessage,
   finishEvryConversationLoad,
   initialEvryConversationLoadState,
@@ -42,6 +44,33 @@ test("draft validation preserves every accepted message byte", () => {
   assert.equal(
     evrySubmissionMessage("  Create café follow-up — keep these bytes.  "),
     "  Create café follow-up — keep these bytes.  "
+  );
+});
+
+test("a successful request clears only the submitted draft snapshot", () => {
+  assert.equal(
+    evryDraftAfterSubmission("Create the task", "Create the task"),
+    ""
+  );
+  assert.equal(
+    evryDraftAfterSubmission(
+      "Create the task, then invite Alex",
+      "Create the task"
+    ),
+    "Create the task, then invite Alex"
+  );
+});
+
+test("completion routing follows the current route, not the source route", () => {
+  assert.equal(
+    evryConversationCompletionHref("/people", "conversation-1"),
+    null,
+    "leaving the workspace while a send is pending must not pull the user back"
+  );
+  assert.equal(
+    evryConversationCompletionHref("/evry", "conversation-1"),
+    "/evry?conversation=conversation-1",
+    "expanding a panel send must attach the new conversation to the workspace"
   );
 });
 

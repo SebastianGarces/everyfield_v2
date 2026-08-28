@@ -14,6 +14,23 @@ export function evrySubmissionMessage(draft: string): string | null {
   return draft.trim().length === 0 ? null : draft;
 }
 
+/** Keep any text entered while the accepted request was in flight. */
+export function evryDraftAfterSubmission(
+  currentDraft: string,
+  submittedDraft: string
+): string {
+  return currentDraft === submittedDraft ? "" : currentDraft;
+}
+
+export function evryConversationCompletionHref(
+  currentPathname: string,
+  conversationId: string
+): string | null {
+  return currentPathname === "/evry"
+    ? `/evry?conversation=${conversationId}`
+    : null;
+}
+
 function samePageContext(
   left: EvryPageContext | null,
   right: EvryPageContext | null

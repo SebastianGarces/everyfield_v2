@@ -330,6 +330,7 @@ test(
           requestKey: evryConversationRequestKeySchema.parse(createRequestKey),
           body: "different bytes",
           pageContext: null,
+          requestPageContext: null,
           createdAt: START,
         }),
       EvryConversationIdempotencyError
@@ -342,6 +343,7 @@ test(
           requestKey: evryConversationRequestKeySchema.parse(createRequestKey),
           body: LITERAL,
           pageContext: null,
+          requestPageContext: null,
           createdAt: START,
         }),
       EvryConversationIdempotencyError
@@ -359,6 +361,7 @@ test(
       author: "user" as const,
       body: "same concurrent bytes",
       pageContext: null,
+      requestPageContext: null,
       relevanceKeys: [],
       deliveryStatus: "complete" as const,
       artifacts: [],

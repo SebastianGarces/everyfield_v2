@@ -12,18 +12,13 @@ import {
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
-import type { EvryPageContext, EvryResolvedPageContext } from "./contract";
+import {
+  safeEvryPageContextLabel,
+  type EvryPageContext,
+  type EvryResolvedPageContext,
+} from "./contract";
 
 const recordIdSchema = z.string().uuid();
-
-function safeDisplayLabel(value: string, fallback: string): string {
-  const normalized = value
-    .normalize("NFKC")
-    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-  return [...(normalized || fallback)].slice(0, 160).join("");
-}
 
 async function scopedRecord(
   actor: EvryPlantActor,
@@ -52,7 +47,7 @@ async function scopedRecord(
       return record
         ? {
             recordId: record.id,
-            label: safeDisplayLabel(
+            label: safeEvryPageContextLabel(
               `${record.firstName} ${record.lastName}`,
               "Person record"
             ),
@@ -87,7 +82,7 @@ async function scopedRecord(
       return record
         ? {
             recordId: record.id,
-            label: safeDisplayLabel(
+            label: safeEvryPageContextLabel(
               meetingDisplayTitle(record),
               "Meeting record"
             ),
@@ -109,7 +104,7 @@ async function scopedRecord(
       return record
         ? {
             recordId: record.id,
-            label: safeDisplayLabel(record.name, "Team record"),
+            label: safeEvryPageContextLabel(record.name, "Team record"),
           }
         : null;
     }
@@ -129,7 +124,7 @@ async function scopedRecord(
       return record
         ? {
             recordId: record.id,
-            label: safeDisplayLabel(record.title, "Task record"),
+            label: safeEvryPageContextLabel(record.title, "Task record"),
           }
         : null;
     }

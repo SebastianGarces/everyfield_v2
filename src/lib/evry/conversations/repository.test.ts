@@ -4,6 +4,13 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { initialEvryConversationState } from "./contract";
+import {
+  fingerprintEvryConversationMessageRequest,
+  matchesEvryConversationRequestFingerprint,
+  type EvryConversationRequestFingerprintInput,
+} from "./repository";
+
 const REPOSITORY = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "repository.ts"
@@ -103,25 +110,114 @@ test("message idempotency binds exact bytes and the full semantic append", () =>
   assert.match(repository, /existing\.bodyFingerprint !== fingerprint/);
   assert.match(
     repository,
-    /existing\.requestFingerprint !== semanticFingerprint/
+    /matchesEvryConversationRequestFingerprint\(\{[\s\S]*storedFingerprint: existing\.requestFingerprint/
   );
   assert.match(
     repository,
-    /requestFingerprint\(\{[\s\S]*state: parsedState,[\s\S]*activePlan: normalizedActivePlan/
+    /fingerprintEvryConversationMessageRequest\(fingerprintInput\)/
   );
-  assert.match(
-    repository,
-    /pageContext:[\s\S]*kind: input\.pageContext\.kind,[\s\S]*recordId: input\.pageContext\.recordId/
-  );
+  assert.match(repository, /pageContext: input\.requestPageContext/);
   assert.doesNotMatch(
     repository.slice(
-      repository.indexOf("function requestFingerprint"),
+      repository.indexOf("function fingerprintEvryConversationMessageRequest"),
       repository.indexOf("function automaticTitle")
     ),
-    /input\.pageContext\.label/
+    /label/
   );
   assert.match(repository, /const replay = await exactReplay\(\)/);
   assert.match(repository, /EvryConversationIdempotencyError/);
+});
+
+const REQUEST_FINGERPRINT_INPUT: EvryConversationRequestFingerprintInput = {
+  author: "user",
+  body: "Keep the scoped task in this request.",
+  requestPageContext: {
+    kind: "task",
+    recordId: "50000000-0000-4000-8000-000000000001",
+  },
+  relevanceKeys: [],
+  deliveryStatus: "complete",
+  artifacts: [],
+  idempotencyContext: { status: "none" },
+  state: initialEvryConversationState(),
+  activePlan: { mode: "preserve" },
+};
+
+test("response-loss retries ignore intervening context deletion or rename", () => {
+  const storedFingerprint = fingerprintEvryConversationMessageRequest(
+    REQUEST_FINGERPRINT_INPUT
+  );
+
+  for (const storedPageContext of [
+    null,
+    {
+      kind: "task" as const,
+      recordId: "50000000-0000-4000-8000-000000000001",
+      label: "Old task title",
+    },
+    {
+      kind: "task" as const,
+      recordId: "50000000-0000-4000-8000-000000000001",
+      label: "Renamed task title",
+    },
+  ]) {
+    assert.equal(
+      matchesEvryConversationRequestFingerprint({
+        fingerprintInput: REQUEST_FINGERPRINT_INPUT,
+        storedFingerprint,
+        storedPageContext,
+      }),
+      true
+    );
+  }
+});
+
+test("legacy resolved fingerprints replay but a changed wire hint does not", () => {
+  const storedLaunchContext = {
+    kind: "launch" as const,
+    recordId: "60000000-0000-4000-8000-000000000001",
+    label: "Launch record",
+  };
+  const retryInput: EvryConversationRequestFingerprintInput = {
+    ...REQUEST_FINGERPRINT_INPUT,
+    requestPageContext: { kind: "launch", recordId: "current" },
+  };
+  const legacyFingerprint = fingerprintEvryConversationMessageRequest({
+    ...retryInput,
+    requestPageContext: {
+      kind: storedLaunchContext.kind,
+      recordId: storedLaunchContext.recordId,
+    },
+  });
+  assert.equal(
+    matchesEvryConversationRequestFingerprint({
+      fingerprintInput: retryInput,
+      storedFingerprint: legacyFingerprint,
+      storedPageContext: storedLaunchContext,
+    }),
+    true
+  );
+
+  assert.equal(
+    matchesEvryConversationRequestFingerprint({
+      fingerprintInput: {
+        ...REQUEST_FINGERPRINT_INPUT,
+        requestPageContext: {
+          kind: "task",
+          recordId: "50000000-0000-4000-8000-000000000002",
+        },
+      },
+      storedFingerprint: fingerprintEvryConversationMessageRequest(
+        REQUEST_FINGERPRINT_INPUT
+      ),
+      storedPageContext: {
+        kind: "task",
+        recordId: "50000000-0000-4000-8000-000000000001",
+        label: "Scoped task",
+      },
+    }),
+    false
+  );
 });
 
 test("database constraints carry exact tenant identity through the aggregate", () => {

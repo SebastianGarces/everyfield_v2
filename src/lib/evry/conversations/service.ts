@@ -5,7 +5,10 @@ import type {
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
+import type {
+  EvryPageContext,
+  EvryResolvedPageContext,
+} from "@/lib/evry/resolvers/contract";
 
 import {
   storedEvryClarificationArtifactDocument,
@@ -104,6 +107,7 @@ export async function createEvryConversation(input: {
   requestKey: string;
   message: string;
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
 }): Promise<EvryResumedConversation> {
@@ -114,6 +118,7 @@ export async function createEvryConversation(input: {
     requestKey,
     body: input.message,
     pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
     createdAt: input.now,
   });
   return Object.freeze({
@@ -136,6 +141,7 @@ export async function appendTrustedEvryConversationMessage(input: {
   author: EvryConversationAuthor;
   body: string;
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
@@ -158,6 +164,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     author: input.author,
     body: input.body,
     pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
     relevanceKeys: input.relevanceKeys,
     deliveryStatus: input.deliveryStatus,
     artifacts: input.artifacts,
@@ -211,6 +218,7 @@ export async function continueEvryConversation(input: {
   requestKey: string;
   message: string;
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
@@ -259,6 +267,7 @@ export async function continueEvryConversation(input: {
     author: "user",
     body: input.message,
     pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
     relevanceKeys,
     deliveryStatus: "complete",
     artifacts: [],
@@ -279,6 +288,7 @@ export async function continueEvryConversation(input: {
       author: "assistant",
       body: reference.artifact.prompt,
       pageContext: null,
+      requestPageContext: null,
       relevanceKeys: [],
       deliveryStatus: "complete",
       artifacts: [storedEvryClarificationArtifactDocument(reference.artifact)],

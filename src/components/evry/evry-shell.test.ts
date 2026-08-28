@@ -9,6 +9,7 @@ const read = (...segments: string[]) =>
 
 const layout = read("app", "(dashboard)", "layout.tsx");
 const shell = read("components", "evry", "evry-shell.tsx");
+const interaction = read("components", "evry", "interaction-state.ts");
 const launcher = read("components", "evry", "evry-launcher.tsx");
 const panel = read("components", "evry", "evry-panel.tsx");
 const workspace = read("components", "evry", "evry-workspace.tsx");
@@ -90,7 +91,7 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
 test("workspace URL updates stay in the App Router and conversation loads use the latest-attempt gate", () => {
   assert.match(
     shell,
-    /router\.replace\(`\/evry\?conversation=\$\{nextConversation\.id\}`\)/
+    /const completionHref = evryConversationCompletionHref\([\s\S]*currentPathnameRef\.current,[\s\S]*nextConversation\.id[\s\S]*if \(completionHref\) router\.replace\(completionHref\)/
   );
   assert.doesNotMatch(shell, /window\.history\.replaceState/);
   assert.match(
@@ -113,6 +114,26 @@ test("workspace URL updates stay in the App Router and conversation loads use th
   );
   assert.match(shell, /\[conversation\?\.id\]\s*\)/);
   assert.doesNotMatch(shell, /\[conversation\?\.id, isLoading\]/);
+});
+
+test("send completion follows current navigation and preserves in-flight edits", () => {
+  assert.match(shell, /const currentPathnameRef = useRef\(pathname\)/);
+  assert.match(
+    shell,
+    /currentPathnameRef\.current = "\/evry";[\s\S]*router\.push\(`\/evry/
+  );
+  assert.match(
+    shell,
+    /setDraft\(evryDraftAfterSubmission\(draftRef\.current, message\)\)/
+  );
+  assert.match(
+    interaction,
+    /currentPathname === "\/evry"[\s\S]*`\/evry\?conversation=\$\{conversationId\}`[\s\S]*: null/
+  );
+  assert.match(
+    interaction,
+    /currentDraft === submittedDraft \? "" : currentDraft/
+  );
 });
 
 test("message retries keep their semantic request identity until success", () => {
@@ -144,6 +165,15 @@ test("the transcript is a live attributed log and renders server-owned context l
   assert.match(surface, /message\.author === "user" \? "You" : "Evry"/);
   assert.match(surface, /message\.pageContext\.label/);
   assert.doesNotMatch(surface, /CONTEXT_KIND_LABELS/);
+});
+
+test("loading remains understandable without motion", () => {
+  assert.equal(
+    surface.match(/animate-spin motion-reduce:animate-none/g)?.length,
+    2
+  );
+  assert.match(surface, /Opening conversation…/);
+  assert.match(surface, /Sending…/);
 });
 
 test("removing context removes it from the request body", () => {

@@ -15,7 +15,10 @@ import {
   type EvryConversationDeliveryStatus,
 } from "@/db/schema";
 import {
+  evryPageContextSchema,
   evryResolvedPageContextSchema,
+  evryStoredPageContextSchema,
+  type EvryPageContext,
   type EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
 
@@ -110,28 +113,33 @@ function bodyFingerprint(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
-function requestFingerprint(input: {
+export type EvryConversationRequestFingerprintInput = Readonly<{
   author: EvryConversationAuthor;
   body: string;
-  pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
   idempotencyContext: EvryConversationMessageIdempotencyContext;
   state: EvryConversationStateDocument;
   activePlan: ActivePlanMutation;
-}): string {
+}>;
+
+export function fingerprintEvryConversationMessageRequest(
+  input: EvryConversationRequestFingerprintInput
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
-        ...input,
-        pageContext:
-          input.pageContext === null
-            ? null
-            : {
-                kind: input.pageContext.kind,
-                recordId: input.pageContext.recordId,
-              },
+        author: input.author,
+        body: input.body,
+        pageContext: input.requestPageContext,
+        relevanceKeys: input.relevanceKeys,
+        deliveryStatus: input.deliveryStatus,
+        artifacts: input.artifacts,
+        idempotencyContext: input.idempotencyContext,
+        state: input.state,
+        activePlan: input.activePlan,
       }),
       "utf8"
     )
@@ -147,9 +155,56 @@ function automaticTitle(body: string): string {
 
 function parsePageContext(input: unknown): EvryResolvedPageContext | null {
   if (input === null) return null;
-  const parsed = evryResolvedPageContextSchema.safeParse(input);
+  const parsed = evryStoredPageContextSchema.safeParse(input);
   if (!parsed.success) throw new EvryConversationStorageError();
   return parsed.data;
+}
+
+function labelFreePageContext(
+  input: EvryResolvedPageContext | null
+): EvryPageContext | null {
+  return input === null ? null : { kind: input.kind, recordId: input.recordId };
+}
+
+function requestMatchesLegacyStoredPageContext(
+  request: EvryPageContext | null,
+  stored: EvryResolvedPageContext | null
+): boolean {
+  if (request === null || stored === null)
+    return request === null && stored === null;
+  return (
+    request.kind === stored.kind &&
+    (request.recordId === stored.recordId ||
+      (request.kind === "launch" && request.recordId === "current"))
+  );
+}
+
+export function matchesEvryConversationRequestFingerprint(input: {
+  fingerprintInput: EvryConversationRequestFingerprintInput;
+  storedFingerprint: string;
+  storedPageContext: EvryResolvedPageContext | null;
+}): boolean {
+  if (
+    input.storedFingerprint ===
+    fingerprintEvryConversationMessageRequest(input.fingerprintInput)
+  ) {
+    return true;
+  }
+  if (
+    !requestMatchesLegacyStoredPageContext(
+      input.fingerprintInput.requestPageContext,
+      input.storedPageContext
+    )
+  ) {
+    return false;
+  }
+  return (
+    input.storedFingerprint ===
+    fingerprintEvryConversationMessageRequest({
+      ...input.fingerprintInput,
+      requestPageContext: labelFreePageContext(input.storedPageContext),
+    })
+  );
 }
 
 function parseActivePlan(input: {
@@ -404,24 +459,30 @@ export async function createEvryConversationRecord(input: {
   requestKey: EvryConversationRequestKey;
   body: string;
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   createdAt: Date;
 }): Promise<EvryStoredConversation> {
   const body = bodySchema.parse(input.body);
   const pageContext = evryResolvedPageContextSchema
     .nullable()
     .parse(input.pageContext);
+  const requestPageContext = evryPageContextSchema
+    .nullable()
+    .parse(input.requestPageContext);
   const state = initialEvryConversationState();
-  const semanticFingerprint = requestFingerprint({
+  const fingerprintInput = {
     author: "user",
     body,
-    pageContext,
+    requestPageContext,
     relevanceKeys: [],
     deliveryStatus: "complete",
     artifacts: [],
     idempotencyContext: { status: "none" },
     state,
     activePlan: { mode: "preserve" },
-  });
+  } as const;
+  const semanticFingerprint =
+    fingerprintEvryConversationMessageRequest(fingerprintInput);
   const conversationId = evryConversationIdSchema.parse(randomUUID());
   const messageId = evryConversationMessageIdSchema.parse(randomUUID());
 
@@ -471,7 +532,11 @@ export async function createEvryConversationRecord(input: {
     if (
       !existing ||
       existing.bodyFingerprint !== bodyFingerprint(body) ||
-      existing.requestFingerprint !== semanticFingerprint
+      !matchesEvryConversationRequestFingerprint({
+        fingerprintInput,
+        storedFingerprint: existing.requestFingerprint,
+        storedPageContext: parsePageContext(existing.pageContext),
+      })
     ) {
       throw new EvryConversationIdempotencyError();
     }
@@ -506,6 +571,7 @@ async function findMessageByRequestKey(input: {
   conversationId: string;
   bodyFingerprint: string;
   requestFingerprint: string;
+  pageContext: unknown;
 }> | null> {
   const [message] = await db
     .select({
@@ -513,6 +579,7 @@ async function findMessageByRequestKey(input: {
       conversationId: evryConversationMessages.conversationId,
       bodyFingerprint: evryConversationMessages.bodyFingerprint,
       requestFingerprint: evryConversationMessages.requestFingerprint,
+      pageContext: evryConversationMessages.pageContext,
     })
     .from(evryConversationMessages)
     .where(
@@ -537,6 +604,7 @@ export async function appendEvryConversationRecord(input: {
   author: EvryConversationAuthor;
   body: string;
   pageContext: EvryResolvedPageContext | null;
+  requestPageContext: EvryPageContext | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
@@ -564,6 +632,9 @@ export async function appendEvryConversationRecord(input: {
   const pageContext = evryResolvedPageContextSchema
     .nullable()
     .parse(input.pageContext);
+  const requestPageContext = evryPageContextSchema
+    .nullable()
+    .parse(input.requestPageContext);
   const relevanceKeys = evryConversationRelevanceKeysSchema.parse(
     input.relevanceKeys
   );
@@ -586,17 +657,19 @@ export async function appendEvryConversationRecord(input: {
       document,
     };
   });
-  const semanticFingerprint = requestFingerprint({
+  const fingerprintInput = {
     author,
     body,
-    pageContext,
+    requestPageContext,
     relevanceKeys,
     deliveryStatus,
     artifacts: artifacts.map(({ document }) => document),
     idempotencyContext,
     state: parsedState,
     activePlan: normalizedActivePlan,
-  });
+  } as const;
+  const semanticFingerprint =
+    fingerprintEvryConversationMessageRequest(fingerprintInput);
   async function exactReplay(): Promise<EvryStoredConversation | null> {
     const existing = await findMessageByRequestKey({
       actorUserId: input.actorUserId,
@@ -607,7 +680,11 @@ export async function appendEvryConversationRecord(input: {
     if (
       existing.conversationId !== input.conversationId ||
       existing.bodyFingerprint !== fingerprint ||
-      existing.requestFingerprint !== semanticFingerprint
+      !matchesEvryConversationRequestFingerprint({
+        fingerprintInput,
+        storedFingerprint: existing.requestFingerprint,
+        storedPageContext: parsePageContext(existing.pageContext),
+      })
     ) {
       throw new EvryConversationIdempotencyError();
     }
