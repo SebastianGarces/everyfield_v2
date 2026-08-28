@@ -5,6 +5,7 @@ import type { SeatFields } from "@/lib/auth/tenancy";
 import {
   DEFAULT_SETTINGS_SECTION,
   isSettingsSectionId,
+  resolveSettingsDestination,
   RETIRED_SETTINGS_SECTIONS,
   SETTINGS_SECTIONS,
   sectionMatchesQuery,
@@ -199,12 +200,14 @@ test("a retired id lands on the section that absorbed it", () => {
   for (const [retired, target] of Object.entries(RETIRED_SETTINGS_SECTIONS)) {
     assert.equal(isSettingsSectionId(retired), false, retired);
     assert.ok(isSettingsSectionId(target), target);
+    assert.equal(resolveSettingsDestination(retired)?.id, target, retired);
   }
 });
 
 test("every section id resolves and nothing else does", () => {
   for (const section of SETTINGS_SECTIONS) {
     assert.ok(isSettingsSectionId(section.id));
+    assert.equal(resolveSettingsDestination(section.id), section);
     // A FRAGMENT since #657 (ruled 2026-08-22): settings opens over the current
     // screen, so a section's own address carries no path at all.
     assert.equal(settingsSectionHref(section.id), `#settings/${section.id}`);
@@ -218,6 +221,11 @@ test("every section id resolves and nothing else does", () => {
       isSettingsSectionId(bogus),
       false,
       `"${bogus}" must not resolve to a section`
+    );
+    assert.equal(
+      resolveSettingsDestination(bogus),
+      null,
+      `"${bogus}" must not become a durable Settings destination`
     );
   }
 });

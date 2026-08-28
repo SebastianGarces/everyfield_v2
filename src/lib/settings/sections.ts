@@ -328,17 +328,31 @@ export function settingsSectionFromHash(
 }
 
 /**
- * The section an id NAMES, corrected — total, so it never needs a `!`.
+ * The live section a durable id names, or `null` when it never named one.
  *
- * Split from the parse above because the retired `/settings/*` redirects ask
- * exactly this and have already established that they are looking at a settings
- * address. One spelling of "what does this id mean", read by the fragment parser
- * and by the two redirect pages, so a retired id cannot go one place from the
- * address bar and another from a mailed link.
+ * This is the canonical boundary for stored destinations: a current id resolves
+ * to itself, a retired id resolves to the live section that absorbed it, and an
+ * arbitrary string does not silently become Account. Browser addresses use the
+ * total wrapper below because a typo there intentionally opens the default.
+ */
+export function resolveSettingsDestination(id: string): SettingsSection | null {
+  const live = SETTINGS_SECTIONS.find((section) => section.id === id);
+  if (live) return live;
+
+  const replacementId = RETIRED_SETTINGS_SECTIONS[id];
+  if (!replacementId) return null;
+  return (
+    SETTINGS_SECTIONS.find((section) => section.id === replacementId) ?? null
+  );
+}
+
+/**
+ * The section an address names, corrected — total, so callers never need a `!`.
+ * Unknown address input intentionally lands on the default section; durable
+ * artifacts must use {@link resolveSettingsDestination} and retain `null`.
  */
 export function resolveSettingsSection(id: string): SettingsSectionId {
-  if (isSettingsSectionId(id)) return id;
-  return RETIRED_SETTINGS_SECTIONS[id] ?? DEFAULT_SETTINGS_SECTION;
+  return resolveSettingsDestination(id)?.id ?? DEFAULT_SETTINGS_SECTION;
 }
 
 /**
