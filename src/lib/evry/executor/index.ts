@@ -1,6 +1,9 @@
 export {
   executeEvryActionPlan,
+  executeEvryRecipePlan,
   type ExecuteEvryActionPlanResult,
+  type ExecuteEvryGenericPlanInput,
+  type ExecuteEvryRecipePlanInput,
   type EvryExecutionStepResult,
 } from "./core";
 export {

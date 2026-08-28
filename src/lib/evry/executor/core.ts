@@ -18,6 +18,11 @@ import {
   findExactEvryActionPlan,
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
+import { storedDocumentMatchesEvryRecipe } from "@/lib/evry/recipes/contract";
+import type {
+  EvryRecipeDefinition,
+  EvryRecipeRegistry,
+} from "@/lib/evry/recipes/schema";
 
 import {
   findEvryExecutionSnapshot,
@@ -29,7 +34,12 @@ import {
   type EvryExecutionAttemptRecord,
   type EvryExecutionSnapshot,
 } from "./repository";
-import type { EvryExecutionCapabilityRegistry } from "./registry";
+import {
+  createEvryExecutionCapabilityRegistry,
+  defineEvryExecutionCapability,
+  type EvryExecutionCapabilityRegistration,
+  type EvryExecutionCapabilityRegistry,
+} from "./registry";
 
 export type EvryExecutionStepResult = Readonly<{
   stepId: string;
@@ -67,6 +77,33 @@ export type EvryExecutorBoundaries = Readonly<{
   expirePlan: typeof confirmExactEvryActionPlan;
   now(): Date;
 }>;
+
+export type ExecuteEvryGenericPlanInput = Readonly<{
+  actor: EvryPlantActor;
+  planId: string;
+  fingerprint: string;
+  registry: EvryExecutionCapabilityRegistry;
+  recipeRegistry?: never;
+}>;
+
+export type ExecuteEvryRecipePlanInput = Readonly<{
+  actor: EvryPlantActor;
+  planId: string;
+  fingerprint: string;
+  recipeRegistry: EvryRecipeRegistry;
+  registry?: never;
+}>;
+
+type ExecuteEvryPlanInput =
+  | ExecuteEvryGenericPlanInput
+  | ExecuteEvryRecipePlanInput;
+
+function executionSourceRegistry(
+  input: ExecuteEvryPlanInput
+): EvryExecutionCapabilityRegistry | null {
+  if (input.recipeRegistry) return input.recipeRegistry.executionRegistry;
+  return input.registry ?? null;
+}
 
 const productionBoundaries: EvryExecutorBoundaries = Object.freeze({
   authorizeCapability: authorizeEvryEffectCapability,
@@ -139,6 +176,84 @@ function parseExactPlan(
   }
 }
 
+/**
+ * Derive executable registrations from the authoritative recipe registration.
+ * Explicit retryable results for never-retry steps become durable failures.
+ * Throws remain non-durable so a same-key replay can recover an effect whose
+ * commit succeeded but whose response was lost.
+ */
+function executionRegistryForRecipe(input: {
+  planId: string;
+  fingerprint: string;
+  definition: EvryRecipeDefinition;
+  registry: EvryRecipeRegistry;
+}): EvryExecutionCapabilityRegistry | null {
+  const neverEffectKeys = new Set(
+    input.definition.steps
+      .filter(({ failurePolicy }) => failurePolicy.retry === "never")
+      .map(({ id }) => executionEffectKey(input.planId, input.fingerprint, id))
+  );
+  const identities = [
+    ...new Set(
+      input.definition.steps.map(({ capabilityIdentity }) => capabilityIdentity)
+    ),
+  ];
+  const registrations: EvryExecutionCapabilityRegistration[] = [];
+  for (const identity of identities) {
+    const registration =
+      input.registry.executionRegistry.registrationFor(identity);
+    if (!registration) return null;
+    registrations.push(
+      defineEvryExecutionCapability({
+        planCapability: registration.planCapability,
+        async executeIfCurrent(effectInput) {
+          const result = await registration.executeIfCurrent(effectInput);
+          if (
+            result.status === "retryable" &&
+            neverEffectKeys.has(effectInput.effectKey)
+          ) {
+            return { status: "failed", excludedCount: 0 };
+          }
+          return result;
+        },
+      })
+    );
+  }
+  return createEvryExecutionCapabilityRegistry(registrations);
+}
+
+function validatedExecution(input: {
+  planId: string;
+  fingerprint: string;
+  document: EvryActionPlanDocument;
+  execution: ExecuteEvryPlanInput;
+}): EvryExecutionCapabilityRegistry | null {
+  if (input.document.recipe) {
+    const recipeRegistry = input.execution.recipeRegistry;
+    if (!recipeRegistry) return null;
+    const definition = recipeRegistry.registrationFor(
+      input.document.recipe.identity
+    );
+    if (
+      !definition ||
+      !storedDocumentMatchesEvryRecipe({
+        definition,
+        document: input.document,
+      })
+    ) {
+      return null;
+    }
+    return executionRegistryForRecipe({
+      planId: input.planId,
+      fingerprint: input.fingerprint,
+      definition,
+      registry: recipeRegistry,
+    });
+  }
+
+  return input.execution.registry ?? null;
+}
+
 function terminalStatusOf(steps: readonly EvryExecutionStepResult[]): {
   attemptStatus: "completed" | "partially_failed" | "failed" | "refused";
   planStatus: "completed" | "partially_failed" | "failed";
@@ -184,12 +299,9 @@ async function persistRefusal(
  * boundaries below and cannot accept actor, time, or repository data from HTTP.
  */
 export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
-  return async function execute(input: {
-    actor: EvryPlantActor;
-    planId: string;
-    fingerprint: string;
-    registry: EvryExecutionCapabilityRegistry;
-  }): Promise<ExecuteEvryActionPlanResult> {
+  return async function execute(
+    input: ExecuteEvryPlanInput
+  ): Promise<ExecuteEvryActionPlanResult> {
     const exact = await boundaries.findExactPlan({
       planId: input.planId,
       actorUserId: input.actor.userId,
@@ -198,8 +310,17 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
     });
     if (!exact) return { status: "unavailable", steps: [] };
 
-    const document = parseExactPlan(exact, input.registry);
+    const sourceRegistry = executionSourceRegistry(input);
+    if (!sourceRegistry) return { status: "unavailable", steps: [] };
+    const document = parseExactPlan(exact, sourceRegistry);
     if (!document) return { status: "unavailable", steps: [] };
+    const registry = validatedExecution({
+      planId: exact.id,
+      fingerprint: exact.fingerprint,
+      document,
+      execution: input,
+    });
+    if (!registry) return { status: "unavailable", steps: [] };
 
     let snapshot = await boundaries.findSnapshot({
       planId: exact.id,
@@ -285,7 +406,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         continue;
       }
 
-      const executionRegistration = input.registry.registrationFor(
+      const executionRegistration = registry.registrationFor(
         step.capabilityIdentity
       );
       const authorization = await boundaries.authorizeCapability(
@@ -316,7 +437,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
       try {
         current = parseStoredEvryActionPlan({
           document: currentDocument,
-          registry: input.registry.planRegistry,
+          registry: registry.planRegistry,
         });
       } catch {
         // The same neutral refusal covers a stale confirmation, expiry, actor,
@@ -432,5 +553,12 @@ export async function executeEvryActionPlan(input: {
   fingerprint: string;
   registry: EvryExecutionCapabilityRegistry;
 }): Promise<ExecuteEvryActionPlanResult> {
+  return productionExecutor(input);
+}
+
+/** Execute a recipe only after matching its persisted plan to live authority. */
+export async function executeEvryRecipePlan(
+  input: ExecuteEvryRecipePlanInput
+): Promise<ExecuteEvryActionPlanResult> {
   return productionExecutor(input);
 }

@@ -25,10 +25,41 @@ export type EvryActionStep = Readonly<{
   effectClass: EvryEffectClass;
   arguments: Readonly<Record<string, EvryJsonValue>>;
   dependsOn: readonly string[];
+  /**
+   * Fingerprint-bound confirmation copy. Optional only for version-1 plans
+   * created before EV-018; the recipe compiler and runner require it on every
+   * recipe effect and verify it against the registered recipe.
+   */
+  disclosure?: EvryPlanStepDisclosure;
+}>;
+
+export type EvryPlanDisclosureItem = Readonly<{
+  label: string;
+  value: string;
+}>;
+
+export type EvryPlanStepDisclosure = Readonly<{
+  title: string;
+  items: readonly [EvryPlanDisclosureItem, ...EvryPlanDisclosureItem[]];
+  consequences: readonly string[];
+}>;
+
+export type EvryPlanConfirmationDisclosure = Readonly<{
+  title: string;
+  actionLabel: string;
+}>;
+
+export type EvryPlanRecipeMetadata = Readonly<{
+  identity: string;
+  preconditionIdentities: readonly string[];
+  safeRetryStepIds: readonly string[];
 }>;
 
 export type EvryActionPlanDocument = Readonly<{
   version: typeof EVRY_PLAN_DOCUMENT_VERSION;
+  /** See the compatibility note on {@link EvryActionStep.disclosure}. */
+  recipe?: EvryPlanRecipeMetadata;
+  confirmation?: EvryPlanConfirmationDisclosure;
   steps: readonly [EvryActionStep, ...EvryActionStep[]];
 }>;
 
@@ -44,10 +75,36 @@ const jsonValueSchema: z.ZodType<EvryJsonValue> = z.lazy(() =>
 );
 
 const stepIdSchema = z.string().regex(STEP_ID_PATTERN);
+const identitySchema = z.string().trim().min(1).max(200);
+const disclosureTextSchema = z.string().trim().min(1).max(1_000);
+
+const recipeMetadataSchema = z.strictObject({
+  identity: identitySchema,
+  preconditionIdentities: z.array(identitySchema),
+  safeRetryStepIds: z.array(stepIdSchema),
+});
+
+const confirmationDisclosureSchema = z.strictObject({
+  title: disclosureTextSchema,
+  actionLabel: disclosureTextSchema,
+});
+
+const stepDisclosureSchema = z.strictObject({
+  title: disclosureTextSchema,
+  items: z
+    .array(
+      z.strictObject({
+        label: disclosureTextSchema,
+        value: z.string().min(1).max(4_000),
+      })
+    )
+    .min(1),
+  consequences: z.array(disclosureTextSchema).max(16),
+});
 
 const candidateStepSchema = z.strictObject({
   id: stepIdSchema,
-  capabilityIdentity: z.string().min(1),
+  capabilityIdentity: identitySchema,
   arguments: z.unknown(),
   dependsOn: z.array(stepIdSchema),
 });
@@ -62,10 +119,13 @@ const storedStepSchema = z.strictObject({
   effectClass: z.enum(EVRY_EFFECT_CLASSES),
   arguments: z.record(z.string(), jsonValueSchema),
   dependsOn: z.array(stepIdSchema),
+  disclosure: stepDisclosureSchema.optional(),
 });
 
 const storedDocumentSchema = z.strictObject({
   version: z.literal(EVRY_PLAN_DOCUMENT_VERSION),
+  recipe: recipeMetadataSchema.optional(),
+  confirmation: confirmationDisclosureSchema.optional(),
   steps: z.array(storedStepSchema).min(1),
 });
 
@@ -134,6 +194,53 @@ function validateGraph(steps: readonly EvryActionStep[]): void {
   for (const id of byId.keys()) visit(id);
 }
 
+function validateRecipeMetadata(
+  recipe: EvryPlanRecipeMetadata | undefined,
+  confirmation: EvryPlanConfirmationDisclosure | undefined,
+  steps: readonly EvryActionStep[]
+): void {
+  if ((recipe === undefined) !== (confirmation === undefined)) {
+    throw new EvryPlanValidationError(
+      "Evry recipe metadata and confirmation disclosure must appear together"
+    );
+  }
+  if (!recipe) {
+    if (steps.some(({ disclosure }) => disclosure !== undefined)) {
+      throw new EvryPlanValidationError(
+        "Only a registered Evry recipe may carry step disclosure"
+      );
+    }
+    return;
+  }
+
+  if (steps.some(({ disclosure }) => disclosure === undefined)) {
+    throw new EvryPlanValidationError(
+      "Every Evry recipe effect requires confirmation disclosure"
+    );
+  }
+
+  if (
+    new Set(recipe.safeRetryStepIds).size !== recipe.safeRetryStepIds.length
+  ) {
+    throw new EvryPlanValidationError("Evry recipe repeats a safe retry step");
+  }
+  if (
+    new Set(recipe.preconditionIdentities).size !==
+    recipe.preconditionIdentities.length
+  ) {
+    throw new EvryPlanValidationError("Evry recipe repeats a precondition");
+  }
+
+  const stepIds = new Set(steps.map(({ id }) => id));
+  for (const stepId of recipe.safeRetryStepIds) {
+    if (!stepIds.has(stepId)) {
+      throw new EvryPlanValidationError(
+        `Evry recipe names an unknown safe retry step: ${stepId}`
+      );
+    }
+  }
+}
+
 function ensureJsonArguments(
   capabilityIdentity: string,
   value: unknown
@@ -145,6 +252,22 @@ function ensureJsonArguments(
     );
   }
   return parsed.data;
+}
+
+function storedDisclosure(
+  value: z.infer<typeof stepDisclosureSchema>
+): EvryPlanStepDisclosure {
+  const [first, ...rest] = value.items;
+  if (!first) {
+    throw new EvryPlanValidationError(
+      "Stored Evry plan disclosure has no visible items"
+    );
+  }
+  return {
+    title: value.title,
+    items: [first, ...rest],
+    consequences: value.consequences,
+  };
 }
 
 export function parseEvryActionPlanCandidate(input: {
@@ -244,12 +367,24 @@ export function parseStoredEvryActionPlan(input: {
         parsedArguments.data
       ),
       dependsOn: step.dependsOn,
+      ...(step.disclosure
+        ? { disclosure: storedDisclosure(step.disclosure) }
+        : {}),
     };
   });
 
   validateGraph(steps);
+  validateRecipeMetadata(
+    document.data.recipe,
+    document.data.confirmation,
+    steps
+  );
   return deepFreeze({
     version: EVRY_PLAN_DOCUMENT_VERSION,
+    ...(document.data.recipe ? { recipe: document.data.recipe } : {}),
+    ...(document.data.confirmation
+      ? { confirmation: document.data.confirmation }
+      : {}),
     steps: steps as [EvryActionStep, ...EvryActionStep[]],
   });
 }

@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "recipe": {
+    "identity": "fixture:meeting.invitation",
+    "preconditionIdentities": ["fixture:audience.present"],
+    "safeRetryStepIds": ["create-meeting", "add-guests", "send-invitations"]
+  },
+  "confirmation": {
+    "title": "Create meeting and send invitations",
+    "actionLabel": "Create meeting and send 1"
+  },
+  "steps": [
+    {
+      "id": "create-meeting",
+      "capabilityIdentity": "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+      "effectClass": "database_write",
+      "arguments": {
+        "meetingId": "10000000-0000-4000-8000-000000000001",
+        "startsAt": "2026-09-02T14:00:00-04:00"
+      },
+      "dependsOn": [],
+      "disclosure": {
+        "title": "Create the meeting",
+        "items": [
+          {
+            "label": "Meeting",
+            "value": "10000000-0000-4000-8000-000000000001"
+          },
+          { "label": "Starts", "value": "2026-09-02T14:00:00-04:00" }
+        ],
+        "consequences": ["Adds one meeting to the plant calendar."]
+      }
+    },
+    {
+      "id": "add-guests",
+      "capabilityIdentity": "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
+      "effectClass": "database_write",
+      "arguments": {
+        "meetingId": "10000000-0000-4000-8000-000000000001",
+        "personIds": [
+          "20000000-0000-4000-8000-000000000001",
+          "20000000-0000-4000-8000-000000000002"
+        ]
+      },
+      "dependsOn": ["create-meeting"],
+      "disclosure": {
+        "title": "Add resolved guests",
+        "items": [
+          {
+            "label": "Meeting",
+            "value": "10000000-0000-4000-8000-000000000001"
+          },
+          {
+            "label": "People",
+            "value": "[\"20000000-0000-4000-8000-000000000001\",\"20000000-0000-4000-8000-000000000002\"]"
+          }
+        ],
+        "consequences": ["Adds two people to the meeting guest list."]
+      }
+    },
+    {
+      "id": "send-invitations",
+      "capabilityIdentity": "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
+      "effectClass": "outbound_communication",
+      "arguments": {
+        "meetingId": "10000000-0000-4000-8000-000000000001",
+        "recipientIds": ["30000000-0000-4000-8000-000000000001"],
+        "subject": "Vision Meeting",
+        "body": "Please join us."
+      },
+      "dependsOn": ["create-meeting"],
+      "disclosure": {
+        "title": "Send the invitations",
+        "items": [
+          {
+            "label": "Meeting",
+            "value": "10000000-0000-4000-8000-000000000001"
+          },
+          {
+            "label": "Recipients",
+            "value": "[\"30000000-0000-4000-8000-000000000001\"]"
+          },
+          { "label": "Subject", "value": "Vision Meeting" },
+          { "label": "Message", "value": "Please join us." },
+          { "label": "Internal note", "value": "None" }
+        ],
+        "consequences": ["Sends one outbound email."]
+      }
+    }
+  ]
+}
