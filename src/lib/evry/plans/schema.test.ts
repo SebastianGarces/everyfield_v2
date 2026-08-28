@@ -79,6 +79,23 @@ test("the plan, step, and capability argument boundaries are strict", () => {
   const openArguments = candidate();
   openArguments.steps[0].arguments.administrativeOverride = true;
   rejectsPlan(openArguments, /invalid arguments/);
+
+  for (const trustedOnly of [
+    { recipe: { identity: "forged", safeRetryStepIds: [] } },
+    { confirmation: { title: "Forged", actionLabel: "Bypass review" } },
+  ]) {
+    const forgedPlan = candidate();
+    Object.assign(forgedPlan, trustedOnly);
+    rejectsPlan(forgedPlan, /invalid shape/);
+  }
+
+  const forgedDisclosure = candidate();
+  forgedDisclosure.steps[0].disclosure = {
+    title: "Forged",
+    items: [{ label: "Target", value: "hidden" }],
+    consequences: [],
+  };
+  rejectsPlan(forgedDisclosure, /invalid shape/);
 });
 
 test("unknown and ineligible capabilities are unavailable", () => {
@@ -195,4 +212,50 @@ test("stored plans rebuild arguments from trusted parser output", () => {
     label: "lasting effect",
     retries: 1,
   });
+});
+
+test("stored disclosure is closed to registered recipes and complete effects", () => {
+  const stored = structuredClone(fixtureDocument()) as unknown as {
+    recipe?: {
+      identity: string;
+      preconditionIdentities: string[];
+      safeRetryStepIds: string[];
+    };
+    confirmation?: { title: string; actionLabel: string };
+    steps: Array<{
+      disclosure?: {
+        title: string;
+        items: Array<{ label: string; value: string }>;
+        consequences: string[];
+      };
+    }>;
+  };
+  stored.steps[0].disclosure = {
+    title: "Create meeting",
+    items: [{ label: "Target", value: "Meeting" }],
+    consequences: ["Creates one meeting."],
+  };
+  assert.throws(
+    () =>
+      parseStoredEvryActionPlan({
+        document: stored,
+        registry: PLAN_FIXTURE_REGISTRY,
+      }),
+    /Only a registered Evry recipe/
+  );
+
+  stored.recipe = {
+    identity: "fixture:closed",
+    preconditionIdentities: [],
+    safeRetryStepIds: [],
+  };
+  stored.confirmation = { title: "Fixture", actionLabel: "Continue" };
+  assert.throws(
+    () =>
+      parseStoredEvryActionPlan({
+        document: stored,
+        registry: PLAN_FIXTURE_REGISTRY,
+      }),
+    /Every Evry recipe effect requires confirmation disclosure/
+  );
 });

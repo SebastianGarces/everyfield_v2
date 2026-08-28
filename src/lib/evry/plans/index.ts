@@ -28,6 +28,10 @@ export {
   type EvryActionPlanDocument,
   type EvryActionStep,
   type EvryJsonValue,
+  type EvryPlanConfirmationDisclosure,
+  type EvryPlanDisclosureItem,
+  type EvryPlanRecipeMetadata,
+  type EvryPlanStepDisclosure,
 } from "./schema";
 export {
   confirmEvryActionPlan,
