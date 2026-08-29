@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, LoaderCircle } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { PublicEvryConversation } from "@/components/evry/client-contract";
 import { useEvryShell } from "@/components/evry/evry-shell";
@@ -23,6 +23,10 @@ import {
   coordinateEvryProductionArtifactRequest,
   type EvryProductionArtifactAction,
 } from "./production-request";
+import {
+  clearEvryRunRecoveryMarker,
+  writeEvryRunRecoveryMarker,
+} from "../streaming/run-recovery";
 
 type ActivePlan = NonNullable<PublicEvryConversation["activePlan"]>;
 type Action = EvryProductionArtifactAction;
@@ -189,10 +193,20 @@ export function EvryProductionArtifact({
     beginWork,
     finishWork,
     isWorking,
+    observeWork,
     updateWork,
   } = useEvryShell();
   const [state, setState] = useState<LocalState>({ status: "idle" });
-  const actionStarted = useRef(false);
+  const actionStarted = useRef<Readonly<{
+    action: Action;
+    stateVersion: number;
+  }> | null>(null);
+  useEffect(() => {
+    const started = actionStarted.current;
+    if (!started || conversationStateVersion <= started.stateVersion) return;
+    actionStarted.current = null;
+    setState({ status: "complete", action: started.action });
+  }, [conversationStateVersion]);
   const canControl =
     !isWorking &&
     interactive &&
@@ -204,14 +218,27 @@ export function EvryProductionArtifact({
     const plan = confirmation?.plan ?? progress?.plan;
     if (
       !plan ||
-      actionStarted.current ||
+      actionStarted.current !== null ||
       !canControl ||
       (action === "retry" ? !progress : !confirmation)
     ) {
       return;
     }
-    actionStarted.current = true;
+    actionStarted.current = {
+      action,
+      stateVersion: conversationStateVersion,
+    };
     const requestKey = crypto.randomUUID();
+    const recoverable = action === "execute" || action === "retry";
+    const controller = new AbortController();
+    if (recoverable) {
+      writeEvryRunRecoveryMarker({
+        requestId: requestKey,
+        kind: "execution",
+        conversationId,
+      });
+      observeWork(requestKey, controller);
+    }
     if (action === "execute" && confirmation) {
       beginWork(requestKey, {
         phase: "execution",
@@ -244,8 +271,11 @@ export function EvryProductionArtifact({
         messageId,
         artifactId,
       },
+      signal: recoverable ? controller.signal : undefined,
     });
+    if (controller.signal.aborted) return;
     if (result.status === "conversation") {
+      if (recoverable) clearEvryRunRecoveryMarker(requestKey);
       if (!applyWorkConversation(requestKey, 1, result.conversation)) return;
       if (action === "cancel" || action === "edit") {
         updateWork(requestKey, 2, {
@@ -273,6 +303,9 @@ export function EvryProductionArtifact({
             : "Evry could not confirm the outcome. Reopen this conversation before trying anything else.",
     });
     finishWork(requestKey, 2);
+    if (recoverable && result.error.kind !== "uncertain") {
+      clearEvryRunRecoveryMarker(requestKey);
+    }
     setState({ status: "error", error: result.error });
   }
 

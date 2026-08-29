@@ -28,7 +28,11 @@ export function evryConversationStream(
     status?: number;
     run: (
       report: (stage: EvryConversationStreamStage) => void
-    ) => Promise<Readonly<{ conversation: PublicEvryConversation }> | null>;
+    ) => Promise<
+      | Readonly<{ conversation: PublicEvryConversation }>
+      | Readonly<{ status: "active" }>
+      | null
+    >;
     failureCode: (error: unknown) => "stale" | "unavailable";
   }>
 ): Response {
@@ -59,6 +63,10 @@ export function evryConversationStream(
           emit({ type: "work", phase: "planning", code });
         })
         .then((result) => {
+          if (result && "status" in result) {
+            emit({ type: "active" });
+            return;
+          }
           if (!result) {
             emit({ type: "failure", code: "unavailable" });
             return;

@@ -23,6 +23,11 @@ import type {
 import type { EvryConversationStore } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
+  EvryConversationActiveRunCoordinator,
+  PreparedEvryConversationRun,
+} from "@/lib/evry/runs/conversation";
+import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
+import type {
   EvryPageContext,
   EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
@@ -341,12 +346,56 @@ async function main(): Promise<void> {
   const planLifecycle = await import("@/lib/evry/plans/lifecycle");
   const planRegistry = await import("@/lib/evry/plans/registry");
   const streamContract = await import("@/lib/evry/streaming/conversation-wire");
+  const runContract = await import("@/lib/evry/runs/contract");
   const createRoute = await import("./route");
   const getRoute = await import("./[conversationId]/route");
   const messageRoute = await import("./[conversationId]/messages/route");
   const pageContextResolver = await import("@/lib/evry/resolvers/page-context");
 
   let capturedActor: EvryPlantActor | null = null;
+  const activeRuns: EvryConversationActiveRunCoordinator = {
+    async prepare(
+      input: Parameters<
+        typeof import("@/lib/evry/runs/conversation").prepareEvryConversationActiveRun
+      >[0]
+    ) {
+      return {
+        input,
+        claim: {
+          ownership: "claimed" as const,
+          run: runContract.parseEvryActiveRunRecord({
+            id: randomUUID(),
+            churchId: input.actor.plantId,
+            actorUserId: input.actor.userId,
+            requestKey: input.requestKey,
+            requestFingerprint: runContract.fingerprintEvryActiveRunRequest(
+              input.fingerprintInput
+            ),
+            kind: "conversation",
+            operation: input.identity.operation,
+            status: "active",
+            stage: "accepted",
+            version: 0,
+            conversationId: input.identity.conversationId,
+            planId: null,
+            planFingerprint: null,
+            startedAt: input.startedAt,
+            changedAt: input.startedAt,
+            expiresAt: new Date(
+              input.startedAt.valueOf() + runContract.EVRY_ACTIVE_RUN_TTL_MS
+            ),
+            completedAt: null,
+          }),
+        },
+      };
+    },
+    async run(
+      prepared: PreparedEvryConversationRun,
+      report: (stage: EvryConversationStreamStage) => void
+    ) {
+      return prepared.input.perform(async (stage) => report(stage));
+    },
+  };
   let pageContextRecordState: "available" | "missing" | "renamed" = "available";
   const resolvePageContext = async (input: {
     actor: EvryPlantActor;
@@ -367,6 +416,7 @@ async function main(): Promise<void> {
         };
   };
   const createPost = createRoute.createEvryConversationCreatePost({
+    activeRuns,
     now: () => START,
     resolvePageContext,
     create: async (input) => {
@@ -413,6 +463,7 @@ async function main(): Promise<void> {
       }),
   });
   const messagePost = messageRoute.createEvryConversationMessagePost({
+    activeRuns,
     now: () => RETURN,
     resolvePageContext,
     continueConversation: (input) =>

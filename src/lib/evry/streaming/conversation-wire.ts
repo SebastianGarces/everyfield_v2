@@ -56,6 +56,13 @@ export const evryConversationStreamEventSchema = z.union([
     .readonly(),
   z
     .object({
+      type: z.literal("active"),
+      ...sequencedEvent,
+    })
+    .strict()
+    .readonly(),
+  z
+    .object({
       type: z.literal("failure"),
       ...sequencedEvent,
       code: z.enum(["stale", "unavailable"]),
@@ -75,6 +82,18 @@ export type EvryConversationStreamStage = Exclude<
   EvryConversationStreamWorkCode,
   "request_accepted"
 >;
+
+export class EvryConversationStreamFailure extends Error {
+  readonly code: "stale" | "unavailable";
+  readonly durableConversationSeen: boolean;
+
+  constructor(code: "stale" | "unavailable", durableConversationSeen: boolean) {
+    super("Unable to update this conversation.");
+    this.name = "EvryConversationStreamFailure";
+    this.code = code;
+    this.durableConversationSeen = durableConversationSeen;
+  }
+}
 
 const WORK_MESSAGE: Readonly<
   Record<EvryConversationStreamWorkCode, EvryWorkState>
@@ -103,10 +122,12 @@ export function evryWorkStateForStreamEvent(
   return WORK_MESSAGE[event.code];
 }
 
-export type EvryConversationStreamResult = Readonly<{
-  conversation: PublicEvryConversation;
-  sawComplete: true;
-}>;
+export type EvryConversationStreamResult =
+  | Readonly<{
+      conversation: PublicEvryConversation;
+      sawComplete: true;
+    }>
+  | Readonly<{ status: "active" }>;
 
 export async function readEvryConversationStream(
   response: Response,
@@ -130,6 +151,7 @@ export async function readEvryConversationStream(
   let expectedSequence = 0;
   let conversation: PublicEvryConversation | null = null;
   let sawComplete = false;
+  let adoptedActive = false;
   let lifecycle: "awaiting_accept" | "working" | "conversation" | "complete" =
     "awaiting_accept";
 
@@ -158,6 +180,10 @@ export async function readEvryConversationStream(
         throw new Error("Evry conversation stream repeated its acceptance.");
       }
       if (event.type === "conversation") lifecycle = "conversation";
+      if (event.type === "active") {
+        lifecycle = "complete";
+        adoptedActive = true;
+      }
       if (event.type === "complete") {
         throw new Error(
           "Evry conversation stream completed without durable output."
@@ -174,7 +200,10 @@ export async function readEvryConversationStream(
       }
     }
     if (event.type === "failure") {
-      throw new Error("Unable to update this conversation.");
+      throw new EvryConversationStreamFailure(
+        event.code,
+        conversation !== null
+      );
     }
     if (event.type === "conversation") {
       if (
@@ -207,6 +236,7 @@ export async function readEvryConversationStream(
     await reader.cancel().catch(() => {});
     throw error;
   }
+  if (adoptedActive) return { status: "active" };
   if (!sawComplete || !conversation) {
     throw new Error("Evry conversation stream ended before completion.");
   }

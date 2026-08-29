@@ -28,6 +28,12 @@ const historyList = read(
 );
 const surface = read("components", "evry", "conversation-surface.tsx");
 const workStatus = read("components", "evry", "streaming", "work-status.tsx");
+const runRecoveryFixture = read(
+  "components",
+  "evry",
+  "streaming",
+  "run-recovery-browser-fixture.tsx"
+);
 const sheet = read("components", "ui", "sheet.tsx");
 const resolver = read("lib", "evry", "resolvers", "page-context.ts");
 const createRoute = read("app", "api", "evry", "conversations", "route.ts");
@@ -239,6 +245,24 @@ test("the synthetic streaming lifecycle is preview-only and split from the produ
     workspace,
     /const EvryStreamingBrowserFixture = dynamic\(\(\) =>[\s\S]*import\("@\/components\/evry\/streaming\/browser-fixture"\)/
   );
+});
+
+test("the deterministic reconnect proof is preview-only and never performs work", () => {
+  assert.match(
+    evryPage,
+    /process\.env\.VERCEL_ENV === "preview"[\s\S]*params\.artifactFixture === "stream-reconnect"/
+  );
+  assert.match(
+    workspace,
+    /const EvryRunRecoveryBrowserFixture = dynamic\(\(\) =>[\s\S]*import\("@\/components\/evry\/streaming\/run-recovery-browser-fixture"\)/
+  );
+  assert.match(
+    runRecoveryFixture,
+    /calls no route, provider, model, or effect/
+  );
+  assert.doesNotMatch(runRecoveryFixture, /fetch\(|\/api\//);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-work-starts"/);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-effect-count"/);
 });
 
 test("removing context removes it from the request body", () => {

@@ -9,6 +9,11 @@ import { createEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
 import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
 import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
+import {
+  evryConversationActiveRunCoordinator,
+  type EvryConversationActiveRunCoordinator,
+} from "@/lib/evry/runs/conversation";
+import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
 
 import {
   evryConversationFailure,
@@ -31,6 +36,7 @@ export type EvryConversationCreatePostOptions = Readonly<{
   create?: typeof createEvryConversation;
   now?: () => Date;
   resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
+  activeRuns?: EvryConversationActiveRunCoordinator;
 }>;
 
 /** Build the auth-first conversation creation endpoint. */
@@ -38,6 +44,7 @@ export function createEvryConversationCreatePost({
   create = createEvryConversation,
   now = () => new Date(),
   resolvePageContext = resolveAuthorizedEvryPageContext,
+  activeRuns = evryConversationActiveRunCoordinator,
 }: EvryConversationCreatePostOptions = {}): (
   request: Request
 ) => Promise<Response> {
@@ -65,21 +72,41 @@ export function createEvryConversationCreatePost({
       });
 
       if (wantsEvryConversationStream(request)) {
-        return evryConversationStream({
-          requestId: parsed.data.requestKey,
-          status: 201,
-          run: async (reportStage) => {
+        const startedAt = now();
+        const prepared = await activeRuns.prepare({
+          actor,
+          requestKey: parsed.data.requestKey,
+          identity: {
+            kind: "conversation",
+            operation: "create",
+            conversationId: null,
+            planId: null,
+            planFingerprint: null,
+          },
+          fingerprintInput: {
+            version: 1,
+            operation: "create",
+            message: parsed.data.message,
+            pageContext: requestPageContext,
+          },
+          startedAt,
+          perform: async (reportStage) => {
             const resumed = await create({
               actor,
               requestKey: parsed.data.requestKey,
               message: parsed.data.message,
               pageContext,
               requestPageContext,
-              now: now(),
+              now: startedAt,
               reportStage,
             });
             return { conversation: publicEvryConversation(resumed) };
           },
+        });
+        return evryConversationStream({
+          requestId: parsed.data.requestKey,
+          status: 201,
+          run: (reportStage) => activeRuns.run(prepared, reportStage),
           failureCode: (error) =>
             error instanceof EvryConversationIdempotencyError
               ? "stale"
@@ -103,7 +130,10 @@ export function createEvryConversationCreatePost({
         201
       );
     } catch (error) {
-      if (error instanceof EvryConversationIdempotencyError) {
+      if (
+        error instanceof EvryConversationIdempotencyError ||
+        error instanceof EvryActiveRunIdentityError
+      ) {
         return evryConversationJson({ status: "stale" }, 409);
       }
       return evryConversationFailure(error);

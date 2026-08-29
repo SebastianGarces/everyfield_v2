@@ -16,6 +16,11 @@ const EvryStreamingBrowserFixture = dynamic(() =>
     (module) => module.EvryStreamingBrowserFixture
   )
 );
+const EvryRunRecoveryBrowserFixture = dynamic(() =>
+  import("@/components/evry/streaming/run-recovery-browser-fixture").then(
+    (module) => module.EvryRunRecoveryBrowserFixture
+  )
+);
 
 export function EvryWorkspace({
   conversations,
@@ -24,6 +29,7 @@ export function EvryWorkspace({
   searchQuery,
   showArtifactFixture = false,
   showStreamingFixture = false,
+  showRunRecoveryFixture = false,
 }: {
   conversations: readonly EvryConversationHistoryItem[];
   conversationId: string | null;
@@ -31,6 +37,7 @@ export function EvryWorkspace({
   searchQuery: string | null;
   showArtifactFixture?: boolean;
   showStreamingFixture?: boolean;
+  showRunRecoveryFixture?: boolean;
 }) {
   const { returnToPage } = useEvryShell();
 
@@ -59,7 +66,9 @@ export function EvryWorkspace({
             </p>
           </div>
         </header>
-        {showStreamingFixture ? (
+        {showRunRecoveryFixture ? (
+          <EvryRunRecoveryBrowserFixture />
+        ) : showStreamingFixture ? (
           <EvryStreamingBrowserFixture />
         ) : showArtifactFixture ? (
           <EvryArtifactBrowserFixture />

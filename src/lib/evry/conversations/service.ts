@@ -111,7 +111,7 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
-  reportStage?: (stage: EvryConversationStreamStage) => void;
+  reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   const conversation = await (input.store ?? evryConversationStore).create({
@@ -123,7 +123,7 @@ export async function createEvryConversation(input: {
     requestPageContext: input.requestPageContext,
     createdAt: input.now,
   });
-  input.reportStage?.("compiling_response");
+  await input.reportStage?.("compiling_response");
   return Object.freeze({
     conversation,
     activePlan: null,
@@ -225,7 +225,7 @@ export async function continueEvryConversation(input: {
   now: Date;
   store?: EvryConversationStore;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
-  reportStage?: (stage: EvryConversationStreamStage) => void;
+  reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryConversationContinuation | null> {
   const store = input.store ?? evryConversationStore;
   const conversationId = evryConversationIdSchema.safeParse(
@@ -243,7 +243,7 @@ export async function continueEvryConversation(input: {
   });
   if (!current) return null;
 
-  input.reportStage?.("resolving_references");
+  await input.reportStage?.("resolving_references");
   const reference = resolveEvryConversationReference({
     text: input.message,
     state: current.state,
@@ -304,7 +304,7 @@ export async function continueEvryConversation(input: {
     });
   }
 
-  input.reportStage?.(
+  await input.reportStage?.(
     current.activePlan ? "revalidating_plan" : "compiling_response"
   );
   const resumed = await resumeEvryConversation({

@@ -49,6 +49,18 @@ const artifactLifecycleResponseSchema = z.union([
     })
     .strict()
     .readonly(),
+  z
+    .object({
+      status: z.literal("active"),
+      requestId: z.string().uuid(),
+      kind: z.literal("execution"),
+      sequence: z.number().int().nonnegative(),
+      stage: z.literal("executing"),
+      conversationId: z.string().uuid(),
+      expiresAt: z.iso.datetime({ offset: true }),
+    })
+    .strict()
+    .readonly(),
 ]);
 
 export type EvryArtifactLifecycleResponse = z.infer<

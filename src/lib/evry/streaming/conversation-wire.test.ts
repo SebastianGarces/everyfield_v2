@@ -5,6 +5,7 @@ import { evryConversationStream } from "@/app/api/evry/conversations/stream";
 import type { PublicEvryConversation } from "@/lib/evry/conversations/public-contract";
 
 import {
+  EvryConversationStreamFailure,
   evryConversationStreamEventSchema,
   readEvryConversationStream,
 } from "./conversation-wire";
@@ -116,8 +117,25 @@ test("the client accepts split chunks only for the expected request and conversa
       onEvent: (event) => observed.push(event.type),
     }
   );
+  assert.ok("conversation" in result);
   assert.equal(result.conversation.id, CONVERSATION_ID);
   assert.deepEqual(observed, ["work", "conversation", "complete"]);
+});
+
+test("an adopted active owner hands the client to recovery without clearing its key", async () => {
+  const response = evryConversationStream({
+    requestId: REQUEST_ID,
+    run: async () => ({ status: "active" }),
+    failureCode: () => "unavailable",
+  });
+  const observed: string[] = [];
+  const result = await readEvryConversationStream(response, {
+    requestId: REQUEST_ID,
+    expectedConversationId: CONVERSATION_ID,
+    onEvent: (event) => observed.push(event.type),
+  });
+  assert.deepEqual(result, { status: "active" });
+  assert.deepEqual(observed, ["work", "active"]);
 });
 
 test("foreign, duplicate, and incomplete stream events fail closed", async () => {
@@ -270,5 +288,34 @@ test("foreign, duplicate, and incomplete stream events fail closed", async () =>
       ])
     ),
     /before completion/
+  );
+});
+
+test("an explicit pre-durable failure is distinguishable from transport uncertainty", async () => {
+  const response = new Response(
+    `${JSON.stringify({
+      type: "work",
+      requestId: REQUEST_ID,
+      sequence: 0,
+      phase: "reading",
+      code: "request_accepted",
+    })}\n${JSON.stringify({
+      type: "failure",
+      requestId: REQUEST_ID,
+      sequence: 1,
+      code: "unavailable",
+    })}\n`,
+    { headers: { "content-type": "application/x-ndjson" } }
+  );
+  await assert.rejects(
+    readEvryConversationStream(response, {
+      requestId: REQUEST_ID,
+      expectedConversationId: null,
+      onEvent: () => {},
+    }),
+    (error: unknown) =>
+      error instanceof EvryConversationStreamFailure &&
+      error.code === "unavailable" &&
+      error.durableConversationSeen === false
   );
 });

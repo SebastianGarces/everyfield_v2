@@ -79,12 +79,31 @@ export const evryConversationArtifactKinds = [
   "result",
   "boundary",
 ] as const;
+export const evryActiveRunKinds = ["conversation", "execution"] as const;
+export const evryActiveRunOperations = [
+  "create",
+  "continue",
+  "execute",
+  "retry",
+] as const;
+export const evryActiveRunStatuses = ["active", "completed", "failed"] as const;
+export const evryActiveRunStages = [
+  "accepted",
+  "resolving_references",
+  "revalidating_plan",
+  "compiling_response",
+  "executing",
+] as const;
 
 export type EvryConversationAuthor = (typeof evryConversationAuthors)[number];
 export type EvryConversationDeliveryStatus =
   (typeof evryConversationDeliveryStatuses)[number];
 export type EvryConversationArtifactKind =
   (typeof evryConversationArtifactKinds)[number];
+export type EvryActiveRunKind = (typeof evryActiveRunKinds)[number];
+export type EvryActiveRunOperation = (typeof evryActiveRunOperations)[number];
+export type EvryActiveRunStatus = (typeof evryActiveRunStatuses)[number];
+export type EvryActiveRunStage = (typeof evryActiveRunStages)[number];
 
 /**
  * The exact plan a person may approve.
@@ -830,6 +849,140 @@ export const evryConversationArtifacts = pgTable(
   ]
 );
 
+/**
+ * One privacy-scoped durable claim for work that may outlive its HTTP stream.
+ *
+ * The row stores identities and closed state only. Request text, page labels,
+ * plan arguments, provider payloads, and effect results remain in their
+ * authoritative stores. A disconnect stops observation, never this claim.
+ * Terminal rows remain as the request-key replay ledger; an owning
+ * conversation/plan retirement cascades its derived run rows. Expiry only
+ * stops observation/resume eligibility and is not permission to reuse a key.
+ * There is deliberately no time-based cleanup of this replay ledger.
+ */
+export const evryActiveRuns = pgTable(
+  "evry_active_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id, { onDelete: "cascade" })
+      .notNull(),
+    actorUserId: uuid("actor_user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    requestKey: uuid("request_key").notNull(),
+    requestFingerprint: varchar("request_fingerprint", {
+      length: 64,
+    }).notNull(),
+    kind: varchar("kind", { length: 16 }).$type<EvryActiveRunKind>().notNull(),
+    operation: varchar("operation", { length: 16 })
+      .$type<EvryActiveRunOperation>()
+      .notNull(),
+    status: varchar("status", { length: 16 })
+      .$type<EvryActiveRunStatus>()
+      .notNull(),
+    stage: varchar("stage", { length: 32 })
+      .$type<EvryActiveRunStage>()
+      .notNull(),
+    version: integer("version").default(0).notNull(),
+    conversationId: uuid("conversation_id"),
+    planId: uuid("plan_id"),
+    planFingerprint: varchar("plan_fingerprint", { length: 64 }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("evry_active_runs_scope_request_unique_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.requestKey
+    ),
+    index("evry_active_runs_scope_status_idx").on(
+      table.churchId,
+      table.actorUserId,
+      table.status,
+      table.expiresAt
+    ),
+    foreignKey({
+      name: "evry_active_runs_conversation_fk",
+      columns: [table.conversationId, table.churchId, table.actorUserId],
+      foreignColumns: [
+        evryConversations.id,
+        evryConversations.churchId,
+        evryConversations.actorUserId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "evry_active_runs_plan_fk",
+      columns: [
+        table.planId,
+        table.churchId,
+        table.actorUserId,
+        table.planFingerprint,
+      ],
+      foreignColumns: [
+        evryActionPlans.id,
+        evryActionPlans.churchId,
+        evryActionPlans.actorUserId,
+        evryActionPlans.fingerprint,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "evry_active_runs_fingerprint_check",
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$' and (${table.planFingerprint} is null or ${table.planFingerprint} ~ '^[0-9a-f]{64}$')`
+    ),
+    check(
+      "evry_active_runs_kind_check",
+      sql`${table.kind} in (${inList(evryActiveRunKinds)})`
+    ),
+    check(
+      "evry_active_runs_operation_check",
+      sql`${table.operation} in (${inList(evryActiveRunOperations)})`
+    ),
+    check(
+      "evry_active_runs_status_check",
+      sql`${table.status} in (${inList(evryActiveRunStatuses)})`
+    ),
+    check(
+      "evry_active_runs_stage_check",
+      sql`${table.stage} in (${inList(evryActiveRunStages)})`
+    ),
+    check("evry_active_runs_version_check", sql`${table.version} >= 0`),
+    check(
+      "evry_active_runs_time_check",
+      sql`${table.changedAt} >= ${table.startedAt} and ${table.expiresAt} = ${table.startedAt} + interval '15 minutes' and (${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt})`
+    ),
+    check(
+      "evry_active_runs_terminal_check",
+      sql`(${table.status} = 'active' and ${table.completedAt} is null) or (${table.status} in ('completed', 'failed') and ${table.completedAt} is not null)`
+    ),
+    check(
+      "evry_active_runs_shape_check",
+      sql`(
+        ${table.kind} = 'conversation'
+        and ${table.operation} in ('create', 'continue')
+        and ${table.planId} is null
+        and ${table.planFingerprint} is null
+        and (${table.operation} = 'create' or ${table.conversationId} is not null)
+        and ${table.stage} <> 'executing'
+      ) or (
+        ${table.kind} = 'execution'
+        and ${table.operation} in ('execute', 'retry')
+        and ${table.conversationId} is not null
+        and ${table.planId} is not null
+        and ${table.planFingerprint} is not null
+        and ${table.stage} = 'executing'
+      )`
+    ),
+    check(
+      "evry_active_runs_completed_conversation_check",
+      sql`${table.status} <> 'completed' or ${table.conversationId} is not null`
+    ),
+  ]
+);
+
 export type EvryActionPlan = typeof evryActionPlans.$inferSelect;
 export type NewEvryActionPlan = typeof evryActionPlans.$inferInsert;
 export type EvryActionPlanState = typeof evryActionPlanStates.$inferSelect;
@@ -844,3 +997,5 @@ export type EvryConversationMessage =
   typeof evryConversationMessages.$inferSelect;
 export type EvryConversationArtifact =
   typeof evryConversationArtifacts.$inferSelect;
+export type EvryActiveRun = typeof evryActiveRuns.$inferSelect;
+export type NewEvryActiveRun = typeof evryActiveRuns.$inferInsert;

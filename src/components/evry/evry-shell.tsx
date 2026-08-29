@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -41,6 +41,7 @@ import type { EligibleEvrySuggestion } from "./suggestions/types";
 import { evryWorkStateForConversation } from "./streaming/conversation-state";
 import type { EvryAcknowledgementTarget } from "./streaming/work-status";
 import {
+  EvryConversationStreamFailure,
   evryWorkStateForStreamEvent,
   readEvryConversationStream,
 } from "@/lib/evry/streaming/conversation-wire";
@@ -50,6 +51,15 @@ import {
   type EvrySequencedWorkState,
   type EvryWorkState,
 } from "@/lib/evry/streaming/state";
+import {
+  bindEvryRunRecoveryConversation,
+  clearEvryRunRecoveryMarker,
+  markerMatchesEvryLocation,
+  readEvryRunRecoveryMarker,
+  reconnectEvryRun,
+  writeEvryRunRecoveryMarker,
+  type EvryRunRecoveryMarker,
+} from "./streaming/run-recovery";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -64,6 +74,7 @@ type EvryShellValue = Readonly<{
     conversation: PublicEvryConversation
   ) => boolean;
   beginWork: (requestId: string, state: EvryWorkState) => void;
+  canStopWatching: boolean;
   clearContext: () => void;
   closePanel: () => void;
   conversation: PublicEvryConversation | null;
@@ -77,13 +88,17 @@ type EvryShellValue = Readonly<{
   isPanelOpen: boolean;
   isSending: boolean;
   isWorking: boolean;
+  isWatchingDetached: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
   openPanel: (trigger: HTMLButtonElement) => void;
+  observeWork: (requestId: string, controller: AbortController) => void;
   resetConversation: () => void;
   restoreLauncherFocus: () => void;
+  resumeWatching: () => void;
   returnToPage: () => void;
   sendMessage: () => Promise<void>;
   setDraft: (draft: string) => void;
+  stopWatching: () => void;
   updateWork: (
     requestId: string,
     sequence: number,
@@ -113,6 +128,8 @@ export function EvryShell({
   eligibleSuggestions: readonly EligibleEvrySuggestion[];
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const locationSearch = searchParams.toString();
   const router = useRouter();
   const { breadcrumbs } = useHeader();
   const visibleContext = useMemo(
@@ -136,6 +153,12 @@ export function EvryShell({
   const [pendingWorkRequestId, setPendingWorkRequestId] = useState<
     string | null
   >(null);
+  const [detachedRequestId, setDetachedRequestId] = useState<string | null>(
+    null
+  );
+  const [observedRequestId, setObservedRequestId] = useState<string | null>(
+    null
+  );
   const [isPanelOpen, setPanelOpen] = useState(false);
   const [hasOpenedPanel, setHasOpenedPanel] = useState(false);
   const [isSending, setSending] = useState(false);
@@ -149,9 +172,23 @@ export function EvryShell({
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
+  const workAbortRef = useRef<Readonly<{
+    requestId: string;
+    controller: AbortController;
+  }> | null>(null);
+  const intentionallyDetachedRef = useRef(new Set<string>());
   const previousPathnameRef = useRef(pathname);
+  const routeLocation = useMemo(
+    () => ({
+      pathname,
+      search: locationSearch.length === 0 ? "" : `?${locationSearch}`,
+    }),
+    [locationSearch, pathname]
+  );
+  const routeLocationRef = useRef(routeLocation);
+  routeLocationRef.current = routeLocation;
   const draftRef = useRef(draft);
-  const isWorking = pendingWorkRequestId !== null;
+  const isWorking = pendingWorkRequestId !== null || detachedRequestId !== null;
 
   const setDraft = useCallback((nextDraft: string) => {
     draftRef.current = nextDraft;
@@ -169,6 +206,7 @@ export function EvryShell({
       setAcknowledgement((current) =>
         current?.requestId === requestId ? current : null
       );
+      setDetachedRequestId(null);
       presentWork(requestId, state);
       pendingWorkRequestIdRef.current = requestId;
       setPendingWorkRequestId(requestId);
@@ -204,6 +242,10 @@ export function EvryShell({
     if (next === current) return false;
     sequencedWorkRef.current = next;
     pendingWorkRequestIdRef.current = null;
+    if (workAbortRef.current?.requestId === requestId) {
+      workAbortRef.current = null;
+      setObservedRequestId(null);
+    }
     setSequencedWork(next);
     setPendingWorkRequestId(null);
     return true;
@@ -214,6 +256,8 @@ export function EvryShell({
     pendingWorkRequestIdRef.current = null;
     setSequencedWork(null);
     setPendingWorkRequestId(null);
+    setDetachedRequestId(null);
+    setObservedRequestId(null);
   }, []);
 
   const applyWorkConversation = useCallback(
@@ -237,6 +281,196 @@ export function EvryShell({
     },
     [updateWork]
   );
+
+  const observeWith = useCallback(
+    (requestId: string, controller: AbortController) => {
+      workAbortRef.current?.controller.abort();
+      workAbortRef.current = { requestId, controller };
+      setObservedRequestId(requestId);
+      intentionallyDetachedRef.current.delete(requestId);
+    },
+    []
+  );
+
+  const recoveryState = useCallback(
+    (marker: EvryRunRecoveryMarker, stage: string): EvryWorkState => {
+      if (marker.kind === "execution" || stage === "executing") {
+        return {
+          phase: "execution",
+          message: "Reconnected to the same confirmed plan attempt",
+        };
+      }
+      return stage === "accepted"
+        ? { phase: "reading", message: "Reconnected to the same request" }
+        : {
+            phase: "planning",
+            message: "Reconnected to the same request and latest progress",
+          };
+    },
+    []
+  );
+
+  const pauseRecoveryForRoute = useCallback(
+    (requestId: string) => {
+      const observation = workAbortRef.current;
+      if (observation?.requestId === requestId) {
+        intentionallyDetachedRef.current.add(requestId);
+        observation.controller.abort();
+        workAbortRef.current = null;
+        setObservedRequestId(null);
+      }
+      if (pendingWorkRequestIdRef.current === requestId) {
+        const sequence = (sequencedWorkRef.current?.sequence ?? 0) + 1;
+        updateWork(requestId, sequence, {
+          phase: "complete",
+          message:
+            "Stopped watching while another conversation is open. Return here to reconnect.",
+        });
+        finishWork(requestId, sequence + 1);
+      }
+      setDetachedRequestId((current) =>
+        current === requestId ? null : current
+      );
+    },
+    [finishWork, updateWork]
+  );
+
+  const recoverMarker = useCallback(
+    async (marker: EvryRunRecoveryMarker) => {
+      if (!markerMatchesEvryLocation(marker, routeLocationRef.current)) return;
+      const controller = new AbortController();
+      observeWith(marker.requestId, controller);
+      beginWork(marker.requestId, recoveryState(marker, "accepted"));
+      let sequence = 0;
+      try {
+        const recovered = await reconnectEvryRun({
+          marker,
+          signal: controller.signal,
+          onActive(snapshot) {
+            sequence += 1;
+            if (snapshot.conversationId) {
+              bindEvryRunRecoveryConversation(
+                marker.requestId,
+                snapshot.conversationId
+              );
+            }
+            updateWork(
+              marker.requestId,
+              sequence,
+              recoveryState(marker, snapshot.stage)
+            );
+          },
+        });
+        if (controller.signal.aborted) return;
+        if (
+          readEvryRunRecoveryMarker()?.requestId !== marker.requestId ||
+          !markerMatchesEvryLocation(marker, routeLocationRef.current)
+        ) {
+          pauseRecoveryForRoute(marker.requestId);
+          return;
+        }
+        sequence += 1;
+        if (recovered.status === "durable") {
+          bindEvryRunRecoveryConversation(
+            marker.requestId,
+            recovered.conversation.id
+          );
+          applyWorkConversation(
+            marker.requestId,
+            sequence,
+            recovered.conversation
+          );
+          sequence += 1;
+          finishWork(marker.requestId, sequence);
+          clearEvryRunRecoveryMarker(marker.requestId);
+          setDetachedRequestId(null);
+          return;
+        }
+        updateWork(marker.requestId, sequence, {
+          phase: recovered.status === "expired" ? "blocked" : "failed",
+          message:
+            recovered.status === "expired"
+              ? "This run expired. Durable conversation state is shown; retry only from its available controls."
+              : "This run is no longer available. Durable conversation state was not changed.",
+        });
+        sequence += 1;
+        finishWork(marker.requestId, sequence);
+        clearEvryRunRecoveryMarker(marker.requestId);
+        setDetachedRequestId(null);
+      } catch (error) {
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError")
+        ) {
+          return;
+        }
+        sequence += 1;
+        updateWork(marker.requestId, sequence, {
+          phase: "failed",
+          message:
+            "Unable to reconnect right now. The durable run was not cancelled.",
+        });
+        sequence += 1;
+        finishWork(marker.requestId, sequence);
+        setDetachedRequestId(marker.requestId);
+      } finally {
+        if (workAbortRef.current?.requestId === marker.requestId) {
+          workAbortRef.current = null;
+          setObservedRequestId(null);
+        }
+      }
+    },
+    [
+      applyWorkConversation,
+      beginWork,
+      finishWork,
+      observeWith,
+      pauseRecoveryForRoute,
+      recoveryState,
+      updateWork,
+    ]
+  );
+
+  const stopWatching = useCallback(() => {
+    const observation = workAbortRef.current;
+    const requestId = pendingWorkRequestIdRef.current;
+    if (!requestId || observation?.requestId !== requestId) return;
+    intentionallyDetachedRef.current.add(requestId);
+    observation.controller.abort();
+    workAbortRef.current = null;
+    setObservedRequestId(null);
+    const sequence = (sequencedWorkRef.current?.sequence ?? 0) + 1;
+    updateWork(requestId, sequence, {
+      phase: "complete",
+      message:
+        "Stopped watching. The same run continues safely; reconnect to see its progress.",
+    });
+    finishWork(requestId, sequence + 1);
+    setDetachedRequestId(requestId);
+  }, [finishWork, updateWork]);
+
+  const resumeWatching = useCallback(() => {
+    const marker = readEvryRunRecoveryMarker();
+    if (!marker || marker.requestId !== detachedRequestId) return;
+    setDetachedRequestId(null);
+    void recoverMarker(marker);
+  }, [detachedRequestId, recoverMarker]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const marker = readEvryRunRecoveryMarker();
+    if (!marker) return;
+    if (!markerMatchesEvryLocation(marker, routeLocation)) {
+      pauseRecoveryForRoute(marker.requestId);
+      return;
+    }
+    void recoverMarker(marker);
+    return () => {
+      if (workAbortRef.current?.requestId === marker.requestId) {
+        workAbortRef.current.controller.abort();
+      }
+    };
+  }, [enabled, pauseRecoveryForRoute, recoverMarker, routeLocation]);
 
   const cancelActiveConversationLoads = useCallback(() => {
     conversationLoadStateRef.current = cancelEvryConversationLoads(
@@ -422,6 +656,11 @@ export function EvryShell({
       requestId: pendingSubmission.requestKey,
       submittedAt: performance.now(),
     });
+    writeEvryRunRecoveryMarker({
+      requestId: pendingSubmission.requestKey,
+      kind: "conversation",
+      conversationId: conversation?.id ?? null,
+    });
     setSending(true);
     setError(null);
     beginWork(pendingSubmission.requestKey, {
@@ -430,6 +669,9 @@ export function EvryShell({
         ? "Checking this conversation and page context"
         : "Checking this conversation",
     });
+    const controller = new AbortController();
+    observeWith(pendingSubmission.requestKey, controller);
+    let recoverAfterStream = false;
     try {
       pendingSubmissionRef.current = pendingSubmission;
       const body = evryConversationRequestBody(pendingSubmission);
@@ -443,6 +685,7 @@ export function EvryShell({
             "content-type": "application/json",
           },
           body,
+          signal: controller.signal,
         }
       );
       const streamed = await readEvryConversationStream(response, {
@@ -470,18 +713,40 @@ export function EvryShell({
                   event.requestId,
                   event.conversation.id
                 );
+              bindEvryRunRecoveryConversation(
+                event.requestId,
+                event.conversation.id
+              );
             }
           } else if (event.type === "complete") {
             finishWork(event.requestId, event.sequence);
           }
         },
       });
+      if ("status" in streamed) {
+        recoverAfterStream = true;
+        return;
+      }
       pendingSubmissionRef.current = null;
       if (!streamed.sawComplete || lastSequence < 2) {
         throw new Error("Evry response did not complete.");
       }
       setDraft(evryDraftAfterSubmission(draftRef.current, message));
-    } catch {
+      clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
+    } catch (cause) {
+      if (
+        controller.signal.aborted &&
+        intentionallyDetachedRef.current.has(pendingSubmission.requestKey)
+      ) {
+        return;
+      }
+      if (
+        cause instanceof EvryConversationStreamFailure &&
+        !cause.durableConversationSeen
+      ) {
+        pendingSubmissionRef.current = null;
+        clearEvryRunRecoveryMarker(pendingSubmission.requestKey);
+      }
       const failure =
         "Unable to save your request. Check your connection and try again.";
       setError(failure);
@@ -495,7 +760,17 @@ export function EvryShell({
       });
       finishWork(pendingSubmission.requestKey, failureSequence + 1);
     } finally {
+      if (workAbortRef.current?.requestId === pendingSubmission.requestKey) {
+        workAbortRef.current = null;
+        setObservedRequestId(null);
+      }
       setSending(false);
+      if (recoverAfterStream) {
+        const marker = readEvryRunRecoveryMarker();
+        if (marker?.requestId === pendingSubmission.requestKey) {
+          void recoverMarker(marker);
+        }
+      }
     }
   }, [
     activeContext,
@@ -509,6 +784,8 @@ export function EvryShell({
     isWorking,
     requestedConversationId,
     setDraft,
+    observeWith,
+    recoverMarker,
     updateWork,
   ]);
 
@@ -518,6 +795,9 @@ export function EvryShell({
       acknowledgement,
       applyWorkConversation,
       beginWork,
+      canStopWatching:
+        observedRequestId !== null &&
+        observedRequestId === pendingWorkRequestId,
       clearContext,
       closePanel,
       conversation,
@@ -532,13 +812,17 @@ export function EvryShell({
       isPanelOpen,
       isSending,
       isWorking,
+      isWatchingDetached: detachedRequestId !== null,
       loadConversation,
       openPanel,
+      observeWork: observeWith,
       resetConversation,
       restoreLauncherFocus,
+      resumeWatching,
       returnToPage,
       sendMessage,
       setDraft,
+      stopWatching,
       updateWork,
       suggestions,
       workRequestId: sequencedWork?.requestId ?? null,
@@ -561,14 +845,20 @@ export function EvryShell({
       isPanelOpen,
       isSending,
       isWorking,
+      detachedRequestId,
       loadConversation,
       openPanel,
+      observeWith,
+      observedRequestId,
+      pendingWorkRequestId,
       resetConversation,
       requestedConversationId,
       restoreLauncherFocus,
+      resumeWatching,
       returnToPage,
       sendMessage,
       setDraft,
+      stopWatching,
       sequencedWork,
       suggestions,
       updateWork,

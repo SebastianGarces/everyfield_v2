@@ -30,6 +30,7 @@ mock.module("@/components/evry/evry-shell", {
       ) {
         workStates.push(state);
       },
+      observeWork() {},
       updateWork(
         _requestId: string,
         _sequence: number,
@@ -120,18 +121,24 @@ test("execution moves focus once when confirmation controls unmount and leaves i
   const { EvryProductionArtifact } =
     await import("@/components/evry/artifacts/production-artifact");
   const confirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
-  const artifactElement = () =>
+  const artifactElement = ({
+    stateVersion = 1,
+    planStatus = "awaiting_confirmation",
+  }: {
+    stateVersion?: number;
+    planStatus?: "awaiting_confirmation" | "completed";
+  } = {}) =>
     createElement(EvryProductionArtifact, {
       artifact: confirmation,
       activePlan: {
         identity: confirmation.plan,
-        status: "awaiting_confirmation",
+        status: planStatus,
         expiresAt: "2026-08-28T13:00:00.000Z",
-        confirmable: true,
+        confirmable: planStatus === "awaiting_confirmation",
       },
       artifactId: "20000000-0000-4000-8000-000000000001",
       conversationId: "30000000-0000-4000-8000-000000000001",
-      conversationStateVersion: 1,
+      conversationStateVersion: stateVersion,
       interactive: true,
       messageId: "40000000-0000-4000-8000-000000000001",
       onEdit() {},
@@ -173,6 +180,14 @@ test("execution moves focus once when confirmation controls unmount and leaves i
   assert.equal(hasText(mounted, confirmation.actionLabel), false);
   assert.equal(hasText(mounted, "Running: " + confirmation.title), true);
   assert.equal(workStates.at(-1)?.phase, "execution");
+  assert.equal(activeElement, statusNode);
+
+  await act(() =>
+    mounted.update(
+      artifactElement({ stateVersion: 2, planStatus: "completed" })
+    )
+  );
+  assert.equal(hasText(mounted, "Running: " + confirmation.title), false);
   assert.equal(activeElement, statusNode);
 
   const reconciled = {
