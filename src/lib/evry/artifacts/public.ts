@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { EvryHydratedConversationArtifact } from "@/lib/evry/conversations/artifacts";
 import {
   EVRY_CONVERSATION_DURABLE_RESULT_CODES,
+  EVRY_READ_ITEM_MAX_FACTS,
   evryConversationPlanIdentitySchema,
   storedEvryArtifactFactSchema,
 } from "@/lib/evry/conversations/contract";
@@ -51,7 +52,9 @@ const publicReadArtifactSchema = z
           .strictObject({
             id: z.string().min(1).max(160),
             label: labelSchema,
-            facts: z.array(storedEvryArtifactFactSchema).max(12),
+            facts: z
+              .array(storedEvryArtifactFactSchema)
+              .max(EVRY_READ_ITEM_MAX_FACTS),
             sourceLink: evryReviewSourceLinkSchema,
           })
           .readonly()

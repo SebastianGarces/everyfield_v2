@@ -143,6 +143,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedResponseIds",
       "expectedEvaluationId",
       "expectedInvitationIds",
+      "expectedConfirmationTokenIds",
       "pendingNotifications",
     ],
     true

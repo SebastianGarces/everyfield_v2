@@ -49,6 +49,8 @@ for (const identity of MEETINGS_READ_OPERATION_IDENTITIES) {
   for (const layer of [
     "tenancy",
     "permission",
+    "arguments",
+    "confirmation",
     "execution",
     "idempotency",
     "errors",

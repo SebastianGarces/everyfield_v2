@@ -22,6 +22,16 @@ function fixtureFor(
         },
       ];
     }
+    if (layer === "policy") {
+      return [
+        {
+          id: `${registration.identity}:${layer}`,
+          proofId: "meetings-selection",
+          testName:
+            "the closed Meetings application policy admits each named capability and rejects non-application requests",
+        },
+      ];
+    }
     if (
       registration.operationKind === "effect" &&
       (layer === "arguments" ||
@@ -39,14 +49,6 @@ function fixtureFor(
         },
       ];
     }
-    const liveLayer =
-      layer === "policy"
-        ? "permission"
-        : layer === "confirmation"
-          ? "execution"
-          : layer === "arguments"
-            ? "errors"
-            : layer;
     return [
       {
         id: `${registration.identity}:${layer}`,
@@ -54,7 +56,7 @@ function fixtureFor(
           registration.operationKind === "effect"
             ? "meetings-effect-live"
             : "meetings-read-live",
-        testName: `${registration.identity}:${liveLayer}`,
+        testName: `${registration.identity}:${layer}`,
       },
     ];
   };

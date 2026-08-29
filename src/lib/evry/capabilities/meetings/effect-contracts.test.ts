@@ -159,6 +159,7 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "expectedResponseIds") return [SECOND_ID];
   if (key === "expectedEvaluationId") return SECOND_ID;
   if (key === "expectedInvitationIds") return [SECOND_ID];
+  if (key === "expectedConfirmationTokenIds") return [ID];
   if (key === "expectedActualAttendance") return null;
   if (key === "attendees") {
     return [
@@ -428,6 +429,27 @@ test("the eval roster is derived from production Meetings registrations", () => 
     ).toSorted(),
     MEETINGS_OPERATION_REGISTRATIONS.map(({ identity }) => identity).toSorted()
   );
+  for (const fixture of MEETINGS_CAPABILITY_EVAL_FIXTURES) {
+    assert.equal(fixture.cases.policy[0]?.proofId, "meetings-selection");
+    assert.equal(
+      fixture.cases.policy[0]?.testName,
+      "the closed Meetings application policy admits each named capability and rejects non-application requests"
+    );
+    const registration = MEETINGS_OPERATION_REGISTRATIONS.find(
+      ({ identity }) => identity === fixture.capabilityIdentity
+    );
+    assert.ok(registration);
+    if (registration.operationKind === "read") {
+      assert.equal(
+        fixture.cases.arguments[0]?.testName,
+        `${fixture.capabilityIdentity}:arguments`
+      );
+      assert.equal(
+        fixture.cases.confirmation[0]?.testName,
+        `${fixture.capabilityIdentity}:confirmation`
+      );
+    }
+  }
 });
 
 test("every Meetings effect renders its exact complete confirmation", () => {
@@ -636,6 +658,10 @@ test("a 101-record delete snapshot discloses every source-owned dependent", () =
     (_, index) =>
       `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
   );
+  const confirmationTokenIds = [
+    "90000000-0000-4000-8000-000000000001",
+    "90000000-0000-4000-8000-000000000002",
+  ];
   const arguments_ = {
     ...validArguments("deleteMeetingAction"),
     expectedAttendanceIds: attendanceIds,
@@ -643,6 +669,7 @@ test("a 101-record delete snapshot discloses every source-owned dependent", () =
     expectedResponseIds: [],
     expectedEvaluationId: null,
     expectedInvitationIds: [],
+    expectedConfirmationTokenIds: confirmationTokenIds,
     pendingNotifications: [],
   };
   assert.equal(
@@ -665,12 +692,101 @@ test("a 101-record delete snapshot discloses every source-owned dependent", () =
     { label: "Attendance records removed", count: 101 }
   );
   assert.deepEqual(
+    step.resolvedTargets
+      .filter(({ label }) => label === "Confirmation token")
+      .map(({ value }) => value),
+    confirmationTokenIds
+  );
+  assert.deepEqual(
+    step.counts.find(({ label }) => label === "Confirmation tokens removed"),
+    { label: "Confirmation tokens removed", count: 2 }
+  );
+  assert.deepEqual(
     JSON.parse(
       joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
     ),
     arguments_
   );
   assert.equal(confirmation.steps[0]?.effectKind, "destructive");
+});
+
+test("a legal large notification plan keeps every target and baseline row", () => {
+  const notificationTargets = Array.from({ length: 101 }, (_, index) => ({
+    notificationId: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    recipientUserId: `50000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    category: "meetings" as const,
+    type: "meeting.reminder",
+    title: `Reminder ${index + 1}`,
+    body: `Meeting reminder ${index + 1}`,
+    entityType: "meeting" as const,
+    entityId: ID,
+    dedupeKey: `meeting-reminder-${index + 1}`,
+    scheduledFor: WHEN,
+    expectedAbsent: true as const,
+  }));
+  const pendingNotifications = Array.from({ length: 101 }, (_, index) => ({
+    notificationId: `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    recipientUserId: `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    type: "meeting.reminder",
+    entityId: ID,
+    dedupeKey: `pending-meeting-reminder-${index + 1}`,
+    scheduledFor: WHEN,
+    beforeStatus: "pending" as const,
+    expectedUpdatedAt: WHEN,
+  }));
+  const activeNotifications = Array.from({ length: 501 }, (_, index) => ({
+    notificationId: `80000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    recipientUserId: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    type: "meeting.reminder",
+    entityId: ID,
+    dedupeKey: `active-meeting-reminder-${index + 1}`,
+    scheduledFor: WHEN,
+    status: "pending" as const,
+    expectedUpdatedAt: WHEN,
+  }));
+  const base = validArguments("updateMeetingAction");
+  const arguments_ = {
+    ...base,
+    pendingNotifications,
+    notificationTargets,
+    notificationBaseline: {
+      coreGroupUserIds: [],
+      reminderUserIds: [],
+      activeNotifications,
+    },
+  };
+
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateMeetingAction.safeParse(arguments_)
+      .success,
+    true
+  );
+  const { step } = reviewForArguments("updateMeetingAction", arguments_);
+  assert.deepEqual(
+    JSON.parse(
+      joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+    ),
+    arguments_
+  );
+  assert.equal(
+    step.resolvedTargets.filter(({ label }) => label === "Notification").length,
+    202
+  );
+  assert.deepEqual(
+    step.counts.filter(({ label }) => label.startsWith("Notifications ")),
+    [
+      { label: "Notifications scheduled", count: 101 },
+      { label: "Notifications cancelled", count: 101 },
+    ]
+  );
+  assert.equal(
+    (
+      JSON.parse(
+        joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+      ) as typeof arguments_
+    ).notificationBaseline.activeNotifications.length,
+    501
+  );
 });
 
 test("reschedule confirmation renders scheduled and cancelled notification changes", () => {

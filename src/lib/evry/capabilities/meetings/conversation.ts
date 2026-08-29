@@ -45,6 +45,16 @@ type MeetingsEffectConversationDependencies = Readonly<{
   proposeEffect: typeof proposeMeetingsEvryEffect;
 }>;
 
+type MeetingsReadConversationDependencies = Readonly<{
+  authorizeRead: typeof authorizeEvryReadCapability;
+  executeRead: typeof executeMeetingsRead;
+}>;
+
+const productionReadDependencies: MeetingsReadConversationDependencies = {
+  authorizeRead: authorizeEvryReadCapability,
+  executeRead: executeMeetingsRead,
+};
+
 function proposalResult(proposal: MeetingsEvryEffectProposal) {
   return {
     body: "Review this exact Meetings change before anything is written.",
@@ -59,7 +69,8 @@ export function createMeetingsEvryConversationContinuation(
     recoverProposal: recoverMeetingsEvryEffectProposal,
     resolveEffect: resolveMeetingsEvryEffect,
     proposeEffect: proposeMeetingsEvryEffect,
-  }
+  },
+  readDependencies: MeetingsReadConversationDependencies = productionReadDependencies
 ): EvryCapabilityConversationContinuation {
   return {
     identity: "meetings",
@@ -72,7 +83,7 @@ export function createMeetingsEvryConversationContinuation(
 
       if (selection.kind !== "effect") {
         const identity = READ_IDENTITY[selection.kind];
-        const authorization = await authorizeEvryReadCapability(identity);
+        const authorization = await readDependencies.authorizeRead(identity);
         if (
           !authorization ||
           authorization.actor.userId !== input.actor.userId ||
@@ -86,7 +97,7 @@ export function createMeetingsEvryConversationContinuation(
         if (needsMeeting && input.pageContext?.kind !== "meeting") {
           return missingMeetingResult();
         }
-        const artifact = await executeMeetingsRead({
+        const artifact = await readDependencies.executeRead({
           authorization,
           untrustedInput: meetingsReadInputForSelection(
             selection,

@@ -134,7 +134,6 @@ const meetingNotificationTargetSchema = z.strictObject({
 });
 const meetingNotificationTargetsSchema = z
   .array(meetingNotificationTargetSchema)
-  .max(100)
   .superRefine((targets, context) => {
     const ids = targets.map(({ notificationId }) => notificationId);
     if (new Set(ids).size !== ids.length) {
@@ -166,7 +165,6 @@ const pendingNotificationSchema = z.strictObject({
 });
 const pendingNotificationsSchema = z
   .array(pendingNotificationSchema)
-  .max(100)
   .superRefine((targets, context) => {
     const ids = targets.map(({ notificationId }) => notificationId);
     if (new Set(ids).size !== ids.length) {
@@ -190,7 +188,7 @@ const activeMeetingNotificationSchema = z.strictObject({
 const notificationPlanBaselineSchema = z.strictObject({
   coreGroupUserIds: uuidSet,
   reminderUserIds: uuidSet,
-  activeNotifications: z.array(activeMeetingNotificationSchema).max(500),
+  activeNotifications: z.array(activeMeetingNotificationSchema),
 });
 
 const taskNotificationTargetSchema = z.strictObject({
@@ -418,6 +416,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedResponseIds: uuidSet,
     expectedEvaluationId: nullableUuid,
     expectedInvitationIds: uuidSet,
+    expectedConfirmationTokenIds: uuidSet,
     pendingNotifications: pendingNotificationsSchema,
   }),
   finalizeAttendanceAction: z.strictObject({

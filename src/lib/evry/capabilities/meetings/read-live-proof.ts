@@ -14,6 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
+import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 
 const SCRATCH = "__evry meetings read proof__";
 const MEETING_AT = new Date("2026-09-29T18:00:00.000Z");
@@ -145,11 +146,15 @@ async function main() {
     seat: "owner",
   };
 
-  const [{ authorizeEvryReadCapability }, { executeMeetingsRead }] =
-    await Promise.all([
-      import("@/lib/evry/eligibility/capabilities"),
-      import("./reads"),
-    ]);
+  const [
+    { authorizeEvryReadCapability },
+    { executeMeetingsRead },
+    { continueMeetingsEvryConversation },
+  ] = await Promise.all([
+    import("@/lib/evry/eligibility/capabilities"),
+    import("./reads"),
+    import("./conversation"),
+  ]);
 
   const inputs = {
     "meetings.read.list": {
@@ -170,6 +175,13 @@ async function main() {
       foreign: { meetingId: foreign.meeting.id, limit: 12 },
     },
     "meetings.read.schedule": { valid: {}, foreign: {} },
+  } as const;
+
+  const literalRequests = {
+    "meetings.read.list": "show meetings",
+    "meetings.read.detail": "show this meeting",
+    "meetings.read.analytics": "show meeting analytics",
+    "meetings.read.schedule": "list meeting locations",
   } as const;
 
   for (const [identity, values] of Object.entries(inputs)) {
@@ -194,7 +206,47 @@ async function main() {
       untrustedInput: { ...values.valid, genericUrl: "https://invalid.test" },
     });
     assert.equal(refused, null, `${identity} accepted an unknown argument`);
+    console.log(`PASS ${identity}:arguments`);
     console.log(`PASS ${identity}:errors`);
+
+    const pageContext =
+      identity === "meetings.read.detail" ||
+      identity === "meetings.read.analytics"
+        ? {
+            kind: "meeting" as const,
+            recordId: local.meeting.id,
+            label: "Local Vision Meeting",
+          }
+        : null;
+    const conversation = {
+      id: randomUUID(),
+      actorUserId: local.user.id,
+      plantId: local.plant.id,
+      stateVersion: 0,
+      state: {},
+      messages: [],
+    } as unknown as EvryStoredConversation;
+    const continuationResult = await continueMeetingsEvryConversation.continue({
+      actor: authorization.actor,
+      conversation,
+      userRequestKey: randomUUID(),
+      literalUserText: literalRequests[identity as keyof typeof inputs],
+      pageContext,
+      requestPageContext: null,
+      now: new Date(),
+    });
+    assert.ok(continuationResult, `${identity} conversation returned nothing`);
+    assert.equal(
+      continuationResult.activePlan,
+      undefined,
+      `${identity} created an active confirmation plan`
+    );
+    assert.deepEqual(
+      continuationResult.artifacts.map(({ kind }) => kind),
+      ["read"],
+      `${identity} did not persist a read artifact`
+    );
+    console.log(`PASS ${identity}:confirmation`);
 
     if (identity === "meetings.read.schedule") {
       assert.equal(

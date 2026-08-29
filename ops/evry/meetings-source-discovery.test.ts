@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -91,6 +98,92 @@ test("the Meetings generator refuses an unclassified read in a new page source",
       (error) =>
         error instanceof Error &&
         error.message.includes(`unclassified=[${identity}`)
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the Meetings generator refuses a direct Drizzle table read added to a classified page", () => {
+  const repoRoot = temporaryMeetingsRepo();
+  const source = path.join(
+    repoRoot,
+    "src/app/(dashboard)/meetings/[id]/attendance/page.tsx"
+  );
+  const original = readFileSync(source, "utf8");
+  writeFileSync(
+    source,
+    `import { db as inventoryProbeDb } from "@/db";\nimport { meetingAttendance as inventoryProbeAttendance } from "@/db/schema";\n${original}\nasync function inventoryProbe() { return inventoryProbeDb.select().from(inventoryProbeAttendance); }\nvoid inventoryProbe;\n`
+  );
+  const operation = meetingsReadIdentity(
+    "src/app/(dashboard)/meetings/[id]/attendance/page.tsx",
+    "meetingAttendance"
+  );
+  try {
+    assert.ok(discoverMeetingsPageReadOperations(repoRoot).includes(operation));
+    assert.throws(
+      () => generateMeetingsCapabilityInventory(repoRoot),
+      (error) => error instanceof Error && error.message.includes(operation)
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("read discovery sees namespace, default, deferred, and synchronous imported calls", () => {
+  const repoRoot = temporaryMeetingsRepo();
+  const source = path.join(
+    repoRoot,
+    "src/app/(dashboard)/meetings/@inventory-call-probes/page.tsx"
+  );
+  mkdirSync(path.dirname(source), { recursive: true });
+  writeFileSync(
+    source,
+    `import defaultRead from "@/lib/meetings/default-read";\nimport * as reads from "@/lib/meetings/service";\nimport { synchronousMeetingRead } from "@/lib/meetings/synchronous-read";\nexport default async function Page() { const deferred = reads.getMeeting("plant", "meeting"); synchronousMeetingRead(); defaultRead(); await deferred; return null; }\n`
+  );
+  try {
+    const operations = discoverMeetingsPageReadOperations(repoRoot);
+    for (const imported of [
+      "default",
+      "getMeeting",
+      "synchronousMeetingRead",
+    ]) {
+      assert.ok(
+        operations.includes(
+          meetingsReadIdentity(
+            "src/app/(dashboard)/meetings/@inventory-call-probes/page.tsx",
+            imported
+          )
+        ),
+        imported
+      );
+    }
+    assert.throws(() => generateMeetingsCapabilityInventory(repoRoot));
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the Meetings generator refuses a function-level server action in a page", () => {
+  const repoRoot = temporaryMeetingsRepo();
+  const source = path.join(
+    repoRoot,
+    "src/app/(dashboard)/meetings/@inventory-inline-action/page.tsx"
+  );
+  mkdirSync(path.dirname(source), { recursive: true });
+  writeFileSync(
+    source,
+    `export default function Page() { async function newlyAddedInlineMeetingAction() { "use server"; } void newlyAddedInlineMeetingAction; return null; }\n`
+  );
+  const action =
+    "action:src/app/(dashboard)/meetings/@inventory-inline-action/page.tsx → newlyAddedInlineMeetingAction";
+  try {
+    assert.ok(discoverMeetingsActionIdentities(repoRoot).includes(action));
+    assert.throws(
+      () => generateMeetingsCapabilityInventory(repoRoot),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(`unclassified=[${action}]`)
     );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });

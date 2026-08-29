@@ -618,6 +618,7 @@
         "expectedResponseIds",
         "expectedEvaluationId",
         "expectedInvitationIds",
+        "expectedConfirmationTokenIds",
         "pendingNotifications"
       ],
       "difficultToReverse": true,
@@ -1208,6 +1209,45 @@
       }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → analyticsMeetingTypeArg",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → analyticsMeetingTypeLabel",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → cn",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → getAttendanceTrend",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.analytics",
@@ -1236,6 +1276,45 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → parseAnalyticsMeetingTypeFilter",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → verifySession",
@@ -1291,7 +1370,46 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → compareEvaluationToHistory",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
       "parityCapability": "meetings",
@@ -1344,6 +1462,45 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → meetingDisplayTitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → verifySession",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
@@ -1387,6 +1544,32 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → verifySession",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
@@ -1421,6 +1604,45 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → meetingDisplayTitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → verifySession",
@@ -1466,6 +1688,32 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → verifySession",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
@@ -1499,6 +1747,32 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → verifySession",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
@@ -1513,6 +1787,19 @@
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → defaultAgendaTemplatesForType",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
       "parityCapability": "meetings",
@@ -1578,6 +1865,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingContextualTemplates",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1588,7 +1888,85 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → meetingComposeUrl",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → meetingLinkedTaskProgressCopy",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → parseAgenda",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → holdsSeatFor",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
       "parityCapability": "meetings",
@@ -1621,7 +1999,46 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → parseMeetingType",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → analyticsMeetingTypeArg",
       "kind": "excluded_operation",
       "capabilityIdentity": null,
       "parityCapability": "meetings",
@@ -1657,6 +2074,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → holdsSeatFor",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → listMeetings",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.list",
@@ -1665,6 +2095,45 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → meetingsListSubtitle",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → parseListMeetingTypeFilter",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → verifySession",
@@ -1698,6 +2167,32 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → notFound",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → redirect",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → verifySession",
@@ -1817,7 +2312,7 @@
     "actions": 25,
     "routes": 10,
     "readOperations": 31,
-    "exclusions": 17,
+    "exclusions": 55,
     "readCapabilities": 4,
     "effectCapabilities": 25,
     "unclassified": 0

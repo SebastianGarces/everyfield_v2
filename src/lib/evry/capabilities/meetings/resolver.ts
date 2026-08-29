@@ -10,6 +10,7 @@ import {
   locations,
   meetingAttendance,
   meetingChecklistItems,
+  meetingConfirmationTokens,
   meetingEvaluations,
   meetingResponses,
   ministryTeams,
@@ -701,6 +702,7 @@ export async function resolveMeetingsEvryEffect(input: {
       responses,
       evaluation,
       invitationRows,
+      confirmationTokenRows,
       pending,
     ] = await Promise.all([
       db
@@ -749,6 +751,15 @@ export async function resolveMeetingsEvryEffect(input: {
             eq(invitations.meetingId, meeting.id)
           )
         ),
+      db
+        .select({ id: meetingConfirmationTokens.id })
+        .from(meetingConfirmationTokens)
+        .where(
+          and(
+            eq(meetingConfirmationTokens.churchId, actor.plantId),
+            eq(meetingConfirmationTokens.meetingId, meeting.id)
+          )
+        ),
       pendingMeetingNotifications(actor.plantId, meeting.id),
     ]);
     return parseResolved(exportName, {
@@ -761,6 +772,7 @@ export async function resolveMeetingsEvryEffect(input: {
       expectedResponseIds: responses.map(({ id }) => id),
       expectedEvaluationId: evaluation[0]?.id ?? null,
       expectedInvitationIds: invitationRows.map(({ id }) => id),
+      expectedConfirmationTokenIds: confirmationTokenRows.map(({ id }) => id),
       pendingNotifications: pending,
     });
   }
@@ -1293,15 +1305,24 @@ export async function resolveMeetingsEvryEffect(input: {
       notificationBaseline,
       notificationTargets,
     };
-    if (exportName === "addAttendeeAction")
+    if (exportName === "addAttendeeAction") {
+      const attendanceType =
+        values.attendanceType ??
+        (await deriveAttendanceType(
+          person.id,
+          meeting.id,
+          meeting.datetime,
+          db
+        ));
       return parseResolved(exportName, {
         ...common,
-        attendanceType: values.attendanceType,
+        attendanceType,
         status: "attended",
         invitedById: null,
         responseStatus: null,
         notes: null,
       });
+    }
     if (exportName === "addWalkInAttendeeAction")
       return parseResolved(exportName, {
         ...common,

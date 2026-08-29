@@ -1584,6 +1584,12 @@ function deleteMeetingStatement(input: {
     where: sql`i.church_id = ${input.execution.plantId}::uuid and i.meeting_id = ${args.meetingId}::uuid`,
     ids: args.expectedInvitationIds,
   });
+  const confirmationTokenSet = exactIdSet({
+    table: sql`meeting_confirmation_tokens t`,
+    id: sql`t.id`,
+    where: sql`t.church_id = ${input.execution.plantId}::uuid and t.meeting_id = ${args.meetingId}::uuid`,
+    ids: args.expectedConfirmationTokenIds,
+  });
   const evaluationCurrent = args.expectedEvaluationId
     ? sql`exists (
         select 1 from meeting_evaluations e
@@ -1610,9 +1616,10 @@ function deleteMeetingStatement(input: {
         args.expectedChecklistItemIds.length +
         args.expectedResponseIds.length +
         args.expectedInvitationIds.length +
+        args.expectedConfirmationTokenIds.length +
         (args.expectedEvaluationId ? 1 : 0),
       current: sql`${attendanceSet} and ${checklistSet} and ${responseSet}
-        and ${invitationSet} and ${evaluationCurrent}
+        and ${invitationSet} and ${confirmationTokenSet} and ${evaluationCurrent}
         and ${pendingNotificationsCurrent({
           plantId: input.execution.plantId,
           meetingId: args.meetingId,

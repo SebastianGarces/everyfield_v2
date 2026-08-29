@@ -8,6 +8,7 @@ import {
   locations,
   meetingAttendance,
   meetingChecklistItems,
+  meetingConfirmationTokens,
   meetingEvaluations,
   meetingResponses,
   notifications,
@@ -992,54 +993,69 @@ export async function meetingsPlanTargetIsCurrent(input: {
     const deletion = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.deleteMeetingAction.parse(
       input.step.arguments
     );
-    const [attendance, checklist, responses, evaluations, invitationRows] =
-      await Promise.all([
-        db
-          .select({ id: meetingAttendance.id })
-          .from(meetingAttendance)
-          .where(
-            and(
-              eq(meetingAttendance.churchId, plantId),
-              eq(meetingAttendance.meetingId, meetingId)
-            )
-          ),
-        db
-          .select({ id: meetingChecklistItems.id })
-          .from(meetingChecklistItems)
-          .where(
-            and(
-              eq(meetingChecklistItems.churchId, plantId),
-              eq(meetingChecklistItems.meetingId, meetingId)
-            )
-          ),
-        db
-          .select({ id: meetingResponses.id })
-          .from(meetingResponses)
-          .where(
-            and(
-              eq(meetingResponses.churchId, plantId),
-              eq(meetingResponses.meetingId, meetingId)
-            )
-          ),
-        db
-          .select({ id: meetingEvaluations.id })
-          .from(meetingEvaluations)
-          .where(
-            and(
-              eq(meetingEvaluations.churchId, plantId),
-              eq(meetingEvaluations.meetingId, meetingId)
-            )
-          ),
-        db
-          .select({ id: invitations.id })
-          .from(invitations)
-          .where(
-            and(
-              eq(invitations.churchId, plantId),
-              eq(invitations.meetingId, meetingId)
-            )
-          ),
-      ]);
+    const [
+      attendance,
+      checklist,
+      responses,
+      evaluations,
+      invitationRows,
+      confirmationTokenRows,
+    ] = await Promise.all([
+      db
+        .select({ id: meetingAttendance.id })
+        .from(meetingAttendance)
+        .where(
+          and(
+            eq(meetingAttendance.churchId, plantId),
+            eq(meetingAttendance.meetingId, meetingId)
+          )
+        ),
+      db
+        .select({ id: meetingChecklistItems.id })
+        .from(meetingChecklistItems)
+        .where(
+          and(
+            eq(meetingChecklistItems.churchId, plantId),
+            eq(meetingChecklistItems.meetingId, meetingId)
+          )
+        ),
+      db
+        .select({ id: meetingResponses.id })
+        .from(meetingResponses)
+        .where(
+          and(
+            eq(meetingResponses.churchId, plantId),
+            eq(meetingResponses.meetingId, meetingId)
+          )
+        ),
+      db
+        .select({ id: meetingEvaluations.id })
+        .from(meetingEvaluations)
+        .where(
+          and(
+            eq(meetingEvaluations.churchId, plantId),
+            eq(meetingEvaluations.meetingId, meetingId)
+          )
+        ),
+      db
+        .select({ id: invitations.id })
+        .from(invitations)
+        .where(
+          and(
+            eq(invitations.churchId, plantId),
+            eq(invitations.meetingId, meetingId)
+          )
+        ),
+      db
+        .select({ id: meetingConfirmationTokens.id })
+        .from(meetingConfirmationTokens)
+        .where(
+          and(
+            eq(meetingConfirmationTokens.churchId, plantId),
+            eq(meetingConfirmationTokens.meetingId, meetingId)
+          )
+        ),
+    ]);
     return (
       sameStrings(
         attendance.map(({ id }) => id),
@@ -1056,6 +1072,10 @@ export async function meetingsPlanTargetIsCurrent(input: {
       sameStrings(
         invitationRows.map(({ id }) => id),
         deletion.expectedInvitationIds
+      ) &&
+      sameStrings(
+        confirmationTokenRows.map(({ id }) => id),
+        deletion.expectedConfirmationTokenIds
       ) &&
       sameNullable(evaluations[0]?.id ?? null, deletion.expectedEvaluationId)
     );

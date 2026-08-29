@@ -17,6 +17,7 @@ import {
   locations,
   meetingAttendance,
   meetingChecklistItems,
+  meetingConfirmationTokens,
   meetingEvaluations,
   meetingResponses,
   ministryTeams,
@@ -32,6 +33,7 @@ import type { EvryEffectInput } from "@/lib/evry/executor";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryActionPlanDocument } from "@/lib/evry/plans";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
+import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
 
 import type { MeetingsActionExport } from "./catalog";
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
@@ -328,6 +330,13 @@ async function fixtureSelection(input: {
           createdBy: actor.userId,
         }))
       );
+      await db.insert(meetingConfirmationTokens).values({
+        token: `evry-delete-${randomUUID()}`,
+        churchId: actor.plantId,
+        meetingId: meeting.id,
+        personId: people[0]!.id,
+        expiresAt: new Date(MEETING_AT.getTime() + 24 * 60 * 60 * 1_000),
+      });
     }
     if (exportName === "updateMeetingAction") {
       const [pending] = await db
@@ -454,7 +463,7 @@ async function fixtureSelection(input: {
   assert.ok(needsAbsentAttendance || attendance);
   const values: Readonly<Record<string, unknown>> =
     exportName === "addAttendeeAction"
-      ? { personId: person.id, attendanceType: "first_time" }
+      ? { personId: person.id }
       : exportName === "addToGuestListAction"
         ? { personId: person.id }
         : exportName === "addWalkInAttendeeAction"
@@ -726,6 +735,21 @@ async function assertMutationCardinality(
     ]);
     assert.equal(meetingRows.length, 0, "deleted meeting remains");
     assert.equal(attendanceRows.length, 0, "dependent attendance remains");
+    assert.equal(
+      (
+        await db
+          .select({ id: meetingConfirmationTokens.id })
+          .from(meetingConfirmationTokens)
+          .where(
+            inArray(
+              meetingConfirmationTokens.id,
+              args.expectedConfirmationTokenIds
+            )
+          )
+      ).length,
+      0,
+      "dependent confirmation token remains"
+    );
   }
 
   if (
@@ -841,12 +865,34 @@ async function runEffect(input: {
     now: NOW,
   });
   assert.ok(resolved, `${input.exportName} did not resolve`);
+  if (resolved.exportName === "addAttendeeAction") {
+    const [meeting] = await db
+      .select({ datetime: churchMeetings.datetime })
+      .from(churchMeetings)
+      .where(eq(churchMeetings.id, resolved.arguments.meetingId));
+    assert.ok(meeting);
+    assert.equal(
+      resolved.arguments.attendanceType,
+      await deriveAttendanceType(
+        resolved.arguments.personId,
+        resolved.arguments.meetingId,
+        meeting.datetime,
+        db
+      ),
+      "omitted attendance type diverged from the UI derivation"
+    );
+  }
   const execution = await seedExecution({ actor: input.actor, resolved });
   if (resolved.exportName === "deleteMeetingAction") {
     assert.equal(
       resolved.arguments.expectedAttendanceIds.length,
       101,
       "resolver truncated source-owned attendance dependents"
+    );
+    assert.equal(
+      resolved.arguments.expectedConfirmationTokenIds.length,
+      1,
+      "resolver omitted a source-owned confirmation-token cascade"
     );
     const document: EvryActionPlanDocument = {
       version: 1,
@@ -876,6 +922,13 @@ async function runEffect(input: {
         .map(({ value }) => value),
       resolved.arguments.expectedAttendanceIds,
       "trusted confirmation omitted a source-owned dependent"
+    );
+    assert.deepEqual(
+      confirmation.steps[0]?.resolvedTargets
+        .filter(({ label }) => label === "Confirmation token")
+        .map(({ value }) => value),
+      resolved.arguments.expectedConfirmationTokenIds,
+      "trusted confirmation omitted a confirmation-token cascade"
     );
     assert.equal(
       (
@@ -947,6 +1000,58 @@ async function runEffect(input: {
   if (input.exportName === "createLocationAction") {
     const args = resolved.arguments as Readonly<{ locationId: string }>;
     await db.delete(locations).where(eq(locations.id, args.locationId));
+  }
+  if (resolved.exportName === "deleteMeetingAction") {
+    const [attendance] = await db
+      .select({ personId: meetingAttendance.personId })
+      .from(meetingAttendance)
+      .where(
+        and(
+          eq(meetingAttendance.meetingId, resolved.arguments.meetingId),
+          sql`${meetingAttendance.id} <> ${resolved.arguments.expectedAttendanceIds[0]}::uuid`
+        )
+      )
+      .limit(1);
+    assert.ok(attendance);
+    const [lateToken] = await db
+      .insert(meetingConfirmationTokens)
+      .values({
+        token: `evry-late-delete-${randomUUID()}`,
+        churchId: input.actor.plantId,
+        meetingId: resolved.arguments.meetingId,
+        personId: attendance.personId,
+        expiresAt: new Date(MEETING_AT.getTime() + 24 * 60 * 60 * 1_000),
+      })
+      .returning({ id: meetingConfirmationTokens.id });
+    assert.ok(lateToken);
+    assert.equal(
+      (await input.executeMeetingsEffect(effectInput)).status,
+      "refused",
+      "delete accepted a confirmation token added after review"
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: churchMeetings.id })
+          .from(churchMeetings)
+          .where(eq(churchMeetings.id, resolved.arguments.meetingId))
+      ).length,
+      1,
+      "stale cascade validation partially deleted the meeting"
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: evryExecutionOutcomes.id })
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+      ).length,
+      0,
+      "stale confirmation-token cascade claimed an execution outcome"
+    );
+    await db
+      .delete(meetingConfirmationTokens)
+      .where(eq(meetingConfirmationTokens.id, lateToken.id));
   }
   console.log(`PASS ${execution.capabilityIdentity}:errors`);
 

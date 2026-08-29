@@ -428,6 +428,7 @@ const BUILDERS = {
       args.expectedChecklistItemIds.length +
       args.expectedResponseIds.length +
       args.expectedInvitationIds.length +
+      args.expectedConfirmationTokenIds.length +
       (args.expectedEvaluationId ? 1 : 0);
     return {
       affectedCount,
@@ -441,6 +442,9 @@ const BUILDERS = {
         ),
         ...args.expectedResponseIds.map((id) => target("Response card", id)),
         ...args.expectedInvitationIds.map((id) => target("Invitation", id)),
+        ...args.expectedConfirmationTokenIds.map((id) =>
+          target("Confirmation token", id)
+        ),
         ...(args.expectedEvaluationId
           ? [target("Evaluation", args.expectedEvaluationId)]
           : []),
@@ -452,6 +456,10 @@ const BUILDERS = {
         count("Checklist items removed", args.expectedChecklistItemIds.length),
         count("Response cards removed", args.expectedResponseIds.length),
         count("Invitations removed", args.expectedInvitationIds.length),
+        count(
+          "Confirmation tokens removed",
+          args.expectedConfirmationTokenIds.length
+        ),
         ...(args.expectedEvaluationId ? [count("Evaluations removed", 1)] : []),
         ...notificationCounts({ cancelled: args.pendingNotifications }),
       ],
