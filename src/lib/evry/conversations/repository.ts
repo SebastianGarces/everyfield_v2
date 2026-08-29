@@ -593,6 +593,24 @@ async function findMessageByRequestKey(input: {
   return message ?? null;
 }
 
+/**
+ * Recover the durable aggregate written for one exact request identity.
+ * This is intentionally actor + plant scoped at the first query boundary.
+ */
+export async function findEvryConversationRecordByRequestKey(input: {
+  actorUserId: string;
+  plantId: string;
+  requestKey: EvryConversationRequestKey;
+}): Promise<EvryStoredConversation | null> {
+  const message = await findMessageByRequestKey(input);
+  if (!message) return null;
+  return findEvryConversationRecord({
+    conversationId: message.conversationId,
+    actorUserId: input.actorUserId,
+    plantId: input.plantId,
+  });
+}
+
 export async function appendEvryConversationRecord(input: {
   messageId: EvryConversationMessageId;
   conversationId: EvryConversationId;

@@ -57,10 +57,12 @@ class RouteRemountController {
 }
 
 const route = new RouteRemountController();
+const emptySearchParams = new URLSearchParams();
 
 mock.module("next/navigation", {
   namedExports: {
     usePathname: () => "/evry",
+    useSearchParams: () => emptySearchParams,
     useRouter: () => ({
       back: () => {},
       push: (href: string) => route.push(href),

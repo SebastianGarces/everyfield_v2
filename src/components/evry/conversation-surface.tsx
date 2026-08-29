@@ -55,6 +55,7 @@ export function ConversationSurface({ className }: { className?: string }) {
   const {
     activeContext,
     acknowledgement,
+    canStopWatching,
     clearContext,
     conversation,
     draft,
@@ -62,8 +63,11 @@ export function ConversationSurface({ className }: { className?: string }) {
     isComposerBlocked,
     isLoading,
     isSending,
+    isWatchingDetached,
+    resumeWatching,
     sendMessage,
     setDraft,
+    stopWatching,
     suggestions,
     workRequestId,
     workState,
@@ -271,15 +275,28 @@ export function ConversationSurface({ className }: { className?: string }) {
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <EvryWorkStatus
-            acknowledgement={acknowledgement}
-            activeRequestId={workRequestId}
-            state={
-              error && workState.phase !== "failed"
-                ? { phase: "failed", message: error }
-                : workState
-            }
-          />
+          <div className="min-w-0 flex-1 space-y-1">
+            <EvryWorkStatus
+              acknowledgement={acknowledgement}
+              activeRequestId={workRequestId}
+              state={
+                error && workState.phase !== "failed"
+                  ? { phase: "failed", message: error }
+                  : workState
+              }
+            />
+            {canStopWatching || isWatchingDetached ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto min-h-6 cursor-pointer px-0 py-0.5"
+                onClick={isWatchingDetached ? resumeWatching : stopWatching}
+              >
+                {isWatchingDetached ? "Reconnect to this run" : "Stop watching"}
+              </Button>
+            ) : null}
+          </div>
           <Button
             type="submit"
             disabled={

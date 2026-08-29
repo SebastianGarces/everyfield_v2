@@ -3,33 +3,20 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import {
-  createEvryArtifactLifecycle,
   evryArtifactLifecycleRequestSchema,
   type EvryArtifactLifecycleResult,
   type EvryArtifactLifecycleRequest,
 } from "@/lib/evry/artifacts/lifecycle";
+import { runEvryProductionArtifactLifecycle } from "@/lib/evry/artifacts/production-lifecycle";
 import {
-  createEvryArtifactReviewRegistry,
-  trustedEvryPlanReview,
-} from "@/lib/evry/artifacts/trusted-plan-review";
-import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
-import {
-  appendTrustedEvryConversationMessage,
-  resumeEvryConversation,
-} from "@/lib/evry/conversations/service";
+  evryExecutionActiveRunCoordinator,
+  type EvryExecutionActiveRunCoordinator,
+} from "@/lib/evry/runs/execution";
+import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
 import {
   requireEvryPlantViewer,
   type EvryPlantActor,
 } from "@/lib/evry/eligibility/viewer";
-import {
-  createEvryExecutionCapabilityRegistry,
-  executeEvryActionPlan,
-} from "@/lib/evry/executor";
-import {
-  confirmEvryActionPlan,
-  createEvryPlanCapabilityRegistry,
-} from "@/lib/evry/plans";
-import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
 
 import {
   evryConversationJson,
@@ -50,6 +37,7 @@ type RunLifecycle = (input: {
 export type EvryArtifactLifecyclePostOptions = Readonly<{
   runLifecycle: RunLifecycle;
   correlationId?: () => string;
+  activeRuns?: EvryExecutionActiveRunCoordinator;
 }>;
 
 type RouteContext = Readonly<{
@@ -60,6 +48,7 @@ type RouteContext = Readonly<{
 export function createEvryArtifactLifecyclePost({
   runLifecycle,
   correlationId = randomUUID,
+  activeRuns,
 }: EvryArtifactLifecyclePostOptions) {
   return async function evryArtifactLifecyclePost(
     request: Request,
@@ -83,11 +72,44 @@ export function createEvryArtifactLifecyclePost({
         return evryConversationJson({ status: "invalid" }, 400);
       }
 
-      const result = await runLifecycle({
-        actor,
-        conversationId: params.data.conversationId,
-        request: parsed.data,
-      });
+      let result: EvryArtifactLifecycleResult;
+      if (
+        activeRuns &&
+        (parsed.data.action === "execute" || parsed.data.action === "retry")
+      ) {
+        const prepared = await activeRuns.prepare({
+          actor,
+          conversationId: params.data.conversationId,
+          request: { ...parsed.data, action: parsed.data.action },
+          startedAt: new Date(),
+          perform: runLifecycle,
+        });
+        const activeResult = await activeRuns.run(prepared);
+        if (activeResult.status === "active") {
+          return evryConversationJson({
+            status: "active",
+            requestId: prepared.claim.run.requestKey,
+            kind: "execution",
+            sequence: prepared.claim.run.version,
+            stage: "executing",
+            conversationId: prepared.claim.run.conversationId,
+            expiresAt: prepared.claim.run.expiresAt.toISOString(),
+          });
+        }
+        if (activeResult.status === "durable") {
+          return evryConversationJson({
+            status: "already_finished",
+            conversation: activeResult.conversation,
+          });
+        }
+        result = activeResult.result;
+      } else {
+        result = await runLifecycle({
+          actor,
+          conversationId: params.data.conversationId,
+          request: parsed.data,
+        });
+      }
       if (result.status === "unavailable") {
         return evryConversationJson(
           {
@@ -102,6 +124,19 @@ export function createEvryArtifactLifecyclePost({
         conversation: publicEvryConversation(result.resumed),
       });
     } catch (error) {
+      if (error instanceof EvryActiveRunIdentityError) {
+        return evryConversationJson(
+          {
+            status: "unavailable",
+            error: {
+              kind: "expected",
+              message:
+                "This request identity is already bound to different work.",
+            },
+          },
+          409
+        );
+      }
       const refusal = evryConversationViewerRefusal(error);
       if (refusal) return refusal;
       const supportId = correlationId();
@@ -120,29 +155,7 @@ export function createEvryArtifactLifecyclePost({
   };
 }
 
-// Capability packs compose these closed registries in their integration wave.
-// Until then a persisted plan cannot become confirmable or executable.
-const productionPlanRegistry = createEvryPlanCapabilityRegistry([]);
-const productionExecutionRegistry = createEvryExecutionCapabilityRegistry([]);
-const productionReviewRegistry = createEvryArtifactReviewRegistry([]);
-
-const runProductionLifecycle = createEvryArtifactLifecycle({
-  planRegistry: productionPlanRegistry,
-  executionRegistry: productionExecutionRegistry,
-  revalidatePlan: revalidateProductionEvryConversationPlan,
-  resume: resumeEvryConversation,
-  append: appendTrustedEvryConversationMessage,
-  confirm: confirmEvryActionPlan,
-  execute: executeEvryActionPlan,
-  cancel: cancelExactEvryActionPlan,
-  reviewPlan: (input) =>
-    trustedEvryPlanReview({
-      ...input,
-      reviewRegistry: productionReviewRegistry,
-    }),
-  now: () => new Date(),
-});
-
 export const POST = createEvryArtifactLifecyclePost({
-  runLifecycle: runProductionLifecycle,
+  runLifecycle: runEvryProductionArtifactLifecycle,
+  activeRuns: evryExecutionActiveRunCoordinator,
 });

@@ -8,6 +8,11 @@ import { continueEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
 import { evryPageContextSchema } from "@/lib/evry/resolvers/contract";
 import { resolveAuthorizedEvryPageContext } from "@/lib/evry/resolvers/page-context";
+import {
+  evryConversationActiveRunCoordinator,
+  type EvryConversationActiveRunCoordinator,
+} from "@/lib/evry/runs/conversation";
+import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
 
 import {
   evryConversationFailure,
@@ -39,6 +44,7 @@ export type EvryConversationMessagePostOptions = Readonly<{
   continueConversation?: typeof continueEvryConversation;
   now?: () => Date;
   resolvePageContext?: typeof resolveAuthorizedEvryPageContext;
+  activeRuns?: EvryConversationActiveRunCoordinator;
 }>;
 
 /** Persist and compile one authenticated continuation without running a model. */
@@ -46,6 +52,7 @@ export function createEvryConversationMessagePost({
   continueConversation = continueEvryConversation,
   now = () => new Date(),
   resolvePageContext = resolveAuthorizedEvryPageContext,
+  activeRuns = evryConversationActiveRunCoordinator,
 }: EvryConversationMessagePostOptions = {}): (
   request: Request,
   context: RouteContext
@@ -78,9 +85,26 @@ export function createEvryConversationMessagePost({
       });
 
       if (wantsEvryConversationStream(request)) {
-        return evryConversationStream({
-          requestId: parsed.data.requestKey,
-          run: async (reportStage) => {
+        const startedAt = now();
+        const prepared = await activeRuns.prepare({
+          actor,
+          requestKey: parsed.data.requestKey,
+          identity: {
+            kind: "conversation",
+            operation: "continue",
+            conversationId: params.data.conversationId,
+            planId: null,
+            planFingerprint: null,
+          },
+          fingerprintInput: {
+            version: 1,
+            operation: "continue",
+            conversationId: params.data.conversationId,
+            message: parsed.data.message,
+            pageContext: requestPageContext,
+          },
+          startedAt,
+          perform: async (reportStage) => {
             const result = await continueConversation({
               actor,
               conversationId: params.data.conversationId,
@@ -88,13 +112,17 @@ export function createEvryConversationMessagePost({
               message: parsed.data.message,
               pageContext,
               requestPageContext,
-              now: now(),
+              now: startedAt,
               reportStage,
             });
             return result
               ? { conversation: publicEvryConversation(result.resumed) }
               : null;
           },
+        });
+        return evryConversationStream({
+          requestId: parsed.data.requestKey,
+          run: (reportStage) => activeRuns.run(prepared, reportStage),
           failureCode: (error) =>
             error instanceof EvryConversationStateConflictError ||
             error instanceof EvryConversationIdempotencyError
@@ -137,7 +165,8 @@ export function createEvryConversationMessagePost({
     } catch (error) {
       if (
         error instanceof EvryConversationStateConflictError ||
-        error instanceof EvryConversationIdempotencyError
+        error instanceof EvryConversationIdempotencyError ||
+        error instanceof EvryActiveRunIdentityError
       ) {
         return evryConversationJson({ status: "stale" }, 409);
       }

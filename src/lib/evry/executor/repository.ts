@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { evryExecutionAttempts, evryExecutionOutcomes } from "@/db/schema";
@@ -143,6 +143,30 @@ export async function findEvryExecutionSnapshot(input: {
     steps,
     terminalStatus,
   });
+}
+
+export async function countEvryExecutionAttempts(input: {
+  planId: string;
+  actorUserId: string;
+  plantId: string;
+  fingerprint: string;
+}): Promise<number> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(evryExecutionAttempts)
+    .where(
+      and(
+        eq(evryExecutionAttempts.planId, input.planId),
+        eq(evryExecutionAttempts.actorUserId, input.actorUserId),
+        eq(evryExecutionAttempts.churchId, input.plantId),
+        eq(evryExecutionAttempts.planFingerprint, input.fingerprint),
+        eq(
+          evryExecutionAttempts.attemptKey,
+          executionAttemptKey(input.planId, input.fingerprint)
+        )
+      )
+    );
+  return row?.value ?? 0;
 }
 
 export async function startOrResumeEvryExecution(input: {

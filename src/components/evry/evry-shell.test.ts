@@ -28,6 +28,26 @@ const historyList = read(
 );
 const surface = read("components", "evry", "conversation-surface.tsx");
 const workStatus = read("components", "evry", "streaming", "work-status.tsx");
+const runRecoveryFixture = read(
+  "components",
+  "evry",
+  "streaming",
+  "run-recovery-browser-fixture.tsx"
+);
+const runRecoveryPreviewRoute = read(
+  "app",
+  "api",
+  "evry",
+  "runs",
+  "preview-fixture",
+  "route.ts"
+);
+const runRecoveryPreviewService = read(
+  "lib",
+  "evry",
+  "runs",
+  "preview-fixture.ts"
+);
 const sheet = read("components", "ui", "sheet.tsx");
 const resolver = read("lib", "evry", "resolvers", "page-context.ts");
 const createRoute = read("app", "api", "evry", "conversations", "route.ts");
@@ -239,6 +259,34 @@ test("the synthetic streaming lifecycle is preview-only and split from the produ
     workspace,
     /const EvryStreamingBrowserFixture = dynamic\(\(\) =>[\s\S]*import\("@\/components\/evry\/streaming\/browser-fixture"\)/
   );
+});
+
+test("the reconnect fixture is preview-only and uses server-owned durable proof", () => {
+  assert.match(
+    evryPage,
+    /process\.env\.VERCEL_ENV === "preview"[\s\S]*params\.artifactFixture === "stream-reconnect"/
+  );
+  assert.match(
+    workspace,
+    /const EvryRunRecoveryBrowserFixture = dynamic\(\(\) =>[\s\S]*import\("@\/components\/evry\/streaming\/run-recovery-browser-fixture"\)/
+  );
+  assert.match(
+    runRecoveryPreviewRoute,
+    /process\.env\.VERCEL_ENV !== "preview"/
+  );
+  assert.match(runRecoveryPreviewRoute, /requireEvryPlantViewer\(\)/);
+  assert.match(runRecoveryFixture, /\/api\/evry\/runs\/preview-fixture/);
+  assert.match(runRecoveryFixture, /writeEvryRunRecoveryMarker/);
+  assert.match(runRecoveryFixture, /window\.location\.reload\(\)/);
+  assert.doesNotMatch(runRecoveryFixture, /starts:\s*1|effectCount:\s*1/);
+  assert.match(runRecoveryPreviewService, /runs\.claim\(/);
+  assert.match(runRecoveryPreviewService, /startExecution\(/);
+  assert.match(runRecoveryPreviewService, /recordStep\(/);
+  assert.match(runRecoveryPreviewService, /append\(/);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-work-starts"/);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-effect-count"/);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-attempt-id"/);
+  assert.match(runRecoveryFixture, /data-testid="reconnect-result"/);
 });
 
 test("removing context removes it from the request body", () => {

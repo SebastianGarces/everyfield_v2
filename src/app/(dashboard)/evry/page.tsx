@@ -72,6 +72,11 @@ export default async function EvryPage({
         typeof params.artifactFixture === "string" &&
         params.artifactFixture === "streaming-states"
       }
+      showRunRecoveryFixture={
+        process.env.VERCEL_ENV === "preview" &&
+        typeof params.artifactFixture === "string" &&
+        params.artifactFixture === "stream-reconnect"
+      }
     />
   );
 }

@@ -29,6 +29,7 @@ type FetchArtifact = (
     method: "GET" | "POST";
     headers: Readonly<Record<string, string>>;
     body?: string;
+    signal?: AbortSignal;
   }>
 ) => Promise<FetchResponse>;
 
@@ -96,6 +97,7 @@ export async function coordinateEvryProductionArtifactRequest(input: {
     artifactId: string;
   }>;
   fetchArtifact?: FetchArtifact;
+  signal?: AbortSignal;
 }): Promise<EvryProductionArtifactRequestResult> {
   const fetchArtifact: FetchArtifact =
     input.fetchArtifact ??
@@ -104,6 +106,7 @@ export async function coordinateEvryProductionArtifactRequest(input: {
         method: init.method,
         headers: init.headers,
         ...(init.body === undefined ? {} : { body: init.body }),
+        ...(init.signal === undefined ? {} : { signal: init.signal }),
       }));
   const conversationPath =
     "/api/evry/conversations/" + encodeURIComponent(input.conversationId);
@@ -124,10 +127,15 @@ export async function coordinateEvryProductionArtifactRequest(input: {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: requestBody,
+        signal: input.signal,
       });
       const result = parseEvryArtifactLifecycleResponse(await response.json());
       if ("conversation" in result) {
         return { status: "conversation", conversation: result.conversation };
+      }
+      if (result.status === "active") {
+        uncertain = true;
+        continue;
       }
       if (result.error.kind === "expected" && !uncertain) {
         return { status: "error", error: result.error };
@@ -145,6 +153,7 @@ export async function coordinateEvryProductionArtifactRequest(input: {
     const response = await fetchArtifact(conversationPath, {
       method: "GET",
       headers: { accept: "application/json" },
+      signal: input.signal,
     });
     const conversation = parseEvryConversationEnvelope(await response.json());
     if (

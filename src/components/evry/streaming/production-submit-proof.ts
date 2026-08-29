@@ -4,9 +4,12 @@ import { mock, test } from "node:test";
 import { createElement, type ReactNode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
+const emptySearchParams = new URLSearchParams();
+
 mock.module("next/navigation", {
   namedExports: {
     usePathname: () => "/dashboard",
+    useSearchParams: () => emptySearchParams,
     useRouter: () => ({ back() {}, push() {} }),
   },
 });
