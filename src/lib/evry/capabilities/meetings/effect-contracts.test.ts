@@ -35,6 +35,7 @@ const meeting = {
   locationId: null,
   locationName: "Community Center",
   locationAddress: "1 Main Street",
+  meetingNumber: 12,
   teamId: null,
   meetingSubtype: null,
   estimatedAttendance: 30,
@@ -60,13 +61,14 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "personId") return PERSON_ID;
   if (key.endsWith("UpdatedAt") || key === "expectedUpdatedAt") return WHEN;
   if (key === "expectedResponseUpdatedAt") return null;
-  if (key === "expectedTeamRosterVersion") return null;
   if (key === "expectedChurchMaterialEventAt") return null;
   if (key === "expectedAssignedPersonUpdatedAt") return WHEN;
   if (key.startsWith("expected") && key.endsWith("Absent")) return true;
   if (key === "type" || key === "meetingType") return "vision_meeting";
   if (key === "title") return "Vision Meeting";
   if (key === "datetime") return WHEN;
+  if (key === "meetingDatetime") return WHEN;
+  if (key === "meetingTitle") return "Vision Meeting";
   if (key === "timezone") return "America/New_York";
   if (key === "locationName") return "Community Center";
   if (key === "locationAddress") return "1 Main Street";
@@ -83,8 +85,7 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "checklistItems") return [];
   if (key === "attendanceRows") return [];
   if (key === "notificationTargets") return [];
-  if (key === "pendingNotificationIds") return [];
-  if (key === "affectedMeetingIds") return [];
+  if (key === "pendingNotifications") return [];
   if (key === "expectedAttendanceIds") return [ID];
   if (key === "expectedChecklistItemIds") return [ID];
   if (key === "expectedResponseIds") return [];
@@ -111,6 +112,9 @@ function fixtureValue(exportName: string, key: string): unknown {
         dueDate: "2026-08-31",
         assignedToId: ID,
         expectedTaskAbsent: true,
+        beforeStatus: null,
+        expectedUpdatedAt: null,
+        notificationTargets: [],
       },
     ];
   }
@@ -123,6 +127,8 @@ function fixtureValue(exportName: string, key: string): unknown {
       expectedTaskAbsent: true,
       beforeStatus: null,
       expectedUpdatedAt: null,
+      pendingNotifications: [],
+      notificationTargets: [],
     };
   }
   if (key === "evaluationTask") return null;
@@ -135,7 +141,11 @@ function fixtureValue(exportName: string, key: string): unknown {
   }
   if (key === "invitedById") return null;
   if (key === "responseStatus") return null;
-  if (key === "status") return "attended";
+  if (key === "status") {
+    return exportName === "createMeetingAction" ? "planning" : "attended";
+  }
+  if (key === "actualAttendance") return null;
+  if (key === "createdById") return ID;
   if (key === "meetingType") return "vision_meeting";
   if (key === "note") return "Follow up next week.";
   if (key === "expectedPersonUpdatedAt") return WHEN;
@@ -176,6 +186,17 @@ function fixtureValue(exportName: string, key: string): unknown {
           updatedAt: WHEN,
         };
   }
+  if (key === "beforeAttendance") {
+    return {
+      id: ID,
+      exists: true,
+      status: "absent",
+      attendanceType: null,
+      responseStatus: "confirmed",
+      notes: null,
+      updatedAt: WHEN,
+    };
+  }
   if (key === "beforeChecked") return false;
   if (key === "afterChecked") return true;
   if (key === "beforeNotes" || key === "beforeAssignedTo") return null;
@@ -214,7 +235,8 @@ test("every authoritative effect has one strict complete fingerprint contract", 
     const valid = validArguments(exportName);
     assert.equal(schema.safeParse(valid).success, true, exportName);
     assert.equal(
-      schema.safeParse({ ...valid, arbitraryUrl: "https://example.com" }).success,
+      schema.safeParse({ ...valid, arbitraryUrl: "https://example.com" })
+        .success,
       false,
       `${exportName} must reject generic escape-hatch fields`
     );
@@ -232,8 +254,8 @@ test("every authoritative effect has one strict complete fingerprint contract", 
 
 test("the eval roster is derived from production Meetings registrations", () => {
   assert.deepEqual(
-    MEETINGS_CAPABILITY_EVAL_FIXTURES.map(({ capabilityIdentity }) =>
-      capabilityIdentity
+    MEETINGS_CAPABILITY_EVAL_FIXTURES.map(
+      ({ capabilityIdentity }) => capabilityIdentity
     ).toSorted(),
     MEETINGS_OPERATION_REGISTRATIONS.map(({ identity }) => identity).toSorted()
   );

@@ -27,19 +27,27 @@ const nullableUuid = uuid.nullable();
 const nullableText = z.string().nullable();
 const email = z.string().email().max(255).nullable();
 const nonnegativeInt = z.number().int().nonnegative();
-const timezone = z.string().trim().min(1).max(128).refine((value) => {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}, "Invalid IANA time zone");
-const uuidSet = z.array(uuid).max(1_000).superRefine((values, context) => {
-  if (new Set(values).size !== values.length) {
-    context.addIssue({ code: "custom", message: "IDs must be unique" });
-  }
-});
+const timezone = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Invalid IANA time zone");
+const uuidSet = z
+  .array(uuid)
+  .max(100)
+  .superRefine((values, context) => {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({ code: "custom", message: "IDs must be unique" });
+    }
+  });
 
 const agendaSectionSchema = z.strictObject({
   id: z.string().trim().min(1).max(160),
@@ -68,6 +76,7 @@ const meetingStateSchema = z.strictObject({
   locationId: nullableUuid,
   locationName: z.string().max(255).nullable(),
   locationAddress: z.string().max(500).nullable(),
+  meetingNumber: nonnegativeInt.nullable(),
   teamId: nullableUuid,
   meetingSubtype: z.enum(meetingSubtypes).nullable(),
   estimatedAttendance: nonnegativeInt.nullable(),
@@ -85,25 +94,49 @@ const personFields = {
   phone: z.string().max(50).nullable(),
 } as const;
 
-const attendanceBaselineSchema = z.strictObject({
-  id: nullableUuid,
-  exists: z.boolean(),
-  status: z.enum(attendanceStatuses).nullable(),
-  attendanceType: z.enum(attendanceTypes).nullable(),
-  responseStatus: z.enum(responseStatuses).nullable(),
-  notes: nullableText,
-  updatedAt: nullableTimestamp,
-});
+const attendanceBaselineSchema = z
+  .strictObject({
+    id: nullableUuid,
+    exists: z.boolean(),
+    status: z.enum(attendanceStatuses).nullable(),
+    attendanceType: z.enum(attendanceTypes).nullable(),
+    responseStatus: z.enum(responseStatuses).nullable(),
+    notes: nullableText,
+    updatedAt: nullableTimestamp,
+  })
+  .superRefine((value, context) => {
+    const complete = value.id !== null && value.updatedAt !== null;
+    if (value.exists !== complete) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "An existing attendance baseline requires its id and updatedAt",
+      });
+    }
+    if (!value.exists && value.status !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Absent attendance cannot carry a stored status",
+      });
+    }
+  });
 
-const notificationTargetSchema = z.strictObject({
+const meetingNotificationTargetSchema = z.strictObject({
   notificationId: uuid,
   recipientUserId: uuid,
-  notificationType: z.string().trim().min(1).max(100),
+  category: z.literal("meetings"),
+  type: z.string().trim().min(1).max(64),
+  title: z.string().trim().min(1).max(255),
+  body: z.string().trim().min(1).max(4_000),
+  entityType: z.literal("meeting"),
+  entityId: uuid,
+  dedupeKey: z.string().trim().min(1).max(255),
   scheduledFor: timestamp,
+  expectedAbsent: z.literal(true),
 });
-const notificationTargetsSchema = z
-  .array(notificationTargetSchema)
-  .max(1_000)
+const meetingNotificationTargetsSchema = z
+  .array(meetingNotificationTargetSchema)
+  .max(100)
   .superRefine((targets, context) => {
     const ids = targets.map(({ notificationId }) => notificationId);
     if (new Set(ids).size !== ids.length) {
@@ -112,7 +145,69 @@ const notificationTargetsSchema = z
         message: "Notification targets must be unique",
       });
     }
+    const keys = targets.map(
+      ({ recipientUserId, dedupeKey }) => `${recipientUserId}:${dedupeKey}`
+    );
+    if (new Set(keys).size !== keys.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Notification recipient/dedupe targets must be unique",
+      });
+    }
   });
+
+const pendingNotificationSchema = z.strictObject({
+  notificationId: uuid,
+  recipientUserId: uuid,
+  type: z.string().trim().min(1).max(64),
+  entityId: uuid,
+  dedupeKey: z.string().trim().min(1).max(255),
+  scheduledFor: timestamp,
+  beforeStatus: z.literal("pending"),
+  expectedUpdatedAt: timestamp,
+});
+const pendingNotificationsSchema = z
+  .array(pendingNotificationSchema)
+  .max(100)
+  .superRefine((targets, context) => {
+    const ids = targets.map(({ notificationId }) => notificationId);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Pending notification targets must be unique",
+      });
+    }
+  });
+
+const taskNotificationTargetSchema = z.strictObject({
+  notificationId: uuid,
+  recipientUserId: uuid,
+  category: z.literal("tasks"),
+  type: z.enum(["task.due", "task.overdue"]),
+  title: z.string().trim().min(1).max(255),
+  body: z.string().trim().min(1).max(4_000),
+  entityType: z.literal("task"),
+  entityId: uuid,
+  dedupeKey: z.string().trim().min(1).max(255),
+  scheduledFor: timestamp,
+  expectedAbsent: z.literal(true),
+});
+const taskNotificationTargetsSchema = z
+  .array(taskNotificationTargetSchema)
+  .max(4);
+const pendingTaskNotificationSchema = z.strictObject({
+  notificationId: uuid,
+  recipientUserId: uuid,
+  type: z.enum(["task.due", "task.overdue"]),
+  entityId: uuid,
+  dedupeKey: z.string().trim().min(1).max(255),
+  scheduledFor: timestamp,
+  beforeStatus: z.literal("pending"),
+  expectedUpdatedAt: timestamp,
+});
+const pendingTaskNotificationsSchema = z
+  .array(pendingTaskNotificationSchema)
+  .max(4);
 
 const responseBaselineSchema = z.strictObject({
   responseId: uuid,
@@ -147,6 +242,7 @@ const personStatusChangeSchema = z.strictObject({
   afterStatus: z.literal("attendee"),
   expectedUpdatedAt: timestamp,
   activityId: uuid,
+  performedById: uuid,
 });
 
 const score = z.number().int().min(1).max(5);
@@ -163,7 +259,12 @@ const followUpTargetSchema = z.strictObject({
   title: z.string().trim().min(1).max(500),
   dueDate: z.string().date(),
   assignedToId: uuid,
-  expectedTaskAbsent: z.literal(true),
+  expectedTaskAbsent: z.boolean(),
+  beforeStatus: z
+    .enum(["not_started", "in_progress", "blocked", "complete"])
+    .nullable(),
+  expectedUpdatedAt: nullableTimestamp,
+  notificationTargets: taskNotificationTargetsSchema,
 });
 const evaluationTaskTargetSchema = z.strictObject({
   taskId: uuid,
@@ -175,6 +276,14 @@ const evaluationTaskTargetSchema = z.strictObject({
     .enum(["not_started", "in_progress", "blocked", "complete"])
     .nullable(),
   expectedUpdatedAt: nullableTimestamp,
+  pendingNotifications: pendingTaskNotificationsSchema,
+  notificationTargets: taskNotificationTargetsSchema,
+});
+const evaluationCompletionTaskSchema = z.strictObject({
+  taskId: uuid,
+  title: z.string().trim().min(1).max(500),
+  beforeStatus: z.enum(["not_started", "in_progress", "blocked", "complete"]),
+  expectedUpdatedAt: timestamp,
 });
 
 export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
@@ -190,7 +299,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   addAttendeeNoteAction: z.strictObject({
     meetingId: uuid,
@@ -208,7 +317,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   addWalkInAttendeeAction: z.strictObject({
     meetingId: uuid,
@@ -218,7 +327,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   clearResponseCardAction: z.strictObject({
     meetingId: uuid,
@@ -241,7 +350,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     notes: nullableText,
     expectedMeetingUpdatedAt: timestamp,
     expectedEvaluationAbsent: z.literal(true),
-    evaluationTask: evaluationTaskTargetSchema.nullable(),
+    evaluationTask: evaluationCompletionTaskSchema.nullable(),
   }),
   createLocationAction: z.strictObject({
     locationId: uuid,
@@ -261,6 +370,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     title: z.string().max(255).nullable(),
     datetime: timestamp,
     timezone,
+    status: z.literal("planning"),
     locationId: nullableUuid,
     locationName: z.string().max(255).nullable(),
     locationAddress: z.string().max(500).nullable(),
@@ -268,6 +378,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     teamId: nullableUuid,
     meetingSubtype: z.enum(meetingSubtypes).nullable(),
     estimatedAttendance: nonnegativeInt.nullable(),
+    actualAttendance: z.null(),
     durationMinutes: z.number().int().min(1).max(1440).nullable(),
     notes: nullableText,
     agenda: agendaSchema,
@@ -275,9 +386,9 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     checklistItems: z.array(checklistCreationSchema).max(100),
     resolvedTeamMemberIds: uuidSet,
     attendanceRows: z.array(attendanceCreationSchema).max(1_000),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
     expectedMeetingAbsent: z.literal(true),
-    expectedTeamRosterVersion: timestamp.nullable(),
+    createdById: uuid,
   }),
   deleteMeetingAction: z.strictObject({
     meetingId: uuid,
@@ -289,10 +400,14 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedResponseIds: uuidSet,
     expectedEvaluationId: nullableUuid,
     expectedInvitationIds: uuidSet,
-    pendingNotificationIds: uuidSet,
+    pendingNotifications: pendingNotificationsSchema,
   }),
   finalizeAttendanceAction: z.strictObject({
     meetingId: uuid,
+    meetingType: z.enum(meetingTypes),
+    meetingTitle: z.string().max(255).nullable(),
+    meetingDatetime: timestamp,
+    timezone,
     expectedMeetingUpdatedAt: timestamp,
     expectedActualAttendance: nonnegativeInt.nullable(),
     attendees: z.array(attendedTargetSchema).max(1_000),
@@ -311,7 +426,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
   quickAddPersonToGuestListAction: z.strictObject({
@@ -322,7 +437,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
   quickAddWalkInAction: z.strictObject({
@@ -334,7 +449,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
-    notificationTargets: notificationTargetsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
   recordAttendanceBatchAction: z.strictObject({
@@ -354,15 +469,20 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
   removeAttendeeAction: z.strictObject({
     meetingId: uuid,
     personId: uuid,
+    beforeAttendance: attendanceBaselineSchema,
+    beforeResponse: responseBaselineSchema.nullable(),
     expectedAttendanceUpdatedAt: timestamp,
     expectedResponseUpdatedAt: nullableTimestamp,
-    pendingNotificationIds: uuidSet,
+    pendingNotifications: pendingNotificationsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   removeFromGuestListAction: z.strictObject({
     meetingId: uuid,
     personId: uuid,
+    beforeAttendance: attendanceBaselineSchema,
     expectedAttendanceUpdatedAt: timestamp,
-    pendingNotificationIds: uuidSet,
+    pendingNotifications: pendingNotificationsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   saveAgendaAction: z.strictObject({
     meetingId: uuid,
@@ -400,26 +520,44 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedUpdatedAt: timestamp,
     before: locationStateSchema,
     after: locationStateSchema,
-    affectedMeetingIds: uuidSet,
-    pendingNotificationIds: uuidSet,
-    notificationTargets: notificationTargetsSchema,
   }),
-  updateMeetingAction: z.strictObject({
-    meetingId: uuid,
-    timezone,
-    expectedUpdatedAt: timestamp,
-    before: meetingStateSchema,
-    after: meetingStateSchema,
-    pendingNotificationIds: uuidSet,
-    notificationTargets: notificationTargetsSchema,
-  }),
+  updateMeetingAction: z
+    .strictObject({
+      meetingId: uuid,
+      timezone,
+      expectedUpdatedAt: timestamp,
+      before: meetingStateSchema,
+      after: meetingStateSchema,
+      pendingNotifications: pendingNotificationsSchema,
+      notificationTargets: meetingNotificationTargetsSchema,
+    })
+    .superRefine((value, context) => {
+      const immutable = [
+        "type",
+        "meetingNumber",
+        "teamId",
+        "actualAttendance",
+        "agenda",
+      ] as const;
+      for (const key of immutable) {
+        if (
+          JSON.stringify(value.before[key]) !== JSON.stringify(value.after[key])
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["after", key],
+            message: `${key} is not editable through the meeting form`,
+          });
+        }
+      }
+    }),
   updateMeetingStatusAction: z.strictObject({
     meetingId: uuid,
     beforeStatus: z.enum(meetingStatuses),
     afterStatus: z.enum(meetingStatuses),
     expectedUpdatedAt: timestamp,
-    pendingNotificationIds: uuidSet,
-    notificationTargets: notificationTargetsSchema,
+    pendingNotifications: pendingNotificationsSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
   }),
   updateRsvpStatusAction: z.strictObject({
     meetingId: uuid,
@@ -430,19 +568,21 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
   }),
 } as const satisfies Record<MeetingsActionExport, z.ZodType>;
 
-export type MeetingsEffectArguments<
-  ExportName extends MeetingsActionExport,
-> = z.infer<(typeof MEETINGS_EFFECT_ARGUMENT_SCHEMAS)[ExportName]>;
+export type MeetingsEffectArguments<ExportName extends MeetingsActionExport> =
+  z.infer<(typeof MEETINGS_EFFECT_ARGUMENT_SCHEMAS)[ExportName]>;
 
 export function assertMeetingsEffectContractsComplete(): void {
   const exports = Object.keys(MEETINGS_ACTION_CONTRACTS).toSorted();
   const schemas = Object.keys(MEETINGS_EFFECT_ARGUMENT_SCHEMAS).toSorted();
   if (JSON.stringify(exports) !== JSON.stringify(schemas)) {
-    throw new Error("Meetings effect schemas do not cover authoritative actions");
+    throw new Error(
+      "Meetings effect schemas do not cover authoritative actions"
+    );
   }
   for (const exportName of exports as MeetingsActionExport[]) {
-    const contractKeys = [...MEETINGS_ACTION_CONTRACTS[exportName].argumentKeys]
-      .toSorted();
+    const contractKeys = [
+      ...MEETINGS_ACTION_CONTRACTS[exportName].argumentKeys,
+    ].toSorted();
     const schemaKeys = Object.keys(
       MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].shape
     ).toSorted();

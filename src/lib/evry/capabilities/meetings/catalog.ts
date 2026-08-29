@@ -109,6 +109,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "title",
     "datetime",
     "timezone",
+    "status",
     "locationId",
     "locationName",
     "locationAddress",
@@ -116,6 +117,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "teamId",
     "meetingSubtype",
     "estimatedAttendance",
+    "actualAttendance",
     "durationMinutes",
     "notes",
     "agenda",
@@ -125,7 +127,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "attendanceRows",
     "notificationTargets",
     "expectedMeetingAbsent",
-    "expectedTeamRosterVersion",
+    "createdById",
   ]),
   deleteMeetingAction: effect(
     "meetings.lifecycle.delete",
@@ -140,7 +142,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedResponseIds",
       "expectedEvaluationId",
       "expectedInvitationIds",
-      "pendingNotificationIds",
+      "pendingNotifications",
     ],
     true
   ),
@@ -149,6 +151,10 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "Finalize meeting attendance",
     [
       "meetingId",
+      "meetingType",
+      "meetingTitle",
+      "meetingDatetime",
+      "timezone",
       "expectedMeetingUpdatedAt",
       "expectedActualAttendance",
       "attendees",
@@ -242,9 +248,12 @@ export const MEETINGS_ACTION_CONTRACTS = {
     [
       "meetingId",
       "personId",
+      "beforeAttendance",
+      "beforeResponse",
       "expectedAttendanceUpdatedAt",
       "expectedResponseUpdatedAt",
-      "pendingNotificationIds",
+      "pendingNotifications",
+      "notificationTargets",
     ],
     true
   ),
@@ -254,17 +263,18 @@ export const MEETINGS_ACTION_CONTRACTS = {
     [
       "meetingId",
       "personId",
+      "beforeAttendance",
       "expectedAttendanceUpdatedAt",
-      "pendingNotificationIds",
+      "pendingNotifications",
+      "notificationTargets",
     ],
     true
   ),
-  saveAgendaAction: effect("meetings.agenda.replace", "Replace meeting agenda", [
-    "meetingId",
-    "expectedUpdatedAt",
-    "beforeSections",
-    "afterSections",
-  ]),
+  saveAgendaAction: effect(
+    "meetings.agenda.replace",
+    "Replace meeting agenda",
+    ["meetingId", "expectedUpdatedAt", "beforeSections", "afterSections"]
+  ),
   toggleAttendanceStatusAction: effect(
     "meetings.attendance.toggle",
     "Update attendance status",
@@ -305,29 +315,17 @@ export const MEETINGS_ACTION_CONTRACTS = {
   updateLocationAction: effect(
     "meetings.location.update",
     "Update meeting location",
-    [
-      "locationId",
-      "expectedUpdatedAt",
-      "before",
-      "after",
-      "affectedMeetingIds",
-      "pendingNotificationIds",
-      "notificationTargets",
-    ]
+    ["locationId", "expectedUpdatedAt", "before", "after"]
   ),
-  updateMeetingAction: effect(
-    "meetings.lifecycle.update",
-    "Update meeting",
-    [
-      "meetingId",
-      "timezone",
-      "expectedUpdatedAt",
-      "before",
-      "after",
-      "pendingNotificationIds",
-      "notificationTargets",
-    ]
-  ),
+  updateMeetingAction: effect("meetings.lifecycle.update", "Update meeting", [
+    "meetingId",
+    "timezone",
+    "expectedUpdatedAt",
+    "before",
+    "after",
+    "pendingNotifications",
+    "notificationTargets",
+  ]),
   updateMeetingStatusAction: effect(
     "meetings.lifecycle.status",
     "Update meeting status",
@@ -336,7 +334,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "beforeStatus",
       "afterStatus",
       "expectedUpdatedAt",
-      "pendingNotificationIds",
+      "pendingNotifications",
       "notificationTargets",
     ]
   ),
@@ -411,7 +409,9 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
         entry.parityCapability !== "meetings" ||
         entry.applicationCapability !== "meetings.write"
       ) {
-        throw new Error(`Meetings action left the supported plant boundary: ${exportName}`);
+        throw new Error(
+          `Meetings action left the supported plant boundary: ${exportName}`
+        );
       }
       return Object.freeze({
         identity: entry.identity,
@@ -428,7 +428,9 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
       });
     });
 
-  const discoveredExports = new Set(actions.map(({ exportName }) => exportName));
+  const discoveredExports = new Set(
+    actions.map(({ exportName }) => exportName)
+  );
   for (const exportName of Object.keys(MEETINGS_ACTION_CONTRACTS)) {
     if (!discoveredExports.has(exportName as MeetingsActionExport)) {
       throw new Error(`Stale Meetings action contract: ${exportName}`);
@@ -437,12 +439,13 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
 
   const routes = inventory.entries
     .filter(
-      (entry) =>
-        entry.kind === "route" && entry.parityCapability === "meetings"
+      (entry) => entry.kind === "route" && entry.parityCapability === "meetings"
     )
     .map((entry) => {
       if (entry.classification.state !== "supported") {
-        throw new Error(`Meetings route left the supported plant boundary: ${entry.path}`);
+        throw new Error(
+          `Meetings route left the supported plant boundary: ${entry.path}`
+        );
       }
       return Object.freeze({
         identity: entry.identity,
@@ -451,9 +454,7 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
         applicationCapability: "read" as const,
         parityCapability: "meetings" as const,
         source:
-          "sources" in entry && entry.sources
-            ? entry.sources.join(",")
-            : "",
+          "sources" in entry && entry.sources ? entry.sources.join(",") : "",
         exportName: null,
         label: `Open ${entry.path}`,
         actionLabel: null,
@@ -465,7 +466,9 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
   const surfaces = [...actions, ...routes].toSorted((left, right) =>
     left.identity.localeCompare(right.identity)
   );
-  if (new Set(surfaces.map(({ identity }) => identity)).size !== surfaces.length) {
+  if (
+    new Set(surfaces.map(({ identity }) => identity)).size !== surfaces.length
+  ) {
     throw new Error("Duplicate Meetings capability surface identity");
   }
   if (
@@ -483,10 +486,12 @@ export const MEETINGS_CAPABILITY_SURFACES = buildMeetingsCapabilitySurfaces();
 export const MEETINGS_EXCLUDED_OPERATIONS = Object.freeze([
   Object.freeze({
     identity: "read-import:src/lib/meetings/locations.ts → getLocation",
-    reason: "No authenticated Meetings page or action invokes this point read directly.",
+    reason:
+      "No authenticated Meetings page or action invokes this point read directly.",
   }),
   Object.freeze({
-    identity: "effect-import:src/lib/meetings/locations.ts → deactivateLocation",
+    identity:
+      "effect-import:src/lib/meetings/locations.ts → deactivateLocation",
     reason: "No authenticated Meetings action exposes location deactivation.",
   }),
 ]);

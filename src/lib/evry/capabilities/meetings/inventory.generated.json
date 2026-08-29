@@ -134,6 +134,10 @@
       "actionLabel": "Finalize meeting attendance",
       "argumentKeys": [
         "meetingId",
+        "meetingType",
+        "meetingTitle",
+        "meetingDatetime",
+        "timezone",
         "expectedMeetingUpdatedAt",
         "expectedActualAttendance",
         "attendees",
@@ -271,9 +275,12 @@
       "argumentKeys": [
         "meetingId",
         "personId",
+        "beforeAttendance",
+        "beforeResponse",
         "expectedAttendanceUpdatedAt",
         "expectedResponseUpdatedAt",
-        "pendingNotificationIds"
+        "pendingNotifications",
+        "notificationTargets"
       ],
       "difficultToReverse": true,
       "fixtureClasses": [
@@ -421,6 +428,7 @@
         "title",
         "datetime",
         "timezone",
+        "status",
         "locationId",
         "locationName",
         "locationAddress",
@@ -428,6 +436,7 @@
         "teamId",
         "meetingSubtype",
         "estimatedAttendance",
+        "actualAttendance",
         "durationMinutes",
         "notes",
         "agenda",
@@ -437,7 +446,7 @@
         "attendanceRows",
         "notificationTargets",
         "expectedMeetingAbsent",
-        "expectedTeamRosterVersion"
+        "createdById"
       ],
       "difficultToReverse": false,
       "fixtureClasses": [
@@ -536,8 +545,10 @@
       "argumentKeys": [
         "meetingId",
         "personId",
+        "beforeAttendance",
         "expectedAttendanceUpdatedAt",
-        "pendingNotificationIds"
+        "pendingNotifications",
+        "notificationTargets"
       ],
       "difficultToReverse": true,
       "fixtureClasses": [
@@ -598,7 +609,7 @@
         "expectedResponseIds",
         "expectedEvaluationId",
         "expectedInvitationIds",
-        "pendingNotificationIds"
+        "pendingNotifications"
       ],
       "difficultToReverse": true,
       "fixtureClasses": [
@@ -626,7 +637,7 @@
         "beforeStatus",
         "afterStatus",
         "expectedUpdatedAt",
-        "pendingNotificationIds",
+        "pendingNotifications",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -656,7 +667,7 @@
         "expectedUpdatedAt",
         "before",
         "after",
-        "pendingNotificationIds",
+        "pendingNotifications",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -713,15 +724,7 @@
       "confirmation": "required",
       "label": "Update meeting location",
       "actionLabel": "Update meeting location",
-      "argumentKeys": [
-        "locationId",
-        "expectedUpdatedAt",
-        "before",
-        "after",
-        "affectedMeetingIds",
-        "pendingNotificationIds",
-        "notificationTargets"
-      ],
+      "argumentKeys": ["locationId", "expectedUpdatedAt", "before", "after"],
       "difficultToReverse": false,
       "fixtureClasses": [
         "selection",
