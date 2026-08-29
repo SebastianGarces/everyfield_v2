@@ -603,6 +603,37 @@ test("a cycle-cut result is not cached as a complete import subgraph", () => {
   }
 });
 
+test("a caller cannot remove or insert names in the reachability cache", () => {
+  const fixture = mkdtempSync(path.join(tmpdir(), "evry-auth-cache-"));
+  const session = path.join(fixture, "session.ts");
+  const leaf = path.join(fixture, "leaf.ts");
+  const root = path.join(fixture, "root.ts");
+
+  try {
+    writeFileSync(
+      session,
+      "export async function verifySession() { return true; }\n"
+    );
+    writeFileSync(
+      leaf,
+      'import { verifySession } from "./session";\nexport function guarded() { verifySession(); }\n'
+    );
+    writeFileSync(
+      root,
+      'import { guarded } from "./leaf";\nexport function endpoint() { guarded(); }\n'
+    );
+
+    const exposed = mintingExportsOf(root, new Set());
+    assert.deepEqual([...exposed], ["endpoint"]);
+    exposed.clear();
+    exposed.add("inventedGuard");
+
+    assert.deepEqual([...mintingExportsOf(root, new Set())], ["endpoint"]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test("a directive is a directive without its semicolon", () => {
   // The guardrail on the guardrail (#265 r2, HOLE 4 — documented mutation 7 in
   // `src/lib/invitations/service.test.ts`). Every walk asks

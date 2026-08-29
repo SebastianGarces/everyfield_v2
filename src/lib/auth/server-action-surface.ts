@@ -416,7 +416,7 @@ export function importedBindings(
   return bindings;
 }
 
-const REACHING_EXPORTS = new Map<string, Set<string>>();
+const REACHING_EXPORTS = new Map<string, readonly string[]>();
 
 type ReachingNamesResult = {
   readonly names: Set<string>;
@@ -509,7 +509,9 @@ function reachingExportsResult(
 ): ReachingNamesResult {
   const key = `${roots.join(",")}\0${file}`;
   const cached = REACHING_EXPORTS.get(key);
-  if (cached !== undefined) return { names: cached, cycleFree: true };
+  if (cached !== undefined) {
+    return { names: new Set(cached), cycleFree: true };
+  }
 
   const code = codeOf(file);
   const reaching = reachingNamesResult(file, code, roots, stack);
@@ -536,7 +538,8 @@ function reachingExportsResult(
   // cut an edge back into the active import stack. Cache those completed
   // subgraphs even when reached below a root call. Cyclic partials stay
   // uncached, preserving the existing fail-closed cycle behavior.
-  if (reaching.cycleFree) REACHING_EXPORTS.set(key, exported);
+  if (reaching.cycleFree)
+    REACHING_EXPORTS.set(key, Object.freeze([...exported]));
   return { names: exported, cycleFree: reaching.cycleFree };
 }
 
