@@ -54,6 +54,14 @@ test("the Task grammar has no generic execution escape hatch", () => {
   }
 });
 
+test("status-to-complete stays a typed status action for canonical completion", () => {
+  assert.deepEqual(selectTaskEvryEffect(`set task ${A} status to complete`), {
+    kind: "effect",
+    exportName: "updateTaskStatusAction",
+    values: { taskId: A, status: "complete" },
+  });
+});
+
 test("Task arguments reject duplicate, invalid, and unknown fields", () => {
   assert.equal(selectTaskEvryEffect(`complete tasks ${A},${A}`), null);
   assert.equal(

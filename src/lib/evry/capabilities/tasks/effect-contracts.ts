@@ -21,6 +21,14 @@ const uniqueUuids = z.array(uuid).superRefine((values, context) => {
     context.addIssue({ code: "custom", message: "IDs must be unique" });
   }
 });
+const uniqueUuidsUpTo100 = z
+  .array(uuid)
+  .max(100)
+  .superRefine((values, context) => {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({ code: "custom", message: "IDs must be unique" });
+    }
+  });
 
 export const taskEffectSnapshotSchema = z.strictObject({
   id: uuid,
@@ -170,6 +178,70 @@ const sourceAssertionSchema = z.discriminatedUnion("kind", [
     kind: z.literal("phase_transition"),
     transitionId: uuid,
     templateKeys: z.array(z.string().trim().min(1).max(160)).max(20),
+  }),
+  z.strictObject({
+    kind: z.literal("bulk_selection"),
+    requestedTaskIds: uniqueUuidsUpTo100,
+    actionableTaskIds: uniqueUuidsUpTo100,
+    excludedTasks: z
+      .array(
+        z
+          .strictObject({
+            taskId: uuid,
+            reason: z.enum([
+              "Task not found",
+              "Task is already complete",
+              "Task is complete — reopen it before rescheduling",
+              "That task is assigned to somebody else",
+            ]),
+            expectedTask: taskEffectSnapshotSchema.nullable(),
+          })
+          .superRefine((excluded, context) => {
+            if (
+              (excluded.reason === "Task not found") !==
+              (excluded.expectedTask === null)
+            ) {
+              context.addIssue({
+                code: "custom",
+                message:
+                  "Only a not-found bulk exclusion may omit its exact Task snapshot",
+              });
+            }
+            if (
+              excluded.expectedTask &&
+              excluded.expectedTask.id !== excluded.taskId
+            ) {
+              context.addIssue({
+                code: "custom",
+                message:
+                  "A bulk exclusion snapshot must name its requested Task",
+              });
+            }
+            if (
+              (excluded.reason === "Task is already complete" ||
+                excluded.reason ===
+                  "Task is complete — reopen it before rescheduling") &&
+              excluded.expectedTask?.status !== "complete"
+            ) {
+              context.addIssue({
+                code: "custom",
+                message:
+                  "An already-complete exclusion must carry the exact completed Task",
+              });
+            }
+            if (
+              excluded.reason === "That task is assigned to somebody else" &&
+              excluded.expectedTask?.status === "complete"
+            ) {
+              context.addIssue({
+                code: "custom",
+                message:
+                  "A completed Task is classified before the own-duty exclusion",
+              });
+            }
+          })
+      )
+      .max(100),
   }),
 ]);
 
@@ -364,6 +436,111 @@ function operationSchema<ExportName extends TaskActionExport>(
       }
       const creates = value.taskWrites.filter(({ before }) => before === null);
       const updates = value.taskWrites.filter(({ before }) => before !== null);
+      const bulkOperation =
+        exportName === "bulkCompleteTasksAction" ||
+        exportName === "bulkRescheduleTasksAction";
+      if (bulkOperation !== (value.sourceAssertion.kind === "bulk_selection")) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Only bulk Task operations may bind an exact partial-selection outcome",
+        });
+      }
+      if (value.sourceAssertion.kind === "bulk_selection") {
+        const selected = value.sourceAssertion;
+        if (
+          selected.excludedTasks.some(({ reason }) =>
+            exportName === "bulkCompleteTasksAction"
+              ? reason === "Task is complete — reopen it before rescheduling"
+              : reason === "Task is already complete" ||
+                reason === "That task is assigned to somebody else"
+          )
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Bulk exclusions must use the canonical reason for their operation",
+          });
+        }
+        const excludedIds = selected.excludedTasks.map(({ taskId }) => taskId);
+        if (new Set(excludedIds).size !== excludedIds.length) {
+          context.addIssue({
+            code: "custom",
+            message: "Bulk exclusions must name unique requested Tasks",
+          });
+        }
+        const partition = [
+          ...selected.actionableTaskIds,
+          ...excludedIds,
+        ].toSorted();
+        const requested = [...selected.requestedTaskIds].toSorted();
+        if (
+          partition.length !== requested.length ||
+          partition.some((id, index) => id !== requested[index])
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "A bulk selection must partition every requested Task exactly once",
+          });
+        }
+        const actionable = (
+          exportName === "bulkCompleteTasksAction"
+            ? value.subjectTasks.map(({ id }) => id)
+            : updates.map(({ taskId }) => taskId)
+        ).toSorted();
+        const declaredActionable = [...selected.actionableTaskIds].toSorted();
+        if (
+          actionable.length !== declaredActionable.length ||
+          actionable.some((id, index) => id !== declaredActionable[index])
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "A bulk selection must bind the exact Tasks eligible for its operation",
+          });
+        }
+        const expectedExclusions = [
+          ...selected.excludedTasks.map((excluded) => ({
+            target: excluded.expectedTask
+              ? `Task ${excluded.taskId}: ${excluded.expectedTask.title}`
+              : `Task ${excluded.taskId}`,
+            reason: excluded.reason,
+          })),
+          ...value.completionEffects.contactLogs.flatMap((effect) =>
+            effect.kind === "create"
+              ? []
+              : [
+                  {
+                    target: `Task ${effect.taskId}`,
+                    reason:
+                      effect.kind === "already_logged"
+                        ? "The completed contact is already present in the person's communication log."
+                        : effect.reason === "person_unavailable"
+                          ? "The related person is unavailable in this plant, so no contact-log entry will be added."
+                          : "This Task is not related to a person, so no contact-log entry applies.",
+                  },
+                ]
+          ),
+        ]
+          .map((exclusion) => JSON.stringify(exclusion))
+          .toSorted();
+        const shownExclusions = value.exclusions
+          .map((exclusion) => JSON.stringify(exclusion))
+          .toSorted();
+        if (
+          expectedExclusions.length !== shownExclusions.length ||
+          expectedExclusions.some(
+            (exclusion, index) => exclusion !== shownExclusions[index]
+          )
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Every rejected bulk Task must be named with its exact reason",
+          });
+        }
+      }
       const scoped = [...value.notifications.scopedTaskIds].toSorted();
       const written = value.taskWrites.map(({ taskId }) => taskId).toSorted();
       if (
@@ -469,7 +646,9 @@ function operationSchema<ExportName extends TaskActionExport>(
             if (!subject) return false;
             const matchingSuccessors = successors.filter(
               ({ after }) =>
-                after.recurrenceRule?.seriesId === recurrenceSeriesId(subject)
+                after.recurrenceRule?.seriesId ===
+                  recurrenceSeriesId(subject) &&
+                after.createdById === subject.createdById
             );
             if (matchingSuccessors.length !== 1) return false;
             const successorId = matchingSuccessors[0]!.taskId;
@@ -486,7 +665,14 @@ function operationSchema<ExportName extends TaskActionExport>(
               sourceSignatures.length === cloneSignatures.length &&
               sourceSignatures.every(
                 (signature, index) => signature === cloneSignatures[index]
-              )
+              ) &&
+              checklistCreates
+                .filter(({ after }) => after.parentTaskId === successorId)
+                .every(
+                  ({ after }) =>
+                    after.createdById ===
+                    matchingSuccessors[0]!.after.createdById
+                )
             );
           }) &&
           successors.every(({ after }) =>
@@ -620,7 +806,6 @@ function operationSchema<ExportName extends TaskActionExport>(
         "reopenTaskAction",
         "setSubtaskCompletionAction",
         "updateTaskAction",
-        "updateTaskStatusAction",
       ]);
       if (
         singleUpdate.has(exportName) &&
@@ -661,6 +846,18 @@ function operationSchema<ExportName extends TaskActionExport>(
         context.addIssue({
           code: "custom",
           message: "Single completion must bind one exact own-duty subject",
+        });
+      }
+      if (
+        exportName === "updateTaskStatusAction" &&
+        (updates.length !== 1 ||
+          value.subjectTasks.length !== 1 ||
+          (updates[0]?.after.status !== "complete" && creates.length !== 0))
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Status update must bind one exact subject and only completion may mint its recurrence",
         });
       }
       if (

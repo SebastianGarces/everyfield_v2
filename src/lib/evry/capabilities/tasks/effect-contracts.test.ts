@@ -7,6 +7,7 @@ import {
   type TaskEffectExport,
 } from "./effect-contracts";
 import {
+  TASK_FIXTURE_ACTOR_ID,
   TASK_FIXTURE_ID,
   taskEffectPlanFixture,
   taskFixtureSnapshot,
@@ -139,12 +140,14 @@ test("create and update contracts bind every structural Task source fact", () =>
 });
 
 test("recurring completion binds the exact checklist source lineage", () => {
+  const originalCreatorId = "00000000-0000-4000-8000-000000000009";
   const successorId = "00000000-0000-4000-8000-000000000006";
   const childId = "00000000-0000-4000-8000-000000000007";
   const cloneId = "00000000-0000-4000-8000-000000000008";
   const base = taskEffectPlanFixture("completeTaskAction");
   const before = {
     ...base.taskWrites[0]!.before!,
+    createdById: originalCreatorId,
     isRecurring: true,
     recurrenceRule: {
       interval: "weekly" as const,
@@ -191,6 +194,7 @@ test("recurring completion binds the exact checklist source lineage", () => {
       ...taskFixtureSnapshot(cloneId),
       title: sourceChild.title,
       parentTaskId: successorId,
+      createdById: originalCreatorId,
     },
   };
   const arguments_ = {
@@ -230,5 +234,115 @@ test("recurring completion binds the exact checklist source lineage", () => {
       ],
     }).success,
     false
+  );
+  assert.equal(
+    schema.safeParse({
+      ...arguments_,
+      taskWrites: [
+        completed,
+        {
+          ...successor,
+          after: {
+            ...successor.after,
+            createdById: TASK_FIXTURE_ACTOR_ID,
+          },
+        },
+        clone,
+      ],
+    }).success,
+    false,
+    "the completing actor cannot replace the recurring Task's creator"
+  );
+  assert.equal(
+    schema.safeParse({
+      ...arguments_,
+      taskWrites: [
+        completed,
+        successor,
+        {
+          ...clone,
+          after: { ...clone.after, createdById: TASK_FIXTURE_ACTOR_ID },
+        },
+      ],
+    }).success,
+    false,
+    "fresh checklist rows must inherit the recurring Task's creator"
+  );
+});
+
+test("bulk contracts preserve one exact actionable and excluded partition", () => {
+  const completeId = "00000000-0000-4000-8000-000000000010";
+  const otherId = "00000000-0000-4000-8000-000000000011";
+  const missingId = "00000000-0000-4000-8000-000000000012";
+  const base = taskEffectPlanFixture("bulkCompleteTasksAction");
+  const complete = taskFixtureSnapshot(completeId, "complete");
+  const other = {
+    ...taskFixtureSnapshot(otherId),
+    assignedToId: "00000000-0000-4000-8000-000000000013",
+  };
+  const sourceAssertion = {
+    kind: "bulk_selection" as const,
+    requestedTaskIds: [TASK_FIXTURE_ID, completeId, missingId, otherId],
+    actionableTaskIds: [TASK_FIXTURE_ID],
+    excludedTasks: [
+      {
+        taskId: completeId,
+        reason: "Task is already complete" as const,
+        expectedTask: complete,
+      },
+      {
+        taskId: missingId,
+        reason: "Task not found" as const,
+        expectedTask: null,
+      },
+      {
+        taskId: otherId,
+        reason: "That task is assigned to somebody else" as const,
+        expectedTask: other,
+      },
+    ],
+  };
+  const exclusions = sourceAssertion.excludedTasks.map((excluded) => ({
+    target: excluded.expectedTask
+      ? `Task ${excluded.taskId}: ${excluded.expectedTask.title}`
+      : `Task ${excluded.taskId}`,
+    reason: excluded.reason,
+  }));
+  const arguments_ = {
+    ...base,
+    sourceAssertion,
+    exclusions: [...exclusions, ...base.exclusions],
+  };
+  const schema = TASKS_EFFECT_ARGUMENT_SCHEMAS.bulkCompleteTasksAction;
+  assert.equal(schema.safeParse(arguments_).success, true);
+  assert.equal(
+    schema.safeParse({
+      ...arguments_,
+      exclusions: arguments_.exclusions.slice(1),
+    }).success,
+    false,
+    "a named partial failure cannot disappear from confirmation"
+  );
+  assert.equal(
+    schema.safeParse({
+      ...arguments_,
+      sourceAssertion: {
+        ...sourceAssertion,
+        actionableTaskIds: [TASK_FIXTURE_ID, missingId],
+      },
+    }).success,
+    false,
+    "a missing Task cannot be relabeled actionable"
+  );
+});
+
+test("status-to-complete admits the canonical recurring completion shape", () => {
+  const completion = taskEffectPlanFixture("completeTaskAction");
+  assert.equal(
+    TASKS_EFFECT_ARGUMENT_SCHEMAS.updateTaskStatusAction.safeParse({
+      ...completion,
+      operation: "updateTaskStatusAction",
+    }).success,
+    true
   );
 });

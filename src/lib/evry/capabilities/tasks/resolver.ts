@@ -138,6 +138,7 @@ function createSnapshot(input: {
   parentTaskId?: string | null;
   isRecurring?: boolean;
   recurrenceRule?: TaskEffectSnapshot["recurrenceRule"];
+  createdById?: string;
 }): TaskEffectSnapshot {
   const at = new Date(input.now.getTime() + (input.offset ?? 0)).toISOString();
   return {
@@ -158,7 +159,7 @@ function createSnapshot(input: {
     completionEvent: null,
     completedAt: null,
     completedById: null,
-    createdById: input.actor.userId,
+    createdById: input.createdById ?? input.actor.userId,
     createdAt: at,
     updatedAt: at,
     deletedAt: null,
@@ -221,6 +222,83 @@ function mayAct(actor: EvryPlantActor, task: Task): boolean {
     assignedToId: task.assignedToId,
     viewerId: actor.userId,
   });
+}
+
+type BulkSelectionAssertion = Extract<
+  AnyTaskEffectArguments["sourceAssertion"],
+  { kind: "bulk_selection" }
+>;
+
+async function planBulkSelection(input: {
+  actor: EvryPlantActor;
+  taskIds: readonly string[];
+  ownDuty: boolean;
+  completedReason:
+    | "Task is already complete"
+    | "Task is complete — reopen it before rescheduling";
+}): Promise<{
+  rows: Task[];
+  sourceAssertion: BulkSelectionAssertion;
+  exclusions: AnyTaskEffectArguments["exclusions"];
+}> {
+  const requestedTaskIds = [...new Set(input.taskIds)];
+  const found =
+    requestedTaskIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.churchId, input.actor.plantId),
+              inArray(tasks.id, requestedTaskIds),
+              isNull(tasks.deletedAt)
+            )
+          );
+  const byId = new Map(found.map((row) => [row.id, row]));
+  const rows: Task[] = [];
+  const excludedTasks: BulkSelectionAssertion["excludedTasks"] = [];
+
+  for (const taskId of requestedTaskIds) {
+    const row = byId.get(taskId);
+    if (!row) {
+      excludedTasks.push({
+        taskId,
+        reason: "Task not found",
+        expectedTask: null,
+      });
+    } else if (row.status === "complete") {
+      excludedTasks.push({
+        taskId,
+        reason: input.completedReason,
+        expectedTask: snapshot(row),
+      });
+    } else if (input.ownDuty && !mayAct(input.actor, row)) {
+      excludedTasks.push({
+        taskId,
+        reason: "That task is assigned to somebody else",
+        expectedTask: snapshot(row),
+      });
+    } else {
+      rows.push(row);
+    }
+  }
+
+  return {
+    rows,
+    sourceAssertion: {
+      kind: "bulk_selection",
+      requestedTaskIds,
+      actionableTaskIds: rows.map(({ id }) => id),
+      excludedTasks,
+    },
+    exclusions: excludedTasks.map((excluded) => ({
+      target: excluded.expectedTask
+        ? `Task ${excluded.taskId}: ${excluded.expectedTask.title}`
+        : `Task ${excluded.taskId}`,
+      reason: excluded.reason,
+    })),
+  };
 }
 
 async function validPlantUser(
@@ -847,6 +925,7 @@ async function completionWrites(input: {
       parentTaskId: row.parentTaskId,
       isRecurring: true,
       recurrenceRule: { ...rule, seriesId },
+      createdById: row.createdById,
     });
     writes.push({ taskId: successorId, before: null, after: successor });
     const children = await db
@@ -887,6 +966,7 @@ async function completionWrites(input: {
           relatedType: child.relatedType,
           relatedId: child.relatedId,
           parentTaskId: successorId,
+          createdById: row.createdById,
         }),
       });
     });
@@ -1178,20 +1258,10 @@ export async function resolveTaskEvryEffect(input: {
     });
   }
 
-  if (
-    exportName === "completeTaskAction" ||
-    exportName === "bulkCompleteTasksAction"
-  ) {
-    const ids =
-      exportName === "bulkCompleteTasksAction"
-        ? Array.isArray(values.taskIds)
-          ? values.taskIds.filter(
-              (value): value is string => typeof value === "string"
-            )
-          : []
-        : [taskIdFrom({ values, pageContext })].filter(
-            (value): value is string => value !== null
-          );
+  if (exportName === "completeTaskAction") {
+    const ids = [taskIdFrom({ values, pageContext })].filter(
+      (value): value is string => value !== null
+    );
     const rows = await loadExactTasks(actor.plantId, ids);
     const completion = rows
       ? await completionWrites({ actor, requestKey, rows, now })
@@ -1207,10 +1277,79 @@ export async function resolveTaskEvryEffect(input: {
       sourceTasks: completion.sourceTasks,
       childSets: completion.childSets,
       disclosure: disclosure({
-        title: rows.length === 1 ? "Complete task" : "Complete selected tasks",
+        title: "Complete task",
         writes: completion.writes,
         consequences: [
-          "Every disclosed task will be completed and its pending due notifications cancelled.",
+          "The disclosed task will be completed and its pending due notifications cancelled.",
+          "Any disclosed recurring successor and fresh checklist will be created in the same transaction.",
+        ],
+      }),
+    });
+  }
+
+  if (exportName === "bulkCompleteTasksAction") {
+    const ids = Array.isArray(values.taskIds)
+      ? values.taskIds.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    const selection = await planBulkSelection({
+      actor,
+      taskIds: ids,
+      ownDuty: true,
+      completedReason: "Task is already complete",
+    });
+    const completion = await completionWrites({
+      actor,
+      requestKey,
+      rows: selection.rows,
+      now,
+    });
+    if (!completion || selection.rows.length === 0) return null;
+    return resolved({
+      exportName,
+      actor,
+      requestKey,
+      now,
+      writes: completion.writes,
+      subjectTasks: selection.rows.map(snapshot),
+      sourceTasks: completion.sourceTasks,
+      childSets: completion.childSets,
+      sourceAssertion: selection.sourceAssertion,
+      exclusions: selection.exclusions,
+      disclosure: disclosure({
+        title: "Complete selected tasks",
+        writes: completion.writes,
+        consequences: [
+          "Every eligible disclosed task will be completed and its pending due notifications cancelled.",
+          "Every named exclusion will remain unchanged.",
+          "Any disclosed recurring successor and fresh checklist will be created in the same transaction.",
+        ],
+      }),
+    });
+  }
+
+  if (exportName === "updateTaskStatusAction" && values.status === "complete") {
+    const taskId = taskIdFrom({ values, pageContext });
+    const row = taskId ? await loadTask(actor.plantId, taskId) : null;
+    const completion = row
+      ? await completionWrites({ actor, requestKey, rows: [row], now })
+      : null;
+    if (!row || !completion) return null;
+    return resolved({
+      exportName,
+      actor,
+      requestKey,
+      now,
+      writes: completion.writes,
+      subjectTasks: [snapshot(row)],
+      sourceTasks: completion.sourceTasks,
+      childSets: completion.childSets,
+      disclosure: disclosure({
+        title: "Complete task",
+        writes: completion.writes,
+        consequences: [
+          "The disclosed task will be completed and its pending due notifications cancelled.",
           "Any disclosed recurring successor and fresh checklist will be created in the same transaction.",
         ],
       }),
@@ -1377,15 +1516,14 @@ export async function resolveTaskEvryEffect(input: {
           (value): value is string => typeof value === "string"
         )
       : [];
-    const rows = await loadExactTasks(actor.plantId, ids);
-    if (
-      !rows ||
-      rows.length === 0 ||
-      rows.some(({ status }) => status === "complete")
-    ) {
-      return null;
-    }
-    const writes = rows.map((row) => {
+    const selection = await planBulkSelection({
+      actor,
+      taskIds: ids,
+      ownDuty: false,
+      completedReason: "Task is complete — reopen it before rescheduling",
+    });
+    if (selection.rows.length === 0) return null;
+    const writes = selection.rows.map((row) => {
       const before = snapshot(row);
       return {
         taskId: row.id,
@@ -1399,11 +1537,14 @@ export async function resolveTaskEvryEffect(input: {
       requestKey,
       now,
       writes,
+      sourceAssertion: selection.sourceAssertion,
+      exclusions: selection.exclusions,
       disclosure: disclosure({
         title: "Reschedule selected tasks",
         writes,
         consequences: [
-          "Every selected task will move to the disclosed due date and its due notifications will be replaced exactly.",
+          "Every eligible selected task will move to the disclosed due date and its due notifications will be replaced exactly.",
+          "Every named exclusion will remain unchanged.",
         ],
       }),
     });
