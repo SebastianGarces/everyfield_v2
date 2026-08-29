@@ -32,9 +32,9 @@ test("candidate recipe output compiles into the real confirmation plan", async (
   assert.deepEqual(
     document.steps.map(({ capabilityIdentity }) => capabilityIdentity),
     document.recipe && [
-      "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
-      "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
-      "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
+      "meetings.create",
+      "meetings.add-guests",
+      "communication.send",
     ]
   );
 });

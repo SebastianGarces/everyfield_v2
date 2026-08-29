@@ -16,8 +16,7 @@ type SessionUser = Readonly<{
 const PLAN_ID = "10000000-0000-4000-8000-000000000001";
 const FINGERPRINT = "a".repeat(64);
 const PLANT_ID = "30000000-0000-4000-8000-000000000001";
-const EFFECT_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → updatePersonAction";
+const EFFECT_IDENTITY = "people.crm.people.update-person";
 const PLANT_USER: SessionUser = {
   id: "20000000-0000-4000-8000-000000000001",
   churchId: PLANT_ID,

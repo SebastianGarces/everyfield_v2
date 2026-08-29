@@ -23,12 +23,9 @@ const PLANT_USER: SessionUser = {
   seat: "admin",
 };
 
-const TASKS_READ_IDENTITY =
-  "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction";
-const PEOPLE_READ_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction";
-const PEOPLE_WRITE_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → updatePersonAction";
+const TASKS_READ_IDENTITY = "tasks.list";
+const PEOPLE_READ_IDENTITY = "people.crm.people.load-more-people";
+const PEOPLE_WRITE_IDENTITY = "people.crm.people.update-person";
 
 const events: string[] = [];
 let sessions: Array<SessionUser | null> = [];

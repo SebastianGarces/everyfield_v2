@@ -12,7 +12,7 @@
   "steps": [
     {
       "id": "create-meeting",
-      "capabilityIdentity": "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+      "capabilityIdentity": "meetings.create",
       "effectClass": "database_write",
       "arguments": {
         "meetingId": "10000000-0000-4000-8000-000000000001",
@@ -33,7 +33,7 @@
     },
     {
       "id": "add-guests",
-      "capabilityIdentity": "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
+      "capabilityIdentity": "meetings.add-guests",
       "effectClass": "database_write",
       "arguments": {
         "meetingId": "10000000-0000-4000-8000-000000000001",
@@ -60,7 +60,7 @@
     },
     {
       "id": "send-invitations",
-      "capabilityIdentity": "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
+      "capabilityIdentity": "communication.send",
       "effectClass": "outbound_communication",
       "arguments": {
         "meetingId": "10000000-0000-4000-8000-000000000001",
