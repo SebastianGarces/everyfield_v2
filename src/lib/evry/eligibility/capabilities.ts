@@ -1,5 +1,7 @@
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
+import meetingsInventory from "@/lib/evry/capabilities/meetings/inventory.generated.json";
+import { MEETINGS_OPERATION_REGISTRATIONS } from "@/lib/evry/capabilities/meetings/registrations";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
   ALL_CAPABILITIES,
@@ -147,24 +149,6 @@ const REFERENCE_REGISTRATIONS = [
     operationKind: "effect",
     applicationCapability: "launch.schedule",
   }),
-  defineEvryCapabilityRegistration({
-    identity: "meetings.create",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
-    ],
-    parityCapability: "meetings",
-    operationKind: "effect",
-    applicationCapability: "meetings.write",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "meetings.add-guests",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
-    ],
-    parityCapability: "meetings",
-    operationKind: "effect",
-    applicationCapability: "meetings.write",
-  }),
 ] as const;
 
 function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
@@ -238,15 +222,40 @@ function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
   );
 }
 
+function generatedMeetingsSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return meetingsInventory.entries.flatMap((entry) => {
+    if (entry.classification.state !== "supported") return [];
+    if (
+      !entry.capabilityIdentity ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      !entry.applicationCapability ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      throw new Error(`Invalid generated Meetings surface: ${entry.identity}`);
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: entry.parityCapability,
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
 const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...MEETINGS_OPERATION_REGISTRATIONS,
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...generatedMeetingsSurfaces(),
     ...referenceSurfaces(),
   ],
 });

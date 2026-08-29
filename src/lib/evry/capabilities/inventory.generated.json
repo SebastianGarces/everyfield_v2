@@ -2426,7 +2426,7 @@
       "identity": "route:/teams/[teamId]/meetings",
       "path": "/teams/[teamId]/meetings",
       "sources": ["src/app/(dashboard)/teams/[teamId]/meetings/page.tsx"],
-      "parityCapability": "teams",
+      "parityCapability": "meetings",
       "classification": { "state": "supported" }
     },
     {
