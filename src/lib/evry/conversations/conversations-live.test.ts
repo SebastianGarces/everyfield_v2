@@ -42,6 +42,7 @@ import {
   EvryConversationIdempotencyError,
   findEvryConversationRecord,
 } from "./repository";
+import { listEvryConversationHistoryRecords } from "./history";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 const skip = LIVE_DB
@@ -321,6 +322,51 @@ test(
         plantId: otherPlant.id,
       }),
       null
+    );
+
+    await createEvryConversationRecord({
+      actorUserId: otherActor.id,
+      plantId: plant.id,
+      requestKey: evryConversationRequestKeySchema.parse(randomUUID()),
+      body: "same-plant-private-term",
+      pageContext: null,
+      requestPageContext: null,
+      createdAt: new Date("2026-08-28T12:00:02.000Z"),
+    });
+    await createEvryConversationRecord({
+      actorUserId: foreignActor.id,
+      plantId: otherPlant.id,
+      requestKey: evryConversationRequestKeySchema.parse(randomUUID()),
+      body: "foreign-plant-private-term",
+      pageContext: null,
+      requestPageContext: null,
+      createdAt: new Date("2026-08-28T12:00:03.000Z"),
+    });
+    assert.deepEqual(
+      await listEvryConversationHistoryRecords({
+        actorUserId: actor.id,
+        plantId: plant.id,
+        search: "same-plant-private-term",
+      }),
+      []
+    );
+    assert.deepEqual(
+      await listEvryConversationHistoryRecords({
+        actorUserId: actor.id,
+        plantId: plant.id,
+        search: "foreign-plant-private-term",
+      }),
+      []
+    );
+    assert.deepEqual(
+      (
+        await listEvryConversationHistoryRecords({
+          actorUserId: actor.id,
+          plantId: plant.id,
+          search: "café follow-up",
+        })
+      ).map(({ id }) => id),
+      [conversationId]
     );
     await assert.rejects(
       () =>

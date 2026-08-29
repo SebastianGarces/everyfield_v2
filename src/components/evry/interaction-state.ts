@@ -38,11 +38,14 @@ export function evryDraftAfterSubmission(
 
 export function evryWorkspaceConversationHref(
   urlConversationId: string | null,
-  mountedConversationId: string | null
+  mountedConversationId: string | null,
+  searchQuery: string | null = null
 ): string | null {
-  return urlConversationId === null && mountedConversationId !== null
-    ? `/evry?conversation=${mountedConversationId}`
-    : null;
+  if (urlConversationId !== null || mountedConversationId === null) return null;
+  const params = new URLSearchParams();
+  if (searchQuery) params.set("q", searchQuery);
+  params.set("conversation", mountedConversationId);
+  return `/evry?${params.toString()}`;
 }
 
 /** Attach a newly created conversation without dispatching an App Router transition. */
@@ -54,11 +57,13 @@ export function syncEvryWorkspaceConversationHistory(
     url?: string | URL | null
   ) => void,
   urlConversationId: string | null,
-  mountedConversationId: string | null
+  mountedConversationId: string | null,
+  searchQuery: string | null = null
 ): boolean {
   const href = evryWorkspaceConversationHref(
     urlConversationId,
-    mountedConversationId
+    mountedConversationId,
+    searchQuery
   );
   if (href === null) return false;
 

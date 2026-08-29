@@ -13,6 +13,19 @@ const interaction = read("components", "evry", "interaction-state.ts");
 const launcher = read("components", "evry", "evry-launcher.tsx");
 const panel = read("components", "evry", "evry-panel.tsx");
 const workspace = read("components", "evry", "evry-workspace.tsx");
+const evryPage = read("app", "(dashboard)", "evry", "page.tsx");
+const historyWorkspace = read(
+  "components",
+  "evry",
+  "conversation-history",
+  "conversation-history-workspace.tsx"
+);
+const historyList = read(
+  "components",
+  "evry",
+  "conversation-history",
+  "history-list.tsx"
+);
 const surface = read("components", "evry", "conversation-surface.tsx");
 const sheet = read("components", "ui", "sheet.tsx");
 const resolver = read("lib", "evry", "resolvers", "page-context.ts");
@@ -37,7 +50,8 @@ test("one persistent shell owns the launcher, panel, and dedicated workspace sta
     /<EvryShell[\s\S]*<GlobalAppBar[\s\S]*<EvryLauncher \/>[\s\S]*<SidebarInset[\s\S]*\{children\}[\s\S]*<\/EvryShell>/
   );
   assert.match(panel, /<ConversationSurface \/>/);
-  assert.match(workspace, /<ConversationSurface \/>/);
+  assert.match(workspace, /<ConversationHistoryWorkspace/);
+  assert.match(workspace, /conversationSurface=\{<ConversationSurface \/>\}/);
   assert.doesNotMatch(workspace, /useState|setDraft|fetch\(/);
 });
 
@@ -88,12 +102,36 @@ test("expand and browser Back retain provider state and reopen the panel", () =>
   );
 });
 
+test("New is an explicit native-navigation mode with no current-tab mutation", () => {
+  assert.match(evryPage, /params\.new === "1"/);
+  assert.match(evryPage, /newConversation=\{newConversation\}/);
+  assert.match(
+    historyWorkspace,
+    /newConversationHref=\{evryHistoryHref\(\{[\s\S]*newConversation: true/
+  );
+  assert.match(
+    historyList,
+    /<a[\s\S]*href=\{newConversationHref\}[\s\S]*event\.metaKey[\s\S]*event\.ctrlKey[\s\S]*event\.shiftKey[\s\S]*event\.altKey/
+  );
+  assert.doesNotMatch(historyList, /onStartNew/);
+});
+
 test("workspace URL sync cannot compete with App Router navigation and loads use the latest-attempt gate", () => {
   assert.match(
-    workspace,
-    /syncEvryWorkspaceConversationHistory\([\s\S]*window\.history\.state,[\s\S]*window\.History\.prototype\.replaceState\.call\([\s\S]*window\.history,[\s\S]*conversationId,[\s\S]*conversation\?\.id \?\? null/
+    historyWorkspace,
+    /syncEvryWorkspaceConversationHistory\([\s\S]*window\.history\.state,[\s\S]*window\.History\.prototype\.replaceState\.call\([\s\S]*window\.history,[\s\S]*null,[\s\S]*decision\.conversationIdToSync/
   );
   assert.doesNotMatch(workspace, /useRouter|router\.replace|router\.push/);
+  assert.doesNotMatch(workspace, /loadConversation/);
+  assert.doesNotMatch(historyWorkspace, /previousConversationIdRef/);
+  assert.match(
+    historyWorkspace,
+    /evryHistoryConversationIdToLoad\([\s\S]*isCreatingNew: ownsNewConversation,[\s\S]*navigationPending: isConversationNavigationPending/
+  );
+  assert.match(
+    historyWorkspace,
+    /\}, \[conversation\?\.id, conversationId, searchQuery\]\);/
+  );
   assert.doesNotMatch(shell, /router\.replace|window\.history\.replaceState/);
   assert.match(
     shell,
@@ -113,8 +151,8 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
     shell,
     /requestedConversationId !== null \|\|[\s\S]*conversationLoadStateRef\.current\.latest !== null/
   );
-  assert.match(shell, /\[conversation\?\.id\]\s*\)/);
-  assert.doesNotMatch(shell, /\[conversation\?\.id, isLoading\]/);
+  assert.match(shell, /if \(isSending\) return/);
+  assert.match(shell, /\[conversation\?\.id, isSending\]\s*\)/);
 });
 
 test("the mounted workspace owns query sync and send preserves in-flight edits", () => {
@@ -124,7 +162,7 @@ test("the mounted workspace owns query sync and send preserves in-flight edits",
   );
   assert.match(
     interaction,
-    /urlConversationId === null && mountedConversationId !== null[\s\S]*`\/evry\?conversation=\$\{mountedConversationId\}`[\s\S]*: null/
+    /urlConversationId !== null \|\| mountedConversationId === null[\s\S]*params\.set\("conversation", mountedConversationId\)/
   );
   assert.match(interaction, /nativeReplaceState\(historyState, "", href\)/);
   assert.match(

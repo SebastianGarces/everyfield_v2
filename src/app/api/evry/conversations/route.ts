@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import {
+  evryConversationHistorySearchSchema,
+  listEvryConversationHistory,
+} from "@/lib/evry/conversations/history";
 import { EvryConversationIdempotencyError } from "@/lib/evry/conversations/repository";
 import { createEvryConversation } from "@/lib/evry/conversations/service";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
@@ -84,3 +88,44 @@ export function createEvryConversationCreatePost({
 }
 
 export const POST = createEvryConversationCreatePost();
+
+export type EvryConversationHistoryGetOptions = Readonly<{
+  list?: typeof listEvryConversationHistory;
+  now?: () => Date;
+}>;
+
+/** List only the freshly authenticated actor's conversations in this plant. */
+export function createEvryConversationHistoryGet({
+  list = listEvryConversationHistory,
+  now = () => new Date(),
+}: EvryConversationHistoryGetOptions = {}): (
+  request: Request
+) => Promise<Response> {
+  return async function evryConversationHistoryGet(request) {
+    try {
+      // FIRST. Search text is still client input, including when it looks like
+      // another account's private title.
+      const actor = await requireEvryPlantViewer();
+      const parsedSearch = evryConversationHistorySearchSchema.safeParse(
+        new URL(request.url).searchParams.get("q") ?? ""
+      );
+      if (!parsedSearch.success) {
+        return evryConversationJson({ status: "invalid" }, 400);
+      }
+
+      const conversations = await list({
+        actor,
+        search: parsedSearch.data,
+        now: now(),
+      });
+      return evryConversationJson({
+        status: "available",
+        conversations,
+      });
+    } catch (error) {
+      return evryConversationFailure(error);
+    }
+  };
+}
+
+export const GET = createEvryConversationHistoryGet();
