@@ -13,6 +13,13 @@ const PRIVATE_HEADERS = {
   "Cache-Control": "private, no-store, max-age=0",
 };
 
+/** True when the request carries the exact configured cleanup bearer. */
+export function isAuthorized(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  return matchesBearerSecret(request.headers.get("authorization"), secret);
+}
+
 export function createEvryPeopleAttachmentCleanupGet({
   sweepStaged = sweepExpiredEvryPeopleAttachments,
   sweepPhotos = sweepAllEvryPersonPhotoObjects,
@@ -23,11 +30,7 @@ export function createEvryPeopleAttachmentCleanupGet({
   sweepCommitments?: typeof sweepAllEvryCommitmentDocumentObjects;
 } = {}) {
   return async function evryPeopleAttachmentCleanupGet(request: Request) {
-    const secret = process.env.CRON_SECRET;
-    if (
-      !secret ||
-      !matchesBearerSecret(request.headers.get("authorization"), secret)
-    ) {
+    if (!isAuthorized(request)) {
       return NextResponse.json(
         { status: "unauthorized" },
         { status: 401, headers: PRIVATE_HEADERS }

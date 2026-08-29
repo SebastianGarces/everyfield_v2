@@ -92,6 +92,7 @@ import type { PersonCreatedEvent, PersonStatusChangedEvent } from "./events";
 import { createPerson } from "./service";
 import { changeStatus } from "./status";
 import { personCreateSchema } from "@/lib/validations/people";
+import { resetEvryPeopleEffectProofDirtyMarker } from "../../../scripts/evry-people-effect-live-proof-seed";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
 const TAG_IDENTITY = "people.crm.tags.assign-tag";
@@ -627,10 +628,7 @@ async function main(): Promise<void> {
     activitySource: "form" as const,
     expectedHouseholdName: null,
   };
-  await db
-    .update(churches)
-    .set({ lastMaterialEventAt: null })
-    .where(eq(churches.id, plant.id));
+  await resetEvryPeopleEffectProofDirtyMarker(plant.id);
   const interfacePerson = await createPerson(
     plant.id,
     owner.id,
@@ -651,10 +649,7 @@ async function main(): Promise<void> {
       .where(eq(churches.id, plant.id))
       .then(([row]) => row?.dirtyAt)
   );
-  await db
-    .update(churches)
-    .set({ lastMaterialEventAt: null })
-    .where(eq(churches.id, plant.id));
+  await resetEvryPeopleEffectProofDirtyMarker(plant.id);
   const createArguments = {
     personId: createInput.personId,
     personJson: JSON.stringify(createInput.person),

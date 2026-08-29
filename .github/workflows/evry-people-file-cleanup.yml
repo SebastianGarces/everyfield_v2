@@ -1,3 +1,7 @@
+# GitHub Actions owns this hourly schedule. Vercel Hobby permits only one
+# invocation per day, and vercel.json deliberately schedules nothing. The
+# route owns authentication and the retry-safe cleanup logic; this workflow
+# only supplies a bounded authenticated tick.
 name: Evry People file cleanup
 
 on:
@@ -9,7 +13,9 @@ permissions: {}
 
 concurrency:
   group: evry-people-file-cleanup
-  cancel-in-progress: true
+  # An active sweep is allowed to finish. The 90-second request budget keeps
+  # it below the hourly cadence, and every deletion is idempotent on retry.
+  cancel-in-progress: false
 
 jobs:
   sweep:
