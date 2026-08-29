@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useId, type ReactNode } from "react";
 
 import { EvryBoundaryMessage } from "@/components/evry/boundary-message";
+import { RichText } from "@/components/shared/rich-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -447,8 +448,14 @@ function DetailedConfirmation({
                       <dt className="text-muted-foreground text-xs font-medium">
                         {preview.label}
                       </dt>
-                      <dd className="mt-1 [overflow-wrap:anywhere] whitespace-pre-wrap">
-                        {preview.content}
+                      <dd className="mt-1 [overflow-wrap:anywhere]">
+                        {preview.format === "rich_text" ? (
+                          <RichText body={preview.content} />
+                        ) : (
+                          <span className="whitespace-pre-wrap">
+                            {preview.content}
+                          </span>
+                        )}
                       </dd>
                     </div>
                   ))}

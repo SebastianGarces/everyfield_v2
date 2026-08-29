@@ -84,6 +84,25 @@ const audienceSchema = z.strictObject({
     .max(16),
 });
 
+const resolvedRecipientSourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("page_person"),
+    personId: z.string().uuid(),
+  }),
+  z.strictObject({
+    kind: z.literal("people"),
+    recipientIds: z.array(z.string().uuid()).min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("group"),
+    selector: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(isRecipientGroupSelector, "Unknown recipient group selector"),
+  }),
+]);
+
 const sourceMessageSchema = z.strictObject({
   id: z.string().uuid(),
   subject: z.string().max(500),
@@ -99,11 +118,13 @@ const sourceMessageSchema = z.strictObject({
 
 const sendArgumentsSchema = z.strictObject({
   communicationId: z.string().uuid(),
+  recipientSource: resolvedRecipientSourceSchema,
   audience: audienceSchema,
 });
 
 const resendArgumentsSchema = z.strictObject({
   source: sourceMessageSchema,
+  nonOpenerPersonIds: z.array(z.string().uuid()).min(1),
   communicationId: z.string().uuid(),
   audience: audienceSchema,
 });
@@ -140,6 +161,7 @@ type CommunicationEvrySendAudienceDependencies = Readonly<{
 type CommunicationEvrySendAudienceResolution =
   | Readonly<{
       kind: "resolved";
+      recipientSource: z.infer<typeof resolvedRecipientSourceSchema>;
       audience: EvryCommunicationAudienceSnapshot;
     }>
   | CommunicationEvryRefusal;
@@ -239,19 +261,35 @@ export function createCommunicationEvrySendAudienceResolver(
     pageContext: EvryResolvedPageContext | null;
     selection: CommunicationEvrySendSelection;
   }): Promise<CommunicationEvrySendAudienceResolution> {
-    const recipientIds =
+    const recipientSource =
       input.selection.audience.kind === "people"
-        ? input.selection.audience.recipientIds
+        ? {
+            kind: "people" as const,
+            recipientIds: [...input.selection.audience.recipientIds],
+          }
         : input.selection.audience.kind === "group"
+          ? {
+              kind: "group" as const,
+              selector: input.selection.audience.selector,
+            }
+          : input.pageContext?.kind === "person"
+            ? {
+                kind: "page_person" as const,
+                personId: input.pageContext.recordId,
+              }
+            : null;
+    const recipientIds = recipientSource
+      ? recipientSource.kind === "people"
+        ? recipientSource.recipientIds
+        : recipientSource.kind === "group"
           ? (
               await dependencies.getGroupRecipients(
                 input.actor.plantId,
-                input.selection.audience.selector
+                recipientSource.selector
               )
             ).map(({ id }) => id)
-          : input.pageContext?.kind === "person"
-            ? [input.pageContext.recordId]
-            : [];
+          : [recipientSource.personId]
+      : [];
     const template =
       input.selection.draft.kind === "template"
         ? await dependencies.getTemplate(
@@ -298,7 +336,11 @@ export function createCommunicationEvrySendAudienceResolver(
         exclusions: audience.exclusions,
       });
     }
-    return { kind: "resolved", audience };
+    return {
+      kind: "resolved",
+      recipientSource: resolvedRecipientSourceSchema.parse(recipientSource),
+      audience,
+    };
   };
 }
 
@@ -326,6 +368,89 @@ function exactExecutionTuple(input: EvryEffectInput, identity: string) {
   );
 }
 
+function sameStrings(left: readonly string[], right: readonly string[]) {
+  const sortedRight = [...right].toSorted();
+  return (
+    left.length === right.length &&
+    [...left].toSorted().every((value, index) => value === sortedRight[index])
+  );
+}
+
+function sameAudience(
+  left: EvryCommunicationAudienceSnapshot | null,
+  right: EvryCommunicationAudienceSnapshot
+) {
+  return Boolean(left && JSON.stringify(left) === JSON.stringify(right));
+}
+
+async function recipientIdsForSource(
+  plantId: string,
+  source: z.infer<typeof resolvedRecipientSourceSchema>
+) {
+  if (source.kind === "people") return source.recipientIds;
+  if (source.kind === "page_person") return [source.personId];
+  return (await getGroupRecipients(plantId, source.selector)).map(
+    ({ id }) => id
+  );
+}
+
+async function sendAudienceIsCurrent(input: {
+  actor: EvryPlantActor;
+  recipientSource: z.infer<typeof resolvedRecipientSourceSchema>;
+  audience: EvryCommunicationAudienceSnapshot;
+}) {
+  const recipientIds = await recipientIdsForSource(
+    input.actor.plantId,
+    input.recipientSource
+  );
+  return sameAudience(
+    await resolveEvryCommunicationAudience({
+      churchId: input.actor.plantId,
+      recipientIds,
+      subject: input.audience.subject,
+      body: input.audience.bodyHtml,
+      channel: input.audience.channel,
+      templateId: input.audience.templateId,
+      meetingId: input.audience.meetingId,
+    }),
+    input.audience
+  );
+}
+
+async function resendAudienceIsCurrent(input: {
+  actor: EvryPlantActor;
+  source: z.infer<typeof sourceMessageSchema>;
+  nonOpenerPersonIds: readonly string[];
+  audience: EvryCommunicationAudienceSnapshot;
+}) {
+  const original = await exactSourceMessage(input.actor.plantId, input.source);
+  if (!original) return false;
+  const summary = await getNonOpenerSummary(input.actor.plantId, original.id);
+  if (
+    !evaluateResendEligibility({
+      status: original.status,
+      sentAt: original.sentAt,
+      deliveredCount: summary.delivered,
+      nonOpenerCount: summary.personIds.length,
+    }).allowed ||
+    !sameStrings(summary.personIds, input.nonOpenerPersonIds)
+  ) {
+    return false;
+  }
+  return sameAudience(
+    await resolveEvryCommunicationAudience({
+      churchId: input.actor.plantId,
+      recipientIds: summary.personIds,
+      subject: original.subject ?? "",
+      body: original.bodyHtml ?? original.body,
+      channel: original.channel,
+      templateId: original.templateId,
+      meetingId: original.meetingId,
+    }),
+    input.audience
+  );
+}
+
 export function createCommunicationEvryMessageExecutions(
   dependencies: Readonly<{ mailer?: EvryCommunicationMailer }> = {}
 ) {
@@ -340,6 +465,15 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
+        if (
+          !(await sendAudienceIsCurrent({
+            actor: input.authorization.actor,
+            recipientSource: parsed.data.recipientSource,
+            audience: parsed.data.audience,
+          }))
+        ) {
+          return { status: "refused", excludedCount: 1 };
+        }
         return await sendFrozenEvryCommunication({
           effect: input,
           identity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
@@ -364,22 +498,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
-        const original = await exactSourceMessage(
-          input.authorization.actor.plantId,
-          parsed.data.source
-        );
-        if (!original) return { status: "refused", excludedCount: 1 };
-        const summary = await getNonOpenerSummary(
-          input.authorization.actor.plantId,
-          parsed.data.source.id
-        );
         if (
-          !evaluateResendEligibility({
-            status: original.status,
-            sentAt: original.sentAt,
-            deliveredCount: summary.delivered,
-            nonOpenerCount: summary.personIds.length,
-          }).allowed
+          !(await resendAudienceIsCurrent({
+            actor: input.authorization.actor,
+            source: parsed.data.source,
+            nonOpenerPersonIds: parsed.data.nonOpenerPersonIds,
+            audience: parsed.data.audience,
+          }))
         ) {
           return { status: "refused", excludedCount: 1 };
         }
@@ -388,7 +513,7 @@ export function createCommunicationEvryMessageExecutions(
           identity: COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
-          eligiblePersonIds: new Set(summary.personIds),
+          eligiblePersonIds: new Set(parsed.data.nonOpenerPersonIds),
           mailer: dependencies.mailer,
         });
       } catch {
@@ -449,10 +574,29 @@ function reviewStep(
     ],
     exclusions: audience.exclusions,
     dateTime: null,
-    contentPreviews: [
-      { label: "Subject", content: preview(audience.subject, "(No subject)") },
-      { label: "Message", content: preview(audience.body, "(Empty message)") },
-    ],
+    contentPreviews: audience.recipients.flatMap((recipient, index) => {
+      const recipientLabel = preview(
+        `${index + 1}. ${recipient.label} · ${recipient.email}`,
+        `Recipient ${index + 1}`,
+        120
+      );
+      return [
+        {
+          label: preview(`Subject — ${recipientLabel}`, "Subject", 160),
+          content: preview(recipient.subject, "(No subject)"),
+          format: "plain_text" as const,
+        },
+        {
+          label: preview(
+            `Rendered message — ${recipientLabel}`,
+            "Message",
+            160
+          ),
+          content: recipient.bodyHtml,
+          format: "rich_text" as const,
+        },
+      ];
+    }),
     beforeAfter: [
       {
         label: input.resend ? "Resend delivery" : "Email delivery",
@@ -638,6 +782,7 @@ export async function proposeCommunicationEvryMessageEffect(input: {
           input.requestKey,
           "communication"
         ),
+        recipientSource: audience.recipientSource,
         audience: parsedAudience.data,
       }),
     });
@@ -699,6 +844,7 @@ export async function proposeCommunicationEvryMessageEffect(input: {
     stepId: "resend-non-openers",
     arguments: resendArgumentsSchema.parse({
       source: source.data,
+      nonOpenerPersonIds: summary.personIds,
       communicationId: communicationEvryEffectUuid(
         input.requestKey,
         "resent-communication"
@@ -739,7 +885,7 @@ async function plannedMessageIsAvailable(input: {
   );
 }
 
-/** Revalidation permits recipient shrinkage but never a new or changed target. */
+/** Revalidation requires the exact reviewed source, audience, and message. */
 export async function communicationEvryMessageTargetIsCurrent(input: {
   actor: EvryPlantActor;
   step: EvryActionStep;
@@ -748,6 +894,11 @@ export async function communicationEvryMessageTargetIsCurrent(input: {
     const parsed = sendArgumentsSchema.safeParse(input.step.arguments);
     return Boolean(
       parsed.success &&
+      (await sendAudienceIsCurrent({
+        actor: input.actor,
+        recipientSource: parsed.data.recipientSource,
+        audience: parsed.data.audience,
+      })) &&
       (await plannedMessageIsAvailable({
         actor: input.actor,
         communicationId: parsed.data.communicationId,
@@ -762,23 +913,13 @@ export async function communicationEvryMessageTargetIsCurrent(input: {
   }
   const parsed = resendArgumentsSchema.safeParse(input.step.arguments);
   if (!parsed.success) return false;
-  const original = await exactSourceMessage(
-    input.actor.plantId,
-    parsed.data.source
-  );
-  if (!original) return false;
-  const summary = await getNonOpenerSummary(input.actor.plantId, original.id);
-  const reviewed = new Set(
-    parsed.data.audience.recipients.map(({ personId }) => personId)
-  );
   return (
-    evaluateResendEligibility({
-      status: original.status,
-      sentAt: original.sentAt,
-      deliveredCount: summary.delivered,
-      nonOpenerCount: summary.personIds.length,
-    }).allowed &&
-    summary.personIds.every((personId) => reviewed.has(personId)) &&
+    (await resendAudienceIsCurrent({
+      actor: input.actor,
+      source: parsed.data.source,
+      nonOpenerPersonIds: parsed.data.nonOpenerPersonIds,
+      audience: parsed.data.audience,
+    })) &&
     (await plannedMessageIsAvailable({
       actor: input.actor,
       communicationId: parsed.data.communicationId,

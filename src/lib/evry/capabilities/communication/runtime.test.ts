@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { render } from "@react-email/components";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { EvryArtifactRenderer } from "@/components/evry/artifacts/artifact-renderer";
 import communicationInventory from "./inventory.generated.json";
 import {
   isEvryEffectCapabilityIdentity,
@@ -16,6 +21,7 @@ import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
 import { renderEmailBodyHtml } from "@/lib/communication/merge";
 import { isRecipientGroupSelector } from "@/lib/communication/recipient-groups";
 import { storedTemplateContent } from "@/lib/communication/templates";
+import { CommunicationEmail } from "@/lib/email/components/communication-email";
 
 import {
   COMMUNICATION_EVRY_READ_REGISTRATIONS,
@@ -179,7 +185,100 @@ test("every template mutation shape has strict arguments and a complete trusted 
     });
     assert.ok(review, identity);
     assert.equal(review.confirmation.steps.length, 1);
-    assert.equal(review.confirmation.steps[0]?.counts[0]?.count, 1);
+    const step = review.confirmation.steps[0];
+    assert.ok(step);
+    assert.equal(step.counts[0]?.count, 1);
+    assert.deepEqual(
+      step.beforeAfter.map(({ label }) => label),
+      ["Name", "Description", "Category", "Channel", "Subject", "Body"]
+    );
+    assert.ok(
+      step.contentPreviews.every(({ format }) => format === "rich_text")
+    );
+    const changes = Object.fromEntries(
+      step.beforeAfter.map(({ label, before, after }) => [
+        label,
+        { before, after },
+      ])
+    );
+    if (identity === COMMUNICATION_TEMPLATE_CREATE_IDENTITY) {
+      assert.deepEqual(
+        step.contentPreviews.map(
+          ({ content: previewContent }) => previewContent
+        ),
+        [content.bodyHtml]
+      );
+      assert.deepEqual(changes, {
+        Name: { before: "Absent", after: content.name },
+        Description: { before: "Absent", after: "(None)" },
+        Category: { before: "Absent", after: content.category },
+        Channel: { before: "Absent", after: content.channel },
+        Subject: { before: "Absent", after: content.subject },
+        Body: {
+          before: "Absent",
+          after: "See exact rendered body preview",
+        },
+      });
+    } else if (identity === COMMUNICATION_TEMPLATE_UPDATE_IDENTITY) {
+      const updated = storedTemplateContent("<p>Hello Grace</p>");
+      assert.deepEqual(
+        step.contentPreviews.map(
+          ({ content: previewContent }) => previewContent
+        ),
+        [content.bodyHtml, updated.bodyHtml]
+      );
+      assert.deepEqual(changes, {
+        Name: { before: content.name, after: content.name },
+        Description: { before: "(None)", after: "(None)" },
+        Category: { before: content.category, after: content.category },
+        Channel: { before: content.channel, after: content.channel },
+        Subject: { before: content.subject, after: content.subject },
+        Body: {
+          before: "See exact previous body preview",
+          after: "See exact rendered body preview",
+        },
+      });
+    } else if (identity === COMMUNICATION_TEMPLATE_DELETE_IDENTITY) {
+      assert.deepEqual(
+        step.contentPreviews.map(
+          ({ content: previewContent }) => previewContent
+        ),
+        [content.bodyHtml]
+      );
+      assert.deepEqual(
+        Object.fromEntries(
+          Object.entries(changes).map(([label, value]) => [label, value.after])
+        ),
+        {
+          Name: "Deleted",
+          Description: "Deleted",
+          Category: "Deleted",
+          Channel: "Deleted",
+          Subject: "Deleted",
+          Body: "Deleted",
+        }
+      );
+    } else {
+      assert.deepEqual(
+        step.contentPreviews.map(
+          ({ content: previewContent }) => previewContent
+        ),
+        [content.bodyHtml]
+      );
+      assert.deepEqual(
+        Object.fromEntries(
+          Object.entries(changes).map(([label, value]) => [label, value.before])
+        ),
+        {
+          Name: "Absent",
+          Description: "Absent",
+          Category: "Absent",
+          Channel: "Absent",
+          Subject: "Absent",
+          Body: "Absent",
+        }
+      );
+    }
   }
 });
 
@@ -254,7 +353,10 @@ test("valid maximum-size and subjectless templates remain exactly reviewable", (
       }
       for (const preview of step.contentPreviews) {
         assert.ok(preview.content.length > 0);
-        assert.ok(preview.content.length <= 4_000);
+        assert.ok(
+          preview.content.length <=
+            (preview.format === "rich_text" ? 200_000 : 4_000)
+        );
       }
       for (const change of step.beforeAfter) {
         assert.ok(change.before.length > 0);
@@ -419,6 +521,21 @@ test("legacy system templates without HTML have reviewable update and fork plans
     });
     assert.ok(review);
     assert.match(JSON.stringify(review.confirmation), /Legacy plain text/);
+    const step = review.confirmation.steps[0];
+    assert.ok(step);
+    assert.equal(step.contentPreviews[0]?.format, "rich_text");
+    if (identity === COMMUNICATION_TEMPLATE_UPDATE_IDENTITY) {
+      assert.match(review.confirmation.title, /^Copy and edit template/);
+      assert.equal(review.confirmation.actionLabel, "Create edited copy");
+      assert.deepEqual(step.counts, [
+        { label: "Plant copies to create", count: 1 },
+      ]);
+      assert.deepEqual(
+        step.resolvedTargets.map(({ label }) => label),
+        ["System template source", "New plant-owned template"]
+      );
+      assert.match(step.resolvedTargets[1]?.value ?? "", new RegExp(RESULT_ID));
+    }
   }
 });
 
@@ -520,11 +637,23 @@ test("outbound selection is closed and each message effect has an exact trusted 
   for (const [identity, args] of [
     [
       COMMUNICATION_MESSAGE_SEND_IDENTITY,
-      { communicationId: RESULT_ID, audience },
+      {
+        communicationId: RESULT_ID,
+        recipientSource: {
+          kind: "people",
+          recipientIds: interfaceSizedAudience,
+        },
+        audience,
+      },
     ],
     [
       COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
-      { source, communicationId: RESULT_ID, audience },
+      {
+        source,
+        nonOpenerPersonIds: interfaceSizedAudience,
+        communicationId: RESULT_ID,
+        audience,
+      },
     ],
   ] as const) {
     const candidate = parseEvryActionPlanCandidate({
@@ -719,7 +848,7 @@ test("valid selections with unavailable sources or zero eligible recipients retu
   assert.equal(audienceCalls, 1);
 });
 
-test("draft, stored, preview, and sent rich text share one sanitized source", () => {
+test("draft, stored, preview, and sent rich text share one sanitized source", async () => {
   const stored = storedTemplateContent(
     '<p>Hello <strong>{{first_name}}</strong> <a href="https://example.com">details</a></p><script>bad()</script>'
   );
@@ -731,6 +860,68 @@ test("draft, stored, preview, and sent rich text share one sanitized source", ()
   assert.equal(preview, sent);
   assert.match(sent, /<strong>Ada<\/strong>/);
   assert.match(sent, /href="https:\/\/example.com"/);
+
+  const audience = {
+    subject: "Hello Ada",
+    body: stored.body,
+    bodyHtml: stored.bodyHtml,
+    channel: "email",
+    templateId: null,
+    meetingId: null,
+    messageClass: "relationship_message",
+    recipients: [
+      {
+        personId: RESULT_ID,
+        label: "Ada Lovelace",
+        email: "ada@example.test",
+        subject: "Hello Ada",
+        bodyHtml: preview,
+        bodyText: "Hello Ada details",
+      },
+    ],
+    exclusions: [],
+  } as const;
+  const candidate = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: "send",
+          capabilityIdentity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
+          arguments: {
+            communicationId: RESULT_ID,
+            recipientSource: { kind: "people", recipientIds: [RESULT_ID] },
+            audience,
+          },
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: COMMUNICATION_MESSAGE_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity: COMMUNICATION_MESSAGE_SEND_IDENTITY }],
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: PLAN_ID,
+      fingerprint: FINGERPRINT,
+    }),
+    document: candidate,
+    reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+  const renderedConfirmation = renderToStaticMarkup(
+    createElement(EvryArtifactRenderer, {
+      model: { variant: "confirmation", artifact: review.confirmation },
+    })
+  );
+  const delivered = await render(
+    CommunicationEmail({ bodyHtml: preview, churchName: "EveryField Test" })
+  );
+  for (const surface of [renderedConfirmation, delivered]) {
+    assert.match(surface, /<strong>Ada<\/strong>/);
+    assert.match(surface, /href="https:\/\/example.com"/);
+    assert.doesNotMatch(surface, /&lt;strong&gt;/);
+    assert.doesNotMatch(surface, /script|bad\(\)/i);
+  }
 });
 
 test("effect identities are stable, purpose-separated UUIDs", () => {

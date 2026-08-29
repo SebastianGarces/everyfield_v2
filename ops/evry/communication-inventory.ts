@@ -5,6 +5,7 @@ import {
   format as formatWithPrettier,
   resolveConfig as resolvePrettierConfig,
 } from "prettier";
+import ts from "typescript";
 
 import type { Capability } from "../../src/lib/auth/seat-rules";
 import { collectActionSurfaces, collectRouteSurfaces } from "./inventory";
@@ -56,7 +57,7 @@ export type CommunicationEvryCapabilityInventory = Readonly<{
   authoritativeSources: Readonly<{
     actions: "src/lib/auth/capability-map.ts";
     routes: "src/app/(dashboard)/communication/**/page.tsx";
-    rscReads: "async @/lib/communication/* imports in dashboard server components";
+    rscReads: "awaited @/lib/communication/* calls in dashboard server components";
     external: "Communication provider and RSVP route handlers";
   }>;
   capabilities: readonly Readonly<{
@@ -360,100 +361,324 @@ function routeSurfaces(repoRoot: string): CommunicationEvrySurface[] {
     });
 }
 
-function exportedAsyncNames(source: string): Set<string> {
-  return new Set(
-    [...source.matchAll(/export\s+async\s+function\s+([A-Za-z0-9_]+)\b/g)].map(
-      (match) => match[1] as string
-    )
-  );
+export type DiscoveredCommunicationRscRead = Readonly<{
+  caller: string;
+  modulePath: string;
+  exportName: string;
+}>;
+
+function compilerOptions(repoRoot: string): ts.CompilerOptions {
+  const configPath = path.join(repoRoot, "tsconfig.json");
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (config.error) {
+    throw new Error(
+      `Communication inventory could not read tsconfig.json: ${ts.flattenDiagnosticMessageText(config.error.messageText, "\n")}`
+    );
+  }
+  return ts.parseJsonConfigFileContent(config.config, ts.sys, repoRoot).options;
 }
 
-function rscReadSurfaces(repoRoot: string): CommunicationEvrySurface[] {
-  const candidates = walk(path.join(repoRoot, DASHBOARD_ROOT)).filter(
+function resolvedSymbol(
+  checker: ts.TypeChecker,
+  node: ts.Node
+): ts.Symbol | undefined {
+  let symbol = checker.getSymbolAtLocation(node);
+  const seen = new Set<ts.Symbol>();
+  while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    if (seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  return symbol;
+}
+
+function callTargetNode(call: ts.CallExpression): ts.Node | null {
+  if (ts.isIdentifier(call.expression)) return call.expression;
+  if (ts.isPropertyAccessExpression(call.expression)) {
+    return call.expression.name;
+  }
+  if (ts.isElementAccessExpression(call.expression)) {
+    return call.expression.argumentExpression;
+  }
+  return null;
+}
+
+function callIsAwaited(call: ts.CallExpression): boolean {
+  for (
+    let current: ts.Node | undefined = call.parent;
+    current;
+    current = current.parent
+  ) {
+    if (ts.isAwaitExpression(current)) return true;
+    if (ts.isFunctionLike(current) || ts.isSourceFile(current)) return false;
+  }
+  return false;
+}
+
+function communicationDeclaration(input: {
+  checker: ts.TypeChecker;
+  call: ts.CallExpression;
+  repoRoot: string;
+}): DiscoveredCommunicationRscRead | null {
+  const target = callTargetNode(input.call);
+  if (!target) return null;
+  const symbol = resolvedSymbol(input.checker, target);
+  if (!symbol) return null;
+  const declaration =
+    symbol.valueDeclaration ??
+    symbol.declarations?.find(
+      (candidate) =>
+        ts.isFunctionDeclaration(candidate) ||
+        ts.isVariableDeclaration(candidate) ||
+        ts.isMethodDeclaration(candidate)
+    );
+  if (!declaration) return null;
+  const absoluteSource = path.resolve(declaration.getSourceFile().fileName);
+  const communicationRoot = path.resolve(
+    input.repoRoot,
+    "src",
+    "lib",
+    "communication"
+  );
+  if (
+    absoluteSource !== communicationRoot &&
+    !absoluteSource.startsWith(`${communicationRoot}${path.sep}`)
+  ) {
+    return null;
+  }
+  const declarationNameNode = (declaration as ts.NamedDeclaration).name;
+  const declarationName =
+    declarationNameNode && ts.isIdentifier(declarationNameNode)
+      ? declarationNameNode.text
+      : symbol.name;
+  const relativeModule = toPosix(path.relative(input.repoRoot, absoluteSource));
+  return {
+    caller: "",
+    modulePath: relativeModule
+      .replace(/^src\//, "@/")
+      .replace(/\.[cm]?[jt]sx?$/, ""),
+    exportName: declarationName,
+  };
+}
+
+/** Compiler-backed discovery: only actual awaited calls count as RSC reads. */
+export function discoverCommunicationRscReads(
+  repoRoot: string,
+  dashboardRoot = DASHBOARD_ROOT
+): DiscoveredCommunicationRscRead[] {
+  const candidates = walk(path.join(repoRoot, dashboardRoot)).filter(
     (file) =>
       /\.[jt]sx?$/.test(file) &&
       !/\.(?:test|proof)\.[jt]sx?$/.test(file) &&
       !file.endsWith("/actions.ts")
   );
-  const asyncByModule = new Map<string, Set<string>>();
-  const entries: CommunicationEvrySurface[] = [];
-
-  for (const file of candidates) {
+  const serverCandidates = candidates.filter((file) => {
     const source = readFileSync(file, "utf8");
-    if (/^\s*["']use client["'];/m.test(source)) continue;
+    return !/^\s*["']use client["'];/m.test(source);
+  });
+  const program = ts.createProgram({
+    rootNames: serverCandidates,
+    options: compilerOptions(repoRoot),
+  });
+  const checker = program.getTypeChecker();
+  const discovered = new Map<string, DiscoveredCommunicationRscRead>();
+  for (const file of serverCandidates) {
+    const sourceFile = program.getSourceFile(file);
+    if (!sourceFile) continue;
     const caller = toPosix(path.relative(repoRoot, file));
-    for (const match of source.matchAll(
-      /import\s+(?!type\s+)\{([^}]*)\}\s+from\s+["'](@\/lib\/communication\/[A-Za-z0-9_.-]+)["'];/g
-    )) {
-      const imported = match[1] as string;
-      const modulePath = match[2] as string;
-      const moduleFile = path.join(
-        repoRoot,
-        `${modulePath.replace(/^@\//, "src/")}.ts`
-      );
-      let asyncNames = asyncByModule.get(moduleFile);
-      if (!asyncNames) {
-        asyncNames = exportedAsyncNames(readFileSync(moduleFile, "utf8"));
-        asyncByModule.set(moduleFile, asyncNames);
-      }
-      for (const specifier of imported.split(",")) {
-        const normalized = specifier.trim().replace(/^type\s+/, "");
-        if (!normalized) continue;
-        const exportName = normalized.split(/\s+as\s+/)[0]?.trim();
-        if (!exportName || !asyncNames.has(exportName)) continue;
-        const contract =
-          RSC_READ_CONTRACTS[exportName as keyof typeof RSC_READ_CONTRACTS];
-        if (!contract) {
-          throw new Error(
-            `Communication inventory has no closed RSC read contract for ${caller} → ${modulePath}#${exportName}`
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && callIsAwaited(node)) {
+        const target = communicationDeclaration({
+          checker,
+          call: node,
+          repoRoot,
+        });
+        if (target) {
+          const read = { ...target, caller };
+          discovered.set(
+            `${caller}\0${read.modulePath}\0${read.exportName}`,
+            read
           );
         }
-        entries.push(
-          supportedSurface(
-            {
-              kind: "rsc_read",
-              identity: `rsc-read:${caller} → ${modulePath}#${exportName}`,
-              source: caller,
-              exportName,
-            },
-            contract,
-            "read"
-          )
-        );
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return [...discovered.values()].toSorted((left, right) =>
+    compareStrings(
+      `${left.caller}\0${left.modulePath}\0${left.exportName}`,
+      `${right.caller}\0${right.modulePath}\0${right.exportName}`
+    )
+  );
+}
+
+function rscReadSurfaces(repoRoot: string): CommunicationEvrySurface[] {
+  return discoverCommunicationRscReads(repoRoot).map((read) => {
+    const contract =
+      RSC_READ_CONTRACTS[read.exportName as keyof typeof RSC_READ_CONTRACTS];
+    if (!contract) {
+      throw new Error(
+        `Communication inventory has no closed RSC read contract for ${read.caller} → ${read.modulePath}#${read.exportName}`
+      );
+    }
+    return supportedSurface(
+      {
+        kind: "rsc_read",
+        identity: `rsc-read:${read.caller} → ${read.modulePath}#${read.exportName}`,
+        source: read.caller,
+        exportName: read.exportName,
+      },
+      contract,
+      "read"
+    );
+  });
+}
+
+type DiscoveredCommunicationRouteHandler = Readonly<{
+  identity: string;
+  source: string;
+  exportName: string;
+}>;
+
+const EXTERNAL_CONTRACTS = {
+  "handler:POST:/api/webhooks/resend": {
+    capabilityIdentity: "communication.delivery.ingest-provider-event",
+    domain: "delivery",
+  },
+  "handler:POST:/api/rsvp/[token]": {
+    capabilityIdentity: "communication.rsvp.respond-by-token",
+    domain: "rsvp",
+  },
+} as const;
+
+function appRoutePath(repoRoot: string, file: string): string {
+  const relative = toPosix(
+    path.relative(path.join(repoRoot, "src", "app"), file)
+  );
+  return `/${relative.replace(/\/route\.[cm]?[jt]sx?$/, "")}`;
+}
+
+const HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+
+function hasExportModifier(node: ts.Node): boolean {
+  return Boolean(
+    ts.canHaveModifiers(node) &&
+    ts
+      .getModifiers(node)
+      ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  );
+}
+
+function exportedHttpMethods(sourceFile: ts.SourceFile): string[] {
+  const methods = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isFunctionDeclaration(statement) &&
+      statement.name &&
+      hasExportModifier(statement) &&
+      HTTP_METHODS.has(statement.name.text)
+    ) {
+      methods.add(statement.name.text);
+      continue;
+    }
+    if (ts.isVariableStatement(statement) && hasExportModifier(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (
+          ts.isIdentifier(declaration.name) &&
+          HTTP_METHODS.has(declaration.name.text)
+        ) {
+          methods.add(declaration.name.text);
+        }
+      }
+      continue;
+    }
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        if (HTTP_METHODS.has(element.name.text)) methods.add(element.name.text);
       }
     }
   }
-  return entries;
+  return [...methods].toSorted(compareStrings);
 }
 
-const EXCLUDED_SURFACES: readonly CommunicationEvrySurface[] = [
-  {
-    kind: "external",
-    identity: "handler:POST:/api/webhooks/resend",
-    source: "src/app/api/webhooks/resend/route.ts",
-    exportName: "POST",
-    capabilityIdentity: "communication.delivery.ingest-provider-event",
-    domain: "delivery",
-    operationKind: "excluded",
-    applicationCapability: null,
-    confirmation: "excluded",
-    mutationShape: null,
-    classification: { state: "excluded", reason: "public_or_sessionless" },
-  },
-  {
-    kind: "external",
-    identity: "handler:GET|POST:/api/rsvp/[token]",
-    source: "src/app/api/rsvp/[token]/route.ts",
-    exportName: null,
-    capabilityIdentity: "communication.rsvp.respond-by-token",
-    domain: "rsvp",
-    operationKind: "excluded",
-    applicationCapability: null,
-    confirmation: "excluded",
-    mutationShape: null,
-    classification: { state: "excluded", reason: "public_or_sessionless" },
-  },
-];
+/** Discover exact exported HTTP methods for communication-owned API routes. */
+export function discoverCommunicationRouteHandlers(
+  repoRoot: string
+): DiscoveredCommunicationRouteHandler[] {
+  const apiRoot = path.join(repoRoot, "src", "app", "api");
+  const handlers: DiscoveredCommunicationRouteHandler[] = [];
+  for (const file of walk(apiRoot).filter((candidate) =>
+    /\/route\.[cm]?[jt]sx?$/.test(toPosix(candidate))
+  )) {
+    const source = readFileSync(file, "utf8");
+    const sourceFile = ts.createSourceFile(
+      file,
+      source,
+      ts.ScriptTarget.Latest,
+      true
+    );
+    const communicationOwned = sourceFile.statements.some(
+      (statement) =>
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        (statement.moduleSpecifier.text.startsWith("@/lib/communication/") ||
+          statement.moduleSpecifier.text === "@/db/schema/communication")
+    );
+    if (!communicationOwned) continue;
+    const routePath = appRoutePath(repoRoot, file);
+    for (const method of exportedHttpMethods(sourceFile)) {
+      handlers.push({
+        identity: `handler:${method}:${routePath}`,
+        source: toPosix(path.relative(repoRoot, file)),
+        exportName: method,
+      });
+    }
+  }
+  return handlers.toSorted((left, right) =>
+    compareStrings(left.identity, right.identity)
+  );
+}
+
+export function communicationExternalSurfaces(
+  repoRoot: string
+): CommunicationEvrySurface[] {
+  const discovered = discoverCommunicationRouteHandlers(repoRoot);
+  return discovered.map((handler) => {
+    const contract =
+      EXTERNAL_CONTRACTS[handler.identity as keyof typeof EXTERNAL_CONTRACTS];
+    if (!contract) {
+      throw new Error(
+        `Communication inventory has no closed external contract for ${handler.identity}`
+      );
+    }
+    return {
+      kind: "external",
+      identity: handler.identity,
+      source: handler.source,
+      exportName: handler.exportName,
+      capabilityIdentity: contract.capabilityIdentity,
+      domain: contract.domain,
+      operationKind: "excluded",
+      applicationCapability: null,
+      confirmation: "excluded",
+      mutationShape: null,
+      classification: { state: "excluded", reason: "public_or_sessionless" },
+    };
+  });
+}
 
 function assertBijection(entries: readonly CommunicationEvrySurface[]): void {
   const identities = entries.map(({ identity }) => identity);
@@ -471,6 +696,12 @@ function assertBijection(entries: readonly CommunicationEvrySurface[]): void {
   if (actions.length !== Object.keys(ACTION_CONTRACTS).length) {
     throw new Error(
       `Communication inventory expected ${Object.keys(ACTION_CONTRACTS).length} guarded action exports, found ${actions.length}`
+    );
+  }
+  const external = entries.filter(({ kind }) => kind === "external");
+  if (external.length !== Object.keys(EXTERNAL_CONTRACTS).length) {
+    throw new Error(
+      `Communication inventory expected ${Object.keys(EXTERNAL_CONTRACTS).length} communication route handlers, found ${external.length}`
     );
   }
   if (
@@ -495,7 +726,7 @@ export function generateCommunicationCapabilityInventory(
     ...actionSurfaces(),
     ...routeSurfaces(repoRoot),
     ...rscReadSurfaces(repoRoot),
-    ...EXCLUDED_SURFACES,
+    ...communicationExternalSurfaces(repoRoot),
   ].toSorted((left, right) => compareStrings(left.identity, right.identity));
   assertBijection(entries);
 
@@ -561,7 +792,7 @@ export function generateCommunicationCapabilityInventory(
       actions: "src/lib/auth/capability-map.ts",
       routes: "src/app/(dashboard)/communication/**/page.tsx",
       rscReads:
-        "async @/lib/communication/* imports in dashboard server components",
+        "awaited @/lib/communication/* calls in dashboard server components",
       external: "Communication provider and RSVP route handlers",
     },
     capabilities,

@@ -52,6 +52,11 @@ function conversation(): EvryStoredConversation {
 
 function storedPlan(): StoredEvryActionPlan {
   const content = storedTemplateContent("<p>Original approved draft</p>");
+  const recipientIds = Array.from(
+    { length: 101 },
+    (_, index) =>
+      `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+  );
   const document = parseEvryActionPlanCandidate({
     candidate: {
       steps: [
@@ -60,6 +65,7 @@ function storedPlan(): StoredEvryActionPlan {
           capabilityIdentity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
           arguments: {
             communicationId: "70000000-0000-4000-8000-000000000001",
+            recipientSource: { kind: "people", recipientIds },
             audience: {
               subject: "Original subject",
               body: content.body,
@@ -68,8 +74,8 @@ function storedPlan(): StoredEvryActionPlan {
               templateId: null,
               meetingId: null,
               messageClass: "relationship_message",
-              recipients: Array.from({ length: 101 }, (_, index) => ({
-                personId: `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+              recipients: recipientIds.map((personId, index) => ({
+                personId,
                 label: `Original recipient ${index + 1}`,
                 email: `original-${index + 1}@example.test`,
                 subject: "Original subject",

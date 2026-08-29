@@ -683,17 +683,104 @@ async function main(): Promise<void> {
     stepId: "send-after-suppression",
   });
   const shrinkMailer = deterministicMailer();
+  const shrinkCommunicationId = randomUUID();
   assert.deepEqual(
     await sendFrozenEvryCommunication({
       effect: shrinkEffect,
       identity: SEND_MESSAGE,
-      communicationId: randomUUID(),
+      communicationId: shrinkCommunicationId,
       audience: shrinkAudience,
       mailer: shrinkMailer.mailer,
     }),
-    { status: "completed", affectedCount: 0, excludedCount: 1 }
+    { status: "refused", excludedCount: 1 }
   );
   assert.equal(shrinkMailer.calls.length, 0);
+  assert.deepEqual(
+    await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communications)
+        .where(eq(communications.id, shrinkCommunicationId))
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communicationRecipients)
+        .where(
+          eq(communicationRecipients.communicationId, shrinkCommunicationId)
+        )
+        .then(([row]) => row?.count ?? -1),
+    ]),
+    [0, 0]
+  );
+
+  const groupEmail = `${randomUUID()}@scratch.invalid`;
+  const [groupPerson] = await db
+    .insert(persons)
+    .values({
+      churchId: plant.id,
+      firstName: "Reviewed",
+      lastName: "Prospect",
+      email: groupEmail,
+      status: "leader",
+      createdBy: owner.id,
+    })
+    .returning({ id: persons.id });
+  assert.ok(groupPerson);
+  const groupAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [groupPerson.id],
+    subject: "Reviewed group",
+    body: "Approved group message",
+  });
+  assert.ok(groupAudience);
+  const groupEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-after-group-change",
+  });
+  const groupCommunicationId = randomUUID();
+  const groupMailer = deterministicMailer();
+  const groupSend = createCommunicationEvryMessageExecutions({
+    mailer: groupMailer.mailer,
+  }).send;
+  await db.insert(persons).values({
+    churchId: plant.id,
+    firstName: "Added",
+    lastName: "Prospect",
+    email: `${randomUUID()}@scratch.invalid`,
+    status: "leader",
+    createdBy: owner.id,
+  });
+  assert.deepEqual(
+    await groupSend.executeIfCurrent({
+      ...groupEffect,
+      arguments: {
+        communicationId: groupCommunicationId,
+        recipientSource: { kind: "group", selector: "leaders" },
+        audience: groupAudience,
+      },
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  assert.equal(groupMailer.calls.length, 0);
+  assert.deepEqual(
+    await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communications)
+        .where(eq(communications.id, groupCommunicationId))
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communicationRecipients)
+        .where(
+          eq(communicationRecipients.communicationId, groupCommunicationId)
+        )
+        .then(([row]) => row?.count ?? -1),
+    ]),
+    [0, 0]
+  );
 
   const permanentEffect = await seedEffect({
     churchId: plant.id,
@@ -777,6 +864,7 @@ async function main(): Promise<void> {
     ...resendEffect,
     arguments: {
       source: resendSource.source,
+      nonOpenerPersonIds: [recipient.id],
       communicationId: randomUUID(),
       audience: resendSource.audience,
     },
@@ -828,6 +916,7 @@ async function main(): Promise<void> {
       ...cooldownEffect,
       arguments: {
         source: cooldownSource.source,
+        nonOpenerPersonIds: [recipient.id],
         communicationId: randomUUID(),
         audience: cooldownSource.audience,
       },
@@ -850,6 +939,7 @@ async function main(): Promise<void> {
       ...openerEffect,
       arguments: {
         source: resendSource.source,
+        nonOpenerPersonIds: [recipient.id],
         communicationId: randomUUID(),
         audience: resendSource.audience,
       },
@@ -876,6 +966,7 @@ async function main(): Promise<void> {
     ...failedResendEffect,
     arguments: {
       source: failedSource.source,
+      nonOpenerPersonIds: [recipient.id],
       communicationId: randomUUID(),
       audience: failedSource.audience,
     },
@@ -908,8 +999,8 @@ async function main(): Promise<void> {
     )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
-  assert.ok(counts.communications >= 9);
-  assert.ok(counts.recipients >= 9);
+  assert.ok(counts.communications >= 8);
+  assert.ok(counts.recipients >= 8);
   assert.ok(counts.outcomes >= 8);
 
   const foreignMessage = await db

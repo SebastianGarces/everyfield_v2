@@ -183,7 +183,11 @@ function readOutcomes(): Readonly<Record<string, ReadOutcome>> {
 function effectArguments(identity: string): Record<string, unknown> {
   switch (identity) {
     case COMMUNICATION_MESSAGE_SEND_IDENTITY:
-      return { communicationId: ID_2, audience };
+      return {
+        communicationId: ID_2,
+        recipientSource: { kind: "people", recipientIds: [ID] },
+        audience,
+      };
     case COMMUNICATION_RESEND_NON_OPENERS_IDENTITY:
       return {
         source: {
@@ -198,6 +202,7 @@ function effectArguments(identity: string): Record<string, unknown> {
           sentAt: "2026-08-27T06:00:00.000Z",
           recipientCount: 1,
         },
+        nonOpenerPersonIds: [ID],
         communicationId: ID_2,
         audience,
       };

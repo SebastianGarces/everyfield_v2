@@ -417,6 +417,63 @@ function templateSourceLink(templateId: string, name: string) {
   };
 }
 
+function reviewNullable(value: string | null | undefined) {
+  return reviewText(value, "(None)");
+}
+
+function renderedBodyPreview(label: string, bodyHtml: string) {
+  return {
+    label,
+    content: bodyHtml,
+    format: "rich_text" as const,
+  };
+}
+
+function templateFieldChanges(input: {
+  before?: z.infer<typeof snapshotSchema>;
+  after: z.infer<typeof contentSchema>;
+}) {
+  const before = input.before;
+  return [
+    {
+      label: "Name",
+      before: before ? before.name : "Absent",
+      after: input.after.name,
+      count: 1,
+    },
+    {
+      label: "Description",
+      before: before ? reviewNullable(before.description) : "Absent",
+      after: reviewNullable(input.after.description),
+      count: 1,
+    },
+    {
+      label: "Category",
+      before: before ? before.category : "Absent",
+      after: input.after.category,
+      count: 1,
+    },
+    {
+      label: "Channel",
+      before: before ? before.channel : "Absent",
+      after: input.after.channel,
+      count: 1,
+    },
+    {
+      label: "Subject",
+      before: before ? reviewNullable(before.subject) : "Absent",
+      after: reviewNullable(input.after.subject),
+      count: 1,
+    },
+    {
+      label: "Body",
+      before: before ? "See exact previous body preview" : "Absent",
+      after: "See exact rendered body preview",
+      count: 1,
+    },
+  ] as const;
+}
+
 export const COMMUNICATION_TEMPLATE_REVIEWS = [
   defineEvryArtifactReview({
     source: {
@@ -450,16 +507,12 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
             exclusions: [],
             dateTime: null,
             contentPreviews: [
-              {
-                label: "Subject",
-                content: reviewText(parsed.content.subject, "(No subject)"),
-              },
-              {
-                label: "Body",
-                content: reviewText(parsed.content.body, "(Empty template)"),
-              },
+              renderedBodyPreview(
+                "Exact rendered body",
+                parsed.content.bodyHtml
+              ),
             ],
-            beforeAfter: [],
+            beforeAfter: templateFieldChanges({ after: parsed.content }),
           },
         ],
       });
@@ -477,7 +530,10 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: templateReviewTitle("Update", parsed.expected.name),
+        title: templateReviewTitle(
+          parsed.targetKind === "system" ? "Copy and edit" : "Update",
+          parsed.expected.name
+        ),
         actionLabel: parsed.expected.isSystem
           ? "Create edited copy"
           : "Save template",
@@ -489,46 +545,64 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         steps: [
           {
             stepId: step?.id ?? "update-template",
-            title: "Update communication template",
+            title:
+              parsed.targetKind === "system"
+                ? "Create edited plant template"
+                : "Update communication template",
             effectKind: "other",
             reversibility: "reversible",
-            resolvedTargets: [
+            resolvedTargets:
+              parsed.targetKind === "system"
+                ? [
+                    {
+                      label: "System template source",
+                      value: parsed.expected.name,
+                      sourceLink: templateSourceLink(
+                        parsed.expected.id,
+                        parsed.expected.name
+                      ),
+                    },
+                    {
+                      label: "New plant-owned template",
+                      value: `${parsed.content.name} · ${parsed.resultTemplateId}`,
+                      sourceLink: null,
+                    },
+                  ]
+                : [
+                    {
+                      label: "Plant template",
+                      value: parsed.expected.name,
+                      sourceLink: templateSourceLink(
+                        parsed.expected.id,
+                        parsed.expected.name
+                      ),
+                    },
+                  ],
+            counts: [
               {
-                label: "Template",
-                value: parsed.expected.name,
-                sourceLink: templateSourceLink(
-                  parsed.expected.id,
-                  parsed.expected.name
-                ),
+                label:
+                  parsed.targetKind === "system"
+                    ? "Plant copies to create"
+                    : "Templates to update",
+                count: 1,
               },
             ],
-            counts: [{ label: "Templates to update", count: 1 }],
             exclusions: [],
             dateTime: null,
-            contentPreviews: [],
-            beforeAfter: [
-              {
-                label: "Name",
-                before: parsed.expected.name,
-                after: parsed.content.name,
-                count: 1,
-              },
-              {
-                label: "Subject",
-                before: reviewText(parsed.expected.subject, "(No subject)"),
-                after: reviewText(parsed.content.subject, "(No subject)"),
-                count: 1,
-              },
-              {
-                label: "Body",
-                before: reviewText(
-                  effectiveSnapshotContent(parsed.expected).body,
-                  "(Empty template)"
-                ),
-                after: reviewText(parsed.content.body, "(Empty template)"),
-                count: 1,
-              },
+            contentPreviews: [
+              renderedBodyPreview(
+                "Exact previous rendered body",
+                effectiveSnapshotContent(parsed.expected).bodyHtml
+              ),
+              renderedBodyPreview(
+                "Exact new rendered body",
+                parsed.content.bodyHtml
+              ),
             ],
+            beforeAfter: templateFieldChanges({
+              before: parsed.expected,
+              after: parsed.content,
+            }),
           },
         ],
       });
@@ -569,22 +643,45 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
             exclusions: [],
             dateTime: null,
             contentPreviews: [
-              {
-                label: "Subject",
-                content: reviewText(parsed.expected.subject, "(No subject)"),
-              },
-              {
-                label: "Body",
-                content: reviewText(
-                  effectiveSnapshotContent(parsed.expected).body,
-                  "(Empty template)"
-                ),
-              },
+              renderedBodyPreview(
+                "Exact rendered body to delete",
+                effectiveSnapshotContent(parsed.expected).bodyHtml
+              ),
             ],
             beforeAfter: [
               {
-                label: "Template",
+                label: "Name",
                 before: parsed.expected.name,
+                after: "Deleted",
+                count: 1,
+              },
+              {
+                label: "Description",
+                before: reviewNullable(parsed.expected.description),
+                after: "Deleted",
+                count: 1,
+              },
+              {
+                label: "Category",
+                before: parsed.expected.category,
+                after: "Deleted",
+                count: 1,
+              },
+              {
+                label: "Channel",
+                before: parsed.expected.channel,
+                after: "Deleted",
+                count: 1,
+              },
+              {
+                label: "Subject",
+                before: reviewNullable(parsed.expected.subject),
+                after: "Deleted",
+                count: 1,
+              },
+              {
+                label: "Body",
+                before: "See exact rendered body preview",
                 after: "Deleted",
                 count: 1,
               },
@@ -619,31 +716,66 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
             reversibility: "reversible",
             resolvedTargets: [
               {
-                label: "System template",
+                label: "System template source",
                 value: parsed.source.name,
                 sourceLink: templateSourceLink(
                   parsed.source.id,
                   parsed.source.name
                 ),
               },
+              {
+                label: "New plant-owned template",
+                value: `${parsed.source.name} · ${parsed.forkId}`,
+                sourceLink: null,
+              },
             ],
             counts: [{ label: "Plant copies to create", count: 1 }],
             exclusions: [],
             dateTime: null,
             contentPreviews: [
+              renderedBodyPreview(
+                "Exact rendered body to copy",
+                effectiveSnapshotContent(parsed.source).bodyHtml
+              ),
+            ],
+            beforeAfter: [
+              {
+                label: "Name",
+                before: "Absent",
+                after: parsed.source.name,
+                count: 1,
+              },
+              {
+                label: "Description",
+                before: "Absent",
+                after: reviewNullable(parsed.source.description),
+                count: 1,
+              },
+              {
+                label: "Category",
+                before: "Absent",
+                after: parsed.source.category,
+                count: 1,
+              },
+              {
+                label: "Channel",
+                before: "Absent",
+                after: parsed.source.channel,
+                count: 1,
+              },
               {
                 label: "Subject",
-                content: reviewText(parsed.source.subject, "(No subject)"),
+                before: "Absent",
+                after: reviewNullable(parsed.source.subject),
+                count: 1,
               },
               {
                 label: "Body",
-                content: reviewText(
-                  effectiveSnapshotContent(parsed.source).body,
-                  "(Empty template)"
-                ),
+                before: "Absent",
+                after: "See exact rendered body preview",
+                count: 1,
               },
             ],
-            beforeAfter: [],
           },
         ],
       });

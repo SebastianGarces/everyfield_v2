@@ -4,7 +4,7 @@
   "authoritativeSources": {
     "actions": "src/lib/auth/capability-map.ts",
     "routes": "src/app/(dashboard)/communication/**/page.tsx",
-    "rscReads": "async @/lib/communication/* imports in dashboard server components",
+    "rscReads": "awaited @/lib/communication/* calls in dashboard server components",
     "external": "Communication provider and RSVP route handlers"
   },
   "capabilities": [
@@ -381,9 +381,9 @@
     },
     {
       "kind": "external",
-      "identity": "handler:GET|POST:/api/rsvp/[token]",
+      "identity": "handler:POST:/api/rsvp/[token]",
       "source": "src/app/api/rsvp/[token]/route.ts",
-      "exportName": null,
+      "exportName": "POST",
       "capabilityIdentity": "communication.rsvp.respond-by-token",
       "domain": "rsvp",
       "operationKind": "excluded",

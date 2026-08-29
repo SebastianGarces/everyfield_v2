@@ -87,8 +87,9 @@ function dispatchableRecipient() {
 
 /**
  * Resolve, deduplicate and freeze the exact audience before confirmation.
- * Foreign/missing ids are counted neutrally, suppressed addresses and missing
- * addresses are visible, and later execution can only remove recipients.
+ * Foreign/missing ids are counted neutrally, and suppressed or missing
+ * addresses are visible. Execution must re-resolve this exact snapshot; it may
+ * neither add nor remove a recipient after the human approves it.
  */
 export async function resolveEvryCommunicationAudience(input: {
   churchId: string;
@@ -452,7 +453,7 @@ export async function sendFrozenEvryCommunication(input: {
   identity: string;
   communicationId: string;
   audience: EvryCommunicationAudienceSnapshot;
-  /** Optional resend-time shrink set. It can remove planned people, never add. */
+  /** Exact resend eligibility set resolved again immediately before writes. */
   eligiblePersonIds?: ReadonlySet<string>;
   mailer?: EvryCommunicationMailer;
 }): Promise<EvryEffectResult> {
@@ -466,10 +467,9 @@ export async function sendFrozenEvryCommunication(input: {
   ) {
     return { status: "refused", excludedCount: 1 };
   }
-  if (!(await prepareFrozenCommunication(input))) {
-    return { status: "refused", excludedCount: 1 };
-  }
-  const [[church], current, storedRows] = await Promise.all([
+  // This gate deliberately precedes the communication row, recipient rows,
+  // RSVP tokens, and provider calls. A stale confirmation must leave no trace.
+  const [[church], current] = await Promise.all([
     db
       .select({ name: churches.name })
       .from(churches)
@@ -479,17 +479,34 @@ export async function sendFrozenEvryCommunication(input: {
       churchId: actor.plantId,
       recipients: input.audience.recipients,
     }),
-    db
-      .select()
-      .from(communicationRecipients)
-      .where(
-        and(
-          eq(communicationRecipients.churchId, actor.plantId),
-          eq(communicationRecipients.communicationId, input.communicationId)
-        )
-      ),
   ]);
-  if (!church) return { status: "refused", excludedCount: 1 };
+  const plannedPersonIds = new Set(
+    input.audience.recipients.map(({ personId }) => personId)
+  );
+  const sameCurrentRecipients =
+    current.size === plannedPersonIds.size &&
+    [...plannedPersonIds].every((personId) => current.has(personId));
+  const sameResendRecipients =
+    !input.eligiblePersonIds ||
+    (input.eligiblePersonIds.size === plannedPersonIds.size &&
+      [...plannedPersonIds].every((personId) =>
+        input.eligiblePersonIds?.has(personId)
+      ));
+  if (!church || !sameCurrentRecipients || !sameResendRecipients) {
+    return { status: "refused", excludedCount: 1 };
+  }
+  if (!(await prepareFrozenCommunication(input))) {
+    return { status: "refused", excludedCount: 1 };
+  }
+  const storedRows = await db
+    .select()
+    .from(communicationRecipients)
+    .where(
+      and(
+        eq(communicationRecipients.churchId, actor.plantId),
+        eq(communicationRecipients.communicationId, input.communicationId)
+      )
+    );
 
   const byPerson = new Map(storedRows.map((row) => [row.personId, row]));
   let affectedCount = 0;
@@ -503,40 +520,6 @@ export async function sendFrozenEvryCommunication(input: {
   for (const recipient of input.audience.recipients) {
     const row = byPerson.get(recipient.personId);
     if (!row) return { status: "retryable" };
-    if (!current.has(recipient.personId)) {
-      if (
-        row.status === "pending" ||
-        row.errorMessage?.startsWith(EVRY_COMMUNICATION_TRANSIENT_PREFIX)
-      ) {
-        await db
-          .update(communicationRecipients)
-          .set({
-            status: "failed",
-            errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}recipient no longer eligible`,
-          })
-          .where(
-            and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
-          );
-      }
-      excludedCount += 1;
-      continue;
-    }
-    if (
-      input.eligiblePersonIds &&
-      !input.eligiblePersonIds.has(recipient.personId)
-    ) {
-      await db
-        .update(communicationRecipients)
-        .set({
-          status: "failed",
-          errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}recipient no longer qualifies for this resend`,
-        })
-        .where(
-          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
-        );
-      excludedCount += 1;
-      continue;
-    }
     if (["sent", "delivered", "opened", "clicked"].includes(row.status)) {
       affectedCount += 1;
       continue;
