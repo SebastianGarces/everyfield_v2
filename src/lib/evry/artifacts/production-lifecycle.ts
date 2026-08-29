@@ -4,9 +4,13 @@ import {
   type EvryArtifactLifecycleResult,
 } from "@/lib/evry/artifacts/lifecycle";
 import {
-  createEvryArtifactReviewRegistry,
   trustedEvryPlanReview,
 } from "@/lib/evry/artifacts/trusted-plan-review";
+import {
+  PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_PLAN_REGISTRY,
+  PRODUCTION_EVRY_REVIEW_REGISTRY,
+} from "@/lib/evry/capabilities/production";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {
   appendTrustedEvryConversationMessage,
@@ -14,13 +18,9 @@ import {
 } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
-  createEvryExecutionCapabilityRegistry,
   executeEvryActionPlan,
 } from "@/lib/evry/executor";
-import {
-  confirmEvryActionPlan,
-  createEvryPlanCapabilityRegistry,
-} from "@/lib/evry/plans";
+import { confirmEvryActionPlan } from "@/lib/evry/plans";
 import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
 
 export type RunEvryProductionArtifactLifecycle = (input: {
@@ -29,15 +29,9 @@ export type RunEvryProductionArtifactLifecycle = (input: {
   request: EvryArtifactLifecycleRequest;
 }) => Promise<EvryArtifactLifecycleResult>;
 
-// Capability packs compose these closed registries in their integration wave.
-// Until then a persisted plan cannot become confirmable or executable.
-const productionPlanRegistry = createEvryPlanCapabilityRegistry([]);
-const productionExecutionRegistry = createEvryExecutionCapabilityRegistry([]);
-const productionReviewRegistry = createEvryArtifactReviewRegistry([]);
-
 export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
-  planRegistry: productionPlanRegistry,
-  executionRegistry: productionExecutionRegistry,
+  planRegistry: PRODUCTION_EVRY_PLAN_REGISTRY,
+  executionRegistry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
   revalidatePlan: revalidateProductionEvryConversationPlan,
   resume: resumeEvryConversation,
   append: appendTrustedEvryConversationMessage,
@@ -47,7 +41,7 @@ export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
   reviewPlan: (input) =>
     trustedEvryPlanReview({
       ...input,
-      reviewRegistry: productionReviewRegistry,
+      reviewRegistry: PRODUCTION_EVRY_REVIEW_REGISTRY,
     }),
   now: () => new Date(),
 });

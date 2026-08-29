@@ -4,6 +4,7 @@ import type {
   EvryConversationAuthor,
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
+import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
   EvryPageContext,
@@ -114,7 +115,8 @@ export async function createEvryConversation(input: {
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
-  const conversation = await (input.store ?? evryConversationStore).create({
+  const store = input.store ?? evryConversationStore;
+  let conversation = await store.create({
     actorUserId: input.actor.userId,
     plantId: input.actor.plantId,
     requestKey,
@@ -124,14 +126,35 @@ export async function createEvryConversation(input: {
     createdAt: input.now,
   });
   await input.reportStage?.("compiling_response");
-  return Object.freeze({
+  const continued = await continueProductionEvryCapabilityConversation({
+    actor: input.actor,
     conversation,
-    activePlan: null,
-    context: compileEvryConversationContext({
+    userRequestKey: requestKey,
+    literalUserText: input.message,
+    pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
+    now: input.now,
+    store,
+  });
+  if (continued === null) {
+    return Object.freeze({
       conversation,
       activePlan: null,
-    }),
+      context: compileEvryConversationContext({
+        conversation,
+        activePlan: null,
+      }),
+    });
+  }
+  conversation = continued;
+  const resumed = await resumeEvryConversation({
+    actor: input.actor,
+    conversationId: conversation.id,
+    now: input.now,
+    store,
   });
+  if (!resumed) throw new Error("Created Evry conversation disappeared");
+  return resumed;
 }
 
 export async function appendTrustedEvryConversationMessage(input: {
@@ -302,6 +325,18 @@ export async function continueEvryConversation(input: {
       now: input.now,
       store,
     });
+  } else {
+    appended =
+      (await continueProductionEvryCapabilityConversation({
+        actor: input.actor,
+        conversation: appended,
+        userRequestKey: requestKey.data,
+        literalUserText: input.message,
+        pageContext: input.pageContext,
+        requestPageContext: input.requestPageContext,
+        now: input.now,
+        store,
+      })) ?? appended;
   }
 
   await input.reportStage?.(

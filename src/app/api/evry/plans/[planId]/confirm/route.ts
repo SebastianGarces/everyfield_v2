@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
+import { PRODUCTION_EVRY_PLAN_REGISTRY } from "@/lib/evry/capabilities/production";
 import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,
@@ -9,7 +10,6 @@ import {
 } from "@/lib/evry/eligibility/viewer";
 import {
   confirmEvryActionPlan,
-  createEvryPlanCapabilityRegistry,
   type EvryPlanCapabilityRegistry,
 } from "@/lib/evry/plans";
 import type { ConfirmEvryActionPlanResult } from "@/lib/evry/plans/repository";
@@ -103,10 +103,6 @@ export function createEvryPlanConfirmPost({
   };
 }
 
-// Capability packs compose this closed registry in their integration wave.
-// Until then production cannot approve a plan whose contract is not installed.
-const productionRegistry = createEvryPlanCapabilityRegistry([]);
-
 export const POST = createEvryPlanConfirmPost({
-  registry: productionRegistry,
+  registry: PRODUCTION_EVRY_PLAN_REGISTRY,
 });

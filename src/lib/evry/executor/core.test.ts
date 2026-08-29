@@ -43,6 +43,7 @@ const ACTOR = {
 } as unknown as EvryPlantActor;
 const PLAN_ID = "30000000-0000-4000-8000-000000000001";
 const CORRELATION_ID = "40000000-0000-4000-8000-000000000001";
+const ATTEMPT_ID = "50000000-0000-4000-8000-000000000001";
 
 function authorization(actor = ACTOR): EvryEffectCapabilityAuthorization {
   return {
@@ -550,6 +551,16 @@ test("effect counters outside PostgreSQL int4 are refused at the adapter boundar
       registration.executeIfCurrent({
         authorization: authorization(),
         effectKey: "b".repeat(64) as EvryAuditKey,
+        execution: {
+          attemptId: ATTEMPT_ID,
+          planId: PLAN_ID,
+          actorUserId: ACTOR.userId,
+          plantId: ACTOR.plantId,
+          fingerprint: "a".repeat(64),
+          correlationId: CORRELATION_ID,
+          stepId: "step-1",
+          capabilityIdentity: EVRY_PEOPLE_WRITE_PROBE_IDENTITY,
+        },
         arguments: {},
       }),
     /2147483647/
@@ -603,6 +614,16 @@ test("effect results cannot append fields or follow-on work", async () => {
       registration.executeIfCurrent({
         authorization: authorization(),
         effectKey: "c".repeat(64) as EvryAuditKey,
+        execution: {
+          attemptId: ATTEMPT_ID,
+          planId: PLAN_ID,
+          actorUserId: ACTOR.userId,
+          plantId: ACTOR.plantId,
+          fingerprint: "a".repeat(64),
+          correlationId: CORRELATION_ID,
+          stepId: "step-1",
+          capabilityIdentity: EVRY_PEOPLE_WRITE_PROBE_IDENTITY,
+        },
         arguments: {},
       }),
     /unrecognized key/i

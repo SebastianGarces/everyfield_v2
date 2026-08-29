@@ -55,11 +55,7 @@ export type ExecuteEvryActionPlanResult =
   | Readonly<{ status: "expired"; steps: readonly [] }>
   | Readonly<{
       status:
-        | "completed"
-        | "partially_failed"
-        | "failed"
-        | "refused"
-        | "retryable";
+        "completed" | "partially_failed" | "failed" | "refused" | "retryable";
       correlationId: string;
       steps: readonly EvryExecutionStepResult[];
     }>;
@@ -95,8 +91,7 @@ export type ExecuteEvryRecipePlanInput = Readonly<{
 }>;
 
 type ExecuteEvryPlanInput =
-  | ExecuteEvryGenericPlanInput
-  | ExecuteEvryRecipePlanInput;
+  ExecuteEvryGenericPlanInput | ExecuteEvryRecipePlanInput;
 
 function executionSourceRegistry(
   input: ExecuteEvryPlanInput
@@ -479,6 +474,16 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         effect = await executionRegistration.executeIfCurrent({
           authorization,
           effectKey,
+          execution: {
+            attemptId: attempt.id,
+            planId: attempt.planId,
+            actorUserId: attempt.actorUserId,
+            plantId: attempt.plantId,
+            fingerprint: attempt.fingerprint,
+            correlationId: attempt.correlationId,
+            stepId: step.id,
+            capabilityIdentity: step.capabilityIdentity,
+          },
           arguments: currentStep.arguments,
         });
       } catch {

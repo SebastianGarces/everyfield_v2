@@ -1,4 +1,8 @@
 import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
+import {
+  PRODUCTION_EVRY_PLAN_REGISTRY,
+  productionEvryPlanTargetIsCurrent,
+} from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
 import {
@@ -9,10 +13,7 @@ import {
   findExactEvryActionPlan,
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
-import {
-  createEvryPlanCapabilityRegistry,
-  type EvryPlanCapabilityRegistry,
-} from "@/lib/evry/plans/registry";
+import type { EvryPlanCapabilityRegistry } from "@/lib/evry/plans/registry";
 import {
   parseStoredEvryActionPlan,
   type EvryActionStep,
@@ -148,15 +149,10 @@ export function createEvryConversationPlanResumeRevalidator(
   };
 }
 
-// Capability packs replace this closed registry in their integration wave.
-// Until then, persisted fixture/model plans are visible only as stale and can
-// never regain confirmation authority from conversation storage.
-const productionRegistry = createEvryPlanCapabilityRegistry([]);
-
 export const revalidateProductionEvryConversationPlan =
   createEvryConversationPlanResumeRevalidator({
-    registry: productionRegistry,
+    registry: PRODUCTION_EVRY_PLAN_REGISTRY,
     loadExact: findExactEvryActionPlan,
     eligibleCapabilitiesForActor: eligibleEvryCapabilitiesFor,
-    targetIsCurrent: async () => false,
+    targetIsCurrent: productionEvryPlanTargetIsCurrent,
   });

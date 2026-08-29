@@ -42,6 +42,16 @@ export type EvryEffectResult = Readonly<z.infer<typeof effectResultSchema>>;
 export type EvryEffectInput = Readonly<{
   authorization: EvryEffectCapabilityAuthorization;
   effectKey: EvryAuditKey;
+  execution: Readonly<{
+    attemptId: string;
+    planId: string;
+    actorUserId: string;
+    plantId: string;
+    fingerprint: string;
+    correlationId: string;
+    stepId: string;
+    capabilityIdentity: string;
+  }>;
   arguments: Readonly<Record<string, EvryJsonValue>>;
 }>;
 

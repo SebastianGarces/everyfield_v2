@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
+import { PRODUCTION_EVRY_EXECUTION_REGISTRY } from "@/lib/evry/capabilities/production";
 import {
-  createEvryExecutionCapabilityRegistry,
   executeEvryActionPlan,
   type EvryExecutionCapabilityRegistry,
 } from "@/lib/evry/executor";
@@ -101,10 +101,6 @@ export function createEvryPlanExecutePost({
   };
 }
 
-// Capability packs install executable registrations in their own wave. An
-// empty registry fails closed and cannot execute an arbitrary persisted plan.
-const productionRegistry = createEvryExecutionCapabilityRegistry([]);
-
 export const POST = createEvryPlanExecutePost({
-  registry: productionRegistry,
+  registry: PRODUCTION_EVRY_EXECUTION_REGISTRY,
 });
