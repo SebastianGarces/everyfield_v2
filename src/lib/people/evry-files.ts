@@ -9,6 +9,7 @@ import {
   recoverCompletedEvryPeopleEffect,
 } from "./evry-effect";
 import { evryImportDuplicateSnapshotCtes } from "./duplicate-match";
+import { emitPersonCreated } from "./events";
 
 type EffectIdentity = Pick<EvryEffectInput, "execution"> & {
   effectKey: EvryAuditKey;
@@ -250,5 +251,15 @@ export async function claimEvryBulkImport(
         plantId: input.execution.plantId,
         rows: input.rows,
       })),
+    afterClaim: async () => {
+      for (const row of input.rows) {
+        if (row.disposition !== "create") continue;
+        await emitPersonCreated({
+          id: row.personId,
+          churchId: input.execution.plantId,
+          status: "prospect",
+        });
+      }
+    },
   });
 }

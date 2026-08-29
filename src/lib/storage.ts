@@ -245,23 +245,11 @@ export function userAvatarStorageKey(userId: string, ext: string): string {
 // Commitment Documents
 // ============================================================================
 
-/**
- * Validate that a file type is allowed for commitment documents.
- */
-export function isAllowedCommitmentFileType(mimeType: string): boolean {
-  const allowedTypes = [
-    "application/pdf",
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-  ];
-  return allowedTypes.includes(mimeType);
-}
-
-/**
- * Maximum file size for commitment documents (10MB).
- */
-export const MAX_COMMITMENT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+export {
+  isAllowedCommitmentFileType,
+  isValidCommitmentFileSize,
+  MAX_COMMITMENT_FILE_SIZE,
+} from "@/lib/people/commitment-document";
 
 export function commitmentDocumentStorageKey(
   churchId: string,
@@ -270,11 +258,4 @@ export function commitmentDocumentStorageKey(
   objectId: string = crypto.randomUUID()
 ): string {
   return `commitments/${churchId}/${personId}/${objectId}.${ext}`;
-}
-
-/**
- * Validate file size for commitment documents.
- */
-export function isValidCommitmentFileSize(size: number): boolean {
-  return size <= MAX_COMMITMENT_FILE_SIZE;
 }

@@ -9,6 +9,63 @@ export type PendingPeopleFileSubmission = Readonly<{
   requestKey: string;
 }>;
 
+export type PreparedEvryPeopleFile = Readonly<{
+  reference: string;
+  digest: string;
+  duplicateRows: readonly Readonly<{
+    rowNumber: number;
+    label: string;
+    mergeTarget: string;
+  }>[];
+}>;
+
+type PlanIdentity = Readonly<{
+  prepared: PreparedEvryPeopleFile;
+  conversationId: string | null;
+  requestKey: string;
+}>;
+
+export type EvryPeopleFilePlanInput =
+  | (PlanIdentity &
+      Readonly<{
+        kind: "people_csv";
+        duplicateResolutions: Readonly<
+          Record<string, "skip" | "create" | "merge">
+        >;
+      }>)
+  | (PlanIdentity & Readonly<{ kind: "person_photo" }>)
+  | (PlanIdentity &
+      Readonly<{
+        kind: "commitment_document";
+        commitmentType: "core_group" | "launch_team";
+        signedDate: string;
+        notes: string | null;
+      }>);
+
+/** Build the exact content- and option-bound plan request sent to the server. */
+export function evryPeopleFilePlanBody(input: EvryPeopleFilePlanInput) {
+  const identity = {
+    kind: input.kind,
+    reference: input.prepared.reference,
+    attachmentDigest: input.prepared.digest,
+    conversationId: input.conversationId,
+    requestKey: input.requestKey,
+  };
+  if (input.kind === "people_csv") {
+    return { ...identity, duplicateResolutions: input.duplicateResolutions };
+  }
+  if (input.kind === "commitment_document") {
+    return {
+      ...identity,
+      commitmentType: input.commitmentType,
+      signedDate: input.signedDate,
+      witness: null,
+      notes: input.notes,
+    };
+  }
+  return identity;
+}
+
 export function pendingPeopleFileSubmissionFor(
   current: PendingPeopleFileSubmission | null,
   semanticKey: string,
@@ -23,12 +80,20 @@ export function pendingPeopleFileSubmissionFor(
 export function duplicateRowNumbersFromPeopleStage(
   value: unknown
 ): readonly number[] {
+  return duplicateRowsFromPeopleStage(value).map(({ rowNumber }) => rowNumber);
+}
+
+/** Read each duplicate row and its exact default merge target. */
+export function duplicateRowsFromPeopleStage(value: unknown) {
   const staged = record(value);
   const artifact = record(staged?.artifact);
   if (staged?.status !== "staged" || artifact?.kind !== "read") return [];
   if (!Array.isArray(artifact.items)) return [];
 
-  const rows = new Set<number>();
+  const rows = new Map<
+    number,
+    Readonly<{ rowNumber: number; label: string; mergeTarget: string }>
+  >();
   for (const itemValue of artifact.items) {
     const item = record(itemValue);
     const match =
@@ -38,10 +103,47 @@ export function duplicateRowNumbersFromPeopleStage(
       const fact = record(factValue);
       return fact?.label === "Status" && fact.value === "Duplicate review";
     });
+    const mergeTarget = item.facts.find((factValue) => {
+      const fact = record(factValue);
+      return fact?.label === "Merge target" && typeof fact.value === "string";
+    });
+    const mergeTargetValue = record(mergeTarget)?.value;
     const rowNumber = Number(match[1]);
-    if (isDuplicate && Number.isSafeInteger(rowNumber) && rowNumber > 0) {
-      rows.add(rowNumber);
+    if (
+      isDuplicate &&
+      Number.isSafeInteger(rowNumber) &&
+      rowNumber > 0 &&
+      typeof item.label === "string" &&
+      typeof mergeTargetValue === "string"
+    ) {
+      rows.set(rowNumber, {
+        rowNumber,
+        label: item.label,
+        mergeTarget: mergeTargetValue,
+      });
     }
   }
-  return [...rows].sort((left, right) => left - right);
+  return [...rows.values()].sort(
+    (left, right) => left.rowNumber - right.rowNumber
+  );
+}
+
+/** Accept only the signed reference and digest delivered by the staging API. */
+export function preparedEvryPeopleFileFromStage(
+  value: unknown
+): PreparedEvryPeopleFile | null {
+  const staged = record(value);
+  const metadata = record(staged?.metadata);
+  return staged?.status === "staged" &&
+    typeof staged.reference === "string" &&
+    staged.reference.length > 0 &&
+    staged.reference.length <= 4_000 &&
+    typeof metadata?.digest === "string" &&
+    /^[0-9a-f]{64}$/.test(metadata.digest)
+    ? {
+        reference: staged.reference,
+        digest: metadata.digest,
+        duplicateRows: duplicateRowsFromPeopleStage(value),
+      }
+    : null;
 }

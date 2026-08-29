@@ -4,6 +4,7 @@ import type { Assessment, Commitment, Interview } from "@/db/schema";
 import { logPersonActivity } from "@/lib/people/activity";
 import { createAssessment, createInterview } from "@/lib/people/assessments";
 import { createCommitment, getCommitment } from "@/lib/people/commitments";
+import { commitmentDocumentRefusal } from "@/lib/people/commitment-document";
 import { assertPersonInChurch } from "@/lib/people/service";
 import { changeStatus } from "@/lib/people/status";
 import type { ActionResult } from "@/lib/people/types";
@@ -11,8 +12,6 @@ import {
   commitmentDocumentStorageKey,
   getExtensionFromMimeType,
   getSignedDownloadUrl,
-  isAllowedCommitmentFileType,
-  isValidCommitmentFileSize,
   uploadFile,
 } from "@/lib/storage";
 import {
@@ -232,20 +231,11 @@ export async function createCommitmentAction(
       let documentKey: string | undefined;
 
       if (file && file.size > 0) {
-        // Validate file type
-        if (!isAllowedCommitmentFileType(file.type)) {
+        const refusal = commitmentDocumentRefusal(file);
+        if (refusal) {
           return {
             success: false,
-            error:
-              "Invalid file type. Only PDF, JPG, and PNG files are allowed.",
-          };
-        }
-
-        // Validate file size
-        if (!isValidCommitmentFileSize(file.size)) {
-          return {
-            success: false,
-            error: "File is too large. Maximum size is 10MB.",
+            error: refusal.message,
           };
         }
 

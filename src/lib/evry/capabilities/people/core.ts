@@ -25,6 +25,7 @@ import {
   type EvryEffectInput,
 } from "@/lib/evry/executor";
 import {
+  deriveEvryPlanRequestKey,
   parseEvryActionPlanCandidate,
   type EvryActionStep,
   type EvryPlanRequestKey,
@@ -93,6 +94,7 @@ function jsonSchema<Schema extends z.ZodType>(schema: Schema) {
 
 const personJson = jsonSchema(personPayloadSchema);
 const createSchema = z.strictObject({
+  personId: z.string().uuid(),
   personJson,
   activitySource: z.enum(["form", "quick_add"]),
   expectedHouseholdName: z.string().max(255).nullable(),
@@ -344,6 +346,7 @@ export const PEOPLE_CORE_EXECUTIONS = [
         return claimEvryCreatePerson({
           execution: input.execution,
           effectKey: input.effectKey,
+          personId: args.data.personId,
           person: parseJson(args.data.personJson),
           activitySource: args.data.activitySource,
           expectedHouseholdName: args.data.expectedHouseholdName,
@@ -855,6 +858,11 @@ export async function proposePeopleCoreEffect(input: {
       expectedHouseholdName = household.name;
     }
     args = {
+      personId: deriveEvryPlanRequestKey("people-created-person", [
+        input.actor.userId,
+        input.actor.plantId,
+        input.requestKey,
+      ]),
       personJson: JSON.stringify(person),
       activitySource: input.selection.kind === "create" ? "form" : "quick_add",
       expectedHouseholdName,
@@ -978,6 +986,7 @@ export async function peopleCoreTargetIsCurrent(input: {
   ) {
     const args = createSchema.safeParse(input.step.arguments);
     if (!args.success) return false;
+    if (await getPerson(input.actor.plantId, args.data.personId)) return false;
     const person = parseJson(args.data.personJson);
     if (!person.householdId) return true;
     const household = await getHousehold(

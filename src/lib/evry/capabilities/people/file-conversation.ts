@@ -1,4 +1,5 @@
 import type { StoredEvryConversationArtifactDocument } from "@/lib/evry/conversations/artifacts";
+import { z } from "zod";
 import {
   evryConversationIdSchema,
   evryConversationRequestKeySchema,
@@ -17,6 +18,7 @@ import {
   type EvryResumedConversation,
 } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import { findExactEvryActionPlan } from "@/lib/evry/plans/repository";
 import {
   composeEvryCapabilityConversationContinuations,
   evryCapabilityConversationResultIdentity,
@@ -25,6 +27,69 @@ import {
 
 const recoverOnlyPeopleFileContinuation =
   composeEvryCapabilityConversationContinuations([]);
+
+export type EvryPeopleFileReviewIdentity = Readonly<{
+  kind: "person_photo" | "people_csv" | "commitment_document";
+  digest: string;
+}>;
+
+type RecoveredPlanAttachment = EvryPeopleFileReviewIdentity &
+  Readonly<{ reference: string }>;
+
+function fileAttachmentFromPlan(
+  document: unknown
+): RecoveredPlanAttachment | null {
+  const parsed = z
+    .object({
+      steps: z.array(
+        z.object({
+          capabilityIdentity: z.string(),
+          arguments: z.record(z.string(), z.unknown()),
+        })
+      ),
+    })
+    .safeParse(document);
+  if (!parsed.success || parsed.data.steps.length !== 1) return null;
+  const step = parsed.data.steps[0]!;
+  if (
+    step.capabilityIdentity === "people.crm.people.upload-person-photo" ||
+    step.capabilityIdentity === "people.crm.imports.execute-bulk-import"
+  ) {
+    const attachment = z
+      .object({
+        attachmentReference: z.string().min(1).max(4_000),
+        attachmentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+      })
+      .safeParse(step.arguments);
+    return attachment.success
+      ? {
+          kind:
+            step.capabilityIdentity === "people.crm.people.upload-person-photo"
+              ? "person_photo"
+              : "people_csv",
+          digest: attachment.data.attachmentDigest,
+          reference: attachment.data.attachmentReference,
+        }
+      : null;
+  }
+  if (
+    step.capabilityIdentity === "people.crm.assessments.create-commitment" &&
+    typeof step.arguments.attachmentJson === "string"
+  ) {
+    try {
+      const attachment = z
+        .object({
+          reference: z.string().min(1).max(4_000),
+          digest: z.string().regex(/^[0-9a-f]{64}$/),
+        })
+        .parse(JSON.parse(step.arguments.attachmentJson));
+      return { kind: "commitment_document", ...attachment };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 export type EvryPeopleFileReviewInput = Readonly<{
   actor: EvryPlantActor;
@@ -42,7 +107,9 @@ export type EvryPeopleFileReviewInput = Readonly<{
 export async function recoverEvryPeopleFileReview(
   input: EvryPeopleFileReviewInput &
     Readonly<{
+      expectedAttachment: EvryPeopleFileReviewIdentity;
       findByRequestKey?: typeof findEvryConversationRecordByRequestKey;
+      loadPlan?: typeof findExactEvryActionPlan;
     }>
 ) {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
@@ -85,13 +152,29 @@ export async function recoverEvryPeopleFileReview(
   ) {
     throw new EvryConversationIdempotencyError();
   }
-  return resumeEvryConversation({
+  if (!loaded.activePlan) throw new EvryConversationIdempotencyError();
+  const storedPlan = await (input.loadPlan ?? findExactEvryActionPlan)({
+    planId: loaded.activePlan.planId,
+    actorUserId: input.actor.userId,
+    plantId: input.actor.plantId,
+    fingerprint: loaded.activePlan.fingerprint,
+  });
+  const attachment = fileAttachmentFromPlan(storedPlan?.document);
+  if (
+    !attachment ||
+    attachment.kind !== input.expectedAttachment.kind ||
+    attachment.digest !== input.expectedAttachment.digest
+  ) {
+    throw new EvryConversationIdempotencyError();
+  }
+  const resumed = await resumeEvryConversation({
     actor: input.actor,
     conversationId: loaded.id,
     now: input.now,
     store: input.store,
     revalidatePlan: input.revalidatePlan,
   });
+  return resumed ? { resumed, attachment } : null;
 }
 
 /**

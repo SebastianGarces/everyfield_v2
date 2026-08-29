@@ -30,6 +30,21 @@ const PLAN = {
   planId: "50000000-0000-4000-8000-000000000001",
   fingerprint: "a".repeat(64),
 } as EvryConversationPlanIdentity;
+const DIGEST = "b".repeat(64);
+const ATTACHMENT_REFERENCE = "signed-reference-a";
+const STORED_PLAN = {
+  document: {
+    steps: [
+      {
+        capabilityIdentity: "people.crm.imports.execute-bulk-import",
+        arguments: {
+          attachmentReference: ATTACHMENT_REFERENCE,
+          attachmentDigest: DIGEST,
+        },
+      },
+    ],
+  },
+} as never;
 const CONFIRMATION = parseEvryConversationArtifactDocument({
   kind: "confirmation",
   plan: PLAN,
@@ -167,15 +182,22 @@ test("durable file review survives response loss and source removal", async () =
   );
   const recovered = await recoverEvryPeopleFileReview({
     ...input,
+    expectedAttachment: { kind: "people_csv", digest: DIGEST },
     findByRequestKey: async () => memory.current(),
+    loadPlan: async () => STORED_PLAN,
   });
 
   assert.ok(recovered);
   assert.equal(memory.assistantAppends(), 1);
-  assert.equal(recovered.conversation.messages.length, 2);
-  assert.deepEqual(recovered.conversation.activePlan, PLAN);
+  assert.equal(recovered.resumed.conversation.messages.length, 2);
+  assert.deepEqual(recovered.resumed.conversation.activePlan, PLAN);
+  assert.deepEqual(recovered.attachment, {
+    kind: "people_csv",
+    digest: DIGEST,
+    reference: ATTACHMENT_REFERENCE,
+  });
   assert.deepEqual(
-    recovered.conversation.messages[1]?.artifacts.map(
+    recovered.resumed.conversation.messages[1]?.artifacts.map(
       ({ document }) => document.kind
     ),
     ["confirmation"]
@@ -201,8 +223,39 @@ test("same request key cannot recover a different file workflow", async () => {
   await assert.rejects(
     recoverEvryPeopleFileReview({
       ...input,
+      expectedAttachment: { kind: "people_csv", digest: DIGEST },
       userMessage: "Attached a People CSV import for review.",
       findByRequestKey: async () => memory.current(),
+      loadPlan: async () => STORED_PLAN,
+    }),
+    { name: "EvryConversationIdempotencyError" }
+  );
+});
+
+test("same metadata with different bytes cannot recover the old file plan", async () => {
+  const memory = memoryStore({ afterAssistantCommit: false });
+  const input = {
+    actor: ACTOR,
+    conversationId: null,
+    requestKey: REQUEST_KEY,
+    userMessage: "Attached a People CSV import for review.",
+    assistantMessage: "Review the exact import.",
+    artifacts: [CONFIRMATION],
+    plan: PLAN,
+    now: NOW,
+    store: memory.store,
+    revalidatePlan,
+  };
+  await persistEvryPeopleFileReview(input);
+
+  await assert.rejects(
+    recoverEvryPeopleFileReview({
+      ...input,
+      // The filename, MIME type, size, and last-modified value may all match;
+      // the staged content digest is the recovery identity.
+      expectedAttachment: { kind: "people_csv", digest: "c".repeat(64) },
+      findByRequestKey: async () => memory.current(),
+      loadPlan: async () => STORED_PLAN,
     }),
     { name: "EvryConversationIdempotencyError" }
   );

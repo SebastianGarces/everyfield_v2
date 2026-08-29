@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { commitments } from "@/db/schema";
+import { commitments, type PersonStatus } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
@@ -15,6 +15,7 @@ import {
 import { EVRY_FINAL_OBJECT_GRACE_MS } from "./person-photo";
 
 import { claimEvryPeopleEffect } from "./evry-effect";
+import { emitPersonStatusChanged } from "./events";
 
 type EffectIdentity = Pick<EvryEffectInput, "execution"> & {
   effectKey: EvryAuditKey;
@@ -308,6 +309,18 @@ export async function claimEvryCreateInterview(
     `,
     mutation: sql`select 1 as affected_count, 0 as excluded_count from interview_activity limit 1`,
     targetIsCurrent: () => personIsCurrent(input),
+    afterClaim: () =>
+      changesStatus
+        ? emitPersonStatusChanged(
+            {
+              id: input.person.personId,
+              churchId: input.execution.plantId,
+              status: "interviewed",
+            },
+            input.person.status as PersonStatus,
+            "interviewed"
+          )
+        : Promise.resolve(),
   });
 }
 
@@ -391,5 +404,17 @@ export async function claimEvryCreateCommitment(
               and coalesce(u.name, u.email) = ${value.witnessLabel}
           ))
       `),
+    afterClaim: () =>
+      changesStatus
+        ? emitPersonStatusChanged(
+            {
+              id: input.person.personId,
+              churchId: input.execution.plantId,
+              status: nextStatus,
+            },
+            input.person.status as PersonStatus,
+            nextStatus
+          )
+        : Promise.resolve(),
   });
 }

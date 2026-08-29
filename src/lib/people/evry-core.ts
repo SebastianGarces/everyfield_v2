@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import type { PersonStatus } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 
 import { claimEvryPeopleEffect } from "./evry-effect";
+import { emitPersonCreated, emitPersonStatusChanged } from "./events";
 
 type EffectIdentity = Pick<EvryEffectInput, "execution"> & {
   effectKey: EvryAuditKey;
@@ -21,7 +23,7 @@ export type EvryPersonPayload = Readonly<{
   state: string | null;
   postalCode: string | null;
   country: string | null;
-  status: string;
+  status: PersonStatus;
   backgroundCheckStatus: string;
   source: string | null;
   sourceDetails: string | null;
@@ -51,6 +53,7 @@ function personSnapshot(alias: ReturnType<typeof sql>) {
 
 export async function claimEvryCreatePerson(
   input: EffectIdentity & {
+    personId: string;
     person: EvryPersonPayload;
     activitySource: "form" | "quick_add";
     expectedHouseholdName: string | null;
@@ -70,12 +73,12 @@ export async function claimEvryCreatePerson(
         where id = ${input.execution.plantId}::uuid
       ), created_person as (
         insert into persons (
-          church_id, first_name, last_name, email, phone, address_line1,
+          id, church_id, first_name, last_name, email, phone, address_line1,
           address_line2, city, state, postal_code, country, status,
           background_check_status, source, source_details, notes, household_id,
           household_role, pipeline_sort_order, created_by, created_at, updated_at
         )
-        select e.church_id, ${person.firstName}, ${person.lastName},
+        select ${input.personId}::uuid, e.church_id, ${person.firstName}, ${person.lastName},
           ${person.email}, ${person.phone}, ${person.addressLine1},
           ${person.addressLine2}, ${person.city}, ${person.state},
           ${person.postalCode}, ${person.country}, ${person.status},
@@ -85,11 +88,13 @@ export async function claimEvryCreatePerson(
           transaction_timestamp(), transaction_timestamp()
         from eligible e
         join duplicate_scope d on d.id = e.church_id
-        where ${person.householdId}::uuid is null or exists (
+        where not exists (
+          select 1 from persons p where p.id = ${input.personId}::uuid
+        ) and (${person.householdId}::uuid is null or exists (
           select 1 from households h
           where h.id = ${person.householdId}::uuid and h.church_id = e.church_id
             and h.name = ${input.expectedHouseholdName}
-        )
+        ))
         returning church_id, id
       ), activity as (
         insert into person_activities (
@@ -103,14 +108,23 @@ export async function claimEvryCreatePerson(
     `,
     mutation: sql`select 1 as affected_count, 0 as excluded_count from activity`,
     targetIsCurrent: () =>
-      person.householdId
-        ? hasRow(sql`
-            select 1 from households
-            where id = ${person.householdId}::uuid
-              and church_id = ${input.execution.plantId}::uuid
-              and name = ${input.expectedHouseholdName}
-          `)
-        : Promise.resolve(true),
+      hasRow(sql`
+        select 1
+        where not exists (
+          select 1 from persons where id = ${input.personId}::uuid
+        ) and (${person.householdId}::uuid is null or exists (
+          select 1 from households
+          where id = ${person.householdId}::uuid
+            and church_id = ${input.execution.plantId}::uuid
+            and name = ${input.expectedHouseholdName}
+        ))
+      `),
+    afterClaim: () =>
+      emitPersonCreated({
+        id: input.personId,
+        churchId: input.execution.plantId,
+        status: person.status,
+      }),
   });
 }
 
@@ -250,6 +264,16 @@ export async function claimEvryChangePersonStatus(
           and first_name = ${input.expectedFirstName} and last_name = ${input.expectedLastName}
           and status = ${input.expectedStatus}
       `),
+    afterClaim: () =>
+      emitPersonStatusChanged(
+        {
+          id: input.personId,
+          churchId: input.execution.plantId,
+          status: input.newStatus as PersonStatus,
+        },
+        input.expectedStatus as PersonStatus,
+        input.newStatus as PersonStatus
+      ),
   });
 }
 

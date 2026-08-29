@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import { eventBus } from "@/lib/events/event-bus";
 import {
   assessments,
   churches,
@@ -87,7 +88,9 @@ import {
 } from "./evry-taxonomies";
 import { getEvryPersonPhotoSnapshot } from "./person-photo";
 import { executeBulkImport } from "./import";
+import type { PersonCreatedEvent, PersonStatusChangedEvent } from "./events";
 import { createPerson } from "./service";
+import { changeStatus } from "./status";
 import { personCreateSchema } from "@/lib/validations/people";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
@@ -343,6 +346,17 @@ async function main(): Promise<void> {
     plantId: plant.id,
     seat: "owner",
   } as EvryPlantActor;
+  const createdEvents: PersonCreatedEvent[] = [];
+  const statusEvents: PersonStatusChangedEvent[] = [];
+  eventBus.on<PersonCreatedEvent>("person.created", async (event) => {
+    if (event.churchId === plant.id) createdEvents.push(event);
+  });
+  eventBus.on<PersonStatusChangedEvent>(
+    "person.status.changed",
+    async (event) => {
+      if (event.churchId === plant.id) statusEvents.push(event);
+    }
+  );
   const executeProductionEffect = async (
     identity: string,
     attempt: Awaited<ReturnType<typeof seedAttempt>>,
@@ -590,6 +604,7 @@ async function main(): Promise<void> {
   });
   const createInput = {
     ...createAttempt,
+    personId: randomUUID(),
     person: {
       firstName: "Grace",
       lastName: "Hopper",
@@ -612,6 +627,10 @@ async function main(): Promise<void> {
     activitySource: "form" as const,
     expectedHouseholdName: null,
   };
+  await db
+    .update(churches)
+    .set({ lastMaterialEventAt: null })
+    .where(eq(churches.id, plant.id));
   const interfacePerson = await createPerson(
     plant.id,
     owner.id,
@@ -625,7 +644,19 @@ async function main(): Promise<void> {
     },
     "form"
   );
+  assert.ok(
+    await db
+      .select({ dirtyAt: churches.lastMaterialEventAt })
+      .from(churches)
+      .where(eq(churches.id, plant.id))
+      .then(([row]) => row?.dirtyAt)
+  );
+  await db
+    .update(churches)
+    .set({ lastMaterialEventAt: null })
+    .where(eq(churches.id, plant.id));
   const createArguments = {
+    personId: createInput.personId,
     personJson: JSON.stringify(createInput.person),
     activitySource: createInput.activitySource,
     expectedHouseholdName: createInput.expectedHouseholdName,
@@ -634,6 +665,13 @@ async function main(): Promise<void> {
     CREATE_PERSON_IDENTITY,
     createAttempt,
     createArguments
+  );
+  assert.ok(
+    await db
+      .select({ dirtyAt: churches.lastMaterialEventAt })
+      .from(churches)
+      .where(eq(churches.id, plant.id))
+      .then(([row]) => row?.dirtyAt)
   );
   assert.deepEqual(await claimEvryCreatePerson(createInput), {
     status: "completed",
@@ -673,6 +711,23 @@ async function main(): Promise<void> {
   assert.ok(grace);
   const interfaceRow = graceRows.find(({ id }) => id === interfacePerson.id);
   assert.ok(interfaceRow);
+  const createdEventShape = (event: PersonCreatedEvent) => ({
+    churchId: event.churchId,
+    status: event.status,
+  });
+  assert.deepEqual(
+    createdEventShape(
+      createdEvents.find(({ personId }) => personId === createInput.personId)!
+    ),
+    createdEventShape(
+      createdEvents.find(({ personId }) => personId === interfacePerson.id)!
+    )
+  );
+  assert.equal(
+    createdEvents.filter(({ personId }) => personId === createInput.personId)
+      .length,
+    1
+  );
   const normalizeCreatedPerson = ({
     id: _id,
     ...row
@@ -711,6 +766,7 @@ async function main(): Promise<void> {
   });
   const quickInput = {
     ...quickAttempt,
+    personId: randomUUID(),
     person: {
       ...createInput.person,
       firstName: "Quick",
@@ -725,6 +781,7 @@ async function main(): Promise<void> {
       "people.crm.people.quick-add-person",
       quickAttempt,
       {
+        personId: quickInput.personId,
         personJson: JSON.stringify(quickInput.person),
         activitySource: quickInput.activitySource,
         expectedHouseholdName: quickInput.expectedHouseholdName,
@@ -804,6 +861,19 @@ async function main(): Promise<void> {
     reason: null,
     skippedStatuses: [] as string[],
   };
+  const interfaceStatusPerson = await createPerson(
+    plant.id,
+    owner.id,
+    {
+      firstName: "Interface",
+      lastName: "Status",
+      email: "interface-status@scratch.invalid",
+      country: "US",
+      status: "prospect",
+    },
+    "form"
+  );
+  await changeStatus(plant.id, interfaceStatusPerson.id, owner.id, "attendee");
   assert.deepEqual(
     await executeProductionEffect(
       "people.crm.people.change-status",
@@ -830,6 +900,25 @@ async function main(): Promise<void> {
     affectedCount: 1,
     excludedCount: 0,
   });
+  const statusEventShape = (event: PersonStatusChangedEvent) => ({
+    churchId: event.churchId,
+    oldStatus: event.oldStatus,
+    newStatus: event.newStatus,
+  });
+  assert.deepEqual(
+    statusEventShape(
+      statusEvents.find(({ personId }) => personId === quickPerson.id)!
+    ),
+    statusEventShape(
+      statusEvents.find(
+        ({ personId }) => personId === interfaceStatusPerson.id
+      )!
+    )
+  );
+  assert.equal(
+    statusEvents.filter(({ personId }) => personId === quickPerson.id).length,
+    1
+  );
   const reasonAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1066,7 +1155,7 @@ async function main(): Promise<void> {
       signedDate: "2026-08-29",
       witnessedBy: owner.id,
       witnessLabel: "Proof owner",
-      notes: null,
+      notes: "Signed after the team conversation.",
       documentKey: null,
     },
   };
@@ -1080,7 +1169,7 @@ async function main(): Promise<void> {
       commitmentType: "core_group",
       signedDate: "2026-08-29",
       witnessJson: JSON.stringify({ id: owner.id, label: "Proof owner" }),
-      notes: null,
+      notes: "Signed after the team conversation.",
       attachmentJson: JSON.stringify(null),
       resultingStatus: "core_group",
     }),
@@ -1095,6 +1184,28 @@ async function main(): Promise<void> {
     affectedCount: 1,
     excludedCount: 0,
   });
+  assert.equal(
+    await db
+      .select({ notes: commitments.notes })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.churchId, plant.id),
+          eq(commitments.personId, grace.id)
+        )
+      )
+      .then(([row]) => row?.notes),
+    "Signed after the team conversation."
+  );
+  assert.deepEqual(
+    statusEvents
+      .filter(({ personId }) => personId === grace.id)
+      .map(({ oldStatus, newStatus }) => ({ oldStatus, newStatus })),
+    [
+      { oldStatus: "prospect", newStatus: "interviewed" },
+      { oldStatus: "interviewed", newStatus: "core_group" },
+    ]
+  );
   const importAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1175,6 +1286,13 @@ async function main(): Promise<void> {
     affectedCount: 2,
     excludedCount: 0,
   });
+  assert.deepEqual(
+    importedIds.map(
+      (personId) =>
+        createdEvents.filter((event) => event.personId === personId).length
+    ),
+    [1, 1]
+  );
 
   const productionImportBytes = Buffer.from(
     "First Name *,Last Name *,Email\nProduction,Adapter,production-adapter@scratch.invalid"
@@ -1295,6 +1413,16 @@ async function main(): Promise<void> {
         matchIds: [person.id],
         disposition: "merge",
         targetPersonId: person.id,
+      },
+      {
+        rowNumber: 3,
+        email: "interface-status@scratch.invalid",
+        phone: null,
+        firstName: "Interface",
+        lastName: "Status",
+        matchIds: [interfaceStatusPerson.id],
+        disposition: "skip",
+        targetPersonId: null,
       },
     ]),
     rows: [

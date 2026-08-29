@@ -188,6 +188,7 @@ test("create and update disclose every legal 20k note character losslessly in bo
     identity: PEOPLE_CORE_IDENTITIES.create,
     stepId: "create-person",
     argumentsValue: {
+      personId: PERSON_ID,
       personJson: JSON.stringify({ ...PERSON, notes: afterNotes }),
       activitySource: "form",
       expectedHouseholdName: null,
@@ -233,6 +234,7 @@ test("create and update disclose every legal 20k note character losslessly in bo
     identity: PEOPLE_CORE_IDENTITIES.create,
     stepId: "create-person-with-clustered-note",
     argumentsValue: {
+      personId: PERSON_ID,
       personJson: JSON.stringify({ ...PERSON, notes: oversizedCluster }),
       activitySource: "form",
       expectedHouseholdName: null,

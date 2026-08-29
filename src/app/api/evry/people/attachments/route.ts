@@ -11,7 +11,10 @@ import {
   EvryPlantViewerRefusalError,
   requireEvryPlantViewer,
 } from "@/lib/evry/eligibility/viewer";
-import { MAX_COMMITMENT_FILE_SIZE } from "@/lib/storage";
+import {
+  commitmentDocumentRefusal,
+  MAX_COMMITMENT_FILE_SIZE,
+} from "@/lib/people/commitment-document";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +95,15 @@ export function createEvryPeopleAttachmentPost({
           { status: "unavailable" },
           { status: 404, headers: PRIVATE_HEADERS }
         );
+      }
+      if (kind === "commitment_document") {
+        const refusal = commitmentDocumentRefusal(file);
+        if (refusal) {
+          return NextResponse.json(
+            { status: "invalid", reason: refusal.code },
+            { status: 400, headers: PRIVATE_HEADERS }
+          );
+        }
       }
       const result = await stage({
         actor: authorization.actor,

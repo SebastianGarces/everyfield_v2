@@ -173,26 +173,32 @@ export async function readPeopleImportPreviewArtifact(input: {
           count: 1,
         }))
       : [{ reason: "Attachment unavailable", count: 1 }],
-    items: rows.map((row) => ({
-      id: `csv-row-${row.rowNumber}`,
-      label:
-        `Row ${row.rowNumber}: ${row.data.firstName ?? ""} ${row.data.lastName ?? ""}`.trim(),
-      facts: [
-        {
-          label: "Status",
-          value: row.valid
-            ? row.duplicates.exactMatch ||
-              row.duplicates.potentialMatches.length
-              ? "Duplicate review"
-              : "Valid"
-            : "Invalid",
-        },
-      ],
-      sourceLink: trustedEvryApplicationSourceLink({
-        label: "Open People import",
-        href: "/people/import",
-      }),
-    })),
+    items: rows.map((row) => {
+      const mergeTarget =
+        row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
+      return {
+        id: `csv-row-${row.rowNumber}`,
+        label:
+          `Row ${row.rowNumber}: ${row.data.firstName ?? ""} ${row.data.lastName ?? ""}`.trim(),
+        facts: [
+          {
+            label: "Status",
+            value: row.valid
+              ? mergeTarget
+                ? "Duplicate review"
+                : "Valid"
+              : "Invalid",
+          },
+          ...(mergeTarget
+            ? [{ label: "Merge target", value: mergeTarget.displayName }]
+            : []),
+        ],
+        sourceLink: trustedEvryApplicationSourceLink({
+          label: "Open People import",
+          href: "/people/import",
+        }),
+      };
+    }),
     sourceLinks: [],
   });
 }

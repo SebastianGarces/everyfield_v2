@@ -16,6 +16,7 @@ const OUTCOME_KEY_UNIQUE = "evry_execution_outcomes_key_unique_idx";
 interface CompletedEffectRow extends Record<string, unknown> {
   affected_count: number;
   excluded_count: number;
+  claimed_now: boolean;
 }
 
 export async function recoverCompletedEvryPeopleEffect(
@@ -70,6 +71,7 @@ export async function claimEvryPeopleEffect(input: {
   beforeMutation?: SQL;
   mutation: SQL;
   targetIsCurrent(): Promise<boolean>;
+  afterClaim?(): Promise<void>;
 }): Promise<EvryEffectResult> {
   const outcomeKey = executionStepOutcomeKey(
     input.execution.planId,
@@ -126,9 +128,9 @@ export async function claimEvryPeopleEffect(input: {
       cross join mutation m
       returning affected_count, excluded_count
     )
-    select affected_count, excluded_count from existing
+    select affected_count, excluded_count, false as claimed_now from existing
     union all
-    select affected_count, excluded_count from claimed
+    select affected_count, excluded_count, true as claimed_now from claimed
     limit 1
   `;
   try {
@@ -155,6 +157,7 @@ export async function claimEvryPeopleEffect(input: {
 
   const row = result.rows[0];
   if (row) {
+    if (row.claimed_now) await input.afterClaim?.();
     return {
       status: "completed",
       affectedCount: row.affected_count,
