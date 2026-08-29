@@ -8,6 +8,7 @@ import {
   claimEvryPeopleEffect,
   recoverCompletedEvryPeopleEffect,
 } from "./evry-effect";
+import { evryImportDuplicateSnapshotCtes } from "./duplicate-match";
 
 type EffectIdentity = Pick<EvryEffectInput, "execution"> & {
   effectKey: EvryAuditKey;
@@ -33,6 +34,10 @@ export type EvryImportPersonRow = Readonly<{
   targetPersonId: string | null;
   expectedTargetJson: string | null;
 }>;
+
+interface DuplicateSnapshotCurrent extends Record<string, unknown> {
+  is_current: boolean;
+}
 
 interface DuplicateSnapshotCount extends Record<string, unknown> {
   matched_count: number;
@@ -72,55 +77,21 @@ function personSnapshot(alias: ReturnType<typeof sql>) {
   )`;
 }
 
-async function duplicateSnapshotIsCurrent(input: {
+export async function evryImportDuplicateSnapshotIsCurrent(input: {
   database: Pick<typeof db, "execute">;
   plantId: string;
   snapshotJson: string;
 }): Promise<boolean> {
   const expectedCount = (JSON.parse(input.snapshotJson) as unknown[]).length;
-  const result = await input.database.execute<DuplicateSnapshotCount>(sql`
-    with requested as materialized (
-      select * from jsonb_to_recordset(${input.snapshotJson}::jsonb) as r(
-        "rowNumber" integer, email text, phone text, "firstName" text,
-        "lastName" text, "matchIds" jsonb
-      )
-    ), current_matches as (
-      select r."rowNumber", r."matchIds",
-        to_jsonb(
-          (case when exact_match.id is null then array[]::uuid[]
-                 else array[exact_match.id] end) ||
-          coalesce(fuzzy_matches.ids, array[]::uuid[])
-        ) as current_ids
-      from requested r
-      left join lateral (
-        select p.id from persons p
-        where p.church_id = ${input.plantId}::uuid and p.deleted_at is null
-          and r.email is not null and lower(p.email) = lower(r.email)
-        order by p.id asc limit 1
-      ) exact_match on true
-      left join lateral (
-        select array_agg(matches.id order by matches.id asc) as ids
-        from (
-          select p.id from persons p
-          where p.church_id = ${input.plantId}::uuid and p.deleted_at is null
-            and p.id is distinct from exact_match.id
-            and (
-              (lower(p.first_name) = lower(trim(r."firstName"))
-                and lower(p.last_name) = lower(trim(r."lastName")))
-              or (
-                length(regexp_replace(coalesce(r.phone, ''), '[^0-9]', '', 'g')) >= 4
-                and right(regexp_replace(coalesce(p.phone, ''), '[^0-9]', '', 'g'), 4) =
-                  right(regexp_replace(r.phone, '[^0-9]', '', 'g'), 4)
-              )
-            )
-          order by p.id asc limit 5
-        ) matches
-      ) fuzzy_matches on true
-    )
-    select count(*)::integer as matched_count from current_matches
-    where "matchIds" = current_ids
+  const result = await input.database.execute<DuplicateSnapshotCurrent>(sql`
+    with ${evryImportDuplicateSnapshotCtes({
+      plantId: input.plantId,
+      snapshotJson: input.snapshotJson,
+      expectedCount,
+    })}
+    select is_current from duplicate_snapshot_current
   `);
-  return result.rows[0]?.matched_count === expectedCount;
+  return result.rows[0]?.is_current === true;
 }
 
 async function importMergeTargetsAreCurrent(input: {
@@ -167,54 +138,11 @@ export async function claimEvryBulkImport(
       for update
     `,
     beforeMutation: sql`
-        duplicate_scope as materialized (
-          select id from churches
-          where id = ${input.execution.plantId}::uuid
-        ), duplicate_requested as materialized (
-          select *
-          from jsonb_to_recordset(${input.duplicateSnapshotJson}::jsonb) as r(
-            "rowNumber" integer, email text, phone text, "firstName" text,
-            "lastName" text, "matchIds" jsonb
-          )
-        ), current_matches as materialized (
-          select r."rowNumber", r."matchIds",
-            to_jsonb(
-              (case when exact_match.id is null then array[]::uuid[]
-                     else array[exact_match.id] end) ||
-              coalesce(fuzzy_matches.ids, array[]::uuid[])
-            ) as current_ids
-          from duplicate_requested r
-          cross join duplicate_scope d
-          left join lateral (
-            select p.id from persons p
-            where p.church_id = d.id and p.deleted_at is null
-              and r.email is not null and lower(p.email) = lower(r.email)
-            order by p.id asc limit 1
-          ) exact_match on true
-          left join lateral (
-            select array_agg(matches.id order by matches.id asc) as ids
-            from (
-              select p.id from persons p
-              where p.church_id = d.id and p.deleted_at is null
-                and p.id is distinct from exact_match.id
-                and (
-                  (lower(p.first_name) = lower(trim(r."firstName"))
-                    and lower(p.last_name) = lower(trim(r."lastName")))
-                  or (
-                    length(regexp_replace(coalesce(r.phone, ''), '[^0-9]', '', 'g')) >= 4
-                    and right(regexp_replace(coalesce(p.phone, ''), '[^0-9]', '', 'g'), 4) =
-                      right(regexp_replace(r.phone, '[^0-9]', '', 'g'), 4)
-                  )
-                )
-              order by p.id asc limit 5
-            ) matches
-          ) fuzzy_matches on true
-        ), duplicate_snapshot_current as materialized (
-          select count(*)::integer = ${duplicateCount}
-            and count(*) filter (where "matchIds" = current_ids) =
-              ${duplicateCount} as is_current
-          from current_matches
-        ), requested as materialized (
+        ${evryImportDuplicateSnapshotCtes({
+          plantId: input.execution.plantId,
+          snapshotJson: input.duplicateSnapshotJson,
+          expectedCount: duplicateCount,
+        })}, requested as materialized (
           select * from jsonb_to_recordset(${rowsJson}::jsonb) as r(
             "rowNumber" integer, "rowKey" text, "personId" uuid,
             "firstName" text, "lastName" text, email text, phone text,
@@ -313,7 +241,7 @@ export async function claimEvryBulkImport(
     `,
     targetIsCurrent: async () =>
       evryImportRowsHaveUniqueTargets(input.rows) &&
-      (await duplicateSnapshotIsCurrent({
+      (await evryImportDuplicateSnapshotIsCurrent({
         database: db,
         plantId: input.execution.plantId,
         snapshotJson: input.duplicateSnapshotJson,

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
-import { and, asc, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { literalCaseInsensitiveDuplicateMatch } from "./duplicate-match";
 import { getTagsForPeople } from "./tags";
 import {
   toPersonForClient,
@@ -39,12 +40,17 @@ export async function findDuplicateMatches(
 
   // 1. Check for exact email match
   let exactRow: Person | null = null;
-  const normalizedEmail = input.email?.trim().toLowerCase();
+  const normalizedEmail = input.email?.trim();
   if (normalizedEmail && normalizedEmail !== "") {
     const emailMatches = await db
       .select()
       .from(persons)
-      .where(and(...baseConditions, ilike(persons.email, normalizedEmail)))
+      .where(
+        and(
+          ...baseConditions,
+          literalCaseInsensitiveDuplicateMatch(persons.email, normalizedEmail)
+        )
+      )
       .orderBy(asc(persons.id))
       .limit(1);
 
@@ -52,13 +58,13 @@ export async function findDuplicateMatches(
   }
 
   // 2. Check for potential matches (fuzzy name + phone)
-  const fuzzyConditions: ReturnType<typeof ilike>[] = [];
+  const fuzzyConditions: SQL[] = [];
 
   // Name match: same first AND last name (case-insensitive)
   if (input.firstName && input.lastName) {
     const nameMatch = and(
-      ilike(persons.firstName, input.firstName.trim()),
-      ilike(persons.lastName, input.lastName.trim())
+      literalCaseInsensitiveDuplicateMatch(persons.firstName, input.firstName),
+      literalCaseInsensitiveDuplicateMatch(persons.lastName, input.lastName)
     );
     if (nameMatch) {
       fuzzyConditions.push(nameMatch);
