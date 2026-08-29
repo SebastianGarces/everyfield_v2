@@ -6,7 +6,7 @@ import {
 
 async function main(): Promise<void> {
   const repoRoot = process.cwd();
-  const inventory = generateMeetingsCapabilityInventory();
+  const inventory = generateMeetingsCapabilityInventory(repoRoot);
   if (process.argv.includes("--check")) {
     await assertMeetingsCapabilityInventoryCurrent(repoRoot, inventory);
     return;

@@ -116,6 +116,7 @@ export function createMeetingsEvryConversationContinuation(
       );
       const recovered = await dependencies.recoverProposal({
         actor: input.actor,
+        expectedExportName: selection.exportName,
         requestKey,
       });
       if (recovered) return proposalResult(recovered);

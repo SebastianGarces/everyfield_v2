@@ -12,9 +12,12 @@ import {
 } from "../../src/lib/evry/capabilities/meetings/catalog";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "../../src/lib/evry/capabilities/meetings/registrations";
 import {
+  CLASSIFIED_MEETINGS_ROUTE_IDENTITIES,
+  discoverMeetingsActionIdentities,
   discoverMeetingsPageReadOperations,
-  MEETINGS_DISCOVERED_READ_EXCLUSIONS,
+  meetingsDiscoveredReadExclusions,
 } from "./meetings-source-discovery";
+import { collectRouteSurfaces } from "./inventory";
 
 const GENERATED_INVENTORY = path.join(
   "src",
@@ -86,7 +89,46 @@ export type MeetingsCapabilityInventory = Readonly<{
 const compareStrings = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
 
-export function generateMeetingsCapabilityInventory(): MeetingsCapabilityInventory {
+function assertExactSourceCoverage(input: {
+  subject: string;
+  discovered: readonly string[];
+  supported: readonly string[];
+  excluded?: readonly string[];
+}): void {
+  const supported = new Set(input.supported);
+  const excluded = new Set(input.excluded ?? []);
+  const multiplyClassified = input.supported.filter((identity) =>
+    excluded.has(identity)
+  );
+  const classified = new Set([...supported, ...excluded]);
+  const unclassified = input.discovered.filter(
+    (identity) => !classified.has(identity)
+  );
+  const discovered = new Set(input.discovered);
+  const stale = [...classified].filter((identity) => !discovered.has(identity));
+  if (
+    multiplyClassified.length > 0 ||
+    unclassified.length > 0 ||
+    stale.length > 0
+  ) {
+    throw new Error(
+      `Meetings ${input.subject} authority drift: unclassified=[${unclassified.join(", ")}], multiply-classified=[${multiplyClassified.join(", ")}], stale=[${stale.join(", ")}]`
+    );
+  }
+}
+
+function isMeetingsRoute(routePath: string): boolean {
+  return (
+    routePath === "/meetings" ||
+    routePath.startsWith("/meetings/") ||
+    routePath === "/teams/[teamId]/meetings" ||
+    routePath.startsWith("/teams/[teamId]/meetings/")
+  );
+}
+
+export function generateMeetingsCapabilityInventory(
+  repoRoot = process.cwd()
+): MeetingsCapabilityInventory {
   const authoritativeKinds = new Map(
     MEETINGS_CAPABILITY_SURFACES.map((surface) => [
       surface.identity,
@@ -94,28 +136,44 @@ export function generateMeetingsCapabilityInventory(): MeetingsCapabilityInvento
     ])
   );
   const entries: MeetingsInventoryEntry[] = [];
-  const discoveredReads = discoverMeetingsPageReadOperations();
+  const registeredSurfaces = MEETINGS_OPERATION_REGISTRATIONS.flatMap(
+    ({ surfaceIdentities }) => surfaceIdentities
+  );
+  assertExactSourceCoverage({
+    subject: "action",
+    discovered: discoverMeetingsActionIdentities(repoRoot),
+    supported: registeredSurfaces.filter((identity) =>
+      identity.startsWith("action:")
+    ),
+  });
+  assertExactSourceCoverage({
+    subject: "route",
+    discovered: collectRouteSurfaces(repoRoot)
+      .filter(
+        ({ identity, path: routePath }) =>
+          isMeetingsRoute(routePath) ||
+          CLASSIFIED_MEETINGS_ROUTE_IDENTITIES.includes(identity)
+      )
+      .map(({ identity }) => identity),
+    supported: registeredSurfaces.filter((identity) =>
+      identity.startsWith("route:")
+    ),
+  });
+
+  const discoveredReads = discoverMeetingsPageReadOperations(repoRoot);
   const mappedReads = MEETINGS_OPERATION_REGISTRATIONS.flatMap(
     ({ surfaceIdentities }) => surfaceIdentities
   ).filter((identity) => identity.startsWith("read-operation:"));
+  const discoveredReadExclusions = meetingsDiscoveredReadExclusions(repoRoot);
   const excludedReads = new Set(
-    MEETINGS_DISCOVERED_READ_EXCLUSIONS.map(({ identity }) => identity)
+    discoveredReadExclusions.map(({ identity }) => identity)
   );
-  for (const identity of discoveredReads) {
-    const classifications =
-      Number(mappedReads.includes(identity)) +
-      Number(excludedReads.has(identity));
-    if (classifications !== 1) {
-      throw new Error(
-        `Discovered Meetings page read must be mapped or excluded exactly once: ${identity}`
-      );
-    }
-  }
-  for (const identity of [...mappedReads, ...excludedReads]) {
-    if (!discoveredReads.includes(identity)) {
-      throw new Error(`Stale Meetings page-read classification: ${identity}`);
-    }
-  }
+  assertExactSourceCoverage({
+    subject: "page-read",
+    discovered: discoveredReads,
+    supported: mappedReads,
+    excluded: [...excludedReads],
+  });
 
   for (const registration of MEETINGS_OPERATION_REGISTRATIONS) {
     if (
@@ -163,7 +221,7 @@ export function generateMeetingsCapabilityInventory(): MeetingsCapabilityInvento
         },
       })
     ),
-    ...MEETINGS_DISCOVERED_READ_EXCLUSIONS.map(
+    ...discoveredReadExclusions.map(
       ({ identity }): MeetingsInventoryEntry => ({
         identity,
         kind: "excluded_operation",

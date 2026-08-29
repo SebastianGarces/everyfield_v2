@@ -99,6 +99,7 @@ test("plan recovery uses the exact actor, plant, and request key", async () => {
 
   const recovered = await recoverMeetingsEvryEffectProposal({
     actor,
+    expectedExportName: "addAttendeeNoteAction",
     requestKey,
     async findPlan(scope) {
       lookups.push(scope);
@@ -116,6 +117,18 @@ test("plan recovery uses the exact actor, plant, and request key", async () => {
     .map(({ content }) => content)
     .join("");
   assert.deepEqual(JSON.parse(planPreview ?? "null"), arguments_);
+
+  await assert.rejects(
+    recoverMeetingsEvryEffectProposal({
+      actor,
+      expectedExportName: "deleteMeetingAction",
+      requestKey,
+      async findPlan() {
+        return stored;
+      },
+    }),
+    /does not match the selected effect/
+  );
 });
 
 test("a committed Meetings plan recovers before changed source work after response loss", async () => {
@@ -127,6 +140,7 @@ test("a committed Meetings plan recovers before changed source work after respon
     async recoverProposal(input) {
       recoveredScopes.push({
         actor: input.actor,
+        expectedExportName: input.expectedExportName,
         requestKey: input.requestKey,
       });
       return planCommitted ? proposal : null;
@@ -173,6 +187,7 @@ test("a committed Meetings plan recovers before changed source work after respon
   assert.deepEqual(recoveredScopes[0], recoveredScopes[1]);
   assert.deepEqual(recoveredScopes[0], {
     actor,
+    expectedExportName: "addAttendeeNoteAction",
     requestKey: deriveEvryPlanRequestKey("meetings-addattendeenote", [
       actor.userId,
       actor.plantId,

@@ -21,7 +21,7 @@ import {
 } from "./registrations";
 
 test("generated Meetings inventory is current and has no unclassified surface", () => {
-  const actual = generateMeetingsCapabilityInventory();
+  const actual = generateMeetingsCapabilityInventory(process.cwd());
   assert.deepEqual(actual, generated);
   assert.deepEqual(actual.summary, {
     actions: 25,
@@ -52,8 +52,7 @@ test("Meetings registrations bijectively cover generated actions and routes", ()
   const generatedActions = inventory.entries
     .filter(
       (entry) =>
-        entry.kind === "action" &&
-        entry.source === "src/app/(dashboard)/meetings/actions.ts"
+        entry.kind === "action" && entry.parityCapability === "meetings"
     )
     .map(({ identity }) => identity)
     .toSorted();

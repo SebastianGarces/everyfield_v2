@@ -168,6 +168,7 @@ export async function proposeMeetingsEvryEffect(input: {
  */
 export async function recoverMeetingsEvryEffectProposal(input: {
   actor: EvryPlantActor;
+  expectedExportName: MeetingsActionExport;
   requestKey: EvryPlanRequestKey;
   findPlan?: typeof findEvryActionPlanByRequestKey;
 }): Promise<MeetingsEvryEffectProposal | null> {
@@ -177,11 +178,15 @@ export async function recoverMeetingsEvryEffectProposal(input: {
     requestKey: input.requestKey,
   });
   if (!stored) return null;
-  return proposalFromStoredMeetingsPlan(stored);
+  return proposalFromStoredMeetingsPlan(
+    stored,
+    MEETINGS_ACTION_CONTRACTS[input.expectedExportName].operationId
+  );
 }
 
 function proposalFromStoredMeetingsPlan(
-  stored: StoredEvryActionPlan
+  stored: StoredEvryActionPlan,
+  expectedIdentity: string
 ): MeetingsEvryEffectProposal {
   if (!validateStoredEvryActionPlan(stored, MEETINGS_PLAN_REGISTRY)) {
     throw new Error("Stored Meetings plan failed its integrity check");
@@ -194,9 +199,10 @@ function proposalFromStoredMeetingsPlan(
   if (
     document.steps.length !== 1 ||
     !step ||
-    !EXPORT_BY_IDENTITY.has(step.capabilityIdentity)
+    !EXPORT_BY_IDENTITY.has(step.capabilityIdentity) ||
+    step.capabilityIdentity !== expectedIdentity
   ) {
-    throw new Error("Stored request key is not bound to one Meetings effect");
+    throw new Error("Stored Meetings plan does not match the selected effect");
   }
   const plan = evryConversationPlanIdentitySchema.parse({
     planId: stored.id,

@@ -2,9 +2,6 @@ import inventory from "@/lib/evry/capabilities/inventory.generated.json";
 
 import type { Capability } from "@/lib/auth/seat-rules";
 
-const MEETINGS_ACTION_SOURCE =
-  "src/app/(dashboard)/meetings/actions.ts" as const;
-
 export const MEETINGS_ACTION_CONTRACTS = {
   addAttendeeAction: effect("meetings.attendance.add", "Add attendee", [
     "meetingId",
@@ -407,7 +404,7 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
   const actions = inventory.entries
     .filter(
       (entry) =>
-        entry.kind === "action" && entry.source === MEETINGS_ACTION_SOURCE
+        entry.kind === "action" && entry.parityCapability === "meetings"
     )
     .map((entry) => {
       const exportName = entry.exportName as MeetingsActionExport;
