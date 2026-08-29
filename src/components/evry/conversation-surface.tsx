@@ -158,8 +158,11 @@ export function ConversationSurface({ className }: { className?: string }) {
                         key={id}
                         artifact={artifact}
                         activePlan={conversation.activePlan}
+                        artifactId={id}
                         conversationId={conversation.id}
+                        conversationStateVersion={conversation.stateVersion}
                         interactive={id === activeArtifactId}
+                        messageId={message.id}
                         onConversation={replaceConversation}
                         onEdit={(confirmation) => {
                           setDraft("Revise this plan: " + confirmation.title);

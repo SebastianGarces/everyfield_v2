@@ -3,12 +3,22 @@ import { test } from "node:test";
 
 import type { PublicEvryConversation } from "@/components/evry/client-contract";
 import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
-import { buildEvryProgressArtifact } from "@/lib/evry/artifacts/review";
+import {
+  buildEvryProgressArtifact,
+  buildEvryReceiptArtifact,
+} from "@/lib/evry/artifacts/review";
 
 import { coordinateEvryProductionArtifactRequest } from "./production-request";
 
 const confirmation = EVRY_CONFIRMATION_FIXTURES.communication;
 const requestKey = "10000000-0000-4000-8000-000000000001";
+const baselineMessageId = "30000000-0000-4000-8000-000000000001";
+const baselineArtifactId = "40000000-0000-4000-8000-000000000001";
+const baseline = {
+  stateVersion: 1,
+  messageId: baselineMessageId,
+  artifactId: baselineArtifactId,
+} as const;
 
 function conversation(
   artifact: PublicEvryConversation["messages"][number]["artifacts"][number]["artifact"],
@@ -31,7 +41,7 @@ function conversation(
     state: {},
     messages: [
       {
-        id: "30000000-0000-4000-8000-000000000001",
+        id: baselineMessageId,
         sequence: 0,
         author: "assistant",
         body: "Review the stored artifact.",
@@ -40,7 +50,7 @@ function conversation(
         createdAt: "2026-08-28T12:01:00.000Z",
         artifacts: [
           {
-            id: "40000000-0000-4000-8000-000000000001",
+            id: baselineArtifactId,
             ordinal: 0,
             artifact,
           },
@@ -68,6 +78,25 @@ const safeRetryProgress = buildEvryProgressArtifact({
   })),
 });
 
+const terminalReceipt = buildEvryReceiptArtifact({
+  kind: "result",
+  artifactVersion: 1,
+  plan: confirmation.plan,
+  title: "Launch update sent",
+  status: "completed",
+  steps: confirmation.steps.map((step) => ({
+    stepId: step.stepId,
+    label: step.title,
+    status: "completed",
+    resultCode: "effect_completed",
+    affectedCount: 3,
+    excludedCount: 1,
+    sourceLinks: [],
+    retry: { status: "unavailable" },
+    error: null,
+  })),
+});
+
 test("response-loss reconciliation reuses the exact request body and accepts persisted progress", async () => {
   const calls: Array<{ url: string; body?: string }> = [];
   const recoveredConversation = conversation(safeRetryProgress);
@@ -76,6 +105,7 @@ test("response-loss reconciliation reuses the exact request body and accepts per
     action: "execute",
     requestKey,
     plan: confirmation.plan,
+    baseline,
     fetchArtifact: async (url, init) => {
       calls.push({ url, body: init.body });
       if (calls.length === 1) throw new Error("response lost after dispatch");
@@ -100,6 +130,143 @@ test("response-loss reconciliation reuses the exact request body and accepts per
   });
 });
 
+test("an unchanged safe-retry artifact does not reconcile two lost retry responses", async () => {
+  const unchangedConversation = conversation(safeRetryProgress);
+  let calls = 0;
+  const result = await coordinateEvryProductionArtifactRequest({
+    conversationId: unchangedConversation.id,
+    action: "retry",
+    requestKey,
+    plan: confirmation.plan,
+    baseline,
+    fetchArtifact: async (_url, init) => {
+      calls++;
+      if (init.method === "POST") throw new Error("retry response lost");
+      return {
+        async json() {
+          return { status: "available", conversation: unchangedConversation };
+        },
+      };
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(result, { status: "error", error: { kind: "uncertain" } });
+});
+
+test("new persisted progress reconciles two lost retry responses", async () => {
+  const originalConversation = conversation(safeRetryProgress);
+  const advancedMessage = {
+    ...originalConversation.messages[0]!,
+    id: "30000000-0000-4000-8000-000000000002",
+    sequence: 1,
+    artifacts: [
+      {
+        id: "40000000-0000-4000-8000-000000000002",
+        ordinal: 0,
+        artifact: safeRetryProgress,
+      },
+    ],
+  };
+  const advancedConversation: PublicEvryConversation = {
+    ...originalConversation,
+    stateVersion: baseline.stateVersion + 1,
+    messages: [...originalConversation.messages, advancedMessage],
+  };
+  let calls = 0;
+  const result = await coordinateEvryProductionArtifactRequest({
+    conversationId: advancedConversation.id,
+    action: "retry",
+    requestKey,
+    plan: confirmation.plan,
+    baseline,
+    fetchArtifact: async (_url, init) => {
+      calls++;
+      if (init.method === "POST") throw new Error("retry response lost");
+      return {
+        async json() {
+          return { status: "available", conversation: advancedConversation };
+        },
+      };
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(result, {
+    status: "conversation",
+    conversation: advancedConversation,
+  });
+});
+
+test("a terminal result replacing the baseline artifact in place stays uncertain", async () => {
+  const replacedConversation = conversation(terminalReceipt, false);
+  let calls = 0;
+  const result = await coordinateEvryProductionArtifactRequest({
+    conversationId: replacedConversation.id,
+    action: "retry",
+    requestKey,
+    plan: confirmation.plan,
+    baseline,
+    fetchArtifact: async (_url, init) => {
+      calls++;
+      if (init.method === "POST") throw new Error("retry response lost");
+      return {
+        async json() {
+          return { status: "available", conversation: replacedConversation };
+        },
+      };
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(result, { status: "error", error: { kind: "uncertain" } });
+});
+
+test("a newly appended terminal result reconciles two lost retry responses", async () => {
+  const originalConversation = conversation(safeRetryProgress);
+  const completedMessage = {
+    ...originalConversation.messages[0]!,
+    id: "30000000-0000-4000-8000-000000000003",
+    sequence: 1,
+    artifacts: [
+      {
+        id: "40000000-0000-4000-8000-000000000003",
+        ordinal: 0,
+        artifact: terminalReceipt,
+      },
+    ],
+  };
+  const completedConversation: PublicEvryConversation = {
+    ...originalConversation,
+    activePlan: null,
+    stateVersion: baseline.stateVersion + 1,
+    messages: [...originalConversation.messages, completedMessage],
+  };
+  let calls = 0;
+  const result = await coordinateEvryProductionArtifactRequest({
+    conversationId: completedConversation.id,
+    action: "retry",
+    requestKey,
+    plan: confirmation.plan,
+    baseline,
+    fetchArtifact: async (_url, init) => {
+      calls++;
+      if (init.method === "POST") throw new Error("retry response lost");
+      return {
+        async json() {
+          return { status: "available", conversation: completedConversation };
+        },
+      };
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(result, {
+    status: "conversation",
+    conversation: completedConversation,
+  });
+});
+
 test("unreconciled transport loss stays nonterminal without a fake support reference", async () => {
   const originalConversation = conversation(confirmation);
   let calls = 0;
@@ -108,6 +275,7 @@ test("unreconciled transport loss stays nonterminal without a fake support refer
     action: "execute",
     requestKey,
     plan: confirmation.plan,
+    baseline,
     fetchArtifact: async (_url, init) => {
       calls++;
       if (init.method === "POST") throw new Error("transport lost");
@@ -131,6 +299,7 @@ test("only a server-issued unexpected correlation identity reaches the client", 
     action: "execute",
     requestKey,
     plan: confirmation.plan,
+    baseline,
     fetchArtifact: async () => {
       calls++;
       if (calls === 1) {

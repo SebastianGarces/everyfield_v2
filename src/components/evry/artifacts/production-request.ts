@@ -43,24 +43,42 @@ function conversationReconcilesRequest(input: {
   conversation: PublicEvryConversation;
   action: EvryProductionArtifactAction;
   plan: EvryConversationPlanIdentity;
+  baseline: Readonly<{
+    stateVersion: number;
+    messageId: string;
+    artifactId: string;
+  }>;
 }): boolean {
+  const advanced =
+    input.conversation.stateVersion > input.baseline.stateVersion;
+  const baselineSequence = input.conversation.messages.find(
+    ({ id }) => id === input.baseline.messageId
+  )?.sequence;
   if (input.action === "cancel" || input.action === "edit") {
     return (
-      input.conversation.activePlan === null ||
-      !samePlan(input.conversation.activePlan.identity, input.plan)
+      advanced &&
+      (input.conversation.activePlan === null ||
+        !samePlan(input.conversation.activePlan.identity, input.plan))
     );
   }
-  return input.conversation.messages
-    .flatMap(({ artifacts }) => artifacts)
-    .some(({ artifact }) => {
+  for (const message of input.conversation.messages) {
+    for (const stored of message.artifacts) {
+      const artifact = stored.artifact;
       if (
-        (artifact.kind !== "progress" && artifact.kind !== "result") ||
-        !("artifactVersion" in artifact)
+        advanced &&
+        baselineSequence !== undefined &&
+        message.sequence > baselineSequence &&
+        message.id !== input.baseline.messageId &&
+        stored.id !== input.baseline.artifactId &&
+        (artifact.kind === "progress" || artifact.kind === "result") &&
+        "artifactVersion" in artifact &&
+        samePlan(artifact.plan, input.plan)
       ) {
-        return false;
+        return true;
       }
-      return samePlan(artifact.plan, input.plan);
-    });
+    }
+  }
+  return false;
 }
 
 /**
@@ -72,6 +90,11 @@ export async function coordinateEvryProductionArtifactRequest(input: {
   action: EvryProductionArtifactAction;
   requestKey: string;
   plan: EvryConversationPlanIdentity;
+  baseline: Readonly<{
+    stateVersion: number;
+    messageId: string;
+    artifactId: string;
+  }>;
   fetchArtifact?: FetchArtifact;
 }): Promise<EvryProductionArtifactRequestResult> {
   const fetchArtifact: FetchArtifact =
@@ -129,6 +152,7 @@ export async function coordinateEvryProductionArtifactRequest(input: {
         conversation,
         action: input.action,
         plan: input.plan,
+        baseline: input.baseline,
       })
     ) {
       return { status: "conversation", conversation };

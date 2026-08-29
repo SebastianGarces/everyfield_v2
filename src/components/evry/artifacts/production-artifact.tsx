@@ -165,15 +165,21 @@ function ActionNotice({ state }: { state: LocalState }) {
 export function EvryProductionArtifact({
   artifact,
   activePlan,
+  artifactId,
   conversationId,
+  conversationStateVersion,
   interactive,
+  messageId,
   onConversation,
   onEdit,
 }: {
   artifact: EvryPublicArtifact;
   activePlan: ActivePlan | null;
+  artifactId: string;
   conversationId: string;
+  conversationStateVersion: number;
   interactive: boolean;
+  messageId: string;
   onConversation(conversation: PublicEvryConversation): void;
   onEdit(confirmation: EvryDetailedConfirmationArtifactDocument): void;
 }) {
@@ -209,6 +215,11 @@ export function EvryProductionArtifact({
       action,
       requestKey: crypto.randomUUID(),
       plan,
+      baseline: {
+        stateVersion: conversationStateVersion,
+        messageId,
+        artifactId,
+      },
     });
     if (result.status === "conversation") {
       onConversation(result.conversation);
