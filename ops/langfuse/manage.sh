@@ -139,6 +139,13 @@ langfuse_check_config() {
   langfuse_require_command jq
   langfuse_validate_env
 
+  [[ $(grep -Ec '^[[:space:]]*<level>information</level>[[:space:]]*$' "$LANGFUSE_OPS_DIR/clickhouse-logger.xml") == 1 ]] ||
+    langfuse_die 'ClickHouse logger level must remain information'
+  [[ $(grep -Ec '^[[:space:]]*<size>50M</size>[[:space:]]*$' "$LANGFUSE_OPS_DIR/clickhouse-logger.xml") == 1 ]] ||
+    langfuse_die 'ClickHouse logger rotation size must remain 50M'
+  [[ $(grep -Ec '^[[:space:]]*<count>3</count>[[:space:]]*$' "$LANGFUSE_OPS_DIR/clickhouse-logger.xml") == 1 ]] ||
+    langfuse_die 'ClickHouse logger archive count must remain 3'
+
   local langfuse_temp_dir
   local langfuse_config_json
   langfuse_temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/everyfield-langfuse-config.XXXXXX")
@@ -155,6 +162,16 @@ langfuse_check_config() {
     .services.redis.image == "docker.io/redis:7" and
     .services.postgres.image == "docker.io/postgres:17"
   ' "$langfuse_config_json" >/dev/null || langfuse_die 'rendered compose images do not match the v4.22.0 topology'
+
+  jq -e '
+    [.services.clickhouse.volumes[] |
+      select(
+        .type == "bind" and
+        .target == "/etc/clickhouse-server/config.d/everyfield-logger.xml" and
+        .read_only == true
+      )
+    ] | length == 1
+  ' "$langfuse_config_json" >/dev/null || langfuse_die 'ClickHouse log retention configuration must remain mounted read-only'
 
   jq -e '
     ([.services[] | .ports[]? | select(.published != null)] | length) > 0 and

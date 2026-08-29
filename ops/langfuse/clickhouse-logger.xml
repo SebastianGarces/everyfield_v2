@@ -1,0 +1,7 @@
+<clickhouse>
+  <logger>
+    <level>information</level>
+    <size>50M</size>
+    <count>3</count>
+  </logger>
+</clickhouse>
