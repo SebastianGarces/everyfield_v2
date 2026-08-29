@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { isValidTimeZone } from "@/lib/datetime";
+import {
+  addCalendarDays,
+  instantsAtZonedTime,
+  isValidTimeZone,
+  toCalendarDate,
+  utcOffsetForZonedTime,
+} from "@/lib/datetime";
 
 const TRUSTED_EVRY_SOURCE_LINK: unique symbol = Symbol(
   "TrustedEvryApplicationSourceLink"
@@ -191,6 +197,64 @@ export const evryConfirmationDateTimeDocumentSchema = z
     interpretation: evryInterpretationEvidenceSchema,
   })
   .strict()
+  .superRefine((dateTime, context) => {
+    const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(dateTime.localTime);
+    if (!match) return;
+
+    const statedHour = Number(match[1]);
+    const hour = (statedHour % 12) + (match[3] === "PM" ? 12 : 0);
+    const minute = Number(match[2]);
+    let consistent = false;
+    try {
+      const candidates = instantsAtZonedTime(
+        dateTime.calendarDate,
+        hour,
+        minute,
+        dateTime.timeZone
+      );
+      const instant = candidates[0];
+      consistent =
+        candidates.length === 1 &&
+        instant !== undefined &&
+        instant.toISOString() === dateTime.instantUtc &&
+        utcOffsetForZonedTime(dateTime.calendarDate, hour, minute, instant) ===
+          dateTime.utcOffset;
+
+      if (consistent) {
+        const interpretation = dateTime.interpretation;
+        if (interpretation.basis === "explicit-calendar-date") {
+          consistent =
+            interpretation.statedCalendarDate === dateTime.calendarDate;
+        } else {
+          const referenceInstant = new Date(interpretation.referenceInstantUtc);
+          const referenceCalendarDate = toCalendarDate(
+            referenceInstant,
+            dateTime.timeZone
+          );
+          const expectedCalendarDate =
+            interpretation.relativeDay === "today"
+              ? referenceCalendarDate
+              : addCalendarDays(
+                  new Date(`${referenceCalendarDate}T00:00:00.000Z`),
+                  1
+                );
+          consistent =
+            interpretation.referenceCalendarDate === referenceCalendarDate &&
+            dateTime.calendarDate === expectedCalendarDate;
+        }
+      }
+    } catch {
+      consistent = false;
+    }
+
+    if (!consistent) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Evry confirmation timing is invalid because date, time, zone, offset, instant, and interpretation must agree",
+      });
+    }
+  })
   .readonly();
 
 export type EvryConfirmationDateTimeDocument = z.infer<

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { isUnauthorized } from "@/lib/auth/unauthorized";
 import type { EvryResumedConversation } from "@/lib/evry/conversations/service";
 import { EvryPlantViewerRefusalError } from "@/lib/evry/eligibility/viewer";
+import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
 
 const PRIVATE_HEADERS = { "cache-control": "private, no-store" } as const;
 
@@ -52,7 +53,7 @@ export function publicEvryConversation(resumed: EvryResumedConversation) {
       artifacts: message.artifacts.map(({ id, ordinal, artifact }) => ({
         id,
         ordinal,
-        artifact,
+        artifact: publicEvryArtifact(artifact),
       })),
     })),
   };

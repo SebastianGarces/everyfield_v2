@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+import { EvryArtifactRenderer } from "./artifacts/artifact-renderer";
+import { EvryProductionArtifact } from "./artifacts/production-artifact";
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
 import { EvrySuggestionList } from "./suggestions/suggestion-list";
@@ -57,6 +59,7 @@ export function ConversationSurface({ className }: { className?: string }) {
     isComposerBlocked,
     isLoading,
     isSending,
+    replaceConversation,
     sendMessage,
     setDraft,
     statusMessage,
@@ -64,6 +67,17 @@ export function ConversationSurface({ className }: { className?: string }) {
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
   const showSuggestions = shouldOfferEvrySuggestions(conversation);
+  const activeConfirmationArtifactId =
+    conversation?.messages
+      .flatMap((message) => message.artifacts)
+      .findLast(
+        ({ artifact }) =>
+          artifact.kind === "confirmation" &&
+          "artifactVersion" in artifact &&
+          conversation.activePlan?.identity.planId === artifact.plan.planId &&
+          conversation.activePlan.identity.fingerprint ===
+            artifact.plan.fingerprint
+      )?.id ?? null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest" });
@@ -103,24 +117,55 @@ export function ConversationSurface({ className }: { className?: string }) {
                 >
                   <div
                     className={cn(
-                      "max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere]",
-                      message.author === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
+                      "max-w-[92%] space-y-3 [overflow-wrap:anywhere] sm:max-w-[88%]",
+                      message.author === "user" && "flex flex-col items-end"
                     )}
                   >
-                    <p className="whitespace-pre-wrap">
-                      <span className="sr-only">
-                        {message.author === "user" ? "You" : "Evry"}:{" "}
-                      </span>
-                      {message.body}
-                    </p>
-                    {message.pageContext ? (
-                      <p className="mt-2 flex items-center gap-1 text-xs opacity-75">
-                        <MapPin aria-hidden="true" className="size-3" />
-                        <span>{message.pageContext.label}</span>
+                    <div
+                      className={cn(
+                        "rounded-xl px-3.5 py-2.5 text-sm leading-relaxed",
+                        message.author === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground"
+                      )}
+                    >
+                      <p className="whitespace-pre-wrap">
+                        <span className="sr-only">
+                          {message.author === "user" ? "You" : "Evry"}:{" "}
+                        </span>
+                        {message.body}
                       </p>
+                    </div>
+
+                    {message.pageContext ? (
+                      <EvryArtifactRenderer
+                        model={{
+                          variant: "context",
+                          artifact: {
+                            sourceKind: message.pageContext.kind,
+                            recordId: message.pageContext.recordId,
+                            label: message.pageContext.label,
+                          },
+                        }}
+                      />
                     ) : null}
+
+                    {message.artifacts.map(({ id, artifact }) => (
+                      <EvryProductionArtifact
+                        key={id}
+                        artifact={artifact}
+                        activePlan={conversation.activePlan}
+                        conversationId={conversation.id}
+                        interactive={id === activeConfirmationArtifactId}
+                        onConversation={replaceConversation}
+                        onEdit={(confirmation) => {
+                          setDraft("Revise this plan: " + confirmation.title);
+                          requestAnimationFrame(() =>
+                            document.getElementById("evry-message")?.focus()
+                          );
+                        }}
+                      />
+                    ))}
                   </div>
                 </li>
               ))}

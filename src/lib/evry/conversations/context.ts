@@ -180,7 +180,10 @@ function artifactForContext(
         plan: document.plan,
         title: contextText(document.title, 160),
         actionLabel: contextText(document.actionLabel, 80),
-        items: document.items
+        items: ("artifactVersion" in document
+          ? document.steps.flatMap(({ resolvedTargets }) => resolvedTargets)
+          : document.items
+        )
           .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactItems)
           .map(({ label, value }) => ({
             label: contextText(label, 80),
@@ -195,10 +198,13 @@ function artifactForContext(
         kind: "progress",
         plan: document.plan,
         title: contextText(document.title, 160),
-        steps: [
-          ...(document.activeStep ? [document.activeStep] : []),
-          ...document.completedSteps,
-        ]
+        steps: ("artifactVersion" in document
+          ? document.steps
+          : [
+              ...(document.activeStep ? [document.activeStep] : []),
+              ...document.completedSteps,
+            ]
+        )
           .slice(0, EVRY_CONVERSATION_CONTEXT_LIMITS.artifactSteps)
           .map(({ stepId, label }) => ({
             stepId,
