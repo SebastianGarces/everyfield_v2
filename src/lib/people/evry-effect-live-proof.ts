@@ -29,10 +29,7 @@ import {
   executionAttemptKey,
   planEventKey,
 } from "@/lib/evry/audit/identity";
-import {
-  PEOPLE_CORE_EXECUTION_REGISTRY,
-  PEOPLE_CORE_IDENTITIES,
-} from "@/lib/evry/capabilities/people/core";
+import { PEOPLE_CORE_IDENTITIES } from "@/lib/evry/capabilities/people/core";
 import {
   PEOPLE_FILE_EXECUTION_REGISTRY,
   PEOPLE_FILE_IDENTITIES,
@@ -56,11 +53,7 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { executeAuthorizedEvryRead } from "@/lib/evry/reads/contract";
 
-import {
-  claimEvryPersonNote,
-  claimEvryPersonNoteDelete,
-  claimEvryPersonNoteEdit,
-} from "./activity";
+import { claimEvryPersonNoteDelete, claimEvryPersonNoteEdit } from "./activity";
 import {
   claimEvryChangePersonStatus,
   claimEvryCreatePerson,
@@ -92,12 +85,10 @@ import {
   claimEvryUpdateSkill,
   claimEvryUpdateTag,
 } from "./evry-taxonomies";
-import {
-  claimEvryPersonPhotoMutation,
-  getEvryPersonPhotoSnapshot,
-} from "./person-photo";
+import { getEvryPersonPhotoSnapshot } from "./person-photo";
 import { executeBulkImport } from "./import";
 import { createPerson } from "./service";
+import { personCreateSchema } from "@/lib/validations/people";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
 const TAG_IDENTITY = "people.crm.tags.assign-tag";
@@ -141,6 +132,18 @@ const EFFECT_IDENTITIES = [
   "people.crm.tags.update-tag",
 ] as const;
 const FINGERPRINT = "a".repeat(64);
+
+function uuidFromProofHash(value: string): string {
+  const hex = createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  hex[12] = "4";
+  hex[16] = ["8", "9", "a", "b"][Number.parseInt(hex[16]!, 16) % 4]!;
+  const joined = hex.join("");
+  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
+}
 
 async function seedAttempt(input: {
   churchId: string;
@@ -308,6 +311,16 @@ async function householdMemberSnapshotFor(plantId: string, personId: string) {
 
 async function main(): Promise<void> {
   const provenEffects = new Set<string>();
+  const productionEffectOutcomes = new Map<
+    string,
+    {
+      allowed: boolean;
+      replayed: boolean;
+      denied: boolean;
+      foreignRefused: boolean;
+    }
+  >();
+  const productionArguments = new Map<string, Record<string, unknown>>();
   const plant = await db
     .insert(churches)
     .values({ name: "__People effect proof__" })
@@ -325,6 +338,56 @@ async function main(): Promise<void> {
     })
     .returning({ id: users.id });
   assert.ok(owner);
+  const actor = {
+    userId: owner.id,
+    plantId: plant.id,
+    seat: "owner",
+  } as EvryPlantActor;
+  const executeProductionEffect = async (
+    identity: string,
+    attempt: Awaited<ReturnType<typeof seedAttempt>>,
+    argumentsValue: Record<string, unknown>
+  ) => {
+    const registration =
+      PRODUCTION_EVRY_EXECUTION_REGISTRY.registrationFor(identity);
+    const capability = evryCapabilityRegistrationFor(identity);
+    assert.ok(registration && capability, `Missing production ${identity}`);
+    const result = await registration.executeIfCurrent({
+      authorization: {
+        actor,
+        registration: capability,
+      } as unknown as EvryEffectCapabilityAuthorization,
+      execution: attempt.execution,
+      effectKey: attempt.effectKey,
+      arguments: argumentsValue as never,
+    });
+    if (result.status === "completed") {
+      // Treat the first successful return as lost. The production adapter must
+      // recover the exact named durable outcome without applying again.
+      assert.deepEqual(
+        await registration.executeIfCurrent({
+          authorization: {
+            actor,
+            registration: capability,
+          } as unknown as EvryEffectCapabilityAuthorization,
+          execution: attempt.execution,
+          effectKey: attempt.effectKey,
+          arguments: argumentsValue as never,
+        }),
+        result,
+        `Production replay changed ${identity}`
+      );
+      productionEffectOutcomes.set(identity, {
+        allowed: true,
+        replayed: true,
+        denied: false,
+        foreignRefused: false,
+      });
+      productionArguments.set(identity, argumentsValue);
+      provenEffects.add(identity);
+    }
+    return result;
+  };
   const [person] = await db
     .insert(persons)
     .values({
@@ -348,8 +411,18 @@ async function main(): Promise<void> {
     note: "One concurrent note",
   };
   const race = await Promise.all([
-    claimEvryPersonNote(concurrentInput),
-    claimEvryPersonNote(concurrentInput),
+    executeProductionEffect(NOTE_IDENTITY, concurrent, {
+      personId: person.id,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      note: concurrentInput.note,
+    }),
+    executeProductionEffect(NOTE_IDENTITY, concurrent, {
+      personId: person.id,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      note: concurrentInput.note,
+    }),
   ]);
   assert.deepEqual(race, [
     { status: "completed", affectedCount: 1, excludedCount: 0 },
@@ -367,13 +440,25 @@ async function main(): Promise<void> {
     expectedLastName: "Lovelace",
     note: "One response-loss note",
   };
-  await claimEvryPersonNote(lostResponseInput); // committed; pretend its response vanished
-  assert.deepEqual(await claimEvryPersonNote(lostResponseInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add(NOTE_IDENTITY);
+  const lostNoteArguments = {
+    personId: person.id,
+    firstName: "Ada",
+    lastName: "Lovelace",
+    note: lostResponseInput.note,
+  };
+  await executeProductionEffect(NOTE_IDENTITY, lostResponse, lostNoteArguments);
+  assert.deepEqual(
+    await executeProductionEffect(
+      NOTE_IDENTITY,
+      lostResponse,
+      lostNoteArguments
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   const noteSnapshot = await db
     .select({ id: personActivities.id, metadata: personActivities.metadata })
     .from(personActivities)
@@ -402,17 +487,30 @@ async function main(): Promise<void> {
     note: "Edited response-loss note",
     editedAt: "2026-08-29T12:00:00.000Z",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.notes.edit-note",
+      editNoteAttempt,
+      {
+        personId: person.id,
+        personLabel: "Ada Lovelace",
+        activityId: noteSnapshot.id,
+        expectedMetadataJson: editNoteInput.expectedMetadataJson,
+        note: editNoteInput.note,
+        editedAt: editNoteInput.editedAt,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryPersonNoteEdit(editNoteInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryPersonNoteEdit(editNoteInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.notes.edit-note");
   const editedMetadata = await db
     .select({ metadata: personActivities.metadata })
     .from(personActivities)
@@ -431,17 +529,28 @@ async function main(): Promise<void> {
     activityId: noteSnapshot.id,
     expectedMetadataJson: JSON.stringify(editedMetadata),
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.notes.delete-note",
+      deleteNoteAttempt,
+      {
+        personId: person.id,
+        personLabel: "Ada Lovelace",
+        activityId: noteSnapshot.id,
+        expectedMetadataJson: deleteNoteInput.expectedMetadataJson,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryPersonNoteDelete(deleteNoteInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryPersonNoteDelete(deleteNoteInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.notes.delete-note");
 
   const foreignPlant = await db
     .insert(churches)
@@ -464,11 +573,10 @@ async function main(): Promise<void> {
     actorUserId: owner.id,
   });
   assert.deepEqual(
-    await claimEvryPersonNote({
-      ...refusedAttempt,
+    await executeProductionEffect(NOTE_IDENTITY, refusedAttempt, {
       personId: foreignPerson.id,
-      expectedFirstName: "Ada",
-      expectedLastName: "Lovelace",
+      firstName: "Ada",
+      lastName: "Lovelace",
       note: "Must not cross plants",
     }),
     { status: "refused", excludedCount: 1 }
@@ -517,7 +625,16 @@ async function main(): Promise<void> {
     },
     "form"
   );
-  await claimEvryCreatePerson(createInput); // committed; pretend its response vanished
+  const createArguments = {
+    personJson: JSON.stringify(createInput.person),
+    activitySource: createInput.activitySource,
+    expectedHouseholdName: createInput.expectedHouseholdName,
+  };
+  await executeProductionEffect(
+    CREATE_PERSON_IDENTITY,
+    createAttempt,
+    createArguments
+  );
   assert.deepEqual(await claimEvryCreatePerson(createInput), {
     status: "completed",
     affectedCount: 1,
@@ -585,7 +702,6 @@ async function main(): Promise<void> {
       ),
     [{ source: "form" }, { source: "form" }]
   );
-  provenEffects.add(CREATE_PERSON_IDENTITY);
 
   const quickAttempt = await seedAttempt({
     churchId: plant.id,
@@ -604,17 +720,27 @@ async function main(): Promise<void> {
     activitySource: "quick_add" as const,
     expectedHouseholdName: null,
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.people.quick-add-person",
+      quickAttempt,
+      {
+        personJson: JSON.stringify(quickInput.person),
+        activitySource: quickInput.activitySource,
+        expectedHouseholdName: quickInput.expectedHouseholdName,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryCreatePerson(quickInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryCreatePerson(quickInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.people.quick-add-person");
   const quickPerson = await db
     .select({ id: persons.id })
     .from(persons)
@@ -640,17 +766,28 @@ async function main(): Promise<void> {
     baselineJson: JSON.stringify(quickBaseline),
     after: { ...quickBaseline, notes: "Updated by the production proof" },
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.people.update-person",
+      updateAttempt,
+      {
+        personId: quickPerson.id,
+        personLabel: "Quick Proof",
+        baselineJson: updateInput.baselineJson,
+        afterJson: JSON.stringify(updateInput.after),
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryUpdatePerson(updateInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryUpdatePerson(updateInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.people.update-person");
   const statusAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -663,21 +800,36 @@ async function main(): Promise<void> {
     expectedFirstName: "Quick",
     expectedLastName: "Proof",
     expectedStatus: "prospect",
-    newStatus: "connected",
+    newStatus: "attendee",
     reason: null,
     skippedStatuses: [] as string[],
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.people.change-status",
+      statusAttempt,
+      {
+        personId: quickPerson.id,
+        personLabel: "Quick Proof",
+        expectedFirstName: "Quick",
+        expectedLastName: "Proof",
+        expectedStatus: "prospect",
+        newStatus: "attendee",
+        reason: null,
+        skippedStatuses: [],
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryChangePersonStatus(statusInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryChangePersonStatus(statusInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.people.change-status");
   const reasonAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -689,22 +841,37 @@ async function main(): Promise<void> {
     personId: quickPerson.id,
     expectedFirstName: "Quick",
     expectedLastName: "Proof",
-    expectedStatus: "connected",
-    newStatus: "inactive",
+    expectedStatus: "attendee",
+    newStatus: "following_up",
     reason: "Moved away",
     skippedStatuses: ["attendee"],
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.people.change-status-with-reason",
+      reasonAttempt,
+      {
+        personId: quickPerson.id,
+        personLabel: "Quick Proof",
+        expectedFirstName: "Quick",
+        expectedLastName: "Proof",
+        expectedStatus: "attendee",
+        newStatus: "following_up",
+        reason: "Moved away",
+        skippedStatuses: ["attendee"],
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryChangePersonStatus(reasonInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryChangePersonStatus(reasonInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.people.change-status-with-reason");
   const orderRows = await db
     .select({
       personId: persons.id,
@@ -728,17 +895,30 @@ async function main(): Promise<void> {
     ...reorderAttempt,
     entries: orderRows.map((row, index) => ({ ...row, newOrder: index + 10 })),
   };
+  const reorderArguments = {
+    entries: reorderInput.entries.map((entry) => ({
+      ...entry,
+      personLabel:
+        entry.personId === person.id ? "Ada Lovelace" : "Quick Proof",
+    })),
+  };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.stages.reorder-pipeline",
+      reorderAttempt,
+      reorderArguments
+    ),
+    {
+      status: "completed",
+      affectedCount: 2,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryReorderPeople(reorderInput), {
     status: "completed",
     affectedCount: 2,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryReorderPeople(reorderInput), {
-    status: "completed",
-    affectedCount: 2,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.stages.reorder-pipeline");
   const deleteBaseline = await personSnapshotForImport(
     plant.id,
     quickPerson.id
@@ -755,17 +935,27 @@ async function main(): Promise<void> {
     personId: quickPerson.id,
     baselineJson: JSON.stringify(deleteBaseline),
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.people.delete-person",
+      deletePersonAttempt,
+      {
+        personId: quickPerson.id,
+        personLabel: "Quick Proof",
+        baselineJson: deletePersonInput.baselineJson,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryDeletePerson(deletePersonInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryDeletePerson(deletePersonInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.people.delete-person");
 
   const assessmentAttempt = await seedAttempt({
     churchId: plant.id,
@@ -793,17 +983,26 @@ async function main(): Promise<void> {
       courageousNotes: null,
     },
   };
+  assert.deepEqual(
+    await executeProductionEffect(ASSESSMENT_IDENTITY, assessmentAttempt, {
+      personId: grace.id,
+      personLabel: "Grace Hopper",
+      expectedFirstName: "Grace",
+      expectedLastName: "Hopper",
+      expectedStatus: "prospect",
+      ...assessmentInput.values,
+    }),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryCreateAssessment(assessmentInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryCreateAssessment(assessmentInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add(ASSESSMENT_IDENTITY);
   const interviewAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -834,13 +1033,20 @@ async function main(): Promise<void> {
       nextSteps: "Follow up",
     },
   };
-  await claimEvryCreateInterview(interviewInput);
+  await executeProductionEffect(INTERVIEW_IDENTITY, interviewAttempt, {
+    personId: grace.id,
+    personLabel: "Grace Hopper",
+    expectedFirstName: "Grace",
+    expectedLastName: "Hopper",
+    expectedStatus: "prospect",
+    ...interviewInput.values,
+    resultingStatus: "interviewed",
+  });
   assert.deepEqual(await claimEvryCreateInterview(interviewInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  provenEffects.add(INTERVIEW_IDENTITY);
   const commitmentAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -864,17 +1070,31 @@ async function main(): Promise<void> {
       documentKey: null,
     },
   };
+  assert.deepEqual(
+    await executeProductionEffect(COMMITMENT_IDENTITY, commitmentAttempt, {
+      personId: grace.id,
+      personLabel: "Grace Hopper",
+      expectedFirstName: "Grace",
+      expectedLastName: "Hopper",
+      expectedStatus: "interviewed",
+      commitmentType: "core_group",
+      signedDate: "2026-08-29",
+      witnessJson: JSON.stringify({ id: owner.id, label: "Proof owner" }),
+      notes: null,
+      attachmentJson: JSON.stringify(null),
+      resultingStatus: "core_group",
+    }),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryCreateCommitment(commitmentInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryCreateCommitment(commitmentInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add(COMMITMENT_IDENTITY);
   const importAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -955,7 +1175,105 @@ async function main(): Promise<void> {
     affectedCount: 2,
     excludedCount: 0,
   });
-  provenEffects.add(IMPORT_IDENTITY);
+
+  const productionImportBytes = Buffer.from(
+    "First Name *,Last Name *,Email\nProduction,Adapter,production-adapter@scratch.invalid"
+  );
+  const stagedProductionImport = await stageEvryPeopleAttachment({
+    actor,
+    kind: "people_csv",
+    personId: null,
+    file: {
+      name: "production-adapter.csv",
+      type: "text/csv",
+      size: productionImportBytes.length,
+      async arrayBuffer() {
+        return productionImportBytes.buffer.slice(
+          productionImportBytes.byteOffset,
+          productionImportBytes.byteOffset + productionImportBytes.byteLength
+        ) as ArrayBuffer;
+      },
+    },
+  });
+  assert.ok(stagedProductionImport?.preview);
+  const productionPreviewRow = stagedProductionImport.preview.validRows[0];
+  assert.ok(productionPreviewRow);
+  const parsedProductionPerson = personCreateSchema.parse({
+    ...productionPreviewRow.data,
+    email: productionPreviewRow.data.email || undefined,
+    phone: productionPreviewRow.data.phone || undefined,
+    source: productionPreviewRow.data.source || undefined,
+    addressLine1: productionPreviewRow.data.addressLine1 || undefined,
+    addressLine2: productionPreviewRow.data.addressLine2 || undefined,
+    city: productionPreviewRow.data.city || undefined,
+    state: productionPreviewRow.data.state || undefined,
+    postalCode: productionPreviewRow.data.postalCode || undefined,
+    country: productionPreviewRow.data.country || undefined,
+    notes: productionPreviewRow.data.notes || undefined,
+    status: "prospect",
+  });
+  const productionRowKey = createHash("sha256")
+    .update(
+      `${plant.id}:${stagedProductionImport.metadata.digest}:${productionPreviewRow.rowNumber}:${JSON.stringify(parsedProductionPerson)}`
+    )
+    .digest("hex");
+  const productionImportRow = {
+    rowNumber: productionPreviewRow.rowNumber,
+    rowKey: productionRowKey,
+    personId: uuidFromProofHash(`${plant.id}:${productionRowKey}`),
+    firstName: parsedProductionPerson.firstName,
+    lastName: parsedProductionPerson.lastName,
+    email: parsedProductionPerson.email || null,
+    phone: parsedProductionPerson.phone || null,
+    source: parsedProductionPerson.source ?? null,
+    addressLine1: parsedProductionPerson.addressLine1 || null,
+    addressLine2: parsedProductionPerson.addressLine2 || null,
+    city: parsedProductionPerson.city || null,
+    state: parsedProductionPerson.state || null,
+    postalCode: parsedProductionPerson.postalCode || null,
+    country: parsedProductionPerson.country,
+    notes: parsedProductionPerson.notes || null,
+    disposition: "create",
+    targetPersonId: null,
+    expectedTargetJson: null,
+  };
+  const productionImportSnapshot = [
+    {
+      rowNumber: productionPreviewRow.rowNumber,
+      email: productionImportRow.email,
+      phone: productionImportRow.phone,
+      firstName: productionImportRow.firstName,
+      lastName: productionImportRow.lastName,
+      matchIds: [],
+      disposition: "create",
+      targetPersonId: null,
+    },
+  ];
+  const productionImportAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: IMPORT_IDENTITY,
+    stepId: "production-import",
+  });
+  assert.deepEqual(
+    await executeProductionEffect(IMPORT_IDENTITY, productionImportAttempt, {
+      attachmentReference: stagedProductionImport.reference,
+      attachmentDigest: stagedProductionImport.metadata.digest,
+      originalName: stagedProductionImport.metadata.originalName,
+      previewFingerprint: createHash("sha256")
+        .update(JSON.stringify(stagedProductionImport.preview))
+        .digest("hex"),
+      duplicateSnapshotJson: JSON.stringify(productionImportSnapshot),
+      rowsJson: JSON.stringify([productionImportRow]),
+      totalRows: stagedProductionImport.preview.totalRows,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  await removeEvryPeopleAttachment({
+    actor,
+    reference: stagedProductionImport.reference,
+    expectedKind: "people_csv",
+  });
 
   const mergeTarget = await personSnapshotForImport(plant.id, person.id);
   assert.ok(mergeTarget);
@@ -1350,70 +1668,44 @@ async function main(): Promise<void> {
     capabilityIdentity: PEOPLE_FILE_IDENTITIES.photo,
     stepId: "upload-photo",
   });
-  const photoStorageEvents: string[] = [];
-  const photoStorage = {
-    store(key: string) {
-      photoStorageEvents.push(`store:${key}`);
-      return Promise.resolve();
+  const photoBytes = Buffer.from("live production photo proof");
+  const stagedPhoto = await stageEvryPeopleAttachment({
+    actor,
+    kind: "person_photo",
+    personId: person.id,
+    file: {
+      name: "proof.jpg",
+      type: "image/jpeg",
+      size: photoBytes.length,
+      async arrayBuffer() {
+        return photoBytes.buffer.slice(
+          photoBytes.byteOffset,
+          photoBytes.byteOffset + photoBytes.byteLength
+        ) as ArrayBuffer;
+      },
     },
-    remove(key: string) {
-      photoStorageEvents.push(`remove:${key}`);
-      return Promise.resolve();
-    },
-    list() {
-      return Promise.resolve(
-        photoStorageEvents
-          .filter((event) => event.startsWith("store:"))
-          .map((event) => event.slice("store:".length))
-      );
-    },
-  };
+  });
+  assert.ok(stagedPhoto);
   assert.deepEqual(
-    await claimEvryPersonPhotoMutation({
-      ...photoAttempt,
+    await executeProductionEffect(PEOPLE_FILE_IDENTITIES.photo, photoAttempt, {
       personId: person.id,
-      expectedDigest: null,
-      mutation: {
-        kind: "upload",
-        attachmentDigest: "f".repeat(64),
-        bytes: Buffer.from("photo"),
-        contentType: "image/jpeg",
-      },
-      storage: photoStorage,
+      personLabel: "Ada Lovelace",
+      expectedFirstName: "Ada",
+      expectedLastName: "Lovelace",
+      currentPhotoDigest: null,
+      attachmentReference: stagedPhoto.reference,
+      attachmentDigest: stagedPhoto.metadata.digest,
+      contentType: stagedPhoto.metadata.contentType,
+      size: stagedPhoto.metadata.size,
+      originalName: stagedPhoto.metadata.originalName,
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
-  const photoRegistration = evryCapabilityRegistrationFor(
-    PEOPLE_FILE_IDENTITIES.photo
-  );
-  const photoExecution = PEOPLE_FILE_EXECUTION_REGISTRY.registrationFor(
-    PEOPLE_FILE_IDENTITIES.photo
-  );
-  assert.ok(photoRegistration && photoExecution);
-  assert.deepEqual(
-    await photoExecution.executeIfCurrent({
-      authorization: {
-        actor: authorization.actor,
-        registration: photoRegistration,
-      } as unknown as EvryEffectCapabilityAuthorization,
-      execution: photoAttempt.execution,
-      effectKey: photoAttempt.effectKey,
-      arguments: {
-        personId: person.id,
-        personLabel: "Ada Lovelace",
-        expectedFirstName: "Ada",
-        expectedLastName: "Lovelace",
-        currentPhotoDigest: null,
-        attachmentReference: "unread-because-the-durable-result-exists",
-        attachmentDigest: "f".repeat(64),
-        contentType: "image/jpeg",
-        size: 1,
-        originalName: "unread.jpg",
-      },
-    }),
-    { status: "completed", affectedCount: 1, excludedCount: 0 }
-  );
-  provenEffects.add(PEOPLE_FILE_IDENTITIES.photo);
+  await removeEvryPeopleAttachment({
+    actor,
+    reference: stagedPhoto.reference,
+    expectedKind: "person_photo",
+  });
 
   const removePhotoAttempt = await seedAttempt({
     churchId: plant.id,
@@ -1424,45 +1716,17 @@ async function main(): Promise<void> {
   const uploadedPhoto = await getEvryPersonPhotoSnapshot(plant.id, person.id);
   assert.ok(uploadedPhoto?.digest);
   assert.deepEqual(
-    await claimEvryPersonPhotoMutation({
-      ...removePhotoAttempt,
-      personId: person.id,
-      expectedDigest: uploadedPhoto.digest,
-      mutation: { kind: "remove" },
-      storage: photoStorage,
-    }),
-    { status: "completed", affectedCount: 1, excludedCount: 0 }
-  );
-  assert.equal(photoStorageEvents.length, 2);
-  assert.match(photoStorageEvents[0] ?? "", /^store:people\//);
-  assert.equal(
-    photoStorageEvents[1],
-    `remove:${photoStorageEvents[0]?.slice(6)}`
-  );
-  const removePhotoRegistration = evryCapabilityRegistrationFor(
-    PEOPLE_CORE_IDENTITIES.removePhoto
-  );
-  const removePhotoExecution = PEOPLE_CORE_EXECUTION_REGISTRY.registrationFor(
-    PEOPLE_CORE_IDENTITIES.removePhoto
-  );
-  assert.ok(removePhotoRegistration && removePhotoExecution);
-  assert.deepEqual(
-    await removePhotoExecution.executeIfCurrent({
-      authorization: {
-        actor: authorization.actor,
-        registration: removePhotoRegistration,
-      } as unknown as EvryEffectCapabilityAuthorization,
-      execution: removePhotoAttempt.execution,
-      effectKey: removePhotoAttempt.effectKey,
-      arguments: {
+    await executeProductionEffect(
+      PEOPLE_CORE_IDENTITIES.removePhoto,
+      removePhotoAttempt,
+      {
         personId: person.id,
         personLabel: "Ada Lovelace",
         photoDigest: uploadedPhoto.digest,
-      },
-    }),
+      }
+    ),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
-  provenEffects.add(PEOPLE_CORE_IDENTITIES.removePhoto);
 
   const householdAttempt = await seedAttempt({
     churchId: plant.id,
@@ -1471,32 +1735,26 @@ async function main(): Promise<void> {
     stepId: "create-household",
   });
   const householdId = randomUUID();
+  const householdHead = await householdMemberSnapshotFor(plant.id, person.id);
+  assert.ok(householdHead);
   const householdInput = {
     ...householdAttempt,
-    person: {
-      personId: person.id,
-      firstName: "Ada",
-      lastName: "Lovelace",
-      householdId: null,
-      householdRole: null,
-      addressLine1: null,
-      addressLine2: null,
-      city: null,
-      state: null,
-      postalCode: null,
-      country: "US",
-    },
+    person: householdHead,
     householdId,
     householdName: "Lovelace",
     usePersonAddress: false,
   };
-  await claimEvryCreateHouseholdWithHead(householdInput);
+  await executeProductionEffect(CREATE_HOUSEHOLD_IDENTITY, householdAttempt, {
+    personJson: JSON.stringify(householdInput.person),
+    householdId,
+    householdName: householdInput.householdName,
+    usePersonAddress: householdInput.usePersonAddress,
+  });
   assert.deepEqual(await claimEvryCreateHouseholdWithHead(householdInput), {
     status: "completed",
     affectedCount: 2,
     excludedCount: 0,
   });
-  provenEffects.add(CREATE_HOUSEHOLD_IDENTITY);
   const householdBefore = await householdSnapshotFor(plant.id, householdId);
   assert.ok(householdBefore);
   const householdAfter = {
@@ -1519,17 +1777,27 @@ async function main(): Promise<void> {
     before: householdBefore,
     after: householdAfter,
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.households.update-household",
+      updateHouseholdAttempt,
+      {
+        householdId,
+        beforeJson: JSON.stringify(householdBefore),
+        afterJson: JSON.stringify(householdAfter),
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryUpdateHousehold(updateHouseholdInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryUpdateHousehold(updateHouseholdInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.households.update-household");
   const headBeforePropagation = await householdMemberSnapshotFor(
     plant.id,
     person.id
@@ -1547,17 +1815,27 @@ async function main(): Promise<void> {
     household: householdAfter,
     members: [headBeforePropagation],
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.households.propagate-address",
+      propagateAttempt,
+      {
+        householdId,
+        householdJson: JSON.stringify(householdAfter),
+        membersJson: JSON.stringify(propagateInput.members),
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryPropagateHouseholdAddress(propagateInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryPropagateHouseholdAddress(propagateInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.households.propagate-address");
   const [householdMember] = await db
     .insert(persons)
     .values({
@@ -1584,7 +1862,7 @@ async function main(): Promise<void> {
     person: memberBeforeAdd,
     householdId,
     household: householdAfter,
-    role: "member",
+    role: "other",
     afterAddress: {
       addressLine1: householdAfter.addressLine1,
       addressLine2: householdAfter.addressLine2,
@@ -1594,17 +1872,29 @@ async function main(): Promise<void> {
       country: householdAfter.country,
     },
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.households.add-to-household",
+      addHouseholdAttempt,
+      {
+        personJson: JSON.stringify(addHouseholdInput.person),
+        householdId,
+        householdJson: JSON.stringify(householdAfter),
+        role: "other",
+        afterAddressJson: JSON.stringify(addHouseholdInput.afterAddress),
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryAddToHousehold(addHouseholdInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryAddToHousehold(addHouseholdInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.households.add-to-household");
   const memberBeforeRemove = await householdMemberSnapshotFor(
     plant.id,
     householdMember.id
@@ -1621,17 +1911,26 @@ async function main(): Promise<void> {
     person: memberBeforeRemove,
     household: householdAfter,
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.households.remove-from-household",
+      removeHouseholdAttempt,
+      {
+        personJson: JSON.stringify(removeHouseholdInput.person),
+        householdJson: JSON.stringify(householdAfter),
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryRemoveFromHousehold(removeHouseholdInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryRemoveFromHousehold(removeHouseholdInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.households.remove-from-household");
   const headBeforeRemove = await householdMemberSnapshotFor(
     plant.id,
     person.id
@@ -1664,17 +1963,27 @@ async function main(): Promise<void> {
     householdId,
     household: householdAfter,
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.households.delete-household",
+      deleteHouseholdAttempt,
+      {
+        householdId,
+        householdJson: JSON.stringify(householdAfter),
+        expectedMemberIds: [],
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryDeleteHousehold(deleteHouseholdInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryDeleteHousehold(deleteHouseholdInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.households.delete-household");
 
   const [tag] = await db
     .insert(tags)
@@ -1696,12 +2005,21 @@ async function main(): Promise<void> {
     expectedTagName: "Follow-up",
     expectedTagColor: "blue",
   };
-  assert.deepEqual(await claimEvryAssignTag(tagInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add(TAG_IDENTITY);
+  assert.deepEqual(
+    await executeProductionEffect(TAG_IDENTITY, tagAttempt, {
+      personId: person.id,
+      expectedFirstName: "Ada",
+      expectedLastName: "Lovelace",
+      tagId: tag.id,
+      expectedTagName: "Follow-up",
+      expectedTagColor: "blue",
+    }),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   const removeTagAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1709,17 +2027,30 @@ async function main(): Promise<void> {
     stepId: "remove-tag",
   });
   const removeTagInput = { ...tagInput, ...removeTagAttempt };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.tags.remove-tag",
+      removeTagAttempt,
+      {
+        personId: person.id,
+        expectedFirstName: "Ada",
+        expectedLastName: "Lovelace",
+        tagId: tag.id,
+        expectedTagName: "Follow-up",
+        expectedTagColor: "blue",
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryRemoveTag(removeTagInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryRemoveTag(removeTagInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.tags.remove-tag");
   const createTagAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1731,17 +2062,26 @@ async function main(): Promise<void> {
     name: "Created by Evry proof",
     color: "green",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.tags.create-tag",
+      createTagAttempt,
+      {
+        name: createTagInput.name,
+        color: createTagInput.color,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryCreateTag(createTagInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryCreateTag(createTagInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.tags.create-tag");
   const createdTag = await db
     .select({ id: tags.id })
     .from(tags)
@@ -1762,17 +2102,29 @@ async function main(): Promise<void> {
     name: "Updated by Evry proof",
     color: "purple",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.tags.update-tag",
+      updateTagAttempt,
+      {
+        tagId: createdTag.id,
+        expectedTagName: createTagInput.name,
+        expectedTagColor: "green",
+        name: updateTagInput.name,
+        color: updateTagInput.color,
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryUpdateTag(updateTagInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryUpdateTag(updateTagInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.tags.update-tag");
   const deleteTagAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1786,17 +2138,28 @@ async function main(): Promise<void> {
     expectedColor: "blue",
     expectedPersonIds: [] as string[],
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.tags.delete-tag",
+      deleteTagAttempt,
+      {
+        tagId: tag.id,
+        expectedTagName: "Follow-up",
+        expectedTagColor: "blue",
+        expectedPersonIds: [],
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryDeleteTag(deleteTagInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryDeleteTag(deleteTagInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.tags.delete-tag");
 
   const addSkillAttempt = await seedAttempt({
     churchId: plant.id,
@@ -1809,22 +2172,36 @@ async function main(): Promise<void> {
     personId: person.id,
     expectedFirstName: "Ada",
     expectedLastName: "Lovelace",
-    category: "Technology",
+    category: "tech",
     name: "Computing",
     proficiency: "advanced",
     notes: "Production proof",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.skills.add-skill",
+      addSkillAttempt,
+      {
+        personId: person.id,
+        expectedFirstName: "Ada",
+        expectedLastName: "Lovelace",
+        category: "tech",
+        name: "Computing",
+        proficiency: "advanced",
+        notes: "Production proof",
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryAddSkill(addSkillInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryAddSkill(addSkillInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.skills.add-skill");
   const skill = await db
     .select({ id: skillsInventory.id })
     .from(skillsInventory)
@@ -1849,26 +2226,45 @@ async function main(): Promise<void> {
     personId: person.id,
     expectedFirstName: "Ada",
     expectedLastName: "Lovelace",
-    expectedCategory: "Technology",
+    expectedCategory: "tech",
     expectedName: "Computing",
     expectedProficiency: "advanced",
     expectedNotes: "Production proof",
-    category: "Technology",
+    category: "tech",
     name: "Systems",
     proficiency: "expert",
     notes: "Updated production proof",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.skills.update-skill",
+      updateSkillAttempt,
+      {
+        skillId: skill.id,
+        personId: person.id,
+        expectedFirstName: "Ada",
+        expectedLastName: "Lovelace",
+        expectedCategory: "tech",
+        expectedName: "Computing",
+        expectedProficiency: "advanced",
+        expectedNotes: "Production proof",
+        category: "tech",
+        name: "Systems",
+        proficiency: "expert",
+        notes: "Updated production proof",
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryUpdateSkill(updateSkillInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryUpdateSkill(updateSkillInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.skills.update-skill");
   const removeSkillAttempt = await seedAttempt({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -1881,22 +2277,37 @@ async function main(): Promise<void> {
     personId: person.id,
     expectedFirstName: "Ada",
     expectedLastName: "Lovelace",
-    expectedCategory: "Technology",
+    expectedCategory: "tech",
     expectedName: "Systems",
     expectedProficiency: "expert",
     expectedNotes: "Updated production proof",
   };
+  assert.deepEqual(
+    await executeProductionEffect(
+      "people.crm.skills.remove-skill",
+      removeSkillAttempt,
+      {
+        skillId: skill.id,
+        personId: person.id,
+        expectedFirstName: "Ada",
+        expectedLastName: "Lovelace",
+        expectedCategory: "tech",
+        expectedName: "Systems",
+        expectedProficiency: "expert",
+        expectedNotes: "Updated production proof",
+      }
+    ),
+    {
+      status: "completed",
+      affectedCount: 1,
+      excludedCount: 0,
+    }
+  );
   assert.deepEqual(await claimEvryRemoveSkill(removeSkillInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  assert.deepEqual(await claimEvryRemoveSkill(removeSkillInput), {
-    status: "completed",
-    affectedCount: 1,
-    excludedCount: 0,
-  });
-  provenEffects.add("people.crm.skills.remove-skill");
   assert.deepEqual(await claimEvryAssignTag(tagInput), {
     status: "completed",
     affectedCount: 1,
@@ -2196,6 +2607,34 @@ async function main(): Promise<void> {
       { status: "refused", excludedCount: 1 },
       `Expected operation-specific refusal for ${identity}`
     );
+    const outcome = productionEffectOutcomes.get(identity);
+    assert.ok(outcome, `Missing allowed production result for ${identity}`);
+    const validArguments = productionArguments.get(identity);
+    assert.ok(validArguments);
+    const foreignAttempt = await seedAttempt({
+      churchId: plant.id,
+      actorUserId: owner.id,
+      capabilityIdentity: identity,
+      stepId: `foreign-${identity.split(".").at(-1)}`,
+    });
+    assert.deepEqual(
+      await registration.executeIfCurrent({
+        authorization: {
+          actor: { ...actor, plantId: foreignPlant.id } as EvryPlantActor,
+          registration: capability,
+        } as unknown as EvryEffectCapabilityAuthorization,
+        execution: foreignAttempt.execution,
+        effectKey: foreignAttempt.effectKey,
+        arguments: validArguments as never,
+      }),
+      { status: "refused", excludedCount: 1 },
+      `Expected foreign tuple refusal for ${identity}`
+    );
+    productionEffectOutcomes.set(identity, {
+      ...outcome,
+      denied: true,
+      foreignRefused: true,
+    });
   }
   const completedEffectIdentities = new Set(
     (
@@ -2217,8 +2656,33 @@ async function main(): Promise<void> {
     []
   );
 
+  const machineOutcomes = [
+    ...EFFECT_IDENTITIES.map((identity) => {
+      const outcome = productionEffectOutcomes.get(identity);
+      assert.deepEqual(outcome, {
+        allowed: true,
+        replayed: true,
+        denied: true,
+        foreignRefused: true,
+      });
+      return {
+        identity,
+        operationKind: "effect" as const,
+        ...outcome,
+        durable: completedEffectIdentities.has(identity),
+      };
+    }),
+    ...[...provenReads].map((identity) => ({
+      identity,
+      operationKind: "read" as const,
+      allowed: true,
+      replayed: true,
+    })),
+  ].toSorted((left, right) => left.identity.localeCompare(right.identity));
+
   process.stdout.write(
-    `People effect live proof passed (${completedEffectIdentities.size} operation-specific identities)\n`
+    `People effect live proof passed (${completedEffectIdentities.size} operation-specific identities)\n` +
+      `PEOPLE_CAPABILITY_OUTCOMES=${JSON.stringify(machineOutcomes)}\n`
   );
 }
 

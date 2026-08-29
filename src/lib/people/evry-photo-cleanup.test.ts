@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { sweepEvryPersonPhotoObjects } from "./person-photo";
+import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+
+import {
+  claimEvryPersonPhotoMutation,
+  EVRY_FINAL_OBJECT_GRACE_MS,
+  sweepEvryPersonPhotoObjects,
+} from "./person-photo";
 
 const PLANT_ID = "10000000-0000-4000-8000-000000000001";
 const PERSON_ID = "20000000-0000-4000-8000-000000000001";
@@ -13,9 +19,11 @@ test("photo cleanup preserves the current object and retries failed orphan delet
   const foreign = `people/30000000-0000-4000-8000-000000000001/${PERSON_ID}/foreign.jpg`;
   let fail = true;
   const removed: string[] = [];
+  const old = new Date(NOW.getTime() - EVRY_FINAL_OBJECT_GRACE_MS - 1);
   const storage = {
     store: async () => undefined,
-    list: async () => [current, orphan, foreign],
+    list: async () =>
+      [current, orphan, foreign].map((key) => ({ key, lastModified: old })),
     remove: async (key: string) => {
       if (fail) {
         fail = false;
@@ -29,10 +37,101 @@ test("photo cleanup preserves the current object and retries failed orphan delet
       plantId: PLANT_ID,
       personId: PERSON_ID,
       storage,
+      now: NOW,
       load: async () => ({ photoKey: current }),
     });
 
   assert.deepEqual(await sweep(), { removed: 0, failed: 1 });
   assert.deepEqual(await sweep(), { removed: 1, failed: 0 });
   assert.deepEqual(removed, [orphan]);
+});
+
+const NOW = new Date("2026-08-29T12:00:00.000Z");
+
+test("photo cleanup rechecks references after listing and protects young objects", async () => {
+  const becameCurrent = `${PREFIX}became-current.jpg`;
+  const young = `${PREFIX}young.jpg`;
+  let listed = false;
+  const removed: string[] = [];
+  const result = await sweepEvryPersonPhotoObjects({
+    plantId: PLANT_ID,
+    personId: PERSON_ID,
+    now: NOW,
+    storage: {
+      store: async () => undefined,
+      list: async () => {
+        listed = true;
+        return [
+          {
+            key: becameCurrent,
+            lastModified: new Date(
+              NOW.getTime() - EVRY_FINAL_OBJECT_GRACE_MS - 1
+            ),
+          },
+          { key: young, lastModified: NOW },
+        ];
+      },
+      remove: async (key) => void removed.push(key),
+    },
+    load: async () => {
+      assert.equal(listed, true);
+      return { photoKey: becameCurrent };
+    },
+  });
+  assert.deepEqual(result, { removed: 0, failed: 0 });
+  assert.deepEqual(removed, []);
+});
+
+test("photo claim response loss preserves the committed final object", async () => {
+  const stored: string[] = [];
+  const removed: string[] = [];
+  let recoveryCalls = 0;
+  let loadCalls = 0;
+  const result = await claimEvryPersonPhotoMutation({
+    execution: {
+      attemptId: "30000000-0000-4000-8000-000000000001",
+      planId: "40000000-0000-4000-8000-000000000001",
+      actorUserId: "50000000-0000-4000-8000-000000000001",
+      plantId: PLANT_ID,
+      fingerprint: "a".repeat(64),
+      correlationId: "60000000-0000-4000-8000-000000000001",
+      stepId: "upload-photo",
+      capabilityIdentity: "people.crm.people.upload-person-photo",
+    },
+    effectKey: "b".repeat(64) as EvryAuditKey,
+    personId: PERSON_ID,
+    expectedDigest: null,
+    mutation: {
+      kind: "upload",
+      attachmentDigest: "c".repeat(64),
+      bytes: Buffer.from("photo"),
+      contentType: "image/jpeg",
+    },
+    storage: {
+      store: async (key) => void stored.push(key),
+      list: async () => [],
+      remove: async (key) => void removed.push(key),
+    },
+    load: async () => {
+      loadCalls++;
+      return { photoKey: loadCalls === 1 ? null : stored[0]! };
+    },
+    recover: async () => {
+      recoveryCalls++;
+      return recoveryCalls === 1
+        ? null
+        : { status: "completed", affectedCount: 1, excludedCount: 0 };
+    },
+    claim: async () => {
+      throw new Error("response lost after atomic database commit");
+    },
+  });
+
+  assert.deepEqual(result, {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  assert.equal(stored.length, 1);
+  assert.deepEqual(removed, []);
 });

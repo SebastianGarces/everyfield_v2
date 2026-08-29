@@ -164,8 +164,59 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
   assert.match(
     stored.key,
     new RegExp(
-      `^evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/${NOW.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS}-[0-9a-f]{64}\\.csv$`
+      `^evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/${NOW.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS}-[0-9a-f-]{36}-[0-9a-f]{64}\\.csv$`
     )
+  );
+});
+
+test("concurrent identical uploads own distinct staged objects", async () => {
+  const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
+  const stored: string[] = [];
+  const stage = () =>
+    stageEvryPeopleAttachment({
+      actor: ACTOR,
+      kind: "people_csv",
+      personId: null,
+      file: file("people.csv", "text/csv", bytes),
+      now: NOW,
+      secret: SECRET,
+      parseImport: async () => ({
+        totalRows: 1,
+        validRows: [],
+        invalidRows: [],
+        duplicateRows: [],
+      }),
+      store: async (key) => {
+        stored.push(key);
+        return key;
+      },
+    });
+  const [first, second] = await Promise.all([stage(), stage()]);
+  assert.ok(first && second);
+  assert.notEqual(stored[0], stored[1]);
+  const remaining = new Set(stored);
+  assert.equal(
+    await removeEvryPeopleAttachment({
+      actor: ACTOR,
+      reference: first.reference,
+      expectedKind: "people_csv",
+      secret: SECRET,
+      remove: async (key) => void remaining.delete(key),
+    }),
+    true
+  );
+  assert.deepEqual([...remaining], [stored[1]]);
+  assert.ok(
+    await readExactEvryPeopleAttachment({
+      actor: ACTOR,
+      reference: second.reference,
+      expectedKind: "people_csv",
+      expectedDigest: second.metadata.digest,
+      now: NOW,
+      secret: SECRET,
+      read: async (key) =>
+        remaining.has(key) ? { body: bytes, contentType: "text/csv" } : null,
+    })
   );
 });
 
@@ -216,12 +267,14 @@ test("expired unclaimed attachments sweep idempotently and retry failed deletes"
   const expired = evryPeopleStagedAttachmentStorageKey({
     actor: ACTOR,
     expiresAt: new Date(NOW.getTime() - 1),
+    uploadId: "10000000-0000-4000-8000-000000000010",
     digest,
     extension: "csv",
   });
   const future = evryPeopleStagedAttachmentStorageKey({
     actor: ACTOR,
     expiresAt: new Date(NOW.getTime() + 60_000),
+    uploadId: "10000000-0000-4000-8000-000000000011",
     digest: "b".repeat(64),
     extension: "csv",
   });

@@ -9,8 +9,9 @@ import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
   deleteFile,
   getExtensionFromMimeType,
-  listFileKeys,
+  listFileObjects,
   personPhotoStorageKey,
+  type StoredFileObject,
   uploadFile,
 } from "@/lib/storage";
 
@@ -135,13 +136,15 @@ export type EvryPersonPhotoMutation =
 export type EvryPersonPhotoStorageEffects = Readonly<{
   store(key: string, bytes: Buffer, contentType: string): Promise<unknown>;
   remove(key: string): Promise<unknown>;
-  list(prefix: string): Promise<readonly string[]>;
+  list(prefix: string): Promise<readonly StoredFileObject[]>;
 }>;
+
+export const EVRY_FINAL_OBJECT_GRACE_MS = 60 * 60_000;
 
 const LIVE_EVRY_PHOTO_STORAGE: EvryPersonPhotoStorageEffects = {
   store: uploadFile,
   remove: deleteFile,
-  list: listFileKeys,
+  list: listFileObjects,
 };
 
 /**
@@ -154,25 +157,77 @@ export async function sweepEvryPersonPhotoObjects(input: {
   personId: string;
   storage?: EvryPersonPhotoStorageEffects;
   load?: typeof getPersonPhotoKey;
+  now?: Date;
 }): Promise<Readonly<{ removed: number; failed: number }>> {
-  const current = await (input.load ?? getPersonPhotoKey)(
-    input.plantId,
-    input.personId
-  );
-  if (!current) return { removed: 0, failed: 0 };
   const storage = input.storage ?? LIVE_EVRY_PHOTO_STORAGE;
+  const load = input.load ?? getPersonPhotoKey;
   const prefix = `people/${input.plantId}/${input.personId}/`;
-  const keys = await storage.list(prefix);
+  const objects = await storage.list(prefix);
+  const cutoff =
+    (input.now ?? new Date()).getTime() - EVRY_FINAL_OBJECT_GRACE_MS;
   let removed = 0;
   let failed = 0;
-  for (const key of keys) {
-    if (!key.startsWith(prefix) || key === current.photoKey) continue;
+  for (const object of objects) {
+    if (
+      !object.key.startsWith(prefix) ||
+      !object.lastModified ||
+      object.lastModified.getTime() > cutoff
+    )
+      continue;
     try {
-      await storage.remove(key);
+      // Every legitimate writer stores/refreshes the object before naming it.
+      // The grace fence plus this last-moment reference read prevents a sweep
+      // selected before that write from deleting its newly current object.
+      const current = await load(input.plantId, input.personId);
+      if (current?.photoKey === object.key) continue;
+      await storage.remove(object.key);
       removed += 1;
     } catch {
       failed += 1;
     }
+  }
+  return { removed, failed };
+}
+
+/** Hourly backstop for final photo objects whose terminal replay never ran. */
+export async function sweepAllEvryPersonPhotoObjects(
+  input: {
+    now?: Date;
+    list?: typeof listFileObjects;
+    remove?: typeof deleteFile;
+    load?: typeof getPersonPhotoKey;
+  } = {}
+): Promise<Readonly<{ removed: number; failed: number }>> {
+  const objects = await (input.list ?? listFileObjects)("people/");
+  const scopes = new Map<string, { plantId: string; personId: string }>();
+  for (const { key } of objects) {
+    const match =
+      /^people\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/i.exec(
+        key
+      );
+    if (!match) continue;
+    const [, plantId, personId] = match;
+    scopes.set(`${plantId}:${personId}`, {
+      plantId: plantId!,
+      personId: personId!,
+    });
+  }
+  let removed = 0;
+  let failed = 0;
+  for (const scope of scopes.values()) {
+    const result = await sweepEvryPersonPhotoObjects({
+      ...scope,
+      now: input.now,
+      load: input.load,
+      storage: {
+        store: async () => undefined,
+        list: async (prefix) =>
+          objects.filter(({ key }) => key.startsWith(prefix)),
+        remove: input.remove ?? deleteFile,
+      },
+    });
+    removed += result.removed;
+    failed += result.failed;
   }
   return { removed, failed };
 }
@@ -189,15 +244,17 @@ export async function claimEvryPersonPhotoMutation(
     expectedDigest: string | null;
     mutation: EvryPersonPhotoMutation;
     storage?: EvryPersonPhotoStorageEffects;
+    recover?: typeof recoverCompletedEvryPeopleEffect;
+    load?: typeof getPersonPhotoKey;
+    claim?: typeof claimEvryPeopleEffect;
   }
 ): Promise<EvryEffectResult> {
-  const replay = await recoverCompletedEvryPeopleEffect(input);
+  const recover = input.recover ?? recoverCompletedEvryPeopleEffect;
+  const load = input.load ?? getPersonPhotoKey;
+  const replay = await recover(input);
   if (replay) return replay;
 
-  const current = await getPersonPhotoKey(
-    input.execution.plantId,
-    input.personId
-  );
+  const current = await load(input.execution.plantId, input.personId);
   if (
     !current ||
     digestForPersonPhoto(current.photoKey) !== input.expectedDigest
@@ -225,7 +282,7 @@ export async function claimEvryPersonPhotoMutation(
 
   let result: EvryEffectResult;
   try {
-    result = await claimEvryPeopleEffect({
+    result = await (input.claim ?? claimEvryPeopleEffect)({
       ...input,
       mutation: sql`
         update persons p set photo_url = ${nextPhotoKey},
@@ -237,10 +294,7 @@ export async function claimEvryPersonPhotoMutation(
         returning 1 as affected_count, 0 as excluded_count
       `,
       targetIsCurrent: async () => {
-        const latest = await getPersonPhotoKey(
-          input.execution.plantId,
-          input.personId
-        );
+        const latest = await load(input.execution.plantId, input.personId);
         return (
           latest !== null &&
           digestForPersonPhoto(latest.photoKey) === input.expectedDigest
@@ -250,12 +304,17 @@ export async function claimEvryPersonPhotoMutation(
   } catch (error) {
     if (input.mutation.kind === "upload") {
       try {
+        const [durable, latest] = await Promise.all([
+          recover(input),
+          load(input.execution.plantId, input.personId),
+        ]);
+        if (durable) return durable;
+        if (latest?.photoKey === nextPhotoKey) return { status: "retryable" };
         await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(nextPhotoKey!);
-      } catch (cleanupError) {
-        console.error(
-          "[evry:people] failed to clean up an unclaimed photo object:",
-          cleanupError
-        );
+      } catch {
+        // Outcome reconciliation itself is uncertain. Preserve the object so
+        // same-key replay can recover a committed pointer without data loss.
+        return { status: "retryable" };
       }
     }
     throw error;

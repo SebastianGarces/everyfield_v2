@@ -98,7 +98,7 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
   cleanupPlanResources?(input: {
     actor: EvryPlantActor;
     plan: EvryConversationPlanIdentity;
-  }): Promise<unknown>;
+  }): Promise<void | Readonly<{ failed: number }>>;
   now(): Date;
   correlationId?(): string;
 }>;
@@ -127,13 +127,9 @@ async function cleanupPlanResources(
   plan: EvryConversationPlanIdentity
 ) {
   if (!boundaries.cleanupPlanResources) return;
-  try {
-    await boundaries.cleanupPlanResources({ actor, plan });
-  } catch (error) {
-    // Product state is already authoritative. Cleanup remains idempotently
-    // recoverable and must not rewrite a completed/cancelled outcome as failed.
-    console.error("Unexpected Evry terminal resource cleanup failure", error);
-  }
+  const result = await boundaries.cleanupPlanResources({ actor, plan });
+  if (result && result.failed > 0)
+    throw new Error("Evry terminal resource cleanup remains incomplete");
 }
 
 function samePlan(
@@ -563,6 +559,17 @@ export function createEvryArtifactLifecycle(
       input.request.requestKey,
       completionPurpose
     );
+    const receipt = detailedReceiptFor(
+      resumed.conversation,
+      input.request.plan
+    );
+    if (receipt) {
+      // The receipt is durable before external-object cleanup. A response loss
+      // or cleanup failure re-enters here, retries cleanup idempotently, and
+      // never starts the completed effects again.
+      await cleanupPlanResources(boundaries, input.actor, input.request.plan);
+      return { status: "already_finished", resumed };
+    }
     if (hasRequestKey(resumed.conversation.messages, completionKey)) {
       return {
         status:
@@ -573,15 +580,6 @@ export function createEvryArtifactLifecycle(
               : "cancelled",
         resumed,
       };
-    }
-
-    const receipt = detailedReceiptFor(
-      resumed.conversation,
-      input.request.plan
-    );
-    if (receipt) {
-      await cleanupPlanResources(boundaries, input.actor, input.request.plan);
-      return { status: "already_finished", resumed };
     }
 
     const confirmation = detailedConfirmationFor(

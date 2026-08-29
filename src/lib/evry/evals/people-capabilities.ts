@@ -28,6 +28,7 @@ function liveOutcomeCase(identity: string, layer: EvryCapabilityEvalLayer) {
   return Object.freeze({
     id: `${identity}:${layer}:live-database`,
     proofId: "people-capability-live-outcomes",
+    testName: `${identity}:production-live-outcome`,
   });
 }
 

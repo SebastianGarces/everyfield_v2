@@ -66,9 +66,16 @@ export async function deleteFile(key: string): Promise<void> {
   await s3Client.send(command);
 }
 
-/** List every private object key below one closed application prefix. */
-export async function listFileKeys(prefix: string): Promise<string[]> {
-  const keys: string[] = [];
+export type StoredFileObject = Readonly<{
+  key: string;
+  lastModified: Date | null;
+}>;
+
+/** List every private object below one closed application prefix. */
+export async function listFileObjects(
+  prefix: string
+): Promise<StoredFileObject[]> {
+  const objects: StoredFileObject[] = [];
   let continuationToken: string | undefined;
   do {
     const result = await s3Client.send(
@@ -78,14 +85,22 @@ export async function listFileKeys(prefix: string): Promise<string[]> {
         ContinuationToken: continuationToken,
       })
     );
-    for (const object of result.Contents ?? []) {
-      if (object.Key) keys.push(object.Key);
-    }
+    for (const object of result.Contents ?? [])
+      if (object.Key)
+        objects.push({
+          key: object.Key,
+          lastModified: object.LastModified ?? null,
+        });
     continuationToken = result.IsTruncated
       ? result.NextContinuationToken
       : undefined;
   } while (continuationToken);
-  return keys;
+  return objects;
+}
+
+/** List every private object key below one closed application prefix. */
+export async function listFileKeys(prefix: string): Promise<string[]> {
+  return (await listFileObjects(prefix)).map(({ key }) => key);
 }
 
 // ============================================================================

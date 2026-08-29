@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 import { personSources } from "@/db/schema";
+import { exactEvryContentPages } from "@/lib/evry/artifacts/exact-content-pages";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
   createEvryArtifactReviewRegistry,
@@ -482,10 +483,10 @@ function importRowDisclosure(row: EvryImportPersonRow): string {
 
 function exactImportRowPages(row: EvryImportPersonRow) {
   const content = importRowDisclosure(row);
-  const pages = Math.max(1, Math.ceil(content.length / 4_000));
-  return Array.from({ length: pages }, (_, index) => ({
-    label: `Row ${row.rowNumber} ${row.disposition} · page ${index + 1} of ${pages}`,
-    content: content.slice(index * 4_000, (index + 1) * 4_000),
+  const pages = exactEvryContentPages(content);
+  return pages.map((page, index) => ({
+    label: `Row ${row.rowNumber} ${row.disposition} · page ${index + 1} of ${pages.length}`,
+    content: page,
   }));
 }
 export const PEOPLE_FILE_REVIEWS = [

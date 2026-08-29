@@ -1,4 +1,9 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 
 import { z } from "zod";
 
@@ -129,10 +134,12 @@ function stagedAttachmentPrefix(actor?: Scope): string {
 export function evryPeopleStagedAttachmentStorageKey(input: {
   actor: Scope;
   expiresAt: Date;
+  uploadId: string;
   digest: string;
   extension: string;
 }): string {
-  return `${stagedAttachmentPrefix(input.actor)}${input.expiresAt.getTime()}-${input.digest}.${input.extension}`;
+  const uploadId = z.string().uuid().parse(input.uploadId);
+  return `${stagedAttachmentPrefix(input.actor)}${input.expiresAt.getTime()}-${uploadId}-${input.digest}.${input.extension}`;
 }
 
 /** Idempotently remove one exact actor/plant-scoped staged attachment. */
@@ -168,7 +175,10 @@ export async function sweepExpiredEvryPeopleAttachments(
   let failed = 0;
   for (const key of keys) {
     const tail = key.slice(prefix.length);
-    const expiry = /^(\d{13})-[0-9a-f]{64}\.[a-z0-9]+$/i.exec(tail)?.[1];
+    const expiry =
+      /^(\d{13})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f]{64}\.[a-z0-9]+$/i.exec(
+        tail
+      )?.[1];
     if (!expiry || Number(expiry) > now) continue;
     try {
       await (input.remove ?? deleteFile)(key);
@@ -254,6 +264,7 @@ export async function stageEvryPeopleAttachment(input: {
   const storageKey = evryPeopleStagedAttachmentStorageKey({
     actor: input.actor,
     expiresAt,
+    uploadId: randomUUID(),
     digest,
     extension,
   });

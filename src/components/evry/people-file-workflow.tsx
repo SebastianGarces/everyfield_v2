@@ -19,6 +19,26 @@ const ACCEPT: Record<FileKind, string> = {
 export function EvryPeopleFileWorkflow() {
   const { activeContext, isComposerBlocked, isSending, submitPeopleFile } =
     useEvryShell();
+  return (
+    <EvryPeopleFileWorkflowForm
+      personId={
+        activeContext?.wire.kind === "person"
+          ? activeContext.wire.recordId
+          : null
+      }
+      isComposerBlocked={isComposerBlocked}
+      isSending={isSending}
+      submitPeopleFile={submitPeopleFile}
+    />
+  );
+}
+
+export function EvryPeopleFileWorkflowForm(props: {
+  personId: string | null;
+  isComposerBlocked: boolean;
+  isSending: boolean;
+  submitPeopleFile(value: EvryPeopleFileSubmission): Promise<boolean>;
+}) {
   const [kind, setKind] = useState<FileKind>("people_csv");
   const [file, setFile] = useState<File | null>(null);
   const [duplicateDisposition, setDuplicateDisposition] = useState<
@@ -28,13 +48,12 @@ export function EvryPeopleFileWorkflow() {
     "core_group" | "launch_team"
   >("core_group");
   const [signedDate, setSignedDate] = useState("");
-  const personContext =
-    activeContext?.wire.kind === "person" ? activeContext.wire.recordId : null;
+  const personContext = props.personId;
   const id = useId();
   const needsPerson = kind !== "people_csv";
   const disabled =
-    isComposerBlocked ||
-    isSending ||
+    props.isComposerBlocked ||
+    props.isSending ||
     !file ||
     (needsPerson && !personContext) ||
     (kind === "commitment_document" && !signedDate);
@@ -54,7 +73,7 @@ export function EvryPeopleFileWorkflow() {
               commitmentType,
               signedDate,
             };
-    if (await submitPeopleFile(input)) setFile(null);
+    if (await props.submitPeopleFile(input)) setFile(null);
   }
 
   return (
@@ -80,7 +99,7 @@ export function EvryPeopleFileWorkflow() {
                 setKind(event.target.value as FileKind);
                 setFile(null);
               }}
-              disabled={isComposerBlocked || isSending}
+              disabled={props.isComposerBlocked || props.isSending}
               className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px] disabled:opacity-50"
             >
               <option value="people_csv">Preview and import People CSV</option>
@@ -95,11 +114,10 @@ export function EvryPeopleFileWorkflow() {
               Choose file
             </label>
             <Input
-              key={kind + (file ? "-selected" : "-empty")}
               id={`${id}-file`}
               type="file"
               accept={ACCEPT[kind]}
-              disabled={isComposerBlocked || isSending}
+              disabled={props.isComposerBlocked || props.isSending}
               required
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               className="h-auto min-h-10 py-1.5"
@@ -176,7 +194,7 @@ export function EvryPeopleFileWorkflow() {
             disabled={disabled}
             className="active:scale-[0.96] motion-reduce:transform-none"
           >
-            {isSending ? (
+            {props.isSending ? (
               <LoaderCircle
                 aria-hidden="true"
                 className="animate-spin motion-reduce:animate-none"
@@ -184,7 +202,7 @@ export function EvryPeopleFileWorkflow() {
             ) : (
               <FileUp aria-hidden="true" />
             )}
-            {isSending ? "Preparing review…" : "Prepare review"}
+            {props.isSending ? "Preparing review…" : "Prepare review"}
           </Button>
         </div>
       </form>

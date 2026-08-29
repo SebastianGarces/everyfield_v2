@@ -6,6 +6,7 @@ import {
   personSources,
   personStatuses,
 } from "@/db/schema";
+import { exactEvryContentPages } from "@/lib/evry/artifacts/exact-content-pages";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
   createEvryArtifactReviewRegistry,
@@ -492,29 +493,18 @@ function changes(
   );
 }
 
-const NOTE_DISCLOSURE_PAGE_CHARACTERS = 4_000;
-
 function noteDisclosureSummary(value: string | null): string {
   if (value === null) return "Not set";
-  const pages = Math.max(
-    1,
-    Math.ceil(value.length / NOTE_DISCLOSURE_PAGE_CHARACTERS)
-  );
+  const pages = exactEvryContentPages(value).length;
   return `Exact content shown in ${pages} ${pages === 1 ? "page" : "pages"} below`;
 }
 
 function noteDisclosurePages(phase: "before" | "after", value: string | null) {
   if (value === null) return [];
-  const pages = Math.max(
-    1,
-    Math.ceil(value.length / NOTE_DISCLOSURE_PAGE_CHARACTERS)
-  );
-  return Array.from({ length: pages }, (_, index) => ({
-    label: `Notes ${phase} · page ${index + 1} of ${pages}`,
-    content: value.slice(
-      index * NOTE_DISCLOSURE_PAGE_CHARACTERS,
-      (index + 1) * NOTE_DISCLOSURE_PAGE_CHARACTERS
-    ),
+  const pages = exactEvryContentPages(value);
+  return pages.map((content, index) => ({
+    label: `Notes ${phase} · page ${index + 1} of ${pages.length}`,
+    content,
   }));
 }
 

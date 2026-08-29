@@ -422,7 +422,9 @@ for (const capability of generated.capabilities) {
             );
             assert.ok(
               fixture?.cases.execution.some(
-                ({ proofId }) => proofId === "people-capability-live-outcomes"
+                ({ proofId, testName }) =>
+                  proofId === "people-capability-live-outcomes" &&
+                  testName === `${identity}:production-live-outcome`
               )
             );
           } else {
@@ -446,7 +448,9 @@ for (const capability of generated.capabilities) {
             );
             assert.ok(
               fixture?.cases.idempotency.some(
-                ({ proofId }) => proofId === "people-capability-live-outcomes"
+                ({ proofId, testName }) =>
+                  proofId === "people-capability-live-outcomes" &&
+                  testName === `${identity}:production-live-outcome`
               )
             );
           } else {
@@ -482,7 +486,9 @@ for (const capability of generated.capabilities) {
             );
             assert.ok(
               fixture?.cases.errors.some(
-                ({ proofId }) => proofId === "people-capability-live-outcomes"
+                ({ proofId, testName }) =>
+                  proofId === "people-capability-live-outcomes" &&
+                  testName === `${identity}:production-live-outcome`
               )
             );
           } else {

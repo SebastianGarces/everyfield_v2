@@ -23,7 +23,15 @@ test("cleanup fails closed before touching storage", async () => {
   delete process.env.CRON_SECRET;
   let sweeps = 0;
   const response = await createEvryPeopleAttachmentCleanupGet({
-    sweep: async () => {
+    sweepStaged: async () => {
+      sweeps += 1;
+      return { removed: 0, failed: 0 };
+    },
+    sweepPhotos: async () => {
+      sweeps += 1;
+      return { removed: 0, failed: 0 };
+    },
+    sweepCommitments: async () => {
       sweeps += 1;
       return { removed: 0, failed: 0 };
     },
@@ -35,7 +43,9 @@ test("cleanup fails closed before touching storage", async () => {
 test("cleanup reports complete and retryable incomplete sweeps", async () => {
   process.env.CRON_SECRET = "cleanup-secret";
   const completed = await createEvryPeopleAttachmentCleanupGet({
-    sweep: async () => ({ removed: 4, failed: 0 }),
+    sweepStaged: async () => ({ removed: 1, failed: 0 }),
+    sweepPhotos: async () => ({ removed: 2, failed: 0 }),
+    sweepCommitments: async () => ({ removed: 1, failed: 0 }),
   })(request("Bearer cleanup-secret"));
   assert.equal(completed.status, 200);
   assert.deepEqual(await completed.json(), {
@@ -45,7 +55,9 @@ test("cleanup reports complete and retryable incomplete sweeps", async () => {
   });
 
   const incomplete = await createEvryPeopleAttachmentCleanupGet({
-    sweep: async () => ({ removed: 3, failed: 1 }),
+    sweepStaged: async () => ({ removed: 1, failed: 0 }),
+    sweepPhotos: async () => ({ removed: 1, failed: 1 }),
+    sweepCommitments: async () => ({ removed: 1, failed: 0 }),
   })(request("Bearer cleanup-secret"));
   assert.equal(incomplete.status, 503);
   assert.deepEqual(await incomplete.json(), {

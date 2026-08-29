@@ -4,7 +4,13 @@ import { db } from "@/db";
 import { commitments } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
-import { deleteFile, listFileKeys } from "@/lib/storage";
+import {
+  deleteFile,
+  listFileObjects,
+  type StoredFileObject,
+} from "@/lib/storage";
+
+import { EVRY_FINAL_OBJECT_GRACE_MS } from "./person-photo";
 
 import { claimEvryPeopleEffect } from "./evry-effect";
 
@@ -30,39 +36,93 @@ export async function sweepEvryCommitmentDocumentObjects(input: {
     plantId: string;
     personId: string;
   }) => Promise<readonly string[]>;
-  list?: typeof listFileKeys;
+  list?: (prefix: string) => Promise<readonly StoredFileObject[]>;
   remove?: typeof deleteFile;
+  now?: Date;
 }): Promise<Readonly<{ removed: number; failed: number }>> {
-  const referenced = new Set(
-    input.loadReferenced
-      ? await input.loadReferenced({
+  const loadReferenced =
+    input.loadReferenced ??
+    (async (scope: { plantId: string; personId: string }) =>
+      (
+        await db
+          .select({ key: commitments.documentUrl })
+          .from(commitments)
+          .where(
+            and(
+              eq(commitments.churchId, scope.plantId),
+              eq(commitments.personId, scope.personId)
+            )
+          )
+      ).flatMap(({ key }) => (key ? [key] : [])));
+  const prefix = `commitments/${input.plantId}/${input.personId}/`;
+  const objects = await (input.list ?? listFileObjects)(prefix);
+  const cutoff =
+    (input.now ?? new Date()).getTime() - EVRY_FINAL_OBJECT_GRACE_MS;
+  let removed = 0;
+  let failed = 0;
+  for (const object of objects) {
+    if (
+      !object.key.startsWith(prefix) ||
+      !object.lastModified ||
+      object.lastModified.getTime() > cutoff
+    )
+      continue;
+    try {
+      const referenced = new Set(
+        await loadReferenced({
           plantId: input.plantId,
           personId: input.personId,
         })
-      : (
-          await db
-            .select({ key: commitments.documentUrl })
-            .from(commitments)
-            .where(
-              and(
-                eq(commitments.churchId, input.plantId),
-                eq(commitments.personId, input.personId)
-              )
-            )
-        ).flatMap(({ key }) => (key ? [key] : []))
-  );
-  const prefix = `commitments/${input.plantId}/${input.personId}/`;
-  const keys = await (input.list ?? listFileKeys)(prefix);
-  let removed = 0;
-  let failed = 0;
-  for (const key of keys) {
-    if (!key.startsWith(prefix) || referenced.has(key)) continue;
-    try {
-      await (input.remove ?? deleteFile)(key);
+      );
+      if (referenced.has(object.key)) continue;
+      await (input.remove ?? deleteFile)(object.key);
       removed += 1;
     } catch {
       failed += 1;
     }
+  }
+  return { removed, failed };
+}
+
+/** Hourly backstop for final commitment objects after an interrupted cleanup. */
+export async function sweepAllEvryCommitmentDocumentObjects(
+  input: {
+    now?: Date;
+    list?: typeof listFileObjects;
+    remove?: typeof deleteFile;
+    loadReferenced?: (scope: {
+      plantId: string;
+      personId: string;
+    }) => Promise<readonly string[]>;
+  } = {}
+): Promise<Readonly<{ removed: number; failed: number }>> {
+  const objects = await (input.list ?? listFileObjects)("commitments/");
+  const scopes = new Map<string, { plantId: string; personId: string }>();
+  for (const { key } of objects) {
+    const match =
+      /^commitments\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/i.exec(
+        key
+      );
+    if (!match) continue;
+    const [, plantId, personId] = match;
+    scopes.set(`${plantId}:${personId}`, {
+      plantId: plantId!,
+      personId: personId!,
+    });
+  }
+  let removed = 0;
+  let failed = 0;
+  for (const scope of scopes.values()) {
+    const result = await sweepEvryCommitmentDocumentObjects({
+      ...scope,
+      now: input.now,
+      loadReferenced: input.loadReferenced,
+      list: async (prefix) =>
+        objects.filter(({ key }) => key.startsWith(prefix)),
+      remove: input.remove,
+    });
+    removed += result.removed;
+    failed += result.failed;
   }
   return { removed, failed };
 }

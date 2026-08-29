@@ -246,6 +246,124 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
   );
 });
 
+test("a legal 25-row maximum import has a bounded lossless confirmation", () => {
+  const identity = PEOPLE_FILE_IDENTITIES.import;
+  const rows = Array.from({ length: 25 }, (_, index) => {
+    const suffix = String(index + 1).padStart(12, "0");
+    const expectedTargetJson = JSON.stringify({
+      firstName: `Target ${index + 1}`,
+      lastName: "Person",
+      padding: `${"t".repeat(3_950)}😀${"t".repeat(34_950)}`,
+    });
+    assert.equal(expectedTargetJson.length <= 40_000, true);
+    return {
+      rowNumber: index + 2,
+      rowKey: (index + 1).toString(16).padStart(64, "0"),
+      personId: `10000000-0000-4000-8000-${suffix}`,
+      firstName: `Incoming ${index + 1}`,
+      lastName: "Person",
+      email: `incoming-${index + 1}@example.com`,
+      phone: null,
+      source: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      country: "US",
+      notes: `${"n".repeat(3_950)}😀${"n".repeat(16_048)}`,
+      disposition: "merge" as const,
+      targetPersonId: `20000000-0000-4000-8000-${suffix}`,
+      expectedTargetJson,
+    };
+  });
+  const snapshot = rows.map((row) => ({
+    rowNumber: row.rowNumber,
+    email: row.email,
+    phone: row.phone,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    matchIds: [row.targetPersonId],
+    disposition: "merge" as const,
+    targetPersonId: row.targetPersonId,
+  }));
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: "bulk-import",
+          capabilityIdentity: identity,
+          arguments: {
+            attachmentReference: "first-party-signed-reference",
+            attachmentDigest: DIGEST,
+            originalName: "maximum.csv",
+            previewFingerprint: "c".repeat(64),
+            duplicateSnapshotJson: JSON.stringify(snapshot),
+            rowsJson: JSON.stringify(rows),
+            totalRows: 25,
+          },
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: PEOPLE_FILE_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity }],
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: PLAN_ID,
+      fingerprint: DIGEST,
+    }),
+    document,
+    reviewRegistry: PEOPLE_FILE_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+  const previews = review.confirmation.steps[0]!.contentPreviews;
+  assert.equal(previews.length > 160, true);
+  assert.equal(previews.length <= 512, true);
+  assert.equal(
+    previews.every(({ content }) => {
+      const first = content.charCodeAt(0);
+      const last = content.charCodeAt(content.length - 1);
+      return (
+        content.length <= 4_000 &&
+        !(first >= 0xdc00 && first <= 0xdfff) &&
+        !(last >= 0xd800 && last <= 0xdbff)
+      );
+    }),
+    true
+  );
+  const disclosed = previews
+    .filter(({ label }) => label.startsWith("Row "))
+    .reduce<Record<string, string>>((documents, page) => {
+      const rowNumber = page.label.split(" ")[1]!;
+      documents[rowNumber] = (documents[rowNumber] ?? "") + page.content;
+      return documents;
+    }, {});
+  for (const row of rows) {
+    assert.deepEqual(JSON.parse(disclosed[String(row.rowNumber)]!), {
+      disposition: "merge",
+      rowNumber: row.rowNumber,
+      targetPersonId: row.targetPersonId,
+      before: JSON.parse(row.expectedTargetJson),
+      incoming: {
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        phone: row.phone,
+        source: row.source,
+        addressLine1: row.addressLine1,
+        addressLine2: row.addressLine2,
+        city: row.city,
+        state: row.state,
+        postalCode: row.postalCode,
+        country: row.country,
+        notes: row.notes,
+      },
+    });
+  }
+});
+
 test("import plan validation refuses two merge rows targeting one person", () => {
   const identity = PEOPLE_FILE_IDENTITIES.import;
   const targetPersonId = "10000000-0000-4000-8000-000000000002";

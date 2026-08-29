@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { sweepExpiredEvryPeopleAttachments } from "@/lib/evry/capabilities/people/attachments";
+import { sweepAllEvryCommitmentDocumentObjects } from "@/lib/people/evry-milestones";
+import { sweepAllEvryPersonPhotoObjects } from "@/lib/people/person-photo";
 import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 export const dynamic = "force-dynamic";
@@ -12,9 +14,13 @@ const PRIVATE_HEADERS = {
 };
 
 export function createEvryPeopleAttachmentCleanupGet({
-  sweep = sweepExpiredEvryPeopleAttachments,
+  sweepStaged = sweepExpiredEvryPeopleAttachments,
+  sweepPhotos = sweepAllEvryPersonPhotoObjects,
+  sweepCommitments = sweepAllEvryCommitmentDocumentObjects,
 }: {
-  sweep?: typeof sweepExpiredEvryPeopleAttachments;
+  sweepStaged?: typeof sweepExpiredEvryPeopleAttachments;
+  sweepPhotos?: typeof sweepAllEvryPersonPhotoObjects;
+  sweepCommitments?: typeof sweepAllEvryCommitmentDocumentObjects;
 } = {}) {
   return async function evryPeopleAttachmentCleanupGet(request: Request) {
     const secret = process.env.CRON_SECRET;
@@ -28,7 +34,18 @@ export function createEvryPeopleAttachmentCleanupGet({
       );
     }
     try {
-      const result = await sweep();
+      const results = await Promise.all([
+        sweepStaged(),
+        sweepPhotos(),
+        sweepCommitments(),
+      ]);
+      const result = results.reduce(
+        (total, current) => ({
+          removed: total.removed + current.removed,
+          failed: total.failed + current.failed,
+        }),
+        { removed: 0, failed: 0 }
+      );
       return NextResponse.json(
         { status: result.failed === 0 ? "completed" : "incomplete", ...result },
         {
@@ -37,7 +54,7 @@ export function createEvryPeopleAttachmentCleanupGet({
         }
       );
     } catch (error) {
-      console.error("[evry:people] staged attachment cleanup failed", error);
+      console.error("[evry:people] attachment cleanup failed", error);
       return NextResponse.json(
         { status: "unavailable" },
         { status: 503, headers: PRIVATE_HEADERS }

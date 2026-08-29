@@ -179,8 +179,8 @@ function disclosedNotes(
 }
 
 test("create and update disclose every legal 20k note character losslessly in bounded pages", () => {
-  const beforeNotes = `  ${"b".repeat(19_996)}  `;
-  const afterNotes = `\n${"a".repeat(19_998)}\t`;
+  const beforeNotes = `  ${"b".repeat(3_997)}😀${"b".repeat(15_997)}  `;
+  const afterNotes = `\n${"a".repeat(3_998)}😀${"a".repeat(15_998)}\t`;
   assert.equal(beforeNotes.length, 20_000);
   assert.equal(afterNotes.length, 20_000);
 
@@ -215,5 +215,16 @@ test("create and update disclose every legal 20k note character losslessly in bo
   assert.ok(updated);
   assert.equal(disclosedNotes(updated, "before"), beforeNotes);
   assert.equal(disclosedNotes(updated, "after"), afterNotes);
-  assert.equal(updated.confirmation.steps[0]?.contentPreviews.length, 10);
+  assert.equal(updated.confirmation.steps[0]?.contentPreviews.length, 12);
+  assert.equal(
+    updated.confirmation.steps[0]?.contentPreviews.every(({ content }) => {
+      const first = content.charCodeAt(0);
+      const last = content.charCodeAt(content.length - 1);
+      return (
+        !(first >= 0xdc00 && first <= 0xdfff) &&
+        !(last >= 0xd800 && last <= 0xdbff)
+      );
+    }),
+    true
+  );
 });

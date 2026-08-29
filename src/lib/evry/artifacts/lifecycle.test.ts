@@ -345,6 +345,35 @@ test("a replay returns the persisted receipt without a second confirm or executi
   assert.deepEqual(fake.calls, callsAfterFirstRun);
 });
 
+test("receipt survives cleanup failure and replay retries cleanup without a second effect", async () => {
+  const fake = harness();
+  let cleanupCalls = 0;
+  const run = createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => ({
+      failed: cleanupCalls++ === 0 ? 1 : 0,
+    }),
+  });
+
+  await assert.rejects(
+    run(request("execute")),
+    /terminal resource cleanup remains incomplete/
+  );
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(
+    fake
+      .conversation()
+      .messages.flatMap(({ artifacts }) => artifacts)
+      .some(({ document }) => document.kind === "result"),
+    true
+  );
+
+  const replay = await run(request("execute"));
+  assert.equal(replay.status, "already_finished");
+  assert.equal(fake.calls.filter((call) => call === "execute").length, 1);
+  assert.equal(cleanupCalls, 2);
+});
+
 test("cancel and edit durably cancel the exact plan and clear conversation authority", async () => {
   for (const action of ["cancel", "edit"] as const) {
     const fake = harness();
