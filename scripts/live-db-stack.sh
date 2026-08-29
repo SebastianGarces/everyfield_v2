@@ -41,10 +41,15 @@ usage() {
 
 up() {
   docker network create "$NETWORK" >/dev/null 2>&1 || true
-  docker rm -f "$PG_CONTAINER" "$PROXY_CONTAINER" >/dev/null 2>&1 || true
+  # pgvector declares PGDATA as a VOLUME. Removing a prior container without
+  # `-v` leaves that anonymous test database behind forever, so every reset
+  # used to leak hundreds of megabytes. The live lane is intentionally
+  # disposable: remove its anonymous mounts and keep the replacement in RAM.
+  docker rm -fv "$PG_CONTAINER" "$PROXY_CONTAINER" >/dev/null 2>&1 || true
 
   echo "==> starting Postgres (pgvector) on :$PG_PORT"
   docker run -d --name "$PG_CONTAINER" --network "$NETWORK" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data,tmpfs-size=2147483648 \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_PASSWORD=postgres \
     -e POSTGRES_DB=main \
@@ -123,7 +128,7 @@ EOF
 }
 
 down() {
-  docker rm -f "$PG_CONTAINER" "$PROXY_CONTAINER" >/dev/null 2>&1 || true
+  docker rm -fv "$PG_CONTAINER" "$PROXY_CONTAINER" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   echo "==> removed"
 }
