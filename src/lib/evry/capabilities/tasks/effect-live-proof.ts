@@ -25,7 +25,9 @@ import {
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
 import type { EvryEffectInput } from "@/lib/evry/executor";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type { EvryCapabilityRegistration } from "@/lib/evry/eligibility/registry";
 import type { EvryPlanRequestKey } from "@/lib/evry/plans";
+import type { EvryReadContinuation } from "@/lib/evry/reads/contract";
 import {
   holdTaskStructureBarrier,
   waitForTaskStructureWaiters,
@@ -44,6 +46,7 @@ const SCRATCH = `__evry tasks proof ${randomUUID()}__`;
 const READ_IDENTITIES = {
   detail: "tasks.read.detail",
   list: "tasks.read.list",
+  phasePrompt: "tasks.read.phase-template-prompt",
   planning: "tasks.read.planning-options",
   templates: "tasks.read.templates",
 } as const;
@@ -1606,9 +1609,11 @@ async function runStructureBarrierRaces(input: {
 function readInput(identity: string, taskId: string) {
   switch (identity) {
     case READ_IDENTITIES.list:
-      return { search: SCRATCH, includeCompleted: true };
+      return { search: SCRATCH, includeCompleted: true, cursor: null };
     case READ_IDENTITIES.detail:
       return { taskId };
+    case READ_IDENTITIES.phasePrompt:
+      return {};
     case READ_IDENTITIES.planning:
       return { taskId };
     case READ_IDENTITIES.templates:
@@ -1625,6 +1630,8 @@ async function runReads(input: {
   foreignTaskId: string;
   foreignTaskTitle: string;
   foreignUserId: string;
+  localTransitionId: string;
+  foreignTransitionId: string;
 }) {
   for (const registration of input.registrations) {
     const invocation = {
@@ -1657,10 +1664,72 @@ async function runReads(input: {
         : first;
     assert.ok(foreignAttempt);
     const serialized = JSON.stringify(foreignAttempt);
+    if (registration.capabilityIdentity === READ_IDENTITIES.phasePrompt) {
+      assert.match(serialized, new RegExp(input.localTransitionId));
+    }
+    assert.doesNotMatch(serialized, new RegExp(input.foreignTransitionId));
     assert.doesNotMatch(serialized, new RegExp(input.foreignTaskTitle));
     assert.doesNotMatch(serialized, new RegExp(input.foreignUserId));
     console.log(`PASS ${registration.capabilityIdentity}:tenancy`);
   }
+}
+
+async function runListCursorProof(input: {
+  actor: EvryPlantActor;
+  continueRead: EvryReadContinuation;
+  eligibleCapabilities: readonly EvryCapabilityRegistration[];
+  registration: EvryReadRegistration;
+}) {
+  const marker = `cursor-proof-${randomUUID()}`;
+  const seeded = await Promise.all(
+    Array.from({ length: 51 }, (_, index) =>
+      seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: `${marker} ${String(index + 1).padStart(2, "0")}`,
+      })
+    )
+  );
+  const invocation = {
+    literalUserText: `Find tasks matching ${marker}`,
+    pageContext: null,
+  } as const;
+  const first = await input.registration.execute(invocation, {
+    search: marker,
+    includeCompleted: true,
+    cursor: null,
+  });
+  assert.ok(first?.kind === "read");
+  assert.equal(first.items.length, 50);
+  assert.equal(first.counts.excluded, 0);
+  assert.deepEqual(first.exclusions, []);
+  const nextCursor = first.filters.find(
+    ({ label }) => label === "Next page cursor"
+  )?.value;
+  assert.ok(nextCursor && nextCursor !== "End of results");
+
+  const second = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText: `Load more tasks matching ${marker} after ${nextCursor}`,
+    pageContext: null,
+  });
+  assert.ok(second?.kind === "read");
+  assert.equal(second.items.length, 1);
+  assert.equal(second.counts.excluded, 0);
+  assert.deepEqual(second.exclusions, []);
+  assert.equal(
+    second.filters.find(({ label }) => label === "Page cursor")?.value,
+    nextCursor
+  );
+  assert.equal(
+    second.filters.find(({ label }) => label === "Next page cursor")?.value,
+    "End of results"
+  );
+  assert.deepEqual(
+    [...first.items, ...second.items].map(({ id }) => id).toSorted(),
+    seeded.map(({ id }) => id).toSorted()
+  );
+  console.log("PASS tasks.read.list:cursor-pagination");
 }
 
 async function main() {
@@ -1742,6 +1811,20 @@ async function main() {
     title: `${SCRATCH} ${"read target ".repeat(60)}`.slice(0, 500),
     description: `<p>${"Long durable Task description. ".repeat(50)}</p>`,
   });
+  const [localTransition] = await db
+    .insert(phaseTransitions)
+    .values({
+      churchId: actor.plantId,
+      fromPhase: 1,
+      toPhase: 0,
+      initiatedById: actor.userId,
+      reason: "Local Task read proof",
+      kind: "transition",
+      rubricVersion: "task-proof-v1",
+      createdAt: NOW,
+    })
+    .returning({ id: phaseTransitions.id });
+  assert.ok(localTransition);
   await runReads({
     registrations: reads.TASK_EVRY_READ_REGISTRATIONS,
     store: artifacts.storedEvryReadArtifactDocument,
@@ -1749,6 +1832,14 @@ async function main() {
     foreignTaskId: foreignTask!.id,
     foreignTaskTitle,
     foreignUserId: seeded.foreignUserId,
+    localTransitionId: localTransition.id,
+    foreignTransitionId: foreignTransition.id,
+  });
+  await runListCursorProof({
+    actor,
+    continueRead: reads.continueTaskEvryRead,
+    eligibleCapabilities: eligibility.eligibleEvryCapabilitiesFor(actor),
+    registration: reads.TASK_LIST_READ,
   });
 
   await db
@@ -1764,7 +1855,8 @@ async function main() {
     assert.equal(
       Boolean(result),
       registration.capabilityIdentity !== READ_IDENTITIES.planning &&
-        registration.capabilityIdentity !== READ_IDENTITIES.templates,
+        registration.capabilityIdentity !== READ_IDENTITIES.templates &&
+        registration.capabilityIdentity !== READ_IDENTITIES.phasePrompt,
       registration.capabilityIdentity
     );
     console.log(`PASS ${registration.capabilityIdentity}:permission`);

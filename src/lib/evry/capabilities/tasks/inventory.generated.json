@@ -4,7 +4,7 @@
   "authoritativeSources": {
     "actions": "src/lib/auth/capability-map.ts",
     "routes": "src/app/(dashboard)/tasks/**/page.tsx",
-    "rscReads": "AST-discovered imported operations in Task page awaits"
+    "rscReads": "AST-discovered awaited operations in the Task RSC import graph"
   },
   "capabilities": [
     {
@@ -232,6 +232,18 @@
       "domain": "list",
       "operationKind": "read",
       "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
+      "identity": "tasks.read.phase-template-prompt",
+      "surfaceIdentities": [
+        "read-operation:src/components/tasks/phase-template-prompt.tsx → readPhaseTemplatePrompt"
+      ],
+      "parityCapability": "tasks",
+      "domain": "phase_template",
+      "operationKind": "read",
+      "applicationCapability": "phase.signal",
       "confirmation": "not_required",
       "mutationShape": null
     },
@@ -798,6 +810,45 @@
       "classification": { "state": "excluded", "reason": "shared_boundary" }
     },
     {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → cookies",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "cookies",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → getCurrentSession",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "getCurrentSession",
+      "capabilityIdentity": null,
+      "domain": "boundary",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "shared_boundary" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "read-operation:src/components/tasks/phase-template-prompt.tsx → readPhaseTemplatePrompt",
+      "source": "src/components/tasks/phase-template-prompt.tsx",
+      "exportName": "readPhaseTemplatePrompt",
+      "capabilityIdentity": "tasks.read.phase-template-prompt",
+      "domain": "phase_template",
+      "operationKind": "read",
+      "applicationCapability": "phase.signal",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
       "kind": "route",
       "identity": "route:/tasks",
       "source": "src/app/(dashboard)/tasks/page.tsx",
@@ -853,9 +904,9 @@
   "summary": {
     "actions": 18,
     "routes": 4,
-    "rscReads": 22,
-    "exclusions": 7,
-    "readCapabilities": 4,
+    "rscReads": 25,
+    "exclusions": 9,
+    "readCapabilities": 5,
     "effectCapabilities": 17,
     "unclassified": 0
   }

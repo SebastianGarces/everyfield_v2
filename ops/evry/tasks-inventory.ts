@@ -30,14 +30,18 @@ const GENERATED_INVENTORY = path.join(
   "inventory.generated.json"
 );
 
-type TaskReadDomain = "detail" | "list" | "planning" | "templates";
+type TaskReadDomain =
+  | "detail"
+  | "list"
+  | "phase_template"
+  | "planning"
+  | "templates";
 type TaskDomain =
   | TaskReadDomain
   | "checklist"
   | "follow_up"
   | "lifecycle"
   | "list"
-  | "phase_template"
   | "template";
 
 type SupportedContract = Readonly<{
@@ -70,7 +74,7 @@ export type TaskEvryCapabilityInventory = Readonly<{
   authoritativeSources: Readonly<{
     actions: "src/lib/auth/capability-map.ts";
     routes: "src/app/(dashboard)/tasks/**/page.tsx";
-    rscReads: "AST-discovered imported operations in Task page awaits";
+    rscReads: "AST-discovered awaited operations in the Task RSC import graph";
   }>;
   capabilities: readonly Readonly<{
     identity: string;
@@ -150,6 +154,19 @@ const READ_CONTRACTS = new Map<string, SupportedContract>([
       applicationCapability: "tasks.write",
     },
   ]),
+  [
+    read(
+      "src/components/tasks/phase-template-prompt.tsx",
+      "readPhaseTemplatePrompt"
+    ),
+    {
+      capabilityIdentity: "tasks.read.phase-template-prompt",
+      domain: "phase_template",
+      operationKind: "read",
+      mutationShape: null,
+      applicationCapability: "phase.signal",
+    },
+  ],
   [
     read(
       "src/app/(dashboard)/tasks/templates/page.tsx",
@@ -318,7 +335,7 @@ function readEntries(repoRoot: string): TaskEvrySurface[] {
     }
     if (!exclusions.has(identity)) {
       throw new Error(
-        `Task inventory has no page-read contract for ${identity}`
+        `Task inventory has no RSC-read contract for ${identity}`
       );
     }
     return {
@@ -439,7 +456,8 @@ export function generateTaskCapabilityInventory(
     authoritativeSources: {
       actions: "src/lib/auth/capability-map.ts",
       routes: "src/app/(dashboard)/tasks/**/page.tsx",
-      rscReads: "AST-discovered imported operations in Task page awaits",
+      rscReads:
+        "AST-discovered awaited operations in the Task RSC import graph",
     },
     capabilities,
     entries,

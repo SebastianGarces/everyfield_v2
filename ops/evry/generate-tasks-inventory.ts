@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   }
   const summary = inventory.summary;
   process.stdout.write(
-    `Task capability inventory ${check ? "verified" : "generated"}: ${summary.actions} actions, ${summary.routes} routes, ${summary.rscReads} page operations (${summary.exclusions} exclusions), ${summary.readCapabilities} read and ${summary.effectCapabilities} effect capabilities; 0 unclassified.\n`
+    `Task capability inventory ${check ? "verified" : "generated"}: ${summary.actions} actions, ${summary.routes} routes, ${summary.rscReads} RSC operations (${summary.exclusions} exclusions), ${summary.readCapabilities} read and ${summary.effectCapabilities} effect capabilities; 0 unclassified.\n`
   );
 }
 

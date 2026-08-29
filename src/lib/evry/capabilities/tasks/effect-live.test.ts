@@ -8,6 +8,7 @@ import { TASK_ACTION_CONTRACTS } from "./contracts";
 const TASK_READ_IDENTITIES = [
   "tasks.read.detail",
   "tasks.read.list",
+  "tasks.read.phase-template-prompt",
   "tasks.read.planning-options",
   "tasks.read.templates",
 ] as const;
@@ -64,6 +65,10 @@ run("Task source-derived handoff remains exact above the bulk UI cap", () => {
 
 run("A resolver-shaped 100-Task completion reaches trusted review", () => {
   assert.match(output, /PASS tasks:resolver-shaped-bulk-review/);
+});
+
+run("Task list cursors reach 51 matching rows without page exclusions", () => {
+  assert.match(output, /PASS tasks\.read\.list:cursor-pagination/);
 });
 
 for (const race of [
