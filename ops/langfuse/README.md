@@ -6,6 +6,8 @@ The stack has no model-provider credentials. Langfuse telemetry, experimental fe
 
 ClickHouse operational logging is capped locally at information level with three 50 MB archives per log channel. Every service also uses Docker's rotating `local` log driver with three 10 MB files, so dependency output cannot exhaust the Docker VM. These bounds cover disposable operational logs without changing trace or event retention.
 
+This local stack is proven with 8 GB of Docker VM memory. At 4 GB, ClickHouse can exhaust its merge memory on retained trace data; increase Docker Desktop's memory allocation if background merges report `MEMORY_LIMIT_EXCEEDED`. Log rotation keeps that failure bounded, but additional memory is what lets the merge complete.
+
 ## Lifecycle
 
 From the repository root:
