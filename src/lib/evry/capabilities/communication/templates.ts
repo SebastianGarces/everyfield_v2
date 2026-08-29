@@ -392,6 +392,31 @@ function effectiveSnapshotContent(snapshot: z.infer<typeof snapshotSchema>) {
   return storedTemplateContent(snapshot.bodyHtml ?? snapshot.body);
 }
 
+function reviewText(
+  value: string | null | undefined,
+  fallback: string,
+  maximum = 4_000
+) {
+  return (value?.trim() || fallback).slice(0, maximum);
+}
+
+function templateReviewTitle(verb: string, name: string) {
+  const prefix = `${verb} template “`;
+  const suffix = "”";
+  return `${prefix}${reviewText(
+    name,
+    "Unnamed template",
+    200 - prefix.length - suffix.length
+  )}${suffix}`;
+}
+
+function templateSourceLink(templateId: string, name: string) {
+  return {
+    label: reviewText(`Open ${name}`, "Open template", 160),
+    href: templateHref(templateId),
+  };
+}
+
 export const COMMUNICATION_TEMPLATE_REVIEWS = [
   defineEvryArtifactReview({
     source: {
@@ -405,7 +430,7 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Create template “${parsed.content.name}”`,
+        title: templateReviewTitle("Create", parsed.content.name),
         actionLabel: "Create template",
         consequences: ["This adds one reusable template to this plant."],
         steps: [
@@ -425,8 +450,14 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
             exclusions: [],
             dateTime: null,
             contentPreviews: [
-              { label: "Subject", content: parsed.content.subject ?? "" },
-              { label: "Body", content: parsed.content.body },
+              {
+                label: "Subject",
+                content: reviewText(parsed.content.subject, "(No subject)"),
+              },
+              {
+                label: "Body",
+                content: reviewText(parsed.content.body, "(Empty template)"),
+              },
             ],
             beforeAfter: [],
           },
@@ -446,7 +477,7 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Update template “${parsed.expected.name}”`,
+        title: templateReviewTitle("Update", parsed.expected.name),
         actionLabel: parsed.expected.isSystem
           ? "Create edited copy"
           : "Save template",
@@ -465,10 +496,10 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
               {
                 label: "Template",
                 value: parsed.expected.name,
-                sourceLink: {
-                  label: `Open ${parsed.expected.name}`,
-                  href: templateHref(parsed.expected.id),
-                },
+                sourceLink: templateSourceLink(
+                  parsed.expected.id,
+                  parsed.expected.name
+                ),
               },
             ],
             counts: [{ label: "Templates to update", count: 1 }],
@@ -484,14 +515,17 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
               },
               {
                 label: "Subject",
-                before: parsed.expected.subject ?? "",
-                after: parsed.content.subject ?? "",
+                before: reviewText(parsed.expected.subject, "(No subject)"),
+                after: reviewText(parsed.content.subject, "(No subject)"),
                 count: 1,
               },
               {
                 label: "Body",
-                before: effectiveSnapshotContent(parsed.expected).body,
-                after: parsed.content.body,
+                before: reviewText(
+                  effectiveSnapshotContent(parsed.expected).body,
+                  "(Empty template)"
+                ),
+                after: reviewText(parsed.content.body, "(Empty template)"),
                 count: 1,
               },
             ],
@@ -512,7 +546,7 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Delete template “${parsed.expected.name}”`,
+        title: templateReviewTitle("Delete", parsed.expected.name),
         actionLabel: "Delete template",
         consequences: ["This permanently removes the selected plant template."],
         steps: [
@@ -525,20 +559,26 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
               {
                 label: "Template",
                 value: parsed.expected.name,
-                sourceLink: {
-                  label: `Open ${parsed.expected.name}`,
-                  href: templateHref(parsed.expected.id),
-                },
+                sourceLink: templateSourceLink(
+                  parsed.expected.id,
+                  parsed.expected.name
+                ),
               },
             ],
             counts: [{ label: "Templates to delete", count: 1 }],
             exclusions: [],
             dateTime: null,
             contentPreviews: [
-              { label: "Subject", content: parsed.expected.subject ?? "" },
+              {
+                label: "Subject",
+                content: reviewText(parsed.expected.subject, "(No subject)"),
+              },
               {
                 label: "Body",
-                content: effectiveSnapshotContent(parsed.expected).body,
+                content: reviewText(
+                  effectiveSnapshotContent(parsed.expected).body,
+                  "(Empty template)"
+                ),
               },
             ],
             beforeAfter: [
@@ -566,7 +606,7 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Copy template “${parsed.source.name}”`,
+        title: templateReviewTitle("Copy", parsed.source.name),
         actionLabel: "Create copy",
         consequences: [
           "This adds one plant-owned copy; the system template remains unchanged.",
@@ -581,20 +621,26 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
               {
                 label: "System template",
                 value: parsed.source.name,
-                sourceLink: {
-                  label: `Open ${parsed.source.name}`,
-                  href: templateHref(parsed.source.id),
-                },
+                sourceLink: templateSourceLink(
+                  parsed.source.id,
+                  parsed.source.name
+                ),
               },
             ],
             counts: [{ label: "Plant copies to create", count: 1 }],
             exclusions: [],
             dateTime: null,
             contentPreviews: [
-              { label: "Subject", content: parsed.source.subject ?? "" },
+              {
+                label: "Subject",
+                content: reviewText(parsed.source.subject, "(No subject)"),
+              },
               {
                 label: "Body",
-                content: effectiveSnapshotContent(parsed.source).body,
+                content: reviewText(
+                  effectiveSnapshotContent(parsed.source).body,
+                  "(Empty template)"
+                ),
               },
             ],
             beforeAfter: [],

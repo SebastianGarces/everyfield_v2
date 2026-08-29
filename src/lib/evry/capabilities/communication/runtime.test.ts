@@ -183,6 +183,89 @@ test("every template mutation shape has strict arguments and a complete trusted 
   }
 });
 
+test("valid maximum-size and subjectless templates remain exactly reviewable", () => {
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: PLAN_ID,
+    fingerprint: FINGERPRINT,
+  });
+  const boundaryContent = {
+    ...content,
+    name: "N".repeat(255),
+    channel: "sms" as const,
+    subject: null,
+    ...storedTemplateContent("B".repeat(5_000)),
+  };
+  const boundarySnapshot = {
+    ...ownedSnapshot,
+    ...boundaryContent,
+  };
+  const candidates = [
+    {
+      identity: COMMUNICATION_TEMPLATE_CREATE_IDENTITY,
+      arguments: { templateId: RESULT_ID, content: boundaryContent },
+    },
+    {
+      identity: COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
+      arguments: {
+        targetKind: "owned",
+        resultTemplateId: TEMPLATE_ID,
+        expected: boundarySnapshot,
+        content: boundaryContent,
+      },
+    },
+    {
+      identity: COMMUNICATION_TEMPLATE_DELETE_IDENTITY,
+      arguments: { expected: boundarySnapshot },
+    },
+    {
+      identity: COMMUNICATION_TEMPLATE_FORK_IDENTITY,
+      arguments: {
+        forkId: RESULT_ID,
+        source: { ...boundarySnapshot, isSystem: true },
+      },
+    },
+  ];
+
+  for (const candidate of candidates) {
+    const document = parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: candidate.identity.split(".").at(-1) ?? "template",
+            capabilityIdentity: candidate.identity,
+            arguments: candidate.arguments,
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: COMMUNICATION_TEMPLATE_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity: candidate.identity }],
+    });
+    const review = trustedReviewForEvryPlanDocument({
+      plan,
+      document,
+      reviewRegistry: COMMUNICATION_TEMPLATE_REVIEW_REGISTRY,
+    });
+    assert.ok(review, candidate.identity);
+    assert.ok(review.confirmation.title.length <= 200);
+    for (const step of review.confirmation.steps) {
+      for (const target of step.resolvedTargets) {
+        assert.ok((target.sourceLink?.label.length ?? 0) <= 160);
+      }
+      for (const preview of step.contentPreviews) {
+        assert.ok(preview.content.length > 0);
+        assert.ok(preview.content.length <= 4_000);
+      }
+      for (const change of step.beforeAfter) {
+        assert.ok(change.before.length > 0);
+        assert.ok(change.before.length <= 4_000);
+        assert.ok(change.after.length > 0);
+        assert.ok(change.after.length <= 4_000);
+      }
+    }
+  }
+});
+
 test("template selection exposes every mutation shape without accepting arbitrary prose", () => {
   assert.deepEqual(
     selectCommunicationEvryTemplateEffect(
@@ -410,7 +493,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
     messageClass: "relationship_message",
     recipients: interfaceSizedAudience.map((personId, index) => ({
       personId,
-      label: `Recipient ${index + 1}`,
+      label: index === 0 ? "R".repeat(511) : `Recipient ${index + 1}`,
       email: `recipient-${index + 1}@example.test`,
       subject: `Hello recipient ${index + 1}`,
       bodyHtml: content.bodyHtml,
@@ -477,6 +560,11 @@ test("outbound selection is closed and each message effect has an exact trusted 
     assert.equal(
       review.confirmation.steps[0]?.resolvedTargets.length,
       interfaceSizedAudience.length
+    );
+    assert.ok(
+      review.confirmation.steps[0]?.resolvedTargets.every(
+        ({ sourceLink }) => (sourceLink?.label.length ?? 0) <= 160
+      )
     );
     assert.match(JSON.stringify(review.confirmation), /Hello/);
   }

@@ -419,8 +419,8 @@ export const COMMUNICATION_MESSAGE_EXECUTION_REGISTRY =
 export const COMMUNICATION_MESSAGE_PLAN_REGISTRY =
   COMMUNICATION_MESSAGE_EXECUTION_REGISTRY.planRegistry;
 
-function preview(value: string, fallback: string) {
-  return (value.trim() || fallback).slice(0, 4_000);
+function preview(value: string, fallback: string, maximum = 4_000) {
+  return (value.trim() || fallback).slice(0, maximum);
 }
 
 function reviewStep(
@@ -437,7 +437,7 @@ function reviewStep(
       label: "Recipient",
       value: `${recipient.label} · ${recipient.email}`,
       sourceLink: {
-        label: `Open ${recipient.label}`,
+        label: preview(`Open ${recipient.label}`, "Open person", 160),
         href: `/people/${recipient.personId}`,
       },
     })),
