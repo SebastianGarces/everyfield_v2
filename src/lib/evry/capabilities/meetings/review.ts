@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
@@ -15,7 +13,7 @@ import { meetingsEffectDisclosure } from "./effect-disclosure";
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
 
 const MAX_PREVIEW_CHARACTERS = 4_000;
-const MAX_RESOLVED_TARGETS = 100;
+const MAX_STATE_PAGE_CHARACTERS = 3_500;
 
 function humanize(value: string): string {
   return value
@@ -24,32 +22,43 @@ function humanize(value: string): string {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
-function boundedSerializedPreview(input: {
-  serialized: string;
-  format: "JSON" | "text";
-}): Readonly<{ content: string; complete: boolean }> {
-  if (input.serialized.length <= MAX_PREVIEW_CHARACTERS) {
-    return { content: input.serialized, complete: true };
+function splitExactPages(value: string, limit = MAX_PREVIEW_CHARACTERS) {
+  if (value.length === 0) return [JSON.stringify(value)];
+  const pages: string[] = [];
+  let start = 0;
+  while (start < value.length) {
+    let end = Math.min(start + limit, value.length);
+    const finalCodeUnit = value.charCodeAt(end - 1);
+    if (
+      end < value.length &&
+      finalCodeUnit >= 0xd800 &&
+      finalCodeUnit <= 0xdbff
+    ) {
+      end -= 1;
+    }
+    pages.push(value.slice(start, end));
+    start = end;
   }
-  const digest = createHash("sha256").update(input.serialized).digest("hex");
-  const marker = "\n… middle omitted from this display …\n";
-  const footer = `\nExact ${input.format} length: ${input.serialized.length} characters; SHA-256: ${digest}`;
-  const visibleCharacters =
-    MAX_PREVIEW_CHARACTERS - marker.length - footer.length;
-  const prefixLength = Math.ceil(visibleCharacters / 2);
-  const suffixLength = Math.floor(visibleCharacters / 2);
-  return {
-    content: `${input.serialized.slice(0, prefixLength)}${marker}${input.serialized.slice(-suffixLength)}${footer}`,
-    complete: false,
-  };
+  return pages;
 }
 
-function boundedJson(value: unknown) {
+function exactJson(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (!serialized) {
     throw new Error("Meetings confirmation content is not serializable");
   }
-  return boundedSerializedPreview({ serialized, format: "JSON" });
+  return serialized;
+}
+
+function paginatedPreview(label: string, content: string) {
+  const pages = splitExactPages(content);
+  return pages.map((page, index) => ({
+    label:
+      pages.length === 1
+        ? label
+        : `${label} (page ${index + 1} of ${pages.length})`,
+    content: page,
+  }));
 }
 
 function sourceLinkFor(source: "meeting" | "person" | "none", value: string) {
@@ -75,49 +84,73 @@ function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
   const previews = previewKeys.flatMap((key) => {
     const value = arguments_[key];
     if (value === undefined || value === null || value === "") return [];
-    return [{ label: humanize(key), content: boundedJson(value).content }];
+    return paginatedPreview(humanize(key), exactJson(value));
   });
-  const immutablePlan = boundedJson(arguments_);
-  previews.push({
-    label: immutablePlan.complete
-      ? "Complete immutable plan"
-      : "Immutable plan summary",
-    content: immutablePlan.content,
-  });
+  previews.push(
+    ...paginatedPreview("Complete immutable plan", exactJson(arguments_))
+  );
   return previews;
 }
 
 function displayState(value: unknown): string {
-  return typeof value === "string"
-    ? boundedSerializedPreview({ serialized: value, format: "text" }).content
-    : boundedJson(value).content;
+  return typeof value === "string" && value.length > 0
+    ? value
+    : exactJson(value);
+}
+
+function statePageEnvelope(input: {
+  page: string | null;
+  index: number;
+  total: number;
+}): string {
+  return JSON.stringify({
+    page: input.page === null ? null : input.index + 1,
+    total: input.total,
+    content: input.page,
+  });
+}
+
+function paginatedBeforeAfter(input: {
+  label: string;
+  before: unknown;
+  after: unknown;
+  count: number;
+}) {
+  const before = displayState(input.before);
+  const after = displayState(input.after);
+  if (
+    before.length <= MAX_PREVIEW_CHARACTERS &&
+    after.length <= MAX_PREVIEW_CHARACTERS
+  ) {
+    return [{ ...input, before, after }];
+  }
+  const beforePages = splitExactPages(before, MAX_STATE_PAGE_CHARACTERS);
+  const afterPages = splitExactPages(after, MAX_STATE_PAGE_CHARACTERS);
+  const total = Math.max(beforePages.length, afterPages.length);
+  return Array.from({ length: total }, (_, index) => ({
+    label: `${input.label} (page ${index + 1} of ${total})`,
+    before: statePageEnvelope({
+      page: beforePages[index] ?? null,
+      index,
+      total: beforePages.length,
+    }),
+    after: statePageEnvelope({
+      page: afterPages[index] ?? null,
+      index,
+      total: afterPages.length,
+    }),
+    count: input.count,
+  }));
 }
 
 function resolvedTargetsFor(
   targets: ReturnType<typeof meetingsEffectDisclosure>["targets"]
 ) {
-  const directTargets = targets
-    .slice(
-      0,
-      targets.length <= MAX_RESOLVED_TARGETS
-        ? MAX_RESOLVED_TARGETS
-        : MAX_RESOLVED_TARGETS - 1
-    )
-    .map(({ label, value, source }) => ({
-      label,
-      value,
-      sourceLink: sourceLinkFor(source, value),
-    }));
-  const additionalTargets = targets.slice(directTargets.length);
-  if (additionalTargets.length === 0) return directTargets;
-  return [
-    ...directTargets,
-    {
-      label: `Additional targets (${additionalTargets.length})`,
-      value: boundedJson(additionalTargets).content,
-      sourceLink: null,
-    },
-  ];
+  return targets.map(({ label, value, source }) => ({
+    label,
+    value,
+    sourceLink: sourceLinkFor(source, value),
+  }));
 }
 
 function localTime(instant: Date, timeZone: string): string {
@@ -134,8 +167,15 @@ function dateTimeFor(arguments_: Readonly<Record<string, unknown>>) {
     arguments_.before && typeof arguments_.before === "object"
       ? (arguments_.before as Record<string, unknown>)
       : null;
+  const after =
+    arguments_.after && typeof arguments_.after === "object"
+      ? (arguments_.after as Record<string, unknown>)
+      : null;
   const instantValue =
-    arguments_.datetime ?? arguments_.meetingDatetime ?? before?.datetime;
+    arguments_.datetime ??
+    arguments_.meetingDatetime ??
+    after?.datetime ??
+    before?.datetime;
   const timeZone = arguments_.timezone;
   if (typeof instantValue !== "string" || typeof timeZone !== "string") {
     return null;
@@ -206,14 +246,7 @@ function reviewFor(input: {
         exclusions: [],
         dateTime: dateTimeFor(arguments_),
         contentPreviews: collectContentPreviews(arguments_),
-        beforeAfter: disclosure.beforeAfter.map(
-          ({ label, before, after, count }) => ({
-            label,
-            before: displayState(before),
-            after: displayState(after),
-            count,
-          })
-        ),
+        beforeAfter: disclosure.beforeAfter.flatMap(paginatedBeforeAfter),
       },
     ],
   });

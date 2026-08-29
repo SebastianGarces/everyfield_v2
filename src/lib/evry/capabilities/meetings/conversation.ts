@@ -11,7 +11,11 @@ import type { EvryCapabilityConversationContinuation } from "../conversation";
 import { meetingsReadInputForSelection } from "./read-input";
 import { executeMeetingsRead } from "./reads";
 import { resolveMeetingsEvryEffect } from "./resolver";
-import { proposeMeetingsEvryEffect } from "./runtime";
+import {
+  proposeMeetingsEvryEffect,
+  recoverMeetingsEvryEffectProposal,
+  type MeetingsEvryEffectProposal,
+} from "./runtime";
 import { selectMeetingsEvryRequest } from "./selection";
 
 const READ_IDENTITY = {
@@ -35,9 +39,29 @@ function missingMeetingResult() {
   };
 }
 
+type MeetingsEffectConversationDependencies = Readonly<{
+  recoverProposal: typeof recoverMeetingsEvryEffectProposal;
+  resolveEffect: typeof resolveMeetingsEvryEffect;
+  proposeEffect: typeof proposeMeetingsEvryEffect;
+}>;
+
+function proposalResult(proposal: MeetingsEvryEffectProposal) {
+  return {
+    body: "Review this exact Meetings change before anything is written.",
+    artifacts: [parseEvryConversationArtifactDocument(proposal.confirmation)],
+    activePlan: { mode: "set" as const, plan: proposal.plan },
+  };
+}
+
 /** Closed production continuation for Meetings reads and confirmed effects. */
-export const continueMeetingsEvryConversation: EvryCapabilityConversationContinuation =
-  {
+export function createMeetingsEvryConversationContinuation(
+  dependencies: MeetingsEffectConversationDependencies = {
+    recoverProposal: recoverMeetingsEvryEffectProposal,
+    resolveEffect: resolveMeetingsEvryEffect,
+    proposeEffect: proposeMeetingsEvryEffect,
+  }
+): EvryCapabilityConversationContinuation {
+  return {
     identity: "meetings",
     matches(input) {
       return selectMeetingsEvryRequest(input.literalUserText) !== null;
@@ -90,7 +114,13 @@ export const continueMeetingsEvryConversation: EvryCapabilityConversationContinu
           input.userRequestKey,
         ]
       );
-      const resolved = await resolveMeetingsEvryEffect({
+      const recovered = await dependencies.recoverProposal({
+        actor: input.actor,
+        requestKey,
+      });
+      if (recovered) return proposalResult(recovered);
+
+      const resolved = await dependencies.resolveEffect({
         actor: input.actor,
         selection,
         pageContext: input.pageContext,
@@ -98,18 +128,16 @@ export const continueMeetingsEvryConversation: EvryCapabilityConversationContinu
         now: input.now,
       });
       if (!resolved) return missingMeetingResult();
-      const proposal = await proposeMeetingsEvryEffect({
+      const proposal = await dependencies.proposeEffect({
         actor: input.actor,
         resolved,
         requestKey,
       });
       if (!proposal) return null;
-      return {
-        body: "Review this exact Meetings change before anything is written.",
-        artifacts: [
-          parseEvryConversationArtifactDocument(proposal.confirmation),
-        ],
-        activePlan: { mode: "set", plan: proposal.plan },
-      };
+      return proposalResult(proposal);
     },
   };
+}
+
+export const continueMeetingsEvryConversation =
+  createMeetingsEvryConversationContinuation();

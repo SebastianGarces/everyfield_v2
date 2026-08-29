@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
@@ -350,8 +349,39 @@ function reviewForArguments(
   return { confirmation: review.confirmation, step };
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function joinedPreviewPages(
+  previews: readonly Readonly<{ label: string; content: string }>[],
+  label: string
+): string {
+  return previews
+    .filter(
+      (preview) =>
+        preview.label === label || preview.label.startsWith(`${label} (page `)
+    )
+    .map(({ content }) => content)
+    .join("");
+}
+
+function joinedStatePages(
+  changes: readonly Readonly<{
+    label: string;
+    before: string;
+    after: string;
+  }>[],
+  label: string,
+  side: "before" | "after"
+): string {
+  const matching = changes.filter(
+    (change) =>
+      change.label === label || change.label.startsWith(`${label} (page `)
+  );
+  if (matching.length === 1 && matching[0]?.label === label) {
+    return matching[0][side];
+  }
+  return matching
+    .map((change) => JSON.parse(change[side]) as { content: string | null })
+    .flatMap(({ content }) => (content === null ? [] : [content]))
+    .join("");
 }
 
 test("every authoritative effect has one strict complete fingerprint contract", () => {
@@ -457,11 +487,12 @@ test("every Meetings effect renders its exact complete confirmation", () => {
     );
     assert.deepEqual(review.confirmation.consequences, expected.consequences);
     assert.equal(step.reversibility, expected.reversibility);
-    const complete = step.contentPreviews.find(
-      ({ label }) => label === "Complete immutable plan"
+    const complete = joinedPreviewPages(
+      step.contentPreviews,
+      "Complete immutable plan"
     );
     assert.ok(complete, exportName);
-    assert.deepEqual(JSON.parse(complete.content), arguments_, exportName);
+    assert.deepEqual(JSON.parse(complete), arguments_, exportName);
     assert.equal(
       expected.counts
         .filter(({ includedInAffectedCount }) => includedInAffectedCount)
@@ -473,7 +504,7 @@ test("every Meetings effect renders its exact complete confirmation", () => {
   }
 });
 
-test("a legal 5,000-character attendee note remains confirmable and exactly identified", () => {
+test("a legal 5,000-character attendee note is disclosed losslessly", () => {
   const note = "x".repeat(5_000);
   const arguments_ = {
     ...validArguments("addAttendeeNoteAction"),
@@ -489,17 +520,23 @@ test("a legal 5,000-character attendee note remains confirmable and exactly iden
     "addAttendeeNoteAction",
     arguments_
   );
-  const preview = step.contentPreviews.find(({ label }) => label === "Note");
-  assert.ok(preview);
   const serializedNote = JSON.stringify(note);
-  assert.match(preview.content, /middle omitted from this display/);
-  assert.match(
-    preview.content,
-    new RegExp(`Exact JSON length: ${serializedNote.length} characters`)
+  assert.equal(
+    joinedPreviewPages(step.contentPreviews, "Note"),
+    serializedNote
   );
-  assert.match(preview.content, new RegExp(sha256(serializedNote)));
-  assert.ok(preview.content.length <= 4_000);
-  assert.ok(step.beforeAfter[0]?.after.length <= 4_000);
+  assert.equal(
+    joinedStatePages(step.beforeAfter, "Attendee note activity", "after"),
+    note
+  );
+  assert.ok(
+    step.contentPreviews.every(({ content }) => content.length <= 4_000)
+  );
+  assert.ok(
+    step.beforeAfter.every(
+      ({ before, after }) => before.length <= 4_000 && after.length <= 4_000
+    )
+  );
   assert.deepEqual(confirmation.consequences, [
     "The disclosed note will be added to this person's plant-visible activity timeline.",
   ]);
@@ -515,7 +552,7 @@ test("a legal 5,000-character attendee note remains confirmable and exactly iden
   ]);
 });
 
-test("a cardinality-heavy legal plan preserves direct and summarized target disclosure", () => {
+test("a cardinality-heavy legal plan preserves every exact target and plan byte", () => {
   const records = Array.from({ length: 100 }, (_, index) => {
     const suffix = String(index + 1).padStart(12, "0");
     const personSuffix = String(index + 1_001).padStart(12, "0");
@@ -553,25 +590,20 @@ test("a cardinality-heavy legal plan preserves direct and summarized target disc
     "recordAttendanceBatchAction",
     arguments_
   );
-  assert.equal(step.resolvedTargets.length, 100);
+  assert.equal(step.resolvedTargets.length, expected.targets.length);
   assert.deepEqual(
-    step.resolvedTargets.slice(0, 99).map(({ label, value }) => ({
+    step.resolvedTargets.map(({ label, value }) => ({
       label,
       value,
     })),
-    expected.targets.slice(0, 99).map(({ label, value }) => ({ label, value }))
+    expected.targets.map(({ label, value }) => ({ label, value }))
   );
-  const additional = step.resolvedTargets[99];
-  assert.equal(additional?.label, "Additional targets (102)");
-  const serializedAdditionalTargets = JSON.stringify(
-    expected.targets.slice(99)
+  assert.deepEqual(
+    JSON.parse(
+      joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+    ),
+    arguments_
   );
-  assert.match(
-    additional?.value ?? "",
-    new RegExp(sha256(serializedAdditionalTargets))
-  );
-  assert.match(additional?.value ?? "", /Exact JSON length:/);
-  assert.ok((additional?.value.length ?? 4_001) <= 4_000);
   assert.deepEqual(step.counts, [
     { label: "Attendance records changed", count: 100 },
   ]);
@@ -584,5 +616,25 @@ test("a cardinality-heavy legal plan preserves direct and summarized target disc
     step.beforeAfter.every(
       ({ before, after }) => before.length <= 4_000 && after.length <= 4_000
     )
+  );
+});
+
+test("meeting updates disclose the after datetime as the absolute time", () => {
+  const before = "2026-08-29T14:00:00.000Z";
+  const after = "2026-08-30T18:30:00.000Z";
+  const base = validArguments("updateMeetingAction");
+  const arguments_ = {
+    ...base,
+    timezone: "America/New_York",
+    before: { ...(base.before as Record<string, unknown>), datetime: before },
+    after: { ...(base.after as Record<string, unknown>), datetime: after },
+  };
+  const { step } = reviewForArguments("updateMeetingAction", arguments_);
+  assert.equal(step.dateTime?.startsAt.instantUtc, after);
+  assert.equal(
+    JSON.parse(
+      joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+    ).after.datetime,
+    after
   );
 });

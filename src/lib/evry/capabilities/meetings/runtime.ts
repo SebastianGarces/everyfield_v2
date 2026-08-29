@@ -20,7 +20,10 @@ import {
   trustedReviewForEvryPlanDocument,
   type EvryArtifactReviewRegistry,
 } from "@/lib/evry/artifacts/trusted-plan-review";
-import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
+import {
+  evryConversationPlanIdentitySchema,
+  type EvryConversationPlanIdentity,
+} from "@/lib/evry/conversations/contract";
 import {
   authorizeEvryEffectCapability,
   eligibleEvryCapabilitiesFor,
@@ -33,10 +36,16 @@ import {
 } from "@/lib/evry/executor";
 import {
   parseEvryActionPlanCandidate,
+  parseStoredEvryActionPlan,
   type EvryActionStep,
   type EvryPlanRequestKey,
 } from "@/lib/evry/plans";
-import { createEvryActionPlanRecord } from "@/lib/evry/plans/repository";
+import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
+import {
+  createEvryActionPlanRecord,
+  findEvryActionPlanByRequestKey,
+  type StoredEvryActionPlan,
+} from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 
 import {
@@ -82,6 +91,13 @@ export const MEETINGS_PLAN_REGISTRY = MEETINGS_EXECUTION_REGISTRY.planRegistry;
 export const MEETINGS_ARTIFACT_REVIEW_REGISTRY: EvryArtifactReviewRegistry =
   MEETINGS_REVIEW_REGISTRY;
 
+export type MeetingsEvryEffectProposal = Readonly<{
+  plan: EvryConversationPlanIdentity;
+  confirmation: NonNullable<
+    ReturnType<typeof trustedReviewForEvryPlanDocument>
+  >["confirmation"];
+}>;
+
 const EXPORT_BY_IDENTITY = new Map(
   Object.entries(MEETINGS_ACTION_CONTRACTS).map(([exportName, contract]) => [
     contract.operationId,
@@ -93,7 +109,7 @@ export async function proposeMeetingsEvryEffect(input: {
   actor: EvryPlantActor;
   resolved: ResolvedMeetingsEffect;
   requestKey: EvryPlanRequestKey;
-}) {
+}): Promise<MeetingsEvryEffectProposal | null> {
   const { exportName, arguments: resolvedArguments } = input.resolved;
   const contract = MEETINGS_ACTION_CONTRACTS[exportName];
   const authorization = await authorizeEvryEffectCapability(
@@ -143,6 +159,58 @@ export async function proposeMeetingsEvryEffect(input: {
     reviewRegistry: MEETINGS_REVIEW_REGISTRY,
   });
   return review ? { plan, confirmation: review.confirmation } : null;
+}
+
+/**
+ * Recover a request-bound immutable Meetings plan before any mutable resolver
+ * or source read runs. A scoped row that cannot be reparsed is an integrity
+ * failure, not permission to derive different work for the same request key.
+ */
+export async function recoverMeetingsEvryEffectProposal(input: {
+  actor: EvryPlantActor;
+  requestKey: EvryPlanRequestKey;
+  findPlan?: typeof findEvryActionPlanByRequestKey;
+}): Promise<MeetingsEvryEffectProposal | null> {
+  const stored = await (input.findPlan ?? findEvryActionPlanByRequestKey)({
+    actorUserId: input.actor.userId,
+    plantId: input.actor.plantId,
+    requestKey: input.requestKey,
+  });
+  if (!stored) return null;
+  return proposalFromStoredMeetingsPlan(stored);
+}
+
+function proposalFromStoredMeetingsPlan(
+  stored: StoredEvryActionPlan
+): MeetingsEvryEffectProposal {
+  if (!validateStoredEvryActionPlan(stored, MEETINGS_PLAN_REGISTRY)) {
+    throw new Error("Stored Meetings plan failed its integrity check");
+  }
+  const document = parseStoredEvryActionPlan({
+    document: stored.document,
+    registry: MEETINGS_PLAN_REGISTRY,
+  });
+  const step = document.steps[0];
+  if (
+    document.steps.length !== 1 ||
+    !step ||
+    !EXPORT_BY_IDENTITY.has(step.capabilityIdentity)
+  ) {
+    throw new Error("Stored request key is not bound to one Meetings effect");
+  }
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: stored.id,
+    fingerprint: stored.fingerprint,
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan,
+    document,
+    reviewRegistry: MEETINGS_REVIEW_REGISTRY,
+  });
+  if (!review) {
+    throw new Error("Stored Meetings plan has no trusted confirmation");
+  }
+  return { plan, confirmation: review.confirmation };
 }
 
 function sameInstant(value: Date, expected: string): boolean {
