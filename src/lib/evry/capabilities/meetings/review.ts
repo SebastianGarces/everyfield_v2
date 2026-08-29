@@ -95,11 +95,16 @@ function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
     "afterSections",
     "records",
   ];
-  return previewKeys.flatMap((key) => {
+  const previews = previewKeys.flatMap((key) => {
     const value = arguments_[key];
     if (value === undefined || value === null || value === "") return [];
     return [{ label: humanize(key), content: compactJson(value) }];
   });
+  previews.push({
+    label: "Complete immutable plan",
+    content: compactJson(arguments_),
+  });
+  return previews;
 }
 
 function collectBeforeAfter(arguments_: Readonly<Record<string, unknown>>) {
@@ -169,7 +174,8 @@ function dateTimeFor(arguments_: Readonly<Record<string, unknown>>) {
     arguments_.before && typeof arguments_.before === "object"
       ? (arguments_.before as Record<string, unknown>)
       : null;
-  const instantValue = arguments_.datetime ?? before?.datetime;
+  const instantValue =
+    arguments_.datetime ?? arguments_.meetingDatetime ?? before?.datetime;
   const timeZone = arguments_.timezone;
   if (typeof instantValue !== "string" || typeof timeZone !== "string") {
     return null;
@@ -187,12 +193,7 @@ function dateTimeFor(arguments_: Readonly<Record<string, unknown>>) {
       calendarDate,
       localTime: time,
       timeZone,
-      utcOffset: utcOffsetForZonedTime(
-        calendarDate,
-        hour,
-        minute,
-        instant
-      ),
+      utcOffset: utcOffsetForZonedTime(calendarDate, hour, minute, instant),
       instantUtc: instant.toISOString(),
       interpretation: {
         basis: "explicit-calendar-date" as const,
@@ -205,7 +206,10 @@ function dateTimeFor(arguments_: Readonly<Record<string, unknown>>) {
 }
 
 function effectKind(identity: string) {
-  if (identity === "meetings.create" || identity === "meetings.lifecycle.update") {
+  if (
+    identity === "meetings.create" ||
+    identity === "meetings.lifecycle.update"
+  ) {
     return "meeting" as const;
   }
   if (identity === "meetings.lifecycle.delete") return "destructive" as const;
@@ -283,7 +287,10 @@ function reviewFor(input: {
 const CONTRACT_BY_ID = Object.fromEntries(
   Object.entries(MEETINGS_ACTION_CONTRACTS).map(([exportName, contract]) => [
     contract.operationId,
-    { ...contract, exportName: exportName as keyof typeof MEETINGS_ACTION_CONTRACTS },
+    {
+      ...contract,
+      exportName: exportName as keyof typeof MEETINGS_ACTION_CONTRACTS,
+    },
   ])
 ) as Record<
   string,
@@ -292,21 +299,23 @@ const CONTRACT_BY_ID = Object.fromEntries(
   }
 >;
 
+export const MEETINGS_ARTIFACT_REVIEWS = Object.freeze(
+  Object.keys(CONTRACT_BY_ID).map((identity) =>
+    defineEvryArtifactReview({
+      source: {
+        kind: "generic",
+        capabilityIdentities: [identity],
+      },
+      build({ plan, document }) {
+        const step = document.steps[0];
+        if (!step || step.capabilityIdentity !== identity) {
+          throw new Error("Meetings review source did not match its plan");
+        }
+        return reviewFor({ identity, plan, step });
+      },
+    })
+  )
+);
+
 export const MEETINGS_REVIEW_REGISTRY: EvryArtifactReviewRegistry =
-  createEvryArtifactReviewRegistry(
-    Object.keys(CONTRACT_BY_ID).map((identity) =>
-      defineEvryArtifactReview({
-        source: {
-          kind: "generic",
-          capabilityIdentities: [identity],
-        },
-        build({ plan, document }) {
-          const step = document.steps[0];
-          if (!step || step.capabilityIdentity !== identity) {
-            throw new Error("Meetings review source did not match its plan");
-          }
-          return reviewFor({ identity, plan, step });
-        },
-      })
-    )
-  );
+  createEvryArtifactReviewRegistry(MEETINGS_ARTIFACT_REVIEWS);

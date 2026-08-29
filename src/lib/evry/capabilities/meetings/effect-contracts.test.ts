@@ -10,6 +10,12 @@ import {
 } from "./effect-contracts";
 import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "./eval-fixtures";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
+import { MEETINGS_READ_ADAPTER_IDENTITIES } from "./reads";
+import { MEETINGS_EXECUTION_REGISTRY, MEETINGS_PLAN_REGISTRY } from "./runtime";
+import {
+  MEETINGS_SELECTION_EXAMPLES,
+  selectMeetingsEvryRequest,
+} from "./selection";
 
 const ID = "10000000-0000-4000-8000-000000000001";
 const PERSON_ID = "20000000-0000-4000-8000-000000000001";
@@ -274,14 +280,88 @@ for (const fixture of MEETINGS_CAPABILITY_EVAL_FIXTURES) {
         `${fixture.capabilityIdentity}:${layer}`
       );
       assert.equal(
-        fixture.expectsConfirmation,
-        registration.operationKind === "effect"
+        fixture.cases[layer][0].testName,
+        `${fixture.capabilityIdentity}:${layer}`
       );
-      assert.equal(
-        registration.operationKind === "read",
-        registration.actionLabel === null,
-        "reads execute directly; effects own an effect-specific primary action"
-      );
+
+      if (layer === "policy" || layer === "permission" || layer === "tenancy") {
+        assert.equal(registration.parityCapability, "meetings");
+        assert.equal(
+          registration.applicationCapability,
+          registration.operationKind === "read" ? "read" : "meetings.write"
+        );
+        assert.ok(registration.surfaceIdentities.length > 0);
+      }
+      if (layer === "selection") {
+        if (registration.operationKind === "read") {
+          assert.ok(
+            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
+          );
+        } else {
+          const example = Object.entries(MEETINGS_ACTION_CONTRACTS).find(
+            ([, contract]) => contract.operationId === registration.identity
+          )?.[0] as keyof typeof MEETINGS_SELECTION_EXAMPLES | undefined;
+          assert.ok(example);
+          const selected = selectMeetingsEvryRequest(
+            MEETINGS_SELECTION_EXAMPLES[example]
+          );
+          assert.equal(selected?.kind, "effect");
+        }
+      }
+      if (layer === "arguments" || layer === "errors") {
+        if (registration.operationKind === "effect") {
+          const entry = Object.entries(MEETINGS_ACTION_CONTRACTS).find(
+            ([, contract]) => contract.operationId === registration.identity
+          );
+          assert.ok(entry);
+          const exportName = entry[0] as keyof typeof MEETINGS_ACTION_CONTRACTS;
+          const valid = validArguments(exportName);
+          assert.equal(
+            MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse(valid)
+              .success,
+            true
+          );
+          assert.equal(
+            MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse({
+              ...valid,
+              arbitrary: true,
+            }).success,
+            false
+          );
+        } else {
+          assert.ok(
+            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
+          );
+        }
+      }
+      if (layer === "confirmation") {
+        assert.equal(
+          registration.operationKind === "read",
+          registration.actionLabel === null,
+          "reads execute directly; effects own an effect-specific primary action"
+        );
+      }
+      if (layer === "execution" || layer === "idempotency") {
+        if (registration.operationKind === "effect") {
+          assert.ok(
+            MEETINGS_EXECUTION_REGISTRY.registrationFor(registration.identity)
+          );
+          assert.ok(
+            MEETINGS_PLAN_REGISTRY.registrationFor(registration.identity)
+          );
+        } else {
+          assert.ok(
+            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
+          );
+        }
+      }
+      if (layer === "ui_artifact") {
+        assert.ok(
+          registration.operationKind === "effect"
+            ? registration.actionLabel
+            : MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
+        );
+      }
     });
   }
 }

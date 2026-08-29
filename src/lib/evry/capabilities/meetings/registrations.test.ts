@@ -73,14 +73,8 @@ const AUTHORITATIVE_READ_EXPORTS = new Map<string, ReadonlySet<string>>([
     "@/lib/meetings/analytics",
     new Set(["getAttendanceTrend", "getMeetingSummaryStats"]),
   ],
-  [
-    "@/lib/communication/service",
-    new Set(["getMeetingCommunications"]),
-  ],
-  [
-    "@/lib/documents/contextual",
-    new Set(["getMeetingContextualTemplates"]),
-  ],
+  ["@/lib/communication/service", new Set(["getMeetingCommunications"])],
+  ["@/lib/documents/contextual", new Set(["getMeetingContextualTemplates"])],
 ]);
 
 function discoveredReadOperations(): readonly string[] {
@@ -148,20 +142,21 @@ test("Meetings registrations bijectively cover generated actions and routes", ()
     .map(({ identity }) => identity)
     .toSorted();
   assert.deepEqual(
-    registeredSurfaces.filter((identity) => identity.startsWith("action:"))
+    registeredSurfaces
+      .filter((identity) => identity.startsWith("action:"))
       .toSorted(),
     generatedActions
   );
 
   const generatedRoutes = inventory.entries
     .filter(
-      (entry) =>
-        entry.kind === "route" && entry.parityCapability === "meetings"
+      (entry) => entry.kind === "route" && entry.parityCapability === "meetings"
     )
     .map(({ identity }) => identity)
     .toSorted();
   assert.deepEqual(
-    registeredSurfaces.filter((identity) => identity.startsWith("route:"))
+    registeredSurfaces
+      .filter((identity) => identity.startsWith("route:"))
       .toSorted(),
     generatedRoutes
   );

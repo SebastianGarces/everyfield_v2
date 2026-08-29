@@ -6,7 +6,10 @@ import {
   type EvryReadContinuationArtifact,
 } from "@/lib/evry/artifacts/types";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import { getAttendanceTrend, getMeetingSummaryStats } from "@/lib/meetings/analytics";
+import {
+  getAttendanceTrend,
+  getMeetingSummaryStats,
+} from "@/lib/meetings/analytics";
 import { getGuestList } from "@/lib/meetings/guest-list";
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { listLocations } from "@/lib/meetings/locations";
@@ -94,12 +97,12 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
         filters: [
           { label: "Time", value: input.status },
           { label: "Type", value: input.type ?? "All meeting types" },
-          ...(input.teamId
-            ? [{ label: "Team", value: input.teamId }]
-            : []),
+          ...(input.teamId ? [{ label: "Team", value: input.teamId }] : []),
         ],
         exclusions:
-          excluded > 0 ? [{ reason: "Outside this page", count: excluded }] : [],
+          excluded > 0
+            ? [{ reason: "Outside this page", count: excluded }]
+            : [],
         items,
         sourceLinks: [listLink, ...items.map(({ sourceLink }) => sourceLink)],
       });
@@ -212,8 +215,14 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
             label: meetingDisplayTitle(meeting),
             facts: [
               { label: "Meetings", value: String(stats.totalMeetings) },
-              { label: "Total attendance", value: String(stats.totalAttendees) },
-              { label: "Average attendance", value: String(stats.avgAttendance) },
+              {
+                label: "Total attendance",
+                value: String(stats.totalAttendees),
+              },
+              {
+                label: "Average attendance",
+                value: String(stats.avgAttendance),
+              },
               { label: "Trend points", value: String(trend.length) },
             ],
             sourceLink,
@@ -240,7 +249,9 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
           {
             label: "Capacity",
             value:
-              location.capacity === null ? "Not set" : String(location.capacity),
+              location.capacity === null
+                ? "Not set"
+                : String(location.capacity),
           },
         ],
         sourceLink: newMeetingLink,
