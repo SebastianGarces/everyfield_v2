@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -44,14 +42,11 @@ import {
   claimEvryCreateAssessment,
   claimEvryCreateCommitment,
   claimEvryCreateInterview,
+  storeEvryCommitmentDocumentForClaim,
 } from "@/lib/people/evry-milestones";
 import { recoverCompletedEvryPeopleEffect } from "@/lib/people/evry-effect";
 import { getPerson } from "@/lib/people/service";
-import {
-  commitmentDocumentStorageKey,
-  getExtensionFromMimeType,
-  uploadFile,
-} from "@/lib/storage";
+import { getExtensionFromMimeType } from "@/lib/storage";
 
 export const MILESTONE_IDENTITIES = {
   assessment: "people.crm.assessments.create-assessment",
@@ -334,20 +329,13 @@ export const MILESTONE_EXECUTIONS = [
           attachment.document.originalName !== plannedAttachment.originalName
         )
           return { status: "refused", excludedCount: 1 };
-        const objectId = objectIdFor(
-          `${input.effectKey}:${plannedAttachment.digest}`
-        );
-        documentKey = commitmentDocumentStorageKey(
-          input.authorization.actor.plantId,
-          args.data.personId,
-          getExtensionFromMimeType(plannedAttachment.contentType),
-          objectId
-        );
-        await uploadFile(
-          documentKey,
-          attachment.bytes,
-          plannedAttachment.contentType
-        );
+        documentKey = await storeEvryCommitmentDocumentForClaim({
+          plantId: input.authorization.actor.plantId,
+          personId: args.data.personId,
+          extension: getExtensionFromMimeType(plannedAttachment.contentType),
+          bytes: attachment.bytes,
+          contentType: plannedAttachment.contentType,
+        });
       }
       return claimEvryCreateCommitment({
         execution: input.execution,
@@ -389,18 +377,6 @@ function commitmentAttachmentOf(
   value: string
 ): z.infer<typeof commitmentAttachmentSchema> {
   return commitmentAttachmentSchema.parse(JSON.parse(value));
-}
-
-function objectIdFor(value: string): string {
-  const hex = createHash("sha256")
-    .update(value)
-    .digest("hex")
-    .slice(0, 32)
-    .split("");
-  hex[12] = "4";
-  hex[16] = "8";
-  const joined = hex.join("");
-  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
 }
 
 export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(

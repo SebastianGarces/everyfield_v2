@@ -5,6 +5,13 @@
  */
 export const EVRY_EXACT_CONTENT_PAGE_CHARACTERS = 4_000;
 
+/**
+ * Largest legal single grapheme in exact disclosures. Import target snapshots
+ * admit 40,000 UTF-16 code units, so the artifact must admit one unsplittable
+ * cluster of the same size even though ordinary pages target 4,000.
+ */
+export const EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS = 40_000;
+
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** Split literal content into bounded pages that concatenate to the original. */
@@ -20,22 +27,9 @@ export function exactEvryContentPages(value: string): readonly string[] {
       pages.push(page);
       page = "";
     }
-    // A single pathological grapheme can exceed the page limit. Split it on
-    // code-point boundaries so no page can violate the wire contract.
-    if (segment.length > EVRY_EXACT_CONTENT_PAGE_CHARACTERS) {
-      for (const codePoint of segment) {
-        if (
-          page.length > 0 &&
-          page.length + codePoint.length > EVRY_EXACT_CONTENT_PAGE_CHARACTERS
-        ) {
-          pages.push(page);
-          page = "";
-        }
-        page += codePoint;
-      }
-    } else {
-      page += segment;
-    }
+    if (segment.length > EVRY_EXACT_CONTENT_MAX_PAGE_CHARACTERS)
+      throw new Error("Exact disclosure contains an oversized grapheme");
+    page += segment;
   }
   if (page.length > 0) pages.push(page);
   return pages;

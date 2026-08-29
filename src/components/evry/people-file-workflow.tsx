@@ -1,7 +1,7 @@
 "use client";
 
 import { FileUp, LoaderCircle } from "lucide-react";
-import { useId, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,7 @@ export function EvryPeopleFileWorkflowForm(props: {
     "core_group" | "launch_team"
   >("core_group");
   const [signedDate, setSignedDate] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const personContext = props.personId;
   const id = useId();
   const needsPerson = kind !== "people_csv";
@@ -57,6 +58,11 @@ export function EvryPeopleFileWorkflowForm(props: {
     !file ||
     (needsPerson && !personContext) ||
     (kind === "commitment_document" && !signedDate);
+
+  function clearSelectedFile() {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setFile(null);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -73,7 +79,7 @@ export function EvryPeopleFileWorkflowForm(props: {
               commitmentType,
               signedDate,
             };
-    if (await props.submitPeopleFile(input)) setFile(null);
+    if (await props.submitPeopleFile(input)) clearSelectedFile();
   }
 
   return (
@@ -97,7 +103,7 @@ export function EvryPeopleFileWorkflowForm(props: {
               value={kind}
               onChange={(event) => {
                 setKind(event.target.value as FileKind);
-                setFile(null);
+                clearSelectedFile();
               }}
               disabled={props.isComposerBlocked || props.isSending}
               className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px] disabled:opacity-50"
@@ -114,6 +120,7 @@ export function EvryPeopleFileWorkflowForm(props: {
               Choose file
             </label>
             <Input
+              ref={fileInputRef}
               id={`${id}-file`}
               type="file"
               accept={ACCEPT[kind]}

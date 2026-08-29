@@ -227,4 +227,26 @@ test("create and update disclose every legal 20k note character losslessly in bo
     }),
     true
   );
+
+  const oversizedCluster = `a${"\u0301".repeat(5_000)}`;
+  const clustered = coreReview({
+    identity: PEOPLE_CORE_IDENTITIES.create,
+    stepId: "create-person-with-clustered-note",
+    argumentsValue: {
+      personJson: JSON.stringify({ ...PERSON, notes: oversizedCluster }),
+      activitySource: "form",
+      expectedHouseholdName: null,
+    },
+  });
+  assert.ok(clustered);
+  const clusteredPages =
+    clustered.confirmation.steps[0]!.contentPreviews.filter(({ label }) =>
+      label.startsWith("Notes after · page ")
+    );
+  assert.deepEqual(
+    clusteredPages.map(({ content }) => content),
+    [oversizedCluster]
+  );
+  assert.equal(clusteredPages[0]!.content.length > 4_000, true);
+  assert.equal(clusteredPages[0]!.content.length <= 40_000, true);
 });

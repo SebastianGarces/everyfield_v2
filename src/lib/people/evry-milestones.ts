@@ -5,9 +5,11 @@ import { commitments } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
+  commitmentDocumentStorageKey,
   deleteFile,
   listFileObjects,
   type StoredFileObject,
+  uploadFile,
 } from "@/lib/storage";
 
 import { EVRY_FINAL_OBJECT_GRACE_MS } from "./person-photo";
@@ -24,6 +26,32 @@ type PersonBaseline = Readonly<{
   lastName: string;
   status: string;
 }>;
+
+export type EvryCommitmentDocumentStorageEffects = Readonly<{
+  store(key: string, bytes: Buffer, contentType: string): Promise<unknown>;
+}>;
+
+/** Store one claim attempt under a fresh final key. */
+export async function storeEvryCommitmentDocumentForClaim(input: {
+  plantId: string;
+  personId: string;
+  extension: string;
+  bytes: Buffer;
+  contentType: string;
+  storage?: EvryCommitmentDocumentStorageEffects;
+}): Promise<string> {
+  const key = commitmentDocumentStorageKey(
+    input.plantId,
+    input.personId,
+    input.extension
+  );
+  await (input.storage ?? { store: uploadFile }).store(
+    key,
+    input.bytes,
+    input.contentType
+  );
+  return key;
+}
 
 /**
  * Sweep unreferenced final commitment objects below one exact person prefix.

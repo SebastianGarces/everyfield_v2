@@ -108,18 +108,6 @@ export async function getEvryPersonPhotoSnapshot(
     : null;
 }
 
-function uuidFromPhotoIdentity(value: string): string {
-  const hex = createHash("sha256")
-    .update(value)
-    .digest("hex")
-    .slice(0, 32)
-    .split("");
-  hex[12] = "4";
-  hex[16] = ["8", "9", "a", "b"][Number.parseInt(hex[16]!, 16) % 4]!;
-  const joined = hex.join("");
-  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
-}
-
 type EvryPhotoEffectIdentity = Pick<EvryEffectInput, "execution"> & {
   effectKey: EvryAuditKey;
 };
@@ -267,10 +255,7 @@ export async function claimEvryPersonPhotoMutation(
       : personPhotoStorageKey(
           input.execution.plantId,
           input.personId,
-          getExtensionFromMimeType(input.mutation.contentType),
-          uuidFromPhotoIdentity(
-            `${input.effectKey}:${input.mutation.attachmentDigest}`
-          )
+          getExtensionFromMimeType(input.mutation.contentType)
         );
   if (input.mutation.kind === "upload") {
     await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).store(
