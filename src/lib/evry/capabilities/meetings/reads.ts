@@ -5,7 +5,12 @@ import {
   trustedEvryApplicationSourceLink,
   type EvryReadContinuationArtifact,
 } from "@/lib/evry/artifacts/types";
-import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
+import {
+  getMeetingCommunications,
+  getMeetingTrackingByPerson,
+} from "@/lib/communication/service";
+import { getMeetingContextualTemplates } from "@/lib/documents/contextual";
 import {
   getAttendanceTrend,
   getMeetingSummaryStats,
@@ -13,20 +18,29 @@ import {
 import { getGuestList } from "@/lib/meetings/guest-list";
 import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { listLocations } from "@/lib/meetings/locations";
-import { getMeetingResponseBreakdown } from "@/lib/meetings/response-queries";
+import {
+  getMeetingResponseBreakdown,
+  listMeetingResponses,
+} from "@/lib/meetings/response-queries";
 import {
   getAttendanceSummary,
+  getChecklist,
   getChecklistSummary,
   getEvaluation,
+  getEvaluationTrend,
   getFollowUpCompletion,
   getMeeting,
+  hasMeetingHistory,
+  listAttendees,
   listMeetings,
 } from "@/lib/meetings/service";
+import { getTeam, listTeams } from "@/lib/ministry-teams/service";
 import { meetingStatuses, meetingTypes } from "@/db/schema/meetings";
 
-import type { MeetingsOperationRegistration } from "./registrations";
-
-type MeetingsReadAuthorization = Readonly<{ actor: EvryPlantActor }>;
+type MeetingsReadAuthorization = Pick<
+  EvryReadCapabilityAuthorization,
+  "actor" | "registration"
+>;
 
 const listInputSchema = z.strictObject({
   status: z.enum(["upcoming", "past", "all"]).default("all"),
@@ -62,7 +76,19 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
     identity: "meetings.read.list",
     inputSchema: listInputSchema,
     async run({ actor }, input: z.infer<typeof listInputSchema>) {
-      const result = await listMeetings(actor.plantId, input);
+      const [result, history, team] = await Promise.all([
+        listMeetings(actor.plantId, input),
+        hasMeetingHistory(actor.plantId),
+        input.teamId ? getTeam(actor.plantId, input.teamId) : null,
+      ]);
+      if (input.teamId && !team) {
+        return {
+          kind: "clarification",
+          mode: "missing",
+          entityType: "team",
+          prompt: "That team is unavailable.",
+        };
+      }
       const listLink = trustedEvryApplicationSourceLink({
         label: "Meetings",
         href: input.teamId ? `/teams/${input.teamId}/meetings` : "/meetings",
@@ -93,7 +119,11 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
         filters: [
           { label: "Time", value: input.status },
           { label: "Type", value: input.type ?? "All meeting types" },
-          ...(input.teamId ? [{ label: "Team", value: input.teamId }] : []),
+          ...(team ? [{ label: "Team", value: team.name }] : []),
+          {
+            label: "Plant meeting history",
+            value: history ? "Existing meetings" : "No meetings yet",
+          },
         ],
         exclusions:
           excluded > 0
@@ -117,15 +147,36 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
           prompt: "That meeting is unavailable.",
         };
       }
-      const [guests, attendance, checklist, evaluation, followUp, responses] =
-        await Promise.all([
-          getGuestList(actor.plantId, meeting.id),
-          getAttendanceSummary(actor.plantId, meeting.id),
-          getChecklistSummary(actor.plantId, meeting.id),
-          getEvaluation(actor.plantId, meeting.id),
-          getFollowUpCompletion(actor.plantId, meeting.id),
-          getMeetingResponseBreakdown(actor.plantId, meeting.id),
-        ]);
+      const [
+        guests,
+        attendance,
+        checklist,
+        checklistSummary,
+        evaluation,
+        evaluationTrend,
+        followUp,
+        responseCards,
+        responses,
+        attendees,
+        locations,
+        communications,
+        tracking,
+      ] = await Promise.all([
+        getGuestList(actor.plantId, meeting.id),
+        getAttendanceSummary(actor.plantId, meeting.id),
+        getChecklist(actor.plantId, meeting.id),
+        getChecklistSummary(actor.plantId, meeting.id),
+        getEvaluation(actor.plantId, meeting.id),
+        getEvaluationTrend(actor.plantId),
+        getFollowUpCompletion(actor.plantId, meeting.id),
+        listMeetingResponses(actor.plantId, meeting.id),
+        getMeetingResponseBreakdown(actor.plantId, meeting.id),
+        listAttendees(actor.plantId, meeting.id),
+        listLocations(actor.plantId),
+        getMeetingCommunications(actor.plantId, meeting.id),
+        getMeetingTrackingByPerson(actor.plantId, meeting.id),
+      ]);
+      const templates = getMeetingContextualTemplates(meeting.type);
       const sourceLink = trustedEvryApplicationSourceLink({
         label: meetingDisplayTitle(meeting),
         href: `/meetings/${meeting.id}`,
@@ -153,8 +204,9 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
               },
               {
                 label: "Checklist",
-                value: `${checklist.checked} of ${checklist.total}`,
+                value: `${checklistSummary.checked} of ${checklistSummary.total}`,
               },
+              { label: "Checklist rows", value: String(checklist.length) },
               {
                 label: "Evaluation score",
                 value: evaluation?.totalScore ?? "Not evaluated",
@@ -168,6 +220,31 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
               {
                 label: "Response cards",
                 value: String(responses.recordedCount),
+              },
+              {
+                label: "Response rows",
+                value: String(responseCards.length),
+              },
+              { label: "Attendee rows", value: String(attendees.length) },
+              {
+                label: "Evaluation trend points",
+                value: String(evaluationTrend.length),
+              },
+              {
+                label: "Available locations",
+                value: String(locations.length),
+              },
+              {
+                label: "Meeting communications",
+                value: String(communications.length),
+              },
+              {
+                label: "Recipients with tracking",
+                value: String(tracking.size),
+              },
+              {
+                label: "Contextual templates",
+                value: String(templates?.templates.length ?? 0),
               },
             ],
             sourceLink,
@@ -232,29 +309,48 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
     identity: "meetings.read.schedule",
     inputSchema: locationsInputSchema,
     async run({ actor }) {
-      const locations = await listLocations(actor.plantId);
+      const [locations, teams] = await Promise.all([
+        listLocations(actor.plantId),
+        listTeams(actor.plantId),
+      ]);
       const newMeetingLink = trustedEvryApplicationSourceLink({
         label: "New meeting",
         href: "/meetings/new",
       });
-      const items = locations.map((location) => ({
-        id: location.id,
-        label: location.name,
-        facts: [
-          { label: "Address", value: location.address },
-          {
-            label: "Capacity",
-            value:
-              location.capacity === null
-                ? "Not set"
-                : String(location.capacity),
-          },
-        ],
-        sourceLink: newMeetingLink,
-      }));
+      const items = [
+        ...locations.map((location) => ({
+          id: location.id,
+          label: location.name,
+          facts: [
+            { label: "Kind", value: "Location" },
+            { label: "Address", value: location.address },
+            {
+              label: "Capacity",
+              value:
+                location.capacity === null
+                  ? "Not set"
+                  : String(location.capacity),
+            },
+          ],
+          sourceLink: newMeetingLink,
+        })),
+        ...teams.map((team) => ({
+          id: team.id,
+          label: team.name,
+          facts: [
+            { label: "Kind", value: "Team" },
+            { label: "Filled roles", value: String(team.filledRoles) },
+            { label: "Total roles", value: String(team.totalRoles) },
+          ],
+          sourceLink: newMeetingLink,
+        })),
+      ];
       return buildEvryReadArtifact({
-        title: "Meeting locations",
-        filters: [{ label: "Status", value: "Active" }],
+        title: "Meeting scheduling options",
+        filters: [
+          { label: "Locations", value: String(locations.length) },
+          { label: "Teams", value: String(teams.length) },
+        ],
         exclusions: [],
         items,
         sourceLinks: [newMeetingLink],
@@ -273,17 +369,14 @@ export const MEETINGS_READ_ADAPTER_IDENTITIES = Object.freeze(
 
 /** Parse untrusted selection input, then run only a fixed plant-scoped adapter. */
 export async function executeMeetingsRead(input: {
-  registration: MeetingsOperationRegistration;
   authorization: MeetingsReadAuthorization;
   untrustedInput: unknown;
 }): Promise<EvryReadContinuationArtifact | null> {
-  if (
-    input.registration.operationKind !== "read" ||
-    input.registration.applicationCapability !== "read"
-  ) {
+  const registration = input.authorization.registration;
+  if (registration.operationKind !== "read") {
     return null;
   }
-  const adapter = READ_ADAPTER_BY_ID.get(input.registration.identity);
+  const adapter = READ_ADAPTER_BY_ID.get(registration.identity);
   if (!adapter) return null;
   const parsed = adapter.inputSchema.safeParse(input.untrustedInput);
   if (!parsed.success) return null;

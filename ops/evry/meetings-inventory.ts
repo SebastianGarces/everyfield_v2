@@ -11,6 +11,10 @@ import {
   MEETINGS_EXCLUDED_OPERATIONS,
 } from "../../src/lib/evry/capabilities/meetings/catalog";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "../../src/lib/evry/capabilities/meetings/registrations";
+import {
+  discoverMeetingsPageReadOperations,
+  MEETINGS_DISCOVERED_READ_EXCLUSIONS,
+} from "./meetings-source-discovery";
 
 const GENERATED_INVENTORY = path.join(
   "src",
@@ -40,7 +44,10 @@ type MeetingsInventoryEntry = Readonly<{
   confirmation: "not_required" | "required" | "excluded";
   classification:
     | Readonly<{ state: "supported" }>
-    | Readonly<{ state: "excluded"; reason: "no_authenticated_surface" }>;
+    | Readonly<{
+        state: "excluded";
+        reason: "no_authenticated_surface" | "shared_boundary_or_presentation";
+      }>;
 }>;
 
 export type MeetingsCapabilityInventory = Readonly<{
@@ -87,6 +94,28 @@ export function generateMeetingsCapabilityInventory(): MeetingsCapabilityInvento
     ])
   );
   const entries: MeetingsInventoryEntry[] = [];
+  const discoveredReads = discoverMeetingsPageReadOperations();
+  const mappedReads = MEETINGS_OPERATION_REGISTRATIONS.flatMap(
+    ({ surfaceIdentities }) => surfaceIdentities
+  ).filter((identity) => identity.startsWith("read-operation:"));
+  const excludedReads = new Set(
+    MEETINGS_DISCOVERED_READ_EXCLUSIONS.map(({ identity }) => identity)
+  );
+  for (const identity of discoveredReads) {
+    const classifications =
+      Number(mappedReads.includes(identity)) +
+      Number(excludedReads.has(identity));
+    if (classifications !== 1) {
+      throw new Error(
+        `Discovered Meetings page read must be mapped or excluded exactly once: ${identity}`
+      );
+    }
+  }
+  for (const identity of [...mappedReads, ...excludedReads]) {
+    if (!discoveredReads.includes(identity)) {
+      throw new Error(`Stale Meetings page-read classification: ${identity}`);
+    }
+  }
 
   for (const registration of MEETINGS_OPERATION_REGISTRATIONS) {
     if (
@@ -131,6 +160,21 @@ export function generateMeetingsCapabilityInventory(): MeetingsCapabilityInvento
         classification: {
           state: "excluded",
           reason: "no_authenticated_surface",
+        },
+      })
+    ),
+    ...MEETINGS_DISCOVERED_READ_EXCLUSIONS.map(
+      ({ identity }): MeetingsInventoryEntry => ({
+        identity,
+        kind: "excluded_operation",
+        capabilityIdentity: null,
+        parityCapability: "meetings",
+        operationKind: "excluded",
+        applicationCapability: null,
+        confirmation: "excluded",
+        classification: {
+          state: "excluded",
+          reason: "shared_boundary_or_presentation",
         },
       })
     )

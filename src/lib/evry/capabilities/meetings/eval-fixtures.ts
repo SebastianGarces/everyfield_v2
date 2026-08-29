@@ -6,25 +6,58 @@ import {
 
 import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
 
-const LIVE_EFFECT_LAYERS = new Set<EvryCapabilityEvalLayer>([
-  "execution",
-  "idempotency",
-  "errors",
-]);
-
 function fixtureFor(
   registration: (typeof MEETINGS_OPERATION_REGISTRATIONS)[number]
 ): EvryCapabilityEvalFixture {
-  const proofCase = (layer: EvryCapabilityEvalLayer) => [
-    {
-      id: `${registration.identity}:${layer}`,
-      proofId:
-        registration.operationKind === "effect" && LIVE_EFFECT_LAYERS.has(layer)
-          ? "meetings-effect-live"
-          : "meetings-capability-contract",
-      testName: `${registration.identity}:${layer}`,
-    },
-  ];
+  const proofCase = (layer: EvryCapabilityEvalLayer) => {
+    if (layer === "selection") {
+      return [
+        {
+          id: `${registration.identity}:${layer}`,
+          proofId: "meetings-selection",
+          testName:
+            registration.operationKind === "effect"
+              ? "the closed Meetings grammar selects every registered effect exactly"
+              : "the closed Meetings grammar selects each read without confirmation",
+        },
+      ];
+    }
+    if (
+      registration.operationKind === "effect" &&
+      (layer === "arguments" ||
+        layer === "confirmation" ||
+        layer === "ui_artifact")
+    ) {
+      return [
+        {
+          id: `${registration.identity}:${layer}`,
+          proofId: "meetings-capability-contract",
+          testName:
+            layer === "arguments"
+              ? "every authoritative effect has one strict complete fingerprint contract"
+              : "every Meetings effect renders its exact complete confirmation",
+        },
+      ];
+    }
+    const liveLayer =
+      layer === "policy"
+        ? "permission"
+        : layer === "confirmation"
+          ? "execution"
+          : layer === "arguments"
+            ? "errors"
+            : layer;
+    return [
+      {
+        id: `${registration.identity}:${layer}`,
+        proofId:
+          registration.operationKind === "effect"
+            ? "meetings-effect-live"
+            : "meetings-read-live",
+        testName: `${registration.identity}:${liveLayer}`,
+      },
+    ];
+  };
   const cases: EvryCapabilityEvalFixture["cases"] = {
     policy: proofCase("policy"),
     selection: proofCase("selection"),

@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
-import { EVRY_CAPABILITY_EVAL_LAYERS } from "@/lib/evry/evals/contracts";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
@@ -11,21 +10,18 @@ import {
   assertMeetingsEffectContractsComplete,
   MEETINGS_EFFECT_ARGUMENT_SCHEMAS,
 } from "./effect-contracts";
+import { meetingsEffectDisclosure } from "./effect-disclosure";
 import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "./eval-fixtures";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
-import { MEETINGS_READ_ADAPTER_IDENTITIES } from "./reads";
 import {
   MEETINGS_ARTIFACT_REVIEW_REGISTRY,
-  MEETINGS_EXECUTION_REGISTRY,
   MEETINGS_PLAN_REGISTRY,
 } from "./runtime";
-import {
-  MEETINGS_SELECTION_EXAMPLES,
-  selectMeetingsEvryRequest,
-} from "./selection";
 
 const ID = "10000000-0000-4000-8000-000000000001";
 const PERSON_ID = "20000000-0000-4000-8000-000000000001";
+const SECOND_ID = "30000000-0000-4000-8000-000000000001";
+const NOTIFICATION_ID = "40000000-0000-4000-8000-000000000001";
 const WHEN = "2026-08-29T14:00:00.000Z";
 
 const agenda = [{ id: "welcome", title: "Welcome", minutes: 10 }];
@@ -85,7 +81,9 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "timezone") return "America/New_York";
   if (key === "locationName") return "Community Center";
   if (key === "locationAddress") return "1 Main Street";
-  if (key === "savedLocationId") return null;
+  if (key === "savedLocationId") {
+    return exportName === "createMeetingAction" ? ID : null;
+  }
   if (key === "teamId" || key === "meetingSubtype") return null;
   if (key === "estimatedAttendance") return 30;
   if (key === "durationMinutes") return 90;
@@ -95,8 +93,18 @@ function fixtureValue(exportName: string, key: string): unknown {
   }
   if (key === "resolvedTeamMemberIds") return [];
   if (key === "meetingNumber") return 12;
-  if (key === "checklistItems") return [];
-  if (key === "attendanceRows") return [];
+  if (key === "checklistItems") {
+    return [{ itemId: SECOND_ID, itemName: "Set up", category: "setup" }];
+  }
+  if (key === "attendanceRows") {
+    return [
+      {
+        attendanceId: SECOND_ID,
+        personId: PERSON_ID,
+        expectedPersonUpdatedAt: WHEN,
+      },
+    ];
+  }
   if (key === "notificationBaseline") {
     return {
       coreGroupUserIds: [],
@@ -104,13 +112,42 @@ function fixtureValue(exportName: string, key: string): unknown {
       activeNotifications: [],
     };
   }
-  if (key === "notificationTargets") return [];
-  if (key === "pendingNotifications") return [];
+  if (key === "notificationTargets") {
+    return [
+      {
+        notificationId: NOTIFICATION_ID,
+        recipientUserId: ID,
+        category: "meetings",
+        type: "meeting.reminder",
+        title: "Meeting reminder",
+        body: "Vision Meeting is coming up.",
+        entityType: "meeting",
+        entityId: ID,
+        dedupeKey: "meeting-reminder",
+        scheduledFor: WHEN,
+        expectedAbsent: true,
+      },
+    ];
+  }
+  if (key === "pendingNotifications") {
+    return [
+      {
+        notificationId: NOTIFICATION_ID,
+        recipientUserId: ID,
+        type: "meeting.reminder",
+        entityId: ID,
+        dedupeKey: "meeting-reminder",
+        scheduledFor: WHEN,
+        beforeStatus: "pending",
+        expectedUpdatedAt: WHEN,
+      },
+    ];
+  }
   if (key === "expectedAttendanceIds") return [ID];
   if (key === "expectedChecklistItemIds") return [ID];
-  if (key === "expectedResponseIds") return [];
-  if (key === "expectedEvaluationId") return null;
-  if (key === "expectedInvitationIds") return [];
+  if (key === "expectedResponseIds") return [SECOND_ID];
+  if (key === "expectedEvaluationId") return SECOND_ID;
+  if (key === "expectedInvitationIds") return [SECOND_ID];
   if (key === "expectedActualAttendance") return null;
   if (key === "attendees") {
     return [
@@ -122,7 +159,18 @@ function fixtureValue(exportName: string, key: string): unknown {
       },
     ];
   }
-  if (key === "personStatusChanges") return [];
+  if (key === "personStatusChanges") {
+    return [
+      {
+        personId: PERSON_ID,
+        beforeStatus: "prospect",
+        afterStatus: "attendee",
+        expectedUpdatedAt: WHEN,
+        activityId: SECOND_ID,
+        performedById: ID,
+      },
+    ];
+  }
   if (key === "followUpTaskTargets") {
     return [
       {
@@ -134,7 +182,21 @@ function fixtureValue(exportName: string, key: string): unknown {
         expectedTaskAbsent: true,
         beforeStatus: null,
         expectedUpdatedAt: null,
-        notificationTargets: [],
+        notificationTargets: [
+          {
+            notificationId: NOTIFICATION_ID,
+            recipientUserId: ID,
+            category: "tasks",
+            type: "task.due",
+            title: "Task due",
+            body: "Follow up",
+            entityType: "task",
+            entityId: ID,
+            dedupeKey: "task-due",
+            scheduledFor: WHEN,
+            expectedAbsent: true,
+          },
+        ],
       },
     ];
   }
@@ -151,7 +213,14 @@ function fixtureValue(exportName: string, key: string): unknown {
       notificationTargets: [],
     };
   }
-  if (key === "evaluationTask") return null;
+  if (key === "evaluationTask") {
+    return {
+      taskId: SECOND_ID,
+      title: "Evaluate Vision Meeting",
+      beforeStatus: "not_started",
+      expectedUpdatedAt: WHEN,
+    };
+  }
   if (key === "firstName") return "Alex";
   if (key === "lastName") return "Rivera";
   if (key === "email") return "alex@example.com";
@@ -324,117 +393,43 @@ test("every Meetings effect renders its exact complete confirmation", () => {
     const step = review.confirmation.steps[0];
     assert.ok(step, exportName);
     assert.equal(step.stepId, contract.operationId);
-    assert.ok(step.resolvedTargets.length > 0, exportName);
+    const parsedArguments =
+      MEETINGS_EFFECT_ARGUMENT_SCHEMAS[
+        exportName as keyof typeof MEETINGS_ACTION_CONTRACTS
+      ].parse(arguments_);
+    const expected = meetingsEffectDisclosure(
+      exportName as keyof typeof MEETINGS_ACTION_CONTRACTS,
+      parsedArguments
+    );
+    assert.deepEqual(
+      step.resolvedTargets.map(({ label, value }) => ({ label, value })),
+      expected.targets.map(({ label, value }) => ({ label, value })),
+      exportName
+    );
+    assert.deepEqual(
+      step.counts,
+      expected.counts.map(({ label, count }) => ({ label, count })),
+      exportName
+    );
+    assert.deepEqual(
+      step.beforeAfter.map(({ label, count }) => ({ label, count })),
+      expected.beforeAfter.map(({ label, count }) => ({ label, count })),
+      exportName
+    );
+    assert.deepEqual(review.confirmation.consequences, expected.consequences);
+    assert.equal(step.reversibility, expected.reversibility);
     const complete = step.contentPreviews.find(
       ({ label }) => label === "Complete immutable plan"
     );
     assert.ok(complete, exportName);
     assert.deepEqual(JSON.parse(complete.content), arguments_, exportName);
-    if (contract.difficultToReverse) {
-      assert.equal(step.reversibility, "difficult_to_reverse");
-      assert.ok(step.beforeAfter.length > 0, exportName);
-    }
+    assert.equal(
+      expected.counts
+        .filter(({ includedInAffectedCount }) => includedInAffectedCount)
+        .reduce((sum, entry) => sum + entry.count, 0),
+      expected.affectedCount,
+      exportName
+    );
+    assert.ok(step.beforeAfter.length > 0, exportName);
   }
 });
-
-for (const fixture of MEETINGS_CAPABILITY_EVAL_FIXTURES) {
-  for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
-    test(`${fixture.capabilityIdentity}:${layer}`, () => {
-      const registration = MEETINGS_OPERATION_REGISTRATIONS.find(
-        ({ identity }) => identity === fixture.capabilityIdentity
-      );
-      assert.ok(registration);
-      assert.equal(fixture.cases[layer].length, 1);
-      assert.equal(
-        fixture.cases[layer][0].id,
-        `${fixture.capabilityIdentity}:${layer}`
-      );
-      assert.equal(
-        fixture.cases[layer][0].testName,
-        `${fixture.capabilityIdentity}:${layer}`
-      );
-
-      if (layer === "policy" || layer === "permission" || layer === "tenancy") {
-        assert.equal(registration.parityCapability, "meetings");
-        assert.equal(
-          registration.applicationCapability,
-          registration.operationKind === "effect" ||
-            registration.identity === "meetings.read.schedule"
-            ? "meetings.write"
-            : "read"
-        );
-        assert.ok(registration.surfaceIdentities.length > 0);
-      }
-      if (layer === "selection") {
-        if (registration.operationKind === "read") {
-          assert.ok(
-            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
-          );
-        } else {
-          const example = Object.entries(MEETINGS_ACTION_CONTRACTS).find(
-            ([, contract]) => contract.operationId === registration.identity
-          )?.[0] as keyof typeof MEETINGS_SELECTION_EXAMPLES | undefined;
-          assert.ok(example);
-          const selected = selectMeetingsEvryRequest(
-            MEETINGS_SELECTION_EXAMPLES[example]
-          );
-          assert.equal(selected?.kind, "effect");
-        }
-      }
-      if (layer === "arguments" || layer === "errors") {
-        if (registration.operationKind === "effect") {
-          const entry = Object.entries(MEETINGS_ACTION_CONTRACTS).find(
-            ([, contract]) => contract.operationId === registration.identity
-          );
-          assert.ok(entry);
-          const exportName = entry[0] as keyof typeof MEETINGS_ACTION_CONTRACTS;
-          const valid = validArguments(exportName);
-          assert.equal(
-            MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse(valid)
-              .success,
-            true
-          );
-          assert.equal(
-            MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse({
-              ...valid,
-              arbitrary: true,
-            }).success,
-            false
-          );
-        } else {
-          assert.ok(
-            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
-          );
-        }
-      }
-      if (layer === "confirmation") {
-        assert.equal(
-          registration.operationKind === "read",
-          registration.actionLabel === null,
-          "reads execute directly; effects own an effect-specific primary action"
-        );
-      }
-      if (layer === "execution" || layer === "idempotency") {
-        if (registration.operationKind === "effect") {
-          assert.ok(
-            MEETINGS_EXECUTION_REGISTRY.registrationFor(registration.identity)
-          );
-          assert.ok(
-            MEETINGS_PLAN_REGISTRY.registrationFor(registration.identity)
-          );
-        } else {
-          assert.ok(
-            MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
-          );
-        }
-      }
-      if (layer === "ui_artifact") {
-        assert.ok(
-          registration.operationKind === "effect"
-            ? registration.actionLabel
-            : MEETINGS_READ_ADAPTER_IDENTITIES.includes(registration.identity)
-        );
-      }
-    });
-  }
-}

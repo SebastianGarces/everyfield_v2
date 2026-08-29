@@ -68,6 +68,18 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "meetings-selection",
+    testFile: "src/lib/evry/capabilities/meetings/selection.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "meetings-read-live",
+    testFile: "src/lib/evry/capabilities/meetings/read-live.test.ts",
+    lane: "live_database",
+    safetyGates: ["cross_tenant_access"],
+  },
+  {
     id: "meetings-effect-live",
     testFile: "src/lib/evry/capabilities/meetings/effect-live.test.ts",
     lane: "live_database",

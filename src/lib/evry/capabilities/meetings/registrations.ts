@@ -43,6 +43,10 @@ const MEETING_LIST_READ = registration(
         "src/app/(dashboard)/teams/[teamId]/meetings/page.tsx",
         "listMeetings"
       ),
+      readCall(
+        "src/app/(dashboard)/teams/[teamId]/meetings/page.tsx",
+        "getTeam"
+      ),
     ],
   },
   {
@@ -78,11 +82,6 @@ const MEETING_DETAIL_READ = registration(
         "src/app/(dashboard)/meetings/[id]/page.tsx",
         "getMeetingCommunications"
       ),
-      readCall(
-        "src/app/(dashboard)/meetings/[id]/page.tsx",
-        "getMeetingContextualTemplates"
-      ),
-      "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
       readCall(
         "src/app/(dashboard)/meetings/[id]/attendance/page.tsx",
         "getMeeting"
@@ -122,6 +121,10 @@ const MEETING_DETAIL_READ = registration(
       readCall(
         "src/app/(dashboard)/meetings/[id]/invitations/page.tsx",
         "getGuestList"
+      ),
+      readCall(
+        "src/app/(dashboard)/meetings/[id]/invitations/page.tsx",
+        "getMeetingTrackingByPerson"
       ),
       readCall(
         "src/app/(dashboard)/meetings/[id]/logistics/page.tsx",
@@ -192,6 +195,7 @@ const MEETING_SCHEDULING_READ = registration(
     surfaceIdentities: [
       "route:/meetings/new",
       readCall("src/app/(dashboard)/meetings/new/page.tsx", "listLocations"),
+      readCall("src/app/(dashboard)/meetings/new/page.tsx", "listTeams"),
     ],
   },
   {

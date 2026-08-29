@@ -28,10 +28,12 @@ import {
   users,
 } from "@/db/schema";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
+import type { EvryEffectInput } from "@/lib/evry/executor";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
 import type { MeetingsActionExport } from "./catalog";
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
+import { meetingsEffectDisclosure } from "./effect-disclosure";
 import type { ResolvedMeetingsEffect } from "./resolver";
 import type { MeetingsEvryEffectSelection } from "./selection";
 
@@ -815,6 +817,53 @@ async function runEffect(input: {
     effectKey,
     arguments: resolved.arguments,
   };
+  let staleArguments: EvryEffectInput["arguments"];
+  if (input.exportName === "createLocationAction") {
+    const args = resolved.arguments as Readonly<{ locationId: string }>;
+    await db.insert(locations).values({
+      id: args.locationId,
+      churchId: input.actor.plantId,
+      name: `${SCRATCH} stale collision`,
+      address: "9 Stale Way",
+    });
+    staleArguments = resolved.arguments;
+  } else if (input.exportName === "createMeetingAction") {
+    staleArguments = { ...resolved.arguments, createdById: randomUUID() };
+  } else {
+    const staleTimestamp = Object.keys(resolved.arguments).find((key) =>
+      /^expected.*UpdatedAt$/.test(key)
+    );
+    assert.ok(staleTimestamp, `${input.exportName} has no stale baseline`);
+    staleArguments = {
+      ...resolved.arguments,
+      [staleTimestamp]: "2000-01-01T00:00:00.000Z",
+    };
+  }
+  const stale = await input.executeMeetingsEffect({
+    ...effectInput,
+    arguments: staleArguments,
+  });
+  assert.equal(
+    stale.status,
+    "refused",
+    `${input.exportName} accepted stale state`
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+    ).length,
+    0,
+    `${input.exportName} claimed a stale effect`
+  );
+  if (input.exportName === "createLocationAction") {
+    const args = resolved.arguments as Readonly<{ locationId: string }>;
+    await db.delete(locations).where(eq(locations.id, args.locationId));
+  }
+  console.log(`PASS ${execution.capabilityIdentity}:errors`);
+
   const concurrent = await Promise.all([
     input.executeMeetingsEffect(effectInput),
     input.executeMeetingsEffect(effectInput),
@@ -824,6 +873,20 @@ async function runEffect(input: {
     ["completed", "completed"],
     input.exportName
   );
+  const expectedDisclosure = meetingsEffectDisclosure(
+    input.exportName,
+    resolved.arguments
+  );
+  for (const result of concurrent) {
+    assert.equal(result.status, "completed", input.exportName);
+    if (result.status === "completed") {
+      assert.equal(
+        result.affectedCount,
+        expectedDisclosure.affectedCount,
+        `${input.exportName} receipt count diverged from confirmation`
+      );
+    }
+  }
   const outcomes = await db
     .select({ id: evryExecutionOutcomes.id })
     .from(evryExecutionOutcomes)
@@ -853,12 +916,11 @@ async function runEffect(input: {
   );
   console.log(`PASS ${execution.capabilityIdentity}:idempotency`);
 
-  const refused = await input.executeMeetingsEffect({
+  const refusedArguments = await input.executeMeetingsEffect({
     ...effectInput,
     arguments: { ...resolved.arguments, genericUrl: "https://invalid.test" },
   });
-  assert.equal(refused.status, "refused", input.exportName);
-  console.log(`PASS ${execution.capabilityIdentity}:errors`);
+  assert.equal(refusedArguments.status, "refused", input.exportName);
 }
 
 async function assertCrossPlantRefusals(input: {
@@ -979,6 +1041,27 @@ async function main() {
     resolveMeetingsEvryEffect: resolver.resolveMeetingsEvryEffect,
     mintEvryPlanRequestKey: plans.mintEvryPlanRequestKey,
   });
+  for (const contract of Object.values(MEETINGS_ACTION_CONTRACTS)) {
+    console.log(`PASS ${contract.operationId}:tenancy`);
+  }
+  await db
+    .update(users)
+    .set({ seat: "member" })
+    .where(eq(users.id, actor.userId));
+  sessionUser = sessionUser ? { ...sessionUser, seat: "member" } : null;
+  for (const contract of Object.values(MEETINGS_ACTION_CONTRACTS)) {
+    assert.equal(
+      await eligibility.authorizeEvryEffectCapability(contract.operationId),
+      null,
+      `${contract.operationId} admitted a Member`
+    );
+    console.log(`PASS ${contract.operationId}:permission`);
+  }
+  await db
+    .update(users)
+    .set({ seat: "owner" })
+    .where(eq(users.id, actor.userId));
+  sessionUser = sessionUser ? { ...sessionUser, seat: "owner" } : null;
   for (const exportName of Object.keys(
     MEETINGS_ACTION_CONTRACTS
   ) as MeetingsActionExport[]) {

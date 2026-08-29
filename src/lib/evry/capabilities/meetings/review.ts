@@ -9,6 +9,7 @@ import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/cont
 import type { EvryActionStep } from "@/lib/evry/plans";
 
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
+import { meetingsEffectDisclosure } from "./effect-disclosure";
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
 
 const MAX_PREVIEW_CHARACTERS = 4_000;
@@ -28,61 +29,14 @@ function compactJson(value: unknown): string {
   return serialized;
 }
 
-function sourceLinkFor(key: string, value: string) {
-  if (key === "meetingId") {
+function sourceLinkFor(source: "meeting" | "person" | "none", value: string) {
+  if (source === "meeting") {
     return { label: "Open meeting", href: `/meetings/${value}` };
   }
-  if (key === "personId") {
+  if (source === "person") {
     return { label: "Open person", href: `/people/${value}` };
   }
   return null;
-}
-
-function collectTargets(arguments_: Readonly<Record<string, unknown>>) {
-  const targets: {
-    label: string;
-    value: string;
-    sourceLink: { label: string; href: string } | null;
-  }[] = [];
-  const seen = new Set<string>();
-  const add = (key: string, value: string) => {
-    const identity = `${key}:${value}`;
-    if (seen.has(identity)) return;
-    seen.add(identity);
-    targets.push({
-      label: humanize(key),
-      value,
-      sourceLink: sourceLinkFor(key, value),
-    });
-  };
-
-  for (const [key, value] of Object.entries(arguments_)) {
-    if (typeof value === "string" && /Id$/.test(key)) add(key, value);
-    if (!Array.isArray(value)) continue;
-    for (const item of value) {
-      if (typeof item === "string" && /Ids$/.test(key)) {
-        add(key.slice(0, -1), item);
-        continue;
-      }
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      for (const [itemKey, itemValue] of Object.entries(item)) {
-        if (typeof itemValue === "string" && /Id$/.test(itemKey)) {
-          add(itemKey, itemValue);
-        }
-      }
-    }
-  }
-  if (targets.length === 0) {
-    throw new Error("Meetings confirmation omitted its resolved target");
-  }
-  return targets;
-}
-
-function collectCounts(arguments_: Readonly<Record<string, unknown>>) {
-  const counts = Object.entries(arguments_)
-    .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
-    .map(([key, value]) => ({ label: humanize(key), count: value.length }));
-  return counts.length > 0 ? counts : [{ label: "Records changed", count: 1 }];
 }
 
 function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
@@ -107,81 +61,8 @@ function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
   return previews;
 }
 
-function collectBeforeAfter(arguments_: Readonly<Record<string, unknown>>) {
-  if (Array.isArray(arguments_.records)) {
-    return [
-      {
-        label: "Attendance records",
-        before: compactJson(
-          arguments_.records.map((record) => {
-            const value = record as Readonly<Record<string, unknown>>;
-            return { personId: value.personId, state: value.before };
-          })
-        ),
-        after: compactJson(
-          arguments_.records.map((record) => {
-            const value = record as Readonly<Record<string, unknown>>;
-            return {
-              personId: value.personId,
-              status: value.afterStatus,
-              attendanceType: value.afterAttendanceType,
-            };
-          })
-        ),
-        count: arguments_.records.length,
-      },
-    ];
-  }
-  if (arguments_.before !== undefined && arguments_.after !== undefined) {
-    return [
-      {
-        label: "State",
-        before: compactJson(arguments_.before),
-        after: compactJson(arguments_.after),
-        count: 1,
-      },
-    ];
-  }
-  if (
-    arguments_.beforeSections !== undefined &&
-    arguments_.afterSections !== undefined
-  ) {
-    return [
-      {
-        label: "Agenda",
-        before: compactJson(arguments_.beforeSections),
-        after: compactJson(arguments_.afterSections),
-        count: 1,
-      },
-    ];
-  }
-  if (arguments_.beforeStatus !== undefined) {
-    return [
-      {
-        label: "Status",
-        before: String(arguments_.beforeStatus ?? "Not set"),
-        after: String(arguments_.afterStatus ?? "Not set"),
-        count: 1,
-      },
-    ];
-  }
-  if (arguments_.beforeResponse !== undefined) {
-    return [
-      {
-        label: "Response card",
-        before: compactJson(arguments_.beforeResponse ?? { recorded: false }),
-        after:
-          arguments_.responseType === undefined
-            ? "No response card"
-            : compactJson({
-                responseType: arguments_.responseType,
-                notes: arguments_.notes ?? null,
-              }),
-        count: 1,
-      },
-    ];
-  }
-  return [];
+function displayState(value: unknown): string {
+  return typeof value === "string" ? value : compactJson(value);
 }
 
 function localTime(instant: Date, timeZone: string): string {
@@ -243,26 +124,6 @@ function effectKind(identity: string) {
   return "other" as const;
 }
 
-function consequences(identity: string, difficultToReverse: boolean) {
-  if (identity === "meetings.lifecycle.delete") {
-    return [
-      "This permanently deletes the meeting and every disclosed dependent record.",
-      "Pending reminders disclosed in this plan will be cancelled.",
-    ];
-  }
-  if (identity.startsWith("meetings.attendance.person-create")) {
-    return [
-      "This creates one CRM person and one meeting attendance record together.",
-      "The new person becomes visible throughout this plant.",
-    ];
-  }
-  return [
-    difficultToReverse
-      ? "This changes the disclosed Meetings records and may be difficult to reverse."
-      : "This changes only the disclosed Meetings records and downstream targets.",
-  ];
-}
-
 function reviewFor(input: {
   identity: keyof typeof CONTRACT_BY_ID;
   plan: EvryConversationPlanIdentity;
@@ -270,39 +131,38 @@ function reviewFor(input: {
 }) {
   const contract = CONTRACT_BY_ID[input.identity];
   const schema = MEETINGS_EFFECT_ARGUMENT_SCHEMAS[contract.exportName];
-  const arguments_ = schema.parse(input.step.arguments) as Readonly<
-    Record<string, unknown>
-  >;
-  const beforeAfter = collectBeforeAfter(arguments_);
-  if (contract.difficultToReverse && beforeAfter.length === 0) {
-    beforeAfter.push({
-      label: "Record",
-      before: compactJson(arguments_.before ?? arguments_),
-      after: "Removed",
-      count: 1,
-    });
-  }
+  const arguments_ = schema.parse(input.step.arguments);
+  const disclosure = meetingsEffectDisclosure(contract.exportName, arguments_);
   return buildEvryConfirmationArtifact({
     kind: "confirmation",
     artifactVersion: 1,
     plan: input.plan,
     title: contract.label,
     actionLabel: contract.actionLabel,
-    consequences: consequences(input.identity, contract.difficultToReverse),
+    consequences: disclosure.consequences,
     steps: [
       {
         stepId: input.step.id,
         title: contract.label,
         effectKind: effectKind(input.identity),
-        reversibility: contract.difficultToReverse
-          ? "difficult_to_reverse"
-          : "reversible",
-        resolvedTargets: collectTargets(arguments_),
-        counts: collectCounts(arguments_),
+        reversibility: disclosure.reversibility,
+        resolvedTargets: disclosure.targets.map(({ label, value, source }) => ({
+          label,
+          value,
+          sourceLink: sourceLinkFor(source, value),
+        })),
+        counts: disclosure.counts.map(({ label, count }) => ({ label, count })),
         exclusions: [],
         dateTime: dateTimeFor(arguments_),
         contentPreviews: collectContentPreviews(arguments_),
-        beforeAfter,
+        beforeAfter: disclosure.beforeAfter.map(
+          ({ label, before, after, count }) => ({
+            label,
+            before: displayState(before),
+            after: displayState(after),
+            count,
+          })
+        ),
       },
     ],
   });

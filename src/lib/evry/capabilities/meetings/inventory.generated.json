@@ -784,18 +784,17 @@
         "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → listAttendees",
         "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getGuestList",
         "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeeting",
+        "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeetingTrackingByPerson",
         "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getMeeting",
         "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklist",
         "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklistSummary",
         "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getMeeting",
         "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeeting",
         "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeetingResponseBreakdown",
-        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
         "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getFollowUpCompletion",
         "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getGuestList",
         "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeeting",
         "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingCommunications",
-        "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingContextualTemplates",
         "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
         "route:/meetings/[id]",
         "route:/meetings/[id]/attendance",
@@ -826,6 +825,7 @@
       "surfaceIdentities": [
         "read-operation:src/app/(dashboard)/meetings/page.tsx → hasMeetingHistory",
         "read-operation:src/app/(dashboard)/meetings/page.tsx → listMeetings",
+        "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
         "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings",
         "route:/meetings",
         "route:/teams/[teamId]/meetings"
@@ -851,6 +851,7 @@
       "identity": "meetings.read.schedule",
       "surfaceIdentities": [
         "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
+        "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
         "route:/meetings/new"
       ],
       "parityCapability": "meetings",
@@ -1237,6 +1238,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/analytics/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → getAttendanceSummary",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1275,6 +1289,19 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/attendance/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → getEvaluation",
@@ -1317,6 +1344,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/evaluation/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getGuestList",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1337,6 +1377,42 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → getMeetingTrackingByPerson",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.detail",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getCurrentUserChurch",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → getMeeting",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1345,6 +1421,19 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/layout.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → getChecklist",
@@ -1377,6 +1466,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/logistics/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → getMeeting",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1397,14 +1499,43 @@
       "classification": { "state": "supported" }
     },
     {
-      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
-      "kind": "read_operation",
-      "capabilityIdentity": "meetings.read.detail",
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/outcomes/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
       "parityCapability": "meetings",
-      "operationKind": "read",
-      "applicationCapability": "read",
-      "confirmation": "not_required",
-      "classification": { "state": "supported" }
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → churches",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → eq",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getFollowUpCompletion",
@@ -1447,16 +1578,6 @@
       "classification": { "state": "supported" }
     },
     {
-      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → getMeetingContextualTemplates",
-      "kind": "read_operation",
-      "capabilityIdentity": "meetings.read.detail",
-      "parityCapability": "meetings",
-      "operationKind": "read",
-      "applicationCapability": "read",
-      "confirmation": "not_required",
-      "classification": { "state": "supported" }
-    },
-    {
       "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → listLocations",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.detail",
@@ -1467,6 +1588,19 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/[id]/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.schedule",
@@ -1475,6 +1609,42 @@
       "applicationCapability": "meetings.write",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listTeams",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.schedule",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "meetings.write",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → getCurrentUserChurch",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → hasMeetingHistory",
@@ -1497,6 +1667,29 @@
       "classification": { "state": "supported" }
     },
     {
+      "identity": "read-operation:src/app/(dashboard)/meetings/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → getTeam",
+      "kind": "read_operation",
+      "capabilityIdentity": "meetings.read.list",
+      "parityCapability": "meetings",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
       "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → listMeetings",
       "kind": "read_operation",
       "capabilityIdentity": "meetings.read.list",
@@ -1505,6 +1698,19 @@
       "applicationCapability": "read",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
+    },
+    {
+      "identity": "read-operation:src/app/(dashboard)/teams/[teamId]/meetings/page.tsx → verifySession",
+      "kind": "excluded_operation",
+      "capabilityIdentity": null,
+      "parityCapability": "meetings",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "classification": {
+        "state": "excluded",
+        "reason": "shared_boundary_or_presentation"
+      }
     },
     {
       "identity": "route:/meetings",
@@ -1610,8 +1816,8 @@
   "summary": {
     "actions": 25,
     "routes": 10,
-    "readOperations": 30,
-    "exclusions": 2,
+    "readOperations": 31,
+    "exclusions": 17,
     "readCapabilities": 4,
     "effectCapabilities": 25,
     "unclassified": 0

@@ -8,7 +8,6 @@ import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import type { EvryCapabilityConversationContinuation } from "../conversation";
 
-import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
 import { meetingsReadInputForSelection } from "./read-input";
 import { executeMeetingsRead } from "./reads";
 import { resolveMeetingsEvryEffect } from "./resolver";
@@ -57,10 +56,6 @@ export const continueMeetingsEvryConversation: EvryCapabilityConversationContinu
         ) {
           return null;
         }
-        const registration = MEETINGS_OPERATION_REGISTRATIONS.find(
-          (candidate) => candidate.identity === identity
-        );
-        if (!registration) return null;
         const needsMeeting =
           selection.kind === "read_detail" ||
           selection.kind === "read_analytics";
@@ -68,7 +63,6 @@ export const continueMeetingsEvryConversation: EvryCapabilityConversationContinu
           return missingMeetingResult();
         }
         const artifact = await executeMeetingsRead({
-          registration,
           authorization,
           untrustedInput: meetingsReadInputForSelection(
             selection,
