@@ -86,4 +86,28 @@ test("run rows reject malformed terminal and cross-domain shapes", () => {
     })
   );
   assert.throws(() => createRow({ kind: "execution", stage: "accepted" }));
+  assert.throws(() =>
+    createRow({
+      conversationId: CONVERSATION_ID,
+      status: "active",
+    })
+  );
+  assert.throws(() =>
+    createRow({
+      changedAt: new Date(START.valueOf() + 1_000),
+      expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS + 1_000),
+    })
+  );
+  assert.doesNotThrow(() =>
+    createRow({
+      kind: "execution",
+      operation: "execute",
+      stage: "executing",
+      conversationId: CONVERSATION_ID,
+      planId: "60000000-0000-4000-8000-000000000001",
+      planFingerprint: "b".repeat(64),
+      changedAt: new Date(START.valueOf() + 1_000),
+      expiresAt: new Date(START.valueOf() + 1_000),
+    })
+  );
 });

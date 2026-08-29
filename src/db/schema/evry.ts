@@ -856,8 +856,9 @@ export const evryConversationArtifacts = pgTable(
  * plan arguments, provider payloads, and effect results remain in their
  * authoritative stores. A disconnect stops observation, never this claim.
  * Terminal rows remain as the request-key replay ledger; an owning
- * conversation/plan retirement cascades its derived run rows. Expiry only
- * stops observation/resume eligibility and is not permission to reuse a key.
+ * conversation/plan retirement cascades its derived run rows. Conversation
+ * expiry is fixed; execution expiry is a renewable, version-fenced lease and
+ * is never permission to reuse a request key.
  * There is deliberately no time-based cleanup of this replay ledger.
  */
 export const evryActiveRuns = pgTable(
@@ -952,7 +953,7 @@ export const evryActiveRuns = pgTable(
     check("evry_active_runs_version_check", sql`${table.version} >= 0`),
     check(
       "evry_active_runs_time_check",
-      sql`${table.changedAt} >= ${table.startedAt} and ${table.expiresAt} = ${table.startedAt} + interval '15 minutes' and (${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt})`
+      sql`${table.changedAt} >= ${table.startedAt} and ((${table.kind} = 'conversation' and ${table.expiresAt} = ${table.startedAt} + interval '15 minutes') or (${table.kind} = 'execution' and ${table.expiresAt} >= ${table.startedAt} and (${table.status} <> 'active' or ${table.expiresAt} >= ${table.changedAt}))) and (${table.completedAt} is null or ${table.completedAt} >= ${table.startedAt})`
     ),
     check(
       "evry_active_runs_terminal_check",
@@ -965,6 +966,7 @@ export const evryActiveRuns = pgTable(
         and ${table.operation} in ('create', 'continue')
         and ${table.planId} is null
         and ${table.planFingerprint} is null
+        and (${table.operation} <> 'create' or ${table.status} <> 'active' or ${table.conversationId} is null)
         and (${table.operation} = 'create' or ${table.conversationId} is not null)
         and ${table.stage} <> 'executing'
       ) or (

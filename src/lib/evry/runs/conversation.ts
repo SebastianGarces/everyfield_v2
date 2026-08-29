@@ -32,7 +32,7 @@ export type EvryConversationRunResult =
   | null;
 
 type EvryConversationRunBoundaries = Readonly<{
-  runs: EvryActiveRunStore;
+  runs: Pick<EvryActiveRunStore, "claim" | "advance" | "complete" | "fail">;
   recover: typeof recoverEvryActiveRun;
   now(): Date;
 }>;

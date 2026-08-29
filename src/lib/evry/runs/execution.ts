@@ -30,7 +30,10 @@ export type PreparedEvryExecutionRun = Readonly<{
 }>;
 
 type ExecutionRunBoundaries = Readonly<{
-  runs: EvryActiveRunStore;
+  runs: Pick<
+    EvryActiveRunStore,
+    "claim" | "complete" | "fail" | "releaseExecution"
+  >;
   recover: typeof recoverEvryActiveRun;
   now(): Date;
 }>;
@@ -110,28 +113,32 @@ export async function runPreparedEvryExecutionActiveRun(
       request: input.request,
     });
     if (result.status === "unavailable") {
-      await boundaries.runs.fail({
+      const failed = await boundaries.runs.fail({
         actor: input.actor,
         requestKey: input.request.requestKey,
         conversationId: input.conversationId,
         failedAt: boundaries.now(),
+        expectedVersion: claim.run.version,
       });
+      if (failed?.status !== "failed") return { status: "active" };
       return { status: "lifecycle", result };
     }
-    await boundaries.runs.complete({
+    const completed = await boundaries.runs.complete({
       actor: input.actor,
       requestKey: input.request.requestKey,
       conversationId: result.resumed.conversation.id,
       completedAt: boundaries.now(),
+      expectedVersion: claim.run.version,
     });
+    if (completed?.status !== "completed") return { status: "active" };
     return { status: "lifecycle", result };
   } catch (error) {
     await boundaries.runs
-      .fail({
+      .releaseExecution({
         actor: input.actor,
         requestKey: input.request.requestKey,
-        conversationId: input.conversationId,
-        failedAt: boundaries.now(),
+        expectedVersion: claim.run.version,
+        releasedAt: boundaries.now(),
       })
       .catch(() => null);
     throw error;

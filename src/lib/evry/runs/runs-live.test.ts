@@ -7,6 +7,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
+  evryActionPlans,
+  evryActionPlanStates,
   evryActiveRuns,
   evryConversationArtifacts,
   evryConversationMessages,
@@ -24,6 +26,7 @@ import {
   fingerprintEvryActiveRunRequest,
 } from "./contract";
 import {
+  adoptExpiredEvryExecutionRun,
   claimEvryActiveRun,
   completeEvryActiveRun,
   findEvryActiveRun,
@@ -37,6 +40,9 @@ const SCRATCH = "__evry active runs live__";
 const plants: string[] = [];
 const actors: string[] = [];
 const conversations: string[] = [];
+// Immutable plans intentionally survive until this suite's disposable DB reset.
+const retainedPlanActors = new Set<string>();
+const retainedPlanPlants = new Set<string>();
 
 after(async () => {
   if (!LIVE_DB) return;
@@ -59,9 +65,14 @@ after(async () => {
       .delete(evryConversations)
       .where(inArray(evryConversations.id, conversations));
   }
-  if (actors.length) await db.delete(users).where(inArray(users.id, actors));
-  if (plants.length)
-    await db.delete(churches).where(inArray(churches.id, plants));
+  const removableActors = actors.filter((id) => !retainedPlanActors.has(id));
+  const removablePlants = plants.filter((id) => !retainedPlanPlants.has(id));
+  if (removableActors.length) {
+    await db.delete(users).where(inArray(users.id, removableActors));
+  }
+  if (removablePlants.length) {
+    await db.delete(churches).where(inArray(churches.id, removablePlants));
+  }
 });
 
 async function fixture() {
@@ -246,5 +257,117 @@ test(
       null,
       "deleting the owning conversation cascades its run"
     );
+  }
+);
+
+test(
+  "expired execution adoption is one atomic lease and fences the still-live owner",
+  { skip },
+  async () => {
+    const [actor] = await fixture();
+    const requestKey = evryConversationRequestKeySchema.parse(randomUUID());
+    const conversation = await createEvryConversationRecord({
+      actorUserId: actor!.userId,
+      plantId: actor!.plantId,
+      requestKey: evryConversationRequestKeySchema.parse(randomUUID()),
+      body: "Execution lease fixture",
+      pageContext: null,
+      requestPageContext: null,
+      createdAt: new Date(),
+    });
+    conversations.push(conversation.id);
+    const planId = randomUUID();
+    const planFingerprint = "c".repeat(64);
+    const planCreatedAt = new Date();
+    retainedPlanActors.add(actor!.userId);
+    retainedPlanPlants.add(actor!.plantId);
+    await db.batch([
+      db.insert(evryActionPlans).values({
+        id: planId,
+        churchId: actor!.plantId,
+        actorUserId: actor!.userId,
+        requestKey: randomUUID(),
+        intentFingerprint: "d".repeat(64),
+        fingerprint: planFingerprint,
+        document: {
+          version: 1,
+          steps: [
+            {
+              id: "lease-proof",
+              capabilityIdentity: "proof.lease@1",
+              effectClass: "reversible",
+              arguments: {},
+              dependsOn: [],
+            },
+          ],
+        },
+        createdAt: planCreatedAt,
+        expiresAt: new Date(planCreatedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+      }),
+      db.insert(evryActionPlanStates).values({
+        planId,
+        churchId: actor!.plantId,
+        status: "executing",
+        changedAt: planCreatedAt,
+      }),
+    ]);
+
+    const startedAt = new Date(Date.now() - EVRY_ACTIVE_RUN_TTL_MS - 1_000);
+    const requestFingerprint = fingerprintEvryActiveRunRequest({
+      action: "execute",
+      conversationId: conversation.id,
+      plan: { planId, fingerprint: planFingerprint },
+    });
+    const identity = {
+      kind: "execution" as const,
+      operation: "execute" as const,
+      conversationId: conversation.id,
+      planId,
+      planFingerprint,
+    };
+    const original = await claimEvryActiveRun({
+      actor: actor!,
+      requestKey,
+      requestFingerprint,
+      identity,
+      startedAt,
+    });
+    const adoptedAt = new Date();
+    const adopters = await Promise.all([
+      adoptExpiredEvryExecutionRun({
+        actor: actor!,
+        requestKey,
+        expectedVersion: original.run.version,
+        adoptedAt,
+      }),
+      adoptExpiredEvryExecutionRun({
+        actor: actor!,
+        requestKey,
+        expectedVersion: original.run.version,
+        adoptedAt,
+      }),
+    ]);
+    const winners = adopters.filter((run) => run !== null);
+    assert.equal(winners.length, 1);
+    assert.equal(winners[0]?.version, original.run.version + 1);
+
+    const staleCompletion = await completeEvryActiveRun({
+      actor: actor!,
+      requestKey,
+      conversationId: conversation.id,
+      completedAt: adoptedAt,
+      expectedVersion: original.run.version,
+    });
+    assert.equal(staleCompletion?.status, "active");
+    assert.equal(staleCompletion?.version, winners[0]?.version);
+
+    const winnerCompletion = await completeEvryActiveRun({
+      actor: actor!,
+      requestKey,
+      conversationId: conversation.id,
+      completedAt: adoptedAt,
+      expectedVersion: winners[0]!.version,
+    });
+    assert.equal(winnerCompletion?.status, "completed");
   }
 );

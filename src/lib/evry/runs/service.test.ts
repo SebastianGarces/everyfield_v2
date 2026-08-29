@@ -160,7 +160,14 @@ test("expired and missing runs terminate when no durable state exists", async ()
       now: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS + 1),
       boundaries,
     }),
-    { status: "expired", requestId: REQUEST_ID }
+    {
+      status: "expired",
+      requestId: REQUEST_ID,
+      kind: "conversation",
+      operation: "create",
+      sequence: 2,
+      conversationId: null,
+    }
   );
   assert.deepEqual(
     await recoverEvryActiveRun({

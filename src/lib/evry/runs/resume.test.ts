@@ -13,7 +13,11 @@ import type { EvryStoredConversation } from "@/lib/evry/conversations/repository
 import type { EvryResumedConversation } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 
-import { EVRY_ACTIVE_RUN_TTL_MS, parseEvryActiveRunRecord } from "./contract";
+import {
+  EVRY_ACTIVE_RUN_TTL_MS,
+  parseEvryActiveRunRecord,
+  type EvryActiveRunRecord,
+} from "./contract";
 import { resumeEvryActiveRun } from "./resume";
 
 const START = new Date("2026-08-29T01:00:00.000Z");
@@ -93,10 +97,56 @@ function activeExecution() {
   });
 }
 
+function replaceExecution(
+  current: EvryActiveRunRecord,
+  overrides: Partial<Parameters<typeof parseEvryActiveRunRecord>[0]>
+): EvryActiveRunRecord {
+  return parseEvryActiveRunRecord({
+    id: current.id,
+    churchId: current.plantId,
+    actorUserId: current.actorUserId,
+    requestKey: current.requestKey,
+    requestFingerprint: current.requestFingerprint,
+    kind: current.kind,
+    operation: current.operation,
+    status: current.status,
+    stage: current.stage,
+    version: current.version,
+    conversationId: current.conversationId,
+    planId: current.planId,
+    planFingerprint: current.planFingerprint,
+    startedAt: current.startedAt,
+    changedAt: current.changedAt,
+    expiresAt: current.expiresAt,
+    completedAt: current.completedAt,
+    ...overrides,
+  });
+}
+
+function durableResponse(sequence: number) {
+  return {
+    status: "durable" as const,
+    requestId: REQUEST_ID,
+    kind: "execution" as const,
+    sequence,
+    conversation: {
+      id: CONVERSATION_ID,
+      title: "Durable execution",
+      createdAt: START.toISOString(),
+      lastActivityAt: START.toISOString(),
+      activePlan: null,
+      stateVersion: 0,
+      state: {},
+      messages: [],
+    },
+  };
+}
+
 test("explicit expiry adoption reuses the exact request and plan, then settles once", async () => {
   let row = activeExecution();
   const lifecycleRequests: unknown[] = [];
   let completionCount = 0;
+  let adoptionCount = 0;
   const durable = {
     status: "durable" as const,
     requestId: REQUEST_ID,
@@ -117,13 +167,52 @@ test("explicit expiry adoption reuses the exact request and plan, then settles o
   const boundaries = {
     runs: {
       find: async () => row,
-      claim: async () => {
-        throw new Error("resume must not claim a second run");
+      adoptExpiredExecution: async ({
+        expectedVersion,
+        adoptedAt,
+      }: {
+        expectedVersion: number;
+        adoptedAt: Date;
+      }) => {
+        if (
+          row.version !== expectedVersion ||
+          adoptedAt < row.expiresAt ||
+          row.status !== "active"
+        ) {
+          return null;
+        }
+        adoptionCount += 1;
+        row = parseEvryActiveRunRecord({
+          id: row.id,
+          churchId: row.plantId,
+          actorUserId: row.actorUserId,
+          requestKey: row.requestKey,
+          requestFingerprint: row.requestFingerprint,
+          kind: row.kind,
+          operation: row.operation,
+          status: row.status,
+          stage: row.stage,
+          version: row.version + 1,
+          conversationId: row.conversationId,
+          planId: row.planId,
+          planFingerprint: row.planFingerprint,
+          startedAt: row.startedAt,
+          changedAt: adoptedAt,
+          expiresAt: new Date(adoptedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+          completedAt: null,
+        });
+        return row;
       },
-      advance: async () => {
-        throw new Error("execution resume has no conversation stage");
-      },
-      complete: async ({ completedAt }: { completedAt: Date }) => {
+      complete: async ({
+        completedAt,
+        expectedVersion,
+      }: {
+        completedAt: Date;
+        expectedVersion?: number;
+      }) => {
+        if (expectedVersion !== row.version || row.status !== "active") {
+          return row;
+        }
         completionCount += 1;
         row = parseEvryActiveRunRecord({
           id: row.id,
@@ -135,7 +224,7 @@ test("explicit expiry adoption reuses the exact request and plan, then settles o
           operation: row.operation,
           status: "completed",
           stage: row.stage,
-          version: 1,
+          version: row.version + 1,
           conversationId: row.conversationId,
           planId: row.planId,
           planFingerprint: row.planFingerprint,
@@ -147,6 +236,7 @@ test("explicit expiry adoption reuses the exact request and plan, then settles o
         return row;
       },
       fail: async () => row,
+      releaseExecution: async () => row,
     },
     resumeExecution: async (input: unknown) => {
       lifecycleRequests.push(input);
@@ -177,6 +267,7 @@ test("explicit expiry adoption reuses the exact request and plan, then settles o
     },
   ]);
   assert.equal(completionCount, 1);
+  assert.equal(adoptionCount, 1);
 
   await resumeEvryActiveRun({
     actor,
@@ -186,4 +277,222 @@ test("explicit expiry adoption reuses the exact request and plan, then settles o
   });
   assert.equal(lifecycleRequests.length, 1);
   assert.equal(completionCount, 1);
+  assert.equal(adoptionCount, 1);
+});
+
+test("only one reconnect owns an expired execution lease and the old epoch cannot settle", async () => {
+  let row = activeExecution();
+  let lifecycleCount = 0;
+  const lifecycleEntered = Promise.withResolvers<void>();
+  const allowLifecycle = Promise.withResolvers<void>();
+  const store = {
+    find: async () => row,
+    adoptExpiredExecution: async ({
+      expectedVersion,
+      adoptedAt,
+    }: {
+      expectedVersion: number;
+      adoptedAt: Date;
+    }) => {
+      if (
+        row.status !== "active" ||
+        row.version !== expectedVersion ||
+        row.expiresAt > adoptedAt
+      ) {
+        return null;
+      }
+      row = replaceExecution(row, {
+        version: row.version + 1,
+        changedAt: adoptedAt,
+        expiresAt: new Date(adoptedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+      });
+      return row;
+    },
+    complete: async ({
+      expectedVersion,
+      completedAt,
+    }: {
+      expectedVersion?: number;
+      completedAt: Date;
+    }) => {
+      if (row.status !== "active" || row.version !== expectedVersion) {
+        return row;
+      }
+      row = replaceExecution(row, {
+        status: "completed",
+        version: row.version + 1,
+        changedAt: completedAt,
+        completedAt,
+      });
+      return row;
+    },
+    fail: async () => row,
+    releaseExecution: async () => row,
+  };
+  const now = new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS + 1);
+  const boundaries = {
+    runs: store,
+    resumeExecution: async () => {
+      lifecycleCount += 1;
+      lifecycleEntered.resolve();
+      await allowLifecycle.promise;
+      return {
+        status: "already_finished" as const,
+        resumed: resumedConversation(),
+      };
+    },
+    recover: async () =>
+      row.status === "completed"
+        ? durableResponse(row.version + 1)
+        : {
+            status: "active" as const,
+            requestId: REQUEST_ID,
+            kind: "execution" as const,
+            operation: "execute" as const,
+            sequence: row.version,
+            stage: "executing" as const,
+            conversationId: CONVERSATION_ID,
+            expiresAt: row.expiresAt.toISOString(),
+          },
+  };
+
+  const winner = resumeEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now,
+    boundaries,
+  });
+  await lifecycleEntered.promise;
+  assert.equal(row.version, 1);
+
+  const concurrent = await resumeEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now,
+    boundaries,
+  });
+  assert.equal(concurrent.status, "active");
+  assert.equal(lifecycleCount, 1);
+
+  const staleOwner = await store.complete({
+    expectedVersion: 0,
+    completedAt: now,
+  });
+  assert.equal(staleOwner?.status, "active");
+  assert.equal(row.version, 1);
+
+  allowLifecycle.resolve();
+  assert.equal((await winner).status, "durable");
+  assert.equal(row.status, "completed");
+  assert.equal(lifecycleCount, 1);
+});
+
+test("an uncertain failure after an effect commit stays resumable and reconciles the same attempt", async () => {
+  let row = activeExecution();
+  let lifecycleCount = 0;
+  let effectCount = 0;
+  const firstNow = new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS + 1);
+  const store = {
+    find: async () => row,
+    adoptExpiredExecution: async ({
+      expectedVersion,
+      adoptedAt,
+    }: {
+      expectedVersion: number;
+      adoptedAt: Date;
+    }) => {
+      if (
+        row.status !== "active" ||
+        row.version !== expectedVersion ||
+        row.expiresAt > adoptedAt
+      ) {
+        return null;
+      }
+      row = replaceExecution(row, {
+        version: row.version + 1,
+        changedAt: adoptedAt,
+        expiresAt: new Date(adoptedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+      });
+      return row;
+    },
+    complete: async ({
+      expectedVersion,
+      completedAt,
+    }: {
+      expectedVersion?: number;
+      completedAt: Date;
+    }) => {
+      if (row.status !== "active" || row.version !== expectedVersion) {
+        return row;
+      }
+      row = replaceExecution(row, {
+        status: "completed",
+        version: row.version + 1,
+        changedAt: completedAt,
+        completedAt,
+      });
+      return row;
+    },
+    fail: async () => row,
+    releaseExecution: async ({
+      expectedVersion,
+      releasedAt,
+    }: {
+      expectedVersion: number;
+      releasedAt: Date;
+    }) => {
+      if (row.status !== "active" || row.version !== expectedVersion) {
+        return row;
+      }
+      row = replaceExecution(row, {
+        version: row.version + 1,
+        changedAt: releasedAt,
+        expiresAt: releasedAt,
+      });
+      return row;
+    },
+  };
+  const recover = async () =>
+    row.status === "completed"
+      ? durableResponse(row.version + 1)
+      : {
+          status: "resumable" as const,
+          requestId: REQUEST_ID,
+          kind: "execution" as const,
+          operation: "execute" as const,
+          sequence: row.version,
+          conversationId: CONVERSATION_ID,
+        };
+  const resumeExecution = async () => {
+    lifecycleCount += 1;
+    if (lifecycleCount === 1) {
+      effectCount += 1;
+      throw new Error("receipt append lost after committed effect");
+    }
+    return {
+      status: "already_finished" as const,
+      resumed: resumedConversation(),
+    };
+  };
+
+  const uncertain = await resumeEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now: firstNow,
+    boundaries: { runs: store, resumeExecution, recover },
+  });
+  assert.equal(uncertain.status, "resumable");
+  assert.equal(row.status, "active");
+  assert.equal(effectCount, 1);
+
+  const reconciled = await resumeEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now: new Date(firstNow.valueOf() + 1),
+    boundaries: { runs: store, resumeExecution, recover },
+  });
+  assert.equal(reconciled.status, "durable");
+  assert.equal(row.status, "completed");
+  assert.equal(lifecycleCount, 2);
+  assert.equal(effectCount, 1);
 });

@@ -83,6 +83,7 @@ export function markerMatchesEvryLocation(
 
 const MAX_OBSERVATION_MS = 16 * 60 * 1_000;
 const PRECLAIM_GRACE_READS = 6;
+const MAX_RESUME_ATTEMPTS = 3;
 
 type FetchRecovery = (
   requestId: string,
@@ -119,18 +120,17 @@ function validateSnapshot(
   if (snapshot.requestId !== marker.requestId) {
     throw new Error("Evry recovery response did not match its request");
   }
-  if (
-    (snapshot.status === "active" || snapshot.status === "durable") &&
-    snapshot.kind !== marker.kind
-  ) {
+  if ("kind" in snapshot && snapshot.kind !== marker.kind) {
     throw new Error("Evry recovery response changed run kind");
   }
   const conversationId =
     snapshot.status === "durable"
       ? snapshot.conversation.id
-      : snapshot.status === "active"
+      : snapshot.status === "active" || snapshot.status === "resumable"
         ? snapshot.conversationId
-        : null;
+        : snapshot.status === "expired"
+          ? snapshot.conversationId
+          : null;
   if (
     marker.conversationId !== null &&
     conversationId !== null &&
@@ -168,26 +168,50 @@ export async function reconnectEvryRun(input: {
   const fetchRecovery = input.fetchRecovery ?? defaultFetchRecovery;
   const wait = input.wait ?? waitForRecovery;
   const deadline = performance.now() + MAX_OBSERVATION_MS;
-  let resumed = false;
+  let resumeAttempts = 0;
   let unavailableReads = 0;
   let foundDurableRun = false;
+  let lastSequence = -1;
+  let lastSequencedSnapshot = "";
+  const acceptSequence = (snapshot: EvryRunRecoveryResponse): boolean => {
+    if (!("sequence" in snapshot)) return true;
+    const serialized = JSON.stringify(snapshot);
+    if (
+      snapshot.sequence < lastSequence ||
+      (snapshot.sequence === lastSequence &&
+        lastSequencedSnapshot !== "" &&
+        serialized !== lastSequencedSnapshot)
+    ) {
+      throw new Error("Evry recovery response moved backwards");
+    }
+    const changed = snapshot.sequence > lastSequence;
+    lastSequence = snapshot.sequence;
+    lastSequencedSnapshot = serialized;
+    return changed;
+  };
   while (!input.signal.aborted && performance.now() < deadline) {
     const snapshot = validateSnapshot(
       input.marker,
       await fetchRecovery(input.marker.requestId, "read", input.signal)
     );
+    const changed = acceptSequence(snapshot);
     if (snapshot.status === "resumable") {
       foundDurableRun = true;
-      if (resumed) {
-        return { status: "unavailable", requestId: input.marker.requestId };
+      if (resumeAttempts >= MAX_RESUME_ATTEMPTS) {
+        throw new Error("Evry execution still requires durable reconciliation");
       }
-      resumed = true;
+      resumeAttempts += 1;
       const resumedSnapshot = validateSnapshot(
         input.marker,
         await fetchRecovery(input.marker.requestId, "resume", input.signal)
       );
+      const resumedChanged = acceptSequence(resumedSnapshot);
+      if (resumedSnapshot.status === "resumable") {
+        await wait(500, input.signal);
+        continue;
+      }
       if (resumedSnapshot.status !== "active") return resumedSnapshot;
-      input.onActive(resumedSnapshot);
+      if (resumedChanged) input.onActive(resumedSnapshot);
       await wait(500, input.signal);
       continue;
     }
@@ -200,7 +224,7 @@ export async function reconnectEvryRun(input: {
     }
     if (snapshot.status !== "active") return snapshot;
     foundDurableRun = true;
-    input.onActive(snapshot);
+    if (changed) input.onActive(snapshot);
     await wait(500, input.signal);
   }
   if (input.signal.aborted) {

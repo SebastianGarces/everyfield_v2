@@ -10362,7 +10362,7 @@
         },
         "evry_active_runs_time_check": {
           "name": "evry_active_runs_time_check",
-          "value": "\"evry_active_runs\".\"changed_at\" >= \"evry_active_runs\".\"started_at\" and \"evry_active_runs\".\"expires_at\" = \"evry_active_runs\".\"started_at\" + interval '15 minutes' and (\"evry_active_runs\".\"completed_at\" is null or \"evry_active_runs\".\"completed_at\" >= \"evry_active_runs\".\"started_at\")"
+          "value": "\"evry_active_runs\".\"changed_at\" >= \"evry_active_runs\".\"started_at\" and ((\"evry_active_runs\".\"kind\" = 'conversation' and \"evry_active_runs\".\"expires_at\" = \"evry_active_runs\".\"started_at\" + interval '15 minutes') or (\"evry_active_runs\".\"kind\" = 'execution' and \"evry_active_runs\".\"expires_at\" >= \"evry_active_runs\".\"started_at\" and (\"evry_active_runs\".\"status\" <> 'active' or \"evry_active_runs\".\"expires_at\" >= \"evry_active_runs\".\"changed_at\"))) and (\"evry_active_runs\".\"completed_at\" is null or \"evry_active_runs\".\"completed_at\" >= \"evry_active_runs\".\"started_at\")"
         },
         "evry_active_runs_terminal_check": {
           "name": "evry_active_runs_terminal_check",
@@ -10370,7 +10370,7 @@
         },
         "evry_active_runs_shape_check": {
           "name": "evry_active_runs_shape_check",
-          "value": "(\n        \"evry_active_runs\".\"kind\" = 'conversation'\n        and \"evry_active_runs\".\"operation\" in ('create', 'continue')\n        and \"evry_active_runs\".\"plan_id\" is null\n        and \"evry_active_runs\".\"plan_fingerprint\" is null\n        and (\"evry_active_runs\".\"operation\" = 'create' or \"evry_active_runs\".\"conversation_id\" is not null)\n        and \"evry_active_runs\".\"stage\" <> 'executing'\n      ) or (\n        \"evry_active_runs\".\"kind\" = 'execution'\n        and \"evry_active_runs\".\"operation\" in ('execute', 'retry')\n        and \"evry_active_runs\".\"conversation_id\" is not null\n        and \"evry_active_runs\".\"plan_id\" is not null\n        and \"evry_active_runs\".\"plan_fingerprint\" is not null\n        and \"evry_active_runs\".\"stage\" = 'executing'\n      )"
+          "value": "(\n        \"evry_active_runs\".\"kind\" = 'conversation'\n        and \"evry_active_runs\".\"operation\" in ('create', 'continue')\n        and \"evry_active_runs\".\"plan_id\" is null\n        and \"evry_active_runs\".\"plan_fingerprint\" is null\n        and (\"evry_active_runs\".\"operation\" <> 'create' or \"evry_active_runs\".\"status\" <> 'active' or \"evry_active_runs\".\"conversation_id\" is null)\n        and (\"evry_active_runs\".\"operation\" = 'create' or \"evry_active_runs\".\"conversation_id\" is not null)\n        and \"evry_active_runs\".\"stage\" <> 'executing'\n      ) or (\n        \"evry_active_runs\".\"kind\" = 'execution'\n        and \"evry_active_runs\".\"operation\" in ('execute', 'retry')\n        and \"evry_active_runs\".\"conversation_id\" is not null\n        and \"evry_active_runs\".\"plan_id\" is not null\n        and \"evry_active_runs\".\"plan_fingerprint\" is not null\n        and \"evry_active_runs\".\"stage\" = 'executing'\n      )"
         },
         "evry_active_runs_completed_conversation_check": {
           "name": "evry_active_runs_completed_conversation_check",

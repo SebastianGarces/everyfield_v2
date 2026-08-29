@@ -1,4 +1,4 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, lte, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { evryActiveRuns, type EvryActiveRunStage } from "@/db/schema";
@@ -112,11 +112,45 @@ export async function advanceEvryActiveRun(input: {
   return row ? parseEvryActiveRunRecord(row) : null;
 }
 
+/**
+ * Fence one expired execution owner. The version is the lease epoch: exactly
+ * one caller can replace the observed epoch, and the renewed expiry prevents
+ * another adopter from entering while that owner reconciles the attempt.
+ */
+export async function adoptExpiredEvryExecutionRun(input: {
+  actor: EvryActiveRunStoreInput["actor"];
+  requestKey: string;
+  expectedVersion: number;
+  adoptedAt: Date;
+}): Promise<EvryActiveRunRecord | null> {
+  const [row] = await db
+    .update(evryActiveRuns)
+    .set({
+      changedAt: input.adoptedAt,
+      expiresAt: new Date(input.adoptedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+      version: sql`${evryActiveRuns.version} + 1`,
+    })
+    .where(
+      and(
+        eq(evryActiveRuns.churchId, input.actor.plantId),
+        eq(evryActiveRuns.actorUserId, input.actor.userId),
+        eq(evryActiveRuns.requestKey, input.requestKey),
+        eq(evryActiveRuns.kind, "execution"),
+        eq(evryActiveRuns.status, "active"),
+        eq(evryActiveRuns.version, input.expectedVersion),
+        lte(evryActiveRuns.expiresAt, input.adoptedAt)
+      )
+    )
+    .returning();
+  return row ? parseEvryActiveRunRecord(row) : null;
+}
+
 export async function completeEvryActiveRun(input: {
   actor: EvryActiveRunStoreInput["actor"];
   requestKey: string;
   conversationId: string;
   completedAt: Date;
+  expectedVersion?: number;
 }): Promise<EvryActiveRunRecord | null> {
   const [row] = await db
     .update(evryActiveRuns)
@@ -137,6 +171,9 @@ export async function completeEvryActiveRun(input: {
         eq(evryActiveRuns.actorUserId, input.actor.userId),
         eq(evryActiveRuns.requestKey, input.requestKey),
         eq(evryActiveRuns.status, "active"),
+        ...(input.expectedVersion === undefined
+          ? []
+          : [eq(evryActiveRuns.version, input.expectedVersion)]),
         or(
           eq(evryActiveRuns.operation, "create"),
           eq(evryActiveRuns.conversationId, input.conversationId)
@@ -153,6 +190,7 @@ export async function failEvryActiveRun(input: {
   requestKey: string;
   conversationId?: string | null;
   failedAt: Date;
+  expectedVersion?: number;
 }): Promise<EvryActiveRunRecord | null> {
   const [row] = await db
     .update(evryActiveRuns)
@@ -176,7 +214,39 @@ export async function failEvryActiveRun(input: {
         eq(evryActiveRuns.churchId, input.actor.plantId),
         eq(evryActiveRuns.actorUserId, input.actor.userId),
         eq(evryActiveRuns.requestKey, input.requestKey),
-        eq(evryActiveRuns.status, "active")
+        eq(evryActiveRuns.status, "active"),
+        ...(input.expectedVersion === undefined
+          ? []
+          : [eq(evryActiveRuns.version, input.expectedVersion)])
+      )
+    )
+    .returning();
+  if (row) return parseEvryActiveRunRecord(row);
+  return findEvryActiveRun(input);
+}
+
+/** Make an uncertain execution immediately adoptable without declaring loss. */
+export async function releaseEvryExecutionRun(input: {
+  actor: EvryActiveRunStoreInput["actor"];
+  requestKey: string;
+  expectedVersion: number;
+  releasedAt: Date;
+}): Promise<EvryActiveRunRecord | null> {
+  const [row] = await db
+    .update(evryActiveRuns)
+    .set({
+      changedAt: input.releasedAt,
+      expiresAt: input.releasedAt,
+      version: sql`${evryActiveRuns.version} + 1`,
+    })
+    .where(
+      and(
+        eq(evryActiveRuns.churchId, input.actor.plantId),
+        eq(evryActiveRuns.actorUserId, input.actor.userId),
+        eq(evryActiveRuns.requestKey, input.requestKey),
+        eq(evryActiveRuns.kind, "execution"),
+        eq(evryActiveRuns.status, "active"),
+        eq(evryActiveRuns.version, input.expectedVersion)
       )
     )
     .returning();
@@ -188,14 +258,18 @@ export type EvryActiveRunStore = Readonly<{
   find: typeof findEvryActiveRun;
   claim: typeof claimEvryActiveRun;
   advance: typeof advanceEvryActiveRun;
+  adoptExpiredExecution: typeof adoptExpiredEvryExecutionRun;
   complete: typeof completeEvryActiveRun;
   fail: typeof failEvryActiveRun;
+  releaseExecution: typeof releaseEvryExecutionRun;
 }>;
 
 export const evryActiveRunStore: EvryActiveRunStore = Object.freeze({
   find: findEvryActiveRun,
   claim: claimEvryActiveRun,
   advance: advanceEvryActiveRun,
+  adoptExpiredExecution: adoptExpiredEvryExecutionRun,
   complete: completeEvryActiveRun,
   fail: failEvryActiveRun,
+  releaseExecution: releaseEvryExecutionRun,
 });

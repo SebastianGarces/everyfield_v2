@@ -151,6 +151,9 @@ export function parseEvryActiveRunRecord(input: {
     row.planId === null &&
     row.planFingerprint === null &&
     row.stage !== "executing" &&
+    (row.operation === "continue" ||
+      row.status !== "active" ||
+      row.conversationId === null) &&
     (row.operation === "create" || row.conversationId !== null);
   const executionShape =
     row.kind === "execution" &&
@@ -159,11 +162,18 @@ export function parseEvryActiveRunRecord(input: {
     row.planId !== null &&
     row.planFingerprint !== null &&
     row.stage === "executing";
+  const expiryShape =
+    (row.kind === "conversation" &&
+      row.expiresAt.valueOf() ===
+        row.startedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS) ||
+    (row.kind === "execution" &&
+      row.expiresAt >= row.startedAt &&
+      (row.status !== "active" || row.expiresAt >= row.changedAt));
   if (
     !terminalShape ||
     (!conversationShape && !executionShape) ||
     row.changedAt < row.startedAt ||
-    row.expiresAt.valueOf() !== row.startedAt.valueOf() + EVRY_ACTIVE_RUN_TTL_MS
+    !expiryShape
   ) {
     throw new EvryActiveRunIdentityError();
   }

@@ -82,15 +82,58 @@ export async function recoverEvryActiveRun(input: {
     requestKey,
   });
   if (run?.status === "active" && input.now < run.expiresAt) {
-    return {
-      status: "active",
-      requestId: requestKey,
-      kind: run.kind,
-      sequence: run.version,
-      stage: run.stage,
-      conversationId: run.conversationId,
-      expiresAt: run.expiresAt.toISOString(),
-    };
+    if (
+      run.kind === "execution" &&
+      (run.operation === "execute" || run.operation === "retry") &&
+      run.stage === "executing" &&
+      run.conversationId
+    ) {
+      return {
+        status: "active",
+        requestId: requestKey,
+        kind: "execution",
+        operation: run.operation,
+        sequence: run.version,
+        stage: "executing",
+        conversationId: run.conversationId,
+        expiresAt: run.expiresAt.toISOString(),
+      };
+    }
+    if (
+      run.kind === "conversation" &&
+      run.operation === "continue" &&
+      run.stage !== "executing" &&
+      run.conversationId
+    ) {
+      return {
+        status: "active",
+        requestId: requestKey,
+        kind: "conversation",
+        operation: "continue",
+        sequence: run.version,
+        stage: run.stage,
+        conversationId: run.conversationId,
+        expiresAt: run.expiresAt.toISOString(),
+      };
+    }
+    if (
+      run.kind === "conversation" &&
+      run.operation === "create" &&
+      run.stage !== "executing" &&
+      run.conversationId === null
+    ) {
+      return {
+        status: "active",
+        requestId: requestKey,
+        kind: "conversation",
+        operation: "create",
+        sequence: run.version,
+        stage: run.stage,
+        conversationId: null,
+        expiresAt: run.expiresAt.toISOString(),
+      };
+    }
+    throw new Error("Evry active run had an invalid wire identity");
   }
 
   if (
@@ -98,10 +141,19 @@ export async function recoverEvryActiveRun(input: {
     input.now >= run.expiresAt &&
     run.kind === "execution"
   ) {
+    if (
+      (run.operation !== "execute" && run.operation !== "retry") ||
+      !run.conversationId
+    ) {
+      throw new Error("Evry execution run had an invalid wire identity");
+    }
     return {
       status: "resumable",
       requestId: requestKey,
       kind: "execution",
+      operation: run.operation,
+      sequence: run.version,
+      conversationId: run.conversationId,
     };
   }
 
@@ -113,19 +165,57 @@ export async function recoverEvryActiveRun(input: {
     boundaries,
   });
   if (resumed) {
+    if (!run) {
+      return {
+        status: "durable",
+        requestId: requestKey,
+        kind: "conversation",
+        sequence: 1,
+        conversation: publicEvryConversation(resumed),
+      };
+    }
+    if (
+      run.kind === "execution" &&
+      (run.operation === "execute" || run.operation === "retry")
+    ) {
+      return {
+        status: "durable",
+        requestId: requestKey,
+        kind: "execution",
+        sequence: run.version + 1,
+        conversation: publicEvryConversation(resumed),
+      };
+    }
+    if (
+      run.kind !== "conversation" ||
+      (run.operation !== "create" && run.operation !== "continue")
+    ) {
+      throw new Error("Evry durable run had an invalid wire identity");
+    }
     return {
       status: "durable",
       requestId: requestKey,
-      kind: run?.kind ?? "conversation",
-      sequence: (run?.version ?? 0) + 1,
+      kind: "conversation",
+      sequence: run.version + 1,
       conversation: publicEvryConversation(resumed),
     };
   }
-  return {
-    status:
-      run?.status === "active" && input.now >= run.expiresAt
-        ? "expired"
-        : "unavailable",
-    requestId: requestKey,
-  };
+  if (
+    run?.status === "active" &&
+    input.now >= run.expiresAt &&
+    run.kind === "conversation"
+  ) {
+    if (run.operation !== "create" && run.operation !== "continue") {
+      throw new Error("Evry expired run had an invalid wire identity");
+    }
+    return {
+      status: "expired",
+      requestId: requestKey,
+      kind: "conversation",
+      operation: run.operation,
+      sequence: run.version + 1,
+      conversationId: run.conversationId,
+    };
+  }
+  return { status: "unavailable", requestId: requestKey };
 }

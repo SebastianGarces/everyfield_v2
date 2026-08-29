@@ -6,7 +6,8 @@
 -- RETENTION: terminal rows are the request-key replay ledger and remain until
 -- their owning user, plant, conversation, or plan is deleted. All four owning
 -- foreign keys cascade, so the registry never blocks an owning-record delete.
--- Expiry ends reconnect eligibility; it never permits request-key reuse.
+-- Conversation expiry ends reconnect eligibility. Execution expiry is a
+-- renewable version-fenced lease; neither permits request-key reuse.
 -- No time-based cleanup removes this replay ledger.
 --
 -- ROLLBACK (run against an isolated database, in one transaction):
@@ -42,13 +43,14 @@ CREATE TABLE "evry_active_runs" (
 	CONSTRAINT "evry_active_runs_status_check" CHECK ("evry_active_runs"."status" in ('active', 'completed', 'failed')),
 	CONSTRAINT "evry_active_runs_stage_check" CHECK ("evry_active_runs"."stage" in ('accepted', 'resolving_references', 'revalidating_plan', 'compiling_response', 'executing')),
 	CONSTRAINT "evry_active_runs_version_check" CHECK ("evry_active_runs"."version" >= 0),
-	CONSTRAINT "evry_active_runs_time_check" CHECK ("evry_active_runs"."changed_at" >= "evry_active_runs"."started_at" and "evry_active_runs"."expires_at" = "evry_active_runs"."started_at" + interval '15 minutes' and ("evry_active_runs"."completed_at" is null or "evry_active_runs"."completed_at" >= "evry_active_runs"."started_at")),
+	CONSTRAINT "evry_active_runs_time_check" CHECK ("evry_active_runs"."changed_at" >= "evry_active_runs"."started_at" and (("evry_active_runs"."kind" = 'conversation' and "evry_active_runs"."expires_at" = "evry_active_runs"."started_at" + interval '15 minutes') or ("evry_active_runs"."kind" = 'execution' and "evry_active_runs"."expires_at" >= "evry_active_runs"."started_at" and ("evry_active_runs"."status" <> 'active' or "evry_active_runs"."expires_at" >= "evry_active_runs"."changed_at"))) and ("evry_active_runs"."completed_at" is null or "evry_active_runs"."completed_at" >= "evry_active_runs"."started_at")),
 	CONSTRAINT "evry_active_runs_terminal_check" CHECK (("evry_active_runs"."status" = 'active' and "evry_active_runs"."completed_at" is null) or ("evry_active_runs"."status" in ('completed', 'failed') and "evry_active_runs"."completed_at" is not null)),
 	CONSTRAINT "evry_active_runs_shape_check" CHECK ((
         "evry_active_runs"."kind" = 'conversation'
         and "evry_active_runs"."operation" in ('create', 'continue')
         and "evry_active_runs"."plan_id" is null
         and "evry_active_runs"."plan_fingerprint" is null
+        and ("evry_active_runs"."operation" <> 'create' or "evry_active_runs"."status" <> 'active' or "evry_active_runs"."conversation_id" is null)
         and ("evry_active_runs"."operation" = 'create' or "evry_active_runs"."conversation_id" is not null)
         and "evry_active_runs"."stage" <> 'executing'
       ) or (

@@ -231,25 +231,38 @@ export function EvryShell({
     []
   );
 
-  const finishWork = useCallback((requestId: string, sequence: number) => {
-    const current = sequencedWorkRef.current;
-    if (!current || pendingWorkRequestIdRef.current !== requestId) return false;
-    const next = applyEvrySequencedWork(current, {
-      requestId,
-      sequence,
-      state: current.state,
-    });
-    if (next === current) return false;
-    sequencedWorkRef.current = next;
-    pendingWorkRequestIdRef.current = null;
-    if (workAbortRef.current?.requestId === requestId) {
-      workAbortRef.current = null;
-      setObservedRequestId(null);
-    }
-    setSequencedWork(next);
-    setPendingWorkRequestId(null);
-    return true;
-  }, []);
+  const settleWork = useCallback(
+    (requestId: string, sequence: number, state: EvryWorkState) => {
+      const current = sequencedWorkRef.current;
+      if (!current || pendingWorkRequestIdRef.current !== requestId) {
+        return false;
+      }
+      const next = applyEvrySequencedWork(current, {
+        requestId,
+        sequence,
+        state,
+      });
+      if (next === current) return false;
+      sequencedWorkRef.current = next;
+      pendingWorkRequestIdRef.current = null;
+      if (workAbortRef.current?.requestId === requestId) {
+        workAbortRef.current = null;
+        setObservedRequestId(null);
+      }
+      setSequencedWork(next);
+      setPendingWorkRequestId(null);
+      return true;
+    },
+    []
+  );
+
+  const finishWork = useCallback(
+    (requestId: string, sequence: number) => {
+      const current = sequencedWorkRef.current;
+      return current ? settleWork(requestId, sequence, current.state) : false;
+    },
+    [settleWork]
+  );
 
   const clearWork = useCallback(() => {
     sequencedWorkRef.current = null;
@@ -280,6 +293,28 @@ export function EvryShell({
       return true;
     },
     [updateWork]
+  );
+
+  const settleWorkConversation = useCallback(
+    (
+      requestId: string,
+      sequence: number,
+      nextConversation: PublicEvryConversation
+    ) => {
+      if (
+        !settleWork(
+          requestId,
+          sequence,
+          evryWorkStateForConversation(nextConversation)
+        )
+      ) {
+        return false;
+      }
+      setConversation(nextConversation);
+      setError(null);
+      return true;
+    },
+    [settleWork]
   );
 
   const observeWith = useCallback(
@@ -341,13 +376,11 @@ export function EvryShell({
       const controller = new AbortController();
       observeWith(marker.requestId, controller);
       beginWork(marker.requestId, recoveryState(marker, "accepted"));
-      let sequence = 0;
       try {
         const recovered = await reconnectEvryRun({
           marker,
           signal: controller.signal,
           onActive(snapshot) {
-            sequence += 1;
             if (snapshot.conversationId) {
               bindEvryRunRecoveryConversation(
                 marker.requestId,
@@ -356,7 +389,7 @@ export function EvryShell({
             }
             updateWork(
               marker.requestId,
-              sequence,
+              snapshot.sequence,
               recoveryState(marker, snapshot.stage)
             );
           },
@@ -369,32 +402,31 @@ export function EvryShell({
           pauseRecoveryForRoute(marker.requestId);
           return;
         }
-        sequence += 1;
         if (recovered.status === "durable") {
           bindEvryRunRecoveryConversation(
             marker.requestId,
             recovered.conversation.id
           );
-          applyWorkConversation(
+          settleWorkConversation(
             marker.requestId,
-            sequence,
+            recovered.sequence,
             recovered.conversation
           );
-          sequence += 1;
-          finishWork(marker.requestId, sequence);
           clearEvryRunRecoveryMarker(marker.requestId);
           setDetachedRequestId(null);
           return;
         }
-        updateWork(marker.requestId, sequence, {
+        const terminalSequence =
+          "sequence" in recovered
+            ? recovered.sequence
+            : (sequencedWorkRef.current?.sequence ?? 0) + 1;
+        settleWork(marker.requestId, terminalSequence, {
           phase: recovered.status === "expired" ? "blocked" : "failed",
           message:
             recovered.status === "expired"
               ? "This run expired. Durable conversation state is shown; retry only from its available controls."
               : "This run is no longer available. Durable conversation state was not changed.",
         });
-        sequence += 1;
-        finishWork(marker.requestId, sequence);
         clearEvryRunRecoveryMarker(marker.requestId);
         setDetachedRequestId(null);
       } catch (error) {
@@ -404,14 +436,12 @@ export function EvryShell({
         ) {
           return;
         }
-        sequence += 1;
-        updateWork(marker.requestId, sequence, {
+        const failureSequence = (sequencedWorkRef.current?.sequence ?? 0) + 1;
+        settleWork(marker.requestId, failureSequence, {
           phase: "failed",
           message:
             "Unable to reconnect right now. The durable run was not cancelled.",
         });
-        sequence += 1;
-        finishWork(marker.requestId, sequence);
         setDetachedRequestId(marker.requestId);
       } finally {
         if (workAbortRef.current?.requestId === marker.requestId) {
@@ -421,12 +451,12 @@ export function EvryShell({
       }
     },
     [
-      applyWorkConversation,
       beginWork,
-      finishWork,
       observeWith,
       pauseRecoveryForRoute,
       recoveryState,
+      settleWork,
+      settleWorkConversation,
       updateWork,
     ]
   );
@@ -452,6 +482,7 @@ export function EvryShell({
   const resumeWatching = useCallback(() => {
     const marker = readEvryRunRecoveryMarker();
     if (!marker || marker.requestId !== detachedRequestId) return;
+    document.getElementById("evry-work-status")?.focus();
     setDetachedRequestId(null);
     void recoverMarker(marker);
   }, [detachedRequestId, recoverMarker]);
