@@ -2,11 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  discoverTaskActionIdentities,
   discoverTaskPageReadOperations,
   discoverTaskPageSources,
   TASKS_DISCOVERED_READ_EXCLUSIONS,
   taskReadIdentity,
 } from "./tasks-source-discovery";
+
+test("Task action discovery starts from every server export", () => {
+  assert.deepEqual(discoverTaskActionIdentities(), [
+    "action:src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → createTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → deleteTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → importTaskTemplateAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → reopenTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → setSubtaskCompletionAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → updateTaskAction",
+    "action:src/app/(dashboard)/tasks/actions.ts → updateTaskStatusAction",
+    "action:src/app/(dashboard)/tasks/follow-up-actions.ts → assignFollowUpAction",
+    "action:src/app/(dashboard)/tasks/follow-up-actions.ts → createAndAssignFollowUpAction",
+    "action:src/app/(dashboard)/tasks/follow-up-actions.ts → handOffFollowUpsAction",
+    "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction",
+    "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction",
+  ]);
+});
 
 test("Task page discovery walks every authenticated route recursively", () => {
   assert.deepEqual(discoverTaskPageSources(), [

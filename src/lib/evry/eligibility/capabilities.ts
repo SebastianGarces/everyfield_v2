@@ -1,6 +1,8 @@
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
+import { TASK_AUTHORITATIVE_SURFACES } from "@/lib/evry/capabilities/tasks/catalog";
+import { TASK_CAPABILITY_REGISTRATIONS } from "@/lib/evry/capabilities/tasks/registrations";
 import {
   PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
   PLANT_INTELLIGENCE_CAPABILITIES,
@@ -137,24 +139,6 @@ function generatedPlantIntelligenceRegistrations(): EvryCapabilityRegistration[]
 /** Explicit shared proof registrations, replaced in place by owning packs. */
 const REFERENCE_REGISTRATIONS = [
   defineEvryCapabilityRegistration({
-    identity: "tasks.list",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "read",
-    applicationCapability: "read",
-  }),
-  defineEvryCapabilityRegistration({
-    identity: "tasks.complete",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
-    ],
-    parityCapability: "tasks",
-    operationKind: "effect",
-    applicationCapability: "tasks.own",
-  }),
-  defineEvryCapabilityRegistration({
     identity: "launch.schedule",
     surfaceIdentities: [
       "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
@@ -259,12 +243,14 @@ const REGISTRY = createEvryCapabilityRegistry({
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
     ...generatedPlantIntelligenceRegistrations(),
+    ...TASK_CAPABILITY_REGISTRATIONS,
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
     ...PLANT_INTELLIGENCE_AUTHORITATIVE_SURFACES,
+    ...TASK_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });
@@ -287,8 +273,8 @@ export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
 export const EVRY_PEOPLE_WRITE_PROBE_IDENTITY =
   "people.crm.people.update-person";
 
-export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.list";
-export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.complete";
+export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.read.list";
+export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.lifecycle.complete";
 export const EVRY_LAUNCH_SCHEDULE_PROBE_IDENTITY = "launch.schedule";
 
 function seatFieldsOf(actor: EvryPlantActor): SeatFields {
