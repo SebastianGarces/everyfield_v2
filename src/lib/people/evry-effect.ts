@@ -59,11 +59,14 @@ async function exactCompletedOutcome(
  * Atomically gate one named People mutation with the executor's exact effect
  * key. `mutation` is trusted pack SQL and must read the `eligible` CTE, apply
  * the full plan-bound baseline predicate, and return affected/excluded counts
- * only when the complete mutation succeeded.
+ * only when the complete mutation succeeded. Compound writes put their
+ * data-modifying CTEs in `beforeMutation`; PostgreSQL requires those CTEs at
+ * the statement's top level, so nesting them inside `mutation` is invalid.
  */
 export async function claimEvryPeopleEffect(input: {
   execution: EvryEffectInput["execution"];
   effectKey: EvryAuditKey;
+  beforeMutation?: SQL;
   mutation: SQL;
   targetIsCurrent(): Promise<boolean>;
 }): Promise<EvryEffectResult> {
@@ -104,7 +107,7 @@ export async function claimEvryPeopleEffect(input: {
           and a.correlation_id = ${input.execution.correlationId}::uuid
           and s.status = 'executing'
           and not exists (select 1 from existing)
-      ), mutation as materialized (
+      ), ${input.beforeMutation ?? sql``} mutation as materialized (
         ${input.mutation}
       ), claimed as (
         insert into evry_execution_outcomes (

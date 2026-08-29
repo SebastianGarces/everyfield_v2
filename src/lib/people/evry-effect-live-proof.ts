@@ -13,7 +13,9 @@ import {
   evryPlanConfirmations,
   evryProductAuditEvents,
   personActivities,
+  personTags,
   persons,
+  tags,
   users,
 } from "@/db/schema";
 import {
@@ -25,11 +27,18 @@ import {
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
+import { claimEvryAssignTag } from "./evry-taxonomies";
 
-const IDENTITY = "people.crm.notes.add-note";
+const NOTE_IDENTITY = "people.crm.notes.add-note";
+const TAG_IDENTITY = "people.crm.tags.assign-tag";
 const FINGERPRINT = "a".repeat(64);
 
-async function seedAttempt(input: { churchId: string; actorUserId: string }) {
+async function seedAttempt(input: {
+  churchId: string;
+  actorUserId: string;
+  capabilityIdentity?: string;
+  stepId?: string;
+}) {
   const planId = randomUUID();
   const attemptId = randomUUID();
   const requestKey = mintEvryPlanRequestKey();
@@ -51,8 +60,8 @@ async function seedAttempt(input: { churchId: string; actorUserId: string }) {
         version: 1,
         steps: [
           {
-            id: "add-note",
-            capabilityIdentity: IDENTITY,
+            id: input.stepId ?? "add-note",
+            capabilityIdentity: input.capabilityIdentity ?? NOTE_IDENTITY,
             effectClass: "database_write",
             arguments: {},
             dependsOn: [],
@@ -108,7 +117,7 @@ async function seedAttempt(input: { churchId: string; actorUserId: string }) {
       startedAt: createdAt,
     }),
   ]);
-  const stepId = "add-note";
+  const stepId = input.stepId ?? "add-note";
   return {
     execution: {
       attemptId,
@@ -118,7 +127,7 @@ async function seedAttempt(input: { churchId: string; actorUserId: string }) {
       fingerprint: FINGERPRINT,
       correlationId,
       stepId,
-      capabilityIdentity: IDENTITY,
+      capabilityIdentity: input.capabilityIdentity ?? NOTE_IDENTITY,
     },
     effectKey: executionEffectKey(planId, FINGERPRINT, stepId),
   };
@@ -222,15 +231,45 @@ async function main(): Promise<void> {
     { status: "refused", excludedCount: 1 }
   );
 
-  const [activityCount, outcomeCount] = await Promise.all([
+  const [tag] = await db
+    .insert(tags)
+    .values({ churchId: plant.id, name: "Follow-up", color: "blue" })
+    .returning({ id: tags.id });
+  assert.ok(tag);
+  const tagAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: TAG_IDENTITY,
+    stepId: "assign-tag",
+  });
+  const tagInput = {
+    ...tagAttempt,
+    personId: person.id,
+    expectedFirstName: "Ada",
+    expectedLastName: "Lovelace",
+    tagId: tag.id,
+    expectedTagName: "Follow-up",
+    expectedTagColor: "blue",
+  };
+  assert.deepEqual(await claimEvryAssignTag(tagInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  assert.deepEqual(await claimEvryAssignTag(tagInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+
+  const [activityCount, outcomeCount, membershipCount] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(personActivities)
       .where(
         and(
           eq(personActivities.churchId, plant.id),
-          eq(personActivities.personId, person.id),
-          eq(personActivities.activityType, "note_added")
+          eq(personActivities.personId, person.id)
         )
       )
       .then(([row]) => row?.count ?? 0),
@@ -239,9 +278,21 @@ async function main(): Promise<void> {
       .from(evryExecutionOutcomes)
       .where(eq(evryExecutionOutcomes.churchId, plant.id))
       .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(personTags)
+      .where(
+        and(
+          eq(personTags.churchId, plant.id),
+          eq(personTags.personId, person.id),
+          eq(personTags.tagId, tag.id)
+        )
+      )
+      .then(([row]) => row?.count ?? 0),
   ]);
-  assert.equal(activityCount, 2);
-  assert.equal(outcomeCount, 2);
+  assert.equal(activityCount, 3);
+  assert.equal(outcomeCount, 3);
+  assert.equal(membershipCount, 1);
 
   process.stdout.write("People effect live proof passed\n");
 }
