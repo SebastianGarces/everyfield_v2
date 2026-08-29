@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
+import { meetingsReadInputForSelection } from "./read-input";
 import {
   MEETINGS_SELECTION_EXAMPLES,
   selectMeetingsEvryRequest,
@@ -36,6 +37,28 @@ test("the closed Meetings grammar selects each read without confirmation", () =>
   assert.deepEqual(selectMeetingsEvryRequest("list meeting locations"), {
     kind: "read_locations",
   });
+});
+
+test("the meeting-list read preserves trusted team route scope", () => {
+  const teamId = "10000000-0000-4000-8000-000000000001";
+  assert.deepEqual(
+    meetingsReadInputForSelection(
+      { kind: "read_list" },
+      { kind: "team", recordId: teamId, label: "Care team" }
+    ),
+    { teamId }
+  );
+  assert.deepEqual(
+    meetingsReadInputForSelection(
+      { kind: "read_list" },
+      {
+        kind: "meeting",
+        recordId: "20000000-0000-4000-8000-000000000001",
+        label: "Vision Meeting",
+      }
+    ),
+    {}
+  );
 });
 
 test("the closed Meetings grammar rejects generic escape hatches", () => {

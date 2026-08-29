@@ -9,6 +9,7 @@ import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryCapabilityConversationContinuation } from "../conversation";
 
 import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
+import { meetingsReadInputForSelection } from "./read-input";
 import { executeMeetingsRead } from "./reads";
 import { resolveMeetingsEvryEffect } from "./resolver";
 import { proposeMeetingsEvryEffect } from "./runtime";
@@ -18,7 +19,7 @@ const READ_IDENTITY = {
   read_list: "meetings.read.list",
   read_detail: "meetings.read.detail",
   read_analytics: "meetings.read.analytics",
-  read_locations: "meetings.read.locations",
+  read_locations: "meetings.read.schedule",
 } as const;
 
 function missingMeetingResult() {
@@ -69,12 +70,10 @@ export const continueMeetingsEvryConversation: EvryCapabilityConversationContinu
         const artifact = await executeMeetingsRead({
           registration,
           authorization,
-          untrustedInput:
-            selection.kind === "read_list"
-              ? {}
-              : selection.kind === "read_locations"
-                ? {}
-                : { meetingId: input.pageContext?.recordId },
+          untrustedInput: meetingsReadInputForSelection(
+            selection,
+            input.pageContext
+          ),
         });
         if (!artifact) return null;
         return artifact.kind === "read"

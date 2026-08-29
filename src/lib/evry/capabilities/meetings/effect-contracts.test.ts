@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import { EVRY_CAPABILITY_EVAL_LAYERS } from "@/lib/evry/evals/contracts";
+import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
 import {
@@ -11,7 +14,11 @@ import {
 import { MEETINGS_CAPABILITY_EVAL_FIXTURES } from "./eval-fixtures";
 import { MEETINGS_OPERATION_REGISTRATIONS } from "./registrations";
 import { MEETINGS_READ_ADAPTER_IDENTITIES } from "./reads";
-import { MEETINGS_EXECUTION_REGISTRY, MEETINGS_PLAN_REGISTRY } from "./runtime";
+import {
+  MEETINGS_ARTIFACT_REVIEW_REGISTRY,
+  MEETINGS_EXECUTION_REGISTRY,
+  MEETINGS_PLAN_REGISTRY,
+} from "./runtime";
 import {
   MEETINGS_SELECTION_EXAMPLES,
   selectMeetingsEvryRequest,
@@ -90,6 +97,13 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "meetingNumber") return 12;
   if (key === "checklistItems") return [];
   if (key === "attendanceRows") return [];
+  if (key === "notificationBaseline") {
+    return {
+      coreGroupUserIds: [],
+      reminderUserIds: [],
+      activeNotifications: [],
+    };
+  }
   if (key === "notificationTargets") return [];
   if (key === "pendingNotifications") return [];
   if (key === "expectedAttendanceIds") return [ID];
@@ -267,6 +281,62 @@ test("the eval roster is derived from production Meetings registrations", () => 
   );
 });
 
+test("every Meetings effect renders its exact complete confirmation", () => {
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: "30000000-0000-4000-8000-000000000001",
+    fingerprint: "a".repeat(64),
+  });
+  for (const [exportName, contract] of Object.entries(
+    MEETINGS_ACTION_CONTRACTS
+  )) {
+    const arguments_ = validArguments(
+      exportName as keyof typeof MEETINGS_ACTION_CONTRACTS
+    );
+    const document = parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: contract.operationId,
+            capabilityIdentity: contract.operationId,
+            arguments: arguments_,
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: MEETINGS_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity: contract.operationId }],
+    });
+    const registration =
+      MEETINGS_ARTIFACT_REVIEW_REGISTRY.registrationFor(document);
+    assert.ok(registration, exportName);
+    assert.doesNotThrow(
+      () => registration.build({ plan, document }),
+      exportName
+    );
+    const review = trustedReviewForEvryPlanDocument({
+      plan,
+      document,
+      reviewRegistry: MEETINGS_ARTIFACT_REVIEW_REGISTRY,
+    });
+    assert.ok(review, exportName);
+    assert.equal(review.confirmation.actionLabel, contract.actionLabel);
+    assert.equal(review.confirmation.steps.length, 1);
+    const step = review.confirmation.steps[0];
+    assert.ok(step, exportName);
+    assert.equal(step.stepId, contract.operationId);
+    assert.ok(step.resolvedTargets.length > 0, exportName);
+    const complete = step.contentPreviews.find(
+      ({ label }) => label === "Complete immutable plan"
+    );
+    assert.ok(complete, exportName);
+    assert.deepEqual(JSON.parse(complete.content), arguments_, exportName);
+    if (contract.difficultToReverse) {
+      assert.equal(step.reversibility, "difficult_to_reverse");
+      assert.ok(step.beforeAfter.length > 0, exportName);
+    }
+  }
+});
+
 for (const fixture of MEETINGS_CAPABILITY_EVAL_FIXTURES) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
     test(`${fixture.capabilityIdentity}:${layer}`, () => {
@@ -288,7 +358,10 @@ for (const fixture of MEETINGS_CAPABILITY_EVAL_FIXTURES) {
         assert.equal(registration.parityCapability, "meetings");
         assert.equal(
           registration.applicationCapability,
-          registration.operationKind === "read" ? "read" : "meetings.write"
+          registration.operationKind === "effect" ||
+            registration.identity === "meetings.read.schedule"
+            ? "meetings.write"
+            : "read"
         );
         assert.ok(registration.surfaceIdentities.length > 0);
       }

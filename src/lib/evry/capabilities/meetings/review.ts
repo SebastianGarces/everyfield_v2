@@ -108,6 +108,30 @@ function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
 }
 
 function collectBeforeAfter(arguments_: Readonly<Record<string, unknown>>) {
+  if (Array.isArray(arguments_.records)) {
+    return [
+      {
+        label: "Attendance records",
+        before: compactJson(
+          arguments_.records.map((record) => {
+            const value = record as Readonly<Record<string, unknown>>;
+            return { personId: value.personId, state: value.before };
+          })
+        ),
+        after: compactJson(
+          arguments_.records.map((record) => {
+            const value = record as Readonly<Record<string, unknown>>;
+            return {
+              personId: value.personId,
+              status: value.afterStatus,
+              attendanceType: value.afterAttendanceType,
+            };
+          })
+        ),
+        count: arguments_.records.length,
+      },
+    ];
+  }
   if (arguments_.before !== undefined && arguments_.after !== undefined) {
     return [
       {

@@ -9,6 +9,7 @@ import {
   responseCardTypes,
   responseStatuses,
 } from "@/db/schema/meetings";
+import { notificationStatuses } from "@/db/schema/notifications";
 import {
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
@@ -179,6 +180,22 @@ const pendingNotificationsSchema = z
     }
   });
 
+const activeMeetingNotificationSchema = z.strictObject({
+  notificationId: uuid,
+  recipientUserId: uuid,
+  type: z.string().trim().min(1).max(64),
+  entityId: uuid,
+  dedupeKey: z.string().trim().min(1).max(255),
+  scheduledFor: timestamp,
+  status: z.enum(notificationStatuses).refine((value) => value !== "cancelled"),
+  expectedUpdatedAt: timestamp,
+});
+const notificationPlanBaselineSchema = z.strictObject({
+  coreGroupUserIds: uuidSet,
+  reminderUserIds: uuidSet,
+  activeNotifications: z.array(activeMeetingNotificationSchema).max(500),
+});
+
 const taskNotificationTargetSchema = z.strictObject({
   notificationId: uuid,
   recipientUserId: uuid,
@@ -299,6 +316,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   addAttendeeNoteAction: z.strictObject({
@@ -317,6 +335,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   addWalkInAttendeeAction: z.strictObject({
@@ -327,6 +346,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   clearResponseCardAction: z.strictObject({
@@ -386,6 +406,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     checklistItems: z.array(checklistCreationSchema).max(100),
     resolvedTeamMemberIds: uuidSet,
     attendanceRows: z.array(attendanceCreationSchema).max(1_000),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
     expectedMeetingAbsent: z.literal(true),
     createdById: uuid,
@@ -426,6 +447,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
@@ -437,6 +459,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
@@ -449,6 +472,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonAbsent: z.literal(true),
     expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
@@ -474,6 +498,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     expectedAttendanceUpdatedAt: timestamp,
     expectedResponseUpdatedAt: nullableTimestamp,
     pendingNotifications: pendingNotificationsSchema,
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   removeFromGuestListAction: z.strictObject({
@@ -482,6 +507,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     beforeAttendance: attendanceBaselineSchema,
     expectedAttendanceUpdatedAt: timestamp,
     pendingNotifications: pendingNotificationsSchema,
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   saveAgendaAction: z.strictObject({
@@ -529,6 +555,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
       before: meetingStateSchema,
       after: meetingStateSchema,
       pendingNotifications: pendingNotificationsSchema,
+      notificationBaseline: notificationPlanBaselineSchema,
       notificationTargets: meetingNotificationTargetsSchema,
     })
     .superRefine((value, context) => {
@@ -557,6 +584,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     afterStatus: z.enum(meetingStatuses),
     expectedUpdatedAt: timestamp,
     pendingNotifications: pendingNotificationsSchema,
+    notificationBaseline: notificationPlanBaselineSchema,
     notificationTargets: meetingNotificationTargetsSchema,
   }),
   updateRsvpStatusAction: z.strictObject({

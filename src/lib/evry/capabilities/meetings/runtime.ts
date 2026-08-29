@@ -11,8 +11,10 @@ import {
   meetingEvaluations,
   meetingResponses,
   notifications,
+  personActivities,
   persons,
   tasks,
+  users,
 } from "@/db/schema";
 import {
   trustedReviewForEvryPlanDocument,
@@ -42,6 +44,7 @@ import {
   type MeetingsActionExport,
 } from "./catalog";
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
+import type { MeetingsEffectArguments } from "./effect-contracts";
 import { executeMeetingsEffect } from "./atomic-effect";
 import { MEETINGS_REVIEW_REGISTRY } from "./review";
 import type { ResolvedMeetingsEffect } from "./resolver";
@@ -106,7 +109,10 @@ export async function proposeMeetingsEvryEffect(input: {
   const parsed =
     MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].safeParse(resolvedArguments);
   if (!parsed.success) return null;
-  const stepId = exportName.replace(/Action$/, "");
+  // Capability identities are already stable, lowercase semantic IDs that
+  // satisfy the durable outcome ledger's step-id contract. JavaScript export
+  // names are implementation details and include uppercase characters.
+  const stepId = contract.operationId;
   const document = parseEvryActionPlanCandidate({
     candidate: {
       steps: [
@@ -224,27 +230,221 @@ async function notificationTargetsRemainAbsent(input: {
     if (
       !target ||
       typeof target !== "object" ||
+      !("notificationId" in target) ||
       !("recipientUserId" in target) ||
       !("dedupeKey" in target) ||
+      typeof target.notificationId !== "string" ||
       typeof target.recipientUserId !== "string" ||
       typeof target.dedupeKey !== "string"
     ) {
       return false;
     }
-    const rows = await db
-      .select({ id: notifications.id })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.churchId, input.plantId),
-          eq(notifications.recipientUserId, target.recipientUserId),
-          eq(notifications.dedupeKey, target.dedupeKey),
-          sql`${notifications.status} <> 'cancelled'`
-        )
-      );
-    if (rows.some(({ id }) => !cancelledIds.has(id))) return false;
+    const rows = await db.select({ id: notifications.id }).from(notifications)
+      .where(sql`${notifications.id} = ${target.notificationId}::uuid or (
+        ${notifications.churchId} = ${input.plantId}::uuid
+        and ${notifications.recipientUserId} = ${target.recipientUserId}::uuid
+        and ${notifications.dedupeKey} = ${target.dedupeKey}
+        and ${notifications.status} <> 'cancelled'
+      )`);
+    if (
+      rows.some(
+        ({ id }) => id === target.notificationId || !cancelledIds.has(id)
+      )
+    )
+      return false;
   }
   return true;
+}
+
+async function pendingTaskNotificationsAreCurrent(input: {
+  plantId: string;
+  taskId: string;
+  pending: readonly Readonly<{
+    notificationId: string;
+    recipientUserId: string;
+    type: string;
+    entityId: string;
+    dedupeKey: string;
+    scheduledFor: string;
+    beforeStatus: "pending";
+    expectedUpdatedAt: string;
+  }>[];
+}): Promise<boolean> {
+  const rows = await db
+    .select({
+      notificationId: notifications.id,
+      recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
+      dedupeKey: notifications.dedupeKey,
+      scheduledFor: notifications.scheduledFor,
+      expectedUpdatedAt: notifications.updatedAt,
+    })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, input.plantId),
+        eq(notifications.category, "tasks"),
+        eq(notifications.entityType, "task"),
+        eq(notifications.entityId, input.taskId),
+        eq(notifications.status, "pending")
+      )
+    );
+  return sameStrings(
+    rows.map((row) =>
+      JSON.stringify({
+        ...row,
+        entityId: row.entityId ?? "",
+        dedupeKey: row.dedupeKey ?? "",
+        scheduledFor: row.scheduledFor.toISOString(),
+        beforeStatus: "pending",
+        expectedUpdatedAt: row.expectedUpdatedAt.toISOString(),
+      })
+    ),
+    input.pending.map((row) => JSON.stringify(row))
+  );
+}
+
+type NotificationBaseline =
+  MeetingsEffectArguments<"createMeetingAction">["notificationBaseline"];
+
+async function notificationBaselineIsCurrent(input: {
+  actor: EvryPlantActor;
+  exportName: MeetingsActionExport;
+  meetingId: string;
+  baseline: NotificationBaseline;
+  args: Readonly<Record<string, unknown>>;
+}): Promise<boolean> {
+  const { plantId, userId } = input.actor;
+  const coreRows = await db.execute<{ id: string }>(sql`
+    select distinct u.id::text as id
+    from persons p
+    join users u on u.church_id = ${plantId}::uuid
+      and lower(u.email) = lower(p.email)
+    where p.church_id = ${plantId}::uuid
+      and p.deleted_at is null and p.email is not null
+      and p.status in ('core_group', 'launch_team', 'leader')
+    order by id
+  `);
+
+  const create = input.exportName === "createMeetingAction";
+  const addPerson =
+    input.exportName === "addAttendeeAction" ||
+    input.exportName === "addToGuestListAction" ||
+    input.exportName === "addWalkInAttendeeAction";
+  const removePerson =
+    input.exportName === "removeAttendeeAction" ||
+    input.exportName === "removeFromGuestListAction";
+  const quickAdd =
+    input.exportName === "quickAddAttendeeAction" ||
+    input.exportName === "quickAddPersonToGuestListAction" ||
+    input.exportName === "quickAddWalkInAction";
+  const personId =
+    typeof input.args.personId === "string" ? input.args.personId : null;
+  const email = typeof input.args.email === "string" ? input.args.email : null;
+  const rosterPersonIds = Array.isArray(input.args.resolvedTeamMemberIds)
+    ? input.args.resolvedTeamMemberIds.filter(
+        (value): value is string => typeof value === "string"
+      )
+    : [];
+  const reminderRows = create
+    ? await db.execute<{ id: string }>(sql`
+        select ${userId}::uuid::text as id
+        where exists (
+          select 1 from users u
+          where u.id = ${userId}::uuid and u.church_id = ${plantId}::uuid
+        )
+        union
+        select distinct u.id::text
+        from persons p
+        join users u on u.church_id = ${plantId}::uuid
+          and lower(u.email) = lower(p.email)
+        where p.church_id = ${plantId}::uuid
+          and p.id in (
+            select value::uuid
+            from jsonb_array_elements_text(${JSON.stringify(rosterPersonIds)}::jsonb) value
+          )
+          and p.deleted_at is null and p.email is not null
+        order by id
+      `)
+    : await db.execute<{ id: string }>(sql`
+        select distinct actual.id::text as id from (
+          select m.created_by as id
+          from church_meetings m
+          where m.id = ${input.meetingId}::uuid
+            and m.church_id = ${plantId}::uuid
+          union
+          select u.id
+          from meeting_attendance a
+          join persons p on p.id = a.person_id and p.church_id = a.church_id
+          join users u on u.church_id = a.church_id
+            and lower(u.email) = lower(p.email)
+          where a.meeting_id = ${input.meetingId}::uuid
+            and a.church_id = ${plantId}::uuid
+            and p.deleted_at is null and p.email is not null
+            and (${removePerson ? personId : null}::uuid is null
+              or p.id <> ${removePerson ? personId : null}::uuid)
+          union
+          select u.id
+          from persons p
+          join users u on u.church_id = p.church_id
+            and lower(u.email) = lower(p.email)
+          where p.id = ${addPerson ? personId : null}::uuid
+            and p.church_id = ${plantId}::uuid
+            and p.deleted_at is null and p.email is not null
+          union
+          select u.id from users u
+          where u.church_id = ${plantId}::uuid
+            and ${quickAdd ? email : null}::text is not null
+            and lower(u.email) = lower(${quickAdd ? email : null}::text)
+        ) actual
+        order by id
+      `);
+
+  const activeRows = await db
+    .select({
+      notificationId: notifications.id,
+      recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
+      dedupeKey: notifications.dedupeKey,
+      scheduledFor: notifications.scheduledFor,
+      status: notifications.status,
+      expectedUpdatedAt: notifications.updatedAt,
+    })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, plantId),
+        eq(notifications.category, "meetings"),
+        eq(notifications.entityType, "meeting"),
+        eq(notifications.entityId, input.meetingId),
+        sql`${notifications.status} <> 'cancelled'`
+      )
+    );
+  const active = activeRows.map((row) =>
+    JSON.stringify({
+      ...row,
+      entityId: row.entityId ?? "",
+      dedupeKey: row.dedupeKey ?? "",
+      scheduledFor: row.scheduledFor.toISOString(),
+      expectedUpdatedAt: row.expectedUpdatedAt.toISOString(),
+    })
+  );
+  return (
+    sameStrings(
+      coreRows.rows.map(({ id }) => id),
+      input.baseline.coreGroupUserIds
+    ) &&
+    sameStrings(
+      reminderRows.rows.map(({ id }) => id),
+      input.baseline.reminderUserIds
+    ) &&
+    sameStrings(
+      active,
+      input.baseline.activeNotifications.map((row) => JSON.stringify(row))
+    )
+  );
 }
 
 /** Read-only stale-confirmation gate; execution repeats the complete predicate. */
@@ -292,7 +492,15 @@ export async function meetingsPlanTargetIsCurrent(input: {
     const create = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.parse(
       input.step.arguments
     );
-    const [meetings, checklist, attendance] = await Promise.all([
+    const [
+      meetings,
+      checklist,
+      attendance,
+      savedLocation,
+      existingLocation,
+      teamRoster,
+      rosterPeople,
+    ] = await Promise.all([
       db
         .select({ id: churchMeetings.id })
         .from(churchMeetings)
@@ -323,11 +531,97 @@ export async function meetingsPlanTargetIsCurrent(input: {
                 create.attendanceRows.map(({ attendanceId }) => attendanceId)
               )
             ),
+      create.savedLocationId
+        ? db
+            .select({ id: locations.id })
+            .from(locations)
+            .where(eq(locations.id, create.savedLocationId))
+            .limit(1)
+        : Promise.resolve([]),
+      create.locationId && !create.savedLocationId
+        ? db
+            .select({ id: locations.id })
+            .from(locations)
+            .where(
+              and(
+                eq(locations.id, create.locationId),
+                eq(locations.churchId, plantId),
+                eq(locations.isActive, true),
+                eq(locations.name, create.locationName ?? ""),
+                eq(locations.address, create.locationAddress ?? "")
+              )
+            )
+            .limit(1)
+        : Promise.resolve([]),
+      create.teamId
+        ? db
+            .execute<{ id: string }>(
+              sql`
+            select tm.person_id::text as id
+            from team_memberships tm
+            join ministry_teams t on t.id = tm.team_id
+              and t.church_id = tm.church_id
+            join persons p on p.id = tm.person_id
+              and p.church_id = tm.church_id
+            where tm.team_id = ${create.teamId}::uuid
+              and tm.church_id = ${plantId}::uuid
+              and tm.status = 'active' and p.deleted_at is null
+            order by id
+          `
+            )
+            .then(({ rows }) => rows)
+        : Promise.resolve([]),
+      create.attendanceRows.length > 0
+        ? db
+            .select({ id: persons.id, updatedAt: persons.updatedAt })
+            .from(persons)
+            .where(
+              and(
+                eq(persons.churchId, plantId),
+                inArray(
+                  persons.id,
+                  create.attendanceRows.map(({ personId }) => personId)
+                ),
+                isNull(persons.deletedAt)
+              )
+            )
+        : Promise.resolve([]),
     ]);
+    const personById = new Map(
+      rosterPeople.map((person) => [person.id, person.updatedAt])
+    );
+    const locationCurrent = create.locationId
+      ? create.savedLocationId
+        ? create.savedLocationId === create.locationId &&
+          create.locationName !== null &&
+          create.locationAddress !== null
+        : existingLocation.length === 1
+      : create.savedLocationId === null &&
+        create.locationName === null &&
+        create.locationAddress === null;
     return (
       meetings.length === 0 &&
       checklist.length === 0 &&
       attendance.length === 0 &&
+      savedLocation.length === 0 &&
+      locationCurrent &&
+      sameStrings(
+        teamRoster.map(({ id }) => id),
+        create.resolvedTeamMemberIds
+      ) &&
+      create.attendanceRows.every(({ personId, expectedPersonUpdatedAt }) => {
+        const updatedAt = personById.get(personId);
+        return Boolean(
+          updatedAt && sameInstant(updatedAt, expectedPersonUpdatedAt)
+        );
+      }) &&
+      (await notificationBaselineIsCurrent({
+        actor: input.actor,
+        exportName,
+        meetingId: create.meetingId,
+        baseline: create.notificationBaseline,
+        args: create,
+      })) &&
       (await notificationTargetsRemainAbsent({
         plantId,
         targets: create.notificationTargets,
@@ -340,7 +634,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
       MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createEvaluationAction.parse(
         input.step.arguments
       );
-    const [meeting, evaluation] = await Promise.all([
+    const [meeting, evaluation, evaluationTasks] = await Promise.all([
       db
         .select({ updatedAt: churchMeetings.updatedAt })
         .from(churchMeetings)
@@ -356,14 +650,50 @@ export async function meetingsPlanTargetIsCurrent(input: {
         .from(meetingEvaluations)
         .where(eq(meetingEvaluations.meetingId, evaluationArgs.meetingId))
         .limit(1),
+      db
+        .select({
+          id: tasks.id,
+          churchId: tasks.churchId,
+          title: tasks.title,
+          status: tasks.status,
+          completionEvent: tasks.completionEvent,
+          relatedType: tasks.relatedType,
+          relatedId: tasks.relatedId,
+          updatedAt: tasks.updatedAt,
+        })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.churchId, plantId),
+            eq(tasks.completionEvent, "meeting.evaluation.completed"),
+            eq(tasks.relatedType, "meeting"),
+            eq(tasks.relatedId, evaluationArgs.meetingId),
+            isNull(tasks.deletedAt)
+          )
+        ),
     ]);
+    const expectedTask = evaluationArgs.evaluationTask;
+    const taskCurrent = expectedTask
+      ? evaluationTasks.length === 1 &&
+        evaluationTasks[0]?.id === expectedTask.taskId &&
+        evaluationTasks[0].title === expectedTask.title &&
+        evaluationTasks[0].status === expectedTask.beforeStatus &&
+        evaluationTasks[0].completionEvent === "meeting.evaluation.completed" &&
+        evaluationTasks[0].relatedType === "meeting" &&
+        evaluationTasks[0].relatedId === evaluationArgs.meetingId &&
+        sameInstant(
+          evaluationTasks[0].updatedAt,
+          expectedTask.expectedUpdatedAt
+        )
+      : evaluationTasks.every(({ status }) => status === "complete");
     return Boolean(
       meeting[0] &&
       sameInstant(
         meeting[0].updatedAt,
         evaluationArgs.expectedMeetingUpdatedAt
       ) &&
-      !evaluation[0]
+      !evaluation[0] &&
+      taskCurrent
     );
   }
 
@@ -402,6 +732,18 @@ export async function meetingsPlanTargetIsCurrent(input: {
       plantId,
       meetingId,
       pending: args.pendingNotifications,
+    }))
+  ) {
+    return false;
+  }
+  if (
+    args.notificationBaseline !== undefined &&
+    !(await notificationBaselineIsCurrent({
+      actor: input.actor,
+      exportName,
+      meetingId,
+      baseline: args.notificationBaseline as NotificationBaseline,
+      args,
     }))
   ) {
     return false;
@@ -683,7 +1025,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
       MEETINGS_EFFECT_ARGUMENT_SCHEMAS.finalizeAttendanceAction.parse(
         input.step.arguments
       );
-    const [attended, church] = await Promise.all([
+    const [attended, church, meeting] = await Promise.all([
       db
         .select({
           attendanceId: meetingAttendance.id,
@@ -704,8 +1046,30 @@ export async function meetingsPlanTargetIsCurrent(input: {
         .from(churches)
         .where(eq(churches.id, plantId))
         .limit(1),
+      db
+        .select({
+          type: churchMeetings.type,
+          title: churchMeetings.title,
+          datetime: churchMeetings.datetime,
+          actualAttendance: churchMeetings.actualAttendance,
+        })
+        .from(churchMeetings)
+        .where(
+          and(
+            eq(churchMeetings.id, meetingId),
+            eq(churchMeetings.churchId, plantId)
+          )
+        )
+        .limit(1),
     ]);
     if (
+      !meeting[0] ||
+      meeting[0].type !== finalization.meetingType ||
+      meeting[0].title !== finalization.meetingTitle ||
+      !sameInstant(meeting[0].datetime, finalization.meetingDatetime) ||
+      meeting[0].actualAttendance !== finalization.expectedActualAttendance ||
+      (finalization.meetingType === "vision_meeting") !==
+        (finalization.evaluationTaskTarget !== null) ||
       !sameStrings(
         attended.map((row) =>
           JSON.stringify({
@@ -720,20 +1084,45 @@ export async function meetingsPlanTargetIsCurrent(input: {
     ) {
       return false;
     }
+    const firstTimePeople =
+      finalization.meetingType === "vision_meeting"
+        ? finalization.attendees
+            .filter(({ attendanceType }) => attendanceType === "first_time")
+            .map(({ personId }) => personId)
+        : [];
+    if (
+      !sameStrings(
+        firstTimePeople,
+        finalization.followUpTaskTargets.map(({ personId }) => personId)
+      ) ||
+      finalization.personStatusChanges.some(
+        ({ performedById }) => performedById !== input.actor.userId
+      )
+    ) {
+      return false;
+    }
     for (const change of finalization.personStatusChanges) {
-      const [person] = await db
-        .select({ status: persons.status, updatedAt: persons.updatedAt })
-        .from(persons)
-        .where(
-          and(
-            eq(persons.id, change.personId),
-            eq(persons.churchId, plantId),
-            isNull(persons.deletedAt)
+      const [[person], [activity]] = await Promise.all([
+        db
+          .select({ status: persons.status, updatedAt: persons.updatedAt })
+          .from(persons)
+          .where(
+            and(
+              eq(persons.id, change.personId),
+              eq(persons.churchId, plantId),
+              isNull(persons.deletedAt)
+            )
           )
-        )
-        .limit(1);
+          .limit(1),
+        db
+          .select({ id: personActivities.id })
+          .from(personActivities)
+          .where(eq(personActivities.id, change.activityId))
+          .limit(1),
+      ]);
       if (
         !person ||
+        activity ||
         person.status !== change.beforeStatus ||
         !sameInstant(person.updatedAt, change.expectedUpdatedAt)
       ) {
@@ -746,24 +1135,83 @@ export async function meetingsPlanTargetIsCurrent(input: {
         ? [finalization.evaluationTaskTarget]
         : []),
     ]) {
-      const [task] = await db
-        .select({ status: tasks.status, updatedAt: tasks.updatedAt })
+      const taskRows = await db
+        .select({
+          id: tasks.id,
+          churchId: tasks.churchId,
+          title: tasks.title,
+          status: tasks.status,
+          priority: tasks.priority,
+          category: tasks.category,
+          dueDate: tasks.dueDate,
+          assignedToId: tasks.assignedToId,
+          relatedType: tasks.relatedType,
+          relatedId: tasks.relatedId,
+          completionEvent: tasks.completionEvent,
+          updatedAt: tasks.updatedAt,
+        })
         .from(tasks)
         .where(
+          sql`${tasks.id} = ${target.taskId}::uuid or (
+            ${tasks.churchId} = ${plantId}::uuid
+            and ${tasks.category} = ${"personId" in target ? "follow_up" : "vision_meeting"}
+            and ${tasks.relatedType} = ${"personId" in target ? "person" : "meeting"}
+            and ${tasks.relatedId} = ${"personId" in target ? target.personId : meetingId}::uuid
+            and ${tasks.dueDate} = ${target.dueDate}::date
+            and ${tasks.deletedAt} is null
+          )`
+        );
+      const task = taskRows.find(({ id }) => id === target.taskId);
+      const exactTask = Boolean(
+        task &&
+        taskRows.length === 1 &&
+        task.churchId === plantId &&
+        task.title === target.title &&
+        task.status === target.beforeStatus &&
+        task.priority === "high" &&
+        task.category ===
+          ("personId" in target ? "follow_up" : "vision_meeting") &&
+        task.dueDate === target.dueDate &&
+        task.assignedToId === target.assignedToId &&
+        task.relatedType === ("personId" in target ? "person" : "meeting") &&
+        task.relatedId ===
+          ("personId" in target ? target.personId : meetingId) &&
+        ("personId" in target ||
+          task.completionEvent === "meeting.evaluation.completed") &&
+        target.expectedUpdatedAt &&
+        sameInstant(task.updatedAt, target.expectedUpdatedAt)
+      );
+      const [assignee] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
           and(
-            eq(tasks.id, target.taskId),
-            eq(tasks.churchId, plantId),
-            isNull(tasks.deletedAt)
+            eq(users.id, target.assignedToId),
+            eq(users.churchId, plantId),
+            eq(users.seat, "owner")
           )
         )
         .limit(1);
       if (
-        (target.expectedTaskAbsent && task) ||
-        (!target.expectedTaskAbsent &&
-          (!task ||
-            task.status !== target.beforeStatus ||
-            !target.expectedUpdatedAt ||
-            !sameInstant(task.updatedAt, target.expectedUpdatedAt)))
+        !assignee ||
+        (target.expectedTaskAbsent && taskRows.length > 0) ||
+        (!target.expectedTaskAbsent && !exactTask)
+      ) {
+        return false;
+      }
+      const pending =
+        "pendingNotifications" in target ? target.pendingNotifications : [];
+      if (
+        !(await pendingTaskNotificationsAreCurrent({
+          plantId,
+          taskId: target.taskId,
+          pending,
+        })) ||
+        !(await notificationTargetsRemainAbsent({
+          plantId,
+          targets: target.notificationTargets,
+          cancelling: pending,
+        }))
       ) {
         return false;
       }

@@ -177,8 +177,13 @@ test("operation kind is independent from application permission", () => {
   for (const registration of MEETINGS_OPERATION_REGISTRATIONS) {
     assert.equal(registration.parityCapability, "meetings");
     if (registration.operationKind === "read") {
-      assert.equal(registration.applicationCapability, "read");
       assert.equal(registration.actionLabel, null);
+      assert.equal(
+        registration.applicationCapability,
+        registration.identity === "meetings.read.schedule"
+          ? "meetings.write"
+          : "read"
+      );
       continue;
     }
     assert.equal(registration.applicationCapability, "meetings.write");

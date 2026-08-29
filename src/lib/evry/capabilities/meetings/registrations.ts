@@ -183,19 +183,19 @@ const MEETING_ANALYTICS_READ = registration(
   }
 );
 
-const MEETING_LOCATIONS_READ = registration(
+const MEETING_SCHEDULING_READ = registration(
   {
-    identity: "meetings.read.locations",
+    identity: "meetings.read.schedule",
     parityCapability: "meetings",
     operationKind: "read",
-    applicationCapability: "read",
+    applicationCapability: "meetings.write",
     surfaceIdentities: [
       "route:/meetings/new",
       readCall("src/app/(dashboard)/meetings/new/page.tsx", "listLocations"),
     ],
   },
   {
-    label: "List meeting locations",
+    label: "Review meeting scheduling options",
     actionLabel: null,
     argumentKeys: Object.freeze([]),
     difficultToReverse: false,
@@ -228,7 +228,7 @@ export const MEETINGS_OPERATION_REGISTRATIONS: readonly MeetingsOperationRegistr
     MEETING_LIST_READ,
     MEETING_DETAIL_READ,
     MEETING_ANALYTICS_READ,
-    MEETING_LOCATIONS_READ,
+    MEETING_SCHEDULING_READ,
     ...EFFECT_REGISTRATIONS,
   ]);
 

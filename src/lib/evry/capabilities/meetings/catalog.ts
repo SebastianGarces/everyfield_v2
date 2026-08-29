@@ -18,6 +18,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "expectedMeetingUpdatedAt",
     "expectedPersonUpdatedAt",
     "expectedAttendanceAbsent",
+    "notificationBaseline",
     "notificationTargets",
   ]),
   addAttendeeNoteAction: effect(
@@ -40,6 +41,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "expectedMeetingUpdatedAt",
     "expectedPersonUpdatedAt",
     "expectedAttendanceAbsent",
+    "notificationBaseline",
     "notificationTargets",
   ]),
   addWalkInAttendeeAction: effect(
@@ -53,6 +55,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedMeetingUpdatedAt",
       "expectedPersonUpdatedAt",
       "expectedAttendanceAbsent",
+      "notificationBaseline",
       "notificationTargets",
     ]
   ),
@@ -125,6 +128,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "checklistItems",
     "resolvedTeamMemberIds",
     "attendanceRows",
+    "notificationBaseline",
     "notificationTargets",
     "expectedMeetingAbsent",
     "createdById",
@@ -181,6 +185,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedMeetingUpdatedAt",
       "expectedPersonAbsent",
       "expectedAttendanceAbsent",
+      "notificationBaseline",
       "notificationTargets",
       "expectedChurchMaterialEventAt",
     ]
@@ -200,6 +205,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedMeetingUpdatedAt",
       "expectedPersonAbsent",
       "expectedAttendanceAbsent",
+      "notificationBaseline",
       "notificationTargets",
       "expectedChurchMaterialEventAt",
     ]
@@ -220,6 +226,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedMeetingUpdatedAt",
       "expectedPersonAbsent",
       "expectedAttendanceAbsent",
+      "notificationBaseline",
       "notificationTargets",
       "expectedChurchMaterialEventAt",
     ]
@@ -253,6 +260,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "expectedAttendanceUpdatedAt",
       "expectedResponseUpdatedAt",
       "pendingNotifications",
+      "notificationBaseline",
       "notificationTargets",
     ],
     true
@@ -266,6 +274,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "beforeAttendance",
       "expectedAttendanceUpdatedAt",
       "pendingNotifications",
+      "notificationBaseline",
       "notificationTargets",
     ],
     true
@@ -324,6 +333,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "before",
     "after",
     "pendingNotifications",
+    "notificationBaseline",
     "notificationTargets",
   ]),
   updateMeetingStatusAction: effect(
@@ -335,6 +345,7 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "afterStatus",
       "expectedUpdatedAt",
       "pendingNotifications",
+      "notificationBaseline",
       "notificationTargets",
     ]
   ),
@@ -451,7 +462,10 @@ function buildMeetingsCapabilitySurfaces(): readonly MeetingsCapabilitySurface[]
         identity: entry.identity,
         operationId: `meetings.read.route:${entry.path}`,
         operationKind: "read" as const,
-        applicationCapability: "read" as const,
+        applicationCapability:
+          entry.path === "/meetings/new"
+            ? ("meetings.write" as const)
+            : ("read" as const),
         parityCapability: "meetings" as const,
         source:
           "sources" in entry && entry.sources ? entry.sources.join(",") : "",

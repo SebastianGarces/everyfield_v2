@@ -157,6 +157,28 @@ function timestamp(value: string): Date {
   return new Date(value);
 }
 
+/**
+ * PostgreSQL timestamps retain microseconds while a durable Evry plan crosses
+ * the JSON boundary as a JavaScript Date (milliseconds). Compare the exact
+ * serialized version instead of making every freshly planned row stale when
+ * its database timestamp has non-zero microseconds.
+ */
+function serializedTimestampMatches(column: SQL, value: string): SQL {
+  return sql`to_char(
+    date_trunc('milliseconds', ${column}),
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) = ${value}`;
+}
+
+function nullableSerializedTimestampMatches(
+  column: SQL,
+  value: string | null
+): SQL {
+  return value === null
+    ? sql`${column} is null`
+    : serializedTimestampMatches(column, value);
+}
+
 function locationStateCurrent(
   alias: SQL,
   state: MeetingsEffectArguments<"updateLocationAction">["before"]
@@ -217,7 +239,7 @@ function updateLocationStatement(input: {
         select 1 from locations l
         where l.id = ${args.locationId}::uuid
           and l.church_id = ${input.execution.plantId}::uuid
-          and l.updated_at = ${timestamp(args.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`l.updated_at`, args.expectedUpdatedAt)}
           and ${locationStateCurrent(sql`l`, args.before)}
       )`,
     })}, location_updated as (
@@ -232,7 +254,7 @@ function updateLocationStatement(input: {
       from claimed c
       where l.id = ${args.locationId}::uuid
         and l.church_id = c.church_id
-        and l.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`l.updated_at`, args.expectedUpdatedAt)}
         and ${locationStateCurrent(sql`l`, args.before)}
       returning l.id
     ), mutation_complete as (
@@ -258,9 +280,9 @@ function attendeeNoteStatement(input: {
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
           and m.type = ${args.meetingType}
-          and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
           and p.church_id = m.church_id and p.deleted_at is null
-          and p.updated_at = ${timestamp(args.expectedPersonUpdatedAt)}
+          and ${serializedTimestampMatches(sql`p.updated_at`, args.expectedPersonUpdatedAt)}
           and not exists (
             select 1 from person_activities a
             where a.id = ${args.activityId}::uuid
@@ -302,7 +324,7 @@ function saveAgendaStatement(input: {
         select 1 from church_meetings m
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
-          and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
           and coalesce(m.agenda, '[]'::jsonb) = ${before}::jsonb
       )`,
     })}, meeting_updated as (
@@ -311,7 +333,7 @@ function saveAgendaStatement(input: {
           updated_at = transaction_timestamp()
       from claimed c
       where m.id = ${args.meetingId}::uuid and m.church_id = c.church_id
-        and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
         and coalesce(m.agenda, '[]'::jsonb) = ${before}::jsonb
       returning m.id
     ), mutation_complete as (
@@ -338,7 +360,7 @@ function toggleChecklistStatement(input: {
           and i.meeting_id = ${args.meetingId}::uuid
           and i.church_id = ${input.execution.plantId}::uuid
           and i.is_checked = ${args.beforeChecked}
-          and i.updated_at = ${timestamp(args.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`i.updated_at`, args.expectedUpdatedAt)}
       )`,
     })}, item_updated as (
       update meeting_checklist_items i
@@ -348,7 +370,7 @@ function toggleChecklistStatement(input: {
         and i.meeting_id = ${args.meetingId}::uuid
         and i.church_id = c.church_id
         and i.is_checked = ${args.beforeChecked}
-        and i.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`i.updated_at`, args.expectedUpdatedAt)}
       returning i.id
     ), mutation_complete as (
       select count(*) = 1 as ok from item_updated
@@ -368,9 +390,9 @@ function updateChecklistStatement(input: {
         where p.id = ${args.afterAssignedTo}::uuid
           and p.church_id = ${input.execution.plantId}::uuid
           and p.deleted_at is null
-          and p.updated_at = ${timestamp(args.expectedAssignedPersonUpdatedAt!)}
+          and ${serializedTimestampMatches(sql`p.updated_at`, args.expectedAssignedPersonUpdatedAt!)}
       )`
-    : sql`${args.expectedAssignedPersonUpdatedAt} is null`;
+    : sql`${args.expectedAssignedPersonUpdatedAt === null}`;
   return sql`
     with ${effectPrelude({
       ...input,
@@ -384,7 +406,7 @@ function updateChecklistStatement(input: {
           and i.church_id = ${input.execution.plantId}::uuid
           and i.notes is not distinct from ${args.beforeNotes}
           and i.assigned_to is not distinct from ${args.beforeAssignedTo}::uuid
-          and i.updated_at = ${timestamp(args.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`i.updated_at`, args.expectedUpdatedAt)}
       )`,
     })}, item_updated as (
       update meeting_checklist_items i
@@ -395,7 +417,7 @@ function updateChecklistStatement(input: {
         and i.meeting_id = ${args.meetingId}::uuid and i.church_id = c.church_id
         and i.notes is not distinct from ${args.beforeNotes}
         and i.assigned_to is not distinct from ${args.beforeAssignedTo}::uuid
-        and i.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`i.updated_at`, args.expectedUpdatedAt)}
       returning i.id
     ), mutation_complete as (
       select count(*) = 1 as ok from item_updated
@@ -422,7 +444,7 @@ function updateRsvpStatement(input: {
           and a.church_id = ${input.execution.plantId}::uuid
           and p.deleted_at is null
           and a.response_status is not distinct from ${args.beforeStatus}
-          and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+          and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       )`,
     })}, attendance_updated as (
       update meeting_attendance a
@@ -431,7 +453,7 @@ function updateRsvpStatement(input: {
       where a.meeting_id = ${args.meetingId}::uuid
         and a.person_id = ${args.personId}::uuid and a.church_id = c.church_id
         and a.response_status is not distinct from ${args.beforeStatus}
-        and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+        and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       returning a.id
     ), mutation_complete as (
       select count(*) = 1 as ok from attendance_updated
@@ -457,7 +479,7 @@ function toggleAttendanceStatement(input: {
           and a.person_id = ${args.personId}::uuid
           and a.church_id = ${input.execution.plantId}::uuid
           and p.deleted_at is null and a.status = ${args.beforeStatus}
-          and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+          and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       )`,
     })}, attendance_updated as (
       update meeting_attendance a
@@ -468,7 +490,7 @@ function toggleAttendanceStatement(input: {
       where a.meeting_id = ${args.meetingId}::uuid
         and a.person_id = ${args.personId}::uuid and a.church_id = c.church_id
         and a.status = ${args.beforeStatus}
-        and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+        and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       returning a.id
     ), mutation_complete as (
       select count(*) = 1 as ok from attendance_updated
@@ -491,7 +513,7 @@ function recordAttendanceBatchStatement(input: {
         select 1 from church_meetings m
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
-          and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
       ) and not exists (
         select 1
         from jsonb_array_elements(${records}::jsonb) entry
@@ -513,7 +535,8 @@ function recordAttendanceBatchStatement(input: {
               or a.attendance_type is distinct from entry->'before'->>'attendanceType'
               or a.response_status is distinct from entry->'before'->>'responseStatus'
               or a.notes is distinct from entry->'before'->>'notes'
-              or a.updated_at is distinct from (entry->'before'->>'updatedAt')::timestamp
+              or date_trunc('milliseconds', a.updated_at) is distinct from
+                (entry->'before'->>'updatedAt')::timestamp
             else a.id is not null
           end
       )`,
@@ -536,7 +559,8 @@ function recordAttendanceBatchStatement(input: {
         and a.attendance_type is not distinct from r.entry->'before'->>'attendanceType'
         and a.response_status is not distinct from r.entry->'before'->>'responseStatus'
         and a.notes is not distinct from r.entry->'before'->>'notes'
-        and a.updated_at = (r.entry->'before'->>'updatedAt')::timestamp
+        and date_trunc('milliseconds', a.updated_at) =
+          (r.entry->'before'->>'updatedAt')::timestamp
       returning a.id
     ), attendance_inserted as (
       insert into meeting_attendance (
@@ -579,12 +603,12 @@ function clearResponseStatement(input: {
         where a.meeting_id = ${args.meetingId}::uuid
           and a.person_id = ${args.personId}::uuid
           and a.church_id = ${input.execution.plantId}::uuid
-          and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+          and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
           and r.id = ${args.responseId}::uuid
           and r.response_type = ${args.beforeResponse.responseType}
           and r.notes is not distinct from ${args.beforeResponse.notes}
           and r.recorded_by_id is not distinct from ${args.beforeResponse.recordedById}::uuid
-          and r.updated_at = ${timestamp(args.beforeResponse.updatedAt)}
+          and ${serializedTimestampMatches(sql`r.updated_at`, args.beforeResponse.updatedAt)}
       )`,
     })}, response_deleted as (
       delete from meeting_responses r using claimed c
@@ -594,7 +618,7 @@ function clearResponseStatement(input: {
         and r.response_type = ${args.beforeResponse.responseType}
         and r.notes is not distinct from ${args.beforeResponse.notes}
         and r.recorded_by_id is not distinct from ${args.beforeResponse.recordedById}::uuid
-        and r.updated_at = ${timestamp(args.beforeResponse.updatedAt)}
+        and ${serializedTimestampMatches(sql`r.updated_at`, args.beforeResponse.updatedAt)}
       returning r.id
     ), mutation_complete as (
       select count(*) = 1 as ok from response_deleted
@@ -618,7 +642,7 @@ function recordResponseStatement(input: {
           and r.response_type = ${args.beforeResponse.responseType}
           and r.notes is not distinct from ${args.beforeResponse.notes}
           and r.recorded_by_id is not distinct from ${args.beforeResponse.recordedById}::uuid
-          and r.updated_at = ${timestamp(args.beforeResponse.updatedAt)}
+          and ${serializedTimestampMatches(sql`r.updated_at`, args.beforeResponse.updatedAt)}
       )`
     : sql`not exists (
         select 1 from meeting_responses r
@@ -639,7 +663,7 @@ function recordResponseStatement(input: {
         and r.response_type = ${args.beforeResponse.responseType}
         and r.notes is not distinct from ${args.beforeResponse.notes}
         and r.recorded_by_id is not distinct from ${args.beforeResponse.recordedById}::uuid
-        and r.updated_at = ${timestamp(args.beforeResponse.updatedAt)}
+        and ${serializedTimestampMatches(sql`r.updated_at`, args.beforeResponse.updatedAt)}
       returning r.id`
     : sql`insert into meeting_responses (
         id, church_id, meeting_id, person_id, response_type, notes,
@@ -661,7 +685,7 @@ function recordResponseStatement(input: {
         where a.meeting_id = ${args.meetingId}::uuid
           and a.person_id = ${args.personId}::uuid
           and a.church_id = ${input.execution.plantId}::uuid
-          and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+          and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       )`,
     })}, response_written as (
       ${responseWritten}
@@ -673,18 +697,129 @@ function recordResponseStatement(input: {
 
 type NotificationTarget =
   MeetingsEffectArguments<"createMeetingAction">["notificationTargets"][number];
+type NotificationBaseline =
+  MeetingsEffectArguments<"createMeetingAction">["notificationBaseline"];
 type PendingNotification =
   MeetingsEffectArguments<"deleteMeetingAction">["pendingNotifications"][number];
 
 function notificationTargetsCurrent(input: {
   plantId: string;
   meetingId: string;
+  baseline: NotificationBaseline;
   targets: readonly NotificationTarget[];
   cancelling?: readonly PendingNotification[];
+  audience:
+    | Readonly<{
+        kind: "existing";
+        addPersonId?: string;
+        removePersonId?: string;
+        addEmail?: string | null;
+      }>
+    | Readonly<{
+        kind: "create";
+        actorUserId: string;
+        rosterPersonIds: readonly string[];
+      }>;
 }): SQL {
   const targets = JSON.stringify(input.targets);
   const cancelling = JSON.stringify(input.cancelling ?? []);
+  const coreGroup = JSON.stringify(input.baseline.coreGroupUserIds);
+  const reminderUsers = JSON.stringify(input.baseline.reminderUserIds);
+  const activeNotifications = JSON.stringify(
+    input.baseline.activeNotifications
+  );
+  const actualReminderUsers =
+    input.audience.kind === "create"
+      ? sql`select ${input.audience.actorUserId}::uuid as user_id
+          union select distinct u.id
+          from persons p join users u
+            on u.church_id = ${input.plantId}::uuid
+           and lower(u.email) = lower(p.email)
+          where p.church_id = ${input.plantId}::uuid
+            and p.id in (
+              select value::uuid
+              from jsonb_array_elements_text(${JSON.stringify(input.audience.rosterPersonIds)}::jsonb) value
+            )
+            and p.deleted_at is null and p.email is not null`
+      : sql`select m.created_by as user_id
+          from church_meetings m
+          where m.id = ${input.meetingId}::uuid
+            and m.church_id = ${input.plantId}::uuid
+          union select distinct u.id
+          from meeting_attendance a
+          join persons p on p.id = a.person_id and p.church_id = a.church_id
+          join users u on u.church_id = a.church_id
+            and lower(u.email) = lower(p.email)
+          where a.meeting_id = ${input.meetingId}::uuid
+            and a.church_id = ${input.plantId}::uuid
+            and p.deleted_at is null and p.email is not null
+            and (${input.audience.removePersonId ?? null}::uuid is null
+              or p.id <> ${input.audience.removePersonId ?? null}::uuid)
+          union select u.id
+          from persons p join users u
+            on u.church_id = ${input.plantId}::uuid
+           and lower(u.email) = lower(p.email)
+          where p.id = ${input.audience.addPersonId ?? null}::uuid
+            and p.church_id = ${input.plantId}::uuid
+            and p.deleted_at is null and p.email is not null
+          union select u.id
+          from users u
+          where u.church_id = ${input.plantId}::uuid
+            and ${input.audience.addEmail ?? null}::text is not null
+            and lower(u.email) = lower(${input.audience.addEmail ?? null}::text)`;
   return sql`not exists (
+    select u.id
+    from persons p join users u
+      on u.church_id = ${input.plantId}::uuid
+     and lower(u.email) = lower(p.email)
+    where p.church_id = ${input.plantId}::uuid
+      and p.deleted_at is null and p.email is not null
+      and p.status in ('core_group', 'launch_team', 'leader')
+    except select value::uuid
+    from jsonb_array_elements_text(${coreGroup}::jsonb) value
+  ) and not exists (
+    select value::uuid
+    from jsonb_array_elements_text(${coreGroup}::jsonb) value
+    except select u.id
+    from persons p join users u
+      on u.church_id = ${input.plantId}::uuid
+     and lower(u.email) = lower(p.email)
+    where p.church_id = ${input.plantId}::uuid
+      and p.deleted_at is null and p.email is not null
+      and p.status in ('core_group', 'launch_team', 'leader')
+  ) and not exists (
+    select actual.user_id from (${actualReminderUsers}) actual
+    except select value::uuid
+    from jsonb_array_elements_text(${reminderUsers}::jsonb) value
+  ) and not exists (
+    select value::uuid
+    from jsonb_array_elements_text(${reminderUsers}::jsonb) value
+    except select actual.user_id from (${actualReminderUsers}) actual
+  ) and not exists (
+    select n.id, n.recipient_user_id, n.type, n.entity_id, n.dedupe_key,
+      n.scheduled_for, n.status, date_trunc('milliseconds', n.updated_at)
+    from notifications n
+    where n.church_id = ${input.plantId}::uuid
+      and n.category = 'meetings' and n.entity_type = 'meeting'
+      and n.entity_id = ${input.meetingId}::uuid and n.status <> 'cancelled'
+    except select (a->>'notificationId')::uuid,
+      (a->>'recipientUserId')::uuid, a->>'type', (a->>'entityId')::uuid,
+      a->>'dedupeKey', (a->>'scheduledFor')::timestamp,
+      a->>'status', (a->>'expectedUpdatedAt')::timestamp
+    from jsonb_array_elements(${activeNotifications}::jsonb) a
+  ) and not exists (
+    select (a->>'notificationId')::uuid,
+      (a->>'recipientUserId')::uuid, a->>'type', (a->>'entityId')::uuid,
+      a->>'dedupeKey', (a->>'scheduledFor')::timestamp,
+      a->>'status', (a->>'expectedUpdatedAt')::timestamp
+    from jsonb_array_elements(${activeNotifications}::jsonb) a
+    except select n.id, n.recipient_user_id, n.type, n.entity_id, n.dedupe_key,
+      n.scheduled_for, n.status, date_trunc('milliseconds', n.updated_at)
+    from notifications n
+    where n.church_id = ${input.plantId}::uuid
+      and n.category = 'meetings' and n.entity_type = 'meeting'
+      and n.entity_id = ${input.meetingId}::uuid and n.status <> 'cancelled'
+  ) and not exists (
     select 1
     from jsonb_array_elements(${targets}::jsonb) t
     left join users u
@@ -706,6 +841,10 @@ function notificationTargetsCurrent(input: {
         else t->>'dedupeKey' not like
           (t->>'type') || ':' || ${input.meetingId} || ':%'
       end
+      or exists (
+        select 1 from notifications n
+        where n.id = (t->>'notificationId')::uuid
+      )
       or exists (
         select 1 from notifications n
         where n.church_id = ${input.plantId}::uuid
@@ -741,7 +880,8 @@ function pendingNotificationsCurrent(input: {
           and (p->>'entityId')::uuid = n.entity_id
           and p->>'dedupeKey' = n.dedupe_key
           and (p->>'scheduledFor')::timestamp = n.scheduled_for
-          and (p->>'expectedUpdatedAt')::timestamp = n.updated_at
+          and (p->>'expectedUpdatedAt')::timestamp =
+            date_trunc('milliseconds', n.updated_at)
       )
   ) and not exists (
     select 1 from jsonb_array_elements(${pending}::jsonb) p
@@ -756,7 +896,8 @@ function pendingNotificationsCurrent(input: {
      and n.dedupe_key = p->>'dedupeKey'
      and n.scheduled_for = (p->>'scheduledFor')::timestamp
      and n.status = 'pending'
-     and n.updated_at = (p->>'expectedUpdatedAt')::timestamp
+     and date_trunc('milliseconds', n.updated_at) =
+       (p->>'expectedUpdatedAt')::timestamp
     where n.id is null
   )`;
 }
@@ -783,7 +924,8 @@ function notificationsWritten(input: {
         and n.dedupe_key = p->>'dedupeKey'
         and n.scheduled_for = (p->>'scheduledFor')::timestamp
         and n.status = 'pending'
-        and n.updated_at = (p->>'expectedUpdatedAt')::timestamp
+        and date_trunc('milliseconds', n.updated_at) =
+          (p->>'expectedUpdatedAt')::timestamp
       returning n.id
     ), notifications_inserted as (
       insert into notifications (
@@ -832,7 +974,9 @@ function addAttendanceStatement<
   const notificationsCurrent = notificationTargetsCurrent({
     plantId: input.execution.plantId,
     meetingId: args.meetingId,
+    baseline: args.notificationBaseline,
     targets: args.notificationTargets,
+    audience: { kind: "existing", addPersonId: args.personId },
   });
   const invitedByCurrent = invitedById
     ? sql`exists (
@@ -851,9 +995,9 @@ function addAttendanceStatement<
         join persons p on p.id = ${args.personId}::uuid
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
-          and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
           and p.church_id = m.church_id and p.deleted_at is null
-          and p.updated_at = ${timestamp(args.expectedPersonUpdatedAt)}
+          and ${serializedTimestampMatches(sql`p.updated_at`, args.expectedPersonUpdatedAt)}
           and not exists (
             select 1 from meeting_attendance a
             where a.meeting_id = m.id and a.person_id = p.id
@@ -903,7 +1047,7 @@ function removeAttendanceStatement<
           and r.response_type = ${beforeResponse.responseType}
           and r.notes is not distinct from ${beforeResponse.notes}
           and r.recorded_by_id is not distinct from ${beforeResponse.recordedById}::uuid
-          and r.updated_at = ${timestamp(beforeResponse.updatedAt)}
+          and ${serializedTimestampMatches(sql`r.updated_at`, beforeResponse.updatedAt)}
       )`
     : sql`not exists (
         select 1 from meeting_responses r
@@ -924,8 +1068,10 @@ function removeAttendanceStatement<
         and ${notificationTargetsCurrent({
           plantId: input.execution.plantId,
           meetingId: args.meetingId,
+          baseline: args.notificationBaseline,
           targets: args.notificationTargets,
           cancelling: args.pendingNotifications,
+          audience: { kind: "existing", removePersonId: args.personId },
         })}
         and exists (
           select 1 from meeting_attendance a
@@ -940,7 +1086,7 @@ function removeAttendanceStatement<
             and a.attendance_type is not distinct from ${args.beforeAttendance.attendanceType}
             and a.response_status is not distinct from ${args.beforeAttendance.responseStatus}
             and a.notes is not distinct from ${args.beforeAttendance.notes}
-            and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+            and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
         )`,
     })}, response_deleted as (
       delete from meeting_responses r using claimed c
@@ -953,7 +1099,7 @@ function removeAttendanceStatement<
       where a.id = ${args.beforeAttendance.id}::uuid
         and a.meeting_id = ${args.meetingId}::uuid
         and a.person_id = ${args.personId}::uuid and a.church_id = c.church_id
-        and a.updated_at = ${timestamp(args.expectedAttendanceUpdatedAt)}
+        and ${serializedTimestampMatches(sql`a.updated_at`, args.expectedAttendanceUpdatedAt)}
       returning a.id
     ), ${notificationsWritten({
       targets: args.notificationTargets,
@@ -1003,18 +1149,23 @@ function quickAddPersonStatement<
         and ${notificationTargetsCurrent({
           plantId: input.execution.plantId,
           meetingId: args.meetingId,
+          baseline: args.notificationBaseline,
           targets: args.notificationTargets,
+          audience: { kind: "existing", addEmail: args.email },
         })}
         and exists (
           select 1 from church_meetings m
           where m.id = ${args.meetingId}::uuid
             and m.church_id = ${input.execution.plantId}::uuid
-            and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+            and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
         )
         and exists (
           select 1 from churches ch
           where ch.id = ${input.execution.plantId}::uuid
-            and ch.last_material_event_at is not distinct from ${args.expectedChurchMaterialEventAt ? timestamp(args.expectedChurchMaterialEventAt) : null}
+            and ${nullableSerializedTimestampMatches(
+              sql`ch.last_material_event_at`,
+              args.expectedChurchMaterialEventAt
+            )}
         )
         and not exists (select 1 from persons p where p.id = ${args.personId}::uuid)
         and not exists (
@@ -1068,7 +1219,10 @@ function quickAddPersonStatement<
           updated_at = transaction_timestamp()
       from claimed c
       where ch.id = c.church_id
-        and ch.last_material_event_at is not distinct from ${args.expectedChurchMaterialEventAt ? timestamp(args.expectedChurchMaterialEventAt) : null}
+        and ${nullableSerializedTimestampMatches(
+          sql`ch.last_material_event_at`,
+          args.expectedChurchMaterialEventAt
+        )}
       returning ch.id
     ), ${notificationsWritten({ targets: args.notificationTargets })},
     mutation_complete as (
@@ -1087,7 +1241,7 @@ function meetingStateCurrent(
 ): SQL {
   return sql`${alias}.type = ${state.type}
     and ${alias}.title is not distinct from ${state.title}
-    and ${alias}.datetime = ${timestamp(state.datetime)}
+    and ${serializedTimestampMatches(sql`${alias}.datetime`, state.datetime)}
     and ${alias}.status = ${state.status}
     and ${alias}.location_id is not distinct from ${state.locationId}::uuid
     and ${alias}.location_name is not distinct from ${state.locationName}
@@ -1139,8 +1293,11 @@ function createMeetingStatement(input: {
             and l.name = ${args.locationName}
             and l.address = ${args.locationAddress}
         )`
-    : sql`${args.savedLocationId} is null
-        and ${args.locationName} is null and ${args.locationAddress} is null`;
+    : sql`${
+        args.savedLocationId === null &&
+        args.locationName === null &&
+        args.locationAddress === null
+      }`;
   const teamCurrent = args.teamId
     ? sql`exists (
         select 1 from ministry_teams t
@@ -1166,6 +1323,14 @@ function createMeetingStatement(input: {
           and tm.status = 'active' and p.deleted_at is null
       )`
     : sql`jsonb_array_length(${roster}::jsonb) = 0`;
+  const meetingNumberCurrent =
+    args.meetingNumber === null
+      ? sql`true`
+      : sql`not exists (
+          select 1 from church_meetings m
+          where m.church_id = ${input.execution.plantId}::uuid
+            and m.meeting_number = ${args.meetingNumber}
+        )`;
   return sql`
     with ${effectPrelude({
       ...input,
@@ -1178,7 +1343,13 @@ function createMeetingStatement(input: {
         and ${notificationTargetsCurrent({
           plantId: input.execution.plantId,
           meetingId: args.meetingId,
+          baseline: args.notificationBaseline,
           targets: args.notificationTargets,
+          audience: {
+            kind: "create",
+            actorUserId: input.execution.actorUserId,
+            rosterPersonIds: args.resolvedTeamMemberIds,
+          },
         })}
         and exists (
           select 1 from users u
@@ -1187,11 +1358,7 @@ function createMeetingStatement(input: {
             and u.church_id = ${input.execution.plantId}::uuid
         )
         and not exists (select 1 from church_meetings m where m.id = ${args.meetingId}::uuid)
-        and (${args.meetingNumber} is null or not exists (
-          select 1 from church_meetings m
-          where m.church_id = ${input.execution.plantId}::uuid
-            and m.meeting_number = ${args.meetingNumber}
-        ))
+        and ${meetingNumberCurrent}
         and not exists (
           select 1 from jsonb_array_elements(${checklist}::jsonb) i
           where exists (
@@ -1205,7 +1372,8 @@ function createMeetingStatement(input: {
             on p.id = (a->>'personId')::uuid
            and p.church_id = ${input.execution.plantId}::uuid
            and p.deleted_at is null
-           and p.updated_at = (a->>'expectedPersonUpdatedAt')::timestamp
+           and date_trunc('milliseconds', p.updated_at) =
+             (a->>'expectedPersonUpdatedAt')::timestamp
           where p.id is null or exists (
             select 1 from meeting_attendance x
             where x.id = (a->>'attendanceId')::uuid
@@ -1281,7 +1449,9 @@ function updateMeetingStatement(input: {
           and l.name = ${args.after.locationName}
           and l.address = ${args.after.locationAddress}
       )`
-    : sql`${args.after.locationName} is null and ${args.after.locationAddress} is null`;
+    : sql`${
+        args.after.locationName === null && args.after.locationAddress === null
+      }`;
   return sql`
     with ${effectPrelude({
       ...input,
@@ -1295,14 +1465,16 @@ function updateMeetingStatement(input: {
         and ${notificationTargetsCurrent({
           plantId: input.execution.plantId,
           meetingId: args.meetingId,
+          baseline: args.notificationBaseline,
           targets: args.notificationTargets,
           cancelling: args.pendingNotifications,
+          audience: { kind: "existing" },
         })}
         and exists (
           select 1 from church_meetings m
           where m.id = ${args.meetingId}::uuid
             and m.church_id = ${input.execution.plantId}::uuid
-            and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+            and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
             and ${meetingStateCurrent(sql`m`, args.before)}
         )`,
     })}, meeting_updated as (
@@ -1317,7 +1489,7 @@ function updateMeetingStatement(input: {
           updated_at = transaction_timestamp()
       from claimed c
       where m.id = ${args.meetingId}::uuid and m.church_id = c.church_id
-        and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
         and ${meetingStateCurrent(sql`m`, args.before)}
       returning m.id
     ), ${notificationsWritten({
@@ -1350,14 +1522,16 @@ function updateMeetingStatusStatement(input: {
       })} and ${notificationTargetsCurrent({
         plantId: input.execution.plantId,
         meetingId: args.meetingId,
+        baseline: args.notificationBaseline,
         targets: args.notificationTargets,
         cancelling: args.pendingNotifications,
+        audience: { kind: "existing" },
       })} and exists (
         select 1 from church_meetings m
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
           and m.status = ${args.beforeStatus}
-          and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
       )`,
     })}, meeting_updated as (
       update church_meetings m
@@ -1365,7 +1539,7 @@ function updateMeetingStatusStatement(input: {
       from claimed c
       where m.id = ${args.meetingId}::uuid and m.church_id = c.church_id
         and m.status = ${args.beforeStatus}
-        and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
       returning m.id
     ), ${notificationsWritten({
       targets: args.notificationTargets,
@@ -1448,13 +1622,13 @@ function deleteMeetingStatement(input: {
           select 1 from church_meetings m
           where m.id = ${args.meetingId}::uuid
             and m.church_id = ${input.execution.plantId}::uuid
-            and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+            and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
             and ${meetingStateCurrent(sql`m`, args.before)}
         )`,
     })}, meeting_deleted as (
       delete from church_meetings m using claimed c
       where m.id = ${args.meetingId}::uuid and m.church_id = c.church_id
-        and m.updated_at = ${timestamp(args.expectedUpdatedAt)}
+        and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedUpdatedAt)}
         and ${meetingStateCurrent(sql`m`, args.before)}
       returning m.id
     ), ${notificationsWritten({
@@ -1479,21 +1653,33 @@ type PendingTaskNotification = NonNullable<
 function taskNotificationTargetsCurrent(input: {
   plantId: string;
   targets: readonly TaskNotificationTarget[];
+  taskBindings: readonly Readonly<{
+    taskId: string;
+    assignedToId: string;
+  }>[];
   cancelling?: readonly PendingTaskNotification[];
 }): SQL {
   const targets = JSON.stringify(input.targets);
+  const taskBindings = JSON.stringify(input.taskBindings);
   const cancelling = JSON.stringify(input.cancelling ?? []);
   return sql`not exists (
     select 1 from jsonb_array_elements(${targets}::jsonb) t
+    left join jsonb_array_elements(${taskBindings}::jsonb) b
+      on (b->>'taskId')::uuid = (t->>'entityId')::uuid
+     and (b->>'assignedToId')::uuid = (t->>'recipientUserId')::uuid
     left join users u
       on u.id = (t->>'recipientUserId')::uuid
      and u.church_id = ${input.plantId}::uuid
-    where u.id is null
+    where b is null
+      or u.id is null
       or t->>'category' <> 'tasks'
       or t->>'entityType' <> 'task'
       or t->>'type' not in ('task.due', 'task.overdue')
-      or (t->>'recipientUserId')::uuid <> (t->>'recipientUserId')::uuid
       or t->>'dedupeKey' not like (t->>'type') || ':' || (t->>'entityId') || ':%'
+      or exists (
+        select 1 from notifications n
+        where n.id = (t->>'notificationId')::uuid
+      )
       or exists (
         select 1 from notifications n
         where n.church_id = ${input.plantId}::uuid
@@ -1525,7 +1711,8 @@ function pendingTaskNotificationsCurrent(input: {
           and (p->>'recipientUserId')::uuid = n.recipient_user_id
           and p->>'type' = n.type and p->>'dedupeKey' = n.dedupe_key
           and (p->>'scheduledFor')::timestamp = n.scheduled_for
-          and (p->>'expectedUpdatedAt')::timestamp = n.updated_at
+          and (p->>'expectedUpdatedAt')::timestamp =
+            date_trunc('milliseconds', n.updated_at)
       )
   ) and not exists (
     select 1 from jsonb_array_elements(${pending}::jsonb) p
@@ -1538,7 +1725,8 @@ function pendingTaskNotificationsCurrent(input: {
      and n.dedupe_key = p->>'dedupeKey'
      and n.scheduled_for = (p->>'scheduledFor')::timestamp
      and n.status = 'pending'
-     and n.updated_at = (p->>'expectedUpdatedAt')::timestamp
+     and date_trunc('milliseconds', n.updated_at) =
+       (p->>'expectedUpdatedAt')::timestamp
     where n.id is null
   )`;
 }
@@ -1557,7 +1745,27 @@ function finalizeAttendanceStatement(input: {
     ...args.followUpTaskTargets.flatMap((target) => target.notificationTargets),
     ...(evaluation?.notificationTargets ?? []),
   ];
+  const taskBindings = [
+    ...args.followUpTaskTargets.map(({ taskId, assignedToId }) => ({
+      taskId,
+      assignedToId,
+    })),
+    ...(evaluation
+      ? [
+          {
+            taskId: evaluation.taskId,
+            assignedToId: evaluation.assignedToId,
+          },
+        ]
+      : []),
+  ];
   const pendingEvaluationNotifications = evaluation?.pendingNotifications ?? [];
+  const evaluationNotificationsChange = Boolean(
+    evaluation &&
+    (evaluation.expectedTaskAbsent ||
+      evaluation.pendingNotifications.length > 0 ||
+      evaluation.notificationTargets.length > 0)
+  );
   const taskTargetsCurrent = args.followUpTaskTargets.map((target) =>
     target.expectedTaskAbsent
       ? sql`not exists (
@@ -1577,7 +1785,10 @@ function finalizeAttendanceStatement(input: {
             and t.due_date = ${target.dueDate}::date
             and t.assigned_to_id = ${target.assignedToId}::uuid
             and t.related_type = 'person' and t.related_id = ${target.personId}::uuid
-            and t.updated_at = ${target.expectedUpdatedAt ? timestamp(target.expectedUpdatedAt) : null}
+            and ${serializedTimestampMatches(
+              sql`t.updated_at`,
+              target.expectedUpdatedAt!
+            )}
             and t.deleted_at is null
         )`
   );
@@ -1609,7 +1820,10 @@ function finalizeAttendanceStatement(input: {
             and t.assigned_to_id = ${evaluation.assignedToId}::uuid
             and t.related_type = 'meeting' and t.related_id = ${args.meetingId}::uuid
             and t.completion_event = 'meeting.evaluation.completed'
-            and t.updated_at = ${evaluation.expectedUpdatedAt ? timestamp(evaluation.expectedUpdatedAt) : null}
+            and ${serializedTimestampMatches(
+              sql`t.updated_at`,
+              evaluation.expectedUpdatedAt!
+            )}
             and t.deleted_at is null
         )`;
   const taskCurrent = sql.join(
@@ -1630,23 +1844,28 @@ function finalizeAttendanceStatement(input: {
       ...input,
       affectedCount: 1 + args.personStatusChanges.length + insertedTaskCount,
       current: sql`${oneAssignee}
+        and ${(args.meetingType === "vision_meeting") === (evaluation !== null)}
         and exists (
           select 1 from church_meetings m
           where m.id = ${args.meetingId}::uuid
             and m.church_id = ${input.execution.plantId}::uuid
             and m.type = ${args.meetingType}
             and m.title is not distinct from ${args.meetingTitle}
-            and m.datetime = ${timestamp(args.meetingDatetime)}
+            and ${serializedTimestampMatches(sql`m.datetime`, args.meetingDatetime)}
             and m.actual_attendance is not distinct from ${args.expectedActualAttendance}
-            and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+            and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
         )
         and exists (
           select 1 from churches ch
           where ch.id = ${input.execution.plantId}::uuid
-            and ch.last_material_event_at is not distinct from ${args.expectedChurchMaterialEventAt ? timestamp(args.expectedChurchMaterialEventAt) : null}
+            and ${nullableSerializedTimestampMatches(
+              sql`ch.last_material_event_at`,
+              args.expectedChurchMaterialEventAt
+            )}
         )
         and not exists (
-          select a.id, a.person_id, a.attendance_type, a.updated_at
+          select a.id, a.person_id, a.attendance_type,
+            date_trunc('milliseconds', a.updated_at)
           from meeting_attendance a
           join persons p on p.id = a.person_id and p.church_id = a.church_id
           where a.church_id = ${input.execution.plantId}::uuid
@@ -1660,13 +1879,14 @@ function finalizeAttendanceStatement(input: {
           select (x->>'attendanceId')::uuid, (x->>'personId')::uuid,
             x->>'attendanceType', (x->>'expectedUpdatedAt')::timestamp
           from jsonb_array_elements(${attendees}::jsonb) x
-          except select a.id, a.person_id, a.attendance_type, a.updated_at
+          except select a.id, a.person_id, a.attendance_type,
+            date_trunc('milliseconds', a.updated_at)
           from meeting_attendance a
           where a.church_id = ${input.execution.plantId}::uuid
             and a.meeting_id = ${args.meetingId}::uuid and a.status = 'attended'
         )
         and not exists (
-          select p.id, p.updated_at
+          select p.id, date_trunc('milliseconds', p.updated_at)
           from persons p
           join meeting_attendance a on a.person_id = p.id and a.church_id = p.church_id
           where p.church_id = ${input.execution.plantId}::uuid
@@ -1679,7 +1899,7 @@ function finalizeAttendanceStatement(input: {
         and not exists (
           select (x->>'personId')::uuid, (x->>'expectedUpdatedAt')::timestamp
           from jsonb_array_elements(${statusChanges}::jsonb) x
-          except select p.id, p.updated_at
+          except select p.id, date_trunc('milliseconds', p.updated_at)
           from persons p
           join meeting_attendance a on a.person_id = p.id and a.church_id = p.church_id
           where p.church_id = ${input.execution.plantId}::uuid
@@ -1687,13 +1907,38 @@ function finalizeAttendanceStatement(input: {
             and p.status = 'prospect' and p.deleted_at is null
             and ${args.meetingType} = 'vision_meeting'
         )
+        and not exists (
+          select (x->>'personId')::uuid
+          from jsonb_array_elements(${attendees}::jsonb) x
+          where ${args.meetingType} = 'vision_meeting'
+            and x->>'attendanceType' = 'first_time'
+          except select (f->>'personId')::uuid
+          from jsonb_array_elements(${followUps}::jsonb) f
+        )
+        and not exists (
+          select (f->>'personId')::uuid
+          from jsonb_array_elements(${followUps}::jsonb) f
+          except select (x->>'personId')::uuid
+          from jsonb_array_elements(${attendees}::jsonb) x
+          where ${args.meetingType} = 'vision_meeting'
+            and x->>'attendanceType' = 'first_time'
+        )
+        and not exists (
+          select 1 from jsonb_array_elements(${statusChanges}::jsonb) s
+          where (s->>'performedById')::uuid <> ${input.execution.actorUserId}::uuid
+             or exists (
+               select 1 from person_activities a
+               where a.id = (s->>'activityId')::uuid
+             )
+        )
         and ${taskCurrent}
         and ${taskNotificationTargetsCurrent({
           plantId: input.execution.plantId,
           targets: allTaskNotifications,
+          taskBindings,
           cancelling: pendingEvaluationNotifications,
         })}
-        and ${evaluation ? pendingTaskNotificationsCurrent({ plantId: input.execution.plantId, taskId: evaluation.taskId, pending: pendingEvaluationNotifications }) : sql`true`}
+        and ${evaluationNotificationsChange && evaluation ? pendingTaskNotificationsCurrent({ plantId: input.execution.plantId, taskId: evaluation.taskId, pending: pendingEvaluationNotifications }) : sql`true`}
         and not exists (
           select 1 from jsonb_array_elements(${followUps}::jsonb) f
           where (f->>'assignedToId')::uuid not in (
@@ -1709,7 +1954,8 @@ function finalizeAttendanceStatement(input: {
       from claimed c, status_input s
       where p.id = (s.change->>'personId')::uuid and p.church_id = c.church_id
         and p.status = 'prospect' and p.deleted_at is null
-        and p.updated_at = (s.change->>'expectedUpdatedAt')::timestamp
+        and date_trunc('milliseconds', p.updated_at) =
+          (s.change->>'expectedUpdatedAt')::timestamp
       returning p.id
     ), status_activities_inserted as (
       insert into person_activities (
@@ -1745,11 +1991,12 @@ function finalizeAttendanceStatement(input: {
         category, related_type, related_id, completion_event,
         created_by_id, created_at, updated_at
       )
-      select ${evaluation?.taskId}::uuid, c.church_id, ${evaluation?.title},
-        'not_started', 'high', ${evaluation?.dueDate}::date,
-        ${evaluation?.assignedToId}::uuid, 'vision_meeting', 'meeting',
+      select ${evaluation?.taskId ?? null}::uuid, c.church_id, ${evaluation?.title ?? null},
+        'not_started', 'high', ${evaluation?.dueDate ?? null}::date,
+        ${evaluation?.assignedToId ?? null}::uuid, 'vision_meeting', 'meeting',
         ${args.meetingId}::uuid, 'meeting.evaluation.completed',
-        ${evaluation?.assignedToId}::uuid, transaction_timestamp(), transaction_timestamp()
+        ${evaluation?.assignedToId ?? null}::uuid,
+        transaction_timestamp(), transaction_timestamp()
       from claimed c where ${evaluation?.expectedTaskAbsent ?? false}
       returning id
     ), task_notifications_cancelled as (
@@ -1758,7 +2005,8 @@ function finalizeAttendanceStatement(input: {
       where n.id = (p->>'notificationId')::uuid and n.church_id = c.church_id
         and n.category = 'tasks' and n.entity_type = 'task'
         and n.entity_id = (p->>'entityId')::uuid and n.status = 'pending'
-        and n.updated_at = (p->>'expectedUpdatedAt')::timestamp
+        and date_trunc('milliseconds', n.updated_at) =
+          (p->>'expectedUpdatedAt')::timestamp
       returning n.id
     ), task_notifications_inserted as (
       insert into notifications (
@@ -1779,14 +2027,17 @@ function finalizeAttendanceStatement(input: {
           updated_at = transaction_timestamp()
       from claimed c
       where m.id = ${args.meetingId}::uuid and m.church_id = c.church_id
-        and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+        and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
         and m.actual_attendance is not distinct from ${args.expectedActualAttendance}
       returning m.id
     ), church_stamped as (
       update churches ch set last_material_event_at = transaction_timestamp(),
         updated_at = transaction_timestamp()
       from claimed c where ch.id = c.church_id
-        and ch.last_material_event_at is not distinct from ${args.expectedChurchMaterialEventAt ? timestamp(args.expectedChurchMaterialEventAt) : null}
+        and ${nullableSerializedTimestampMatches(
+          sql`ch.last_material_event_at`,
+          args.expectedChurchMaterialEventAt
+        )}
       returning ch.id
     ), mutation_complete as (
       select (select count(*) from persons_updated) = ${args.personStatusChanges.length}
@@ -1831,7 +2082,7 @@ function createEvaluationStatement(input: {
           and t.completion_event = 'meeting.evaluation.completed'
           and t.related_type = 'meeting'
           and t.related_id = ${args.meetingId}::uuid
-          and t.updated_at = ${timestamp(task.expectedUpdatedAt)}
+          and ${serializedTimestampMatches(sql`t.updated_at`, task.expectedUpdatedAt)}
           and t.deleted_at is null
       ) and not exists (
         select 1 from tasks t
@@ -1858,7 +2109,7 @@ function createEvaluationStatement(input: {
         select 1 from church_meetings m
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
-          and m.updated_at = ${timestamp(args.expectedMeetingUpdatedAt)}
+          and ${serializedTimestampMatches(sql`m.updated_at`, args.expectedMeetingUpdatedAt)}
       ) and not exists (
         select 1 from meeting_evaluations e
         where e.id = ${args.evaluationId}::uuid
@@ -1884,10 +2135,10 @@ function createEvaluationStatement(input: {
       set status = 'complete', completed_at = transaction_timestamp(),
           updated_at = transaction_timestamp()
       from claimed c
-      where t.id = ${task?.taskId}::uuid and t.church_id = c.church_id
-        and t.status = ${task?.beforeStatus}
+      where t.id = ${task?.taskId ?? null}::uuid and t.church_id = c.church_id
+        and t.status = ${task?.beforeStatus ?? null}
         and t.status <> 'complete'
-        and t.updated_at = ${task?.expectedUpdatedAt ? timestamp(task.expectedUpdatedAt) : null}
+        and ${task ? serializedTimestampMatches(sql`t.updated_at`, task.expectedUpdatedAt) : sql`false`}
         and t.completion_event = 'meeting.evaluation.completed'
         and t.related_type = 'meeting' and t.related_id = ${args.meetingId}::uuid
         and t.deleted_at is null

@@ -4,6 +4,7 @@ import {
   attendanceStatuses,
   attendanceTypes,
   meetingStatuses,
+  meetingSubtypes,
   meetingTypes,
   responseCardTypes,
   responseStatuses,
@@ -90,6 +91,92 @@ function agendaSections(value: string) {
   return sections.length > 0 && sections.every(Boolean) ? sections : null;
 }
 
+const CREATE_MEETING_FIELDS = new Set([
+  "type",
+  "datetime",
+  "timezone",
+  "title",
+  "locationId",
+  "locationName",
+  "locationAddress",
+  "teamId",
+  "meetingSubtype",
+  "estimatedAttendance",
+  "durationMinutes",
+  "notes",
+]);
+
+function closedCreateMeetingFields(
+  value: string
+): Readonly<Record<string, unknown>> | null {
+  const entries = value.split("|").map((part) => part.trim());
+  const fields = new Map<string, string>();
+  for (const entry of entries) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) return null;
+    const key = entry.slice(0, separator).trim();
+    const fieldValue = entry.slice(separator + 1).trim();
+    if (
+      !CREATE_MEETING_FIELDS.has(key) ||
+      fields.has(key) ||
+      fieldValue.length === 0
+    ) {
+      return null;
+    }
+    fields.set(key, fieldValue);
+  }
+  const type = exactEnum(fields.get("type") ?? "", meetingTypes);
+  const datetime = fields.get("datetime");
+  const timezone = fields.get("timezone");
+  const teamId = fields.get("teamId") ?? null;
+  const meetingSubtype = fields.get("meetingSubtype") ?? null;
+  const locationId = fields.get("locationId") ?? null;
+  const locationName = fields.get("locationName") ?? null;
+  const locationAddress = fields.get("locationAddress") ?? null;
+  const estimatedAttendance = fields.has("estimatedAttendance")
+    ? Number(fields.get("estimatedAttendance"))
+    : null;
+  const durationMinutes = fields.has("durationMinutes")
+    ? Number(fields.get("durationMinutes"))
+    : null;
+  if (
+    !type ||
+    !datetime ||
+    !instant.safeParse(datetime).success ||
+    !timezone ||
+    !zone.safeParse(timezone).success ||
+    (type === "team_meeting") !== Boolean(teamId) ||
+    (teamId !== null && !uuid.safeParse(teamId).success) ||
+    (meetingSubtype !== null && !exactEnum(meetingSubtype, meetingSubtypes)) ||
+    (locationId !== null && !uuid.safeParse(locationId).success) ||
+    (locationId !== null &&
+      (locationName !== null || locationAddress !== null)) ||
+    (locationName === null) !== (locationAddress === null) ||
+    (estimatedAttendance !== null &&
+      (!Number.isInteger(estimatedAttendance) || estimatedAttendance < 0)) ||
+    (durationMinutes !== null &&
+      (!Number.isInteger(durationMinutes) ||
+        durationMinutes < 1 ||
+        durationMinutes > 1_440))
+  ) {
+    return null;
+  }
+  return {
+    type,
+    datetime,
+    timezone,
+    title: fields.get("title") ?? null,
+    locationId,
+    locationName,
+    locationAddress,
+    teamId,
+    meetingSubtype,
+    estimatedAttendance,
+    durationMinutes,
+    notes: fields.get("notes") ?? null,
+  };
+}
+
 /** Closed command grammar. No branch accepts JSON, URLs, SQL, or action names. */
 export function selectMeetingsEvryRequest(
   literalUserText: string
@@ -106,6 +193,12 @@ export function selectMeetingsEvryRequest(
   }
   if (/^show (?:this )?meeting(?: details)?[.!?]*$/i.test(text)) {
     return { kind: "read_detail" };
+  }
+
+  const fullCreate = /^create meeting:\s*([\s\S]+)$/i.exec(text);
+  if (fullCreate?.[1]) {
+    const fields = closedCreateMeetingFields(fullCreate[1]);
+    return fields ? effect("createMeetingAction", fields) : null;
   }
 
   let match = /^create meeting location:\s*([^|]+)\|([\s\S]+)$/i.exec(text);
@@ -132,7 +225,7 @@ export function selectMeetingsEvryRequest(
     });
   }
   match =
-    /^create (vision_meeting|orientation|team_meeting) at (\S+) in (\S+)(?: titled ([\s\S]+))?$/i.exec(
+    /^create (vision_meeting|orientation) at (\S+) in (\S+)(?: titled ([\s\S]+))?$/i.exec(
       text
     );
   if (
@@ -146,6 +239,14 @@ export function selectMeetingsEvryRequest(
       datetime: match[2],
       timezone: match[3],
       title: match[4]?.trim() || null,
+      locationId: null,
+      locationName: null,
+      locationAddress: null,
+      teamId: null,
+      meetingSubtype: null,
+      estimatedAttendance: null,
+      durationMinutes: null,
+      notes: null,
     });
   }
   if (/^delete (?:this )?meeting[.!?]*$/i.test(text)) {

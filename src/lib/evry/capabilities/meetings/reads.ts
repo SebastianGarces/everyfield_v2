@@ -22,11 +22,7 @@ import {
   getMeeting,
   listMeetings,
 } from "@/lib/meetings/service";
-import {
-  meetingStatuses,
-  meetingTypes,
-  type MeetingType,
-} from "@/db/schema/meetings";
+import { meetingStatuses, meetingTypes } from "@/db/schema/meetings";
 
 import type { MeetingsOperationRegistration } from "./registrations";
 
@@ -69,7 +65,7 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
       const result = await listMeetings(actor.plantId, input);
       const listLink = trustedEvryApplicationSourceLink({
         label: "Meetings",
-        href: "/meetings",
+        href: input.teamId ? `/teams/${input.teamId}/meetings` : "/meetings",
       });
       const items = result.meetings.map((meeting) => {
         const sourceLink = trustedEvryApplicationSourceLink({
@@ -233,7 +229,7 @@ const READ_ADAPTERS: readonly MeetingsReadAdapter[] = [
     },
   },
   {
-    identity: "meetings.read.locations",
+    identity: "meetings.read.schedule",
     inputSchema: locationsInputSchema,
     async run({ actor }) {
       const locations = await listLocations(actor.plantId);

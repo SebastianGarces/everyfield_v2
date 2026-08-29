@@ -25,6 +25,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonUpdatedAt",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -87,6 +88,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonUpdatedAt",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -211,6 +213,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonAbsent",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets",
         "expectedChurchMaterialEventAt"
       ],
@@ -248,6 +251,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonAbsent",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets",
         "expectedChurchMaterialEventAt"
       ],
@@ -280,6 +284,7 @@
         "expectedAttendanceUpdatedAt",
         "expectedResponseUpdatedAt",
         "pendingNotifications",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": true,
@@ -340,6 +345,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonUpdatedAt",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -444,6 +450,7 @@
         "checklistItems",
         "resolvedTeamMemberIds",
         "attendanceRows",
+        "notificationBaseline",
         "notificationTargets",
         "expectedMeetingAbsent",
         "createdById"
@@ -518,6 +525,7 @@
         "expectedMeetingUpdatedAt",
         "expectedPersonAbsent",
         "expectedAttendanceAbsent",
+        "notificationBaseline",
         "notificationTargets",
         "expectedChurchMaterialEventAt"
       ],
@@ -548,6 +556,7 @@
         "beforeAttendance",
         "expectedAttendanceUpdatedAt",
         "pendingNotifications",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": true,
@@ -638,6 +647,7 @@
         "afterStatus",
         "expectedUpdatedAt",
         "pendingNotifications",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -668,6 +678,7 @@
         "before",
         "after",
         "pendingNotifications",
+        "notificationBaseline",
         "notificationTargets"
       ],
       "difficultToReverse": false,
@@ -837,16 +848,16 @@
       ]
     },
     {
-      "identity": "meetings.read.locations",
+      "identity": "meetings.read.schedule",
       "surfaceIdentities": [
         "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
         "route:/meetings/new"
       ],
       "parityCapability": "meetings",
       "operationKind": "read",
-      "applicationCapability": "read",
+      "applicationCapability": "meetings.write",
       "confirmation": "not_required",
-      "label": "List meeting locations",
+      "label": "Review meeting scheduling options",
       "actionLabel": null,
       "argumentKeys": [],
       "difficultToReverse": false,
@@ -1458,10 +1469,10 @@
     {
       "identity": "read-operation:src/app/(dashboard)/meetings/new/page.tsx → listLocations",
       "kind": "read_operation",
-      "capabilityIdentity": "meetings.read.locations",
+      "capabilityIdentity": "meetings.read.schedule",
       "parityCapability": "meetings",
       "operationKind": "read",
-      "applicationCapability": "read",
+      "applicationCapability": "meetings.write",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
     },
@@ -1578,10 +1589,10 @@
     {
       "identity": "route:/meetings/new",
       "kind": "route",
-      "capabilityIdentity": "meetings.read.locations",
+      "capabilityIdentity": "meetings.read.schedule",
       "parityCapability": "meetings",
       "operationKind": "read",
-      "applicationCapability": "read",
+      "applicationCapability": "meetings.write",
       "confirmation": "not_required",
       "classification": { "state": "supported" }
     },

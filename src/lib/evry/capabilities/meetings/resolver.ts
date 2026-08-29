@@ -12,8 +12,10 @@ import {
   meetingChecklistItems,
   meetingEvaluations,
   meetingResponses,
+  ministryTeams,
   notifications,
   persons,
+  teamMemberships,
   tasks,
   users,
 } from "@/db/schema";
@@ -29,6 +31,7 @@ import { kitTemplate } from "@/lib/meetings/kit-template";
 import {
   listCoreGroupUserIds,
   listGuestListUserIds,
+  meetingNotificationFactsQuery,
   planMeetingNotifications,
   type MeetingAudience,
   type MeetingNotificationFacts,
@@ -241,12 +244,17 @@ async function pendingMeetingNotifications(plantId: string, meetingId: string) {
   }));
 }
 
-async function activeNotificationKeys(plantId: string, meetingId: string) {
+async function activeMeetingNotifications(plantId: string, meetingId: string) {
   const rows = await db
     .select({
+      notificationId: notifications.id,
       recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
       dedupeKey: notifications.dedupeKey,
       status: notifications.status,
+      scheduledFor: notifications.scheduledFor,
+      expectedUpdatedAt: notifications.updatedAt,
     })
     .from(notifications)
     .where(
@@ -258,11 +266,17 @@ async function activeNotificationKeys(plantId: string, meetingId: string) {
         sql`${notifications.status} <> 'cancelled'`
       )
     );
-  return new Set(
-    rows.flatMap((row) =>
-      row.dedupeKey ? [`${row.recipientUserId}:${row.dedupeKey}`] : []
-    )
-  );
+  return rows
+    .map((row) => ({
+      ...row,
+      entityId: row.entityId ?? "",
+      dedupeKey: row.dedupeKey ?? "",
+      scheduledFor: iso(row.scheduledFor),
+      expectedUpdatedAt: iso(row.expectedUpdatedAt),
+    }))
+    .toSorted((left, right) =>
+      left.notificationId.localeCompare(right.notificationId)
+    );
 }
 
 async function meetingAudience(
@@ -272,7 +286,28 @@ async function meetingAudience(
 ): Promise<MeetingAudience> {
   const [coreGroup, guestUsers, selectedUsers] = await Promise.all([
     listCoreGroupUserIds(facts.churchId),
-    listGuestListUserIds(facts.churchId, facts.id),
+    removePersonId
+      ? db
+          .selectDistinct({ userId: users.id })
+          .from(meetingAttendance)
+          .innerJoin(
+            persons,
+            and(
+              eq(meetingAttendance.personId, persons.id),
+              eq(meetingAttendance.churchId, persons.churchId)
+            )
+          )
+          .innerJoin(users, personIsUserInChurch(facts.churchId))
+          .where(
+            and(
+              eq(meetingAttendance.churchId, facts.churchId),
+              eq(meetingAttendance.meetingId, facts.id),
+              sql`${persons.id} <> ${removePersonId}::uuid`,
+              isNull(persons.deletedAt)
+            )
+          )
+          .then((rows) => rows.map(({ userId }) => userId))
+      : listGuestListUserIds(facts.churchId, facts.id),
     addPersonId || removePersonId
       ? db
           .select({ userId: users.id, personId: persons.id })
@@ -290,8 +325,10 @@ async function meetingAudience(
   const selectedUserIds = new Set(selectedUsers.map(({ userId }) => userId));
   const reminders = new Set([facts.createdBy, ...guestUsers]);
   if (addPersonId) selectedUserIds.forEach((id) => reminders.add(id));
-  if (removePersonId) selectedUserIds.forEach((id) => reminders.delete(id));
-  return { coreGroup: [...new Set(coreGroup)], reminders: [...reminders] };
+  return {
+    coreGroup: [...new Set(coreGroup)].toSorted(),
+    reminders: [...reminders].toSorted(),
+  };
 }
 
 async function plannedMeetingNotificationTargets(input: {
@@ -301,14 +338,23 @@ async function plannedMeetingNotificationTargets(input: {
   now: Date;
   cancelling?: Awaited<ReturnType<typeof pendingMeetingNotifications>>;
 }) {
-  const active = await activeNotificationKeys(
+  const activeNotifications = await activeMeetingNotifications(
     input.facts.churchId,
     input.facts.id
+  );
+  const active = new Set(
+    activeNotifications.map(
+      ({ recipientUserId, dedupeKey }) => `${recipientUserId}:${dedupeKey}`
+    )
   );
   for (const row of input.cancelling ?? []) {
     active.delete(`${row.recipientUserId}:${row.dedupeKey}`);
   }
-  return planMeetingNotifications(input.facts, input.audience, input.now)
+  const notificationTargets = planMeetingNotifications(
+    input.facts,
+    input.audience,
+    input.now
+  )
     .notifications.filter(
       (notification) =>
         !active.has(
@@ -331,19 +377,13 @@ async function plannedMeetingNotificationTargets(input: {
       scheduledFor: plannedInstant(notification.scheduledFor),
       expectedAbsent: true as const,
     }));
-}
-
-function notificationFacts(meeting: Meeting): MeetingNotificationFacts {
   return {
-    id: meeting.id,
-    churchId: meeting.churchId,
-    type: meeting.type,
-    title: meeting.title,
-    meetingNumber: meeting.meetingNumber,
-    teamName: null,
-    datetime: meeting.datetime,
-    status: meeting.status,
-    createdBy: meeting.createdBy,
+    notificationBaseline: {
+      coreGroupUserIds: [...input.audience.coreGroup].toSorted(),
+      reminderUserIds: [...input.audience.reminders].toSorted(),
+      activeNotifications,
+    },
+    notificationTargets,
   };
 }
 
@@ -456,17 +496,94 @@ export async function resolveMeetingsEvryEffect(input: {
   if (exportName === "createMeetingAction") {
     const type = values.type;
     const datetime = values.datetime;
+    const selectedTeamId =
+      typeof values.teamId === "string" ? values.teamId : null;
+    const selectedLocationId =
+      typeof values.locationId === "string" ? values.locationId : null;
+    const locationName =
+      typeof values.locationName === "string" ? values.locationName : null;
+    const locationAddress =
+      typeof values.locationAddress === "string"
+        ? values.locationAddress
+        : null;
     if (
       (type !== "vision_meeting" &&
         type !== "orientation" &&
         type !== "team_meeting") ||
       typeof datetime !== "string" ||
       typeof values.timezone !== "string" ||
-      type === "team_meeting"
+      (type === "team_meeting") !== (selectedTeamId !== null) ||
+      (selectedLocationId !== null &&
+        (locationName !== null || locationAddress !== null)) ||
+      (locationName === null) !== (locationAddress === null)
     ) {
       return null;
     }
     const meetingId = derivedUuid(requestKey, "meeting");
+    const [savedLocation, team] = await Promise.all([
+      selectedLocationId
+        ? db
+            .select()
+            .from(locations)
+            .where(
+              and(
+                eq(locations.id, selectedLocationId),
+                eq(locations.churchId, actor.plantId),
+                eq(locations.isActive, true)
+              )
+            )
+            .limit(1)
+            .then((rows) => rows[0] ?? null)
+        : Promise.resolve(null),
+      selectedTeamId
+        ? db
+            .select({ id: ministryTeams.id, name: ministryTeams.name })
+            .from(ministryTeams)
+            .where(
+              and(
+                eq(ministryTeams.id, selectedTeamId),
+                eq(ministryTeams.churchId, actor.plantId)
+              )
+            )
+            .limit(1)
+            .then((rows) => rows[0] ?? null)
+        : Promise.resolve(null),
+    ]);
+    if ((selectedLocationId && !savedLocation) || (selectedTeamId && !team)) {
+      return null;
+    }
+    const resolvedLocationId =
+      savedLocation?.id ??
+      (locationName ? derivedUuid(requestKey, "saved-location") : null);
+    const savedLocationId = locationName ? resolvedLocationId : null;
+    const resolvedLocationName = savedLocation?.name ?? locationName;
+    const resolvedLocationAddress = savedLocation?.address ?? locationAddress;
+    const teamMembers = selectedTeamId
+      ? await db
+          .select({
+            personId: persons.id,
+            expectedPersonUpdatedAt: persons.updatedAt,
+          })
+          .from(teamMemberships)
+          .innerJoin(
+            persons,
+            and(
+              eq(persons.id, teamMemberships.personId),
+              eq(persons.churchId, teamMemberships.churchId)
+            )
+          )
+          .where(
+            and(
+              eq(teamMemberships.teamId, selectedTeamId),
+              eq(teamMemberships.churchId, actor.plantId),
+              eq(teamMemberships.status, "active"),
+              isNull(persons.deletedAt)
+            )
+          )
+      : [];
+    teamMembers.sort((left, right) =>
+      left.personId.localeCompare(right.personId)
+    );
     const agenda = defaultAgendaTemplatesForType(type).map(
       (section, index) => ({
         id: derivedUuid(requestKey, `agenda:${index}`),
@@ -495,18 +612,41 @@ export async function resolveMeetingsEvryEffect(input: {
       type,
       title: typeof values.title === "string" ? values.title : null,
       meetingNumber: meetingNumberRow?.value ?? null,
-      teamName: null,
+      teamName: team?.name ?? null,
       datetime: new Date(datetime),
       status: "planning",
       createdBy: actor.userId,
     };
     const audience = await meetingAudience(facts);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts,
-      audience,
-      now,
-    });
+    if (teamMembers.length > 0) {
+      const teamUsers = await db
+        .select({ userId: users.id })
+        .from(persons)
+        .innerJoin(users, personIsUserInChurch(actor.plantId))
+        .where(
+          and(
+            eq(persons.churchId, actor.plantId),
+            inArray(
+              persons.id,
+              teamMembers.map(({ personId }) => personId)
+            ),
+            isNull(persons.deletedAt)
+          )
+        );
+      audience.reminders = [
+        ...new Set([
+          ...audience.reminders,
+          ...teamUsers.map(({ userId }) => userId),
+        ]),
+      ].toSorted();
+    }
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts,
+        audience,
+        now,
+      });
     return parseResolved(exportName, {
       meetingId,
       type,
@@ -514,21 +654,31 @@ export async function resolveMeetingsEvryEffect(input: {
       datetime,
       timezone: values.timezone,
       status: "planning",
-      locationId: null,
-      locationName: null,
-      locationAddress: null,
-      savedLocationId: null,
-      teamId: null,
-      meetingSubtype: null,
-      estimatedAttendance: null,
+      locationId: resolvedLocationId,
+      locationName: resolvedLocationName,
+      locationAddress: resolvedLocationAddress,
+      savedLocationId,
+      teamId: selectedTeamId,
+      meetingSubtype: values.meetingSubtype ?? null,
+      estimatedAttendance: values.estimatedAttendance ?? null,
       actualAttendance: null,
-      durationMinutes: null,
-      notes: null,
+      durationMinutes: values.durationMinutes ?? null,
+      notes: values.notes ?? null,
       agenda,
       meetingNumber: facts.meetingNumber,
       checklistItems,
-      resolvedTeamMemberIds: [],
-      attendanceRows: [],
+      resolvedTeamMemberIds: teamMembers.map(({ personId }) => personId),
+      attendanceRows: teamMembers.map(
+        ({ personId, expectedPersonUpdatedAt }, index) => ({
+          attendanceId: derivedUuid(
+            requestKey,
+            `team-attendance:${index}:${personId}`
+          ),
+          personId,
+          expectedPersonUpdatedAt: iso(expectedPersonUpdatedAt),
+        })
+      ),
+      notificationBaseline,
       notificationTargets,
       expectedMeetingAbsent: true,
       createdById: actor.userId,
@@ -538,7 +688,11 @@ export async function resolveMeetingsEvryEffect(input: {
   const meeting = await loadMeeting(actor.plantId, input.pageContext);
   if (!meeting) return null;
   const expectedMeetingUpdatedAt = iso(meeting.updatedAt);
-  const facts = notificationFacts(meeting);
+  const [facts] = await meetingNotificationFactsQuery(
+    actor.plantId,
+    meeting.id
+  );
+  if (!facts) return null;
 
   if (exportName === "deleteMeetingAction") {
     const [
@@ -623,13 +777,14 @@ export async function resolveMeetingsEvryEffect(input: {
     );
     const afterFacts = { ...facts, datetime: new Date(values.datetime) };
     const audience = await meetingAudience(afterFacts);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts: afterFacts,
-      audience,
-      now,
-      cancelling: pending,
-    });
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts: afterFacts,
+        audience,
+        now,
+        cancelling: pending,
+      });
     return parseResolved(exportName, {
       meetingId: meeting.id,
       timezone: values.timezone,
@@ -637,6 +792,7 @@ export async function resolveMeetingsEvryEffect(input: {
       before,
       after: { ...before, datetime: values.datetime },
       pendingNotifications: pending,
+      notificationBaseline,
       notificationTargets,
     });
   }
@@ -649,19 +805,21 @@ export async function resolveMeetingsEvryEffect(input: {
     );
     const afterFacts = { ...facts, status: afterStatus as Meeting["status"] };
     const audience = await meetingAudience(afterFacts);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts: afterFacts,
-      audience,
-      now,
-      cancelling: pending,
-    });
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts: afterFacts,
+        audience,
+        now,
+        cancelling: pending,
+      });
     return parseResolved(exportName, {
       meetingId: meeting.id,
       beforeStatus: meeting.status,
       afterStatus,
       expectedUpdatedAt: expectedMeetingUpdatedAt,
       pendingNotifications: pending,
+      notificationBaseline,
       notificationTargets,
     });
   }
@@ -774,12 +932,30 @@ export async function resolveMeetingsEvryEffect(input: {
   ) {
     const quickPersonId = derivedUuid(requestKey, "person");
     const audience = await meetingAudience(facts);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts,
-      audience,
-      now,
-    });
+    if (typeof values.email === "string") {
+      const matchingUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.churchId, actor.plantId),
+            sql`lower(${users.email}) = lower(${values.email})`
+          )
+        );
+      audience.reminders = [
+        ...new Set([
+          ...audience.reminders,
+          ...matchingUsers.map(({ id }) => id),
+        ]),
+      ].toSorted();
+    }
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts,
+        audience,
+        now,
+      });
     const common = {
       meetingId: meeting.id,
       personId: quickPersonId,
@@ -792,6 +968,7 @@ export async function resolveMeetingsEvryEffect(input: {
       expectedMeetingUpdatedAt,
       expectedPersonAbsent: true,
       expectedAttendanceAbsent: true,
+      notificationBaseline,
       notificationTargets,
       expectedChurchMaterialEventAt:
         (
@@ -988,14 +1165,14 @@ export async function resolveMeetingsEvryEffect(input: {
           )
         : [];
     const dueDate = addCalendarDays(meeting.datetime, 2);
-    const followUpTaskTargets = await Promise.all(
+    const unresolvedFollowUpTaskTargets = await Promise.all(
       firstTimers.map(async (attendance, index) => {
         const existing = followUps.find(
           (task) =>
             task.relatedId === attendance.personId && task.dueDate === dueDate
         );
         const person = await loadPerson(actor.plantId, attendance.personId);
-        if (!person) throw new Error("Resolved attendee disappeared");
+        if (!person) return null;
         const taskId =
           existing?.id ??
           derivedUuid(requestKey, `follow-up:${index}:${attendance.personId}`);
@@ -1024,6 +1201,12 @@ export async function resolveMeetingsEvryEffect(input: {
               }),
         };
       })
+    );
+    if (unresolvedFollowUpTaskTargets.some((target) => target === null)) {
+      return null;
+    }
+    const followUpTaskTargets = unresolvedFollowUpTaskTargets.filter(
+      (target): target is NonNullable<typeof target> => target !== null
     );
     const existingEvaluation = evaluationTasks[0];
     const evaluationTaskId =
@@ -1093,12 +1276,13 @@ export async function resolveMeetingsEvryEffect(input: {
   ) {
     if (attendance) return null;
     const audience = await meetingAudience(facts, person.id);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts,
-      audience,
-      now,
-    });
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts,
+        audience,
+        now,
+      });
     const common = {
       meetingId: meeting.id,
       attendanceId: derivedUuid(requestKey, `attendance:${person.id}`),
@@ -1106,6 +1290,7 @@ export async function resolveMeetingsEvryEffect(input: {
       expectedMeetingUpdatedAt,
       expectedPersonUpdatedAt: iso(person.updatedAt),
       expectedAttendanceAbsent: true,
+      notificationBaseline,
       notificationTargets,
     };
     if (exportName === "addAttendeeAction")
@@ -1135,19 +1320,21 @@ export async function resolveMeetingsEvryEffect(input: {
       meeting.id
     );
     const audience = await meetingAudience(facts, undefined, person.id);
-    const notificationTargets = await plannedMeetingNotificationTargets({
-      requestKey,
-      facts,
-      audience,
-      now,
-      cancelling: pending,
-    });
+    const { notificationBaseline, notificationTargets } =
+      await plannedMeetingNotificationTargets({
+        requestKey,
+        facts,
+        audience,
+        now,
+        cancelling: pending,
+      });
     const common = {
       meetingId: meeting.id,
       personId: person.id,
       beforeAttendance: attendanceBaseline(attendance),
       expectedAttendanceUpdatedAt: iso(attendance.updatedAt),
       pendingNotifications: pending,
+      notificationBaseline,
       notificationTargets,
     };
     return exportName === "removeAttendeeAction"
