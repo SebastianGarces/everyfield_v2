@@ -191,6 +191,15 @@ langfuse_check_config() {
   ' "$langfuse_config_json" >/dev/null || langfuse_die 'telemetry, experimental features, and the in-app agent must remain disabled'
 
   jq -e '
+    [.services[]] |
+    all(
+      .logging.driver == "local" and
+      .logging.options["max-size"] == "10m" and
+      .logging.options["max-file"] == "3"
+    )
+  ' "$langfuse_config_json" >/dev/null || langfuse_die 'every service must use bounded local Docker logs'
+
+  jq -e '
     [.services[] | (.environment // {}) | keys[] |
       select(test("^(OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|AZURE_OPENAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|COHERE_API_KEY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|LANGFUSE_AI_API_KEY)$"))
     ] | length == 0

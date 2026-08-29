@@ -33,6 +33,14 @@ x-langfuse-environment: &langfuse-environment
   REDIS_AUTH: ${REDIS_AUTH:?run ./ops/langfuse/manage.sh init}
   REDIS_TLS_ENABLED: "false"
 
+# Docker's json-file driver is unbounded by default. Keep operational stdout
+# useful without allowing a noisy dependency to exhaust Docker Desktop's disk.
+x-local-logging: &local-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   langfuse-worker:
     image: docker.langfuse.com/langfuse/langfuse-worker:4.22.0
@@ -49,6 +57,7 @@ services:
     ports:
       - "127.0.0.1:${LANGFUSE_WORKER_HOST_PORT:?run ./ops/langfuse/manage.sh init}:3030"
     environment: *langfuse-environment
+    logging: *local-logging
 
   langfuse-web:
     image: docker.langfuse.com/langfuse/langfuse:4.22.0
@@ -70,6 +79,7 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?run ./ops/langfuse/manage.sh init}
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:?run ./ops/langfuse/manage.sh init}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?run ./ops/langfuse/manage.sh init}
+    logging: *local-logging
 
   clickhouse:
     image: docker.io/clickhouse/clickhouse-server:25.12
@@ -92,6 +102,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 2s
+    logging: *local-logging
 
   minio:
     # Langfuse v4.22.0 intentionally uses Chainguard's rolling public image.
@@ -113,6 +124,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 2s
+    logging: *local-logging
 
   redis:
     image: docker.io/redis:7
@@ -138,6 +150,7 @@ services:
       retries: 20
     environment:
       REDIS_AUTH: ${REDIS_AUTH:?run ./ops/langfuse/manage.sh init}
+    logging: *local-logging
 
   postgres:
     image: docker.io/postgres:17
@@ -157,6 +170,7 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+    logging: *local-logging
 
 volumes:
   langfuse_postgres_data:
