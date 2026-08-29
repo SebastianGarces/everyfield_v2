@@ -5,7 +5,9 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  assessments,
   churches,
+  commitments,
   evryActionPlans,
   evryActionPlanStates,
   evryExecutionAttempts,
@@ -13,6 +15,7 @@ import {
   evryPlanConfirmations,
   evryProductAuditEvents,
   households,
+  interviews,
   personActivities,
   personTags,
   persons,
@@ -30,6 +33,11 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { claimEvryPersonNote } from "./activity";
 import { claimEvryCreatePerson } from "./evry-core";
 import { claimEvryCreateHouseholdWithHead } from "./evry-households";
+import {
+  claimEvryCreateAssessment,
+  claimEvryCreateCommitment,
+  claimEvryCreateInterview,
+} from "./evry-milestones";
 import { claimEvryAssignTag } from "./evry-taxonomies";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
@@ -37,6 +45,9 @@ const TAG_IDENTITY = "people.crm.tags.assign-tag";
 const CREATE_PERSON_IDENTITY = "people.crm.people.create-person";
 const CREATE_HOUSEHOLD_IDENTITY =
   "people.crm.households.create-household-with-head";
+const ASSESSMENT_IDENTITY = "people.crm.assessments.create-assessment";
+const INTERVIEW_IDENTITY = "people.crm.assessments.create-interview";
+const COMMITMENT_IDENTITY = "people.crm.assessments.create-commitment";
 const FINGERPRINT = "a".repeat(64);
 
 async function seedAttempt(input: {
@@ -273,6 +284,107 @@ async function main(): Promise<void> {
     affectedCount: 1,
     excludedCount: 0,
   });
+  const [grace] = await db
+    .select({ id: persons.id })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, plant.id),
+        eq(persons.email, "grace@scratch.invalid")
+      )
+    );
+  assert.ok(grace);
+
+  const assessmentAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: ASSESSMENT_IDENTITY,
+    stepId: "assessment",
+  });
+  assert.deepEqual(
+    await claimEvryCreateAssessment({
+      ...assessmentAttempt,
+      person: {
+        personId: grace.id,
+        firstName: "Grace",
+        lastName: "Hopper",
+        status: "prospect",
+      },
+      values: {
+        assessmentDate: "2026-08-29",
+        committedScore: 5,
+        committedNotes: null,
+        compelledScore: 4,
+        compelledNotes: null,
+        contagiousScore: 3,
+        contagiousNotes: null,
+        courageousScore: 5,
+        courageousNotes: null,
+      },
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  const interviewAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: INTERVIEW_IDENTITY,
+    stepId: "interview",
+  });
+  const interviewInput = {
+    ...interviewAttempt,
+    person: {
+      personId: grace.id,
+      firstName: "Grace",
+      lastName: "Hopper",
+      status: "prospect",
+    },
+    values: {
+      interviewDate: "2026-08-29",
+      maturityStatus: "pass",
+      maturityNotes: null,
+      giftedStatus: "pass",
+      giftedNotes: null,
+      chemistryStatus: "concern",
+      chemistryNotes: "Follow up",
+      rightReasonsStatus: "pass",
+      rightReasonsNotes: null,
+      seasonStatus: "pass",
+      seasonNotes: null,
+      overallResult: "qualified_with_notes",
+      nextSteps: "Follow up",
+    },
+  };
+  await claimEvryCreateInterview(interviewInput);
+  assert.deepEqual(await claimEvryCreateInterview(interviewInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  const commitmentAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: COMMITMENT_IDENTITY,
+    stepId: "commitment",
+  });
+  assert.deepEqual(
+    await claimEvryCreateCommitment({
+      ...commitmentAttempt,
+      person: {
+        personId: grace.id,
+        firstName: "Grace",
+        lastName: "Hopper",
+        status: "interviewed",
+      },
+      values: {
+        commitmentType: "core_group",
+        signedDate: "2026-08-29",
+        witnessedBy: owner.id,
+        witnessLabel: "Proof owner",
+        notes: null,
+      },
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
 
   const householdAttempt = await seedAttempt({
     churchId: plant.id,
@@ -344,6 +456,10 @@ async function main(): Promise<void> {
     membershipCount,
     createdPersonCount,
     householdCount,
+    assessmentCount,
+    interviewCount,
+    commitmentCount,
+    graceStatus,
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -388,12 +504,51 @@ async function main(): Promise<void> {
         and(eq(households.churchId, plant.id), eq(households.id, householdId))
       )
       .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(assessments)
+      .where(
+        and(
+          eq(assessments.churchId, plant.id),
+          eq(assessments.personId, grace.id)
+        )
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(interviews)
+      .where(
+        and(
+          eq(interviews.churchId, plant.id),
+          eq(interviews.personId, grace.id)
+        )
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(commitments)
+      .where(
+        and(
+          eq(commitments.churchId, plant.id),
+          eq(commitments.personId, grace.id)
+        )
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ status: persons.status })
+      .from(persons)
+      .where(and(eq(persons.churchId, plant.id), eq(persons.id, grace.id)))
+      .then(([row]) => row?.status),
   ]);
   assert.equal(activityCount, 4);
-  assert.equal(outcomeCount, 5);
+  assert.equal(outcomeCount, 8);
   assert.equal(membershipCount, 1);
   assert.equal(createdPersonCount, 1);
   assert.equal(householdCount, 1);
+  assert.equal(assessmentCount, 1);
+  assert.equal(interviewCount, 1);
+  assert.equal(commitmentCount, 1);
+  assert.equal(graceStatus, "core_group");
 
   process.stdout.write("People effect live proof passed\n");
 }
