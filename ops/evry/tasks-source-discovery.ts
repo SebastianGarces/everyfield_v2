@@ -24,6 +24,12 @@ const TASK_PAGE_SOURCES = [
   "src/app/(dashboard)/tasks/templates/page.tsx",
 ] as const;
 
+export const TASK_ACTION_SOURCES = [
+  "src/app/(dashboard)/tasks/actions.ts",
+  "src/app/(dashboard)/tasks/follow-up-actions.ts",
+  "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+] as const;
+
 /** Imported calls that are boundaries/query builders rather than Task reads. */
 export const TASKS_DISCOVERED_READ_EXCLUSIONS = Object.freeze([
   ...TASK_PAGE_SOURCES.map((source) =>
@@ -153,6 +159,51 @@ export function discoverTaskPageReadOperations(
     visit(sourceFile);
   }
   return Object.freeze([...discovered].toSorted());
+}
+
+/**
+ * Discover the server-action exports independently from the auth capability
+ * map. A new unguarded export must therefore fail parity instead of remaining
+ * invisible to the inventory source that was supposed to classify it.
+ */
+export function discoverTaskActionIdentities(
+  repoRoot = process.cwd()
+): readonly string[] {
+  const identities: string[] = [];
+  for (const source of TASK_ACTION_SOURCES) {
+    const sourceFile = ts.createSourceFile(
+      source,
+      readFileSync(path.join(repoRoot, source), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+    const serverModule = sourceFile.statements.some(
+      (statement) =>
+        ts.isExpressionStatement(statement) &&
+        ts.isStringLiteral(statement.expression) &&
+        statement.expression.text === "use server"
+    );
+    if (!serverModule) {
+      throw new Error(`Task action source is missing use server: ${source}`);
+    }
+    for (const statement of sourceFile.statements) {
+      if (
+        !ts.isFunctionDeclaration(statement) ||
+        !statement.name ||
+        !statement.modifiers?.some(
+          ({ kind }) => kind === ts.SyntaxKind.ExportKeyword
+        ) ||
+        !statement.modifiers.some(
+          ({ kind }) => kind === ts.SyntaxKind.AsyncKeyword
+        )
+      ) {
+        continue;
+      }
+      identities.push(`action:${source} → ${statement.name.text}`);
+    }
+  }
+  return Object.freeze(identities.toSorted());
 }
 
 export const taskReadIdentity = readIdentity;

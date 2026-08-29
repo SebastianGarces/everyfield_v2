@@ -20,6 +20,8 @@
     "evry:communication-inventory:check": "tsx ops/evry/generate-communication-inventory.ts --check",
     "evry:people-inventory": "tsx ops/evry/generate-people-inventory.ts",
     "evry:people-inventory:check": "tsx ops/evry/generate-people-inventory.ts --check",
+    "evry:tasks-inventory": "tsx ops/evry/generate-tasks-inventory.ts",
+    "evry:tasks-inventory:check": "tsx ops/evry/generate-tasks-inventory.ts --check",
     "evry:cost:audit": "node ops/evry-cost-audit.mjs",
     "evry:benchmark": "tsx --env-file-if-exists=.env.local scripts/evry-model-benchmark.ts",
     "evry:verify-selected-model": "node --no-warnings --experimental-test-module-mocks --import tsx --env-file-if-exists=.env.local src/app/api/evry/requests/selected-model-live-proof.ts",
