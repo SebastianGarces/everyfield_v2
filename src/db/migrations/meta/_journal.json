@@ -484,6 +484,13 @@
       "when": 1787980056815,
       "tag": "0069_evry_active_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1788031147139,
+      "tag": "0070_task_structure_serialization",
+      "breakpoints": true
     }
   ]
 }

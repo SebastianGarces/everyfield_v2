@@ -137,3 +137,98 @@ test("create and update contracts bind every structural Task source fact", () =>
     "nesting an existing Task must bind its exact current child set"
   );
 });
+
+test("recurring completion binds the exact checklist source lineage", () => {
+  const successorId = "00000000-0000-4000-8000-000000000006";
+  const childId = "00000000-0000-4000-8000-000000000007";
+  const cloneId = "00000000-0000-4000-8000-000000000008";
+  const base = taskEffectPlanFixture("completeTaskAction");
+  const before = {
+    ...base.taskWrites[0]!.before!,
+    isRecurring: true,
+    recurrenceRule: {
+      interval: "weekly" as const,
+      endDate: null,
+      seriesId: null,
+    },
+  };
+  const completed = {
+    ...base.taskWrites[0]!,
+    before,
+    after: {
+      ...base.taskWrites[0]!.after,
+      ...before,
+      status: "complete" as const,
+    },
+  };
+  const sourceChild = {
+    ...taskFixtureSnapshot(childId),
+    title: "Repeat this exact checklist item",
+    parentTaskId: TASK_FIXTURE_ID,
+  };
+  const successor = {
+    taskId: successorId,
+    before: null,
+    after: {
+      ...before,
+      id: successorId,
+      status: "not_started" as const,
+      dueDate: "2026-09-08",
+      parentTaskId: null,
+      recurrenceRule: {
+        interval: "weekly" as const,
+        endDate: null,
+        seriesId: TASK_FIXTURE_ID,
+      },
+      completedAt: null,
+      completedById: null,
+    },
+  };
+  const clone = {
+    taskId: cloneId,
+    before: null,
+    after: {
+      ...taskFixtureSnapshot(cloneId),
+      title: sourceChild.title,
+      parentTaskId: successorId,
+    },
+  };
+  const arguments_ = {
+    ...base,
+    subjectTasks: [before],
+    sourceTasks: [sourceChild],
+    childSets: [{ parentTaskId: TASK_FIXTURE_ID, taskIds: [childId] }],
+    taskWrites: [completed, successor, clone],
+    notifications: {
+      ...base.notifications,
+      scopedTaskIds: [TASK_FIXTURE_ID, successorId, cloneId],
+    },
+    disclosure: {
+      ...base.disclosure,
+      targets: [completed, successor, clone].map(
+        ({ taskId, after }) => `Task ${taskId}: ${after.title}`
+      ),
+    },
+  };
+  const schema = TASKS_EFFECT_ARGUMENT_SCHEMAS.completeTaskAction;
+  assert.equal(schema.safeParse(arguments_).success, true);
+  assert.equal(
+    schema.safeParse({ ...arguments_, sourceTasks: [] }).success,
+    false
+  );
+  assert.equal(
+    schema.safeParse({ ...arguments_, childSets: [] }).success,
+    false
+  );
+  assert.equal(
+    schema.safeParse({
+      ...arguments_,
+      taskWrites: [
+        completed,
+        successor,
+        { ...clone, after: { ...clone.after, title: "Stale clone" } },
+      ],
+    }).success,
+    false
+  );
+});

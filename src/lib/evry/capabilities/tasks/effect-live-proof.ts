@@ -18,6 +18,7 @@ import {
   persons,
   phaseTransitions,
   sessions,
+  taskDependencies,
   tasks,
   users,
 } from "@/db/schema";
@@ -25,6 +26,10 @@ import { UnauthorizedError } from "@/lib/auth/unauthorized";
 import type { EvryEffectInput } from "@/lib/evry/executor";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryPlanRequestKey } from "@/lib/evry/plans";
+import {
+  holdTaskStructureBarrier,
+  waitForTaskStructureWaiters,
+} from "@/lib/testing/postgres-transaction-barrier";
 
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import type { TaskEffectExport } from "./effect-contracts";
@@ -194,6 +199,12 @@ async function seedTask(input: {
   dueDate?: string | null;
   relatedType?: "person" | null;
   relatedId?: string | null;
+  isRecurring?: boolean;
+  recurrenceRule?: Readonly<{
+    interval: "weekly";
+    endDate: string | null;
+    seriesId?: string;
+  }> | null;
 }) {
   const [row] = await db
     .insert(tasks)
@@ -211,6 +222,8 @@ async function seedTask(input: {
       dueDate: input.dueDate ?? null,
       relatedType: input.relatedType ?? null,
       relatedId: input.relatedId ?? null,
+      isRecurring: input.isRecurring ?? false,
+      recurrenceRule: input.recurrenceRule ?? null,
     })
     .returning();
   return row!;
@@ -826,6 +839,63 @@ async function runForeignEffectTenancy(input: {
   );
 }
 
+async function preparedEffect(input: {
+  actor: EvryPlantActor;
+  resolved: ResolvedTaskEffect;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+}) {
+  const execution = await seedExecution({
+    actor: input.actor,
+    resolved: input.resolved,
+  });
+  const authorization = await input.authorize(execution.capabilityIdentity);
+  assert.ok(authorization);
+  const effectKey = input.effectKey(
+    execution.planId,
+    execution.fingerprint,
+    execution.stepId
+  );
+  return {
+    effectKey,
+    input: {
+      authorization,
+      execution,
+      effectKey,
+      arguments: input.resolved.arguments,
+    } satisfies EvryEffectInput,
+  };
+}
+
+async function outcomeCount(effectKeys: readonly string[]) {
+  if (effectKeys.length === 0) return 0;
+  return (
+    await db
+      .select({ id: evryExecutionOutcomes.id })
+      .from(evryExecutionOutcomes)
+      .where(inArray(evryExecutionOutcomes.effectKey, [...effectKeys]))
+  ).length;
+}
+
+async function assertValidPlantStructure(plantId: string) {
+  const result = await db.execute<{ invalid: number }>(sql`
+    select count(*)::int as invalid
+    from tasks child
+    left join tasks parent
+      on parent.id = child.parent_task_id
+     and parent.church_id = child.church_id
+    where child.church_id = ${plantId}::uuid
+      and child.deleted_at is null
+      and child.parent_task_id is not null
+      and (
+        parent.id is null
+        or parent.deleted_at is not null
+        or parent.parent_task_id is not null
+      )
+  `);
+  assert.equal(result.rows[0]?.invalid ?? 0, 0);
+}
+
 async function runCompetingPlans(input: {
   actor: EvryPlantActor;
   resolve: typeof import("./resolver").resolveTaskEvryEffect;
@@ -1091,6 +1161,118 @@ async function runStructuralSourceDrift(input: {
   console.log("PASS tasks:structural-source-drift");
 }
 
+async function runRecurringChecklistSourceDrift(input: {
+  actor: EvryPlantActor;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  current: typeof import("./atomic-effect").taskEffectArgumentsAreCurrent;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  for (const drift of ["add", "delete", "edit"] as const) {
+    const parent = await seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      title: `Recurring ${drift} ${randomUUID()}`,
+      dueDate: "2026-09-01",
+      isRecurring: true,
+      recurrenceRule: { interval: "weekly", endDate: null },
+    });
+    const child = await seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      title: `Recurring checklist ${drift}`,
+      parentTaskId: parent.id,
+    });
+    const resolved = await input.resolve({
+      actor: input.actor,
+      selection: {
+        kind: "effect",
+        exportName: "completeTaskAction",
+        values: { taskId: parent.id },
+      },
+      pageContext: null,
+      requestKey: input.mintRequestKey(),
+      now: NOW,
+    });
+    assert.ok(resolved);
+    assert.deepEqual(
+      resolved.arguments.sourceTasks.map(({ id }) => id),
+      [child.id]
+    );
+    assert.deepEqual(resolved.arguments.childSets, [
+      { parentTaskId: parent.id, taskIds: [child.id] },
+    ]);
+    const prepared = await preparedEffect({
+      actor: input.actor,
+      resolved,
+      authorize: input.authorize,
+      effectKey: input.effectKey,
+    });
+
+    if (drift === "add") {
+      await seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: "Added after confirmation",
+        parentTaskId: parent.id,
+      });
+    } else if (drift === "delete") {
+      await db
+        .update(tasks)
+        .set({
+          deletedAt: new Date(NOW.getTime() + 1_000),
+          updatedAt: new Date(NOW.getTime() + 1_000),
+        })
+        .where(eq(tasks.id, child.id));
+    } else {
+      await db
+        .update(tasks)
+        .set({
+          title: "Edited after confirmation",
+          updatedAt: new Date(NOW.getTime() + 1_000),
+        })
+        .where(eq(tasks.id, child.id));
+    }
+
+    assert.equal(
+      await input.current({
+        actorUserId: input.actor.userId,
+        plantId: input.actor.plantId,
+        exportName: resolved.exportName,
+        args: resolved.arguments,
+      }),
+      false
+    );
+    assert.deepEqual(await input.execute(prepared.input), {
+      status: "refused",
+      excludedCount: 1,
+    });
+    assert.equal(await outcomeCount([prepared.effectKey]), 0);
+    const [unchanged] = await db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.id, parent.id));
+    assert.equal(unchanged?.status, "not_started");
+    const plannedCreateIds = resolved.arguments.taskWrites
+      .filter(({ before }) => before === null)
+      .map(({ taskId }) => taskId);
+    assert.equal(
+      plannedCreateIds.length === 0
+        ? 0
+        : (
+            await db
+              .select({ id: tasks.id })
+              .from(tasks)
+              .where(inArray(tasks.id, plannedCreateIds))
+          ).length,
+      0
+    );
+  }
+  console.log("PASS tasks:recurring-checklist-source-drift");
+}
+
 async function runLargeSourceHandoff(input: {
   actor: EvryPlantActor;
   memberId: string;
@@ -1178,6 +1360,249 @@ async function runLargeSourceHandoff(input: {
   console.log("PASS tasks:source-derived-handoff-above-bulk-cap");
 }
 
+async function runResolverShapedBulkReview(input: {
+  actor: EvryPlantActor;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  propose: typeof import("./runtime").proposeTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+}) {
+  const rows = await db
+    .insert(tasks)
+    .values(
+      Array.from({ length: 100 }, (_, index) => ({
+        churchId: input.actor.plantId,
+        createdById: input.actor.userId,
+        assignedToId: input.actor.userId,
+        title: `${SCRATCH} resolver review ${index + 1}`,
+      }))
+    )
+    .returning({ id: tasks.id });
+  const requestKey = input.mintRequestKey();
+  const resolved = await input.resolve({
+    actor: input.actor,
+    selection: {
+      kind: "effect",
+      exportName: "bulkCompleteTasksAction",
+      values: { taskIds: rows.map(({ id }) => id) },
+    },
+    pageContext: null,
+    requestKey,
+    now: NOW,
+  });
+  assert.ok(resolved);
+  assert.equal(resolved.arguments.exclusions.length, 100);
+  const proposal = await input.propose({
+    actor: input.actor,
+    resolved,
+    requestKey,
+  });
+  assert.ok(proposal);
+  assert.deepEqual(proposal.confirmation.steps[0]?.exclusions, [
+    {
+      reason:
+        "This Task is not related to a person, so no contact-log entry applies.",
+      count: 100,
+    },
+  ]);
+  assert.equal(
+    proposal.confirmation.steps[0]?.resolvedTargets.length,
+    rows.length
+  );
+  const immutableEvidence = proposal.confirmation.steps[0]?.contentPreviews
+    .map(({ content }) => content)
+    .join("");
+  for (const { id } of rows) assert.match(immutableEvidence ?? "", RegExp(id));
+  console.log("PASS tasks:resolver-shaped-bulk-review");
+}
+
+async function runStructureBarrierRaces(input: {
+  actor: EvryPlantActor;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+  createTask: typeof import("@/lib/tasks/service").createTask;
+}) {
+  const resolve = async (
+    exportName: TaskEffectExport,
+    values: Readonly<Record<string, unknown>>
+  ) => {
+    const resolved = await input.resolve({
+      actor: input.actor,
+      selection: { kind: "effect", exportName, values },
+      pageContext: null,
+      requestKey: input.mintRequestKey(),
+      now: NOW,
+    });
+    assert.ok(resolved, `${exportName} did not resolve for barrier proof`);
+    return resolved;
+  };
+  const prepare = (resolved: ResolvedTaskEffect) =>
+    preparedEffect({
+      actor: input.actor,
+      resolved,
+      authorize: input.authorize,
+      effectKey: input.effectKey,
+    });
+
+  {
+    const [taskA, taskB] = await Promise.all([
+      seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: `Cycle A ${randomUUID()}`,
+      }),
+      seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: `Cycle B ${randomUUID()}`,
+      }),
+    ]);
+    const [left, right] = await Promise.all([
+      resolve("updateTaskAction", {
+        taskId: taskA.id,
+        prerequisiteTaskIds: [taskB.id],
+      }),
+      resolve("updateTaskAction", {
+        taskId: taskB.id,
+        prerequisiteTaskIds: [taskA.id],
+      }),
+    ]);
+    const [preparedLeft, preparedRight] = await Promise.all([
+      prepare(left),
+      prepare(right),
+    ]);
+    const barrier = await holdTaskStructureBarrier(input.actor.plantId);
+    const executions = [
+      input.execute(preparedLeft.input),
+      input.execute(preparedRight.input),
+    ] as const;
+    try {
+      await waitForTaskStructureWaiters(2);
+    } finally {
+      await barrier.release();
+    }
+    const results = await Promise.all(executions);
+    assert.deepEqual(results.map(({ status }) => status).toSorted(), [
+      "completed",
+      "refused",
+    ]);
+    const edges = await db
+      .select({
+        taskId: taskDependencies.taskId,
+        prerequisiteTaskId: taskDependencies.prerequisiteTaskId,
+      })
+      .from(taskDependencies)
+      .where(
+        and(
+          eq(taskDependencies.churchId, input.actor.plantId),
+          inArray(taskDependencies.taskId, [taskA.id, taskB.id])
+        )
+      );
+    assert.equal(edges.length, 1);
+    assert.equal(
+      await outcomeCount([preparedLeft.effectKey, preparedRight.effectKey]),
+      1
+    );
+    console.log("PASS tasks:dependency-cycle-barrier");
+  }
+
+  {
+    const [parent, target] = await Promise.all([
+      seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: `Reparent destination ${randomUUID()}`,
+      }),
+      seedTask({
+        plantId: input.actor.plantId,
+        actorId: input.actor.userId,
+        title: `Reparent source ${randomUUID()}`,
+      }),
+    ]);
+    const resolved = await resolve("updateTaskAction", {
+      taskId: target.id,
+      parentTaskId: parent.id,
+    });
+    const prepared = await prepare(resolved);
+    const barrier = await holdTaskStructureBarrier(input.actor.plantId);
+    const evryExecution = input.execute(prepared.input);
+    const ownerExecution = input.createTask(
+      input.actor.plantId,
+      input.actor.userId,
+      {
+        title: "Concurrent owning-writer checklist item",
+        status: "not_started",
+        priority: "medium",
+        parentTaskId: target.id,
+      }
+    );
+    try {
+      await waitForTaskStructureWaiters(2);
+    } finally {
+      await barrier.release();
+    }
+    const [evryResult, ownerResult] = await Promise.all([
+      evryExecution,
+      ownerExecution.then(
+        (task) => ({ status: "completed" as const, task }),
+        () => ({ status: "refused" as const, task: null })
+      ),
+    ]);
+    assert.deepEqual([evryResult.status, ownerResult.status].toSorted(), [
+      "completed",
+      "refused",
+    ]);
+    assert.equal(
+      await outcomeCount([prepared.effectKey]),
+      evryResult.status === "completed" ? 1 : 0
+    );
+    await assertValidPlantStructure(input.actor.plantId);
+    console.log("PASS tasks:reparent-child-barrier");
+  }
+
+  {
+    const parent = await seedTask({
+      plantId: input.actor.plantId,
+      actorId: input.actor.userId,
+      title: `Delete race parent ${randomUUID()}`,
+    });
+    const [remove, add] = await Promise.all([
+      resolve("deleteTaskAction", { taskId: parent.id }),
+      resolve("addSubtaskAction", {
+        parentTaskId: parent.id,
+        title: "Concurrent child",
+      }),
+    ]);
+    const [preparedRemove, preparedAdd] = await Promise.all([
+      prepare(remove),
+      prepare(add),
+    ]);
+    const barrier = await holdTaskStructureBarrier(input.actor.plantId);
+    const executions = [
+      input.execute(preparedRemove.input),
+      input.execute(preparedAdd.input),
+    ] as const;
+    try {
+      await waitForTaskStructureWaiters(2);
+    } finally {
+      await barrier.release();
+    }
+    const results = await Promise.all(executions);
+    assert.deepEqual(results.map(({ status }) => status).toSorted(), [
+      "completed",
+      "refused",
+    ]);
+    assert.equal(
+      await outcomeCount([preparedRemove.effectKey, preparedAdd.effectKey]),
+      1
+    );
+    await assertValidPlantStructure(input.actor.plantId);
+    console.log("PASS tasks:delete-child-barrier");
+  }
+}
+
 function readInput(identity: string, taskId: string) {
   switch (identity) {
     case READ_IDENTITIES.list:
@@ -1240,16 +1665,27 @@ async function runReads(input: {
 
 async function main() {
   const seeded = await seedActor();
-  const [resolver, plans, eligibility, audit, atomic, reads, artifacts] =
-    await Promise.all([
-      import("./resolver"),
-      import("@/lib/evry/plans"),
-      import("@/lib/evry/eligibility/capabilities"),
-      import("@/lib/evry/audit/identity"),
-      import("./atomic-effect"),
-      import("./reads"),
-      import("@/lib/evry/conversations/artifacts"),
-    ]);
+  const [
+    resolver,
+    plans,
+    eligibility,
+    audit,
+    atomic,
+    reads,
+    artifacts,
+    runtime,
+    taskService,
+  ] = await Promise.all([
+    import("./resolver"),
+    import("@/lib/evry/plans"),
+    import("@/lib/evry/eligibility/capabilities"),
+    import("@/lib/evry/audit/identity"),
+    import("./atomic-effect"),
+    import("./reads"),
+    import("@/lib/evry/conversations/artifacts"),
+    import("./runtime"),
+    import("@/lib/tasks/service"),
+  ]);
   const initial = await eligibility.authorizeEvryEffectCapability(
     TASK_ACTION_CONTRACTS.createTaskAction.operationId
   );
@@ -1392,6 +1828,15 @@ async function main() {
     current: atomic.taskEffectArgumentsAreCurrent,
     execute: atomic.executeTaskEffect,
   });
+  await runRecurringChecklistSourceDrift({
+    actor,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    current: atomic.taskEffectArgumentsAreCurrent,
+    execute: atomic.executeTaskEffect,
+  });
   await runLargeSourceHandoff({
     actor,
     memberId: seeded.memberId,
@@ -1400,6 +1845,21 @@ async function main() {
     authorize: eligibility.authorizeEvryEffectCapability,
     effectKey: audit.executionEffectKey,
     execute: atomic.executeTaskEffect,
+  });
+  await runResolverShapedBulkReview({
+    actor,
+    resolve: resolver.resolveTaskEvryEffect,
+    propose: runtime.proposeTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+  });
+  await runStructureBarrierRaces({
+    actor,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    execute: atomic.executeTaskEffect,
+    createTask: taskService.createTask,
   });
 
   for (const exportName of Object.keys(TASK_ACTION_CONTRACTS) as Array<

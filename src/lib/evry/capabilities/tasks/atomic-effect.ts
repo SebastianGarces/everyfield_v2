@@ -7,6 +7,7 @@ import {
   type EvryAuditKey,
 } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import { taskStructureLockStatement } from "@/lib/tasks/structure-lock";
 
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import {
@@ -994,10 +995,11 @@ export async function executeTaskEffect(
     args: parsed.data,
   });
   try {
-    const [, result] = await db.batch([
+    const [, , result] = await db.batch([
       db.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${input.effectKey}, 0))`
       ),
+      taskStructureLockStatement(input.execution.plantId),
       db.execute<CompletedEffectRow>(statement),
     ]);
     const row = result.rows[0];

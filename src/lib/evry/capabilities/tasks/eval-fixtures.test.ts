@@ -204,6 +204,14 @@ test("a 100-Task bulk confirmation discloses every exact before/after target", (
         personId: null,
       })),
     },
+    // This is the exact shape `resolved()` derives for non-person Task
+    // completions. Keeping it here prevents a synthetic bulk fixture from
+    // bypassing the shared artifact's exclusion boundary.
+    exclusions: writes.map(({ taskId }) => ({
+      target: `Task ${taskId}`,
+      reason:
+        "This Task is not related to a person, so no contact-log entry applies.",
+    })),
     disclosure: {
       ...base.disclosure,
       targets: writes.map(
@@ -239,6 +247,13 @@ test("a 100-Task bulk confirmation discloses every exact before/after target", (
     reviewRegistry: TASK_REVIEW_REGISTRY,
   });
   assert.ok(review);
+  assert.deepEqual(review.confirmation.steps[0]?.exclusions, [
+    {
+      reason:
+        "This Task is not related to a person, so no contact-log entry applies.",
+      count: 100,
+    },
+  ]);
   const targets = review.confirmation.steps[0]?.resolvedTargets ?? [];
   assert.equal(targets.length, 100);
   for (const [index, target] of targets.entries()) {

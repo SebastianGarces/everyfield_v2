@@ -218,6 +218,23 @@ const commonShape = {
   disclosure: disclosureSchema,
 } as const;
 
+function recurrenceSeriesId(task: TaskEffectSnapshot): string {
+  return task.recurrenceRule?.seriesId ?? task.id;
+}
+
+function checklistTemplateSignature(task: TaskEffectSnapshot): string {
+  return JSON.stringify({
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    dueTime: task.dueTime,
+    assignedToId: task.assignedToId,
+    category: task.category,
+    relatedType: task.relatedType,
+    relatedId: task.relatedId,
+  });
+}
+
 function operationShape<ExportName extends TaskActionExport>(
   exportName: ExportName
 ) {
@@ -410,6 +427,85 @@ function operationSchema<ExportName extends TaskActionExport>(
           message:
             "Completion side effects must bind every emitted task.completed consequence exactly",
         });
+      }
+      if (completionOperation) {
+        const completedSubjects = value.subjectTasks.filter(({ id }) =>
+          completedIds.includes(id)
+        );
+        const creates = value.taskWrites.filter(
+          ({ before }) => before === null
+        );
+        const successors = creates.filter(
+          ({ after }) =>
+            after.isRecurring && after.recurrenceRule?.seriesId !== undefined
+        );
+        const successorIds = new Set(successors.map(({ taskId }) => taskId));
+        const checklistCreates = creates.filter(
+          ({ after }) =>
+            !after.isRecurring &&
+            after.parentTaskId !== null &&
+            successorIds.has(after.parentTaskId)
+        );
+        const declaredChildIds = value.childSets
+          .flatMap(({ taskIds }) => taskIds)
+          .toSorted();
+        const sourceChildIds = value.sourceTasks.map(({ id }) => id).toSorted();
+        const recurrenceSourcesAreExact =
+          creates.length === successors.length + checklistCreates.length &&
+          declaredChildIds.length === sourceChildIds.length &&
+          declaredChildIds.every((id, index) => id === sourceChildIds[index]) &&
+          value.sourceTasks.every(
+            ({ id, parentTaskId }) =>
+              parentTaskId !== null &&
+              value.childSets.some(
+                (set) =>
+                  set.parentTaskId === parentTaskId && set.taskIds.includes(id)
+              )
+          ) &&
+          value.childSets.every((set) => {
+            const subject = completedSubjects.find(
+              ({ id }) => id === set.parentTaskId
+            );
+            if (!subject) return false;
+            const matchingSuccessors = successors.filter(
+              ({ after }) =>
+                after.recurrenceRule?.seriesId === recurrenceSeriesId(subject)
+            );
+            if (matchingSuccessors.length !== 1) return false;
+            const successorId = matchingSuccessors[0]!.taskId;
+            const sourceSignatures = value.sourceTasks
+              .filter(({ id }) => set.taskIds.includes(id))
+              .map(checklistTemplateSignature)
+              .toSorted();
+            const cloneSignatures = checklistCreates
+              .filter(({ after }) => after.parentTaskId === successorId)
+              .map(({ after }) => checklistTemplateSignature(after))
+              .toSorted();
+            return (
+              sourceSignatures.length === set.taskIds.length &&
+              sourceSignatures.length === cloneSignatures.length &&
+              sourceSignatures.every(
+                (signature, index) => signature === cloneSignatures[index]
+              )
+            );
+          }) &&
+          successors.every(({ after }) =>
+            completedSubjects.some(
+              (subject) =>
+                after.recurrenceRule?.seriesId ===
+                  recurrenceSeriesId(subject) &&
+                value.childSets.some(
+                  ({ parentTaskId }) => parentTaskId === subject.id
+                )
+            )
+          );
+        if (!recurrenceSourcesAreExact) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Recurring completion must bind every cloned checklist source and exact child set",
+          });
+        }
       }
       if (
         new Set(communicationIds).size !== communicationIds.length ||

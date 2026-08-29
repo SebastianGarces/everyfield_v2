@@ -38,6 +38,14 @@ function chunks(value: unknown, label: string) {
   return parts;
 }
 
+function groupedExclusions(exclusions: AnyTaskEffectArguments["exclusions"]) {
+  const counts = new Map<string, number>();
+  for (const { reason } of exclusions) {
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].map(([reason, count]) => ({ reason, count }));
+}
+
 function taskWriteTarget(
   write: AnyTaskEffectArguments["taskWrites"][number],
   index: number
@@ -155,10 +163,10 @@ function reviewFor(input: {
             })),
         ],
         counts: disclosure.counts,
-        exclusions: args.exclusions.map(({ reason }) => ({
-          reason,
-          count: 1,
-        })),
+        // The immutable evidence below retains every exact Task target. The
+        // bounded summary groups repeated resolver-owned reasons so a legal
+        // 100-Task completion cannot disappear at the shared 32-row boundary.
+        exclusions: groupedExclusions(args.exclusions),
         dateTime: null,
         contentPreviews: chunks(args, "Immutable Task plan evidence"),
         beforeAfter: disclosure.changes.slice(0, 32).map((item) => ({
