@@ -12,13 +12,14 @@ import { parseCsvImport } from "@/lib/people/import";
 import { getPerson } from "@/lib/people/service";
 import { profilePhotoRefusal } from "@/lib/profile-photo";
 import {
-  getFileBytes,
   isAllowedCommitmentFileType,
   isValidCommitmentFileSize,
-  deleteFile,
-  listFileKeys,
-  uploadFile,
 } from "@/lib/storage";
+
+import {
+  evryPeopleFileStorage,
+  type EvryPeopleFileStorage,
+} from "./file-storage";
 
 export const EVRY_PEOPLE_CSV_MAX_BYTES = 1024 * 1024;
 export const EVRY_PEOPLE_IMPORT_MAX_ROWS = 25;
@@ -53,9 +54,7 @@ export type EvryPeopleAttachmentFile = Readonly<{
 type Scope = Pick<EvryPlantActor, "userId" | "plantId">;
 
 function secretFromEnvironment(): string {
-  const value = process.env.AWS_SECRET_ACCESS_KEY;
-  if (!value) throw new Error("Attachment signing is unavailable");
-  return value;
+  return evryPeopleFileStorage().signingSecret();
 }
 
 function signature(payload: string, secret: string): Buffer {
@@ -148,11 +147,11 @@ export async function removeEvryPeopleAttachment(input: {
   actor: Scope;
   expectedKind: EvryPeopleAttachmentReference["kind"];
   secret?: string;
-  remove?: typeof deleteFile;
+  remove?: EvryPeopleFileStorage["remove"];
 }): Promise<boolean> {
   const document = openScopedEvryPeopleAttachmentReference(input);
   if (!document) return false;
-  await (input.remove ?? deleteFile)(document.storageKey);
+  await (input.remove ?? evryPeopleFileStorage().remove)(document.storageKey);
   return true;
 }
 
@@ -164,12 +163,12 @@ export async function sweepExpiredEvryPeopleAttachments(
   input: {
     actor?: Scope;
     now?: Date;
-    list?: typeof listFileKeys;
-    remove?: typeof deleteFile;
+    list?: EvryPeopleFileStorage["listKeys"];
+    remove?: EvryPeopleFileStorage["remove"];
   } = {}
 ): Promise<Readonly<{ removed: number; failed: number }>> {
   const prefix = stagedAttachmentPrefix(input.actor);
-  const keys = await (input.list ?? listFileKeys)(prefix);
+  const keys = await (input.list ?? evryPeopleFileStorage().listKeys)(prefix);
   const now = (input.now ?? new Date()).getTime();
   let removed = 0;
   let failed = 0;
@@ -181,7 +180,7 @@ export async function sweepExpiredEvryPeopleAttachments(
       )?.[1];
     if (!expiry || Number(expiry) > now) continue;
     try {
-      await (input.remove ?? deleteFile)(key);
+      await (input.remove ?? evryPeopleFileStorage().remove)(key);
       removed += 1;
     } catch {
       failed += 1;
@@ -199,7 +198,7 @@ export async function stageEvryPeopleAttachment(input: {
   secret?: string;
   loadPerson?: typeof getPerson;
   parseImport?: typeof parseCsvImport;
-  store?: typeof uploadFile;
+  store?: EvryPeopleFileStorage["store"];
   sweep?: typeof sweepExpiredEvryPeopleAttachments;
 }) {
   const now = input.now ?? new Date();
@@ -268,7 +267,11 @@ export async function stageEvryPeopleAttachment(input: {
     digest,
     extension,
   });
-  await (input.store ?? uploadFile)(storageKey, bytes, input.file.type);
+  await (input.store ?? evryPeopleFileStorage().store)(
+    storageKey,
+    bytes,
+    input.file.type
+  );
   const document = referenceDocumentSchema.parse({
     version: 1,
     kind: input.kind,
@@ -301,11 +304,13 @@ export async function readExactEvryPeopleAttachment(input: {
   expectedDigest: string;
   now?: Date;
   secret?: string;
-  read?: typeof getFileBytes;
+  read?: EvryPeopleFileStorage["read"];
 }) {
   const document = openEvryPeopleAttachmentReference(input);
   if (!document || document.digest !== input.expectedDigest) return null;
-  const stored = await (input.read ?? getFileBytes)(document.storageKey);
+  const stored = await (input.read ?? evryPeopleFileStorage().read)(
+    document.storageKey
+  );
   if (
     !stored ||
     stored.contentType !== document.contentType ||

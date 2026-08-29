@@ -7,6 +7,30 @@ import generated from "@/lib/evry/capabilities/people/inventory.generated.json";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 
+const STORAGE_ENVIRONMENT_KEYS = [
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "AWS_PROFILE",
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_ENDPOINT_URL",
+  "AWS_ENDPOINT_URL_S3",
+  "AWS_BUCKET_NAME",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_ROLE_ARN",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+] as const;
+
+function credentialFreeProofEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  for (const key of STORAGE_ENVIRONMENT_KEYS) delete environment[key];
+  return environment;
+}
+
 type LiveOutcome = Readonly<{
   identity: string;
   operationKind: "read" | "effect";
@@ -21,6 +45,10 @@ let outcomes = new Map<string, LiveOutcome>();
 
 before(() => {
   if (!LIVE_DB) return;
+  const environment = credentialFreeProofEnvironment();
+  for (const key of STORAGE_ENVIRONMENT_KEYS) {
+    assert.equal(environment[key], undefined, `${key} reached the proof child`);
+  }
   const proof = spawnSync(
     process.execPath,
     [
@@ -34,9 +62,14 @@ before(() => {
     {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: process.env,
+      env: environment,
       timeout: 180_000,
     }
+  );
+  assert.doesNotMatch(
+    proof.stderr,
+    /Region is missing|Could not load credentials|CredentialsProviderError/,
+    "People effect proof reached the default S3 client"
   );
   assert.equal(
     proof.status,

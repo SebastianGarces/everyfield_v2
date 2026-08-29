@@ -5,14 +5,15 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+import {
+  evryPeopleFileStorage,
+  type EvryPeopleFileStorage,
+} from "@/lib/evry/capabilities/people/file-storage";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
-  deleteFile,
   getExtensionFromMimeType,
-  listFileObjects,
   personPhotoStorageKey,
   type StoredFileObject,
-  uploadFile,
 } from "@/lib/storage";
 
 import {
@@ -130,9 +131,12 @@ export type EvryPersonPhotoStorageEffects = Readonly<{
 export const EVRY_FINAL_OBJECT_GRACE_MS = 60 * 60_000;
 
 const LIVE_EVRY_PHOTO_STORAGE: EvryPersonPhotoStorageEffects = {
-  store: uploadFile,
-  remove: deleteFile,
-  list: listFileObjects,
+  store: (...argumentsValue) =>
+    evryPeopleFileStorage().store(...argumentsValue),
+  remove: (...argumentsValue) =>
+    evryPeopleFileStorage().remove(...argumentsValue),
+  list: (...argumentsValue) =>
+    evryPeopleFileStorage().listObjects(...argumentsValue),
 };
 
 /**
@@ -181,12 +185,14 @@ export async function sweepEvryPersonPhotoObjects(input: {
 export async function sweepAllEvryPersonPhotoObjects(
   input: {
     now?: Date;
-    list?: typeof listFileObjects;
-    remove?: typeof deleteFile;
+    list?: EvryPeopleFileStorage["listObjects"];
+    remove?: EvryPeopleFileStorage["remove"];
     load?: typeof getPersonPhotoKey;
   } = {}
 ): Promise<Readonly<{ removed: number; failed: number }>> {
-  const objects = await (input.list ?? listFileObjects)("people/");
+  const objects = await (input.list ?? evryPeopleFileStorage().listObjects)(
+    "people/"
+  );
   const scopes = new Map<string, { plantId: string; personId: string }>();
   for (const { key } of objects) {
     const match =
@@ -211,7 +217,7 @@ export async function sweepAllEvryPersonPhotoObjects(
         store: async () => undefined,
         list: async (prefix) =>
           objects.filter(({ key }) => key.startsWith(prefix)),
-        remove: input.remove ?? deleteFile,
+        remove: input.remove ?? evryPeopleFileStorage().remove,
       },
     });
     removed += result.removed;
@@ -376,7 +382,8 @@ const LIVE_PHOTO_EFFECTS: PersonPhotoEffects = {
 
     return updated;
   },
-  remove: deleteFile,
+  remove: (...argumentsValue) =>
+    evryPeopleFileStorage().remove(...argumentsValue),
 };
 
 /**

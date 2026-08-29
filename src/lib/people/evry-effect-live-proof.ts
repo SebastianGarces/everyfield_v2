@@ -38,7 +38,9 @@ import {
 import {
   removeEvryPeopleAttachment,
   stageEvryPeopleAttachment,
+  sweepExpiredEvryPeopleAttachments,
 } from "@/lib/evry/capabilities/people/attachments";
+import { withEvryPeopleLiveProofStorage } from "@/lib/evry/capabilities/people/file-storage";
 import generatedPeopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
@@ -75,6 +77,7 @@ import {
   claimEvryCreateAssessment,
   claimEvryCreateCommitment,
   claimEvryCreateInterview,
+  sweepAllEvryCommitmentDocumentObjects,
 } from "./evry-milestones";
 import {
   claimEvryAddSkill,
@@ -86,12 +89,19 @@ import {
   claimEvryUpdateSkill,
   claimEvryUpdateTag,
 } from "./evry-taxonomies";
-import { getEvryPersonPhotoSnapshot } from "./person-photo";
+import {
+  getEvryPersonPhotoSnapshot,
+  sweepAllEvryPersonPhotoObjects,
+} from "./person-photo";
 import { executeBulkImport } from "./import";
 import type { PersonCreatedEvent, PersonStatusChangedEvent } from "./events";
 import { createPerson } from "./service";
 import { changeStatus } from "./status";
 import { personCreateSchema } from "@/lib/validations/people";
+import {
+  createEvryPeopleEffectProofStorage,
+  type EvryPeopleEffectProofStorage,
+} from "../../../scripts/evry-people-effect-live-proof-storage";
 import { resetEvryPeopleEffectProofDirtyMarker } from "../../../scripts/evry-people-effect-live-proof-seed";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
@@ -313,7 +323,7 @@ async function householdMemberSnapshotFor(plantId: string, personId: string) {
     .then(([row]) => row ?? null);
 }
 
-async function main(): Promise<void> {
+async function main(proofStorage: EvryPeopleEffectProofStorage): Promise<void> {
   const provenEffects = new Set<string>();
   const productionEffectOutcomes = new Map<
     string,
@@ -2803,13 +2813,30 @@ async function main(): Promise<void> {
     })),
   ].toSorted((left, right) => left.identity.localeCompare(right.identity));
 
+  assert.deepEqual(await sweepExpiredEvryPeopleAttachments({ actor }), {
+    removed: 0,
+    failed: 0,
+  });
+  assert.deepEqual(await sweepAllEvryPersonPhotoObjects(), {
+    removed: 0,
+    failed: 0,
+  });
+  assert.deepEqual(await sweepAllEvryCommitmentDocumentObjects(), {
+    removed: 0,
+    failed: 0,
+  });
+  proofStorage.assertCleaned();
+
   process.stdout.write(
     `People effect live proof passed (${completedEffectIdentities.size} operation-specific identities)\n` +
       `PEOPLE_CAPABILITY_OUTCOMES=${JSON.stringify(machineOutcomes)}\n`
   );
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+const proofStorage = createEvryPeopleEffectProofStorage();
+withEvryPeopleLiveProofStorage(proofStorage, () => main(proofStorage)).catch(
+  (error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+  }
+);

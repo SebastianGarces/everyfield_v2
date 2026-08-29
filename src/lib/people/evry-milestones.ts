@@ -3,13 +3,14 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { commitments, type PersonStatus } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+import {
+  evryPeopleFileStorage,
+  type EvryPeopleFileStorage,
+} from "@/lib/evry/capabilities/people/file-storage";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
   commitmentDocumentStorageKey,
-  deleteFile,
-  listFileObjects,
   type StoredFileObject,
-  uploadFile,
 } from "@/lib/storage";
 
 import { EVRY_FINAL_OBJECT_GRACE_MS } from "./person-photo";
@@ -46,7 +47,7 @@ export async function storeEvryCommitmentDocumentForClaim(input: {
     input.personId,
     input.extension
   );
-  await (input.storage ?? { store: uploadFile }).store(
+  await (input.storage ?? { store: evryPeopleFileStorage().store }).store(
     key,
     input.bytes,
     input.contentType
@@ -66,7 +67,7 @@ export async function sweepEvryCommitmentDocumentObjects(input: {
     personId: string;
   }) => Promise<readonly string[]>;
   list?: (prefix: string) => Promise<readonly StoredFileObject[]>;
-  remove?: typeof deleteFile;
+  remove?: EvryPeopleFileStorage["remove"];
   now?: Date;
 }): Promise<Readonly<{ removed: number; failed: number }>> {
   const loadReferenced =
@@ -84,7 +85,9 @@ export async function sweepEvryCommitmentDocumentObjects(input: {
           )
       ).flatMap(({ key }) => (key ? [key] : [])));
   const prefix = `commitments/${input.plantId}/${input.personId}/`;
-  const objects = await (input.list ?? listFileObjects)(prefix);
+  const objects = await (input.list ?? evryPeopleFileStorage().listObjects)(
+    prefix
+  );
   const cutoff =
     (input.now ?? new Date()).getTime() - EVRY_FINAL_OBJECT_GRACE_MS;
   let removed = 0;
@@ -104,7 +107,7 @@ export async function sweepEvryCommitmentDocumentObjects(input: {
         })
       );
       if (referenced.has(object.key)) continue;
-      await (input.remove ?? deleteFile)(object.key);
+      await (input.remove ?? evryPeopleFileStorage().remove)(object.key);
       removed += 1;
     } catch {
       failed += 1;
@@ -117,15 +120,17 @@ export async function sweepEvryCommitmentDocumentObjects(input: {
 export async function sweepAllEvryCommitmentDocumentObjects(
   input: {
     now?: Date;
-    list?: typeof listFileObjects;
-    remove?: typeof deleteFile;
+    list?: EvryPeopleFileStorage["listObjects"];
+    remove?: EvryPeopleFileStorage["remove"];
     loadReferenced?: (scope: {
       plantId: string;
       personId: string;
     }) => Promise<readonly string[]>;
   } = {}
 ): Promise<Readonly<{ removed: number; failed: number }>> {
-  const objects = await (input.list ?? listFileObjects)("commitments/");
+  const objects = await (input.list ?? evryPeopleFileStorage().listObjects)(
+    "commitments/"
+  );
   const scopes = new Map<string, { plantId: string; personId: string }>();
   for (const { key } of objects) {
     const match =
