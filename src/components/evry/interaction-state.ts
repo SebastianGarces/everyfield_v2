@@ -9,6 +9,20 @@ export type EvrySubmission = Readonly<{
 export type PendingEvrySubmission = EvrySubmission &
   Readonly<{ requestKey: string }>;
 
+/** The ordinary conversation request contract; UI affordances add no metadata. */
+export function evryConversationRequestBody(
+  submission: Pick<
+    PendingEvrySubmission,
+    "requestKey" | "message" | "pageContext"
+  >
+): string {
+  return JSON.stringify({
+    requestKey: submission.requestKey,
+    message: submission.message,
+    pageContext: submission.pageContext,
+  });
+}
+
 /** Refuse whitespace-only drafts without changing the bytes that are sent. */
 export function evrySubmissionMessage(draft: string): string | null {
   return draft.trim().length === 0 ? null : draft;
