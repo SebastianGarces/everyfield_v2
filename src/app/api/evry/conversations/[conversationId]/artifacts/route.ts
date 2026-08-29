@@ -8,6 +8,7 @@ import {
   type EvryArtifactLifecycleResult,
   type EvryArtifactLifecycleRequest,
 } from "@/lib/evry/artifacts/lifecycle";
+import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {
   appendTrustedEvryConversationMessage,
@@ -130,6 +131,7 @@ const runProductionLifecycle = createEvryArtifactLifecycle({
   confirm: confirmEvryActionPlan,
   execute: executeEvryActionPlan,
   cancel: cancelExactEvryActionPlan,
+  reviewPlan: trustedEvryPlanReview,
   now: () => new Date(),
 });
 

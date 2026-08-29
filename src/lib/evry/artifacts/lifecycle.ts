@@ -75,6 +75,18 @@ type CancelExactPlan = (input: {
 type ResumeConversation = typeof resumeEvryConversation;
 type AppendMessage = typeof appendTrustedEvryConversationMessage;
 
+export type EvryTrustedPlanReview = Readonly<{
+  confirmation: Readonly<{ title: string; actionLabel: string }> | null;
+  steps: readonly Readonly<{
+    stepId: string;
+    disclosure: Readonly<{
+      title: string;
+      items: readonly Readonly<{ label: string; value: string }>[];
+      consequences: readonly string[];
+    }> | null;
+  }>[];
+}>;
+
 export type EvryArtifactLifecycleBoundaries = Readonly<{
   planRegistry: EvryPlanCapabilityRegistry;
   executionRegistry: EvryExecutionCapabilityRegistry;
@@ -84,6 +96,11 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
   confirm: ConfirmExactPlan;
   execute: ExecuteExactPlan;
   cancel: CancelExactPlan;
+  reviewPlan(input: {
+    actor: EvryPlantActor;
+    plan: EvryConversationPlanIdentity;
+    registry: EvryPlanCapabilityRegistry;
+  }): Promise<EvryTrustedPlanReview | null>;
   now(): Date;
   correlationId?(): string;
 }>;
@@ -203,6 +220,49 @@ function hasRequestKey(
   requestKey: string
 ): boolean {
   return messages.some((message) => message.requestKey === requestKey);
+}
+
+function confirmationMatchesTrustedPlan(
+  confirmation: EvryDetailedConfirmationArtifactDocument,
+  review: EvryTrustedPlanReview
+): boolean {
+  if (
+    confirmation.steps.length !== review.steps.length ||
+    !confirmation.steps.every(
+      (step, index) => step.stepId === review.steps[index]?.stepId
+    )
+  ) {
+    return false;
+  }
+  if (
+    review.confirmation &&
+    (confirmation.title !== review.confirmation.title ||
+      confirmation.actionLabel !== review.confirmation.actionLabel)
+  ) {
+    return false;
+  }
+  for (const [index, trustedStep] of review.steps.entries()) {
+    if (!trustedStep.disclosure) continue;
+    const displayed = confirmation.steps[index];
+    if (!displayed || displayed.title !== trustedStep.disclosure.title) {
+      return false;
+    }
+    if (
+      trustedStep.disclosure.items.some(
+        (item) =>
+          !displayed.resolvedTargets.some(
+            (target) =>
+              target.label === item.label && target.value === item.value
+          )
+      ) ||
+      trustedStep.disclosure.consequences.some(
+        (consequence) => !confirmation.consequences.includes(consequence)
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function pendingEvryProgress(
@@ -545,6 +605,22 @@ export function createEvryArtifactLifecycle(
       resumed.conversation,
       input.request.plan
     );
+    const trustedReview = await boundaries.reviewPlan({
+      actor: input.actor,
+      plan: input.request.plan,
+      registry: boundaries.planRegistry,
+    });
+    if (
+      !trustedReview ||
+      !confirmationMatchesTrustedPlan(confirmation, trustedReview) ||
+      (progress &&
+        (progress.steps.length !== confirmation.steps.length ||
+          !progress.steps.every(
+            (step, index) => step.stepId === confirmation.steps[index]?.stepId
+          )))
+    ) {
+      return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+    }
     if (!progress) {
       if (
         revalidated.status !== "awaiting_confirmation" &&

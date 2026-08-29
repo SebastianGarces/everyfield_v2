@@ -125,6 +125,9 @@ function harness() {
     })),
   };
   let executeError: unknown = null;
+  let trustedStepIds = EVRY_CONFIRMATION_FIXTURES.meeting.steps.map(
+    ({ stepId }) => stepId
+  );
 
   const resume = (async () => {
     const activePlan = conversation.activePlan
@@ -224,6 +227,18 @@ function harness() {
       planStatus = "cancelled";
       return true;
     },
+    async reviewPlan(input) {
+      calls.push("review");
+      assert.equal(input.actor, ACTOR);
+      assert.deepEqual(input.plan, EVRY_CONFIRMATION_FIXTURES.meeting.plan);
+      return {
+        confirmation: null,
+        steps: trustedStepIds.map((stepId) => ({
+          stepId,
+          disclosure: null,
+        })),
+      };
+    },
     now: () => NOW,
     correlationId: () => "80000000-0000-4000-8000-000000000001",
   };
@@ -241,6 +256,9 @@ function harness() {
     },
     setExecuteError(error: unknown) {
       executeError = error;
+    },
+    setTrustedStepIds(stepIds: readonly string[]) {
+      trustedStepIds = [...stepIds];
     },
   };
 }
@@ -267,6 +285,7 @@ test("execute persists progress before the effect and a terminal receipt after i
 
   assert.equal(result.status, "executed");
   assert.deepEqual(fake.calls, [
+    "review",
     "confirm",
     "append:progress:preserve",
     "execute",
@@ -333,6 +352,18 @@ test("a mismatched conversation plan reaches no plan or persistence boundary", a
 
   assert.equal(result.status, "unavailable");
   assert.deepEqual(fake.calls, []);
+});
+
+test("a confirmation whose step lineage differs from the trusted plan cannot confirm or execute", async () => {
+  const fake = harness();
+  fake.setTrustedStepIds(["undisclosed-effect"]);
+
+  const result = await createEvryArtifactLifecycle(fake.boundaries)(
+    request("execute")
+  );
+
+  assert.equal(result.status, "unavailable");
+  assert.deepEqual(fake.calls, ["review"]);
 });
 
 test("partial execution preserves all disclosed statuses and safe-retry state", () => {
