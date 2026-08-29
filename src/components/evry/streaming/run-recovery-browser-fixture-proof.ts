@@ -183,6 +183,11 @@ test("the fixture writes the production marker, performs a full reload, and then
     attemptBeforeReload
   );
   assert.equal(
+    renderer.root.findByProps({ "data-testid": "reconnect-work-starts" })
+      .children[0],
+    "1"
+  );
+  assert.equal(
     renderer.root.findByProps({ "data-testid": "reconnect-effect-count" })
       .children[0],
     "1"

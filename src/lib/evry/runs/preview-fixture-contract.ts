@@ -8,7 +8,7 @@ export const evryRunRecoveryPreviewProofSchema = z
     conversationId: z.string().uuid(),
     planId: z.string().uuid().nullable(),
     attemptId: z.string().uuid().nullable(),
-    starts: z.literal(1),
+    starts: z.number().int().nonnegative(),
     effectCount: z.number().int().nonnegative(),
     stage: z.enum([
       "accepted",

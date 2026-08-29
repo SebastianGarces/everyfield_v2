@@ -17,6 +17,7 @@ import {
   users,
 } from "@/db/schema";
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
+import { countEvryExecutionAttempts } from "./repository";
 import type { EvryEffectInput, EvryEffectResult } from "./registry";
 
 type SessionUser = Readonly<{
@@ -469,6 +470,16 @@ async function main(): Promise<void> {
   );
   let evidence = await counts(completedPlan.id);
   assert.equal(evidence.attempts, 1);
+  assert.ok(sessionUser.churchId);
+  assert.equal(
+    await countEvryExecutionAttempts({
+      planId: completedPlan.id,
+      actorUserId: sessionUser.id,
+      plantId: sessionUser.churchId,
+      fingerprint: completedPlan.fingerprint,
+    }),
+    1
+  );
   assert.equal(evidence.effects, 1);
   assert.equal(evidence.state, "completed");
   assert.deepEqual(

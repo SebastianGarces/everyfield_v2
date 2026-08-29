@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -29,6 +29,7 @@ import {
   adoptExpiredEvryExecutionRun,
   claimEvryActiveRun,
   completeEvryActiveRun,
+  countEvryActiveRunsForRequest,
   findEvryActiveRun,
 } from "./repository";
 
@@ -161,17 +162,10 @@ test(
       "adopted",
       "claimed",
     ]);
-    const [count] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(evryActiveRuns)
-      .where(
-        and(
-          eq(evryActiveRuns.churchId, actor!.plantId),
-          eq(evryActiveRuns.actorUserId, actor!.userId),
-          eq(evryActiveRuns.requestKey, requestKey)
-        )
-      );
-    assert.equal(count?.count, 1);
+    assert.equal(
+      await countEvryActiveRunsForRequest({ actor: actor!, requestKey }),
+      1
+    );
 
     const expiredRequestKey =
       evryConversationRequestKeySchema.parse(randomUUID());

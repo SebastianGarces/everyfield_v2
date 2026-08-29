@@ -28,6 +28,7 @@ import {
   finishEvryExecution,
   recordEvryStepOutcome,
   startOrResumeEvryExecution,
+  countEvryExecutionAttempts,
 } from "@/lib/evry/executor/repository";
 import { executionEffectKey } from "@/lib/evry/audit/identity";
 
@@ -58,7 +59,10 @@ const fixturePlanRegistry = createEvryPlanCapabilityRegistry([
 ]);
 
 export type EvryRunRecoveryPreviewFixtureBoundaries = Readonly<{
-  runs: Pick<EvryActiveRunStore, "claim" | "find" | "advance" | "complete">;
+  runs: Pick<
+    EvryActiveRunStore,
+    "claim" | "find" | "countForRequest" | "advance" | "complete"
+  >;
   createConversation: typeof createEvryConversation;
   continueConversation: typeof continueEvryConversation;
   resumeConversation: typeof resumeEvryConversation;
@@ -66,6 +70,7 @@ export type EvryRunRecoveryPreviewFixtureBoundaries = Readonly<{
   createPlan: typeof createEvryActionPlanRecord;
   confirmPlan: typeof confirmExactEvryActionPlan;
   findExecution: typeof findEvryExecutionSnapshot;
+  countExecutionAttempts: typeof countEvryExecutionAttempts;
   startExecution: typeof startOrResumeEvryExecution;
   recordStep: typeof recordEvryStepOutcome;
   finishExecution: typeof finishEvryExecution;
@@ -83,6 +88,7 @@ const productionBoundaries: EvryRunRecoveryPreviewFixtureBoundaries =
     createPlan: createEvryActionPlanRecord,
     confirmPlan: confirmExactEvryActionPlan,
     findExecution: findEvryExecutionSnapshot,
+    countExecutionAttempts: countEvryExecutionAttempts,
     startExecution: startOrResumeEvryExecution,
     recordStep: recordEvryStepOutcome,
     finishExecution: finishEvryExecution,
@@ -138,6 +144,18 @@ async function previewProof(input: {
           fingerprint: run.planFingerprint,
         })
       : null;
+  const starts =
+    run.kind === "execution" && run.planId && run.planFingerprint
+      ? await input.boundaries.countExecutionAttempts({
+          planId: run.planId,
+          actorUserId: input.actor.userId,
+          plantId: input.actor.plantId,
+          fingerprint: run.planFingerprint,
+        })
+      : await input.boundaries.runs.countForRequest({
+          actor: input.actor,
+          requestKey: run.requestKey,
+        });
   return {
     kind: run.kind === "execution" ? "execution" : "read",
     requestId: run.requestKey,
@@ -145,7 +163,7 @@ async function previewProof(input: {
     conversationId: run.conversationId,
     planId: run.planId,
     attemptId: execution?.attempt.id ?? null,
-    starts: 1,
+    starts,
     effectCount:
       execution?.steps.filter(({ status }) => status === "completed").length ??
       0,

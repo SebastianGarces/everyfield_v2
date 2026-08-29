@@ -40,10 +40,11 @@ async function durableConversation(input: {
   actor: EvryPlantActor;
   requestKey: EvryConversationRequestKey;
   conversationId: string | null;
+  trustRunConversation: boolean;
   now: Date;
   boundaries: EvryRunRecoveryBoundaries;
 }): Promise<EvryResumedConversation | null> {
-  if (input.conversationId) {
+  if (input.trustRunConversation && input.conversationId) {
     const resumed = await input.boundaries.resume({
       actor: input.actor,
       conversationId: input.conversationId,
@@ -161,6 +162,7 @@ export async function recoverEvryActiveRun(input: {
     actor: input.actor,
     requestKey,
     conversationId: run?.conversationId ?? null,
+    trustRunConversation: run?.status === "completed",
     now: input.now,
     boundaries,
   });

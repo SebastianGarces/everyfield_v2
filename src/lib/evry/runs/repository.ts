@@ -1,4 +1,4 @@
-import { and, eq, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, lte, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { evryActiveRuns, type EvryActiveRunStage } from "@/db/schema";
@@ -29,6 +29,22 @@ export async function findEvryActiveRun(
     )
     .limit(1);
   return row ? parseEvryActiveRunRecord(row) : null;
+}
+
+export async function countEvryActiveRunsForRequest(
+  input: EvryActiveRunStoreInput
+): Promise<number> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(evryActiveRuns)
+    .where(
+      and(
+        eq(evryActiveRuns.churchId, input.actor.plantId),
+        eq(evryActiveRuns.actorUserId, input.actor.userId),
+        eq(evryActiveRuns.requestKey, input.requestKey)
+      )
+    );
+  return row?.value ?? 0;
 }
 
 export async function claimEvryActiveRun(input: {
@@ -256,6 +272,7 @@ export async function releaseEvryExecutionRun(input: {
 
 export type EvryActiveRunStore = Readonly<{
   find: typeof findEvryActiveRun;
+  countForRequest: typeof countEvryActiveRunsForRequest;
   claim: typeof claimEvryActiveRun;
   advance: typeof advanceEvryActiveRun;
   adoptExpiredExecution: typeof adoptExpiredEvryExecutionRun;
@@ -266,6 +283,7 @@ export type EvryActiveRunStore = Readonly<{
 
 export const evryActiveRunStore: EvryActiveRunStore = Object.freeze({
   find: findEvryActiveRun,
+  countForRequest: countEvryActiveRunsForRequest,
   claim: claimEvryActiveRun,
   advance: advanceEvryActiveRun,
   adoptExpiredExecution: adoptExpiredEvryExecutionRun,

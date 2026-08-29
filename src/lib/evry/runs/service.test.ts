@@ -6,6 +6,7 @@ import {
   evryConversationMessageIdSchema,
   evryConversationRequestKeySchema,
   initialEvryConversationState,
+  type EvryConversationRequestKey,
 } from "@/lib/evry/conversations/contract";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 import type { EvryResumedConversation } from "@/lib/evry/conversations/service";
@@ -20,6 +21,9 @@ const USER_ID = "20000000-0000-4000-8000-000000000001";
 const REQUEST_ID = evryConversationRequestKeySchema.parse(
   "30000000-0000-4000-8000-000000000001"
 );
+const OLDER_REQUEST_ID = evryConversationRequestKeySchema.parse(
+  "30000000-0000-4000-8000-000000000002"
+);
 const CONVERSATION_ID = evryConversationIdSchema.parse(
   "40000000-0000-4000-8000-000000000001"
 );
@@ -30,7 +34,9 @@ const actor: EvryPlantActor = Object.freeze({
   seat: "owner",
 }) as unknown as EvryPlantActor;
 
-function storedConversation(): EvryStoredConversation {
+function storedConversation(
+  requestKey: EvryConversationRequestKey = REQUEST_ID
+): EvryStoredConversation {
   return Object.freeze({
     id: CONVERSATION_ID,
     actorUserId: USER_ID,
@@ -46,7 +52,7 @@ function storedConversation(): EvryStoredConversation {
         id: evryConversationMessageIdSchema.parse(
           "50000000-0000-4000-8000-000000000001"
         ),
-        requestKey: REQUEST_ID,
+        requestKey,
         sequence: 0,
         author: "user" as const,
         body: "Durable request",
@@ -91,6 +97,50 @@ function activeRun() {
     changedAt: new Date(START.valueOf() + 100),
     expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
     completedAt: null,
+  });
+}
+
+function expiredContinuation() {
+  return parseEvryActiveRunRecord({
+    id: "60000000-0000-4000-8000-000000000001",
+    churchId: PLANT_ID,
+    actorUserId: USER_ID,
+    requestKey: REQUEST_ID,
+    requestFingerprint: "a".repeat(64),
+    kind: "conversation",
+    operation: "continue",
+    status: "active",
+    stage: "compiling_response",
+    version: 1,
+    conversationId: CONVERSATION_ID,
+    planId: null,
+    planFingerprint: null,
+    startedAt: START,
+    changedAt: new Date(START.valueOf() + 100),
+    expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+    completedAt: null,
+  });
+}
+
+function failedExecution() {
+  return parseEvryActiveRunRecord({
+    id: "60000000-0000-4000-8000-000000000002",
+    churchId: PLANT_ID,
+    actorUserId: USER_ID,
+    requestKey: REQUEST_ID,
+    requestFingerprint: "b".repeat(64),
+    kind: "execution",
+    operation: "execute",
+    status: "failed",
+    stage: "executing",
+    version: 2,
+    conversationId: CONVERSATION_ID,
+    planId: "70000000-0000-4000-8000-000000000001",
+    planFingerprint: "c".repeat(64),
+    startedAt: START,
+    changedAt: new Date(START.valueOf() + 1_000),
+    expiresAt: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS),
+    completedAt: new Date(START.valueOf() + 1_000),
   });
 }
 
@@ -181,4 +231,58 @@ test("expired and missing runs terminate when no durable state exists", async ()
     }),
     { status: "unavailable", requestId: REQUEST_ID }
   );
+});
+
+test("an expired continuation without its exact request never reuses older conversation state", async () => {
+  let conversationResumeCount = 0;
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now: new Date(START.valueOf() + EVRY_ACTIVE_RUN_TTL_MS + 1),
+    boundaries: {
+      runs: { find: async () => expiredContinuation() },
+      findConversationByRequest: async () => null,
+      resume: async () => {
+        conversationResumeCount += 1;
+        return {
+          ...resumed(),
+          conversation: storedConversation(OLDER_REQUEST_ID),
+        };
+      },
+    },
+  });
+  assert.deepEqual(result, {
+    status: "expired",
+    requestId: REQUEST_ID,
+    kind: "conversation",
+    operation: "continue",
+    sequence: 2,
+    conversationId: CONVERSATION_ID,
+  });
+  assert.equal(conversationResumeCount, 0);
+});
+
+test("a failed execution without an exact durable receipt never returns an older conversation", async () => {
+  let conversationResumeCount = 0;
+  const result = await recoverEvryActiveRun({
+    actor,
+    requestKey: REQUEST_ID,
+    now: new Date(START.valueOf() + 2_000),
+    boundaries: {
+      runs: { find: async () => failedExecution() },
+      findConversationByRequest: async () => null,
+      resume: async () => {
+        conversationResumeCount += 1;
+        return {
+          ...resumed(),
+          conversation: storedConversation(OLDER_REQUEST_ID),
+        };
+      },
+    },
+  });
+  assert.deepEqual(result, {
+    status: "unavailable",
+    requestId: REQUEST_ID,
+  });
+  assert.equal(conversationResumeCount, 0);
 });
