@@ -1,19 +1,67 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 
 import {
   composeEvryCapabilityConversationContinuations,
   EvryCapabilityConversationAmbiguityError,
+  evryCapabilityConversationResultIdentity,
   type EvryCapabilityConversationContinuation,
+  type EvryCapabilityConversationResult,
 } from "./conversation";
+
+const clarification = storedEvryClarificationArtifactDocument({
+  kind: "clarification",
+  mode: "missing",
+  entityType: "person",
+  prompt: "Which person?",
+});
+
+function conversation(
+  messages: readonly Record<string, unknown>[] = []
+): EvryStoredConversation {
+  return {
+    id: "10000000-0000-4000-8000-000000000001",
+    actorUserId: "20000000-0000-4000-8000-000000000001",
+    plantId: "30000000-0000-4000-8000-000000000001",
+    stateVersion: 4,
+    state: {},
+    messages,
+  } as unknown as EvryStoredConversation;
+}
+
+function selectionInput(input: {
+  current?: EvryStoredConversation;
+  appendCalls: unknown[];
+}) {
+  return {
+    actor: {
+      userId: "20000000-0000-4000-8000-000000000001",
+      plantId: "30000000-0000-4000-8000-000000000001",
+      seat: "owner",
+    },
+    conversation: input.current ?? conversation(),
+    userRequestKey: "40000000-0000-4000-8000-000000000001",
+    literalUserText: "List people",
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-29T12:00:00.000Z"),
+    store: {
+      async append(request: unknown) {
+        input.appendCalls.push(request);
+        return conversation();
+      },
+    },
+  } as never;
+}
 
 function registration(input: {
   identity: string;
   match: boolean;
   calls: string[];
-  result?: EvryStoredConversation;
+  result?: EvryCapabilityConversationResult | null;
 }): EvryCapabilityConversationContinuation {
   return {
     identity: input.identity,
@@ -28,103 +76,120 @@ function registration(input: {
   };
 }
 
-test("conversation composition evaluates every pure matcher then invokes one pack", async () => {
+test("composition evaluates every pure matcher then shared code appends one result", async () => {
   const calls: string[] = [];
-  const selected = {
-    id: "selected",
-    messages: [],
-  } as unknown as EvryStoredConversation;
+  const appendCalls: unknown[] = [];
   const continuation = composeEvryCapabilityConversationContinuations([
     registration({ identity: "first", match: false, calls }),
-    registration({ identity: "second", match: true, calls, result: selected }),
+    registration({
+      identity: "second",
+      match: true,
+      calls,
+      result: { body: "Which person?", artifacts: [clarification] },
+    }),
     registration({ identity: "third", match: false, calls }),
   ]);
 
-  assert.equal(
-    await continuation({
-      conversation: { id: "conversation", messages: [] },
-      userRequestKey: "request",
-    } as never),
-    selected
-  );
+  await continuation(selectionInput({ appendCalls }));
+  const resultIdentity = evryCapabilityConversationResultIdentity({
+    conversationId: "10000000-0000-4000-8000-000000000001",
+    userRequestKey: "40000000-0000-4000-8000-000000000001",
+  });
   assert.deepEqual(calls, [
     "match:first",
     "match:second",
     "match:third",
     "continue:second",
   ]);
+  assert.equal(appendCalls.length, 1);
+  assert.deepEqual(appendCalls[0], {
+    messageId: resultIdentity.messageId,
+    conversationId: "10000000-0000-4000-8000-000000000001",
+    actorUserId: "20000000-0000-4000-8000-000000000001",
+    plantId: "30000000-0000-4000-8000-000000000001",
+    requestKey: resultIdentity.requestKey,
+    expectedStateVersion: 4,
+    state: {},
+    author: "assistant",
+    body: "Which person?",
+    pageContext: null,
+    requestPageContext: null,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    artifacts: [clarification],
+    idempotencyContext: { status: "none" },
+    activePlan: { mode: "preserve" },
+    createdAt: new Date("2026-08-29T12:00:00.000Z"),
+  });
 });
 
-test("ambiguous packs fail before any continuation can mutate", async () => {
+test("ambiguous packs fail before any continuation or append can mutate", async () => {
   const calls: string[] = [];
+  const appendCalls: unknown[] = [];
   const continuation = composeEvryCapabilityConversationContinuations([
     registration({ identity: "first", match: true, calls }),
     registration({ identity: "second", match: true, calls }),
   ]);
 
   await assert.rejects(
-    continuation({
-      conversation: { id: "conversation", messages: [] },
-      userRequestKey: "request",
-    } as never),
+    continuation(selectionInput({ appendCalls })),
     EvryCapabilityConversationAmbiguityError
   );
   assert.deepEqual(calls, ["match:first", "match:second"]);
+  assert.deepEqual(appendCalls, []);
 });
 
-test("a durable request result is recovered before match or continuation work", async () => {
+test("a durable request result is recovered before match or append work", async () => {
   const calls: string[] = [];
-  let source = "first source value";
-  const continuation = composeEvryCapabilityConversationContinuations([
+  const appendCalls: unknown[] = [];
+  const identity = evryCapabilityConversationResultIdentity({
+    conversationId: "10000000-0000-4000-8000-000000000001",
+    userRequestKey: "40000000-0000-4000-8000-000000000001",
+  });
+  const current = conversation([
     {
-      identity: "people",
-      matches() {
-        calls.push(`match:${source}`);
-        return true;
-      },
-      async continue(input) {
-        calls.push(`continue:${source}`);
-        return {
-          ...input.conversation,
-          messages: [
-            ...input.conversation.messages,
-            {
-              id: input.resultIdentity.messageId,
-              requestKey: input.resultIdentity.requestKey,
-              author: "assistant",
-              body: source,
-            },
-          ],
-        } as EvryStoredConversation;
-      },
+      id: identity.messageId,
+      requestKey: identity.requestKey,
+      author: "assistant",
     },
   ]);
-  const first = await continuation({
-    conversation: { id: "conversation", messages: [] },
-    userRequestKey: "request",
-  } as never);
-  assert.ok(first);
-
-  source = "changed source value";
-  const replay = await continuation({
-    conversation: first,
-    userRequestKey: "request",
-  } as never);
-  assert.equal(replay, first);
-  assert.equal(first.messages.at(-1)?.body, "first source value");
-  assert.deepEqual(calls, [
-    "match:first source value",
-    "continue:first source value",
+  const continuation = composeEvryCapabilityConversationContinuations([
+    registration({ identity: "people", match: true, calls }),
   ]);
+
+  assert.equal(
+    await continuation(selectionInput({ current, appendCalls })),
+    current
+  );
+  assert.deepEqual(calls, []);
+  assert.deepEqual(appendCalls, []);
 });
 
-test("empty conversation composition has no production continuation", async () => {
-  const continuation = composeEvryCapabilityConversationContinuations([]);
-  assert.equal(
-    await continuation({
-      conversation: { id: "conversation", messages: [] },
-      userRequestKey: "request",
-    } as never),
-    null
+test("a pack cannot choose result identity or conversation state", async () => {
+  const calls: string[] = [];
+  const appendCalls: unknown[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    registration({
+      identity: "people",
+      match: true,
+      calls,
+      result: {
+        body: "Which person?",
+        artifacts: [clarification],
+        messageId: "attacker-chosen",
+        state: { version: 999 },
+      } as unknown as EvryCapabilityConversationResult,
+    }),
+  ]);
+
+  await assert.rejects(
+    continuation(selectionInput({ appendCalls })),
+    /unrecognized key/i
   );
+  assert.deepEqual(appendCalls, []);
+});
+
+test("empty composition has no production continuation", async () => {
+  const continuation = composeEvryCapabilityConversationContinuations([]);
+  assert.equal(await continuation(selectionInput({ appendCalls: [] })), null);
 });

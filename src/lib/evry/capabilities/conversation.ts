@@ -1,9 +1,18 @@
 import { createHash } from "node:crypto";
 
+import { z } from "zod";
+
 import {
+  parseEvryConversationArtifactDocument,
+  type StoredEvryConversationArtifactDocument,
+} from "@/lib/evry/conversations/artifacts";
+import {
+  EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS,
   evryConversationMessageIdSchema,
+  evryConversationPlanIdentitySchema,
   evryConversationRequestKeySchema,
   type EvryConversationMessageId,
+  type EvryConversationPlanIdentity,
   type EvryConversationRequestKey,
 } from "@/lib/evry/conversations/contract";
 import type {
@@ -35,24 +44,27 @@ export type EvryCapabilityConversationResultIdentity = Readonly<{
   requestKey: EvryConversationRequestKey;
 }>;
 
-export type EvryCapabilityConversationContinuationInput =
-  EvryCapabilityConversationSelectionInput &
-    Readonly<{
-      store: EvryCapabilityConversationStore;
-      resultIdentity: EvryCapabilityConversationResultIdentity;
-    }>;
+type EvryCapabilityActivePlanMutation =
+  | Readonly<{ mode: "preserve" }>
+  | Readonly<{ mode: "set"; plan: EvryConversationPlanIdentity }>;
+
+export type EvryCapabilityConversationResult = Readonly<{
+  body: string;
+  artifacts: readonly StoredEvryConversationArtifactDocument[];
+  activePlan?: EvryCapabilityActivePlanMutation;
+}>;
 
 /**
  * One closed pack registration. `matches` must be pure: composition evaluates
  * every matcher before choosing, and no adapter runs unless exactly one pack
- * matches. The continuation receives the one stable durable result identity.
+ * matches. A pack returns content only; shared code owns every durable field.
  */
 export type EvryCapabilityConversationContinuation = Readonly<{
   identity: string;
   matches(input: EvryCapabilityConversationSelectionInput): boolean;
   continue(
-    input: EvryCapabilityConversationContinuationInput
-  ): Promise<EvryStoredConversation | null>;
+    input: EvryCapabilityConversationSelectionInput
+  ): Promise<EvryCapabilityConversationResult | null>;
 }>;
 
 export class EvryCapabilityConversationAmbiguityError extends Error {
@@ -105,16 +117,74 @@ export function evryCapabilityConversationResultIdentity(input: {
   });
 }
 
-function hasDurableContinuationResult(
-  conversation: EvryStoredConversation,
-  identity: EvryCapabilityConversationResultIdentity
-): boolean {
-  return conversation.messages.some(
+export function hasDurableEvryCapabilityConversationResult(input: {
+  conversation: EvryStoredConversation;
+  userRequestKey: string;
+}): boolean {
+  const identity = evryCapabilityConversationResultIdentity({
+    conversationId: input.conversation.id,
+    userRequestKey: input.userRequestKey,
+  });
+  return input.conversation.messages.some(
     (message) =>
       message.id === identity.messageId &&
       message.requestKey === identity.requestKey &&
       message.author === "assistant"
   );
+}
+
+const activePlanMutationSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("preserve") }),
+  z.strictObject({
+    mode: z.literal("set"),
+    plan: evryConversationPlanIdentitySchema,
+  }),
+]);
+const resultSchema = z.strictObject({
+  body: z.string().min(1).max(EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS),
+  artifacts: z.array(z.unknown()).min(1).max(16),
+  activePlan: activePlanMutationSchema.optional(),
+});
+
+function parseCapabilityResult(
+  input: EvryCapabilityConversationResult
+): EvryCapabilityConversationResult {
+  const parsed = resultSchema.parse(input);
+  return Object.freeze({
+    body: parsed.body,
+    artifacts: Object.freeze(
+      parsed.artifacts.map(parseEvryConversationArtifactDocument)
+    ),
+    activePlan: parsed.activePlan,
+  });
+}
+
+async function appendResult(input: {
+  selection: EvryCapabilityConversationSelectionInput;
+  store: EvryCapabilityConversationStore;
+  identity: EvryCapabilityConversationResultIdentity;
+  result: EvryCapabilityConversationResult;
+}): Promise<EvryStoredConversation> {
+  const result = parseCapabilityResult(input.result);
+  return input.store.append({
+    messageId: input.identity.messageId,
+    conversationId: input.selection.conversation.id,
+    actorUserId: input.selection.actor.userId,
+    plantId: input.selection.actor.plantId,
+    requestKey: input.identity.requestKey,
+    expectedStateVersion: input.selection.conversation.stateVersion,
+    state: input.selection.conversation.state,
+    author: "assistant",
+    body: result.body,
+    pageContext: null,
+    requestPageContext: null,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    artifacts: result.artifacts,
+    idempotencyContext: { status: "none" },
+    activePlan: result.activePlan ?? { mode: "preserve" },
+    createdAt: input.selection.now,
+  });
 }
 
 /** Recover a request's durable result, then select exactly one closed pack. */
@@ -133,11 +203,12 @@ export function composeEvryCapabilityConversationContinuations(
   }
 
   return async function continueEvryCapabilityConversation(input) {
-    const resultIdentity = evryCapabilityConversationResultIdentity({
-      conversationId: input.conversation.id,
-      userRequestKey: input.userRequestKey,
-    });
-    if (hasDurableContinuationResult(input.conversation, resultIdentity)) {
+    if (
+      hasDurableEvryCapabilityConversationResult({
+        conversation: input.conversation,
+        userRequestKey: input.userRequestKey,
+      })
+    ) {
       return input.conversation;
     }
 
@@ -151,6 +222,17 @@ export function composeEvryCapabilityConversationContinuations(
       );
     }
     const selected = matches[0];
-    return selected ? selected.continue({ ...input, resultIdentity }) : null;
+    if (!selected) return null;
+    const result = await selected.continue(selectionInput);
+    if (!result) return null;
+    return appendResult({
+      selection: selectionInput,
+      store: input.store,
+      identity: evryCapabilityConversationResultIdentity({
+        conversationId: input.conversation.id,
+        userRequestKey: input.userRequestKey,
+      }),
+      result,
+    });
   };
 }

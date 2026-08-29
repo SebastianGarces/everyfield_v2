@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { initialEvryConversationState } from "./contract";
+import { storedEvryClarificationArtifactDocument } from "./artifacts";
+import {
+  initialEvryConversationState,
+  type EvryConversationRelevanceKey,
+  type EvryResolvedReference,
+} from "./contract";
 import type {
   EvryStoredConversation,
   EvryStoredConversationMessage,
@@ -31,21 +36,26 @@ function message(input: {
   author: "user" | "assistant";
   body: string;
   createdAt: Date;
+  pageContext?: EvryStoredConversationMessage["pageContext"];
+  relevanceKeys?: EvryStoredConversationMessage["relevanceKeys"];
   artifacts?: EvryStoredConversationMessage["artifacts"];
 }): EvryStoredConversationMessage {
   return {
     ...input,
     id: input.id as never,
     requestKey: input.requestKey as never,
-    pageContext: null,
-    relevanceKeys: [],
+    pageContext: input.pageContext ?? null,
+    relevanceKeys: input.relevanceKeys ?? [],
     deliveryStatus: "complete",
     artifacts: input.artifacts ?? [],
   };
 }
 
-function memoryStore(): EvryConversationStore & {
+function memoryStore(loss: {
+  throwAfterFirstResultCommit: boolean;
+}): EvryConversationStore & {
   current(): EvryStoredConversation | null;
+  changeState(): void;
 } {
   let current: EvryStoredConversation | null = null;
   let generated = 0;
@@ -92,6 +102,8 @@ function memoryStore(): EvryConversationStore & {
         author: input.author,
         body: input.body,
         createdAt: input.createdAt,
+        pageContext: input.pageContext,
+        relevanceKeys: input.relevanceKeys,
         artifacts: input.artifacts.map((document, ordinal) => ({
           id: `70000000-0000-4000-8000-${String(generated).padStart(12, "0")}`,
           ordinal,
@@ -107,19 +119,50 @@ function memoryStore(): EvryConversationStore & {
         state: input.state,
         messages: [...current.messages, next],
       };
+      if (input.author === "assistant" && loss.throwAfterFirstResultCommit) {
+        loss.throwAfterFirstResultCommit = false;
+        throw new Error("response lost after durable continuation commit");
+      }
       return current;
     },
     current() {
       return current;
     },
+    changeState() {
+      if (!current) throw new Error("missing conversation");
+      current = {
+        ...current,
+        stateVersion: current.stateVersion + 1,
+        state: {
+          ...current.state,
+          resolvedReferences: Array.from({ length: 16 }, (_, index) =>
+            resolvedReference(`later-${index}`, index)
+          ),
+        },
+      };
+    },
   };
   return store;
+}
+
+function resolvedReference(key: string, index: number): EvryResolvedReference {
+  return {
+    key,
+    entityType: "person",
+    entityId: `person-${index}`,
+    label: `Person ${index}`,
+    distinguishingFacts: [],
+    sourceLink: { label: `Open Person ${index}`, href: "/people" },
+    aliases: [`person ${index}`],
+    sourceMessageId: "60000000-0000-4000-8000-000000000001",
+    resolvedAt: "2026-08-29T11:00:00.000Z",
+    validThrough: null,
+  } as unknown as EvryResolvedReference;
 }
 
 function lostResponseContinuation(calls: {
   matches: number;
   reads: number;
-  throwAfterFirstCommit: boolean;
   source: string;
 }) {
   return composeEvryCapabilityConversationContinuations([
@@ -129,43 +172,30 @@ function lostResponseContinuation(calls: {
         calls.matches += 1;
         return true;
       },
-      async continue(input) {
+      async continue() {
         calls.reads += 1;
-        const stored = await input.store.append({
-          messageId: input.resultIdentity.messageId,
-          conversationId: input.conversation.id,
-          actorUserId: input.actor.userId,
-          plantId: input.actor.plantId,
-          requestKey: input.resultIdentity.requestKey,
-          expectedStateVersion: input.conversation.stateVersion,
-          state: input.conversation.state,
-          author: "assistant",
+        return {
           body: calls.source,
-          pageContext: null,
-          requestPageContext: null,
-          relevanceKeys: [],
-          deliveryStatus: "complete",
-          artifacts: [],
-          idempotencyContext: { status: "none" },
-          activePlan: { mode: "preserve" },
-          createdAt: input.now,
-        });
-        if (calls.throwAfterFirstCommit) {
-          calls.throwAfterFirstCommit = false;
-          throw new Error("response lost after durable continuation commit");
-        }
-        return stored;
+          artifacts: [
+            storedEvryClarificationArtifactDocument({
+              kind: "clarification",
+              mode: "missing",
+              entityType: "person",
+              prompt: "Which person?",
+            }),
+          ],
+        };
       },
     },
   ]);
 }
 
 test("create replay recovers the committed capability result before source work", async () => {
-  const store = memoryStore();
+  const loss = { throwAfterFirstResultCommit: true };
+  const store = memoryStore(loss);
   const calls = {
     matches: 0,
     reads: 0,
-    throwAfterFirstCommit: true,
     source: "Original People result",
   };
   const continueCapabilityConversation = lostResponseContinuation(calls);
@@ -197,8 +227,9 @@ test("create replay recovers the committed capability result before source work"
   );
 });
 
-test("continue replay recovers the committed capability result before source work", async () => {
-  const store = memoryStore();
+test("continue replay survives bounded-reference pruning with zero rerun work", async () => {
+  const loss = { throwAfterFirstResultCommit: true };
+  const store = memoryStore(loss);
   await store.create({
     actorUserId: ACTOR.userId,
     plantId: ACTOR.plantId,
@@ -211,7 +242,7 @@ test("continue replay recovers the committed capability result before source wor
   const calls = {
     matches: 0,
     reads: 0,
-    throwAfterFirstCommit: true,
+    references: 0,
     source: "Original People result",
   };
   const continueCapabilityConversation = lostResponseContinuation(calls);
@@ -225,11 +256,28 @@ test("continue replay recovers the committed capability result before source wor
     now: NOW,
     store,
     continueCapabilityConversation,
+    resolveReference() {
+      calls.references += 1;
+      return {
+        status: "resolved" as const,
+        reference: resolvedReference("original-person", 99),
+        relevanceKeys: ["original-person" as EvryConversationRelevanceKey],
+      };
+    },
   };
 
   await assert.rejects(
     continueEvryConversation(input),
     /response lost after durable continuation commit/
+  );
+  store.changeState();
+  assert.equal(
+    store
+      .current()
+      ?.state.resolvedReferences.some(
+        ({ key }) => String(key) === "original-person"
+      ),
+    false
   );
   calls.source = "Changed People result";
   const replay = await continueEvryConversation(input);
@@ -240,8 +288,12 @@ test("continue replay recovers the committed capability result before source wor
     "Original People result"
   );
   assert.deepEqual(
-    { matches: calls.matches, reads: calls.reads },
-    { matches: 1, reads: 1 }
+    {
+      matches: calls.matches,
+      reads: calls.reads,
+      references: calls.references,
+    },
+    { matches: 1, reads: 1, references: 1 }
   );
   assert.equal(store.current()?.messages.length, 3);
 });

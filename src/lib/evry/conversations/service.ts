@@ -4,6 +4,7 @@ import type {
   EvryConversationAuthor,
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
+import { hasDurableEvryCapabilityConversationResult } from "@/lib/evry/capabilities/conversation";
 import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
@@ -40,6 +41,7 @@ import {
 import {
   appendEvryConversationRecord,
   createEvryConversationRecord,
+  EvryConversationIdempotencyError,
   findEvryConversationRecord,
   type EvryStoredConversation,
 } from "./repository";
@@ -241,6 +243,38 @@ export type EvryConversationContinuation =
       >;
     }>;
 
+function sameResolvedPageContext(
+  left: EvryResolvedPageContext | null,
+  right: EvryResolvedPageContext | null
+): boolean {
+  return (
+    (left === null && right === null) ||
+    (left !== null &&
+      right !== null &&
+      left.kind === right.kind &&
+      left.recordId === right.recordId)
+  );
+}
+
+function assertDurableCapabilityReplayRequest(input: {
+  conversation: EvryStoredConversation;
+  requestKey: EvryConversationRequestKey;
+  message: string;
+  pageContext: EvryResolvedPageContext | null;
+}): void {
+  const userMessage = input.conversation.messages.find(
+    (message) =>
+      message.requestKey === input.requestKey && message.author === "user"
+  );
+  if (
+    !userMessage ||
+    userMessage.body !== input.message ||
+    !sameResolvedPageContext(userMessage.pageContext, input.pageContext)
+  ) {
+    throw new EvryConversationIdempotencyError();
+  }
+}
+
 /** Persist one user turn and any deterministic clarification; no model runs. */
 export async function continueEvryConversation(input: {
   actor: EvryPlantActor;
@@ -252,6 +286,7 @@ export async function continueEvryConversation(input: {
   now: Date;
   store?: EvryConversationStore;
   continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
+  resolveReference?: typeof resolveEvryConversationReference;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryConversationContinuation | null> {
@@ -271,8 +306,43 @@ export async function continueEvryConversation(input: {
   });
   if (!current) return null;
 
+  // A prior request may have committed both its user turn and its capability
+  // result before the response was lost. Recover that immutable result before
+  // reference resolution, append, selection, or source/plan work can rerun.
+  if (
+    hasDurableEvryCapabilityConversationResult({
+      conversation: current,
+      userRequestKey: requestKey.data,
+    })
+  ) {
+    assertDurableCapabilityReplayRequest({
+      conversation: current,
+      requestKey: requestKey.data,
+      message: input.message,
+      pageContext: input.pageContext,
+    });
+    const resumed = await resumeEvryConversation({
+      actor: input.actor,
+      conversationId: current.id,
+      now: input.now,
+      store,
+      revalidatePlan: input.revalidatePlan,
+    });
+    return resumed
+      ? {
+          status: "continued",
+          resumed,
+          // The immutable conversation is the result. Advisory reference
+          // metadata is not rebuilt from the mutable bounded cache on replay.
+          reference: { status: "not_applicable" },
+        }
+      : null;
+  }
+
   await input.reportStage?.("resolving_references");
-  const reference = resolveEvryConversationReference({
+  const reference = (
+    input.resolveReference ?? resolveEvryConversationReference
+  )({
     text: input.message,
     state: current.state,
     now: input.now,
