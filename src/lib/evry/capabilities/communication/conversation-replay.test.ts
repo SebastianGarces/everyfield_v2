@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EVRY_COMMUNICATION_MAX_RECIPIENTS } from "@/lib/communication/evry-send";
 import { storedTemplateContent } from "@/lib/communication/templates";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { composeEvryCapabilityConversationContinuations } from "@/lib/evry/capabilities/conversation";
@@ -53,7 +54,7 @@ function conversation(): EvryStoredConversation {
 function storedPlan(): StoredEvryActionPlan {
   const content = storedTemplateContent("<p>Original approved draft</p>");
   const recipientIds = Array.from(
-    { length: 101 },
+    { length: EVRY_COMMUNICATION_MAX_RECIPIENTS },
     (_, index) =>
       `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
   );
@@ -131,7 +132,10 @@ test("a committed Communication plan is recovered before changed or deleted sour
     reviewRegistry: COMMUNICATION_EVRY_REVIEW_REGISTRY,
   });
   assert.ok(review);
-  assert.equal(review.confirmation.steps[0]?.resolvedTargets.length, 101);
+  assert.equal(
+    review.confirmation.steps[0]?.resolvedTargets.length,
+    EVRY_COMMUNICATION_MAX_RECIPIENTS
+  );
 
   let committed: StoredEvryActionPlan | null = null;
   let sourceReads = 0;
@@ -174,7 +178,7 @@ test("a committed Communication plan is recovered before changed or deleted sour
         }
         assert.match(
           JSON.stringify(request.artifacts),
-          /Original recipient 101/
+          new RegExp(`Original recipient ${EVRY_COMMUNICATION_MAX_RECIPIENTS}`)
         );
         return conversation();
       },
