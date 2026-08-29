@@ -22,15 +22,6 @@ const COMMUNICATION_ACTION_SOURCE =
   "src/app/(dashboard)/communication/actions.ts";
 const DASHBOARD_ROOT = path.join("src", "app", "(dashboard)");
 
-const FIXTURE_CLASSES = [
-  "selection",
-  "arguments",
-  "confirmation",
-  "execution",
-  "idempotency",
-  "failure",
-] as const;
-
 export type CommunicationEvryOperationKind = "read" | "effect";
 export type CommunicationEvryMutationShape =
   | "single_create"
@@ -77,7 +68,6 @@ export type CommunicationEvryCapabilityInventory = Readonly<{
     applicationCapability: Capability;
     confirmation: "not_required" | "required";
     mutationShape: CommunicationEvryMutationShape | null;
-    fixtureClasses: typeof FIXTURE_CLASSES;
   }>[];
   entries: readonly CommunicationEvrySurface[];
   summary: Readonly<{
@@ -524,10 +514,7 @@ export function generateCommunicationCapabilityInventory(
 
   const byCapability = new Map<
     string,
-    Omit<
-      CommunicationEvryCapabilityInventory["capabilities"][number],
-      "fixtureClasses"
-    >
+    CommunicationEvryCapabilityInventory["capabilities"][number]
   >();
   for (const entry of entries) {
     if (entry.classification.state !== "supported") continue;
@@ -575,7 +562,6 @@ export function generateCommunicationCapabilityInventory(
       surfaceIdentities: [...capability.surfaceIdentities].toSorted(
         compareStrings
       ),
-      fixtureClasses: FIXTURE_CLASSES,
     }))
     .toSorted((left, right) => compareStrings(left.identity, right.identity));
   const count = (kind: CommunicationEvrySurface["kind"]) =>

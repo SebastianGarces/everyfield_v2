@@ -34,6 +34,7 @@ import {
   claimEvryCommunicationTemplateDelete,
   claimEvryCommunicationTemplateFork,
   claimEvryCommunicationTemplateUpdate,
+  getEvryCommunicationTemplateFork,
   getEvryCommunicationTemplateSnapshot,
 } from "@/lib/communication/evry-template-effect";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
@@ -48,7 +49,7 @@ export const COMMUNICATION_TEMPLATE_DELETE_IDENTITY =
 export const COMMUNICATION_TEMPLATE_FORK_IDENTITY =
   "communication.templates.fork";
 
-const contentSchema = z.strictObject({
+const contentShape = {
   name: z.string().trim().min(1).max(255),
   description: z.string().max(1_000).nullable(),
   category: z.enum(templateCategories),
@@ -56,10 +57,34 @@ const contentSchema = z.strictObject({
   subject: z.string().max(500).nullable(),
   body: z.string().min(1).max(100_000),
   bodyHtml: z.string().min(1).max(200_000),
-});
+} as const;
 
-const snapshotSchema = contentSchema.extend({
+/** Canonical rich content: callers cannot confirm one body and store another. */
+const contentSchema = z
+  .strictObject(contentShape)
+  .superRefine((content, ctx) => {
+    const canonical = storedTemplateContent(content.bodyHtml);
+    if (
+      canonical.body !== content.body ||
+      canonical.bodyHtml !== content.bodyHtml
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["bodyHtml"],
+        message: "Template body and HTML must be one canonical sanitized value",
+      });
+    }
+  });
+
+const snapshotSchema = z.strictObject({
   id: z.string().uuid(),
+  name: contentShape.name,
+  description: contentShape.description,
+  category: contentShape.category,
+  channel: contentShape.channel,
+  subject: contentShape.subject,
+  body: contentShape.body,
+  bodyHtml: z.string().min(1).max(200_000).nullable(),
   isSystem: z.boolean(),
   sourceTemplateId: z.string().uuid().nullable(),
   updatedAt: z.string().datetime(),
@@ -73,7 +98,6 @@ const updateArgumentsSchema = z.strictObject({
   targetKind: z.enum(["owned", "system"]),
   resultTemplateId: z.string().uuid(),
   expected: snapshotSchema,
-  changedAt: z.string().datetime(),
   content: contentSchema,
 });
 const deleteArgumentsSchema = z.strictObject({
@@ -217,7 +241,6 @@ export const COMMUNICATION_TEMPLATE_UPDATE_EXECUTION =
               identity: COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
               templateId: parsed.data.expected.id,
               expectedUpdatedAt: parsed.data.expected.updatedAt,
-              changedAt: parsed.data.changedAt,
               content: parsed.data.content,
             })
           : await claimEvryCommunicationSystemTemplateUpdate({
@@ -225,7 +248,6 @@ export const COMMUNICATION_TEMPLATE_UPDATE_EXECUTION =
               identity: COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
               source: parsed.data.expected,
               forkId: parsed.data.resultTemplateId,
-              changedAt: parsed.data.changedAt,
               content: parsed.data.content,
             });
       } catch {
@@ -284,13 +306,15 @@ export const COMMUNICATION_TEMPLATE_FORK_EXECUTION =
     },
   });
 
+export const COMMUNICATION_TEMPLATE_EXECUTIONS = [
+  COMMUNICATION_TEMPLATE_CREATE_EXECUTION,
+  COMMUNICATION_TEMPLATE_UPDATE_EXECUTION,
+  COMMUNICATION_TEMPLATE_DELETE_EXECUTION,
+  COMMUNICATION_TEMPLATE_FORK_EXECUTION,
+] as const;
+
 export const COMMUNICATION_TEMPLATE_EXECUTION_REGISTRY =
-  createEvryExecutionCapabilityRegistry([
-    COMMUNICATION_TEMPLATE_CREATE_EXECUTION,
-    COMMUNICATION_TEMPLATE_UPDATE_EXECUTION,
-    COMMUNICATION_TEMPLATE_DELETE_EXECUTION,
-    COMMUNICATION_TEMPLATE_FORK_EXECUTION,
-  ]);
+  createEvryExecutionCapabilityRegistry(COMMUNICATION_TEMPLATE_EXECUTIONS);
 export const COMMUNICATION_TEMPLATE_PLAN_REGISTRY =
   COMMUNICATION_TEMPLATE_EXECUTION_REGISTRY.planRegistry;
 
@@ -298,215 +322,225 @@ function templateHref(templateId: string) {
   return `/communication/templates/${templateId}/edit`;
 }
 
+function effectiveSnapshotContent(snapshot: z.infer<typeof snapshotSchema>) {
+  return storedTemplateContent(snapshot.bodyHtml ?? snapshot.body);
+}
+
+export const COMMUNICATION_TEMPLATE_REVIEWS = [
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_TEMPLATE_CREATE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = createArgumentsSchema.parse(step?.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Create template “${parsed.content.name}”`,
+        actionLabel: "Create template",
+        consequences: ["This adds one reusable template to this plant."],
+        steps: [
+          {
+            stepId: step?.id ?? "create-template",
+            title: "Create communication template",
+            effectKind: "other",
+            reversibility: "reversible",
+            resolvedTargets: [
+              {
+                label: "Template",
+                value: parsed.content.name,
+                sourceLink: null,
+              },
+            ],
+            counts: [{ label: "Templates to create", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [
+              { label: "Subject", content: parsed.content.subject ?? "" },
+              { label: "Body", content: parsed.content.body },
+            ],
+            beforeAfter: [],
+          },
+        ],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_TEMPLATE_UPDATE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = updateArgumentsSchema.parse(step?.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Update template “${parsed.expected.name}”`,
+        actionLabel: parsed.expected.isSystem
+          ? "Create edited copy"
+          : "Save template",
+        consequences: [
+          parsed.expected.isSystem
+            ? "This creates one plant-owned edited copy; the system template remains unchanged."
+            : "This replaces the selected plant template content.",
+        ],
+        steps: [
+          {
+            stepId: step?.id ?? "update-template",
+            title: "Update communication template",
+            effectKind: "other",
+            reversibility: "reversible",
+            resolvedTargets: [
+              {
+                label: "Template",
+                value: parsed.expected.name,
+                sourceLink: {
+                  label: `Open ${parsed.expected.name}`,
+                  href: templateHref(parsed.expected.id),
+                },
+              },
+            ],
+            counts: [{ label: "Templates to update", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [],
+            beforeAfter: [
+              {
+                label: "Name",
+                before: parsed.expected.name,
+                after: parsed.content.name,
+                count: 1,
+              },
+              {
+                label: "Subject",
+                before: parsed.expected.subject ?? "",
+                after: parsed.content.subject ?? "",
+                count: 1,
+              },
+              {
+                label: "Body",
+                before: effectiveSnapshotContent(parsed.expected).body,
+                after: parsed.content.body,
+                count: 1,
+              },
+            ],
+          },
+        ],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_TEMPLATE_DELETE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = deleteArgumentsSchema.parse(step?.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Delete template “${parsed.expected.name}”`,
+        actionLabel: "Delete template",
+        consequences: ["This permanently removes the selected plant template."],
+        steps: [
+          {
+            stepId: step?.id ?? "delete-template",
+            title: "Delete communication template",
+            effectKind: "destructive",
+            reversibility: "irreversible",
+            resolvedTargets: [
+              {
+                label: "Template",
+                value: parsed.expected.name,
+                sourceLink: {
+                  label: `Open ${parsed.expected.name}`,
+                  href: templateHref(parsed.expected.id),
+                },
+              },
+            ],
+            counts: [{ label: "Templates to delete", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [
+              { label: "Subject", content: parsed.expected.subject ?? "" },
+              {
+                label: "Body",
+                content: effectiveSnapshotContent(parsed.expected).body,
+              },
+            ],
+            beforeAfter: [
+              {
+                label: "Template",
+                before: parsed.expected.name,
+                after: "Deleted",
+                count: 1,
+              },
+            ],
+          },
+        ],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_TEMPLATE_FORK_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = forkArgumentsSchema.parse(step?.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Copy template “${parsed.source.name}”`,
+        actionLabel: "Create copy",
+        consequences: [
+          "This adds one plant-owned copy; the system template remains unchanged.",
+        ],
+        steps: [
+          {
+            stepId: step?.id ?? "fork-template",
+            title: "Copy system template",
+            effectKind: "other",
+            reversibility: "reversible",
+            resolvedTargets: [
+              {
+                label: "System template",
+                value: parsed.source.name,
+                sourceLink: {
+                  label: `Open ${parsed.source.name}`,
+                  href: templateHref(parsed.source.id),
+                },
+              },
+            ],
+            counts: [{ label: "Plant copies to create", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [
+              { label: "Subject", content: parsed.source.subject ?? "" },
+              {
+                label: "Body",
+                content: effectiveSnapshotContent(parsed.source).body,
+              },
+            ],
+            beforeAfter: [],
+          },
+        ],
+      });
+    },
+  }),
+] as const;
+
 export const COMMUNICATION_TEMPLATE_REVIEW_REGISTRY =
-  createEvryArtifactReviewRegistry([
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [COMMUNICATION_TEMPLATE_CREATE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = createArgumentsSchema.parse(step?.arguments);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Create template “${parsed.content.name}”`,
-          actionLabel: "Create template",
-          consequences: ["This adds one reusable template to this plant."],
-          steps: [
-            {
-              stepId: step?.id ?? "create-template",
-              title: "Create communication template",
-              effectKind: "other",
-              reversibility: "reversible",
-              resolvedTargets: [
-                {
-                  label: "Template",
-                  value: parsed.content.name,
-                  sourceLink: null,
-                },
-              ],
-              counts: [{ label: "Templates to create", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [
-                { label: "Subject", content: parsed.content.subject ?? "" },
-                { label: "Body", content: parsed.content.body },
-              ],
-              beforeAfter: [],
-            },
-          ],
-        });
-      },
-    }),
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [COMMUNICATION_TEMPLATE_UPDATE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = updateArgumentsSchema.parse(step?.arguments);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Update template “${parsed.expected.name}”`,
-          actionLabel: parsed.expected.isSystem
-            ? "Create edited copy"
-            : "Save template",
-          consequences: [
-            parsed.expected.isSystem
-              ? "This creates one plant-owned edited copy; the system template remains unchanged."
-              : "This replaces the selected plant template content.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "update-template",
-              title: "Update communication template",
-              effectKind: "other",
-              reversibility: "reversible",
-              resolvedTargets: [
-                {
-                  label: "Template",
-                  value: parsed.expected.name,
-                  sourceLink: {
-                    label: `Open ${parsed.expected.name}`,
-                    href: templateHref(parsed.expected.id),
-                  },
-                },
-              ],
-              counts: [{ label: "Templates to update", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [],
-              beforeAfter: [
-                {
-                  label: "Name",
-                  before: parsed.expected.name,
-                  after: parsed.content.name,
-                  count: 1,
-                },
-                {
-                  label: "Subject",
-                  before: parsed.expected.subject ?? "",
-                  after: parsed.content.subject ?? "",
-                  count: 1,
-                },
-                {
-                  label: "Body",
-                  before: parsed.expected.body,
-                  after: parsed.content.body,
-                  count: 1,
-                },
-              ],
-            },
-          ],
-        });
-      },
-    }),
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [COMMUNICATION_TEMPLATE_DELETE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = deleteArgumentsSchema.parse(step?.arguments);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Delete template “${parsed.expected.name}”`,
-          actionLabel: "Delete template",
-          consequences: [
-            "This permanently removes the selected plant template.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "delete-template",
-              title: "Delete communication template",
-              effectKind: "destructive",
-              reversibility: "irreversible",
-              resolvedTargets: [
-                {
-                  label: "Template",
-                  value: parsed.expected.name,
-                  sourceLink: {
-                    label: `Open ${parsed.expected.name}`,
-                    href: templateHref(parsed.expected.id),
-                  },
-                },
-              ],
-              counts: [{ label: "Templates to delete", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [
-                { label: "Subject", content: parsed.expected.subject ?? "" },
-                { label: "Body", content: parsed.expected.body },
-              ],
-              beforeAfter: [
-                {
-                  label: "Template",
-                  before: parsed.expected.name,
-                  after: "Deleted",
-                  count: 1,
-                },
-              ],
-            },
-          ],
-        });
-      },
-    }),
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [COMMUNICATION_TEMPLATE_FORK_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = forkArgumentsSchema.parse(step?.arguments);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Copy template “${parsed.source.name}”`,
-          actionLabel: "Create copy",
-          consequences: [
-            "This adds one plant-owned copy; the system template remains unchanged.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "fork-template",
-              title: "Copy system template",
-              effectKind: "other",
-              reversibility: "reversible",
-              resolvedTargets: [
-                {
-                  label: "System template",
-                  value: parsed.source.name,
-                  sourceLink: {
-                    label: `Open ${parsed.source.name}`,
-                    href: templateHref(parsed.source.id),
-                  },
-                },
-              ],
-              counts: [{ label: "Plant copies to create", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [
-                { label: "Subject", content: parsed.source.subject ?? "" },
-                { label: "Body", content: parsed.source.body },
-              ],
-              beforeAfter: [],
-            },
-          ],
-        });
-      },
-    }),
-  ]);
+  createEvryArtifactReviewRegistry(COMMUNICATION_TEMPLATE_REVIEWS);
 
 function exactContent(input: {
   name: string;
@@ -577,7 +611,6 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
   actor: EvryPlantActor;
   selection: CommunicationEvryTemplateSelection;
   requestKey: EvryPlanRequestKey;
-  now: Date;
 }) {
   if (input.selection.kind === "create_template") {
     return storeTemplatePlan({
@@ -660,7 +693,6 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
         ? communicationEvryEffectUuid(input.requestKey, "edited-template")
         : snapshot.id,
       expected: snapshot,
-      changedAt: input.now.toISOString(),
       content: exactContent({
         name: input.selection.name,
         description: snapshot.description,
@@ -689,35 +721,76 @@ export async function communicationEvryTemplateTargetIsCurrent(input: {
       })) === null
     );
   }
-  const expected = (() => {
-    if (
-      input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_UPDATE_IDENTITY
-    ) {
-      const parsed = updateArgumentsSchema.safeParse(input.step.arguments);
-      return parsed.success ? parsed.data.expected : null;
+  if (
+    input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_UPDATE_IDENTITY
+  ) {
+    const parsed = updateArgumentsSchema.safeParse(input.step.arguments);
+    if (!parsed.success) return false;
+    const current = await getEvryCommunicationTemplateSnapshot({
+      churchId: input.actor.plantId,
+      templateId: parsed.data.expected.id,
+    });
+    if (!sameSnapshot(current, parsed.data.expected)) return false;
+    if (parsed.data.targetKind === "owned") {
+      return parsed.data.resultTemplateId === parsed.data.expected.id;
     }
-    if (
-      input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_DELETE_IDENTITY
-    ) {
-      const parsed = deleteArgumentsSchema.safeParse(input.step.arguments);
-      return parsed.success ? parsed.data.expected : null;
-    }
-    if (
-      input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_FORK_IDENTITY
-    ) {
-      const parsed = forkArgumentsSchema.safeParse(input.step.arguments);
-      return parsed.success ? parsed.data.source : null;
-    }
-    return null;
-  })();
-  if (!expected) return false;
-  const current = await getEvryCommunicationTemplateSnapshot({
-    churchId: input.actor.plantId,
-    templateId: expected.id,
-  });
-  return Boolean(
-    current &&
-    current.isSystem === expected.isSystem &&
-    current.updatedAt === expected.updatedAt
+    const [fork, result] = await Promise.all([
+      getEvryCommunicationTemplateFork({
+        churchId: input.actor.plantId,
+        sourceTemplateId: parsed.data.expected.id,
+      }),
+      getEvryCommunicationTemplateSnapshot({
+        churchId: input.actor.plantId,
+        templateId: parsed.data.resultTemplateId,
+      }),
+    ]);
+    return fork === null && result === null;
+  }
+  if (
+    input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_DELETE_IDENTITY
+  ) {
+    const parsed = deleteArgumentsSchema.safeParse(input.step.arguments);
+    if (!parsed.success || parsed.data.expected.isSystem) return false;
+    return sameSnapshot(
+      await getEvryCommunicationTemplateSnapshot({
+        churchId: input.actor.plantId,
+        templateId: parsed.data.expected.id,
+      }),
+      parsed.data.expected
+    );
+  }
+  if (input.step.capabilityIdentity === COMMUNICATION_TEMPLATE_FORK_IDENTITY) {
+    const parsed = forkArgumentsSchema.safeParse(input.step.arguments);
+    if (!parsed.success || !parsed.data.source.isSystem) return false;
+    const [source, fork, result] = await Promise.all([
+      getEvryCommunicationTemplateSnapshot({
+        churchId: input.actor.plantId,
+        templateId: parsed.data.source.id,
+      }),
+      getEvryCommunicationTemplateFork({
+        churchId: input.actor.plantId,
+        sourceTemplateId: parsed.data.source.id,
+      }),
+      getEvryCommunicationTemplateSnapshot({
+        churchId: input.actor.plantId,
+        templateId: parsed.data.forkId,
+      }),
+    ]);
+    return (
+      sameSnapshot(source, parsed.data.source) &&
+      fork === null &&
+      result === null
+    );
+  }
+  return false;
+}
+
+function sameSnapshot(
+  current: Awaited<ReturnType<typeof getEvryCommunicationTemplateSnapshot>>,
+  expected: z.infer<typeof snapshotSchema>
+) {
+  const parsed = snapshotSchema.safeParse(current);
+  return (
+    parsed.success && JSON.stringify(parsed.data) === JSON.stringify(expected)
   );
 }

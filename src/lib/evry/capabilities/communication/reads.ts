@@ -18,8 +18,13 @@ import {
 } from "@/lib/communication/service";
 import {
   getGroupRecipients,
+  isRecipientGroupSelector,
   listRecipientTeams,
 } from "@/lib/communication/recipient-groups";
+import {
+  evaluateResendEligibility,
+  resendBlockedHint,
+} from "@/lib/communication/resend-policy";
 import { getNonOpenerSummary } from "@/lib/communication/send";
 import { getTemplate, getTemplates } from "@/lib/communication/templates";
 import { listPeople } from "@/lib/people/service";
@@ -333,7 +338,9 @@ export const COMMUNICATION_RECIPIENT_GROUP_READ = defineEvryReadRegistration({
   capabilityIdentity: COMMUNICATION_READ_IDENTITIES.group,
   inputShape: groupInput,
   async run({ authorization }, { group }) {
-    const people = await getGroupRecipients(authorization.actor.plantId, group);
+    const people = isRecipientGroupSelector(group)
+      ? await getGroupRecipients(authorization.actor.plantId, group)
+      : [];
     return peopleArtifact({
       title: "Resolved recipient group",
       filterLabel: "Group",
@@ -390,11 +397,29 @@ export const COMMUNICATION_RESEND_SUMMARY_READ = defineEvryReadRegistration({
   capabilityIdentity: COMMUNICATION_READ_IDENTITIES.resendSummary,
   inputShape: idInput,
   async run({ authorization }, { id }) {
-    const summary = await getNonOpenerSummary(authorization.actor.plantId, id);
+    const [summary, message] = await Promise.all([
+      getNonOpenerSummary(authorization.actor.plantId, id),
+      getCommunication(authorization.actor.plantId, id),
+    ]);
+    const eligibility = evaluateResendEligibility({
+      status: message?.status ?? "missing",
+      sentAt: message?.sentAt ?? null,
+      deliveredCount: summary.delivered,
+      nonOpenerCount: summary.personIds.length,
+    });
+    const eligibleIds = eligibility.allowed ? summary.personIds : [];
     return buildEvryReadArtifact({
       title: "Resend eligibility",
       filters: [{ label: "Original message", value: id }],
       exclusions: [
+        ...(!eligibility.allowed && eligibility.reason
+          ? [
+              {
+                reason: resendBlockedHint(eligibility.reason),
+                count: Math.max(1, summary.personIds.length),
+              },
+            ]
+          : []),
         { reason: "Already opened", count: summary.opened },
         {
           reason: "Not eligible for resend",
@@ -404,7 +429,7 @@ export const COMMUNICATION_RESEND_SUMMARY_READ = defineEvryReadRegistration({
           ),
         },
       ].filter(({ count }) => count > 0),
-      items: summary.personIds.map((personId) => ({
+      items: eligibleIds.map((personId) => ({
         id: personId,
         label: personId,
         facts: [{ label: "Eligibility", value: "No open recorded" }],
@@ -552,7 +577,9 @@ export function selectCommunicationEvryRead(
   if (/^(?:show|list) recipient teams[.!?]*$/i.test(text))
     return { kind: "teams" };
   match = /^resolve recipient group\s+(.+?)[.!?]*$/i.exec(text);
-  if (match?.[1]) return { kind: "group", group: match[1].trim() };
+  if (match?.[1] && isRecipientGroupSelector(match[1].trim())) {
+    return { kind: "group", group: match[1].trim() };
+  }
   match = /^search communication recipients\s+(.+?)[.!?]*$/i.exec(text);
   if (match?.[1]) return { kind: "people", query: match[1].trim() };
   match = new RegExp(

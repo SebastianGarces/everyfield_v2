@@ -1,0 +1,593 @@
+import { z } from "zod";
+
+import {
+  type EvryCommunicationAudienceSnapshot,
+  resolveEvryCommunicationAudience,
+  sendFrozenEvryCommunication,
+} from "@/lib/communication/evry-send";
+import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
+import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
+import { getCommunication } from "@/lib/communication/service";
+import { getNonOpenerSummary } from "@/lib/communication/send";
+import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
+import {
+  createEvryArtifactReviewRegistry,
+  defineEvryArtifactReview,
+  trustedReviewForEvryPlanDocument,
+} from "@/lib/evry/artifacts/trusted-plan-review";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
+import {
+  authorizeEvryEffectCapability,
+  eligibleEvryCapabilitiesFor,
+} from "@/lib/evry/eligibility/capabilities";
+import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import {
+  createEvryExecutionCapabilityRegistry,
+  defineEvryExecutionCapability,
+  type EvryEffectInput,
+} from "@/lib/evry/executor";
+import {
+  parseEvryActionPlanCandidate,
+  type EvryActionStep,
+  type EvryPlanRequestKey,
+} from "@/lib/evry/plans";
+import { createEvryActionPlanRecord } from "@/lib/evry/plans/repository";
+import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
+import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
+
+export const COMMUNICATION_MESSAGE_SEND_IDENTITY =
+  "communication.messages.send";
+export const COMMUNICATION_RESEND_NON_OPENERS_IDENTITY =
+  "communication.resends.send-to-non-openers";
+
+const recipientSchema = z.strictObject({
+  personId: z.string().uuid(),
+  label: z.string().trim().min(1).max(511),
+  email: z.string().trim().min(1).max(255),
+  subject: z.string().max(500),
+  bodyHtml: z.string().min(1).max(200_000),
+  bodyText: z.string().min(1).max(100_000),
+});
+
+const audienceSchema = z.strictObject({
+  subject: z.string().max(500),
+  body: z.string().min(1).max(100_000),
+  bodyHtml: z.string().min(1).max(200_000),
+  channel: z.literal("email"),
+  templateId: z.string().uuid().nullable(),
+  meetingId: z.string().uuid().nullable(),
+  messageClass: z.enum(["transactional_meeting", "relationship_message"]),
+  recipients: z.array(recipientSchema).min(1).max(100),
+  exclusions: z
+    .array(
+      z.strictObject({
+        reason: z.string().trim().min(1).max(500),
+        count: z.number().int().positive(),
+      })
+    )
+    .max(16),
+});
+
+const sourceMessageSchema = z.strictObject({
+  id: z.string().uuid(),
+  subject: z.string().max(500),
+  body: z.string().min(1).max(100_000),
+  bodyHtml: z.string().min(1).max(200_000).nullable(),
+  channel: z.literal("email"),
+  templateId: z.string().uuid().nullable(),
+  meetingId: z.string().uuid().nullable(),
+  status: z.literal("sent"),
+  sentAt: z.string().datetime(),
+  recipientCount: z.number().int().nonnegative().nullable(),
+});
+
+const sendArgumentsSchema = z.strictObject({
+  communicationId: z.string().uuid(),
+  audience: audienceSchema,
+});
+
+const resendArgumentsSchema = z.strictObject({
+  source: sourceMessageSchema,
+  communicationId: z.string().uuid(),
+  audience: audienceSchema,
+});
+
+export type CommunicationEvryMessageSelection =
+  | Readonly<{
+      kind: "send";
+      recipientIds: readonly string[] | null;
+      subject: string;
+      body: string;
+      templateId?: string | null;
+      meetingId?: string | null;
+    }>
+  | Readonly<{ kind: "resend"; communicationId: string }>;
+
+const UUID =
+  "([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})";
+
+/** Closed message grammar. Arbitrary URLs, addresses and provider inputs do not match. */
+export function selectCommunicationEvryMessageEffect(
+  literalUserText: string
+): CommunicationEvryMessageSelection | null {
+  const text = literalUserText.normalize("NFKC").trim();
+  const contextual = /^send email to this person:\s*([^|]+)\|([\s\S]+)$/i.exec(
+    text
+  );
+  if (contextual?.[1]?.trim() && contextual[2]?.trim()) {
+    return {
+      kind: "send",
+      recipientIds: null,
+      subject: contextual[1].trim(),
+      body: contextual[2].trim(),
+    };
+  }
+  const explicit =
+    /^send email to people\s+([^:]+):\s*([^|]+)\|([\s\S]+)$/i.exec(text);
+  if (explicit?.[1] && explicit[2]?.trim() && explicit[3]?.trim()) {
+    const recipientIds = explicit[1].split(",").map((id) => id.trim());
+    if (
+      recipientIds.length > 0 &&
+      recipientIds.length <= 100 &&
+      recipientIds.every((id) => z.string().uuid().safeParse(id).success)
+    ) {
+      return {
+        kind: "send",
+        recipientIds,
+        subject: explicit[2].trim(),
+        body: explicit[3].trim(),
+      };
+    }
+  }
+  const resend = new RegExp(
+    `^resend message\\s+${UUID}\\s+to non-openers[.!?]*$`,
+    "i"
+  ).exec(text);
+  return resend?.[1] ? { kind: "resend", communicationId: resend[1] } : null;
+}
+
+export const COMMUNICATION_MESSAGE_SEND_PLAN = defineEvryPlanCapability({
+  identity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
+  effectClass: "outbound_communication",
+  arguments: sendArgumentsSchema.shape,
+});
+
+export const COMMUNICATION_RESEND_NON_OPENERS_PLAN = defineEvryPlanCapability({
+  identity: COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
+  effectClass: "outbound_communication",
+  arguments: resendArgumentsSchema.shape,
+});
+
+function exactExecutionTuple(input: EvryEffectInput, identity: string) {
+  return (
+    input.authorization.registration.identity === identity &&
+    input.execution.capabilityIdentity === identity &&
+    input.execution.actorUserId === input.authorization.actor.userId &&
+    input.execution.plantId === input.authorization.actor.plantId
+  );
+}
+
+export const COMMUNICATION_MESSAGE_SEND_EXECUTION =
+  defineEvryExecutionCapability({
+    planCapability: COMMUNICATION_MESSAGE_SEND_PLAN,
+    async executeIfCurrent(input) {
+      const parsed = sendArgumentsSchema.safeParse(input.arguments);
+      if (
+        !parsed.success ||
+        !exactExecutionTuple(input, COMMUNICATION_MESSAGE_SEND_IDENTITY)
+      ) {
+        return { status: "refused", excludedCount: 1 };
+      }
+      try {
+        return await sendFrozenEvryCommunication({
+          effect: input,
+          identity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+        });
+      } catch {
+        return { status: "retryable" };
+      }
+    },
+  });
+
+export const COMMUNICATION_RESEND_NON_OPENERS_EXECUTION =
+  defineEvryExecutionCapability({
+    planCapability: COMMUNICATION_RESEND_NON_OPENERS_PLAN,
+    async executeIfCurrent(input) {
+      const parsed = resendArgumentsSchema.safeParse(input.arguments);
+      if (
+        !parsed.success ||
+        !exactExecutionTuple(input, COMMUNICATION_RESEND_NON_OPENERS_IDENTITY)
+      ) {
+        return { status: "refused", excludedCount: 1 };
+      }
+      try {
+        const original = await exactSourceMessage(
+          input.authorization.actor.plantId,
+          parsed.data.source
+        );
+        if (!original) return { status: "refused", excludedCount: 1 };
+        const summary = await getNonOpenerSummary(
+          input.authorization.actor.plantId,
+          parsed.data.source.id
+        );
+        if (
+          !evaluateResendEligibility({
+            status: original.status,
+            sentAt: original.sentAt,
+            deliveredCount: summary.delivered,
+            nonOpenerCount: summary.personIds.length,
+          }).allowed
+        ) {
+          return { status: "refused", excludedCount: 1 };
+        }
+        return await sendFrozenEvryCommunication({
+          effect: input,
+          identity: COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
+          communicationId: parsed.data.communicationId,
+          audience: parsed.data.audience,
+          eligiblePersonIds: new Set(summary.personIds),
+        });
+      } catch {
+        return { status: "retryable" };
+      }
+    },
+  });
+
+export const COMMUNICATION_MESSAGE_EXECUTIONS = [
+  COMMUNICATION_MESSAGE_SEND_EXECUTION,
+  COMMUNICATION_RESEND_NON_OPENERS_EXECUTION,
+] as const;
+
+export const COMMUNICATION_MESSAGE_EXECUTION_REGISTRY =
+  createEvryExecutionCapabilityRegistry(COMMUNICATION_MESSAGE_EXECUTIONS);
+export const COMMUNICATION_MESSAGE_PLAN_REGISTRY =
+  COMMUNICATION_MESSAGE_EXECUTION_REGISTRY.planRegistry;
+
+function preview(value: string, fallback: string) {
+  return (value.trim() || fallback).slice(0, 4_000);
+}
+
+function reviewStep(
+  step: EvryActionStep,
+  audience: EvryCommunicationAudienceSnapshot,
+  input: { resend: boolean; sourceId?: string }
+) {
+  return {
+    stepId: step.id,
+    title: input.resend ? "Resend the approved message" : "Send the message",
+    effectKind: "communication" as const,
+    reversibility: "irreversible" as const,
+    resolvedTargets: audience.recipients.map((recipient) => ({
+      label: "Recipient",
+      value: `${recipient.label} · ${recipient.email}`,
+      sourceLink: {
+        label: `Open ${recipient.label}`,
+        href: `/people/${recipient.personId}`,
+      },
+    })),
+    counts: [
+      {
+        label: input.resend ? "Emails to resend" : "Emails to send",
+        count: audience.recipients.length,
+      },
+    ],
+    exclusions: audience.exclusions,
+    dateTime: null,
+    contentPreviews: [
+      { label: "Subject", content: preview(audience.subject, "(No subject)") },
+      { label: "Message", content: preview(audience.body, "(Empty message)") },
+    ],
+    beforeAfter: [
+      {
+        label: input.resend ? "Resend delivery" : "Email delivery",
+        before: "Not sent",
+        after: "Sent immediately",
+        count: audience.recipients.length,
+      },
+    ],
+  };
+}
+
+export const COMMUNICATION_MESSAGE_REVIEWS = [
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_MESSAGE_SEND_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0]!;
+      const parsed = sendArgumentsSchema.parse(step.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Send email to ${parsed.audience.recipients.length}`,
+        actionLabel: `Send to ${parsed.audience.recipients.length}`,
+        consequences: [
+          `This immediately sends ${parsed.audience.recipients.length} email${parsed.audience.recipients.length === 1 ? "" : "s"}; delivery cannot be undone.`,
+        ],
+        steps: [reviewStep(step, parsed.audience, { resend: false })],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [COMMUNICATION_RESEND_NON_OPENERS_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0]!;
+      const parsed = resendArgumentsSchema.parse(step.arguments);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Resend to ${parsed.audience.recipients.length} non-opener${parsed.audience.recipients.length === 1 ? "" : "s"}`,
+        actionLabel: `Resend to ${parsed.audience.recipients.length}`,
+        consequences: [
+          "This creates a new message and immediately emails only the still-eligible people from the reviewed non-opener audience.",
+        ],
+        steps: [
+          reviewStep(step, parsed.audience, {
+            resend: true,
+            sourceId: parsed.source.id,
+          }),
+        ],
+      });
+    },
+  }),
+] as const;
+
+export const COMMUNICATION_MESSAGE_REVIEW_REGISTRY =
+  createEvryArtifactReviewRegistry(COMMUNICATION_MESSAGE_REVIEWS);
+
+async function storePlan(input: {
+  actor: EvryPlantActor;
+  identity: string;
+  requestKey: EvryPlanRequestKey;
+  stepId: string;
+  arguments: Record<string, unknown>;
+}) {
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: input.stepId,
+          capabilityIdentity: input.identity,
+          arguments: input.arguments,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: COMMUNICATION_MESSAGE_PLAN_REGISTRY,
+    eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
+  });
+  const stored = await createEvryActionPlanRecord({
+    actorUserId: input.actor.userId,
+    plantId: input.actor.plantId,
+    requestKey: input.requestKey,
+    document,
+  });
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: stored.id,
+    fingerprint: stored.fingerprint,
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan,
+    document,
+    reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
+  });
+  return review ? { plan, confirmation: review.confirmation } : null;
+}
+
+function sourceSnapshot(
+  message: NonNullable<Awaited<ReturnType<typeof getCommunication>>>
+) {
+  return sourceMessageSchema.safeParse({
+    id: message.id,
+    subject: message.subject ?? "",
+    body: message.body,
+    bodyHtml: message.bodyHtml,
+    channel: message.channel,
+    templateId: message.templateId,
+    meetingId: message.meetingId,
+    status: message.status,
+    sentAt: message.sentAt?.toISOString(),
+    recipientCount: message.recipientCount,
+  });
+}
+
+async function exactSourceMessage(
+  plantId: string,
+  expected: z.infer<typeof sourceMessageSchema>
+) {
+  const current = await getCommunication(plantId, expected.id);
+  if (!current) return null;
+  const snapshot = sourceSnapshot(current);
+  return snapshot.success &&
+    JSON.stringify(snapshot.data) === JSON.stringify(expected)
+    ? current
+    : null;
+}
+
+async function authorizeExactActor(actor: EvryPlantActor, identity: string) {
+  const authorization = await authorizeEvryEffectCapability(identity);
+  return authorization &&
+    authorization.actor.userId === actor.userId &&
+    authorization.actor.plantId === actor.plantId
+    ? authorization.actor
+    : null;
+}
+
+/** Resolve and persist one exact outbound plan after a fresh send authorization. */
+export async function proposeCommunicationEvryMessageEffect(input: {
+  actor: EvryPlantActor;
+  pageContext: EvryResolvedPageContext | null;
+  selection: CommunicationEvryMessageSelection;
+  requestKey: EvryPlanRequestKey;
+  now: Date;
+}) {
+  const identity =
+    input.selection.kind === "send"
+      ? COMMUNICATION_MESSAGE_SEND_IDENTITY
+      : COMMUNICATION_RESEND_NON_OPENERS_IDENTITY;
+  const actor = await authorizeExactActor(input.actor, identity);
+  if (!actor) return null;
+
+  if (input.selection.kind === "send") {
+    const recipientIds =
+      input.selection.recipientIds ??
+      (input.pageContext?.kind === "person"
+        ? [input.pageContext.recordId]
+        : []);
+    const audience = await resolveEvryCommunicationAudience({
+      churchId: actor.plantId,
+      recipientIds,
+      subject: input.selection.subject,
+      body: input.selection.body,
+      templateId: input.selection.templateId,
+      meetingId: input.selection.meetingId,
+    });
+    const parsedAudience = audienceSchema.safeParse(audience);
+    if (!parsedAudience.success) return null;
+    return storePlan({
+      actor,
+      identity,
+      requestKey: input.requestKey,
+      stepId: "send-message",
+      arguments: sendArgumentsSchema.parse({
+        communicationId: communicationEvryEffectUuid(
+          input.requestKey,
+          "communication"
+        ),
+        audience: parsedAudience.data,
+      }),
+    });
+  }
+
+  const original = await getCommunication(
+    actor.plantId,
+    input.selection.communicationId
+  );
+  if (!original) return null;
+  const source = sourceSnapshot(original);
+  if (!source.success) return null;
+  const summary = await getNonOpenerSummary(actor.plantId, original.id);
+  if (
+    !evaluateResendEligibility({
+      status: original.status,
+      sentAt: original.sentAt,
+      deliveredCount: summary.delivered,
+      nonOpenerCount: summary.personIds.length,
+      now: input.now,
+    }).allowed
+  ) {
+    return null;
+  }
+  const audience = await resolveEvryCommunicationAudience({
+    churchId: actor.plantId,
+    recipientIds: summary.personIds,
+    subject: original.subject ?? "",
+    body: original.bodyHtml ?? original.body,
+    channel: original.channel,
+    templateId: original.templateId,
+    meetingId: original.meetingId,
+  });
+  const parsedAudience = audienceSchema.safeParse(audience);
+  if (!parsedAudience.success) return null;
+  return storePlan({
+    actor,
+    identity,
+    requestKey: input.requestKey,
+    stepId: "resend-non-openers",
+    arguments: resendArgumentsSchema.parse({
+      source: source.data,
+      communicationId: communicationEvryEffectUuid(
+        input.requestKey,
+        "resent-communication"
+      ),
+      audience: parsedAudience.data,
+    }),
+  });
+}
+
+function exactPlannedMessage(
+  message: NonNullable<Awaited<ReturnType<typeof getCommunication>>>,
+  actor: EvryPlantActor,
+  audience: z.infer<typeof audienceSchema>
+) {
+  return (
+    message.createdById === actor.userId &&
+    message.subject === audience.subject &&
+    message.body === audience.body &&
+    message.bodyHtml === audience.bodyHtml &&
+    message.channel === audience.channel &&
+    message.templateId === audience.templateId &&
+    message.meetingId === audience.meetingId &&
+    message.recipientCount === audience.recipients.length
+  );
+}
+
+async function plannedMessageIsAvailable(input: {
+  actor: EvryPlantActor;
+  communicationId: string;
+  audience: z.infer<typeof audienceSchema>;
+}) {
+  const existing = await getCommunication(
+    input.actor.plantId,
+    input.communicationId
+  );
+  return (
+    !existing || exactPlannedMessage(existing, input.actor, input.audience)
+  );
+}
+
+/** Revalidation permits recipient shrinkage but never a new or changed target. */
+export async function communicationEvryMessageTargetIsCurrent(input: {
+  actor: EvryPlantActor;
+  step: EvryActionStep;
+}): Promise<boolean> {
+  if (input.step.capabilityIdentity === COMMUNICATION_MESSAGE_SEND_IDENTITY) {
+    const parsed = sendArgumentsSchema.safeParse(input.step.arguments);
+    return Boolean(
+      parsed.success &&
+      (await plannedMessageIsAvailable({
+        actor: input.actor,
+        communicationId: parsed.data.communicationId,
+        audience: parsed.data.audience,
+      }))
+    );
+  }
+  if (
+    input.step.capabilityIdentity !== COMMUNICATION_RESEND_NON_OPENERS_IDENTITY
+  ) {
+    return false;
+  }
+  const parsed = resendArgumentsSchema.safeParse(input.step.arguments);
+  if (!parsed.success) return false;
+  const original = await exactSourceMessage(
+    input.actor.plantId,
+    parsed.data.source
+  );
+  if (!original) return false;
+  const summary = await getNonOpenerSummary(input.actor.plantId, original.id);
+  const reviewed = new Set(
+    parsed.data.audience.recipients.map(({ personId }) => personId)
+  );
+  return (
+    evaluateResendEligibility({
+      status: original.status,
+      sentAt: original.sentAt,
+      deliveredCount: summary.delivered,
+      nonOpenerCount: summary.personIds.length,
+    }).allowed &&
+    summary.personIds.every((personId) => reviewed.has(personId)) &&
+    (await plannedMessageIsAvailable({
+      actor: input.actor,
+      communicationId: parsed.data.communicationId,
+      audience: parsed.data.audience,
+    }))
+  );
+}

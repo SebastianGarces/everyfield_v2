@@ -16,15 +16,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.delivery.get-church-totals",
@@ -36,15 +28,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.delivery.get-meeting-tracking",
@@ -56,15 +40,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.delivery.get-message",
@@ -77,15 +53,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.delivery.get-message-recipients",
@@ -97,15 +65,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.history.get-meeting",
@@ -117,15 +77,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.history.get-person",
@@ -137,15 +89,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.history.list",
@@ -164,15 +108,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.messages.send",
@@ -184,15 +120,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "external_send",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "external_send"
     },
     {
       "identity": "communication.recipients.list-teams",
@@ -204,15 +132,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.recipients.resolve-group",
@@ -224,15 +144,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.recipients.search-people",
@@ -244,15 +156,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.resends.get-eligible-non-openers",
@@ -264,15 +168,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.resends.send-to-non-openers",
@@ -284,15 +180,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "external_resend",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "external_resend"
     },
     {
       "identity": "communication.templates.create",
@@ -304,15 +192,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "single_create",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "single_create"
     },
     {
       "identity": "communication.templates.delete",
@@ -324,15 +204,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "single_delete",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "single_delete"
     },
     {
       "identity": "communication.templates.fork",
@@ -344,15 +216,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "compound_write",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "compound_write"
     },
     {
       "identity": "communication.templates.get",
@@ -366,15 +230,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.templates.list",
@@ -390,15 +246,7 @@
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
-      "mutationShape": null,
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": null
     },
     {
       "identity": "communication.templates.update",
@@ -410,15 +258,7 @@
       "operationKind": "effect",
       "applicationCapability": "communication.send",
       "confirmation": "required",
-      "mutationShape": "single_update",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
+      "mutationShape": "single_update"
     }
   ],
   "entries": [

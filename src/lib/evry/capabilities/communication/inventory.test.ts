@@ -5,6 +5,8 @@ import {
   assertCommunicationCapabilityInventoryCurrent,
   generateCommunicationCapabilityInventory,
 } from "../../../../../ops/evry/communication-inventory";
+import { EVRY_CAPABILITY_EVAL_LAYERS } from "@/lib/evry/evals/contracts";
+import { EVRY_CAPABILITY_EVAL_FIXTURES } from "@/lib/evry/evals/registry";
 
 const repoRoot = process.cwd();
 
@@ -22,14 +24,16 @@ test("generated Communication inventory is current and fully classified", async 
   assert.ok(inventory.summary.effectCapabilities > 0);
 
   for (const capability of inventory.capabilities) {
-    assert.deepEqual(capability.fixtureClasses, [
-      "selection",
-      "arguments",
-      "confirmation",
-      "execution",
-      "idempotency",
-      "failure",
-    ]);
+    const fixture = EVRY_CAPABILITY_EVAL_FIXTURES.find(
+      ({ capabilityIdentity }) => capabilityIdentity === capability.identity
+    );
+    assert.ok(fixture, `missing eval fixture for ${capability.identity}`);
+    for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
+      assert.ok(
+        fixture.cases[layer].length > 0,
+        `missing ${layer} proof for ${capability.identity}`
+      );
+    }
     assert.equal(
       capability.confirmation,
       capability.operationKind === "effect" ? "required" : "not_required"

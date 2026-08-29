@@ -155,7 +155,7 @@ export function ComposeForm({
     const template = templates.find((t) => t.id === templateId);
     if (template) {
       setSubject(template.subject ?? "");
-      setBody(toRichTextHtml(template.body));
+      setBody(toRichTextHtml(template.bodyHtml ?? template.body));
     }
   };
 

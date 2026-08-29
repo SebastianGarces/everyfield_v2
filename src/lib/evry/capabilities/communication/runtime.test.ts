@@ -7,16 +7,27 @@ import {
   isEvryReadCapabilityIdentity,
 } from "@/lib/evry/eligibility/capabilities";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
-import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
+import {
+  fingerprintEvryActionPlanIntent,
+  parseEvryActionPlanCandidate,
+} from "@/lib/evry/plans";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
 import { renderEmailBodyHtml } from "@/lib/communication/merge";
+import { isRecipientGroupSelector } from "@/lib/communication/recipient-groups";
 import { storedTemplateContent } from "@/lib/communication/templates";
 
 import {
   COMMUNICATION_EVRY_READ_REGISTRATIONS,
   selectCommunicationEvryRead,
 } from "./reads";
+import {
+  COMMUNICATION_MESSAGE_PLAN_REGISTRY,
+  COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
+  COMMUNICATION_MESSAGE_SEND_IDENTITY,
+  COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
+  selectCommunicationEvryMessageEffect,
+} from "./messages";
 import {
   COMMUNICATION_TEMPLATE_CREATE_IDENTITY,
   COMMUNICATION_TEMPLATE_DELETE_IDENTITY,
@@ -39,8 +50,7 @@ const content = {
   category: "follow_up",
   channel: "email",
   subject: "Good to meet you",
-  body: "Hello Ada",
-  bodyHtml: "<p>Hello <strong>Ada</strong></p>",
+  ...storedTemplateContent("<p>Hello <strong>Ada</strong></p>"),
 } as const;
 
 const ownedSnapshot = {
@@ -61,11 +71,9 @@ function document(identity: string) {
       targetKind: "owned",
       resultTemplateId: TEMPLATE_ID,
       expected: ownedSnapshot,
-      changedAt: "2026-08-29T06:05:00.000Z",
       content: {
         ...content,
-        body: "Hello Grace",
-        bodyHtml: "<p>Hello Grace</p>",
+        ...storedTemplateContent("<p>Hello Grace</p>"),
       },
     },
     [COMMUNICATION_TEMPLATE_DELETE_IDENTITY]: { expected: ownedSnapshot },
@@ -131,6 +139,11 @@ test("Communication read selection is closed and deterministic", () => {
   );
   assert.equal(selectCommunicationEvryRead("Fetch https://example.com"), null);
   assert.equal(selectCommunicationEvryRead("Delete every message"), null);
+  assert.equal(
+    selectCommunicationEvryRead("Resolve recipient group everyone-ish"),
+    null
+  );
+  assert.equal(isRecipientGroupSelector("everyone-ish"), false);
 });
 
 test("every template mutation shape has strict arguments and a complete trusted review", () => {
@@ -202,6 +215,199 @@ test("template selection exposes every mutation shape without accepting arbitrar
     { kind: "fork_template", templateId: TEMPLATE_ID }
   );
   assert.equal(selectCommunicationEvryTemplateEffect("Run this SQL"), null);
+});
+
+test("template plans bind one canonical body and replay to one intent fingerprint", () => {
+  const first = document(COMMUNICATION_TEMPLATE_UPDATE_IDENTITY);
+  const second = document(COMMUNICATION_TEMPLATE_UPDATE_IDENTITY);
+  assert.equal(
+    fingerprintEvryActionPlanIntent({
+      actorUserId: PLAN_ID,
+      plantId: TEMPLATE_ID,
+      document: first,
+    }),
+    fingerprintEvryActionPlanIntent({
+      actorUserId: PLAN_ID,
+      plantId: TEMPLATE_ID,
+      document: second,
+    })
+  );
+
+  assert.throws(() =>
+    parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: "create",
+            capabilityIdentity: COMMUNICATION_TEMPLATE_CREATE_IDENTITY,
+            arguments: {
+              templateId: RESULT_ID,
+              content: { ...content, body: "different confirmed text" },
+            },
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: COMMUNICATION_TEMPLATE_PLAN_REGISTRY,
+      eligibleCapabilities: [
+        { identity: COMMUNICATION_TEMPLATE_CREATE_IDENTITY },
+      ],
+    })
+  );
+});
+
+test("legacy system templates without HTML have reviewable update and fork plans", () => {
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: PLAN_ID,
+    fingerprint: FINGERPRINT,
+  });
+  const legacySource = {
+    ...ownedSnapshot,
+    body: "Legacy plain text",
+    bodyHtml: null,
+    isSystem: true,
+  } as const;
+  for (const [identity, args] of [
+    [
+      COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
+      {
+        targetKind: "system",
+        resultTemplateId: RESULT_ID,
+        expected: legacySource,
+        content: { ...content, ...storedTemplateContent("Updated legacy") },
+      },
+    ],
+    [
+      COMMUNICATION_TEMPLATE_FORK_IDENTITY,
+      { forkId: RESULT_ID, source: legacySource },
+    ],
+  ] as const) {
+    const candidate = parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: identity.endsWith("update") ? "update" : "fork",
+            capabilityIdentity: identity,
+            arguments: args,
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: COMMUNICATION_TEMPLATE_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity }],
+    });
+    const review = trustedReviewForEvryPlanDocument({
+      plan,
+      document: candidate,
+      reviewRegistry: COMMUNICATION_TEMPLATE_REVIEW_REGISTRY,
+    });
+    assert.ok(review);
+    assert.match(JSON.stringify(review.confirmation), /Legacy plain text/);
+  }
+});
+
+test("outbound selection is closed and each message effect has an exact trusted review", () => {
+  assert.deepEqual(
+    selectCommunicationEvryMessageEffect(
+      `Send email to people ${TEMPLATE_ID}: Hello | Welcome`
+    ),
+    {
+      kind: "send",
+      recipientIds: [TEMPLATE_ID],
+      subject: "Hello",
+      body: "Welcome",
+    }
+  );
+  assert.deepEqual(
+    selectCommunicationEvryMessageEffect(
+      `Resend message ${TEMPLATE_ID} to non-openers`
+    ),
+    { kind: "resend", communicationId: TEMPLATE_ID }
+  );
+  assert.equal(
+    selectCommunicationEvryMessageEffect("Send https://example.com"),
+    null
+  );
+
+  const audience = {
+    subject: "Hello",
+    body: content.body,
+    bodyHtml: content.bodyHtml,
+    channel: "email",
+    templateId: null,
+    meetingId: null,
+    messageClass: "relationship_message",
+    recipients: [
+      {
+        personId: TEMPLATE_ID,
+        label: "Ada Lovelace",
+        email: "ada@example.test",
+        subject: "Hello Ada",
+        bodyHtml: content.bodyHtml,
+        bodyText: content.body,
+      },
+    ],
+    exclusions: [],
+  } as const;
+  const source = {
+    id: TEMPLATE_ID,
+    subject: "Hello",
+    body: content.body,
+    bodyHtml: content.bodyHtml,
+    channel: "email",
+    templateId: null,
+    meetingId: null,
+    status: "sent",
+    sentAt: UPDATED_AT,
+    recipientCount: 1,
+  } as const;
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: PLAN_ID,
+    fingerprint: FINGERPRINT,
+  });
+  for (const [identity, args] of [
+    [
+      COMMUNICATION_MESSAGE_SEND_IDENTITY,
+      { communicationId: RESULT_ID, audience },
+    ],
+    [
+      COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
+      { source, communicationId: RESULT_ID, audience },
+    ],
+  ] as const) {
+    const candidate = parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: identity.endsWith("send") ? "send" : "resend",
+            capabilityIdentity: identity,
+            arguments: args,
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: COMMUNICATION_MESSAGE_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity }],
+    });
+    const registration =
+      COMMUNICATION_MESSAGE_PLAN_REGISTRY.registrationFor(identity);
+    assert.ok(registration);
+    assert.equal(
+      registration.argumentsSchema.safeParse({
+        ...args,
+        url: "https://example.com",
+      }).success,
+      false
+    );
+    const review = trustedReviewForEvryPlanDocument({
+      plan,
+      document: candidate,
+      reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
+    });
+    assert.ok(review);
+    assert.equal(review.confirmation.steps[0]?.resolvedTargets.length, 1);
+    assert.match(JSON.stringify(review.confirmation), /Hello/);
+  }
 });
 
 test("draft, stored, preview, and sent rich text share one sanitized source", () => {

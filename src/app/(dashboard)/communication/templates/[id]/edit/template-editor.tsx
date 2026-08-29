@@ -25,7 +25,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   const [name, setName] = useState(template.name);
   const [description, setDescription] = useState(template.description ?? "");
   const [subject, setSubject] = useState(template.subject ?? "");
-  const [body, setBody] = useState(template.body);
+  const [body, setBody] = useState(template.bodyHtml ?? template.body);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

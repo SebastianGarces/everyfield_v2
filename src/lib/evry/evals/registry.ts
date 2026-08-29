@@ -3,11 +3,13 @@ import {
   CREATE_MEETING_IDENTITY,
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
+import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
   defineEvryRecipeEvalFixture,
   EVRY_ABSOLUTE_SAFETY_GATES,
+  EVRY_CAPABILITY_EVAL_LAYERS,
   type EvryCapabilityEvalFixture,
   type EvryEvalProof,
   type EvryRecipeEvalFixture,
@@ -43,6 +45,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   {
     id: "reference-capability-contract",
     testFile: "src/lib/evry/evals/reference-capabilities.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "communication-capability-contract",
+    testFile: "src/lib/evry/capabilities/communication/eval-fixtures.test.ts",
     lane: "deterministic",
     safetyGates: [],
   },
@@ -147,11 +155,33 @@ function capabilityFixture(
  * this release corpus. Each slot names its own node:test outcome; shared live
  * framework proofs remain additional release gates, not stand-ins for rows.
  */
-export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze(
-  [CREATE_MEETING_IDENTITY, ADD_GUESTS_IDENTITY, SEND_MESSAGE_IDENTITY].map(
-    capabilityFixture
-  )
-);
+export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
+  ...[CREATE_MEETING_IDENTITY, ADD_GUESTS_IDENTITY, SEND_MESSAGE_IDENTITY]
+    .filter(
+      (identity) =>
+        !communicationInventory.capabilities.some(
+          (capability) => capability.identity === identity
+        )
+    )
+    .map(capabilityFixture),
+  ...communicationInventory.capabilities.map(({ identity }) =>
+    defineEvryCapabilityEvalFixture({
+      capabilityIdentity: identity,
+      cases: Object.fromEntries(
+        EVRY_CAPABILITY_EVAL_LAYERS.map((layer) => [
+          layer,
+          [
+            {
+              id: `${identity}:${layer}`,
+              proofId: "communication-capability-contract",
+              testName: `${identity}:${layer}`,
+            },
+          ],
+        ])
+      ) as unknown as EvryCapabilityEvalFixture["cases"],
+    })
+  ),
+]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
   Object.freeze([

@@ -1,4 +1,4 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { messageTemplates } from "@/db/schema/communication";
@@ -20,18 +20,37 @@ export type EvryCommunicationTemplateSnapshot = Readonly<{
   updatedAt: string;
 }>;
 
+/** Preserve Postgres's microseconds so an approved snapshot is a real CAS. */
+const templateSnapshotProjection = {
+  id: messageTemplates.id,
+  churchId: messageTemplates.churchId,
+  name: messageTemplates.name,
+  description: messageTemplates.description,
+  category: messageTemplates.category,
+  channel: messageTemplates.channel,
+  subject: messageTemplates.subject,
+  body: messageTemplates.body,
+  bodyHtml: messageTemplates.bodyHtml,
+  isSystem: messageTemplates.isSystem,
+  sourceTemplateId: messageTemplates.sourceTemplateId,
+  updatedAt: sql<string>`to_char(${messageTemplates.updatedAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+} as const;
+
 export async function getEvryCommunicationTemplateSnapshot(input: {
   churchId: string;
   templateId: string;
 }): Promise<EvryCommunicationTemplateSnapshot | null> {
   const [template] = await db
-    .select()
+    .select(templateSnapshotProjection)
     .from(messageTemplates)
     .where(
       and(
         eq(messageTemplates.id, input.templateId),
         or(
-          eq(messageTemplates.isSystem, true),
+          and(
+            eq(messageTemplates.isSystem, true),
+            isNull(messageTemplates.churchId)
+          ),
           eq(messageTemplates.churchId, input.churchId)
         )
       )
@@ -43,19 +62,8 @@ export async function getEvryCommunicationTemplateSnapshot(input: {
   ) {
     return null;
   }
-  return {
-    id: template.id,
-    name: template.name,
-    description: template.description,
-    category: template.category,
-    channel: template.channel,
-    subject: template.subject,
-    body: template.body,
-    bodyHtml: template.bodyHtml,
-    isSystem: template.isSystem,
-    sourceTemplateId: template.sourceTemplateId,
-    updatedAt: template.updatedAt.toISOString(),
-  };
+  const { churchId: _churchId, ...snapshot } = template;
+  return snapshot;
 }
 
 export type EvryCommunicationTemplateContent = Readonly<{
@@ -120,7 +128,6 @@ export async function claimEvryCommunicationTemplateUpdate(input: {
   identity: string;
   templateId: string;
   expectedUpdatedAt: string;
-  changedAt: string;
   content: EvryCommunicationTemplateContent;
 }): Promise<EvryEffectResult> {
   if (!exactTuple(input.effect, input.identity)) {
@@ -139,7 +146,7 @@ export async function claimEvryCommunicationTemplateUpdate(input: {
           subject = ${input.content.subject},
           body = ${input.content.body},
           body_html = ${input.content.bodyHtml},
-          updated_at = ${input.changedAt}::timestamptz
+          updated_at = transaction_timestamp()
       from eligible e
       where t.id = ${input.templateId}::uuid
         and t.church_id = e.church_id
@@ -166,7 +173,6 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
   identity: string;
   source: EvryCommunicationTemplateSnapshot;
   forkId: string;
-  changedAt: string;
   content: EvryCommunicationTemplateContent;
 }): Promise<EvryEffectResult> {
   if (!exactTuple(input.effect, input.identity) || !input.source.isSystem) {
@@ -186,7 +192,7 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
         ${input.content.description}, ${input.content.category},
         ${input.content.channel}, ${input.content.subject}, ${input.content.body},
         ${input.content.bodyHtml}, s.merge_fields, false, s.id,
-        ${input.changedAt}::timestamptz
+        transaction_timestamp()
       from eligible e
       join message_templates s on s.id = ${input.source.id}::uuid
       where s.is_system = true
@@ -203,7 +209,10 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
           churchId,
           templateId: input.source.id,
         }),
-        existingFork({ churchId, sourceTemplateId: input.source.id }),
+        getEvryCommunicationTemplateFork({
+          churchId,
+          sourceTemplateId: input.source.id,
+        }),
       ]);
       return Boolean(
         source?.isSystem &&
@@ -250,12 +259,12 @@ export async function claimEvryCommunicationTemplateDelete(input: {
   });
 }
 
-async function existingFork(input: {
+export async function getEvryCommunicationTemplateFork(input: {
   churchId: string;
   sourceTemplateId: string;
-}) {
+}): Promise<EvryCommunicationTemplateSnapshot | null> {
   const [fork] = await db
-    .select({ id: messageTemplates.id })
+    .select(templateSnapshotProjection)
     .from(messageTemplates)
     .where(
       and(
@@ -264,7 +273,9 @@ async function existingFork(input: {
       )
     )
     .limit(1);
-  return fork ?? null;
+  if (!fork) return null;
+  const { churchId: _churchId, ...snapshot } = fork;
+  return snapshot;
 }
 
 export async function claimEvryCommunicationTemplateFork(input: {
@@ -304,7 +315,10 @@ export async function claimEvryCommunicationTemplateFork(input: {
           churchId,
           templateId: input.source.id,
         }),
-        existingFork({ churchId, sourceTemplateId: input.source.id }),
+        getEvryCommunicationTemplateFork({
+          churchId,
+          sourceTemplateId: input.source.id,
+        }),
       ]);
       return Boolean(
         source?.isSystem &&
