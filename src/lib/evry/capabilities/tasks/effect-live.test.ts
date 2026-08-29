@@ -54,9 +54,27 @@ run(
   }
 );
 
+run("Recurring completion refuses checklist add/delete/edit drift", () => {
+  assert.match(output, /PASS tasks:recurring-checklist-source-drift/);
+});
+
 run("Task source-derived handoff remains exact above the bulk UI cap", () => {
   assert.match(output, /PASS tasks:source-derived-handoff-above-bulk-cap/);
 });
+
+run("A resolver-shaped 100-Task completion reaches trusted review", () => {
+  assert.match(output, /PASS tasks:resolver-shaped-bulk-review/);
+});
+
+for (const race of [
+  "dependency-cycle-barrier",
+  "reparent-child-barrier",
+  "delete-child-barrier",
+] as const) {
+  run(`Task structure serialization proves ${race}`, () => {
+    assert.match(output, new RegExp(`PASS tasks:${race}`));
+  });
+}
 
 for (const contract of Object.values(TASK_ACTION_CONTRACTS)) {
   if (contract.operationKind !== "effect") continue;

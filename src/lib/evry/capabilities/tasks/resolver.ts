@@ -17,10 +17,13 @@ import {
   users,
   type Task,
 } from "@/db/schema";
+import { holdsSeatFor } from "@/lib/auth/seat-rules";
+import { tenancyColumns } from "@/lib/auth/tenancy";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
 import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
+import { mayActOnTaskRow } from "@/lib/tasks/own-duty";
 import { taskEntryBody, taskEntryReference } from "@/lib/communication/log";
 import { hasCycle } from "@/lib/tasks/dependencies";
 import { planTemplateImport } from "@/lib/tasks/import";
@@ -207,7 +210,17 @@ async function loadExactTasks(
 }
 
 function mayAct(actor: EvryPlantActor, task: Task): boolean {
-  return actor.seat !== "member" || task.assignedToId === actor.userId;
+  return mayActOnTaskRow({
+    canWrite: holdsSeatFor(
+      {
+        ...tenancyColumns({ type: "church", id: actor.plantId }),
+        seat: actor.seat,
+      },
+      "tasks.write"
+    ),
+    assignedToId: task.assignedToId,
+    viewerId: actor.userId,
+  });
 }
 
 async function validPlantUser(
@@ -763,8 +776,14 @@ async function completionWrites(input: {
   requestKey: EvryPlanRequestKey;
   rows: readonly Task[];
   now: Date;
-}): Promise<TaskWrite[] | null> {
+}): Promise<Readonly<{
+  writes: TaskWrite[];
+  sourceTasks: TaskEffectSnapshot[];
+  childSets: AnyTaskEffectArguments["childSets"];
+}> | null> {
   const writes: TaskWrite[] = [];
+  const sourceTasks: TaskEffectSnapshot[] = [];
+  const childSets: AnyTaskEffectArguments["childSets"] = [];
   for (const row of input.rows) {
     if (row.status === "complete" || !mayAct(input.actor, row)) return null;
     const before = snapshot(row);
@@ -841,6 +860,11 @@ async function completionWrites(input: {
         )
       )
       .orderBy(asc(tasks.createdAt), asc(tasks.id));
+    sourceTasks.push(...children.map(snapshot));
+    childSets.push({
+      parentTaskId: row.id,
+      taskIds: children.map(({ id }) => id),
+    });
     children.forEach((child, index) => {
       const id = derivedUuid(
         input.requestKey,
@@ -867,7 +891,7 @@ async function completionWrites(input: {
       });
     });
   }
-  return writes;
+  return { writes, sourceTasks, childSets };
 }
 
 /** Resolve every Task command to an immutable, exact, tenant-scoped write set. */
@@ -1169,20 +1193,22 @@ export async function resolveTaskEvryEffect(input: {
             (value): value is string => value !== null
           );
     const rows = await loadExactTasks(actor.plantId, ids);
-    const writes = rows
+    const completion = rows
       ? await completionWrites({ actor, requestKey, rows, now })
       : null;
-    if (!rows || !writes || rows.length === 0) return null;
+    if (!rows || !completion || rows.length === 0) return null;
     return resolved({
       exportName,
       actor,
       requestKey,
       now,
-      writes,
+      writes: completion.writes,
       subjectTasks: rows.map(snapshot),
+      sourceTasks: completion.sourceTasks,
+      childSets: completion.childSets,
       disclosure: disclosure({
         title: rows.length === 1 ? "Complete task" : "Complete selected tasks",
-        writes,
+        writes: completion.writes,
         consequences: [
           "Every disclosed task will be completed and its pending due notifications cancelled.",
           "Any disclosed recurring successor and fresh checklist will be created in the same transaction.",
