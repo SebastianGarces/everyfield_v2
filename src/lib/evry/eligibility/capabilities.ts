@@ -261,6 +261,13 @@ export function eligibleEvryCapabilitiesFor(
   );
 }
 
+/** Resolve a semantic identity through the closed production registry. */
+export function evryCapabilityRegistrationFor(
+  identity: string
+): EvryCapabilityRegistration | null {
+  return REGISTRY.registrationFor(identity);
+}
+
 /**
  * Revalidate a selected registration with a freshly minted actor.
  *
