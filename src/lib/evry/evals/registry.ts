@@ -4,6 +4,10 @@ import {
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import {
+  TASK_CAPABILITY_EVAL_FIXTURES,
+  TASK_EVAL_PROOFS,
+} from "@/lib/evry/capabilities/tasks/eval-fixtures";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -18,6 +22,7 @@ import {
 const MEETING_INVITATION_RECIPE_IDENTITY = "fixture:meeting.invitation";
 
 export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
+  ...TASK_EVAL_PROOFS,
   {
     id: "eval-contracts",
     testFile: "src/lib/evry/evals/contracts.test.ts",
@@ -224,6 +229,7 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
   ),
+  ...TASK_CAPABILITY_EVAL_FIXTURES,
 ]);
 
 export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
