@@ -377,6 +377,7 @@ async function completeExecutionFixture(input: {
       deliveryStatus: "complete",
       artifacts: [],
       idempotencyContext: { status: "none" },
+      replayReference: null,
       activePlan: { mode: "preserve" },
       now: input.boundaries.now(),
     });

@@ -19,8 +19,7 @@ type SessionUser = Readonly<{
 }>;
 
 const PLANT_ID = "10000000-0000-4000-8000-000000000001";
-const CAPABILITY_IDENTITY =
-  "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction";
+const CAPABILITY_IDENTITY = "meetings.create";
 const REFERENCE_INSTANT = "2026-08-28T04:30:00.000Z";
 
 let sessionSequence: Array<SessionUser | null> = [];

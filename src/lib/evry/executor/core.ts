@@ -479,6 +479,16 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         effect = await executionRegistration.executeIfCurrent({
           authorization,
           effectKey,
+          execution: {
+            attemptId: attempt.id,
+            planId: attempt.planId,
+            actorUserId: attempt.actorUserId,
+            plantId: attempt.plantId,
+            fingerprint: attempt.fingerprint,
+            correlationId: attempt.correlationId,
+            stepId: step.id,
+            capabilityIdentity: step.capabilityIdentity,
+          },
           arguments: currentStep.arguments,
         });
       } catch {

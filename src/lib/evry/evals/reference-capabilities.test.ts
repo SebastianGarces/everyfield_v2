@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import generatedInventory from "@/lib/evry/capabilities/inventory.generated.json";
-import type { EvryEffectCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
+import {
+  evryCapabilityRegistrationFor,
+  type EvryEffectCapabilityAuthorization,
+} from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
   createEvryExecutor,
@@ -64,19 +66,13 @@ function effectAuthorization(
   identity: string,
   actor: EvryPlantActor = ACTOR
 ): EvryEffectCapabilityAuthorization {
-  const inventoryEntry = generatedInventory.entries.find(
-    (entry) => entry.identity === identity
-  );
-  assert.ok(inventoryEntry);
-  assert.equal(inventoryEntry.classification.state, "supported");
-  assert.equal(typeof inventoryEntry.applicationCapability, "string");
+  const registration = evryCapabilityRegistrationFor(identity);
+  assert.ok(registration);
+  assert.equal(registration.operationKind, "effect");
+  assert.ok(registration.surfaceIdentities.length > 0);
   return {
     actor,
-    registration: {
-      identity,
-      parityCapability: inventoryEntry.parityCapability,
-      applicationCapability: inventoryEntry.applicationCapability,
-    },
+    registration,
   } as unknown as EvryEffectCapabilityAuthorization;
 }
 
@@ -229,9 +225,7 @@ function createBehaviorHarness(input: {
 for (const identity of CAPABILITIES) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
     test(`${identity}:${layer}`, async () => {
-      const inventoryEntry = generatedInventory.entries.find(
-        (entry) => entry.identity === identity
-      );
+      const capabilityRegistration = evryCapabilityRegistrationFor(identity);
       const definitionStep = recipe.steps.find(
         (step) => step.capabilityIdentity === identity
       );
@@ -242,7 +236,9 @@ for (const identity of CAPABILITIES) {
       const plan =
         registry.executionRegistry.planRegistry.registrationFor(identity);
 
-      assert.equal(inventoryEntry?.classification.state, "supported");
+      assert.ok(capabilityRegistration);
+      assert.equal(capabilityRegistration.operationKind, "effect");
+      assert.ok(capabilityRegistration.surfaceIdentities.length > 0);
       assert.ok(definitionStep);
       assert.ok(goldenStep);
       assert.ok(execution);
@@ -251,9 +247,9 @@ for (const identity of CAPABILITIES) {
       switch (layer) {
         case "policy":
           assert.ok(
-            inventoryEntry.parityCapability &&
+            capabilityRegistration.parityCapability &&
               EVRY_SUPPORTED_CAPABILITIES.includes(
-                inventoryEntry.parityCapability
+                capabilityRegistration.parityCapability
               )
           );
           break;

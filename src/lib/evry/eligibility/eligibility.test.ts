@@ -125,7 +125,7 @@ test("spend APIs accept identities or record ids, never an actor or mapping", ()
     authorizeStart
   );
   const trustedLookup = capabilitySource.indexOf(
-    "const registration = REGISTRY.get(identity)",
+    "const registration = REGISTRY.registrationFor(identity)",
     authorizeStart
   );
 

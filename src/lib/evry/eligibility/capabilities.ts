@@ -1,4 +1,6 @@
-import inventory from "@/lib/evry/capabilities/inventory.generated.json";
+import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
+import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
   ALL_CAPABILITIES,
   holdsSeatFor,
@@ -13,6 +15,25 @@ import {
   requireFreshEvryPlantViewer,
   type EvryPlantActor,
 } from "./viewer";
+import {
+  createEvryCapabilityRegistry,
+  defineEvryCapabilityRegistration,
+  type EvryAuthoritativeCapabilitySurface,
+  type EvryCapabilityRegistration,
+  type EvryEffectCapabilityRegistration,
+  type EvryReadCapabilityRegistration,
+} from "./registry";
+
+export {
+  createEvryCapabilityRegistry,
+  defineEvryCapabilityRegistration,
+  type EvryCapabilityOperationKind,
+  type EvryCapabilityRegistration,
+  type EvryCapabilityRegistry,
+  type EvryAuthoritativeCapabilitySurface,
+  type EvryEffectCapabilityRegistration,
+  type EvryReadCapabilityRegistration,
+} from "./registry";
 
 const EVRY_CAPABILITY_AUTHORIZATION: unique symbol = Symbol(
   "EvryCapabilityAuthorization"
@@ -30,31 +51,12 @@ function isApplicationCapability(value: string): value is Capability {
   return APPLICATION_CAPABILITIES.has(value);
 }
 
-/**
- * A trusted capability registration's authorization facts.
- *
- * Registrations own the mapping from their Evry identity to the application's
- * authoritative capability. Model output and persisted plans may select an
- * identity, but may not supply or replace this mapping.
- */
-export type EvryCapabilityRegistration = Readonly<{
-  identity: string;
-  parityCapability: string;
-  applicationCapability: Capability;
-}>;
-
 /** A fresh session-backed authorization for one trusted registration. */
 export type EvryCapabilityAuthorization = Readonly<{
   actor: EvryPlantActor;
   registration: EvryCapabilityRegistration;
   [EVRY_CAPABILITY_AUTHORIZATION]: true;
 }>;
-
-export type EvryReadCapabilityRegistration = Readonly<
-  Omit<EvryCapabilityRegistration, "applicationCapability"> & {
-    applicationCapability: "read";
-  }
->;
 
 /** Fresh authorization that can reach a read adapter and no effect adapter. */
 export type EvryReadCapabilityAuthorization = Readonly<{
@@ -63,9 +65,6 @@ export type EvryReadCapabilityAuthorization = Readonly<{
   [EVRY_READ_CAPABILITY_AUTHORIZATION]: true;
 }>;
 
-export type EvryEffectCapabilityRegistration = EvryCapabilityRegistration &
-  Readonly<{ applicationCapability: Exclude<Capability, "read"> }>;
-
 /** Fresh authorization that may reach a lasting-effect adapter. */
 export type EvryEffectCapabilityAuthorization = Readonly<{
   actor: EvryPlantActor;
@@ -73,55 +72,206 @@ export type EvryEffectCapabilityAuthorization = Readonly<{
   [EVRY_EFFECT_CAPABILITY_AUTHORIZATION]: true;
 }>;
 
-function buildRegistry(): ReadonlyMap<string, EvryCapabilityRegistration> {
-  const registrations = new Map<string, EvryCapabilityRegistration>();
-
-  for (const entry of inventory.entries) {
+function generatedPeopleRegistrations(): EvryCapabilityRegistration[] {
+  return peopleInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
     if (
-      entry.kind !== "action" ||
-      entry.classification.state !== "supported" ||
-      typeof entry.applicationCapability !== "string" ||
-      !isApplicationCapability(entry.applicationCapability)
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
     ) {
-      continue;
+      throw new Error(
+        `Invalid generated People capability: ${capability.identity}`
+      );
     }
-
-    if (registrations.has(entry.identity)) {
-      throw new Error(`Duplicate Evry capability identity: ${entry.identity}`);
-    }
-
-    registrations.set(
-      entry.identity,
-      Object.freeze({
-        identity: entry.identity,
-        parityCapability: entry.parityCapability,
-        applicationCapability: entry.applicationCapability,
-      })
-    );
-  }
-
-  return registrations;
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
 }
 
-const REGISTRY = buildRegistry();
+function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
+  return communicationInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Communication capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
+/** Explicit shared proof registrations, replaced in place by owning packs. */
+const REFERENCE_REGISTRATIONS = [
+  defineEvryCapabilityRegistration({
+    identity: "tasks.list",
+    surfaceIdentities: [
+      "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
+    ],
+    parityCapability: "tasks",
+    operationKind: "read",
+    applicationCapability: "read",
+  }),
+  defineEvryCapabilityRegistration({
+    identity: "tasks.complete",
+    surfaceIdentities: [
+      "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+    ],
+    parityCapability: "tasks",
+    operationKind: "effect",
+    applicationCapability: "tasks.own",
+  }),
+  defineEvryCapabilityRegistration({
+    identity: "launch.schedule",
+    surfaceIdentities: [
+      "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
+    ],
+    parityCapability: "launch",
+    operationKind: "effect",
+    applicationCapability: "launch.schedule",
+  }),
+  defineEvryCapabilityRegistration({
+    identity: "meetings.create",
+    surfaceIdentities: [
+      "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+    ],
+    parityCapability: "meetings",
+    operationKind: "effect",
+    applicationCapability: "meetings.write",
+  }),
+  defineEvryCapabilityRegistration({
+    identity: "meetings.add-guests",
+    surfaceIdentities: [
+      "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction",
+    ],
+    parityCapability: "meetings",
+    operationKind: "effect",
+    applicationCapability: "meetings.write",
+  }),
+] as const;
+
+function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return peopleInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      return [];
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: "people",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
+function generatedCommunicationSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return communicationInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      return [];
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: "communication",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
+function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return REFERENCE_REGISTRATIONS.flatMap((registration) =>
+    registration.surfaceIdentities.map((surfaceIdentity) => {
+      const source = parityInventory.entries.find(
+        ({ identity }) => identity === surfaceIdentity
+      );
+      if (
+        !source ||
+        source.classification.state !== "supported" ||
+        source.parityCapability !== registration.parityCapability ||
+        source.applicationCapability !== registration.applicationCapability
+      ) {
+        throw new Error(
+          `Reference Evry capability drifted from ${surfaceIdentity}`
+        );
+      }
+      return {
+        identity: surfaceIdentity,
+        capabilityIdentity: registration.identity,
+        parityCapability: registration.parityCapability,
+        operationKind: registration.operationKind,
+        applicationCapability: registration.applicationCapability,
+      };
+    })
+  );
+}
+
+const REGISTRY = createEvryCapabilityRegistry({
+  registrations: [
+    ...generatedPeopleRegistrations(),
+    ...generatedCommunicationRegistrations(),
+    ...REFERENCE_REGISTRATIONS,
+  ],
+  authoritativeSurfaces: [
+    ...generatedPeopleSurfaces(),
+    ...generatedCommunicationSurfaces(),
+    ...referenceSurfaces(),
+  ],
+});
 
 function isReadRegistration(
   registration: EvryCapabilityRegistration
 ): registration is EvryReadCapabilityRegistration {
-  return registration.applicationCapability === "read";
+  return registration.operationKind === "read";
 }
 
 function isEffectRegistration(
   registration: EvryCapabilityRegistration
 ): registration is EvryEffectCapabilityRegistration {
-  return registration.applicationCapability !== "read";
+  return registration.operationKind === "effect";
 }
 
 export const EVRY_PEOPLE_READ_PROBE_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction";
+  "people.crm.people.load-more-people";
 
 export const EVRY_PEOPLE_WRITE_PROBE_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → updatePersonAction";
+  "people.crm.people.update-person";
+
+export const EVRY_TASKS_READ_PROBE_IDENTITY = "tasks.list";
+export const EVRY_TASKS_COMPLETE_PROBE_IDENTITY = "tasks.complete";
+export const EVRY_LAUNCH_SCHEDULE_PROBE_IDENTITY = "launch.schedule";
 
 function seatFieldsOf(actor: EvryPlantActor): SeatFields {
   return {
@@ -148,9 +298,16 @@ function actorHolds(
 export function eligibleEvryCapabilitiesFor(
   actor: EvryPlantActor
 ): readonly EvryCapabilityRegistration[] {
-  return [...REGISTRY.values()].filter((registration) =>
+  return REGISTRY.registrations().filter((registration) =>
     actorHolds(actor, registration.applicationCapability)
   );
+}
+
+/** Resolve a semantic identity through the closed production registry. */
+export function evryCapabilityRegistrationFor(
+  identity: string
+): EvryCapabilityRegistration | null {
+  return REGISTRY.registrationFor(identity);
 }
 
 /**
@@ -165,7 +322,7 @@ export async function authorizeEvryCapability(
   identity: string
 ): Promise<EvryCapabilityAuthorization | null> {
   const actor = await requireEvryPlantViewer();
-  const registration = REGISTRY.get(identity);
+  const registration = REGISTRY.registrationFor(identity);
 
   if (!registration || !actorHolds(actor, registration.applicationCapability)) {
     return null;
@@ -182,14 +339,14 @@ export async function authorizeEvryCapability(
 
 /** Check a pack registration against the generated inventory before exposure. */
 export function isEvryReadCapabilityIdentity(identity: string): boolean {
-  const registration = REGISTRY.get(identity);
-  return registration !== undefined && isReadRegistration(registration);
+  const registration = REGISTRY.registrationFor(identity);
+  return registration !== null && isReadRegistration(registration);
 }
 
 /** Only inventory-backed application effects may be installed in an executor. */
 export function isEvryEffectCapabilityIdentity(identity: string): boolean {
-  const registration = REGISTRY.get(identity);
-  return registration !== undefined && isEffectRegistration(registration);
+  const registration = REGISTRY.registrationFor(identity);
+  return registration !== null && isEffectRegistration(registration);
 }
 
 /** Re-mint the actor and recheck that the selected inventory entry is a read. */
@@ -197,7 +354,7 @@ export async function authorizeEvryReadCapability(
   identity: string
 ): Promise<EvryReadCapabilityAuthorization | null> {
   const actor = await requireEvryPlantViewer();
-  const registration = REGISTRY.get(identity);
+  const registration = REGISTRY.registrationFor(identity);
 
   if (
     !registration ||
@@ -227,7 +384,7 @@ export async function authorizeEvryEffectCapability(
     }
     throw error;
   }
-  const registration = REGISTRY.get(identity);
+  const registration = REGISTRY.registrationFor(identity);
 
   if (
     !registration ||

@@ -74,6 +74,13 @@ const STATUS_GROUPS: Record<string, PersonStatus[]> = {
   all: [],
 };
 
+/** Closed quick-select vocabulary. Unknown labels must never widen to `all`. */
+export function isRecipientGroupSelector(group: string): boolean {
+  return isTeamGroup(group)
+    ? parseTeamGroup(group) !== null
+    : Object.hasOwn(STATUS_GROUPS, group);
+}
+
 /**
  * Resolve a quick-select group into the people it names.
  *
@@ -81,14 +88,15 @@ const STATUS_GROUPS: Record<string, PersonStatus[]> = {
  *  - a status group (`core_group`, `leaders`, `all`, …);
  *  - `team:<teamId>`, the active members of one ministry team (MT-015).
  *
- * An unknown selector resolves to every active person, matching the previous
- * behaviour of the status switch. A team with no active members resolves to
- * an empty list — the caller shows that as "0 recipients", not as an error.
+ * Unknown or malformed selectors resolve to nobody. A team with no active
+ * members also resolves to an empty list — the caller shows that as
+ * "0 recipients", not as an error.
  */
 export async function getGroupRecipients(
   churchId: string,
   group: string
 ): Promise<GroupRecipient[]> {
+  if (!isRecipientGroupSelector(group)) return [];
   if (isTeamGroup(group)) {
     const teamId = parseTeamGroup(group);
     // A malformed team selector names nobody. It must NOT fall through to the

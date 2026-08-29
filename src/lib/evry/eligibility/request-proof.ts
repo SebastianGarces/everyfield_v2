@@ -224,13 +224,11 @@ async function main(): Promise<void> {
 
   const representativeParity = [
     {
-      identity:
-        "action:src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
+      identity: "launch.schedule",
       allowed: { owner: true, admin: false, member: false },
     },
     {
-      identity:
-        "action:src/app/(dashboard)/tasks/actions.ts → completeTaskAction",
+      identity: "tasks.complete",
       allowed: { owner: true, admin: true, member: true },
     },
   ] as const;

@@ -9,7 +9,7 @@
 // - getTemplates() returns church forks in place of their system originals
 // ============================================================================
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   messageTemplates,
@@ -21,6 +21,16 @@ import type {
   UpdateTemplateInput,
   TemplateFilters,
 } from "@/lib/validations/communication";
+import { richTextToPlainText, toRichTextHtml } from "@/lib/rich-text/format";
+
+/** The one persisted shape shared by template create, update, preview and send. */
+export function storedTemplateContent(body: string): {
+  body: string;
+  bodyHtml: string;
+} {
+  const bodyHtml = toRichTextHtml(body);
+  return { body: richTextToPlainText(bodyHtml), bodyHtml };
+}
 
 // ---------------------------------------------------------------------------
 // Read
@@ -37,7 +47,10 @@ export async function getTemplates(
 ): Promise<MessageTemplate[]> {
   const conditions = [
     or(
-      eq(messageTemplates.isSystem, true),
+      and(
+        eq(messageTemplates.isSystem, true),
+        isNull(messageTemplates.churchId)
+      ),
       eq(messageTemplates.churchId, churchId)
     ),
   ];
@@ -81,7 +94,10 @@ export async function getTemplate(
       and(
         eq(messageTemplates.id, id),
         or(
-          eq(messageTemplates.isSystem, true),
+          and(
+            eq(messageTemplates.isSystem, true),
+            isNull(messageTemplates.churchId)
+          ),
           eq(messageTemplates.churchId, churchId)
         )
       )
@@ -129,6 +145,7 @@ export async function createTemplate(
   churchId: string,
   input: CreateTemplateInput
 ): Promise<MessageTemplate> {
+  const content = storedTemplateContent(input.body);
   const [template] = await db
     .insert(messageTemplates)
     .values({
@@ -138,7 +155,7 @@ export async function createTemplate(
       category: input.category,
       channel: input.channel,
       subject: input.subject,
-      body: input.body,
+      ...content,
       isSystem: false,
     })
     .returning();
@@ -245,10 +262,14 @@ export async function updateTemplate(
   if (existing.isSystem) {
     const fork = await forkTemplate(id, churchId);
     // Apply the edits to the fork
+    const { body, ...fields } = input;
+    const content =
+      body === undefined ? undefined : storedTemplateContent(body);
     const [updated] = await db
       .update(messageTemplates)
       .set({
-        ...input,
+        ...fields,
+        ...(content ?? {}),
         updatedAt: new Date(),
       })
       .where(eq(messageTemplates.id, fork.id))
@@ -261,10 +282,13 @@ export async function updateTemplate(
     throw new Error("Cannot edit another church's template");
   }
 
+  const { body, ...fields } = input;
+  const content = body === undefined ? undefined : storedTemplateContent(body);
   const [updated] = await db
     .update(messageTemplates)
     .set({
-      ...input,
+      ...fields,
+      ...(content ?? {}),
       updatedAt: new Date(),
     })
     .where(eq(messageTemplates.id, id))

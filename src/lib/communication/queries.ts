@@ -325,7 +325,7 @@ export function isTeamGroup(group: string): boolean {
  * Read a team id back out of a group selector, or `null` when the selector
  * names one of the status groups instead. An empty id is not a team — pair
  * this with `isTeamGroup` so `"team:"` resolves to nobody rather than falling
- * through to the status branch, where an unrecognised group means EVERYONE.
+ * through to the closed status vocabulary.
  */
 export function parseTeamGroup(group: string): string | null {
   if (!isTeamGroup(group)) return null;

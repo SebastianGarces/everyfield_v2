@@ -28,8 +28,7 @@ type SessionUser = Readonly<{
   seat: "owner" | "admin" | "member" | null;
 }>;
 
-const EFFECT_IDENTITY =
-  "action:src/app/(dashboard)/people/actions.ts → updatePersonAction";
+const EFFECT_IDENTITY = "people.crm.people.update-person";
 const SCRATCH = "__evry executor live proof__";
 const FIXTURE_SESSION_ID = "e".repeat(64);
 let sessionUser: SessionUser | null = null;

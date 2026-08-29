@@ -213,6 +213,7 @@ async function createProof(): Promise<void> {
     deliveryStatus: "complete",
     artifacts: [clarification],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: { mode: "preserve" },
     now: new Date(START.valueOf() + 1_000),
   });
@@ -264,6 +265,7 @@ async function createProof(): Promise<void> {
     deliveryStatus: "complete",
     artifacts: [],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: { mode: "preserve" },
     now: new Date(START.valueOf() + 2_000),
   });
@@ -294,6 +296,7 @@ async function createProof(): Promise<void> {
     deliveryStatus: "complete",
     artifacts: [confirmation],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: { mode: "set", plan },
     now: new Date(START.valueOf() + 3_000),
   });

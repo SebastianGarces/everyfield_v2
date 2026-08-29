@@ -3,7 +3,11 @@ export {
   fingerprintEvryActionPlan,
   fingerprintEvryActionPlanIntent,
 } from "./fingerprint";
-export { mintEvryPlanRequestKey, type EvryPlanRequestKey } from "./request-key";
+export {
+  deriveEvryPlanRequestKey,
+  mintEvryPlanRequestKey,
+  type EvryPlanRequestKey,
+} from "./request-key";
 export {
   canTransitionEvryPlan,
   EVRY_PLAN_STATUSES,

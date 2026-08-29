@@ -494,6 +494,7 @@ function appendLifecycleMessage(input: {
     deliveryStatus: "complete",
     artifacts: input.artifact ? [input.artifact] : [],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: input.clearPlan ? { mode: "clear" } : { mode: "preserve" },
     now: input.now,
   });

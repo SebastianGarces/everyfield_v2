@@ -52,8 +52,7 @@ const ACTOR = {
 const READ_AUTHORIZATION = {
   actor: ACTOR,
   registration: {
-    identity:
-      "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction",
+    identity: "people.crm.people.load-more-people",
     parityCapability: "people.read",
     applicationCapability: "read",
   },

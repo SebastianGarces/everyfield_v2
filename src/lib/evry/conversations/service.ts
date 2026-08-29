@@ -4,6 +4,8 @@ import type {
   EvryConversationAuthor,
   EvryConversationDeliveryStatus,
 } from "@/db/schema";
+import { hasDurableEvryCapabilityConversationResult } from "@/lib/evry/capabilities/conversation";
+import { continueProductionEvryCapabilityConversation } from "@/lib/evry/capabilities/production";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
   EvryPageContext,
@@ -23,11 +25,13 @@ import {
 import {
   evryConversationIdSchema,
   evryConversationMessageIdSchema,
+  evryConversationReplayReferenceSchema,
   evryConversationRequestKeySchema,
   type EvryConversationId,
   type EvryConversationMessageId,
   type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
+  type EvryConversationReplayReference,
   type EvryConversationRelevanceKey,
   type EvryConversationRequestKey,
   type EvryConversationStateDocument,
@@ -39,6 +43,7 @@ import {
 import {
   appendEvryConversationRecord,
   createEvryConversationRecord,
+  EvryConversationIdempotencyError,
   findEvryConversationRecord,
   type EvryStoredConversation,
 } from "./repository";
@@ -111,10 +116,12 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
+  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
-  const conversation = await (input.store ?? evryConversationStore).create({
+  const store = input.store ?? evryConversationStore;
+  let conversation = await store.create({
     actorUserId: input.actor.userId,
     plantId: input.actor.plantId,
     requestKey,
@@ -124,14 +131,38 @@ export async function createEvryConversation(input: {
     createdAt: input.now,
   });
   await input.reportStage?.("compiling_response");
-  return Object.freeze({
+  const continued = await (
+    input.continueCapabilityConversation ??
+    continueProductionEvryCapabilityConversation
+  )({
+    actor: input.actor,
     conversation,
-    activePlan: null,
-    context: compileEvryConversationContext({
+    userRequestKey: requestKey,
+    literalUserText: input.message,
+    pageContext: input.pageContext,
+    requestPageContext: input.requestPageContext,
+    now: input.now,
+    store,
+  });
+  if (continued === null) {
+    return Object.freeze({
       conversation,
       activePlan: null,
-    }),
+      context: compileEvryConversationContext({
+        conversation,
+        activePlan: null,
+      }),
+    });
+  }
+  conversation = continued;
+  const resumed = await resumeEvryConversation({
+    actor: input.actor,
+    conversationId: conversation.id,
+    now: input.now,
+    store,
   });
+  if (!resumed) throw new Error("Created Evry conversation disappeared");
+  return resumed;
 }
 
 export async function appendTrustedEvryConversationMessage(input: {
@@ -149,6 +180,7 @@ export async function appendTrustedEvryConversationMessage(input: {
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
   idempotencyContext: EvryConversationMessageIdempotencyContext;
+  replayReference: EvryConversationReplayReference | null;
   activePlan?:
     | Readonly<{ mode: "preserve" }>
     | Readonly<{ mode: "clear" }>
@@ -172,6 +204,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     deliveryStatus: input.deliveryStatus,
     artifacts: input.artifacts,
     idempotencyContext: input.idempotencyContext,
+    replayReference: input.replayReference,
     activePlan: input.activePlan,
     createdAt: input.now,
   });
@@ -214,6 +247,55 @@ export type EvryConversationContinuation =
       >;
     }>;
 
+function sameResolvedPageContext(
+  left: EvryResolvedPageContext | null,
+  right: EvryResolvedPageContext | null
+): boolean {
+  return (
+    (left === null && right === null) ||
+    (left !== null &&
+      right !== null &&
+      left.kind === right.kind &&
+      left.recordId === right.recordId)
+  );
+}
+
+function assertDurableCapabilityReplayRequest(input: {
+  conversation: EvryStoredConversation;
+  requestKey: EvryConversationRequestKey;
+  message: string;
+  pageContext: EvryResolvedPageContext | null;
+}): void {
+  const userMessage = input.conversation.messages.find(
+    (message) =>
+      message.requestKey === input.requestKey && message.author === "user"
+  );
+  if (
+    !userMessage ||
+    userMessage.body !== input.message ||
+    !sameResolvedPageContext(userMessage.pageContext, input.pageContext)
+  ) {
+    throw new EvryConversationIdempotencyError();
+  }
+}
+
+function durableCapabilityReplayReference(input: {
+  conversation: EvryStoredConversation;
+  requestKey: EvryConversationRequestKey;
+}): EvryConversationReplayReference {
+  const userMessage = input.conversation.messages.find(
+    (message) =>
+      message.requestKey === input.requestKey && message.author === "user"
+  );
+  const replayReference = evryConversationReplayReferenceSchema.safeParse(
+    userMessage?.replayReference
+  );
+  if (!replayReference.success) {
+    throw new EvryConversationIdempotencyError();
+  }
+  return replayReference.data;
+}
+
 /** Persist one user turn and any deterministic clarification; no model runs. */
 export async function continueEvryConversation(input: {
   actor: EvryPlantActor;
@@ -224,6 +306,8 @@ export async function continueEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
+  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
+  resolveReference?: typeof resolveEvryConversationReference;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryConversationContinuation | null> {
@@ -243,8 +327,45 @@ export async function continueEvryConversation(input: {
   });
   if (!current) return null;
 
+  // A prior request may have committed both its user turn and its capability
+  // result before the response was lost. Recover that immutable result before
+  // reference resolution, append, selection, or source/plan work can rerun.
+  if (
+    hasDurableEvryCapabilityConversationResult({
+      conversation: current,
+      userRequestKey: requestKey.data,
+    })
+  ) {
+    assertDurableCapabilityReplayRequest({
+      conversation: current,
+      requestKey: requestKey.data,
+      message: input.message,
+      pageContext: input.pageContext,
+    });
+    const replayReference = durableCapabilityReplayReference({
+      conversation: current,
+      requestKey: requestKey.data,
+    });
+    const resumed = await resumeEvryConversation({
+      actor: input.actor,
+      conversationId: current.id,
+      now: input.now,
+      store,
+      revalidatePlan: input.revalidatePlan,
+    });
+    return resumed
+      ? {
+          status: "continued",
+          resumed,
+          reference: replayReference,
+        }
+      : null;
+  }
+
   await input.reportStage?.("resolving_references");
-  const reference = resolveEvryConversationReference({
+  const reference = (
+    input.resolveReference ?? resolveEvryConversationReference
+  )({
     text: input.message,
     state: current.state,
     now: input.now,
@@ -262,6 +383,16 @@ export async function continueEvryConversation(input: {
       : reference.status === "clarification"
         ? { status: "clarification", reason: reference.reason }
         : { status: "not_applicable" };
+  const replayReference: EvryConversationReplayReference | null =
+    reference.status === "resolved"
+      ? {
+          status: "resolved",
+          reference: reference.reference,
+          relevanceKeys: reference.relevanceKeys,
+        }
+      : reference.status === "not_applicable"
+        ? { status: "not_applicable" }
+        : null;
   let appended = await appendTrustedEvryConversationMessage({
     messageId: evryConversationMessageIdSchema.parse(randomUUID()),
     actor: input.actor,
@@ -277,6 +408,7 @@ export async function continueEvryConversation(input: {
     deliveryStatus: "complete",
     artifacts: [],
     idempotencyContext,
+    replayReference,
     activePlan: { mode: "preserve" },
     now: input.now,
     store,
@@ -298,10 +430,26 @@ export async function continueEvryConversation(input: {
       deliveryStatus: "complete",
       artifacts: [storedEvryClarificationArtifactDocument(reference.artifact)],
       idempotencyContext: { status: "none" },
+      replayReference: null,
       activePlan: { mode: "preserve" },
       now: input.now,
       store,
     });
+  } else {
+    appended =
+      (await (
+        input.continueCapabilityConversation ??
+        continueProductionEvryCapabilityConversation
+      )({
+        actor: input.actor,
+        conversation: appended,
+        userRequestKey: requestKey.data,
+        literalUserText: input.message,
+        pageContext: input.pageContext,
+        requestPageContext: input.requestPageContext,
+        now: input.now,
+        store,
+      })) ?? appended;
   }
 
   await input.reportStage?.(

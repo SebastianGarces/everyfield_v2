@@ -412,6 +412,7 @@ test(
       deliveryStatus: "complete" as const,
       artifacts: [],
       idempotencyContext: { status: "none" as const },
+      replayReference: null,
       createdAt: new Date("2026-08-28T12:00:01.000Z"),
     };
     const [firstReplay, secondReplay] = await Promise.all([

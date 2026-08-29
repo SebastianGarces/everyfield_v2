@@ -190,6 +190,67 @@ export const evryResolvedReferenceSchema = z
   .readonly();
 export type EvryResolvedReference = z.infer<typeof evryResolvedReferenceSchema>;
 
+/**
+ * The immutable result of resolving one user turn. Unlike the bounded
+ * conversation reference cache, this snapshot belongs to the exact stored
+ * request and remains available for response-loss replay.
+ */
+export const evryConversationReplayReferenceSchema = z.discriminatedUnion(
+  "status",
+  [
+    z.strictObject({ status: z.literal("not_applicable") }),
+    z
+      .strictObject({
+        status: z.literal("resolved"),
+        reference: evryResolvedReferenceSchema,
+        relevanceKeys: z
+          .array(evryConversationRelevanceKeySchema)
+          .length(1)
+          .readonly(),
+      })
+      .superRefine((resolution, context) => {
+        if (String(resolution.relevanceKeys[0]) !== resolution.reference.key) {
+          context.addIssue({
+            code: "custom",
+            path: ["relevanceKeys"],
+            message: "Replay relevance must name the resolved reference",
+          });
+        }
+      }),
+  ]
+);
+export type EvryConversationReplayReference = z.infer<
+  typeof evryConversationReplayReferenceSchema
+>;
+
+export const evryConversationReplayMetadataSchema = z
+  .strictObject({
+    idempotencyContext: evryConversationMessageIdempotencyContextSchema,
+    replayReference: evryConversationReplayReferenceSchema.nullable(),
+  })
+  .superRefine((metadata, context) => {
+    const idempotency = metadata.idempotencyContext;
+    const replay = metadata.replayReference;
+    const exact =
+      (idempotency.status === "resolved" &&
+        replay?.status === "resolved" &&
+        replay.reference.key === idempotency.referenceKey &&
+        replay.reference.entityType === idempotency.entityType &&
+        replay.reference.entityId === idempotency.entityId) ||
+      (idempotency.status === "not_applicable" &&
+        replay?.status === "not_applicable") ||
+      ((idempotency.status === "none" ||
+        idempotency.status === "clarification") &&
+        replay === null);
+    if (!exact) {
+      context.addIssue({
+        code: "custom",
+        path: ["replayReference"],
+        message: "Replay metadata must exactly match idempotency metadata",
+      });
+    }
+  });
+
 const evryOfferedReferenceSchema = z
   .object({
     referenceKey: evryConversationReferenceKeySchema,

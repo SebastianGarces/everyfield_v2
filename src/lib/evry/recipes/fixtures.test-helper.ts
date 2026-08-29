@@ -18,12 +18,9 @@ import {
   type EvryRecipeRegistry,
 } from "./schema";
 
-export const CREATE_MEETING_IDENTITY =
-  "action:src/app/(dashboard)/meetings/actions.ts → createMeetingAction";
-export const ADD_GUESTS_IDENTITY =
-  "action:src/app/(dashboard)/meetings/actions.ts → addToGuestListAction";
-export const SEND_MESSAGE_IDENTITY =
-  "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction";
+export const CREATE_MEETING_IDENTITY = "meetings.create";
+export const ADD_GUESTS_IDENTITY = "meetings.add-guests";
+export const SEND_MESSAGE_IDENTITY = "communication.messages.send";
 export const RECIPE_IDENTITY = "fixture:meeting.invitation";
 export const RESOLVER_IDENTITY = "fixture:people.resolve";
 export const PRECONDITION_IDENTITY = "fixture:audience.present";

@@ -86,7 +86,7 @@ function toStoredPlan(row: {
   };
 }
 
-async function findByRequestKey(input: {
+export async function findEvryActionPlanByRequestKey(input: {
   actorUserId: string;
   plantId: string;
   requestKey: EvryPlanRequestKey;
@@ -182,7 +182,7 @@ async function insertPreparedEvryActionPlan(
   } catch (error) {
     if (!isUniqueViolation(error, ACTOR_REQUEST_UNIQUE)) throw error;
 
-    const existing = await findByRequestKey(prepared);
+    const existing = await findEvryActionPlanByRequestKey(prepared);
     if (
       !existing ||
       existing.intentFingerprint !== prepared.intentFingerprint

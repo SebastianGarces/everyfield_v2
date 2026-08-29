@@ -1,0 +1,2016 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:people-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "src/app/(dashboard)/people/**/{page,layout}.tsx",
+    "routeHandlers": "src/app/api/people/**/route.ts",
+    "rscReads": "async @/lib/people/* imports in People route and server-component modules"
+  },
+  "capabilities": [
+    {
+      "identity": "people.crm.assessments.create-assessment",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/assessment-actions.ts → createAssessmentAction"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.create-commitment",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/assessment-actions.ts → createCommitmentAction"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.create-interview",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/assessment-actions.ts → createInterviewAction"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.get-assessments",
+      "surfaceIdentities": [
+        "route:/people/[id]/assessments",
+        "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/assessments#getAssessments"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.get-commitment-download-url",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/assessment-actions.ts → getCommitmentDownloadUrlAction"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.get-commitments",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/commitments#getCommitments"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.get-interviews",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/assessments#getInterviews"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.assessments.get-latest-commitment",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/commitments#getLatestCommitment"
+      ],
+      "parityCapability": "people",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.duplicates.check-for-duplicates",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → checkForDuplicatesAction"
+      ],
+      "parityCapability": "people",
+      "domain": "duplicates",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.exports.export-people",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction"
+      ],
+      "parityCapability": "people",
+      "domain": "exports",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.add-to-household",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → addToHouseholdAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.create-household-with-head",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → createHouseholdWithHeadAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.delete-household",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → deleteHouseholdAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.get-household",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#getHousehold",
+        "rsc-read:src/components/people/person-profile-wrapper.tsx → @/lib/people/household#getHousehold"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.get-household-members",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → getHouseholdMembersAction",
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#getHouseholdMembers"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.list-households",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → listHouseholdsAction",
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#listHouseholds"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.propagate-address",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → propagateAddressAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_propagate",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.remove-from-household",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → removeFromHouseholdAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_remove",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.households.update-household",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/household-actions.ts → updateHouseholdAction"
+      ],
+      "parityCapability": "people",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.imports.download-csv-template",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction"
+      ],
+      "parityCapability": "people",
+      "domain": "imports",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.imports.execute-bulk-import",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction"
+      ],
+      "parityCapability": "people",
+      "domain": "imports",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.imports.preview-import",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction"
+      ],
+      "parityCapability": "people",
+      "domain": "imports",
+      "operationKind": "read",
+      "applicationCapability": "people.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.notes.add-note",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/activity-actions.ts → addNoteAction"
+      ],
+      "parityCapability": "people",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.notes.delete-note",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/activity-actions.ts → deleteNoteAction"
+      ],
+      "parityCapability": "people",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.notes.edit-note",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/activity-actions.ts → editNoteAction"
+      ],
+      "parityCapability": "people",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.notes.get-activities",
+      "surfaceIdentities": [
+        "route:/people/[id]/activity",
+        "rsc-read:src/components/people/activity-timeline.tsx → @/lib/people/activity#getActivities"
+      ],
+      "parityCapability": "people",
+      "domain": "notes",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.notes.get-more-activities",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/activity-actions.ts → getMoreActivitiesAction"
+      ],
+      "parityCapability": "people",
+      "domain": "notes",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.change-status",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → changeStatusAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.change-status-with-reason",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → changeStatusWithReasonAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.create-person",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → createPersonAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.delete-person",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → deletePersonAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.get-person",
+      "surfaceIdentities": [
+        "route:/people/[id]",
+        "route:/people/[id]/assessments/commitment",
+        "route:/people/[id]/assessments/interview",
+        "route:/people/[id]/assessments/new",
+        "route:/people/[id]/communication",
+        "route:/people/[id]/teams",
+        "rsc-read:src/app/(dashboard)/people/[id]/layout.tsx → @/lib/people/service#getPerson",
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/service#getPerson",
+        "rsc-read:src/components/people/assessment-entry-shell.tsx → @/lib/people/service#getPerson",
+        "rsc-read:src/components/people/person-profile-wrapper.tsx → @/lib/people/service#getPerson"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.get-person-photo",
+      "surfaceIdentities": ["handler:GET:/api/people/[personId]/photo"],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.list-people",
+      "surfaceIdentities": [
+        "route:/people",
+        "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/service#listPeople"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.load-more-people",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.quick-add-person",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → quickAddPersonAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.remove-person-photo",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → removePersonPhotoAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "file_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.update-person",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → updatePersonAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.people.upload-person-photo",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/actions.ts → uploadPersonPhotoAction"
+      ],
+      "parityCapability": "people",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "file_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.skills.add-skill",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/skill-actions.ts → addSkillAction"
+      ],
+      "parityCapability": "people",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.skills.get-person-skills",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/skill-actions.ts → getPersonSkillsAction",
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/skills#getPersonSkills"
+      ],
+      "parityCapability": "people",
+      "domain": "skills",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.skills.remove-skill",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/skill-actions.ts → removeSkillAction"
+      ],
+      "parityCapability": "people",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.skills.update-skill",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/skill-actions.ts → updateSkillAction"
+      ],
+      "parityCapability": "people",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.stages.get-pipeline-data",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/pipeline#getPipelineData"
+      ],
+      "parityCapability": "people",
+      "domain": "stages",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.stages.reorder-pipeline",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/pipeline-actions.ts → reorderPipelineAction"
+      ],
+      "parityCapability": "people",
+      "domain": "stages",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_reorder",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.assign-tag",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → assignTagAction"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.create-tag",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → createTagAction"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.delete-tag",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → deleteTagAction"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.get-person-tags",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/tags#getPersonTags"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.list-tags",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → listTagsAction",
+        "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/tags#listTags",
+        "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/tags#listTags"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.remove-tag",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → removeTagAction"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_remove",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "people.crm.tags.update-tag",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/tag-actions.ts → updateTagAction"
+      ],
+      "parityCapability": "people",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → changeStatusAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "changeStatusAction",
+      "capabilityIdentity": "people.crm.people.change-status",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → changeStatusWithReasonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "changeStatusWithReasonAction",
+      "capabilityIdentity": "people.crm.people.change-status-with-reason",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → checkForDuplicatesAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "checkForDuplicatesAction",
+      "capabilityIdentity": "people.crm.duplicates.check-for-duplicates",
+      "domain": "duplicates",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → createPersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "createPersonAction",
+      "capabilityIdentity": "people.crm.people.create-person",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → deletePersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "deletePersonAction",
+      "capabilityIdentity": "people.crm.people.delete-person",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → loadMorePeopleAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "loadMorePeopleAction",
+      "capabilityIdentity": "people.crm.people.load-more-people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → quickAddPersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "quickAddPersonAction",
+      "capabilityIdentity": "people.crm.people.quick-add-person",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → removePersonPhotoAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "removePersonPhotoAction",
+      "capabilityIdentity": "people.crm.people.remove-person-photo",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "file_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → updatePersonAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "updatePersonAction",
+      "capabilityIdentity": "people.crm.people.update-person",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/actions.ts → uploadPersonPhotoAction",
+      "source": "src/app/(dashboard)/people/actions.ts",
+      "exportName": "uploadPersonPhotoAction",
+      "capabilityIdentity": "people.crm.people.upload-person-photo",
+      "domain": "people",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "file_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → addNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "addNoteAction",
+      "capabilityIdentity": "people.crm.notes.add-note",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → deleteNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "deleteNoteAction",
+      "capabilityIdentity": "people.crm.notes.delete-note",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → editNoteAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "editNoteAction",
+      "capabilityIdentity": "people.crm.notes.edit-note",
+      "domain": "notes",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/activity-actions.ts → getMoreActivitiesAction",
+      "source": "src/app/(dashboard)/people/activity-actions.ts",
+      "exportName": "getMoreActivitiesAction",
+      "capabilityIdentity": "people.crm.notes.get-more-activities",
+      "domain": "notes",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createAssessmentAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createAssessmentAction",
+      "capabilityIdentity": "people.crm.assessments.create-assessment",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createCommitmentAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createCommitmentAction",
+      "capabilityIdentity": "people.crm.assessments.create-commitment",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → createInterviewAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "createInterviewAction",
+      "capabilityIdentity": "people.crm.assessments.create-interview",
+      "domain": "assessments",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/assessment-actions.ts → getCommitmentDownloadUrlAction",
+      "source": "src/app/(dashboard)/people/assessment-actions.ts",
+      "exportName": "getCommitmentDownloadUrlAction",
+      "capabilityIdentity": "people.crm.assessments.get-commitment-download-url",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → addToHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "addToHouseholdAction",
+      "capabilityIdentity": "people.crm.households.add-to-household",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → createHouseholdWithHeadAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "createHouseholdWithHeadAction",
+      "capabilityIdentity": "people.crm.households.create-household-with-head",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → deleteHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "deleteHouseholdAction",
+      "capabilityIdentity": "people.crm.households.delete-household",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → getHouseholdMembersAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "getHouseholdMembersAction",
+      "capabilityIdentity": "people.crm.households.get-household-members",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → listHouseholdsAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "listHouseholdsAction",
+      "capabilityIdentity": "people.crm.households.list-households",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → propagateAddressAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "propagateAddressAction",
+      "capabilityIdentity": "people.crm.households.propagate-address",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_propagate",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → removeFromHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "removeFromHouseholdAction",
+      "capabilityIdentity": "people.crm.households.remove-from-household",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_remove",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/household-actions.ts → updateHouseholdAction",
+      "source": "src/app/(dashboard)/people/household-actions.ts",
+      "exportName": "updateHouseholdAction",
+      "capabilityIdentity": "people.crm.households.update-household",
+      "domain": "households",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → downloadCsvTemplateAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "downloadCsvTemplateAction",
+      "capabilityIdentity": "people.crm.imports.download-csv-template",
+      "domain": "imports",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → executeBulkImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "executeBulkImportAction",
+      "capabilityIdentity": "people.crm.imports.execute-bulk-import",
+      "domain": "imports",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_import",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "exportPeopleAction",
+      "capabilityIdentity": "people.crm.exports.export-people",
+      "domain": "exports",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → previewImportAction",
+      "source": "src/app/(dashboard)/people/import-export-actions.ts",
+      "exportName": "previewImportAction",
+      "capabilityIdentity": "people.crm.imports.preview-import",
+      "domain": "imports",
+      "operationKind": "read",
+      "applicationCapability": "people.write",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/pipeline-actions.ts → reorderPipelineAction",
+      "source": "src/app/(dashboard)/people/pipeline-actions.ts",
+      "exportName": "reorderPipelineAction",
+      "capabilityIdentity": "people.crm.stages.reorder-pipeline",
+      "domain": "stages",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "bulk_reorder",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → addSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "addSkillAction",
+      "capabilityIdentity": "people.crm.skills.add-skill",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → getPersonSkillsAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "getPersonSkillsAction",
+      "capabilityIdentity": "people.crm.skills.get-person-skills",
+      "domain": "skills",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → removeSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "removeSkillAction",
+      "capabilityIdentity": "people.crm.skills.remove-skill",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/skill-actions.ts → updateSkillAction",
+      "source": "src/app/(dashboard)/people/skill-actions.ts",
+      "exportName": "updateSkillAction",
+      "capabilityIdentity": "people.crm.skills.update-skill",
+      "domain": "skills",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → assignTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "assignTagAction",
+      "capabilityIdentity": "people.crm.tags.assign-tag",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_add",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → createTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "createTagAction",
+      "capabilityIdentity": "people.crm.tags.create-tag",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → deleteTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "deleteTagAction",
+      "capabilityIdentity": "people.crm.tags.delete-tag",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → listTagsAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "listTagsAction",
+      "capabilityIdentity": "people.crm.tags.list-tags",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → removeTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "removeTagAction",
+      "capabilityIdentity": "people.crm.tags.remove-tag",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "association_remove",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/people/tag-actions.ts → updateTagAction",
+      "source": "src/app/(dashboard)/people/tag-actions.ts",
+      "exportName": "updateTagAction",
+      "capabilityIdentity": "people.crm.tags.update-tag",
+      "domain": "tags",
+      "operationKind": "effect",
+      "applicationCapability": "people.write",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route_handler",
+      "identity": "handler:GET:/api/people/[personId]/photo",
+      "source": "src/app/api/people/[personId]/photo/route.ts",
+      "exportName": "GET",
+      "capabilityIdentity": "people.crm.people.get-person-photo",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "product_gap",
+      "identity": "product-gap:people.duplicates.merge",
+      "source": "src/lib/people/duplicates.ts",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.duplicates.merge",
+      "domain": "duplicates",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "owning_product_gap" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people",
+      "source": "src/app/(dashboard)/people/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.list-people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/activity",
+      "source": "src/app/(dashboard)/people/[id]/activity/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.notes.get-activities",
+      "domain": "notes",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments",
+      "source": "src/app/(dashboard)/people/[id]/assessments/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.assessments.get-assessments",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/commitment",
+      "source": "src/app/(dashboard)/people/[id]/assessments/commitment/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/interview",
+      "source": "src/app/(dashboard)/people/[id]/assessments/interview/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/assessments/new",
+      "source": "src/app/(dashboard)/people/[id]/assessments/new/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/communication",
+      "source": "src/app/(dashboard)/people/[id]/communication/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/[id]/teams",
+      "source": "src/app/(dashboard)/people/[id]/teams/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/people/new",
+      "source": "src/app/(dashboard)/people/new/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "people.crm.ui.navigation",
+      "domain": "routes",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "ui_navigation_only" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/assessments#getAssessments",
+      "source": "src/app/(dashboard)/people/[id]/assessments/page.tsx",
+      "exportName": "getAssessments",
+      "capabilityIdentity": "people.crm.assessments.get-assessments",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/assessments#getInterviews",
+      "source": "src/app/(dashboard)/people/[id]/assessments/page.tsx",
+      "exportName": "getInterviews",
+      "capabilityIdentity": "people.crm.assessments.get-interviews",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/assessments/page.tsx → @/lib/people/commitments#getCommitments",
+      "source": "src/app/(dashboard)/people/[id]/assessments/page.tsx",
+      "exportName": "getCommitments",
+      "capabilityIdentity": "people.crm.assessments.get-commitments",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/layout.tsx → @/lib/people/service#getPerson",
+      "source": "src/app/(dashboard)/people/[id]/layout.tsx",
+      "exportName": "getPerson",
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/commitments#getLatestCommitment",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getLatestCommitment",
+      "capabilityIdentity": "people.crm.assessments.get-latest-commitment",
+      "domain": "assessments",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#getHousehold",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getHousehold",
+      "capabilityIdentity": "people.crm.households.get-household",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#getHouseholdMembers",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getHouseholdMembers",
+      "capabilityIdentity": "people.crm.households.get-household-members",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/household#listHouseholds",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "listHouseholds",
+      "capabilityIdentity": "people.crm.households.list-households",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/service#getPerson",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getPerson",
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/skills#getPersonSkills",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getPersonSkills",
+      "capabilityIdentity": "people.crm.skills.get-person-skills",
+      "domain": "skills",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/tags#getPersonTags",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "getPersonTags",
+      "capabilityIdentity": "people.crm.tags.get-person-tags",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/page.tsx → @/lib/people/tags#listTags",
+      "source": "src/app/(dashboard)/people/[id]/page.tsx",
+      "exportName": "listTags",
+      "capabilityIdentity": "people.crm.tags.list-tags",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/pipeline#getPipelineData",
+      "source": "src/app/(dashboard)/people/page.tsx",
+      "exportName": "getPipelineData",
+      "capabilityIdentity": "people.crm.stages.get-pipeline-data",
+      "domain": "stages",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/service#listPeople",
+      "source": "src/app/(dashboard)/people/page.tsx",
+      "exportName": "listPeople",
+      "capabilityIdentity": "people.crm.people.list-people",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/page.tsx → @/lib/people/tags#listTags",
+      "source": "src/app/(dashboard)/people/page.tsx",
+      "exportName": "listTags",
+      "capabilityIdentity": "people.crm.tags.list-tags",
+      "domain": "tags",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/components/people/activity-timeline.tsx → @/lib/people/activity#getActivities",
+      "source": "src/components/people/activity-timeline.tsx",
+      "exportName": "getActivities",
+      "capabilityIdentity": "people.crm.notes.get-activities",
+      "domain": "notes",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/components/people/assessment-entry-shell.tsx → @/lib/people/service#getPerson",
+      "source": "src/components/people/assessment-entry-shell.tsx",
+      "exportName": "getPerson",
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/components/people/person-profile-wrapper.tsx → @/lib/people/household#getHousehold",
+      "source": "src/components/people/person-profile-wrapper.tsx",
+      "exportName": "getHousehold",
+      "capabilityIdentity": "people.crm.households.get-household",
+      "domain": "households",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/components/people/person-profile-wrapper.tsx → @/lib/people/service#getPerson",
+      "source": "src/components/people/person-profile-wrapper.tsx",
+      "exportName": "getPerson",
+      "capabilityIdentity": "people.crm.people.get-person",
+      "domain": "people",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 41,
+    "routes": 10,
+    "routeHandlers": 1,
+    "rscReads": 19,
+    "productGaps": 1,
+    "readCapabilities": 22,
+    "effectCapabilities": 30,
+    "unclassified": 0
+  }
+}
