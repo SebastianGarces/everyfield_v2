@@ -240,6 +240,14 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "attendanceType" || key === "afterAttendanceType") {
     return "first_time";
   }
+  if (key === "attendanceTypeIsDerived") return true;
+  if (key === "attendanceDerivation") {
+    return {
+      personStatus: "prospect",
+      meetingDatetime: WHEN,
+      priorAttendances: [],
+    };
+  }
   if (key === "invitedById") return null;
   if (key === "responseStatus") return null;
   if (key === "status") {
@@ -272,6 +280,11 @@ function fixtureValue(exportName: string, key: string): unknown {
         },
         afterStatus: "attended",
         afterAttendanceType: "first_time",
+        attendanceDerivation: {
+          personStatus: "prospect",
+          meetingDatetime: WHEN,
+          priorAttendances: [],
+        },
       },
     ];
   }
@@ -537,6 +550,104 @@ test("every Meetings effect renders its exact complete confirmation", () => {
   }
 });
 
+test("finalization distinguishes created tasks from retained tasks", () => {
+  const base = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.finalizeAttendanceAction.parse(
+    validArguments("finalizeAttendanceAction")
+  );
+  const inserted = base.followUpTaskTargets[0];
+  assert.ok(inserted);
+  const retained = {
+    ...inserted,
+    taskId: SECOND_ID,
+    expectedTaskAbsent: false,
+    beforeStatus: "in_progress" as const,
+    expectedUpdatedAt: WHEN,
+    notificationTargets: [],
+  };
+  const arguments_ =
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.finalizeAttendanceAction.parse({
+      ...base,
+      followUpTaskTargets: [inserted, retained],
+      evaluationTaskTarget: null,
+    });
+  const disclosure = meetingsEffectDisclosure(
+    "finalizeAttendanceAction",
+    arguments_
+  );
+  assert.deepEqual(
+    disclosure.counts
+      .filter(({ label }) => label.includes("tasks"))
+      .map(({ label, count, includedInAffectedCount }) => ({
+        label,
+        count,
+        includedInAffectedCount,
+      })),
+    [
+      {
+        label: "Follow-up tasks created",
+        count: 1,
+        includedInAffectedCount: true,
+      },
+      {
+        label: "Existing tasks retained",
+        count: 1,
+        includedInAffectedCount: false,
+      },
+    ]
+  );
+  assert.ok(
+    disclosure.beforeAfter.some(
+      ({ label, after, count }) =>
+        label === "Follow-up and evaluation tasks" &&
+        after === "Created or retained" &&
+        count === 2
+    )
+  );
+  assert.ok(
+    disclosure.consequences.includes(
+      "Missing disclosed follow-up and evaluation tasks will be created; existing disclosed tasks will be retained unchanged."
+    )
+  );
+});
+
+test("derived attendance plans require one closed raw-input baseline", () => {
+  const add = validArguments("addAttendeeAction");
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addAttendeeAction.safeParse({
+      ...add,
+      attendanceDerivation: null,
+    }).success,
+    false
+  );
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addAttendeeAction.safeParse({
+      ...add,
+      attendanceTypeIsDerived: false,
+    }).success,
+    false
+  );
+
+  const toggle = validArguments("toggleAttendanceStatusAction");
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.toggleAttendanceStatusAction.safeParse({
+      ...toggle,
+      attendanceDerivation: null,
+    }).success,
+    false
+  );
+
+  const batch = validArguments("recordAttendanceBatchAction");
+  const [record] = batch.records as ReadonlyArray<Record<string, unknown>>;
+  assert.ok(record);
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.recordAttendanceBatchAction.safeParse({
+      ...batch,
+      records: [{ ...record, attendanceDerivation: null }],
+    }).success,
+    false
+  );
+});
+
 test("a legal 5,000-character attendee note is disclosed losslessly", () => {
   const note = "x".repeat(5_000);
   const arguments_ = {
@@ -603,6 +714,11 @@ test("a cardinality-heavy legal plan preserves every exact target and plan byte"
       },
       afterStatus: "attended",
       afterAttendanceType: "first_time",
+      attendanceDerivation: {
+        personStatus: "prospect" as const,
+        meetingDatetime: WHEN,
+        priorAttendances: [],
+      },
     };
   });
   const arguments_ = {

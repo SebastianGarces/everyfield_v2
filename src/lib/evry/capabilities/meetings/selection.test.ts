@@ -26,6 +26,100 @@ test("the closed Meetings grammar selects every registered effect exactly", () =
   }
 });
 
+test("location commands preserve every owning form field", () => {
+  assert.deepEqual(
+    selectMeetingsEvryRequest(
+      "create meeting location: name=Main Hall | address=1 Main Street | contactName=Alex | contactPhone=555-0100 | contactEmail=alex@example.com | cost=$200 | capacity=120 | notes=Use west door"
+    ),
+    {
+      kind: "effect",
+      exportName: "createLocationAction",
+      values: {
+        name: "Main Hall",
+        address: "1 Main Street",
+        contactName: "Alex",
+        contactPhone: "555-0100",
+        contactEmail: "alex@example.com",
+        cost: "$200",
+        capacity: 120,
+        notes: "Use west door",
+      },
+    }
+  );
+  assert.deepEqual(
+    selectMeetingsEvryRequest(
+      "update meeting location 10000000-0000-4000-8000-000000000001: contactName=none | contactPhone=555-0101 | contactEmail=ops@example.com | cost=none | capacity=200 | notes=Updated"
+    ),
+    {
+      kind: "effect",
+      exportName: "updateLocationAction",
+      values: {
+        locationId: "10000000-0000-4000-8000-000000000001",
+        contactName: null,
+        contactPhone: "555-0101",
+        contactEmail: "ops@example.com",
+        cost: null,
+        capacity: 200,
+        notes: "Updated",
+      },
+    }
+  );
+});
+
+test("meeting updates preserve every editable owning form field", () => {
+  assert.deepEqual(
+    selectMeetingsEvryRequest(
+      "update this meeting: timezone=America/New_York | title=Updated night | datetime=2026-09-13T14:00:00.000Z | locationName=Main Hall | locationAddress=1 Main Street | meetingSubtype=training | estimatedAttendance=80 | durationMinutes=120 | notes=Bring signs"
+    ),
+    {
+      kind: "effect",
+      exportName: "updateMeetingAction",
+      values: {
+        timezone: "America/New_York",
+        title: "Updated night",
+        datetime: "2026-09-13T14:00:00.000Z",
+        locationName: "Main Hall",
+        locationAddress: "1 Main Street",
+        meetingSubtype: "training",
+        estimatedAttendance: 80,
+        durationMinutes: 120,
+        notes: "Bring signs",
+        locationId: null,
+      },
+    }
+  );
+  assert.equal(
+    selectMeetingsEvryRequest(
+      "update this meeting: timezone=America/New_York | locationName=Missing address"
+    ),
+    null
+  );
+});
+
+test("checklist updates carry notes and assignee while walk-ins stay server-derived", () => {
+  const itemId = "10000000-0000-4000-8000-000000000001";
+  const personId = "20000000-0000-4000-8000-000000000001";
+  assert.deepEqual(
+    selectMeetingsEvryRequest(
+      `update checklist ${itemId}: notes=Bring cable | assignedTo=${personId}`
+    ),
+    {
+      kind: "effect",
+      exportName: "updateChecklistItemAction",
+      values: { itemId, notes: "Bring cable", assignedTo: personId },
+    }
+  );
+  assert.deepEqual(selectMeetingsEvryRequest(`add walk-in ${personId}`), {
+    kind: "effect",
+    exportName: "addWalkInAttendeeAction",
+    values: { personId },
+  });
+  assert.equal(
+    selectMeetingsEvryRequest(`add walk-in ${personId} as first_time`),
+    null
+  );
+});
+
 test("the closed Meetings grammar selects each read without confirmation", () => {
   assert.deepEqual(selectMeetingsEvryRequest("show meetings"), {
     kind: "read_list",

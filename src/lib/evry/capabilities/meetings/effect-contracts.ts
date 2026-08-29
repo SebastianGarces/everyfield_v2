@@ -10,6 +10,7 @@ import {
   responseStatuses,
 } from "@/db/schema/meetings";
 import { notificationStatuses } from "@/db/schema/notifications";
+import { personStatuses } from "@/db/schema/people";
 import {
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
@@ -258,13 +259,55 @@ const personStatusChangeSchema = z.strictObject({
 });
 
 const score = z.number().int().min(1).max(5);
-const attendanceRecordChangeSchema = z.strictObject({
+const priorAttendedMeetingSchema = z.strictObject({
   attendanceId: uuid,
-  personId: uuid,
-  before: attendanceBaselineSchema,
-  afterStatus: z.enum(attendanceStatuses),
-  afterAttendanceType: z.enum(attendanceTypes).nullable(),
+  meetingId: uuid,
+  meetingDatetime: timestamp,
 });
+
+const attendanceDerivationBaselineSchema = z.strictObject({
+  personStatus: z.enum(personStatuses),
+  meetingDatetime: timestamp,
+  priorAttendances: z
+    .array(priorAttendedMeetingSchema)
+    .max(1_000)
+    .superRefine((rows, context) => {
+      const attendanceIds = rows.map(({ attendanceId }) => attendanceId);
+      const meetingIds = rows.map(({ meetingId }) => meetingId);
+      if (
+        new Set(attendanceIds).size !== rows.length ||
+        new Set(meetingIds).size !== rows.length
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Prior attendance baselines must be unique",
+        });
+      }
+    }),
+});
+
+const attendanceRecordChangeSchema = z
+  .strictObject({
+    attendanceId: uuid,
+    personId: uuid,
+    before: attendanceBaselineSchema,
+    afterStatus: z.enum(attendanceStatuses),
+    afterAttendanceType: z.enum(attendanceTypes).nullable(),
+    attendanceDerivation: attendanceDerivationBaselineSchema.nullable(),
+  })
+  .superRefine((value, context) => {
+    const attended = value.afterStatus === "attended";
+    if (
+      attended !==
+      (value.afterAttendanceType !== null &&
+        value.attendanceDerivation !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Attended records require one complete derivation baseline",
+      });
+    }
+  });
 const followUpTargetSchema = z.strictObject({
   taskId: uuid,
   personId: uuid,
@@ -299,21 +342,35 @@ const evaluationCompletionTaskSchema = z.strictObject({
 });
 
 export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
-  addAttendeeAction: z.strictObject({
-    meetingId: uuid,
-    attendanceId: uuid,
-    personId: uuid,
-    attendanceType: z.enum(attendanceTypes).nullable(),
-    status: z.enum(attendanceStatuses),
-    invitedById: nullableUuid,
-    responseStatus: z.enum(responseStatuses).nullable(),
-    notes: nullableText,
-    expectedMeetingUpdatedAt: timestamp,
-    expectedPersonUpdatedAt: timestamp,
-    expectedAttendanceAbsent: z.literal(true),
-    notificationBaseline: notificationPlanBaselineSchema,
-    notificationTargets: meetingNotificationTargetsSchema,
-  }),
+  addAttendeeAction: z
+    .strictObject({
+      meetingId: uuid,
+      attendanceId: uuid,
+      personId: uuid,
+      attendanceType: z.enum(attendanceTypes),
+      attendanceTypeIsDerived: z.boolean(),
+      attendanceDerivation: attendanceDerivationBaselineSchema.nullable(),
+      status: z.literal("attended"),
+      invitedById: nullableUuid,
+      responseStatus: z.enum(responseStatuses).nullable(),
+      notes: nullableText,
+      expectedMeetingUpdatedAt: timestamp,
+      expectedPersonUpdatedAt: timestamp,
+      expectedAttendanceAbsent: z.literal(true),
+      notificationBaseline: notificationPlanBaselineSchema,
+      notificationTargets: meetingNotificationTargetsSchema,
+    })
+    .superRefine((value, context) => {
+      if (
+        value.attendanceTypeIsDerived !==
+        (value.attendanceDerivation !== null)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Implicit attendance requires one derivation baseline",
+        });
+      }
+    }),
   addAttendeeNoteAction: z.strictObject({
     meetingId: uuid,
     personId: uuid,
@@ -338,6 +395,7 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     attendanceId: uuid,
     personId: uuid,
     attendanceType: z.enum(attendanceTypes),
+    attendanceDerivation: attendanceDerivationBaselineSchema,
     expectedMeetingUpdatedAt: timestamp,
     expectedPersonUpdatedAt: timestamp,
     expectedAttendanceAbsent: z.literal(true),
@@ -512,14 +570,29 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     beforeSections: agendaSchema,
     afterSections: agendaSchema,
   }),
-  toggleAttendanceStatusAction: z.strictObject({
-    meetingId: uuid,
-    personId: uuid,
-    beforeStatus: z.enum(attendanceStatuses),
-    afterStatus: z.enum(attendanceStatuses),
-    afterAttendanceType: z.enum(attendanceTypes).nullable(),
-    expectedAttendanceUpdatedAt: timestamp,
-  }),
+  toggleAttendanceStatusAction: z
+    .strictObject({
+      meetingId: uuid,
+      personId: uuid,
+      beforeStatus: z.enum(attendanceStatuses),
+      afterStatus: z.enum(attendanceStatuses),
+      afterAttendanceType: z.enum(attendanceTypes).nullable(),
+      attendanceDerivation: attendanceDerivationBaselineSchema.nullable(),
+      expectedAttendanceUpdatedAt: timestamp,
+    })
+    .superRefine((value, context) => {
+      const attended = value.afterStatus === "attended";
+      if (
+        attended !==
+        (value.afterAttendanceType !== null &&
+          value.attendanceDerivation !== null)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Attended transitions require one derivation baseline",
+        });
+      }
+    }),
   toggleChecklistItemAction: z.strictObject({
     itemId: uuid,
     meetingId: uuid,

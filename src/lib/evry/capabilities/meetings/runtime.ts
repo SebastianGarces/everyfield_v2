@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -48,6 +48,7 @@ import {
   type StoredEvryActionPlan,
 } from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
+import { attendanceTypeFromDerivationFacts } from "@/lib/meetings/attendance-type";
 
 import {
   MEETINGS_ACTION_CONTRACTS,
@@ -58,6 +59,87 @@ import type { MeetingsEffectArguments } from "./effect-contracts";
 import { executeMeetingsEffect } from "./atomic-effect";
 import { MEETINGS_REVIEW_REGISTRY } from "./review";
 import type { ResolvedMeetingsEffect } from "./resolver";
+
+async function attendanceDerivationIsCurrent(input: {
+  plantId: string;
+  meetingId: string;
+  personId: string;
+  expected: string | null;
+  baseline: MeetingsEffectArguments<"addWalkInAttendeeAction">["attendanceDerivation"];
+}): Promise<boolean> {
+  if (!input.expected) return false;
+  const [meetingRows, personRows, priorRows] = await Promise.all([
+    db
+      .select({ datetime: churchMeetings.datetime })
+      .from(churchMeetings)
+      .where(
+        and(
+          eq(churchMeetings.id, input.meetingId),
+          eq(churchMeetings.churchId, input.plantId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ status: persons.status })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.id, input.personId),
+          eq(persons.churchId, input.plantId),
+          isNull(persons.deletedAt)
+        )
+      )
+      .limit(1),
+    db
+      .select({
+        attendanceId: meetingAttendance.id,
+        meetingId: churchMeetings.id,
+        meetingDatetime: churchMeetings.datetime,
+      })
+      .from(meetingAttendance)
+      .innerJoin(
+        churchMeetings,
+        and(
+          eq(churchMeetings.id, meetingAttendance.meetingId),
+          eq(churchMeetings.churchId, meetingAttendance.churchId)
+        )
+      )
+      .where(
+        and(
+          eq(meetingAttendance.churchId, input.plantId),
+          eq(meetingAttendance.personId, input.personId),
+          eq(meetingAttendance.status, "attended"),
+          ne(meetingAttendance.meetingId, input.meetingId),
+          lt(churchMeetings.datetime, new Date(input.baseline.meetingDatetime))
+        )
+      )
+      .orderBy(asc(meetingAttendance.id))
+      .limit(1_001),
+  ]);
+  const meeting = meetingRows[0];
+  const person = personRows[0];
+  if (
+    !meeting ||
+    !person ||
+    person.status !== input.baseline.personStatus ||
+    !sameInstant(meeting.datetime, input.baseline.meetingDatetime)
+  ) {
+    return false;
+  }
+  const currentPrior = priorRows.map((row) => ({
+    attendanceId: row.attendanceId,
+    meetingId: row.meetingId,
+    meetingDatetime: row.meetingDatetime.toISOString(),
+  }));
+  return (
+    JSON.stringify(currentPrior) ===
+      JSON.stringify(input.baseline.priorAttendances) &&
+    attendanceTypeFromDerivationFacts({
+      personStatus: person.status,
+      hasPriorAttendance: currentPrior.length > 0,
+    }) === input.expected
+  );
+}
 
 const PLAN_BY_EXPORT = Object.fromEntries(
   Object.entries(MEETINGS_ACTION_CONTRACTS).map(([exportName, contract]) => {
@@ -799,6 +881,27 @@ export async function meetingsPlanTargetIsCurrent(input: {
       return false;
     }
   }
+  if (exportName === "updateMeetingAction") {
+    const update = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateMeetingAction.parse(
+      input.step.arguments
+    );
+    if (update.after.locationId) {
+      const [location] = await db
+        .select({ id: locations.id })
+        .from(locations)
+        .where(
+          and(
+            eq(locations.id, update.after.locationId),
+            eq(locations.churchId, plantId),
+            eq(locations.isActive, true),
+            eq(locations.name, update.after.locationName ?? ""),
+            eq(locations.address, update.after.locationAddress ?? "")
+          )
+        )
+        .limit(1);
+      if (!location) return false;
+    }
+  }
 
   const cancelling = args.pendingNotifications ?? [];
   if (
@@ -857,6 +960,30 @@ export async function meetingsPlanTargetIsCurrent(input: {
     }
   }
   if (
+    exportName === "addAttendeeAction" ||
+    exportName === "addWalkInAttendeeAction"
+  ) {
+    const addition = MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].parse(
+      input.step.arguments
+    );
+    const requiresDerivation =
+      exportName === "addWalkInAttendeeAction" ||
+      ("attendanceTypeIsDerived" in addition &&
+        addition.attendanceTypeIsDerived);
+    if (
+      requiresDerivation &&
+      !(await attendanceDerivationIsCurrent({
+        plantId,
+        meetingId: addition.meetingId,
+        personId: addition.personId,
+        expected: addition.attendanceType,
+        baseline: addition.attendanceDerivation!,
+      }))
+    ) {
+      return false;
+    }
+  }
+  if (
     typeof args.personId === "string" &&
     args.expectedAttendanceAbsent === true &&
     typeof args.attendanceId === "string"
@@ -880,6 +1007,57 @@ export async function meetingsPlanTargetIsCurrent(input: {
     if (person) return false;
   }
 
+  if (exportName === "updateChecklistItemAction") {
+    const checklist =
+      MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateChecklistItemAction.parse(
+        input.step.arguments
+      );
+    const [item] = await db
+      .select({
+        notes: meetingChecklistItems.notes,
+        assignedTo: meetingChecklistItems.assignedTo,
+        updatedAt: meetingChecklistItems.updatedAt,
+      })
+      .from(meetingChecklistItems)
+      .where(
+        and(
+          eq(meetingChecklistItems.id, checklist.itemId),
+          eq(meetingChecklistItems.meetingId, checklist.meetingId),
+          eq(meetingChecklistItems.churchId, plantId)
+        )
+      )
+      .limit(1);
+    if (
+      !item ||
+      item.notes !== checklist.beforeNotes ||
+      item.assignedTo !== checklist.beforeAssignedTo ||
+      !sameInstant(item.updatedAt, checklist.expectedUpdatedAt)
+    ) {
+      return false;
+    }
+    if (!checklist.afterAssignedTo) {
+      return checklist.expectedAssignedPersonUpdatedAt === null;
+    }
+    const [assignedPerson] = await db
+      .select({ updatedAt: persons.updatedAt })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.id, checklist.afterAssignedTo),
+          eq(persons.churchId, plantId),
+          isNull(persons.deletedAt)
+        )
+      )
+      .limit(1);
+    return Boolean(
+      assignedPerson &&
+      checklist.expectedAssignedPersonUpdatedAt &&
+      sameInstant(
+        assignedPerson.updatedAt,
+        checklist.expectedAssignedPersonUpdatedAt
+      )
+    );
+  }
   if (typeof args.itemId === "string") {
     const [item] = await db
       .select({ updatedAt: meetingChecklistItems.updatedAt })
@@ -918,6 +1096,24 @@ export async function meetingsPlanTargetIsCurrent(input: {
       !sameInstant(attendance.updatedAt, args.expectedAttendanceUpdatedAt)
     ) {
       return false;
+    }
+    if (exportName === "toggleAttendanceStatusAction") {
+      const toggle =
+        MEETINGS_EFFECT_ARGUMENT_SCHEMAS.toggleAttendanceStatusAction.parse(
+          input.step.arguments
+        );
+      if (
+        toggle.afterStatus === "attended" &&
+        !(await attendanceDerivationIsCurrent({
+          plantId,
+          meetingId,
+          personId: toggle.personId,
+          expected: toggle.afterAttendanceType,
+          baseline: toggle.attendanceDerivation!,
+        }))
+      ) {
+        return false;
+      }
     }
     if (
       args.beforeAttendance &&
@@ -1108,6 +1304,18 @@ export async function meetingsPlanTargetIsCurrent(input: {
             record.before.notes !== attendance.notes ||
             !record.before.updatedAt ||
             !sameInstant(attendance.updatedAt, record.before.updatedAt)))
+      ) {
+        return false;
+      }
+      if (
+        record.afterStatus === "attended" &&
+        !(await attendanceDerivationIsCurrent({
+          plantId,
+          meetingId: batch.meetingId,
+          personId: record.personId,
+          expected: record.afterAttendanceType,
+          baseline: record.attendanceDerivation!,
+        }))
       ) {
         return false;
       }

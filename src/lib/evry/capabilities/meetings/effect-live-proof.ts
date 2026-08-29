@@ -242,7 +242,16 @@ async function fixtureSelection(input: {
       selection: {
         kind: "effect",
         exportName,
-        values: { name: SCRATCH, address: "1 Atomic Way" },
+        values: {
+          name: SCRATCH,
+          address: "1 Atomic Way",
+          contactName: "Alex Rivera",
+          contactPhone: "555-0100",
+          contactEmail: "alex@example.com",
+          cost: "$250",
+          capacity: 120,
+          notes: "Use the west entrance.",
+        },
       },
       pageContext: null,
     };
@@ -254,6 +263,12 @@ async function fixtureSelection(input: {
         churchId: actor.plantId,
         name: SCRATCH,
         address: "Before",
+        contactName: "Before contact",
+        contactPhone: "555-0100",
+        contactEmail: "before@example.com",
+        cost: "$100",
+        capacity: 80,
+        notes: "Before notes",
       })
       .returning();
     return {
@@ -264,6 +279,12 @@ async function fixtureSelection(input: {
           locationId: location.id,
           name: SCRATCH,
           address: "After",
+          contactName: null,
+          contactPhone: "555-0101",
+          contactEmail: "after@example.com",
+          cost: null,
+          capacity: 160,
+          notes: "After notes",
         },
       },
       pageContext: null,
@@ -375,10 +396,18 @@ async function fixtureSelection(input: {
         ? { sections: [{ id: "welcome", title: "Welcome", minutes: 10 }] }
         : exportName === "updateMeetingAction"
           ? {
+              title: `${SCRATCH} updated`,
               datetime: new Date(
                 MEETING_AT.getTime() + 60 * 60 * 1_000
               ).toISOString(),
               timezone: "America/New_York",
+              locationId: null,
+              locationName: `${SCRATCH} new hall`,
+              locationAddress: "7 Updated Way",
+              meetingSubtype: "training",
+              estimatedAttendance: 75,
+              durationMinutes: 120,
+              notes: "Every editable meeting field is covered.",
             }
           : exportName === "updateMeetingStatusAction"
             ? { status: "ready" }
@@ -413,6 +442,10 @@ async function fixtureSelection(input: {
     exportName === "toggleChecklistItemAction" ||
     exportName === "updateChecklistItemAction"
   ) {
+    const assignedPerson =
+      exportName === "updateChecklistItemAction"
+        ? await seedPerson(actor)
+        : null;
     const [item] = await db
       .insert(meetingChecklistItems)
       .values({
@@ -420,6 +453,7 @@ async function fixtureSelection(input: {
         meetingId: meeting.id,
         itemName: "Projector",
         category: "av",
+        assignedTo: null,
       })
       .returning();
     return {
@@ -429,7 +463,11 @@ async function fixtureSelection(input: {
         values:
           exportName === "toggleChecklistItemAction"
             ? { itemId: item.id, checked: true }
-            : { itemId: item.id, notes: "Bring cable" },
+            : {
+                itemId: item.id,
+                notes: "Bring cable",
+                assignedTo: assignedPerson?.id,
+              },
       },
       pageContext,
     };
@@ -467,7 +505,7 @@ async function fixtureSelection(input: {
       : exportName === "addToGuestListAction"
         ? { personId: person.id }
         : exportName === "addWalkInAttendeeAction"
-          ? { personId: person.id, attendanceType: "first_time" }
+          ? { personId: person.id }
           : exportName === "recordAttendanceBatchAction"
             ? { records: [{ personId: person.id, status: "attended" }] }
             : exportName === "addAttendeeNoteAction"
@@ -657,6 +695,56 @@ async function assertMutationCardinality(
       : [];
   await assertExactNotifications(plantId, topLevelNotifications);
 
+  if (
+    resolved.exportName === "createLocationAction" ||
+    resolved.exportName === "updateLocationAction"
+  ) {
+    const args = resolved.arguments;
+    const [row] = await db
+      .select()
+      .from(locations)
+      .where(eq(locations.id, args.locationId));
+    assert.ok(row);
+    const expected =
+      resolved.exportName === "createLocationAction"
+        ? {
+            name: resolved.arguments.name,
+            address: resolved.arguments.address,
+            contactName: resolved.arguments.contactName,
+            contactPhone: resolved.arguments.contactPhone,
+            contactEmail: resolved.arguments.contactEmail,
+            cost: resolved.arguments.cost,
+            capacity: resolved.arguments.capacity,
+            notes: resolved.arguments.notes,
+            isActive: true,
+          }
+        : resolved.arguments.after;
+    assert.deepEqual(
+      {
+        name: row.name,
+        address: row.address,
+        contactName: row.contactName,
+        contactPhone: row.contactPhone,
+        contactEmail: row.contactEmail,
+        cost: row.cost,
+        capacity: row.capacity,
+        notes: row.notes,
+        isActive: row.isActive,
+      },
+      {
+        name: expected.name,
+        address: expected.address,
+        contactName: expected.contactName,
+        contactPhone: expected.contactPhone,
+        contactEmail: expected.contactEmail,
+        cost: expected.cost,
+        capacity: expected.capacity,
+        notes: expected.notes,
+        isActive: expected.isActive,
+      }
+    );
+  }
+
   if ("pendingNotifications" in resolved.arguments) {
     const pending = resolved.arguments.pendingNotifications;
     const cancelled =
@@ -719,6 +807,54 @@ async function assertMutationCardinality(
     assert.equal(checklistRows.length, args.checklistItems.length);
     assert.equal(attendanceRows.length, args.attendanceRows.length);
     assert.equal(locationRows.length, args.savedLocationId ? 1 : 0);
+  }
+
+  if (resolved.exportName === "updateMeetingAction") {
+    const args = resolved.arguments;
+    const [row] = await db
+      .select()
+      .from(churchMeetings)
+      .where(eq(churchMeetings.id, args.meetingId));
+    assert.ok(row);
+    assert.deepEqual(
+      {
+        title: row.title,
+        datetime: row.datetime.toISOString(),
+        locationId: row.locationId,
+        locationName: row.locationName,
+        locationAddress: row.locationAddress,
+        meetingSubtype: row.meetingSubtype,
+        estimatedAttendance: row.estimatedAttendance,
+        durationMinutes: row.durationMinutes,
+        notes: row.notes,
+      },
+      {
+        title: args.after.title,
+        datetime: args.after.datetime,
+        locationId: args.after.locationId,
+        locationName: args.after.locationName,
+        locationAddress: args.after.locationAddress,
+        meetingSubtype: args.after.meetingSubtype,
+        estimatedAttendance: args.after.estimatedAttendance,
+        durationMinutes: args.after.durationMinutes,
+        notes: args.after.notes,
+      }
+    );
+  }
+
+  if (resolved.exportName === "updateChecklistItemAction") {
+    const args = resolved.arguments;
+    const [row] = await db
+      .select({
+        notes: meetingChecklistItems.notes,
+        assignedTo: meetingChecklistItems.assignedTo,
+      })
+      .from(meetingChecklistItems)
+      .where(eq(meetingChecklistItems.id, args.itemId));
+    assert.deepEqual(row, {
+      notes: args.afterNotes,
+      assignedTo: args.afterAssignedTo,
+    });
   }
 
   if (resolved.exportName === "deleteMeetingAction") {
@@ -1114,6 +1250,181 @@ async function runEffect(input: {
   assert.equal(refusedArguments.status, "refused", input.exportName);
 }
 
+async function assertAttendanceDerivationDriftRefuses(input: {
+  actor: EvryPlantActor;
+  resolveMeetingsEvryEffect: typeof import("./resolver").resolveMeetingsEvryEffect;
+  mintEvryPlanRequestKey: typeof import("@/lib/evry/plans").mintEvryPlanRequestKey;
+  authorizeEvryEffectCapability: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  executionEffectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  executeMeetingsEffect: typeof import("./atomic-effect").executeMeetingsEffect;
+}) {
+  async function seedPrior(personId: string) {
+    const [meeting] = await db
+      .insert(churchMeetings)
+      .values({
+        churchId: input.actor.plantId,
+        type: "orientation",
+        title: `${SCRATCH} prior`,
+        datetime: new Date(MEETING_AT.getTime() - 24 * 60 * 60 * 1_000),
+        status: "completed",
+        agenda: [],
+        createdBy: input.actor.userId,
+      })
+      .returning({ id: churchMeetings.id });
+    const attendance = await seedAttendance({
+      actor: input.actor,
+      meetingId: meeting.id,
+      personId,
+      status: "attended",
+      attendanceType: "first_time",
+    });
+    return { meeting, attendance };
+  }
+
+  async function refuseScenario(inputScenario: {
+    exportName:
+      | "addAttendeeAction"
+      | "addWalkInAttendeeAction"
+      | "toggleAttendanceStatusAction"
+      | "recordAttendanceBatchAction";
+    withPrior: boolean;
+    mutate: (input: {
+      meeting: Awaited<ReturnType<typeof seedMeeting>>;
+      personId: string;
+      prior: Awaited<ReturnType<typeof seedPrior>> | null;
+    }) => Promise<void>;
+  }) {
+    const meeting = await seedMeeting(input.actor);
+    const person = await seedPerson(input.actor);
+    const prior = inputScenario.withPrior ? await seedPrior(person.id) : null;
+    const needsCurrentAttendance =
+      inputScenario.exportName === "toggleAttendanceStatusAction" ||
+      inputScenario.exportName === "recordAttendanceBatchAction";
+    const currentAttendance = needsCurrentAttendance
+      ? await seedAttendance({
+          actor: input.actor,
+          meetingId: meeting.id,
+          personId: person.id,
+          status: "absent",
+        })
+      : null;
+    const selection: MeetingsEvryEffectSelection = {
+      kind: "effect",
+      exportName: inputScenario.exportName,
+      values:
+        inputScenario.exportName === "recordAttendanceBatchAction"
+          ? { records: [{ personId: person.id, status: "attended" }] }
+          : inputScenario.exportName === "toggleAttendanceStatusAction"
+            ? { personId: person.id, status: "attended" }
+            : { personId: person.id },
+    };
+    const resolved = await input.resolveMeetingsEvryEffect({
+      actor: input.actor,
+      selection,
+      pageContext: {
+        kind: "meeting",
+        recordId: meeting.id,
+        label: meeting.title ?? "Meeting",
+      },
+      requestKey: input.mintEvryPlanRequestKey(),
+      now: NOW,
+    });
+    assert.ok(
+      resolved,
+      `${inputScenario.exportName} drift plan did not resolve`
+    );
+    const execution = await seedExecution({ actor: input.actor, resolved });
+    await inputScenario.mutate({ meeting, personId: person.id, prior });
+    const authorization = await input.authorizeEvryEffectCapability(
+      execution.capabilityIdentity
+    );
+    assert.ok(authorization);
+    const effectKey = input.executionEffectKey(
+      execution.planId,
+      execution.fingerprint,
+      execution.stepId
+    );
+    const result = await input.executeMeetingsEffect({
+      authorization,
+      execution,
+      effectKey,
+      arguments: resolved.arguments,
+    });
+    assert.equal(
+      result.status,
+      "refused",
+      `${inputScenario.exportName} accepted changed derivation inputs`
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: evryExecutionOutcomes.id })
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+      ).length,
+      0,
+      `${inputScenario.exportName} claimed a stale derivation`
+    );
+    const attendanceRows = await db
+      .select({ status: meetingAttendance.status })
+      .from(meetingAttendance)
+      .where(
+        and(
+          eq(meetingAttendance.churchId, input.actor.plantId),
+          eq(meetingAttendance.meetingId, meeting.id),
+          eq(meetingAttendance.personId, person.id)
+        )
+      );
+    assert.equal(attendanceRows.length, currentAttendance ? 1 : 0);
+    if (currentAttendance) assert.equal(attendanceRows[0]?.status, "absent");
+  }
+
+  await refuseScenario({
+    exportName: "addAttendeeAction",
+    withPrior: false,
+    mutate: async ({ personId }) => {
+      await db
+        .update(persons)
+        .set({ status: "attendee", updatedAt: new Date() })
+        .where(eq(persons.id, personId));
+    },
+  });
+  await refuseScenario({
+    exportName: "addWalkInAttendeeAction",
+    withPrior: true,
+    mutate: async ({ prior }) => {
+      assert.ok(prior);
+      await db
+        .update(churchMeetings)
+        .set({
+          datetime: new Date(MEETING_AT.getTime() - 12 * 60 * 60 * 1_000),
+        })
+        .where(eq(churchMeetings.id, prior.meeting.id));
+    },
+  });
+  await refuseScenario({
+    exportName: "toggleAttendanceStatusAction",
+    withPrior: true,
+    mutate: async ({ personId }) => {
+      await seedPrior(personId);
+    },
+  });
+  await refuseScenario({
+    exportName: "recordAttendanceBatchAction",
+    withPrior: false,
+    mutate: async ({ meeting }) => {
+      await db
+        .update(churchMeetings)
+        .set({
+          datetime: new Date(MEETING_AT.getTime() + 60 * 60 * 1_000),
+          updatedAt: meeting.updatedAt,
+        })
+        .where(eq(churchMeetings.id, meeting.id));
+    },
+  });
+  console.log("PASS meetings:attendance-derivation-drift-matrix");
+}
+
 async function assertCrossPlantRefusals(input: {
   actor: EvryPlantActor;
   resolveMeetingsEvryEffect: typeof import("./resolver").resolveMeetingsEvryEffect;
@@ -1266,6 +1577,14 @@ async function main() {
       executeMeetingsEffect: atomic.executeMeetingsEffect,
     });
   }
+  await assertAttendanceDerivationDriftRefuses({
+    actor,
+    resolveMeetingsEvryEffect: resolver.resolveMeetingsEvryEffect,
+    mintEvryPlanRequestKey: plans.mintEvryPlanRequestKey,
+    authorizeEvryEffectCapability: eligibility.authorizeEvryEffectCapability,
+    executionEffectKey: audit.executionEffectKey,
+    executeMeetingsEffect: atomic.executeMeetingsEffect,
+  });
   console.log("Meetings atomic effect live proof passed");
 }
 

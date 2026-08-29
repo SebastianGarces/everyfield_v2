@@ -153,8 +153,11 @@ function effectTail(): SQL {
     limit 1`;
 }
 
-function timestamp(value: string): Date {
-  return new Date(value);
+function timestamp(value: string): SQL {
+  // Meeting datetimes are UTC-pinned wall clocks. Passing a Date lets the
+  // driver serialize through the process's local zone before writing the
+  // timestamp-without-time-zone column, so the same plan changes with TZ.
+  return sql`${value}::timestamp`;
 }
 
 /**
@@ -177,6 +180,86 @@ function nullableSerializedTimestampMatches(
   return value === null
     ? sql`${column} is null`
     : serializedTimestampMatches(column, value);
+}
+
+/** Match every owning attendance-classification input inside the claim. */
+function attendanceDerivationBaselineMatches(input: {
+  plantId: string;
+  meetingId: SQL;
+  personId: SQL;
+  attendanceType: SQL;
+  baseline: MeetingsEffectArguments<"addWalkInAttendeeAction">["attendanceDerivation"];
+}): SQL {
+  const priorAttendances = JSON.stringify(input.baseline.priorAttendances);
+  return sql`exists (
+    select 1
+    from church_meetings current_meeting
+    join persons current_person
+      on current_person.id = ${input.personId}
+     and current_person.church_id = current_meeting.church_id
+     and current_person.deleted_at is null
+    where current_meeting.id = ${input.meetingId}
+      and current_meeting.church_id = ${input.plantId}::uuid
+      and current_person.status = ${input.baseline.personStatus}
+      and date_trunc('milliseconds', current_meeting.datetime) =
+        ${timestamp(input.baseline.meetingDatetime)}
+      and case
+        when current_person.status in ('core_group', 'launch_team', 'leader')
+          then 'core_group'
+        when exists (
+          select 1
+          from meeting_attendance prior_attendance
+          join church_meetings prior_meeting
+            on prior_meeting.id = prior_attendance.meeting_id
+           and prior_meeting.church_id = prior_attendance.church_id
+          where prior_attendance.church_id = ${input.plantId}::uuid
+            and prior_attendance.person_id = current_person.id
+            and prior_attendance.status = 'attended'
+            and prior_attendance.meeting_id <> current_meeting.id
+            and prior_meeting.datetime < current_meeting.datetime
+        ) then 'returning'
+        else 'first_time'
+      end = ${input.attendanceType}
+      and not exists (
+        select 1
+        from meeting_attendance prior_attendance
+        join church_meetings prior_meeting
+          on prior_meeting.id = prior_attendance.meeting_id
+         and prior_meeting.church_id = prior_attendance.church_id
+        where prior_attendance.church_id = ${input.plantId}::uuid
+          and prior_attendance.person_id = current_person.id
+          and prior_attendance.status = 'attended'
+          and prior_attendance.meeting_id <> current_meeting.id
+          and prior_meeting.datetime < current_meeting.datetime
+          and not exists (
+            select 1
+            from jsonb_array_elements(${priorAttendances}::jsonb) baseline
+            where (baseline->>'attendanceId')::uuid = prior_attendance.id
+              and (baseline->>'meetingId')::uuid = prior_meeting.id
+              and date_trunc('milliseconds', prior_meeting.datetime) =
+                (baseline->>'meetingDatetime')::timestamp
+          )
+      )
+      and not exists (
+        select 1
+        from jsonb_array_elements(${priorAttendances}::jsonb) baseline
+        left join meeting_attendance prior_attendance
+          on prior_attendance.id = (baseline->>'attendanceId')::uuid
+         and prior_attendance.church_id = ${input.plantId}::uuid
+         and prior_attendance.person_id = current_person.id
+         and prior_attendance.status = 'attended'
+        left join church_meetings prior_meeting
+          on prior_meeting.id = (baseline->>'meetingId')::uuid
+         and prior_meeting.id = prior_attendance.meeting_id
+         and prior_meeting.church_id = prior_attendance.church_id
+        where prior_attendance.id is null
+          or prior_meeting.id is null
+          or prior_meeting.id = current_meeting.id
+          or prior_meeting.datetime >= current_meeting.datetime
+          or date_trunc('milliseconds', prior_meeting.datetime) is distinct from
+            (baseline->>'meetingDatetime')::timestamp
+      )
+  )`;
 }
 
 function locationStateCurrent(
@@ -467,11 +550,21 @@ function toggleAttendanceStatement(input: {
   args: MeetingsEffectArguments<"toggleAttendanceStatusAction">;
 }): SQL {
   const { args } = input;
+  const attendanceTypeCurrent =
+    args.afterStatus === "attended"
+      ? attendanceDerivationBaselineMatches({
+          plantId: input.execution.plantId,
+          meetingId: sql`${args.meetingId}::uuid`,
+          personId: sql`${args.personId}::uuid`,
+          attendanceType: sql`${args.afterAttendanceType}`,
+          baseline: args.attendanceDerivation!,
+        })
+      : sql`${args.afterAttendanceType === null && args.attendanceDerivation === null}`;
   return sql`
     with ${effectPrelude({
       ...input,
       affectedCount: 1,
-      current: sql`exists (
+      current: sql`${attendanceTypeCurrent} and exists (
         select 1 from meeting_attendance a
         join church_meetings m on m.id = a.meeting_id and m.church_id = a.church_id
         join persons p on p.id = a.person_id and p.church_id = a.church_id
@@ -505,11 +598,25 @@ function recordAttendanceBatchStatement(input: {
 }): SQL {
   const { args } = input;
   const records = JSON.stringify(args.records);
+  const derivationsCurrent = sql.join(
+    args.records.map((record) =>
+      record.afterStatus === "attended"
+        ? attendanceDerivationBaselineMatches({
+            plantId: input.execution.plantId,
+            meetingId: sql`${args.meetingId}::uuid`,
+            personId: sql`${record.personId}::uuid`,
+            attendanceType: sql`${record.afterAttendanceType}`,
+            baseline: record.attendanceDerivation!,
+          })
+        : sql`${record.afterAttendanceType === null && record.attendanceDerivation === null}`
+    ),
+    sql` and `
+  );
   return sql`
     with ${effectPrelude({
       ...input,
       affectedCount: args.records.length,
-      current: sql`exists (
+      current: sql`${derivationsCurrent} and exists (
         select 1 from church_meetings m
         where m.id = ${args.meetingId}::uuid
           and m.church_id = ${input.execution.plantId}::uuid
@@ -986,11 +1093,29 @@ function addAttendanceStatement<
           and invited.deleted_at is null
       )`
     : sql`true`;
+  const requiresDerivation =
+    status === "attended" &&
+    !(
+      input.exportName === "addAttendeeAction" &&
+      "attendanceTypeIsDerived" in args &&
+      !args.attendanceTypeIsDerived
+    );
+  const attendanceTypeCurrent =
+    requiresDerivation && "attendanceDerivation" in args
+      ? attendanceDerivationBaselineMatches({
+          plantId: input.execution.plantId,
+          meetingId: sql`${args.meetingId}::uuid`,
+          personId: sql`${args.personId}::uuid`,
+          attendanceType: sql`${attendanceType}`,
+          baseline: args.attendanceDerivation!,
+        })
+      : sql`${!requiresDerivation}`;
   return sql`
     with ${effectPrelude({
       ...input,
       affectedCount: 1,
-      current: sql`${notificationsCurrent} and ${invitedByCurrent} and exists (
+      current: sql`${notificationsCurrent} and ${invitedByCurrent}
+        and ${attendanceTypeCurrent} and exists (
         select 1 from church_meetings m
         join persons p on p.id = ${args.personId}::uuid
         where m.id = ${args.meetingId}::uuid
@@ -1446,11 +1571,15 @@ function updateMeetingStatement(input: {
         select 1 from locations l
         where l.id = ${args.after.locationId}::uuid
           and l.church_id = ${input.execution.plantId}::uuid
+          and l.is_active = true
           and l.name = ${args.after.locationName}
           and l.address = ${args.after.locationAddress}
       )`
     : sql`${
-        args.after.locationName === null && args.after.locationAddress === null
+        (args.after.locationName === null &&
+          args.after.locationAddress === null) ||
+        (args.after.locationName !== null &&
+          args.after.locationAddress !== null)
       }`;
   return sql`
     with ${effectPrelude({

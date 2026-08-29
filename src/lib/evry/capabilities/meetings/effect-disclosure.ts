@@ -533,7 +533,7 @@ const BUILDERS = {
         ...(tasks.length - insertedFollowUps.length - insertedEvaluation
           ? [
               count(
-                "Existing tasks updated",
+                "Existing tasks retained",
                 tasks.length - insertedFollowUps.length - insertedEvaluation,
                 false
               ),
@@ -563,7 +563,7 @@ const BUILDERS = {
               change(
                 "Follow-up and evaluation tasks",
                 "Reviewed baseline",
-                "Created or updated",
+                "Created or retained",
                 tasks.length
               ),
             ]
@@ -584,7 +584,7 @@ const BUILDERS = {
           : []),
         ...(tasks.length
           ? [
-              "The disclosed follow-up and evaluation tasks will be created or updated.",
+              "Missing disclosed follow-up and evaluation tasks will be created; existing disclosed tasks will be retained unchanged.",
             ]
           : []),
         "The plant material-event timestamp will be advanced.",

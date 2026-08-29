@@ -106,9 +106,36 @@ const CREATE_MEETING_FIELDS = new Set([
   "notes",
 ]);
 
-function closedCreateMeetingFields(
-  value: string
-): Readonly<Record<string, unknown>> | null {
+const LOCATION_FIELDS = new Set([
+  "name",
+  "address",
+  "contactName",
+  "contactPhone",
+  "contactEmail",
+  "cost",
+  "capacity",
+  "notes",
+]);
+
+const UPDATE_MEETING_FIELDS = new Set([
+  "timezone",
+  "title",
+  "datetime",
+  "locationId",
+  "locationName",
+  "locationAddress",
+  "meetingSubtype",
+  "estimatedAttendance",
+  "durationMinutes",
+  "notes",
+]);
+
+const UPDATE_CHECKLIST_FIELDS = new Set(["notes", "assignedTo"]);
+
+function closedFields(
+  value: string,
+  allowed: ReadonlySet<string>
+): ReadonlyMap<string, string> | null {
   const entries = value.split("|").map((part) => part.trim());
   const fields = new Map<string, string>();
   for (const entry of entries) {
@@ -116,15 +143,29 @@ function closedCreateMeetingFields(
     if (separator <= 0) return null;
     const key = entry.slice(0, separator).trim();
     const fieldValue = entry.slice(separator + 1).trim();
-    if (
-      !CREATE_MEETING_FIELDS.has(key) ||
-      fields.has(key) ||
-      fieldValue.length === 0
-    ) {
+    if (!allowed.has(key) || fields.has(key) || fieldValue.length === 0) {
       return null;
     }
     fields.set(key, fieldValue);
   }
+  return fields;
+}
+
+function nullableValue(value: string): string | null {
+  return value.toLowerCase() === "none" ? null : value;
+}
+
+function nullableInteger(value: string): number | null | undefined {
+  if (value.toLowerCase() === "none") return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function closedCreateMeetingFields(
+  value: string
+): Readonly<Record<string, unknown>> | null {
+  const fields = closedFields(value, CREATE_MEETING_FIELDS);
+  if (!fields) return null;
   const type = exactEnum(fields.get("type") ?? "", meetingTypes);
   const datetime = fields.get("datetime");
   const timezone = fields.get("timezone");
@@ -177,6 +218,114 @@ function closedCreateMeetingFields(
   };
 }
 
+function closedLocationFields(
+  value: string,
+  mode: "create" | "update"
+): Readonly<Record<string, unknown>> | null {
+  const fields = closedFields(value, LOCATION_FIELDS);
+  if (!fields || (mode === "update" && fields.size === 0)) return null;
+  const capacity = fields.has("capacity")
+    ? nullableInteger(fields.get("capacity")!)
+    : undefined;
+  if (capacity !== undefined && capacity !== null && capacity < 0) return null;
+  if (fields.has("capacity") && capacity === undefined) return null;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, fieldValue] of fields) {
+    result[key] = key === "capacity" ? capacity : nullableValue(fieldValue);
+  }
+  const locationSchema = z.strictObject({
+    name: z.string().trim().min(1).max(255),
+    address: z.string().trim().min(1).max(500),
+    contactName: z.string().max(255).nullable(),
+    contactPhone: z.string().max(50).nullable(),
+    contactEmail: z.string().email().max(255).nullable(),
+    cost: z.string().max(50).nullable(),
+    capacity: z.number().int().nonnegative().nullable(),
+    notes: z.string().nullable(),
+  });
+  if (mode === "create") {
+    result.contactName ??= null;
+    result.contactPhone ??= null;
+    result.contactEmail ??= null;
+    result.cost ??= null;
+    result.capacity ??= null;
+    result.notes ??= null;
+  }
+  const parsed = (
+    mode === "create" ? locationSchema : locationSchema.partial()
+  ).safeParse(result);
+  return parsed.success ? parsed.data : null;
+}
+
+function closedMeetingUpdateFields(
+  value: string
+): Readonly<Record<string, unknown>> | null {
+  const fields = closedFields(value, UPDATE_MEETING_FIELDS);
+  if (!fields || fields.size < 2 || !fields.has("timezone")) return null;
+  const result: Record<string, unknown> = { timezone: fields.get("timezone") };
+  for (const [key, fieldValue] of fields) {
+    if (key === "timezone") continue;
+    if (key === "estimatedAttendance" || key === "durationMinutes") {
+      const parsed = nullableInteger(fieldValue);
+      if (
+        parsed === undefined ||
+        (parsed !== null &&
+          (parsed < (key === "durationMinutes" ? 1 : 0) ||
+            (key === "durationMinutes" && parsed > 1_440)))
+      ) {
+        return null;
+      }
+      result[key] = parsed;
+    } else {
+      result[key] = nullableValue(fieldValue);
+    }
+  }
+  const parsed = z
+    .strictObject({
+      timezone: zone,
+      title: z.string().max(255).nullable().optional(),
+      datetime: instant.optional(),
+      locationId: uuid.nullable().optional(),
+      locationName: z.string().max(255).nullable().optional(),
+      locationAddress: z.string().max(500).nullable().optional(),
+      meetingSubtype: z.enum(meetingSubtypes).nullable().optional(),
+      estimatedAttendance: z.number().int().nonnegative().nullable().optional(),
+      durationMinutes: z.number().int().min(1).max(1_440).nullable().optional(),
+      notes: z.string().nullable().optional(),
+    })
+    .safeParse(result);
+  if (!parsed.success) return null;
+  const hasLocationId = Object.hasOwn(parsed.data, "locationId");
+  const hasLocationName = Object.hasOwn(parsed.data, "locationName");
+  const hasLocationAddress = Object.hasOwn(parsed.data, "locationAddress");
+  if (hasLocationName !== hasLocationAddress) return null;
+  if (parsed.data.locationId && hasLocationName) return null;
+  if (!hasLocationId && hasLocationName) {
+    return { ...parsed.data, locationId: null };
+  }
+  return parsed.data;
+}
+
+function closedChecklistUpdateFields(
+  value: string
+): Readonly<Record<string, unknown>> | null {
+  const fields = closedFields(value, UPDATE_CHECKLIST_FIELDS);
+  if (!fields || fields.size === 0) return null;
+  const result: Record<string, unknown> = {};
+  if (fields.has("notes")) result.notes = nullableValue(fields.get("notes")!);
+  if (fields.has("assignedTo")) {
+    result.assignedTo = nullableValue(fields.get("assignedTo")!);
+  }
+  const parsed = z
+    .strictObject({
+      notes: z.string().nullable().optional(),
+      assignedTo: uuid.nullable().optional(),
+    })
+    .safeParse(result);
+  return parsed.success ? parsed.data : null;
+}
+
 /** Closed command grammar. No branch accepts JSON, URLs, SQL, or action names. */
 export function selectMeetingsEvryRequest(
   literalUserText: string
@@ -201,12 +350,34 @@ export function selectMeetingsEvryRequest(
     return fields ? effect("createMeetingAction", fields) : null;
   }
 
+  const createLocationFields = /^create meeting location:\s*([\s\S]+)$/i.exec(
+    text
+  );
+  if (createLocationFields?.[1]?.includes("=")) {
+    const fields = closedLocationFields(createLocationFields[1], "create");
+    return fields ? effect("createLocationAction", fields) : null;
+  }
   let match = /^create meeting location:\s*([^|]+)\|([\s\S]+)$/i.exec(text);
   if (match?.[1]?.trim() && match[2]?.trim()) {
     return effect("createLocationAction", {
       name: match[1].trim(),
       address: match[2].trim(),
     });
+  }
+  const updateLocationFields =
+    /^update meeting location\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i.exec(text);
+  if (
+    updateLocationFields?.[1] &&
+    uuid.safeParse(updateLocationFields[1]).success &&
+    updateLocationFields[2]?.includes("=")
+  ) {
+    const fields = closedLocationFields(updateLocationFields[2], "update");
+    return fields
+      ? effect("updateLocationAction", {
+          locationId: updateLocationFields[1],
+          ...fields,
+        })
+      : null;
   }
   match =
     /^update meeting location\s+([0-9a-f-]{36}):\s*([^|]+)\|([\s\S]+)$/i.exec(
@@ -252,6 +423,13 @@ export function selectMeetingsEvryRequest(
   if (/^delete (?:this )?meeting[.!?]*$/i.test(text)) {
     return effect("deleteMeetingAction");
   }
+  const updateMeetingFields = /^update (?:this )?meeting:\s*([\s\S]+)$/i.exec(
+    text
+  );
+  if (updateMeetingFields?.[1]) {
+    const fields = closedMeetingUpdateFields(updateMeetingFields[1]);
+    return fields ? effect("updateMeetingAction", fields) : null;
+  }
   match = /^reschedule (?:this )?meeting to (\S+) in (\S+)$/i.exec(text);
   if (
     match &&
@@ -292,15 +470,9 @@ export function selectMeetingsEvryRequest(
   if (match && uuid.safeParse(match[1]).success) {
     return effect("addToGuestListAction", { personId: match[1] });
   }
-  match = /^add walk-in\s+([0-9a-f-]{36}) as ([a-z_]+)[.!?]*$/i.exec(text);
+  match = /^add walk-in\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
   if (match && uuid.safeParse(match[1]).success) {
-    const attendanceType = exactEnum(match[2] ?? "", attendanceTypes);
-    if (attendanceType) {
-      return effect("addWalkInAttendeeAction", {
-        personId: match[1],
-        attendanceType,
-      });
-    }
+    return effect("addWalkInAttendeeAction", { personId: match[1] });
   }
   for (const [prefix, exportName] of [
     ["create and add attendee", "quickAddAttendeeAction"],
@@ -382,6 +554,15 @@ export function selectMeetingsEvryRequest(
   }
   match = /^update checklist\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i.exec(text);
   if (match && uuid.safeParse(match[1]).success) {
+    if (match[2]?.includes("=")) {
+      const fields = closedChecklistUpdateFields(match[2]);
+      return fields
+        ? effect("updateChecklistItemAction", {
+            itemId: match[1],
+            ...fields,
+          })
+        : null;
+    }
     return effect("updateChecklistItemAction", {
       itemId: match[1],
       notes: match[2]?.trim() || null,
@@ -408,8 +589,7 @@ export const MEETINGS_SELECTION_EXAMPLES: Readonly<
   addAttendeeNoteAction:
     "add attendee note 10000000-0000-4000-8000-000000000001: Follow up next week",
   addToGuestListAction: "add guest 10000000-0000-4000-8000-000000000001",
-  addWalkInAttendeeAction:
-    "add walk-in 10000000-0000-4000-8000-000000000001 as returning",
+  addWalkInAttendeeAction: "add walk-in 10000000-0000-4000-8000-000000000001",
   clearResponseCardAction:
     "clear response 10000000-0000-4000-8000-000000000001",
   createEvaluationAction:

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -27,7 +27,7 @@ import {
   defaultAgendaTemplatesForType,
   parseAgenda,
 } from "@/lib/meetings/agenda";
-import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
+import { attendanceTypeFromDerivationFacts } from "@/lib/meetings/attendance-type";
 import { kitTemplate } from "@/lib/meetings/kit-template";
 import {
   listCoreGroupUserIds,
@@ -58,6 +58,7 @@ export type ResolvedMeetingsEffect = {
 type Meeting = typeof churchMeetings.$inferSelect;
 type Attendance = typeof meetingAttendance.$inferSelect;
 type Response = typeof meetingResponses.$inferSelect;
+type Person = typeof persons.$inferSelect;
 
 function iso(value: Date): string {
   return value.toISOString();
@@ -128,6 +129,55 @@ async function loadPerson(plantId: string, personId: string) {
     )
     .limit(1);
   return person ?? null;
+}
+
+async function attendanceDerivationBaseline(input: {
+  plantId: string;
+  meeting: Meeting;
+  person: Pick<Person, "id" | "status">;
+}) {
+  const priorAttendances = await db
+    .select({
+      attendanceId: meetingAttendance.id,
+      meetingId: churchMeetings.id,
+      meetingDatetime: churchMeetings.datetime,
+    })
+    .from(meetingAttendance)
+    .innerJoin(
+      churchMeetings,
+      and(
+        eq(churchMeetings.id, meetingAttendance.meetingId),
+        eq(churchMeetings.churchId, meetingAttendance.churchId)
+      )
+    )
+    .where(
+      and(
+        eq(meetingAttendance.churchId, input.plantId),
+        eq(meetingAttendance.personId, input.person.id),
+        eq(meetingAttendance.status, "attended"),
+        ne(meetingAttendance.meetingId, input.meeting.id),
+        lt(churchMeetings.datetime, input.meeting.datetime)
+      )
+    )
+    .orderBy(asc(meetingAttendance.id))
+    .limit(1_001);
+  if (priorAttendances.length > 1_000) return null;
+  const baseline = {
+    personStatus: input.person.status,
+    meetingDatetime: iso(input.meeting.datetime),
+    priorAttendances: priorAttendances.map((row) => ({
+      attendanceId: row.attendanceId,
+      meetingId: row.meetingId,
+      meetingDatetime: iso(row.meetingDatetime),
+    })),
+  };
+  return {
+    baseline,
+    attendanceType: attendanceTypeFromDerivationFacts({
+      personStatus: baseline.personStatus,
+      hasPriorAttendance: baseline.priorAttendances.length > 0,
+    }),
+  };
 }
 
 async function loadAttendance(
@@ -454,12 +504,12 @@ export async function resolveMeetingsEvryEffect(input: {
       locationId: derivedUuid(requestKey, "location"),
       name: values.name,
       address: values.address,
-      contactName: null,
-      contactPhone: null,
-      contactEmail: null,
-      cost: null,
-      capacity: null,
-      notes: null,
+      contactName: values.contactName ?? null,
+      contactPhone: values.contactPhone ?? null,
+      contactEmail: values.contactEmail ?? null,
+      cost: values.cost ?? null,
+      capacity: values.capacity ?? null,
+      notes: values.notes ?? null,
       expectedLocationAbsent: true,
     });
   }
@@ -487,11 +537,37 @@ export async function resolveMeetingsEvryEffect(input: {
       notes: location.notes,
       isActive: location.isActive,
     };
+    const afterCandidate = {
+      ...before,
+      ...(Object.hasOwn(values, "name") ? { name: values.name } : {}),
+      ...(Object.hasOwn(values, "address") ? { address: values.address } : {}),
+      ...(Object.hasOwn(values, "contactName")
+        ? { contactName: values.contactName }
+        : {}),
+      ...(Object.hasOwn(values, "contactPhone")
+        ? { contactPhone: values.contactPhone }
+        : {}),
+      ...(Object.hasOwn(values, "contactEmail")
+        ? { contactEmail: values.contactEmail }
+        : {}),
+      ...(Object.hasOwn(values, "cost") ? { cost: values.cost } : {}),
+      ...(Object.hasOwn(values, "capacity")
+        ? { capacity: values.capacity }
+        : {}),
+      ...(Object.hasOwn(values, "notes") ? { notes: values.notes } : {}),
+    };
+    const parsedAfter =
+      MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateLocationAction.shape.after.safeParse(
+        afterCandidate
+      );
+    if (!parsedAfter.success) return null;
+    const after = parsedAfter.data;
+    if (JSON.stringify(before) === JSON.stringify(after)) return null;
     return parseResolved(exportName, {
       locationId: location.id,
       expectedUpdatedAt: iso(location.updatedAt),
       before,
-      after: { ...before, name: values.name, address: values.address },
+      after,
     });
   }
   if (exportName === "createMeetingAction") {
@@ -777,17 +853,75 @@ export async function resolveMeetingsEvryEffect(input: {
     });
   }
   if (exportName === "updateMeetingAction") {
-    if (
-      typeof values.datetime !== "string" ||
-      typeof values.timezone !== "string"
-    )
-      return null;
+    if (typeof values.timezone !== "string") return null;
     const before = meetingState(meeting);
+    const hasLocationId = Object.hasOwn(values, "locationId");
+    const hasLocationName = Object.hasOwn(values, "locationName");
+    const hasLocationAddress = Object.hasOwn(values, "locationAddress");
+    if (hasLocationName !== hasLocationAddress) return null;
+    if (typeof values.locationId === "string" && hasLocationName) return null;
+    const [selectedLocation] =
+      typeof values.locationId === "string"
+        ? await db
+            .select()
+            .from(locations)
+            .where(
+              and(
+                eq(locations.id, values.locationId),
+                eq(locations.churchId, actor.plantId),
+                eq(locations.isActive, true)
+              )
+            )
+            .limit(1)
+        : [null];
+    if (typeof values.locationId === "string" && !selectedLocation) return null;
+    const locationPatch = selectedLocation
+      ? {
+          locationId: selectedLocation.id,
+          locationName: selectedLocation.name,
+          locationAddress: selectedLocation.address,
+        }
+      : hasLocationId || hasLocationName
+        ? {
+            locationId: null,
+            locationName: hasLocationName ? values.locationName : null,
+            locationAddress: hasLocationAddress ? values.locationAddress : null,
+          }
+        : {};
+    const afterCandidate = {
+      ...before,
+      ...locationPatch,
+      ...(Object.hasOwn(values, "title") ? { title: values.title } : {}),
+      ...(Object.hasOwn(values, "datetime")
+        ? { datetime: values.datetime }
+        : {}),
+      ...(Object.hasOwn(values, "meetingSubtype")
+        ? { meetingSubtype: values.meetingSubtype }
+        : {}),
+      ...(Object.hasOwn(values, "estimatedAttendance")
+        ? { estimatedAttendance: values.estimatedAttendance }
+        : {}),
+      ...(Object.hasOwn(values, "durationMinutes")
+        ? { durationMinutes: values.durationMinutes }
+        : {}),
+      ...(Object.hasOwn(values, "notes") ? { notes: values.notes } : {}),
+    };
+    const parsedAfter =
+      MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateMeetingAction.shape.after.safeParse(
+        afterCandidate
+      );
+    if (!parsedAfter.success) return null;
+    const after = parsedAfter.data;
+    if (JSON.stringify(before) === JSON.stringify(after)) return null;
     const pending = await pendingMeetingNotifications(
       actor.plantId,
       meeting.id
     );
-    const afterFacts = { ...facts, datetime: new Date(values.datetime) };
+    const afterFacts = {
+      ...facts,
+      title: after.title,
+      datetime: new Date(after.datetime),
+    };
     const audience = await meetingAudience(afterFacts);
     const { notificationBaseline, notificationTargets } =
       await plannedMeetingNotificationTargets({
@@ -802,7 +936,7 @@ export async function resolveMeetingsEvryEffect(input: {
       timezone: values.timezone,
       expectedUpdatedAt: expectedMeetingUpdatedAt,
       before,
-      after: { ...before, datetime: values.datetime },
+      after,
       pendingNotifications: pending,
       notificationBaseline,
       notificationTargets,
@@ -870,14 +1004,39 @@ export async function resolveMeetingsEvryEffect(input: {
         expectedUpdatedAt: iso(item.updatedAt),
       });
     }
+    const changesNotes = Object.hasOwn(values, "notes");
+    const changesAssignee = Object.hasOwn(values, "assignedTo");
+    if (!changesNotes && !changesAssignee) return null;
+    const afterAssignedTo = changesAssignee
+      ? values.assignedTo
+      : item.assignedTo;
+    if (afterAssignedTo !== null && typeof afterAssignedTo !== "string") {
+      return null;
+    }
+    const [assignedPerson] = afterAssignedTo
+      ? await db
+          .select({ id: persons.id, updatedAt: persons.updatedAt })
+          .from(persons)
+          .where(
+            and(
+              eq(persons.id, afterAssignedTo),
+              eq(persons.churchId, actor.plantId),
+              isNull(persons.deletedAt)
+            )
+          )
+          .limit(1)
+      : [null];
+    if (afterAssignedTo && !assignedPerson) return null;
     return parseResolved(exportName, {
       itemId: item.id,
       meetingId: meeting.id,
       beforeNotes: item.notes,
-      afterNotes: values.notes,
+      afterNotes: changesNotes ? values.notes : item.notes,
       beforeAssignedTo: item.assignedTo,
-      afterAssignedTo: item.assignedTo,
-      expectedAssignedPersonUpdatedAt: null,
+      afterAssignedTo,
+      expectedAssignedPersonUpdatedAt: assignedPerson
+        ? iso(assignedPerson.updatedAt)
+        : null,
       expectedUpdatedAt: iso(item.updatedAt),
     });
   }
@@ -1020,7 +1179,7 @@ export async function resolveMeetingsEvryEffect(input: {
       return null;
     const [personRows, attendanceRows] = await Promise.all([
       db
-        .select({ id: persons.id })
+        .select()
         .from(persons)
         .where(
           and(
@@ -1041,6 +1200,7 @@ export async function resolveMeetingsEvryEffect(input: {
         ),
     ]);
     if (personRows.length !== ids.length) return null;
+    const personById = new Map(personRows.map((row) => [row.id, row]));
     const attendanceByPerson = new Map(
       attendanceRows.map((row) => [row.personId, row])
     );
@@ -1051,6 +1211,17 @@ export async function resolveMeetingsEvryEffect(input: {
           status: "attended" | "absent" | "excused";
         };
         const before = attendanceByPerson.get(selectedRecord.personId) ?? null;
+        const person = personById.get(selectedRecord.personId);
+        if (!person) return null;
+        const derivation =
+          selectedRecord.status === "attended"
+            ? await attendanceDerivationBaseline({
+                plantId: actor.plantId,
+                meeting,
+                person,
+              })
+            : null;
+        if (selectedRecord.status === "attended" && !derivation) return null;
         return {
           attendanceId:
             before?.id ??
@@ -1063,16 +1234,13 @@ export async function resolveMeetingsEvryEffect(input: {
           afterStatus: selectedRecord.status,
           afterAttendanceType:
             selectedRecord.status === "attended"
-              ? await deriveAttendanceType(
-                  selectedRecord.personId,
-                  meeting.id,
-                  meeting.datetime,
-                  db
-                )
+              ? derivation!.attendanceType
               : null,
+          attendanceDerivation: derivation?.baseline ?? null,
         };
       })
     );
+    if (records.some((record) => record === null)) return null;
     return parseResolved(exportName, {
       meetingId: meeting.id,
       expectedMeetingUpdatedAt,
@@ -1306,28 +1474,42 @@ export async function resolveMeetingsEvryEffect(input: {
       notificationTargets,
     };
     if (exportName === "addAttendeeAction") {
-      const attendanceType =
-        values.attendanceType ??
-        (await deriveAttendanceType(
-          person.id,
-          meeting.id,
-          meeting.datetime,
-          db
-        ));
+      const attendanceTypeIsDerived =
+        values.attendanceType === null || values.attendanceType === undefined;
+      const derivation = attendanceTypeIsDerived
+        ? await attendanceDerivationBaseline({
+            plantId: actor.plantId,
+            meeting,
+            person,
+          })
+        : null;
+      if (attendanceTypeIsDerived && !derivation) return null;
       return parseResolved(exportName, {
         ...common,
-        attendanceType,
+        attendanceType: attendanceTypeIsDerived
+          ? derivation!.attendanceType
+          : values.attendanceType,
+        attendanceTypeIsDerived,
+        attendanceDerivation: derivation?.baseline ?? null,
         status: "attended",
         invitedById: null,
         responseStatus: null,
         notes: null,
       });
     }
-    if (exportName === "addWalkInAttendeeAction")
+    if (exportName === "addWalkInAttendeeAction") {
+      const derivation = await attendanceDerivationBaseline({
+        plantId: actor.plantId,
+        meeting,
+        person,
+      });
+      if (!derivation) return null;
       return parseResolved(exportName, {
         ...common,
-        attendanceType: values.attendanceType,
+        attendanceType: derivation.attendanceType,
+        attendanceDerivation: derivation.baseline,
       });
+    }
     return parseResolved(exportName, common);
   }
   if (!attendance) return null;
@@ -1374,23 +1556,27 @@ export async function resolveMeetingsEvryEffect(input: {
       afterStatus: values.status,
       expectedAttendanceUpdatedAt: iso(attendance.updatedAt),
     });
-  if (exportName === "toggleAttendanceStatusAction")
+  if (exportName === "toggleAttendanceStatusAction") {
+    const derivation =
+      values.status === "attended"
+        ? await attendanceDerivationBaseline({
+            plantId: actor.plantId,
+            meeting,
+            person,
+          })
+        : null;
+    if (values.status === "attended" && !derivation) return null;
     return parseResolved(exportName, {
       meetingId: meeting.id,
       personId: person.id,
       beforeStatus: attendance.status,
       afterStatus: values.status,
       afterAttendanceType:
-        values.status === "attended"
-          ? await deriveAttendanceType(
-              person.id,
-              meeting.id,
-              meeting.datetime,
-              db
-            )
-          : null,
+        values.status === "attended" ? derivation!.attendanceType : null,
+      attendanceDerivation: derivation?.baseline ?? null,
       expectedAttendanceUpdatedAt: iso(attendance.updatedAt),
     });
+  }
   if (exportName === "addAttendeeNoteAction")
     return parseResolved(exportName, {
       meetingId: meeting.id,
