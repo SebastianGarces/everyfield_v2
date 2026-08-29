@@ -49,7 +49,7 @@ const location = {
 };
 const meeting = {
   type: "vision_meeting",
-  title: "Vision Meeting",
+  title: "Vision Meeting #12",
   datetime: WHEN,
   status: "planning",
   locationId: null,
@@ -85,7 +85,11 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "expectedAssignedPersonUpdatedAt") return WHEN;
   if (key.startsWith("expected") && key.endsWith("Absent")) return true;
   if (key === "type" || key === "meetingType") return "vision_meeting";
-  if (key === "title") return "Vision Meeting";
+  if (key === "title") {
+    return exportName === "createMeetingAction"
+      ? "Vision Meeting #12"
+      : "Vision Meeting";
+  }
   if (key === "datetime") return WHEN;
   if (key === "meetingDatetime") return WHEN;
   if (key === "meetingTitle") return "Vision Meeting";
@@ -195,6 +199,7 @@ function fixtureValue(exportName: string, key: string): unknown {
         expectedTaskAbsent: true,
         beforeStatus: null,
         expectedUpdatedAt: null,
+        notificationBaseline: [],
         notificationTargets: [
           {
             notificationId: NOTIFICATION_ID,
@@ -223,7 +228,7 @@ function fixtureValue(exportName: string, key: string): unknown {
       expectedTaskAbsent: true,
       beforeStatus: null,
       expectedUpdatedAt: null,
-      pendingNotifications: [],
+      notificationBaseline: [],
       notificationTargets: [],
     };
   }
@@ -468,6 +473,42 @@ test("the eval roster is derived from production Meetings registrations", () => 
   }
 });
 
+test("create plans enforce canonical numbered vision titles only", () => {
+  const canonical = validArguments("createMeetingAction");
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.safeParse(canonical)
+      .success,
+    true
+  );
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.safeParse({
+      ...canonical,
+      title: "Custom Night",
+    }).success,
+    false
+  );
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.safeParse({
+      ...canonical,
+      type: "orientation",
+      title: "Orientation Kickoff",
+      meetingNumber: null,
+    }).success,
+    true
+  );
+  const update = validArguments("updateMeetingAction");
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.updateMeetingAction.safeParse({
+      ...update,
+      after: {
+        ...(update.after as Record<string, unknown>),
+        title: "Custom Night",
+      },
+    }).success,
+    false
+  );
+});
+
 test("every Meetings effect renders its exact complete confirmation", () => {
   const plan = evryConversationPlanIdentitySchema.parse({
     planId: "30000000-0000-4000-8000-000000000001",
@@ -565,6 +606,16 @@ test("finalization distinguishes created tasks from retained tasks", () => {
     expectedTaskAbsent: false,
     beforeStatus: "in_progress" as const,
     expectedUpdatedAt: WHEN,
+    notificationBaseline: Array.from({ length: 101 }, (_, index) => ({
+      notificationId: `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      recipientUserId: ID,
+      type: index % 2 === 0 ? ("task.due" as const) : ("task.overdue" as const),
+      entityId: SECOND_ID,
+      dedupeKey: `task-notification-${index + 1}`,
+      scheduledFor: WHEN,
+      beforeStatus: "pending" as const,
+      expectedUpdatedAt: WHEN,
+    })),
     notificationTargets: [],
   };
   const arguments_ =
@@ -597,6 +648,28 @@ test("finalization distinguishes created tasks from retained tasks", () => {
         includedInAffectedCount: false,
       },
     ]
+  );
+  assert.deepEqual(
+    disclosure.counts.find(
+      ({ label }) => label === "Pending task notifications retained"
+    ),
+    {
+      label: "Pending task notifications retained",
+      count: 101,
+      includedInAffectedCount: false,
+    }
+  );
+  assert.equal(
+    disclosure.targets.filter(({ label }) => label === "Notification").length,
+    102
+  );
+  const { step } = reviewForArguments("finalizeAttendanceAction", arguments_);
+  assert.deepEqual(
+    JSON.parse(
+      joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+    ),
+    arguments_,
+    "retained task notification baselines must reconstruct without loss"
   );
   assert.ok(
     disclosure.beforeAfter.some(

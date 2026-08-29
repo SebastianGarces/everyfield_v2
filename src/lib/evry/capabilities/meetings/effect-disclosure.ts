@@ -506,7 +506,9 @@ const BUILDERS = {
     const scheduled = tasks.flatMap(
       ({ notificationTargets: values }) => values
     );
-    const cancelled = args.evaluationTaskTarget?.pendingNotifications ?? [];
+    const retainedNotifications = tasks.flatMap(
+      ({ notificationBaseline }) => notificationBaseline
+    );
     return {
       affectedCount,
       targets: [
@@ -517,7 +519,7 @@ const BUILDERS = {
         ]),
         ...tasks.map(({ taskId }) => target("Task", taskId)),
         ...notificationTargets(scheduled),
-        ...notificationTargets(cancelled),
+        ...notificationTargets(retainedNotifications),
       ],
       counts: [
         count("Meetings finalized", 1),
@@ -540,7 +542,16 @@ const BUILDERS = {
             ]
           : []),
         count("Plant material-event timestamps updated", 1, false),
-        ...notificationCounts({ scheduled, cancelled }),
+        ...notificationCounts({ scheduled }),
+        ...(retainedNotifications.length
+          ? [
+              count(
+                "Pending task notifications retained",
+                retainedNotifications.length,
+                false
+              ),
+            ]
+          : []),
       ],
       beforeAfter: [
         change(
@@ -573,7 +584,17 @@ const BUILDERS = {
           args.expectedChurchMaterialEventAt,
           "Execution time"
         ),
-        ...notificationChanges({ scheduled, cancelled }),
+        ...notificationChanges({ scheduled }),
+        ...(retainedNotifications.length
+          ? [
+              change(
+                "Pending task notifications",
+                "Pending",
+                "Retained unchanged",
+                retainedNotifications.length
+              ),
+            ]
+          : []),
       ],
       consequences: [
         "The meeting's actual attendance will be finalized from the disclosed attendee set.",
@@ -588,9 +609,14 @@ const BUILDERS = {
             ]
           : []),
         "The plant material-event timestamp will be advanced.",
-        ...(scheduled.length || cancelled.length
+        ...(scheduled.length
           ? [
-              "The disclosed task notification schedule will be replaced exactly.",
+              "The disclosed task notifications will be scheduled for newly created tasks.",
+            ]
+          : []),
+        ...(retainedNotifications.length
+          ? [
+              "Every disclosed pending notification for a retained task will remain unchanged.",
             ]
           : []),
       ],

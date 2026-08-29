@@ -41,6 +41,14 @@ before(
       `Meetings live proof failed\nerror: ${proof.error?.message ?? "none"}\nsignal: ${proof.signal ?? "none"}\nstdout:\n${proof.stdout}\nstderr:\n${proof.stderr}`
     );
     assert.match(proof.stdout, /Meetings atomic effect live proof passed/);
+    assert.match(
+      proof.stdout,
+      /PASS meetings:finalization-repeat-notification-convergence/
+    );
+    assert.match(
+      proof.stdout,
+      /PASS meetings:finalization-notification-drift-matrix/
+    );
   },
   { timeout: 190_000 }
 );

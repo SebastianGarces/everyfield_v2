@@ -1522,18 +1522,16 @@ export async function meetingsPlanTargetIsCurrent(input: {
       ) {
         return false;
       }
-      const pending =
-        "pendingNotifications" in target ? target.pendingNotifications : [];
       if (
         !(await pendingTaskNotificationsAreCurrent({
           plantId,
           taskId: target.taskId,
-          pending,
+          pending: target.notificationBaseline,
         })) ||
         !(await notificationTargetsRemainAbsent({
           plantId,
           targets: target.notificationTargets,
-          cancelling: pending,
+          cancelling: [],
         }))
       ) {
         return false;

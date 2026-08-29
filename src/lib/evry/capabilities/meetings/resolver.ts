@@ -479,6 +479,43 @@ async function plannedTaskTargets(input: {
   }));
 }
 
+async function pendingTaskNotificationBaseline(
+  plantId: string,
+  taskId: string
+) {
+  const rows = await db
+    .select({
+      notificationId: notifications.id,
+      recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
+      dedupeKey: notifications.dedupeKey,
+      scheduledFor: notifications.scheduledFor,
+      expectedUpdatedAt: notifications.updatedAt,
+    })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, plantId),
+        eq(notifications.category, "tasks"),
+        eq(notifications.entityType, "task"),
+        eq(notifications.entityId, taskId),
+        eq(notifications.status, "pending")
+      )
+    )
+    .orderBy(asc(notifications.id));
+  return rows.map((row) => ({
+    notificationId: row.notificationId,
+    recipientUserId: row.recipientUserId,
+    type: row.type as "task.due" | "task.overdue",
+    entityId: row.entityId ?? taskId,
+    dedupeKey: row.dedupeKey ?? "",
+    scheduledFor: iso(row.scheduledFor),
+    beforeStatus: "pending" as const,
+    expectedUpdatedAt: iso(row.expectedUpdatedAt),
+  }));
+}
+
 function parseResolved<ExportName extends MeetingsActionExport>(
   exportName: ExportName,
   value: unknown
@@ -688,16 +725,16 @@ export async function resolveMeetingsEvryEffect(input: {
     const meetingNumber = meetingNumberRow?.value ?? null;
     const requestedTitle =
       typeof values.title === "string" ? values.title : null;
+    if (type === "vision_meeting" && requestedTitle !== null) return null;
     const storedTitle =
-      requestedTitle ??
-      (type === "vision_meeting" && meetingNumber
+      type === "vision_meeting" && meetingNumber
         ? meetingDisplayTitle({
             type,
             title: null,
             meetingNumber,
             teamName: null,
           })
-        : null);
+        : requestedTitle;
     const facts: MeetingNotificationFacts = {
       id: meetingId,
       churchId: actor.plantId,
@@ -869,6 +906,9 @@ export async function resolveMeetingsEvryEffect(input: {
   }
   if (exportName === "updateMeetingAction") {
     if (typeof values.timezone !== "string") return null;
+    if (meeting.type === "vision_meeting" && Object.hasOwn(values, "title")) {
+      return null;
+    }
     const before = meetingState(meeting);
     const hasLocationId = Object.hasOwn(values, "locationId");
     const hasLocationName = Object.hasOwn(values, "locationName");
@@ -906,7 +946,21 @@ export async function resolveMeetingsEvryEffect(input: {
     const afterCandidate = {
       ...before,
       ...locationPatch,
-      ...(Object.hasOwn(values, "title") ? { title: values.title } : {}),
+      ...(meeting.type === "vision_meeting"
+        ? {
+            title:
+              meeting.meetingNumber === null
+                ? null
+                : meetingDisplayTitle({
+                    type: meeting.type,
+                    title: null,
+                    meetingNumber: meeting.meetingNumber,
+                    teamName: null,
+                  }),
+          }
+        : Object.hasOwn(values, "title")
+          ? { title: values.title }
+          : {}),
       ...(Object.hasOwn(values, "datetime")
         ? { datetime: values.datetime }
         : {}),
@@ -1392,6 +1446,9 @@ export async function resolveMeetingsEvryEffect(input: {
           expectedTaskAbsent: !existing,
           beforeStatus: existing?.status ?? null,
           expectedUpdatedAt: existing ? iso(existing.updatedAt) : null,
+          notificationBaseline: existing
+            ? await pendingTaskNotificationBaseline(actor.plantId, taskId)
+            : [],
           notificationTargets: existing
             ? []
             : await plannedTaskTargets({
@@ -1435,7 +1492,12 @@ export async function resolveMeetingsEvryEffect(input: {
             expectedUpdatedAt: existingEvaluation
               ? iso(existingEvaluation.updatedAt)
               : null,
-            pendingNotifications: [],
+            notificationBaseline: existingEvaluation
+              ? await pendingTaskNotificationBaseline(
+                  actor.plantId,
+                  evaluationTaskId
+                )
+              : [],
             notificationTargets: existingEvaluation
               ? []
               : await plannedTaskTargets({

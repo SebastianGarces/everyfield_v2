@@ -17,6 +17,7 @@ import {
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
 } from "@/lib/meetings/agenda";
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { CHURCH_LEADERSHIP_STATUSES } from "@/lib/onboarding/leadership";
 
 import {
@@ -222,7 +223,15 @@ const pendingTaskNotificationSchema = z.strictObject({
 });
 const pendingTaskNotificationsSchema = z
   .array(pendingTaskNotificationSchema)
-  .max(4);
+  .superRefine((targets, context) => {
+    const ids = targets.map(({ notificationId }) => notificationId);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Pending task notification baselines must be unique",
+      });
+    }
+  });
 
 const responseBaselineSchema = z.strictObject({
   responseId: uuid,
@@ -321,15 +330,19 @@ const taskTargetState = {
     .enum(["not_started", "in_progress", "blocked", "complete"])
     .nullable(),
   expectedUpdatedAt: nullableTimestamp,
+  notificationBaseline: pendingTaskNotificationsSchema,
 } as const;
 
 function refineTaskTarget(
   value: {
+    taskId: string;
     assignedToId: string | null;
     priority: (typeof taskPriorities)[number];
     expectedTaskAbsent: boolean;
     beforeStatus: string | null;
     expectedUpdatedAt: string | null;
+    notificationBaseline: readonly Readonly<{ entityId: string }>[];
+    notificationTargets: readonly Readonly<{ entityId: string }>[];
   },
   context: z.RefinementCtx
 ) {
@@ -352,6 +365,26 @@ function refineTaskTarget(
         "New finalization tasks require the canonical high-priority assignee",
     });
   }
+  if (
+    (newTask && value.notificationBaseline.length > 0) ||
+    (!newTask && value.notificationTargets.length > 0)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "New task targets schedule notifications; retained task targets snapshot them",
+    });
+  }
+  if (
+    [...value.notificationBaseline, ...value.notificationTargets].some(
+      ({ entityId }) => entityId !== value.taskId
+    )
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Task notification entity IDs must match their task target",
+    });
+  }
 }
 
 const followUpTargetSchema = z
@@ -364,7 +397,6 @@ const followUpTargetSchema = z
 const evaluationTaskTargetSchema = z
   .strictObject({
     ...taskTargetState,
-    pendingNotifications: pendingTaskNotificationsSchema,
     notificationTargets: taskNotificationTargetsSchema,
   })
   .superRefine(refineTaskTarget);
@@ -458,33 +490,59 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     notes: nullableText,
     expectedLocationAbsent: z.literal(true),
   }),
-  createMeetingAction: z.strictObject({
-    meetingId: uuid,
-    type: z.enum(meetingTypes),
-    title: z.string().max(255).nullable(),
-    datetime: timestamp,
-    timezone,
-    status: z.literal("planning"),
-    locationId: nullableUuid,
-    locationName: z.string().max(255).nullable(),
-    locationAddress: z.string().max(500).nullable(),
-    savedLocationId: nullableUuid,
-    teamId: nullableUuid,
-    meetingSubtype: z.enum(meetingSubtypes).nullable(),
-    estimatedAttendance: nonnegativeInt.nullable(),
-    actualAttendance: z.null(),
-    durationMinutes: z.number().int().min(1).max(1440).nullable(),
-    notes: nullableText,
-    agenda: agendaSchema,
-    meetingNumber: nonnegativeInt.nullable(),
-    checklistItems: z.array(checklistCreationSchema).max(100),
-    resolvedTeamMemberIds: uuidSet,
-    attendanceRows: z.array(attendanceCreationSchema).max(1_000),
-    notificationBaseline: notificationPlanBaselineSchema,
-    notificationTargets: meetingNotificationTargetsSchema,
-    expectedMeetingAbsent: z.literal(true),
-    createdById: uuid,
-  }),
+  createMeetingAction: z
+    .strictObject({
+      meetingId: uuid,
+      type: z.enum(meetingTypes),
+      title: z.string().max(255).nullable(),
+      datetime: timestamp,
+      timezone,
+      status: z.literal("planning"),
+      locationId: nullableUuid,
+      locationName: z.string().max(255).nullable(),
+      locationAddress: z.string().max(500).nullable(),
+      savedLocationId: nullableUuid,
+      teamId: nullableUuid,
+      meetingSubtype: z.enum(meetingSubtypes).nullable(),
+      estimatedAttendance: nonnegativeInt.nullable(),
+      actualAttendance: z.null(),
+      durationMinutes: z.number().int().min(1).max(1440).nullable(),
+      notes: nullableText,
+      agenda: agendaSchema,
+      meetingNumber: nonnegativeInt.nullable(),
+      checklistItems: z.array(checklistCreationSchema).max(100),
+      resolvedTeamMemberIds: uuidSet,
+      attendanceRows: z.array(attendanceCreationSchema).max(1_000),
+      notificationBaseline: notificationPlanBaselineSchema,
+      notificationTargets: meetingNotificationTargetsSchema,
+      expectedMeetingAbsent: z.literal(true),
+      createdById: uuid,
+    })
+    .superRefine((value, context) => {
+      if (value.type === "vision_meeting") {
+        if (
+          !value.meetingNumber ||
+          value.title !==
+            meetingDisplayTitle({
+              type: value.type,
+              title: null,
+              meetingNumber: value.meetingNumber,
+              teamName: null,
+            })
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Numbered vision meetings require their canonical generated title",
+          });
+        }
+      } else if (value.meetingNumber !== null) {
+        context.addIssue({
+          code: "custom",
+          message: "Only vision meetings may have a meeting number",
+        });
+      }
+    }),
   deleteMeetingAction: z.strictObject({
     meetingId: uuid,
     timezone,
@@ -666,6 +724,25 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
             code: "custom",
             path: ["after", key],
             message: `${key} is not editable through the meeting form`,
+          });
+        }
+      }
+      if (value.before.type === "vision_meeting") {
+        const canonicalTitle =
+          value.before.meetingNumber === null
+            ? null
+            : meetingDisplayTitle({
+                type: value.before.type,
+                title: null,
+                meetingNumber: value.before.meetingNumber,
+                teamName: null,
+              });
+        if (value.after.title !== canonicalTitle) {
+          context.addIssue({
+            code: "custom",
+            path: ["after", "title"],
+            message:
+              "Numbered vision meetings require their canonical generated title",
           });
         }
       }

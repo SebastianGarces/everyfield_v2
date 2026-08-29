@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mock } from "node:test";
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -34,6 +34,7 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryActionPlanDocument } from "@/lib/evry/plans";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
+import { buildMeetingMergeData } from "@/lib/communication/merge";
 
 import type { MeetingsActionExport } from "./catalog";
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
@@ -172,17 +173,21 @@ async function seedForeignFixtures() {
 }
 
 async function seedMeeting(actor: EvryPlantActor, vision = false) {
+  const meetingNumber = vision
+    ? Number.parseInt(randomUUID().slice(0, 4), 16)
+    : null;
   const [meeting] = await db
     .insert(churchMeetings)
     .values({
       churchId: actor.plantId,
       type: vision ? "vision_meeting" : "orientation",
-      title: `${SCRATCH} ${randomUUID()}`,
+      title:
+        vision && meetingNumber
+          ? `Vision Meeting #${meetingNumber}`
+          : `${SCRATCH} ${randomUUID()}`,
       datetime: MEETING_AT,
       status: "planning",
-      meetingNumber: vision
-        ? Number.parseInt(randomUUID().slice(0, 4), 16)
-        : null,
+      meetingNumber,
       agenda: [],
       createdBy: actor.userId,
     })
@@ -790,6 +795,19 @@ async function assertMutationCardinality(
 
   if (resolved.exportName === "createMeetingAction") {
     const args = resolved.arguments;
+    assert.equal(args.title, `Vision Meeting #${args.meetingNumber}`);
+    assert.equal(
+      buildMeetingMergeData({
+        title: args.title,
+        type: args.type,
+        datetime: new Date(args.datetime),
+        locationName: args.locationName,
+        locationAddress: args.locationAddress,
+        agenda: args.agenda,
+      }).meeting_title,
+      args.title,
+      "Communication changed the canonical vision meeting title"
+    );
     const [meetingRows, checklistRows, attendanceRows, locationRows] =
       await Promise.all([
         db
@@ -994,6 +1012,13 @@ async function assertMutationCardinality(
       const row = taskById.get(target.taskId);
       assert.equal(row?.assignedToId, target.assignedToId);
       if ("personId" in target) assert.equal(row?.relatedId, target.personId);
+    }
+    if (args.evaluationTaskTarget?.expectedTaskAbsent) {
+      assert.equal(
+        args.evaluationTaskTarget.title,
+        `Complete evaluation for ${args.meetingTitle}`,
+        "evaluation task changed the stored meeting title"
+      );
     }
     const taskNotifications = taskTargets.flatMap(
       ({ notificationTargets }) => notificationTargets
@@ -1652,6 +1677,191 @@ async function assertFinalizationParity(input: {
     .where(eq(users.id, input.actor.userId));
   sessionUser = sessionUser ? { ...sessionUser, seat: "owner" } : null;
 
+  const convergenceMeeting = await seedMeeting(input.actor, true);
+  const firstPerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: convergenceMeeting.id,
+    personId: firstPerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const initialFinalization = await resolveFinalization(
+    convergenceMeeting.id,
+    convergenceMeeting.title
+  );
+  assert.ok(
+    initialFinalization.arguments.followUpTaskTargets.every(
+      ({ expectedTaskAbsent }) => expectedTaskAbsent
+    )
+  );
+  assert.equal(
+    initialFinalization.arguments.evaluationTaskTarget?.expectedTaskAbsent,
+    true
+  );
+  assert.equal((await execute(initialFinalization)).result.status, "completed");
+  const originalTaskIds = [
+    ...initialFinalization.arguments.followUpTaskTargets.map(
+      ({ taskId }) => taskId
+    ),
+    initialFinalization.arguments.evaluationTaskTarget?.taskId,
+  ].filter((taskId): taskId is string => Boolean(taskId));
+  const originalFollowUpId =
+    initialFinalization.arguments.followUpTaskTargets[0]?.taskId;
+  assert.ok(originalFollowUpId);
+  await db.insert(notifications).values(
+    Array.from({ length: 101 }, (_, index) => ({
+      id: randomUUID(),
+      churchId: input.actor.plantId,
+      recipientUserId: input.actor.userId,
+      category: "tasks" as const,
+      type: index % 2 === 0 ? "task.due" : "task.overdue",
+      title: `Retained reminder ${index + 1}`,
+      body: "This pending task notification must survive repeat finalization.",
+      entityType: "task" as const,
+      entityId: originalFollowUpId,
+      dedupeKey: `retained-proof:${originalFollowUpId}:${index + 1}`,
+      scheduledFor: new Date(NOW.getTime() + (index + 1) * 60_000),
+    }))
+  );
+  const originalNotificationRows = await db
+    .select({
+      id: notifications.id,
+      recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
+      dedupeKey: notifications.dedupeKey,
+      scheduledFor: notifications.scheduledFor,
+      status: notifications.status,
+      updatedAt: notifications.updatedAt,
+    })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, input.actor.plantId),
+        eq(notifications.category, "tasks"),
+        inArray(notifications.entityId, originalTaskIds)
+      )
+    )
+    .orderBy(asc(notifications.id));
+  assert.ok(
+    originalNotificationRows.length > 100,
+    "real task notification baseline did not exceed the former boundary"
+  );
+  const latePerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: convergenceMeeting.id,
+    personId: latePerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const repeatFinalization = await resolveFinalization(
+    convergenceMeeting.id,
+    convergenceMeeting.title
+  );
+  const repeatTargets = [
+    ...repeatFinalization.arguments.followUpTaskTargets,
+    ...(repeatFinalization.arguments.evaluationTaskTarget
+      ? [repeatFinalization.arguments.evaluationTaskTarget]
+      : []),
+  ];
+  assert.deepEqual(
+    repeatTargets
+      .filter(({ expectedTaskAbsent }) => !expectedTaskAbsent)
+      .flatMap(({ notificationBaseline }) => notificationBaseline)
+      .map(({ notificationId }) => notificationId)
+      .toSorted(),
+    originalNotificationRows.map(({ id }) => id).toSorted(),
+    "repeat plan omitted or duplicated a retained notification"
+  );
+  assert.equal(
+    repeatFinalization.arguments.followUpTaskTargets.filter(
+      ({ expectedTaskAbsent }) => expectedTaskAbsent
+    ).length,
+    1,
+    "late attendee did not produce exactly one new follow-up"
+  );
+  const repeatDisclosure = meetingsEffectDisclosure(
+    "finalizeAttendanceAction",
+    repeatFinalization.arguments
+  );
+  assert.equal(
+    repeatDisclosure.counts.find(
+      ({ label }) => label === "Pending task notifications retained"
+    )?.count,
+    originalNotificationRows.length
+  );
+  assert.equal(
+    (await execute(repeatFinalization)).result.status,
+    "completed",
+    "normal reminders blocked repeat finalization"
+  );
+  const retainedNotificationRowsAfter = await db
+    .select({
+      id: notifications.id,
+      recipientUserId: notifications.recipientUserId,
+      type: notifications.type,
+      entityId: notifications.entityId,
+      dedupeKey: notifications.dedupeKey,
+      scheduledFor: notifications.scheduledFor,
+      status: notifications.status,
+      updatedAt: notifications.updatedAt,
+    })
+    .from(notifications)
+    .where(
+      inArray(
+        notifications.id,
+        originalNotificationRows.map(({ id }) => id)
+      )
+    )
+    .orderBy(asc(notifications.id));
+  assert.deepEqual(
+    retainedNotificationRowsAfter,
+    originalNotificationRows,
+    "repeat finalization changed a retained task notification"
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          inArray(
+            tasks.id,
+            repeatTargets.map(({ taskId }) => taskId)
+          )
+        )
+    ).length,
+    3,
+    "repeat finalization lost or duplicated a task"
+  );
+  const [convergenceMeetingAfter] = await db
+    .select({ actualAttendance: churchMeetings.actualAttendance })
+    .from(churchMeetings)
+    .where(eq(churchMeetings.id, convergenceMeeting.id));
+  assert.equal(convergenceMeetingAfter?.actualAttendance, 2);
+  assert.equal(
+    await input.resolveMeetingsEvryEffect({
+      actor: input.actor,
+      selection: {
+        kind: "effect",
+        exportName: "updateMeetingAction",
+        values: { timezone: "UTC", title: "Custom Night" },
+      },
+      pageContext: {
+        kind: "meeting",
+        recordId: convergenceMeeting.id,
+        label: convergenceMeeting.title ?? "Meeting",
+      },
+      requestKey: input.mintEvryPlanRequestKey(),
+      now: NOW,
+    }),
+    null,
+    "a custom title was selectable for a vision meeting"
+  );
+  console.log("PASS meetings:finalization-repeat-notification-convergence");
+
   const retainedMeeting = await seedMeeting(input.actor, true);
   const retainedPerson = await seedPerson(input.actor, creator.id);
   await seedAttendance({
@@ -1750,6 +1960,118 @@ async function assertFinalizationParity(input: {
     priority: "urgent",
     updatedAt: evaluation.updatedAt,
   });
+
+  async function prepareNotificationDrift() {
+    const meeting = await seedMeeting(input.actor, true);
+    const person = await seedPerson(input.actor, creator.id);
+    await seedAttendance({
+      actor: input.actor,
+      meetingId: meeting.id,
+      personId: person.id,
+      status: "attended",
+      attendanceType: "first_time",
+    });
+    const [followUp] = await db
+      .insert(tasks)
+      .values({
+        churchId: input.actor.plantId,
+        title: "Notification drift follow-up",
+        status: "not_started",
+        priority: "medium",
+        dueDate: "2026-10-01",
+        assignedToId: creator.id,
+        category: "follow_up",
+        relatedType: "person",
+        relatedId: person.id,
+        createdById: input.actor.userId,
+      })
+      .returning();
+    assert.ok(followUp);
+    await db.insert(tasks).values({
+      churchId: input.actor.plantId,
+      title: "Notification drift evaluation",
+      status: "blocked",
+      priority: "urgent",
+      dueDate: "2026-09-30",
+      assignedToId: null,
+      category: "vision_meeting",
+      relatedType: "meeting",
+      relatedId: meeting.id,
+      completionEvent: "meeting.evaluation.completed",
+      createdById: input.actor.userId,
+    });
+    const [notification] = await db
+      .insert(notifications)
+      .values({
+        churchId: input.actor.plantId,
+        recipientUserId: creator.id,
+        category: "tasks",
+        type: "task.due",
+        title: "Notification drift reminder",
+        body: "The exact pending row is part of the immutable plan.",
+        entityType: "task",
+        entityId: followUp.id,
+        dedupeKey: `notification-drift:${followUp.id}`,
+        scheduledFor: new Date("2026-09-30T12:00:00.000Z"),
+      })
+      .returning();
+    assert.ok(notification);
+    const resolved = await resolveFinalization(meeting.id, meeting.title);
+    const planned = resolved.arguments.followUpTaskTargets.find(
+      ({ taskId }) => taskId === followUp.id
+    );
+    assert.equal(planned?.notificationBaseline.length, 1);
+    return {
+      resolved,
+      execution: await seedExecution({ actor: input.actor, resolved }),
+      followUp,
+      notification,
+    };
+  }
+
+  const insertedDrift = await prepareNotificationDrift();
+  await db.insert(notifications).values({
+    churchId: input.actor.plantId,
+    recipientUserId: creator.id,
+    category: "tasks",
+    type: "task.overdue",
+    title: "Unexpected reminder",
+    body: "This row was not in the plan.",
+    entityType: "task",
+    entityId: insertedDrift.followUp.id,
+    dedupeKey: `notification-drift:insert:${insertedDrift.followUp.id}`,
+    scheduledFor: new Date("2026-10-02T12:00:00.000Z"),
+  });
+  assert.equal(
+    (await execute(insertedDrift.resolved, insertedDrift.execution)).result
+      .status,
+    "refused",
+    "an inserted task notification did not invalidate finalization"
+  );
+
+  const deletedDrift = await prepareNotificationDrift();
+  await db
+    .delete(notifications)
+    .where(eq(notifications.id, deletedDrift.notification.id));
+  assert.equal(
+    (await execute(deletedDrift.resolved, deletedDrift.execution)).result
+      .status,
+    "refused",
+    "a deleted task notification did not invalidate finalization"
+  );
+
+  const changedDrift = await prepareNotificationDrift();
+  await db
+    .update(notifications)
+    .set({ scheduledFor: new Date("2026-10-03T12:00:00.000Z") })
+    .where(eq(notifications.id, changedDrift.notification.id));
+  assert.equal(
+    (await execute(changedDrift.resolved, changedDrift.execution)).result
+      .status,
+    "refused",
+    "a changed task notification did not invalidate finalization"
+  );
+  console.log("PASS meetings:finalization-notification-drift-matrix");
 
   const taskDriftMeeting = await seedMeeting(input.actor, true);
   const taskDriftPerson = await seedPerson(input.actor, creator.id);

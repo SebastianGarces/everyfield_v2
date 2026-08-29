@@ -66,6 +66,52 @@ test("location commands preserve every owning form field", () => {
   );
 });
 
+test("vision meeting titles are canonical while other meeting titles remain literal", () => {
+  const when = "2026-09-13T14:00:00.000Z";
+  const zone = "America/New_York";
+  assert.deepEqual(
+    selectMeetingsEvryRequest(`create vision_meeting at ${when} in ${zone}`),
+    {
+      kind: "effect",
+      exportName: "createMeetingAction",
+      values: {
+        type: "vision_meeting",
+        datetime: when,
+        timezone: zone,
+        title: null,
+        locationId: null,
+        locationName: null,
+        locationAddress: null,
+        teamId: null,
+        meetingSubtype: null,
+        estimatedAttendance: null,
+        durationMinutes: null,
+        notes: null,
+      },
+    }
+  );
+  assert.equal(
+    selectMeetingsEvryRequest(
+      `create vision_meeting at ${when} in ${zone} titled Custom Night`
+    ),
+    null
+  );
+  assert.equal(
+    selectMeetingsEvryRequest(
+      `create meeting: type=vision_meeting | datetime=${when} | timezone=${zone} | title=Custom Night`
+    ),
+    null
+  );
+  const exact = "ﬁ ① Ｆ 👨‍👩‍👧‍👦";
+  const orientation = selectMeetingsEvryRequest(
+    `create orientation at ${when} in ${zone} titled ${exact}`
+  );
+  assert.equal(orientation?.kind, "effect");
+  if (orientation?.kind === "effect") {
+    assert.equal(orientation.values.title, exact);
+  }
+});
+
 test("meeting updates preserve every editable owning form field", () => {
   assert.deepEqual(
     selectMeetingsEvryRequest(

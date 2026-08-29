@@ -1778,9 +1778,8 @@ function deleteMeetingStatement(input: {
 
 type TaskNotificationTarget =
   MeetingsEffectArguments<"finalizeAttendanceAction">["followUpTaskTargets"][number]["notificationTargets"][number];
-type PendingTaskNotification = NonNullable<
-  MeetingsEffectArguments<"finalizeAttendanceAction">["evaluationTaskTarget"]
->["pendingNotifications"][number];
+type PendingTaskNotification =
+  MeetingsEffectArguments<"finalizeAttendanceAction">["followUpTaskTargets"][number]["notificationBaseline"][number];
 
 function taskNotificationTargetsCurrent(input: {
   plantId: string;
@@ -1789,11 +1788,9 @@ function taskNotificationTargetsCurrent(input: {
     taskId: string;
     assignedToId: string;
   }>[];
-  cancelling?: readonly PendingTaskNotification[];
 }): SQL {
   const targets = JSON.stringify(input.targets);
   const taskBindings = JSON.stringify(input.taskBindings);
-  const cancelling = JSON.stringify(input.cancelling ?? []);
   return sql`not exists (
     select 1 from jsonb_array_elements(${targets}::jsonb) t
     left join jsonb_array_elements(${taskBindings}::jsonb) b
@@ -1818,10 +1815,6 @@ function taskNotificationTargetsCurrent(input: {
           and n.recipient_user_id = (t->>'recipientUserId')::uuid
           and n.dedupe_key = t->>'dedupeKey'
           and n.status <> 'cancelled'
-          and not exists (
-            select 1 from jsonb_array_elements(${cancelling}::jsonb) p
-            where (p->>'notificationId')::uuid = n.id
-          )
       )
   )`;
 }
@@ -1873,6 +1866,10 @@ function finalizeAttendanceStatement(input: {
   const statusChanges = JSON.stringify(args.personStatusChanges);
   const followUps = JSON.stringify(args.followUpTaskTargets);
   const evaluation = args.evaluationTaskTarget;
+  const allTaskTargets = [
+    ...args.followUpTaskTargets,
+    ...(evaluation ? [evaluation] : []),
+  ];
   const allTaskNotifications = [
     ...args.followUpTaskTargets.flatMap((target) => target.notificationTargets),
     ...(evaluation?.notificationTargets ?? []),
@@ -1890,13 +1887,6 @@ function finalizeAttendanceStatement(input: {
         ]
       : []),
   ];
-  const pendingEvaluationNotifications = evaluation?.pendingNotifications ?? [];
-  const evaluationNotificationsChange = Boolean(
-    evaluation &&
-    (evaluation.expectedTaskAbsent ||
-      evaluation.pendingNotifications.length > 0 ||
-      evaluation.notificationTargets.length > 0)
-  );
   const taskTargetsCurrent = args.followUpTaskTargets.map((target) =>
     target.expectedTaskAbsent
       ? sql`not exists (
@@ -1969,6 +1959,16 @@ function finalizeAttendanceStatement(input: {
         )`;
   const taskCurrent = sql.join(
     [...taskTargetsCurrent, evaluationCurrent],
+    sql` and `
+  );
+  const taskNotificationBaselinesCurrent = sql.join(
+    allTaskTargets.map((target) =>
+      pendingTaskNotificationsCurrent({
+        plantId: input.execution.plantId,
+        taskId: target.taskId,
+        pending: target.notificationBaseline,
+      })
+    ),
     sql` and `
   );
   const newTasksUseCanonicalAssignee = [
@@ -2101,9 +2101,8 @@ function finalizeAttendanceStatement(input: {
           plantId: input.execution.plantId,
           targets: allTaskNotifications,
           taskBindings,
-          cancelling: pendingEvaluationNotifications,
         })}
-        and ${evaluationNotificationsChange && evaluation ? pendingTaskNotificationsCurrent({ plantId: input.execution.plantId, taskId: evaluation.taskId, pending: pendingEvaluationNotifications }) : sql`true`}
+        and ${allTaskTargets.length > 0 ? taskNotificationBaselinesCurrent : sql`true`}
         `,
     })}, status_input as materialized (
       select change from jsonb_array_elements(${statusChanges}::jsonb) change
@@ -2158,15 +2157,6 @@ function finalizeAttendanceStatement(input: {
         transaction_timestamp(), transaction_timestamp()
       from claimed c where ${evaluation?.expectedTaskAbsent ?? false}
       returning id
-    ), task_notifications_cancelled as (
-      update notifications n set status = 'cancelled', updated_at = transaction_timestamp()
-      from claimed c, jsonb_array_elements(${JSON.stringify(pendingEvaluationNotifications)}::jsonb) p
-      where n.id = (p->>'notificationId')::uuid and n.church_id = c.church_id
-        and n.category = 'tasks' and n.entity_type = 'task'
-        and n.entity_id = (p->>'entityId')::uuid and n.status = 'pending'
-        and date_trunc('milliseconds', n.updated_at) =
-          (p->>'expectedUpdatedAt')::timestamp
-      returning n.id
     ), task_notifications_inserted as (
       insert into notifications (
         id, anchor_type, church_id, recipient_user_id, category, type,
@@ -2203,7 +2193,6 @@ function finalizeAttendanceStatement(input: {
         and (select count(*) from status_activities_inserted) = ${args.personStatusChanges.length}
         and (select count(*) from follow_up_tasks_inserted) = ${args.followUpTaskTargets.filter(({ expectedTaskAbsent }) => expectedTaskAbsent).length}
         and (select count(*) from evaluation_task_inserted) = ${evaluation?.expectedTaskAbsent ? 1 : 0}
-        and (select count(*) from task_notifications_cancelled) = ${pendingEvaluationNotifications.length}
         and (select count(*) from task_notifications_inserted) = ${allTaskNotifications.length}
         and (select count(*) from meeting_updated) = 1
         and (select count(*) from church_stamped) = 1 as ok

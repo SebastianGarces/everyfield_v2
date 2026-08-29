@@ -287,7 +287,8 @@ function closedCreateMeetingFields(
     (durationMinutes !== null &&
       (!Number.isInteger(durationMinutes) ||
         durationMinutes < 1 ||
-        durationMinutes > 1_440))
+        durationMinutes > 1_440)) ||
+    (type === "vision_meeting" && fields.has("title"))
   ) {
     return null;
   }
@@ -295,7 +296,8 @@ function closedCreateMeetingFields(
     type,
     datetime,
     timezone,
-    title: fields.get("title")?.literal ?? null,
+    title:
+      type === "vision_meeting" ? null : (fields.get("title")?.literal ?? null),
     locationId,
     locationName,
     locationAddress,
@@ -516,7 +518,8 @@ export function selectMeetingsEvryRequest(
     match &&
     exactEnum(match[1] ?? "", meetingTypes) &&
     instant.safeParse(match[2]).success &&
-    zone.safeParse(match[3]).success
+    zone.safeParse(match[3]).success &&
+    !(match[1] === "vision_meeting" && match[4])
   ) {
     return effect("createMeetingAction", {
       type: match[1],
@@ -727,7 +730,7 @@ export const MEETINGS_SELECTION_EXAMPLES: Readonly<
   createLocationAction:
     "create meeting location: Community Center | 1 Main Street",
   createMeetingAction:
-    "create vision_meeting at 2026-09-12T14:00:00.000Z in America/New_York titled Vision Night",
+    "create vision_meeting at 2026-09-12T14:00:00.000Z in America/New_York",
   deleteMeetingAction: "delete this meeting",
   finalizeAttendanceAction: "finalize this meeting attendance",
   quickAddAttendeeAction:
