@@ -118,7 +118,10 @@ export async function createInterviewAction(
     seasonStatus: "pass" | "fail" | "concern";
     seasonNotes?: string;
     overallResult:
-      "qualified" | "qualified_with_notes" | "not_qualified" | "follow_up";
+      | "qualified"
+      | "qualified_with_notes"
+      | "not_qualified"
+      | "follow_up";
     nextSteps?: string;
   }
 ): Promise<ActionResult<Interview>> {

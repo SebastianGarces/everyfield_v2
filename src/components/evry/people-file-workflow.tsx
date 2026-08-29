@@ -279,7 +279,9 @@ export function EvryPeopleFileWorkflowForm(props: {
                       setDuplicateResolutions((current) => ({
                         ...current,
                         [String(row.rowNumber)]: event.target.value as
-                          "skip" | "create" | "merge",
+                          | "skip"
+                          | "create"
+                          | "merge",
                       }))
                     }
                     className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"

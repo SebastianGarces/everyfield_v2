@@ -106,8 +106,10 @@ function startingConversation(): EvryStoredConversation {
 function harness() {
   let conversation = startingConversation();
   let planStatus:
-    "awaiting_confirmation" | "approved" | "executing" | "cancelled" =
-    "awaiting_confirmation";
+    | "awaiting_confirmation"
+    | "approved"
+    | "executing"
+    | "cancelled" = "awaiting_confirmation";
   const calls: string[] = [];
   let executeResult: Awaited<
     ReturnType<EvryArtifactLifecycleBoundaries["execute"]>
