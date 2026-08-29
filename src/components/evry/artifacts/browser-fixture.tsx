@@ -1,7 +1,13 @@
 "use client";
 
 import { AlertTriangle, CheckCircle2, Pencil, ShieldCheck } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,16 +15,20 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  createEvryArtifactBrowserFixtureStore,
+  parseEvryArtifactBrowserFixtureSnapshot,
+  type EvryArtifactBrowserFixtureSnapshot,
+  type EvryArtifactBrowserFixtureStorage,
+} from "@/lib/evry/artifacts/browser-fixture-state";
+import {
   applyFreshEvryConfirmation,
   beginEvryArtifactEdit,
   beginEvryArtifactExecution,
   cancelEvryArtifactReview,
   finishEvryArtifactExecution,
-  type EvryArtifactInteractionState,
 } from "@/lib/evry/artifacts/interaction";
 import {
   editedMeetingConfirmation,
-  INITIAL_MEETING_CONFIRMATION,
   meetingProgressFixture,
   partialMeetingReceiptFixture,
 } from "@/lib/evry/artifacts/fixtures";
@@ -29,64 +39,117 @@ import {
   renderableEvryArtifact,
 } from "./artifact-renderer";
 
-const INITIAL_RECIPIENT = "Taylor Brooks · taylor@example.test";
+const EXECUTION_DURATION_MS = 2_500;
+const browserSessionStorage: EvryArtifactBrowserFixtureStorage = {
+  getItem: (key) => window.sessionStorage.getItem(key),
+  setItem: (key, value) => window.sessionStorage.setItem(key, value),
+  removeItem: (key) => window.sessionStorage.removeItem(key),
+};
 
 /** Preview-only interaction proof. It never calls a model, route, or effect. */
 export function EvryArtifactBrowserFixture() {
-  const [state, setState] = useState<EvryArtifactInteractionState>({
-    status: "review",
-    confirmation: INITIAL_MEETING_CONFIRMATION,
-  });
-  const stateRef = useRef(state);
+  const [store] = useState(() =>
+    createEvryArtifactBrowserFixtureStore(browserSessionStorage)
+  );
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getServerSnapshot
+  );
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [recipient, setRecipient] = useState(INITIAL_RECIPIENT);
-  const [notice, setNotice] = useState(
-    "Review the exact plan, then edit one recipient."
+  const replaceSnapshot = useCallback(
+    (next: EvryArtifactBrowserFixtureSnapshot) => store.replace(next),
+    [store]
   );
-  const [acceptedExecutions, setAcceptedExecutions] = useState(0);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    if (
+      snapshot === null ||
+      snapshot.state.status !== "executing" ||
+      snapshot.completionDueAt === null
+    ) {
+      return;
+    }
+    const finishExecution = () => {
+      const current = store.getSnapshot();
+      if (current.state.status !== "executing") return;
+      const receipt = partialMeetingReceiptFixture(current.state.progress.plan);
+      replaceSnapshot(
+        parseEvryArtifactBrowserFixtureSnapshot({
+          ...current,
+          state: finishEvryArtifactExecution(current.state, receipt),
+          notice:
+            "The durable receipt preserves completed work and marks only the email step as safe to retry.",
+          completionDueAt: null,
+        })
+      );
+    };
+    timerRef.current = setTimeout(
+      finishExecution,
+      Math.max(0, snapshot.completionDueAt - Date.now())
+    );
+    return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    []
-  );
+    };
+  }, [replaceSnapshot, snapshot, store]);
 
-  function replaceState(next: EvryArtifactInteractionState) {
-    stateRef.current = next;
-    setState(next);
+  if (snapshot === null) {
+    return (
+      <div className="text-muted-foreground p-5 text-sm" role="status">
+        Restoring typed artifact fixture…
+      </div>
+    );
   }
 
+  const { acceptedExecutions, notice, recipient, state } = snapshot;
+
   function editPlan() {
-    replaceState(beginEvryArtifactEdit(stateRef.current));
-    setNotice(
-      "The prior confirmation is invalid. Prepare a fresh review before execution."
+    const current = store.getSnapshot();
+    replaceSnapshot(
+      parseEvryArtifactBrowserFixtureSnapshot({
+        ...current,
+        state: beginEvryArtifactEdit(current.state),
+        notice:
+          "The prior confirmation is invalid. Prepare a fresh review before execution.",
+        completionDueAt: null,
+      })
     );
   }
 
   async function prepareFreshReview() {
-    const fresh = await editedMeetingConfirmation(recipient.trim());
-    replaceState(applyFreshEvryConfirmation(stateRef.current, fresh));
-    setNotice(`Fresh confirmation prepared for ${recipient.trim()}.`);
+    const editedRecipient = store.getSnapshot().recipient.trim();
+    const fresh = await editedMeetingConfirmation(editedRecipient);
+    const current = store.getSnapshot();
+    const nextState = applyFreshEvryConfirmation(current.state, fresh);
+    if (nextState === current.state) return;
+    replaceSnapshot(
+      parseEvryArtifactBrowserFixtureSnapshot({
+        ...current,
+        state: nextState,
+        notice: `Fresh confirmation prepared for ${editedRecipient}.`,
+      })
+    );
   }
 
   function executePlan() {
-    const current = stateRef.current;
-    if (current.status !== "review") return;
-    const progress = meetingProgressFixture(current.confirmation.plan);
-    const transition = beginEvryArtifactExecution(current, progress);
-    replaceState(transition.state);
+    const current = store.getSnapshot();
+    if (current.state.status !== "review") return;
+    const progress = meetingProgressFixture(current.state.confirmation.plan);
+    const transition = beginEvryArtifactExecution(current.state, progress);
     if (!transition.shouldExecute) return;
+    replaceSnapshot(
+      parseEvryArtifactBrowserFixtureSnapshot({
+        ...current,
+        state: transition.state,
+        notice: "Execution started once. A second press cannot start it again.",
+        acceptedExecutions: current.acceptedExecutions + 1,
+        completionDueAt: Date.now() + EXECUTION_DURATION_MS,
+      })
+    );
+  }
 
-    setAcceptedExecutions((count) => count + 1);
-    setNotice("Execution started once. A second press cannot start it again.");
-    timerRef.current = setTimeout(() => {
-      const receipt = partialMeetingReceiptFixture(progress.plan);
-      replaceState(finishEvryArtifactExecution(transition.state, receipt));
-      setNotice(
-        "The durable receipt preserves completed work and marks only the email step as safe to retry."
-      );
-    }, 2_500);
+  function resetFixture() {
+    store.reset();
   }
 
   return (
@@ -104,10 +167,15 @@ export function EvryArtifactBrowserFixture() {
               performs no application work.
             </p>
           </div>
-          <Badge variant="secondary" data-testid="accepted-executions">
-            <ShieldCheck aria-hidden="true" />
-            Executions accepted: {acceptedExecutions}
-          </Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant="secondary" data-testid="accepted-executions">
+              <ShieldCheck aria-hidden="true" />
+              Executions accepted: {acceptedExecutions}
+            </Badge>
+            <Button type="button" variant="ghost" onClick={resetFixture}>
+              Reset fixture
+            </Button>
+          </div>
         </div>
 
         <p
@@ -126,8 +194,15 @@ export function EvryArtifactBrowserFixture() {
             options={{
               confirmationControls: {
                 onCancel() {
-                  replaceState(cancelEvryArtifactReview(stateRef.current));
-                  setNotice("Plan cancelled. Nothing was executed.");
+                  const current = store.getSnapshot();
+                  replaceSnapshot(
+                    parseEvryArtifactBrowserFixtureSnapshot({
+                      ...current,
+                      state: cancelEvryArtifactReview(current.state),
+                      notice: "Plan cancelled. Nothing was executed.",
+                      completionDueAt: null,
+                    })
+                  );
                 },
                 onEdit: editPlan,
                 onExecute: executePlan,
@@ -168,7 +243,15 @@ export function EvryArtifactBrowserFixture() {
                     id="fixture-recipient"
                     name="recipient"
                     value={recipient}
-                    onChange={(event) => setRecipient(event.target.value)}
+                    onChange={(event) => {
+                      const current = store.getSnapshot();
+                      replaceSnapshot(
+                        parseEvryArtifactBrowserFixtureSnapshot({
+                          ...current,
+                          recipient: event.target.value,
+                        })
+                      );
+                    }}
                     required
                     minLength={3}
                     className="text-base sm:text-sm"
