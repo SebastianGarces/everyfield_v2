@@ -769,9 +769,13 @@ test("a redeemed seat invitation decides the whole registration plan", () => {
   assert.equal(plan.userChurchId, PLANT);
   assert.equal(plan.sendingChurchId, null);
   assert.equal(plan.sendingNetworkId, null);
-  assert.deepEqual(plan.statements, []);
-  // Exactly one link statement: the person record AS-013 asks for.
-  assert.equal(plan.linkStatements.length, 1);
+  assert.equal(plan.statements.length, 0);
+  // The church lock comes first, then the person record AS-013 asks for.
+  assert.equal(plan.linkStatements.length, 2);
+  assert.match(
+    asQuery(plan.linkStatements[1]).toSQL().sql,
+    /^insert into "persons"/
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -930,6 +934,21 @@ test("the grant and the claim go into the SAME batch as the account", () => {
 // 8. THE PERSON LINK — matched, or minted (AS-013)
 // ----------------------------------------------------------------------------
 
+test("every person link locks its church before any claim or mint", () => {
+  assert.match(
+    ACCOUNT_PERSON_LINK,
+    /const duplicateMutationLock = db\.execute\(\s*sql`select id from churches where id = \$\{account\.churchId\}::uuid for update`\s*\);/
+  );
+  assert.match(
+    ACCOUNT_PERSON_LINK,
+    /if \(!account\.matchedPersonId\) return \[duplicateMutationLock, mint\];/
+  );
+  assert.match(
+    ACCOUNT_PERSON_LINK,
+    /return \[\s*duplicateMutationLock,\s*db\s*\.update\(persons\)[\s\S]*?mint,\s*\];/
+  );
+});
+
 test("a matching person is CLAIMED, and the mint behind it makes that total", () => {
   const statements = accountPersonLinkStatements({
     userId: USER,
@@ -939,13 +958,14 @@ test("a matching person is CLAIMED, and the mint behind it makes that total", ()
     matchedPersonId: "77777777-7777-4777-8777-777777777777",
   });
 
-  // TWO STATEMENTS, and the second is why AS-013 is total: the UPDATE is
+  // THREE STATEMENTS: the church lock, then the claim and its fallback mint.
+  // The third is why AS-013 is total: the UPDATE is
   // guarded on `user_id IS NULL`, so a row claimed between the read and the
   // batch would leave the account with NO person record at all. The INSERT
   // converges either way and is a no-op when the claim worked.
-  assert.equal(statements.length, 2);
+  assert.equal(statements.length, 3);
 
-  const claim = asQuery(statements[0]).toSQL();
+  const claim = asQuery(statements[1]).toSQL();
   assert.match(claim.sql, /^update "persons" set "user_id" = \$/);
   // The two guards that cost nothing: it can never steal a row another account
   // already holds, and it cannot revive a deleted contact.
@@ -954,7 +974,7 @@ test("a matching person is CLAIMED, and the mint behind it makes that total", ()
   assert.ok(claim.params.includes(USER));
   assert.ok(claim.params.includes("77777777-7777-4777-8777-777777777777"));
 
-  const fallback = asQuery(statements[1]).toSQL();
+  const fallback = asQuery(statements[2]).toSQL();
   assert.match(fallback.sql, /^insert into "persons"/);
   assert.match(
     fallback.sql,
@@ -962,8 +982,8 @@ test("a matching person is CLAIMED, and the mint behind it makes that total", ()
   );
 });
 
-test("no matching person means ONE statement, and it mints, idempotently", () => {
-  const [statement, ...rest] = accountPersonLinkStatements({
+test("no matching person locks, then mints idempotently", () => {
+  const statements = accountPersonLinkStatements({
     userId: USER,
     churchId: PLANT,
     name: "Sam Stranger",
@@ -971,9 +991,9 @@ test("no matching person means ONE statement, and it mints, idempotently", () =>
     matchedPersonId: null,
   });
 
-  assert.deepEqual(rest, [], "an unmatched account needs no claim statement");
+  assert.equal(statements.length, 2, "an unmatched account adds no claim");
 
-  const { sql, params } = asQuery(statement).toSQL();
+  const { sql, params } = asQuery(statements[1]).toSQL();
   assert.match(sql, /^insert into "persons"/);
   // The index predicate, repeated VERBATIM, so Postgres can prove the index
   // covers the statement.
