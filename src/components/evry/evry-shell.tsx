@@ -56,6 +56,7 @@ type EvryShellValue = Readonly<{
   isSending: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
   openPanel: (trigger: HTMLButtonElement) => void;
+  replaceConversation: (conversation: PublicEvryConversation) => void;
   resetConversation: () => void;
   restoreLauncherFocus: () => void;
   returnToPage: () => void;
@@ -181,6 +182,13 @@ export function EvryShell({
   }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
   const clearContext = useCallback(() => setActiveContext(null), []);
+  const replaceConversation = useCallback(
+    (nextConversation: PublicEvryConversation) => {
+      setConversation(nextConversation);
+      setError(null);
+    },
+    []
+  );
 
   const loadConversation = useCallback(
     async (conversationId: string) => {
@@ -344,6 +352,7 @@ export function EvryShell({
       isSending,
       loadConversation,
       openPanel,
+      replaceConversation,
       resetConversation,
       restoreLauncherFocus,
       returnToPage,
@@ -366,6 +375,7 @@ export function EvryShell({
       isSending,
       loadConversation,
       openPanel,
+      replaceConversation,
       resetConversation,
       requestedConversationId,
       restoreLauncherFocus,

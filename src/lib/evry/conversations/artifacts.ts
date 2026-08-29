@@ -12,6 +12,15 @@ import type {
   TrustedEvryApplicationSourceLink,
 } from "@/lib/evry/artifacts/types";
 import {
+  deepFreezeEvryArtifact,
+  evryDetailedConfirmationArtifactDocumentSchema,
+  evryDetailedProgressArtifactDocumentSchema,
+  evryDetailedReceiptArtifactDocumentSchema,
+  type EvryDetailedConfirmationArtifactDocument,
+  type EvryDetailedProgressArtifactDocument,
+  type EvryDetailedReceiptArtifactDocument,
+} from "@/lib/evry/artifacts/review";
+import {
   boundaryArtifactFor,
   settingsHandoffArtifactFor,
   type EvryBoundaryArtifact,
@@ -242,8 +251,11 @@ export const evryConversationArtifactDocumentSchema = z.union([
   missingClarificationDocumentSchema,
   choiceClarificationDocumentSchema,
   settingsArtifactDocumentSchema,
+  evryDetailedConfirmationArtifactDocumentSchema,
   confirmationArtifactDocumentSchema,
+  evryDetailedProgressArtifactDocumentSchema,
   progressArtifactDocumentSchema,
+  evryDetailedReceiptArtifactDocumentSchema,
   resultArtifactDocumentSchema,
   boundaryArtifactDocumentSchema,
 ]);
@@ -252,7 +264,7 @@ export type StoredEvryConversationArtifactDocument = z.infer<
   typeof evryConversationArtifactDocumentSchema
 >;
 
-export type EvryHydratedResultArtifact = Readonly<{
+type EvryHydratedLegacyResultArtifact = Readonly<{
   kind: "result";
   plan: z.infer<typeof evryConversationPlanIdentitySchema>;
   title: string;
@@ -268,13 +280,54 @@ export type EvryHydratedResultArtifact = Readonly<{
   }>[];
 }>;
 
+type DetailedConfirmationStep =
+  EvryDetailedConfirmationArtifactDocument["steps"][number];
+type DetailedConfirmationTarget =
+  DetailedConfirmationStep["resolvedTargets"][number];
+
+type EvryHydratedDetailedConfirmationArtifact = Omit<
+  EvryDetailedConfirmationArtifactDocument,
+  "steps"
+> &
+  Readonly<{
+    steps: readonly (Omit<DetailedConfirmationStep, "resolvedTargets"> &
+      Readonly<{
+        resolvedTargets: readonly (Omit<
+          DetailedConfirmationTarget,
+          "sourceLink"
+        > &
+          Readonly<{
+            sourceLink: TrustedEvryApplicationSourceLink | null;
+          }>)[];
+      }>)[];
+  }>;
+
+type DetailedReceiptStep = EvryDetailedReceiptArtifactDocument["steps"][number];
+
+type EvryHydratedDetailedReceiptArtifact = Omit<
+  EvryDetailedReceiptArtifactDocument,
+  "steps"
+> &
+  Readonly<{
+    steps: readonly (Omit<DetailedReceiptStep, "sourceLinks"> &
+      Readonly<{
+        sourceLinks: readonly TrustedEvryApplicationSourceLink[];
+      }>)[];
+  }>;
+
+export type EvryHydratedResultArtifact =
+  | EvryHydratedLegacyResultArtifact
+  | EvryHydratedDetailedReceiptArtifact;
+
 export type EvryHydratedConversationArtifact =
   | EvryReadArtifact
   | EvryClarificationArtifact
   | EvrySettingsHandoffArtifact
   | EvryBoundaryArtifact
   | z.infer<typeof confirmationArtifactDocumentSchema>
+  | EvryHydratedDetailedConfirmationArtifact
   | z.infer<typeof progressArtifactDocumentSchema>
+  | EvryDetailedProgressArtifactDocument
   | EvryHydratedResultArtifact;
 
 export function parseEvryConversationArtifactDocument(
@@ -351,20 +404,46 @@ export function hydrateStoredEvryConversationArtifact(
     case "boundary":
       return boundaryArtifactFor(document.classification);
     case "confirmation":
-    case "progress":
-      return document;
-    case "result":
-      return Object.freeze({
+      if (!("artifactVersion" in document)) return document;
+      return deepFreezeEvryArtifact({
         ...document,
-        steps: Object.freeze(
+        steps: document.steps.map((step) => ({
+          ...step,
+          resolvedTargets: step.resolvedTargets.map((target) => ({
+            ...target,
+            sourceLink: target.sourceLink
+              ? trustedLink(target.sourceLink)
+              : null,
+          })),
+        })),
+      });
+    case "progress":
+      return "artifactVersion" in document
+        ? deepFreezeEvryArtifact(document)
+        : document;
+    case "result":
+      if ("artifactVersion" in document) {
+        const steps: EvryHydratedDetailedReceiptArtifact["steps"] =
+          Object.freeze(
+            document.steps.map((step) =>
+              Object.freeze({
+                ...step,
+                sourceLinks: Object.freeze(step.sourceLinks.map(trustedLink)),
+              })
+            )
+          );
+        return Object.freeze({ ...document, steps });
+      } else {
+        const steps: EvryHydratedLegacyResultArtifact["steps"] = Object.freeze(
           document.steps.map((step) =>
             Object.freeze({
               ...step,
               sourceLinks: Object.freeze(step.sourceLinks.map(trustedLink)),
             })
           )
-        ),
-      });
+        );
+        return Object.freeze({ ...document, steps });
+      }
   }
 }
 

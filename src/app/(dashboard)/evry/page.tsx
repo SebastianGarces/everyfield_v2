@@ -19,6 +19,7 @@ export default async function EvryPage({
   searchParams,
 }: {
   searchParams: Promise<{
+    artifactFixture?: string | string[];
     conversation?: string | string[];
     new?: string | string[];
     q?: string | string[];
@@ -61,6 +62,11 @@ export default async function EvryPage({
       }
       newConversation={newConversation}
       searchQuery={search.data}
+      showArtifactFixture={
+        process.env.VERCEL_ENV === "preview" &&
+        typeof params.artifactFixture === "string" &&
+        params.artifactFixture === "typed-artifacts"
+      }
     />
   );
 }

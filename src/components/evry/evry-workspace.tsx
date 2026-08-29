@@ -2,6 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 
+import { EvryArtifactBrowserFixture } from "@/components/evry/artifacts/browser-fixture";
 import { ConversationHistoryWorkspace } from "@/components/evry/conversation-history/conversation-history-workspace";
 import { ConversationSurface } from "@/components/evry/conversation-surface";
 import { useEvryShell } from "@/components/evry/evry-shell";
@@ -14,11 +15,13 @@ export function EvryWorkspace({
   conversationId,
   newConversation,
   searchQuery,
+  showArtifactFixture = false,
 }: {
   conversations: readonly EvryConversationHistoryItem[];
   conversationId: string | null;
   newConversation: boolean;
   searchQuery: string | null;
+  showArtifactFixture?: boolean;
 }) {
   const { returnToPage } = useEvryShell();
 
@@ -47,14 +50,18 @@ export function EvryWorkspace({
             </p>
           </div>
         </header>
-        <ConversationHistoryWorkspace
-          key={newConversation ? "new" : "history"}
-          conversations={conversations}
-          conversationId={conversationId}
-          conversationSurface={<ConversationSurface />}
-          newConversation={newConversation}
-          searchQuery={searchQuery}
-        />
+        {showArtifactFixture ? (
+          <EvryArtifactBrowserFixture />
+        ) : (
+          <ConversationHistoryWorkspace
+            key={newConversation ? "new" : "history"}
+            conversations={conversations}
+            conversationId={conversationId}
+            conversationSurface={<ConversationSurface />}
+            newConversation={newConversation}
+            searchQuery={searchQuery}
+          />
+        )}
       </WorkspacePanel>
     </PageCanvas>
   );

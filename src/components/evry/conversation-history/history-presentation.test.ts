@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { PublicEvryConversation } from "@/components/evry/client-contract";
+import { EVRY_CONFIRMATION_FIXTURES } from "@/lib/evry/artifacts/fixtures";
+import { buildEvryReceiptArtifact } from "@/lib/evry/artifacts/review";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 
 import {
   awaitingEvryCreatedConversation,
@@ -19,11 +22,33 @@ import {
 } from "./history-presentation";
 
 const CONVERSATION_ID = "30000000-0000-4000-8000-000000000001";
-const PLAN_ID = "40000000-0000-4000-8000-000000000001";
-const FINGERPRINT = "a".repeat(64);
+const PLAN = evryConversationPlanIdentitySchema.parse({
+  planId: "40000000-0000-4000-8000-000000000001",
+  fingerprint: "a".repeat(64),
+});
+const COMPLETED_RECEIPT = buildEvryReceiptArtifact({
+  kind: "result",
+  artifactVersion: 1,
+  plan: PLAN,
+  title: "Meeting invitation sent",
+  status: "completed",
+  steps: [
+    {
+      stepId: "send-invitations",
+      label: "Send meeting invitations",
+      status: "completed",
+      resultCode: "effect_completed",
+      affectedCount: 24,
+      excludedCount: 0,
+      sourceLinks: [],
+      retry: { status: "unavailable" },
+      error: null,
+    },
+  ],
+});
 
 function conversation(input?: {
-  activePlan?: unknown;
+  activePlan?: PublicEvryConversation["activePlan"];
   artifacts?: PublicEvryConversation["messages"][number]["artifacts"];
   laterArtifacts?: PublicEvryConversation["messages"][number]["artifacts"];
 }): PublicEvryConversation {
@@ -76,16 +101,16 @@ test("history labels cover every actionable state with visible words", () => {
 
 test("a completed plan yields to a later request or clarification", () => {
   const activePlan = {
-    identity: { planId: PLAN_ID, fingerprint: FINGERPRINT },
-    status: "completed",
+    identity: PLAN,
+    status: "completed" as const,
     expiresAt: "2026-08-20T12:15:00.000Z",
     confirmable: false,
   };
-  const result = [
+  const result: PublicEvryConversation["messages"][number]["artifacts"] = [
     {
       id: "60000000-0000-4000-8000-000000000010",
       ordinal: 0,
-      artifact: { kind: "result", status: "completed", title: "Done" },
+      artifact: COMPLETED_RECEIPT,
     },
   ];
 
@@ -106,6 +131,8 @@ test("a completed plan yields to a later request or clarification", () => {
             ordinal: 0,
             artifact: {
               kind: "clarification",
+              mode: "missing",
+              entityType: "meeting",
               prompt: "Which meeting did you mean?",
             },
           },
@@ -123,7 +150,7 @@ test("search sees the title and visible transcript, never artifact-only fields",
         id: "60000000-0000-4000-8000-000000000001",
         ordinal: 0,
         artifact: {
-          kind: "confirmation",
+          ...EVRY_CONFIRMATION_FIXTURES.communication,
           title: "artifact-only-private-term",
         },
       },
@@ -144,7 +171,7 @@ test("search sees the title and visible transcript, never artifact-only fields",
 test("reopen restores the latest structured checkpoint and a stale plan can only rebuild", () => {
   const fixture = conversation({
     activePlan: {
-      identity: { planId: PLAN_ID, fingerprint: FINGERPRINT },
+      identity: PLAN,
       status: "stale",
       expiresAt: null,
       confirmable: false,
@@ -155,7 +182,7 @@ test("reopen restores the latest structured checkpoint and a stale plan can only
         ordinal: 0,
         artifact: {
           kind: "confirmation",
-          plan: { planId: PLAN_ID, fingerprint: FINGERPRINT },
+          plan: PLAN,
           title: "Invite the core team",
           actionLabel: "Send 24 invitations",
           items: [{ label: "Recipients", value: "24 people" }],
