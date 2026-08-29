@@ -453,19 +453,6 @@ const EXCLUDED_SURFACES: readonly CommunicationEvrySurface[] = [
     mutationShape: null,
     classification: { state: "excluded", reason: "public_or_sessionless" },
   },
-  {
-    kind: "product_gap",
-    identity: "product-gap:communication.drafts.persist",
-    source: "src/db/schema/communication.ts",
-    exportName: null,
-    capabilityIdentity: "communication.drafts.persist",
-    domain: "drafts",
-    operationKind: "excluded",
-    applicationCapability: null,
-    confirmation: "excluded",
-    mutationShape: null,
-    classification: { state: "excluded", reason: "owning_product_gap" },
-  },
 ];
 
 function assertBijection(entries: readonly CommunicationEvrySurface[]): void {

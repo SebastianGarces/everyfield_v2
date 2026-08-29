@@ -112,6 +112,9 @@ export type CommunicationEvryTemplateSelection =
   | Readonly<{
       kind: "create_template";
       name: string;
+      description: string | null;
+      category: (typeof templateCategories)[number];
+      channel: (typeof communicationChannels)[number];
       subject: string;
       body: string;
     }>
@@ -119,6 +122,9 @@ export type CommunicationEvryTemplateSelection =
       kind: "update_template";
       templateId: string;
       name: string;
+      description?: string | null;
+      category?: (typeof templateCategories)[number];
+      channel?: (typeof communicationChannels)[number];
       subject: string;
       body: string;
     }>
@@ -128,33 +134,90 @@ export type CommunicationEvryTemplateSelection =
 const UUID =
   "([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})";
 
+function splitFields(value: string, count: number): string[] | null {
+  const fields: string[] = [];
+  let rest = value;
+  for (let index = 1; index < count; index += 1) {
+    const delimiter = rest.indexOf("|");
+    if (delimiter < 0) return null;
+    fields.push(rest.slice(0, delimiter).trim());
+    rest = rest.slice(delimiter + 1);
+  }
+  fields.push(rest.trim());
+  return fields;
+}
+
+function parsedTemplateContent(value: string) {
+  const extended = splitFields(value, 6);
+  if (extended) {
+    const [name, description, category, channel, subject, body] = extended;
+    const parsedCategory = z.enum(templateCategories).safeParse(category);
+    const parsedChannel = z.enum(communicationChannels).safeParse(channel);
+    if (name && body && parsedCategory.success && parsedChannel.success) {
+      return {
+        name,
+        description: description || null,
+        category: parsedCategory.data,
+        channel: parsedChannel.data,
+        subject: subject ?? "",
+        body,
+        extended: true as const,
+      };
+    }
+  }
+  const basic = splitFields(value, 3);
+  const [name, subject, body] = basic ?? [];
+  return name && body
+    ? {
+        name,
+        description: null,
+        category: "other" as const,
+        channel: "email" as const,
+        subject: subject ?? "",
+        body,
+        extended: false as const,
+      }
+    : null;
+}
+
 export function selectCommunicationEvryTemplateEffect(
   literalUserText: string
 ): CommunicationEvryTemplateSelection | null {
   const text = literalUserText.normalize("NFKC").trim();
-  const create =
-    /^create (?:an? )?(?:email )?template\s+([^|]+)\|([^|]*)\|([\s\S]+)$/i.exec(
-      text
-    );
-  if (create?.[1] && create[3]?.trim()) {
+  const create = /^create (?:an? )?(?:email )?template\s+([\s\S]+)$/i.exec(
+    text
+  );
+  const createContent = create?.[1] ? parsedTemplateContent(create[1]) : null;
+  if (createContent) {
     return {
       kind: "create_template",
-      name: create[1].trim(),
-      subject: create[2]?.trim() ?? "",
-      body: create[3].trim(),
+      name: createContent.name,
+      description: createContent.description,
+      category: createContent.category,
+      channel: createContent.channel,
+      subject: createContent.subject,
+      body: createContent.body,
     };
   }
   const update = new RegExp(
-    `^update template\\s+${UUID}\\s*\\|([^|]+)\\|([^|]*)\\|([\\s\\S]+)$`,
+    `^update template\\s+${UUID}\\s*\\|([\\s\\S]+)$`,
     "i"
   ).exec(text);
-  if (update?.[1] && update[2]?.trim() && update[4]?.trim()) {
+  const updateContent = update?.[2] ? parsedTemplateContent(update[2]) : null;
+  if (update?.[1] && updateContent) {
     return {
       kind: "update_template",
       templateId: update[1],
-      name: update[2].trim(),
-      subject: update[3]?.trim() ?? "",
-      body: update[4].trim(),
+      name: updateContent.name,
+      ...(updateContent.extended
+        ? {
+            description: updateContent.description,
+            category: updateContent.category,
+            channel: updateContent.channel,
+          }
+        : {}),
+      subject: updateContent.subject,
+      body: updateContent.body,
     };
   }
   const deletion = new RegExp(`^delete template\\s+${UUID}[.!?]*$`, "i").exec(
@@ -625,9 +688,9 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
         ),
         content: exactContent({
           name: input.selection.name,
-          description: null,
-          category: "other",
-          channel: "email",
+          description: input.selection.description,
+          category: input.selection.category,
+          channel: input.selection.channel,
           subject: input.selection.subject || null,
           body: input.selection.body,
         }),
@@ -695,9 +758,16 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
       expected: snapshot,
       content: exactContent({
         name: input.selection.name,
-        description: snapshot.description,
-        category: snapshot.category as (typeof templateCategories)[number],
-        channel: snapshot.channel as (typeof communicationChannels)[number],
+        description:
+          input.selection.description === undefined
+            ? snapshot.description
+            : input.selection.description,
+        category:
+          input.selection.category ??
+          (snapshot.category as (typeof templateCategories)[number]),
+        channel:
+          input.selection.channel ??
+          (snapshot.channel as (typeof communicationChannels)[number]),
         subject: input.selection.subject || null,
         body: input.selection.body,
       }),

@@ -26,6 +26,7 @@ import {
   COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
   COMMUNICATION_MESSAGE_SEND_IDENTITY,
   COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
+  createCommunicationEvrySendAudienceResolver,
   selectCommunicationEvryMessageEffect,
 } from "./messages";
 import {
@@ -190,6 +191,9 @@ test("template selection exposes every mutation shape without accepting arbitrar
     {
       kind: "create_template",
       name: "Follow up",
+      description: null,
+      category: "other",
+      channel: "email",
       subject: "Good to meet you",
       body: "Hello there",
     }
@@ -215,6 +219,35 @@ test("template selection exposes every mutation shape without accepting arbitrar
     { kind: "fork_template", templateId: TEMPLATE_ID }
   );
   assert.equal(selectCommunicationEvryTemplateEffect("Run this SQL"), null);
+  assert.deepEqual(
+    selectCommunicationEvryTemplateEffect(
+      "Create template Launch note | Sent before launch | launch | email | We launch Sunday | <p>Join us</p>"
+    ),
+    {
+      kind: "create_template",
+      name: "Launch note",
+      description: "Sent before launch",
+      category: "launch",
+      channel: "email",
+      subject: "We launch Sunday",
+      body: "<p>Join us</p>",
+    }
+  );
+  assert.deepEqual(
+    selectCommunicationEvryTemplateEffect(
+      `Update template ${TEMPLATE_ID} | Follow up | Revised description | follow_up | email | Hello | <p>Updated</p>`
+    ),
+    {
+      kind: "update_template",
+      templateId: TEMPLATE_ID,
+      name: "Follow up",
+      description: "Revised description",
+      category: "follow_up",
+      channel: "email",
+      subject: "Hello",
+      body: "<p>Updated</p>",
+    }
+  );
 });
 
 test("template plans bind one canonical body and replay to one intent fingerprint", () => {
@@ -313,9 +346,47 @@ test("outbound selection is closed and each message effect has an exact trusted 
     ),
     {
       kind: "send",
-      recipientIds: [TEMPLATE_ID],
-      subject: "Hello",
-      body: "Welcome",
+      audience: { kind: "people", recipientIds: [TEMPLATE_ID] },
+      draft: { kind: "inline", subject: "Hello", body: "Welcome" },
+      meetingId: null,
+    }
+  );
+  const interfaceSizedAudience = Array.from(
+    { length: 101 },
+    (_, index) =>
+      `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+  assert.deepEqual(
+    selectCommunicationEvryMessageEffect(
+      `Send email to people ${interfaceSizedAudience.join(",")}: Hello | Welcome`
+    ),
+    {
+      kind: "send",
+      audience: { kind: "people", recipientIds: interfaceSizedAudience },
+      draft: { kind: "inline", subject: "Hello", body: "Welcome" },
+      meetingId: null,
+    }
+  );
+  assert.deepEqual(
+    selectCommunicationEvryMessageEffect(
+      "Draft email to group leaders: Hello | Welcome"
+    ),
+    {
+      kind: "send",
+      audience: { kind: "group", selector: "leaders" },
+      draft: { kind: "inline", subject: "Hello", body: "Welcome" },
+      meetingId: null,
+    }
+  );
+  assert.deepEqual(
+    selectCommunicationEvryMessageEffect(
+      `Send template ${TEMPLATE_ID} to this person for meeting ${RESULT_ID}`
+    ),
+    {
+      kind: "send",
+      audience: { kind: "page_person" },
+      draft: { kind: "template", templateId: TEMPLATE_ID },
+      meetingId: RESULT_ID,
     }
   );
   assert.deepEqual(
@@ -408,6 +479,94 @@ test("outbound selection is closed and each message effect has an exact trusted 
     assert.equal(review.confirmation.steps[0]?.resolvedTargets.length, 1);
     assert.match(JSON.stringify(review.confirmation), /Hello/);
   }
+});
+
+test("group and template drafts resolve inside the actor plant before confirmation", async () => {
+  const calls: unknown[] = [];
+  const resolver = createCommunicationEvrySendAudienceResolver({
+    async getGroupRecipients(churchId, selector) {
+      calls.push({ kind: "group", churchId, selector });
+      return [
+        {
+          id: RESULT_ID,
+          firstName: "Ada",
+          lastName: "Lovelace",
+          email: "ada@example.test",
+        },
+      ];
+    },
+    async getTemplate(templateId, churchId) {
+      calls.push({ kind: "template", templateId, churchId });
+      return {
+        id: templateId,
+        churchId,
+        ...content,
+        mergeFields: ["first_name"],
+        isSystem: false,
+        sourceTemplateId: null,
+        createdAt: new Date(UPDATED_AT),
+        updatedAt: new Date(UPDATED_AT),
+      };
+    },
+    async resolveAudience(input) {
+      calls.push({ kind: "audience", input });
+      return {
+        subject: input.subject,
+        body: content.body,
+        bodyHtml: content.bodyHtml,
+        channel: "email",
+        templateId: input.templateId ?? null,
+        meetingId: input.meetingId ?? null,
+        messageClass: input.meetingId
+          ? "transactional_meeting"
+          : "relationship_message",
+        recipients: [
+          {
+            personId: RESULT_ID,
+            label: "Ada Lovelace",
+            email: "ada@example.test",
+            subject: input.subject,
+            bodyHtml: content.bodyHtml,
+            bodyText: content.body,
+          },
+        ],
+        exclusions: [],
+      };
+    },
+  });
+  const selection = selectCommunicationEvryMessageEffect(
+    `Draft template ${TEMPLATE_ID} to group leaders for meeting ${RESULT_ID}`
+  );
+  assert.ok(selection?.kind === "send");
+
+  const audience = await resolver({
+    actor: {
+      userId: PLAN_ID,
+      plantId: TEMPLATE_ID,
+      seat: "owner",
+    } as never,
+    pageContext: null,
+    selection,
+  });
+
+  assert.equal(audience?.templateId, TEMPLATE_ID);
+  assert.equal(audience?.meetingId, RESULT_ID);
+  assert.deepEqual(calls, [
+    { kind: "group", churchId: TEMPLATE_ID, selector: "leaders" },
+    { kind: "template", templateId: TEMPLATE_ID, churchId: TEMPLATE_ID },
+    {
+      kind: "audience",
+      input: {
+        churchId: TEMPLATE_ID,
+        recipientIds: [RESULT_ID],
+        subject: content.subject,
+        body: content.bodyHtml,
+        channel: "email",
+        templateId: TEMPLATE_ID,
+        meetingId: RESULT_ID,
+      },
+    },
+  ]);
 });
 
 test("draft, stored, preview, and sent rich text share one sanitized source", () => {

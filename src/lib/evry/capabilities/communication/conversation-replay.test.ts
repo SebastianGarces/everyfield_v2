@@ -4,6 +4,7 @@ import test from "node:test";
 import { storedTemplateContent } from "@/lib/communication/templates";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { composeEvryCapabilityConversationContinuations } from "@/lib/evry/capabilities/conversation";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import {
@@ -117,7 +118,10 @@ test("a committed Communication plan is recovered before changed or deleted sour
     typeof trustedReviewForEvryPlanDocument
   >[0]["document"];
   const review = trustedReviewForEvryPlanDocument({
-    plan: { planId: stored.id, fingerprint: stored.fingerprint },
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: stored.id,
+      fingerprint: stored.fingerprint,
+    }),
     document,
     reviewRegistry: COMMUNICATION_EVRY_REVIEW_REGISTRY,
   });
@@ -135,14 +139,17 @@ test("a committed Communication plan is recovered before changed or deleted sour
         sourceReads += 1;
         committed = stored;
         return {
-          plan: { planId: stored.id, fingerprint: stored.fingerprint },
+          plan: evryConversationPlanIdentitySchema.parse({
+            planId: stored.id,
+            fingerprint: stored.fingerprint,
+          }),
           confirmation: review.confirmation,
         };
       },
       async proposeTemplate() {
         throw new Error("template source must not run");
       },
-    })
+    }),
   ]);
   const input = {
     actor: ACTOR,
@@ -178,13 +185,17 @@ test("a request-key plan with a different capability identity fails closed", asy
   const continuation = composeEvryCapabilityConversationContinuations([
     createCommunicationEvryConversationContinuation({
       async findPlanByRequestKey() {
+        const storedDocument = stored.document as {
+          version: number;
+          steps: readonly Record<string, unknown>[];
+        };
         return {
           ...stored,
           document: {
-            ...stored.document,
+            ...storedDocument,
             steps: [
               {
-                ...(stored.document as { steps: readonly object[] }).steps[0],
+                ...storedDocument.steps[0],
                 capabilityIdentity: "communication.templates.delete",
               },
             ],
@@ -197,7 +208,7 @@ test("a request-key plan with a different capability identity fails closed", asy
       async proposeTemplate() {
         throw new Error("proposal must not run");
       },
-    })
+    }),
   ]);
 
   await assert.rejects(

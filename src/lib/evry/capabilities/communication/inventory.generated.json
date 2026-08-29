@@ -412,19 +412,6 @@
       }
     },
     {
-      "kind": "product_gap",
-      "identity": "product-gap:communication.drafts.persist",
-      "source": "src/db/schema/communication.ts",
-      "exportName": null,
-      "capabilityIdentity": "communication.drafts.persist",
-      "domain": "drafts",
-      "operationKind": "excluded",
-      "applicationCapability": null,
-      "confirmation": "excluded",
-      "mutationShape": null,
-      "classification": { "state": "excluded", "reason": "owning_product_gap" }
-    },
-    {
       "kind": "route",
       "identity": "route:/communication",
       "source": "src/app/(dashboard)/communication/page.tsx",
@@ -755,7 +742,7 @@
     "routes": 6,
     "rscReads": 19,
     "externalExclusions": 2,
-    "productGaps": 1,
+    "productGaps": 0,
     "readCapabilities": 14,
     "effectCapabilities": 6,
     "unclassified": 0

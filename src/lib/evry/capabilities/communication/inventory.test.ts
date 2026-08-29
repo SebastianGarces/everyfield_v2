@@ -17,7 +17,7 @@ test("generated Communication inventory is current and fully classified", async 
   assert.equal(inventory.summary.actions, 9);
   assert.equal(inventory.summary.routes, 6);
   assert.equal(inventory.summary.externalExclusions, 2);
-  assert.equal(inventory.summary.productGaps, 1);
+  assert.equal(inventory.summary.productGaps, 0);
   assert.equal(inventory.summary.unclassified, 0);
   assert.ok(inventory.summary.rscReads > 0);
   assert.ok(inventory.summary.readCapabilities > 0);

@@ -3,6 +3,7 @@ import {
   storedEvryClarificationArtifactDocument,
   storedEvryReadArtifactDocument,
 } from "@/lib/evry/conversations/artifacts";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
 import {
   deriveEvryPlanRequestKey,
@@ -97,10 +98,10 @@ function recoveredPlanResult(input: {
   ) {
     throw new Error("Stored Communication plan does not match the request");
   }
-  const plan = {
+  const plan = evryConversationPlanIdentitySchema.parse({
     planId: input.stored.id,
     fingerprint: input.stored.fingerprint,
-  };
+  });
   const review = trustedReviewForEvryPlanDocument({
     plan,
     document,
@@ -154,7 +155,7 @@ export function createCommunicationEvryConversationContinuation(
       if (!templateSelection && !messageSelection) return null;
       if (
         messageSelection?.kind === "send" &&
-        messageSelection.recipientIds === null &&
+        messageSelection.audience.kind === "page_person" &&
         input.pageContext?.kind !== "person"
       ) {
         const clarification = {

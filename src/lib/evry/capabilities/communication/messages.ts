@@ -6,9 +6,14 @@ import {
   sendFrozenEvryCommunication,
 } from "@/lib/communication/evry-send";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
+import {
+  getGroupRecipients,
+  isRecipientGroupSelector,
+} from "@/lib/communication/recipient-groups";
 import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
 import { getCommunication } from "@/lib/communication/service";
 import { getNonOpenerSummary } from "@/lib/communication/send";
+import { getTemplate } from "@/lib/communication/templates";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
   createEvryArtifactReviewRegistry,
@@ -57,7 +62,7 @@ const audienceSchema = z.strictObject({
   templateId: z.string().uuid().nullable(),
   meetingId: z.string().uuid().nullable(),
   messageClass: z.enum(["transactional_meeting", "relationship_message"]),
-  recipients: z.array(recipientSchema).min(1).max(100),
+  recipients: z.array(recipientSchema).min(1),
   exclusions: z
     .array(
       z.strictObject({
@@ -92,50 +97,111 @@ const resendArgumentsSchema = z.strictObject({
   audience: audienceSchema,
 });
 
+export type CommunicationEvryAudienceSelection =
+  | Readonly<{ kind: "page_person" }>
+  | Readonly<{ kind: "people"; recipientIds: readonly string[] }>
+  | Readonly<{ kind: "group"; selector: string }>;
+
+export type CommunicationEvryDraftSelection =
+  | Readonly<{ kind: "inline"; subject: string; body: string }>
+  | Readonly<{ kind: "template"; templateId: string }>;
+
 export type CommunicationEvryMessageSelection =
   | Readonly<{
       kind: "send";
-      recipientIds: readonly string[] | null;
-      subject: string;
-      body: string;
-      templateId?: string | null;
-      meetingId?: string | null;
+      audience: CommunicationEvryAudienceSelection;
+      draft: CommunicationEvryDraftSelection;
+      meetingId: string | null;
     }>
   | Readonly<{ kind: "resend"; communicationId: string }>;
 
-const UUID =
-  "([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})";
+type CommunicationEvrySendSelection = Extract<
+  CommunicationEvryMessageSelection,
+  { kind: "send" }
+>;
+
+type CommunicationEvrySendAudienceDependencies = Readonly<{
+  getGroupRecipients: typeof getGroupRecipients;
+  getTemplate: typeof getTemplate;
+  resolveAudience: typeof resolveEvryCommunicationAudience;
+}>;
+
+const productionSendAudienceDependencies: CommunicationEvrySendAudienceDependencies =
+  {
+    getGroupRecipients,
+    getTemplate,
+    resolveAudience: resolveEvryCommunicationAudience,
+  };
+
+const UUID_VALUE =
+  "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const UUID = `(${UUID_VALUE})`;
+
+function audienceSelection(
+  value: string
+): CommunicationEvryAudienceSelection | null {
+  const target = value.trim();
+  if (/^this person$/i.test(target)) return { kind: "page_person" };
+  const people = /^people\s+([\s\S]+)$/i.exec(target);
+  if (people?.[1]) {
+    const recipientIds = people[1].split(",").map((id) => id.trim());
+    return recipientIds.length > 0 &&
+      recipientIds.every((id) => z.string().uuid().safeParse(id).success)
+      ? { kind: "people", recipientIds }
+      : null;
+  }
+  const group = /^group\s+([\s\S]+)$/i.exec(target);
+  const selector = group?.[1]?.trim();
+  return selector && isRecipientGroupSelector(selector)
+    ? { kind: "group", selector }
+    : null;
+}
+
+function targetAndMeeting(value: string): Readonly<{
+  audience: CommunicationEvryAudienceSelection;
+  meetingId: string | null;
+}> | null {
+  const meeting = new RegExp(
+    `^(.*)\\s+for meeting\\s+(${UUID_VALUE})$`,
+    "i"
+  ).exec(value.trim());
+  const audience = audienceSelection(meeting?.[1] ?? value);
+  return audience ? { audience, meetingId: meeting?.[2] ?? null } : null;
+}
 
 /** Closed message grammar. Arbitrary URLs, addresses and provider inputs do not match. */
 export function selectCommunicationEvryMessageEffect(
   literalUserText: string
 ): CommunicationEvryMessageSelection | null {
   const text = literalUserText.normalize("NFKC").trim();
-  const contextual = /^send email to this person:\s*([^|]+)\|([\s\S]+)$/i.exec(
-    text
-  );
-  if (contextual?.[1]?.trim() && contextual[2]?.trim()) {
-    return {
-      kind: "send",
-      recipientIds: null,
-      subject: contextual[1].trim(),
-      body: contextual[2].trim(),
-    };
-  }
-  const explicit =
-    /^send email to people\s+([^:]+):\s*([^|]+)\|([\s\S]+)$/i.exec(text);
-  if (explicit?.[1] && explicit[2]?.trim() && explicit[3]?.trim()) {
-    const recipientIds = explicit[1].split(",").map((id) => id.trim());
-    if (
-      recipientIds.length > 0 &&
-      recipientIds.length <= 100 &&
-      recipientIds.every((id) => z.string().uuid().safeParse(id).success)
-    ) {
+  const inline = /^(?:send|draft) email to\s+([\s\S]+)$/i.exec(text);
+  if (inline?.[1]) {
+    const delimiter = inline[1].indexOf(": ");
+    const content = delimiter >= 0 ? inline[1].slice(delimiter + 2) : "";
+    const separator = content.indexOf("|");
+    const target =
+      delimiter >= 0 ? targetAndMeeting(inline[1].slice(0, delimiter)) : null;
+    const subject = separator >= 0 ? content.slice(0, separator).trim() : "";
+    const body = separator >= 0 ? content.slice(separator + 1).trim() : "";
+    if (target && subject && body) {
       return {
         kind: "send",
-        recipientIds,
-        subject: explicit[2].trim(),
-        body: explicit[3].trim(),
+        ...target,
+        draft: { kind: "inline", subject, body },
+      };
+    }
+  }
+  const template = new RegExp(
+    `^(?:send|draft) template\\s+(${UUID_VALUE})\\s+to\\s+([\\s\\S]+?)[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (template?.[1] && template[2]) {
+    const target = targetAndMeeting(template[2]);
+    if (target) {
+      return {
+        kind: "send",
+        ...target,
+        draft: { kind: "template", templateId: template[1] },
       };
     }
   }
@@ -145,6 +211,62 @@ export function selectCommunicationEvryMessageEffect(
   ).exec(text);
   return resend?.[1] ? { kind: "resend", communicationId: resend[1] } : null;
 }
+
+/** Resolve one closed draft and audience through the owning product rules. */
+export function createCommunicationEvrySendAudienceResolver(
+  dependencies: CommunicationEvrySendAudienceDependencies = productionSendAudienceDependencies
+) {
+  return async function resolveCommunicationEvrySendAudience(input: {
+    actor: EvryPlantActor;
+    pageContext: EvryResolvedPageContext | null;
+    selection: CommunicationEvrySendSelection;
+  }) {
+    const recipientIds =
+      input.selection.audience.kind === "people"
+        ? input.selection.audience.recipientIds
+        : input.selection.audience.kind === "group"
+          ? (
+              await dependencies.getGroupRecipients(
+                input.actor.plantId,
+                input.selection.audience.selector
+              )
+            ).map(({ id }) => id)
+          : input.pageContext?.kind === "person"
+            ? [input.pageContext.recordId]
+            : [];
+    const template =
+      input.selection.draft.kind === "template"
+        ? await dependencies.getTemplate(
+            input.selection.draft.templateId,
+            input.actor.plantId
+          )
+        : null;
+    if (
+      input.selection.draft.kind === "template" &&
+      (!template || template.channel === "sms" || !template.subject?.trim())
+    ) {
+      return null;
+    }
+    return dependencies.resolveAudience({
+      churchId: input.actor.plantId,
+      recipientIds,
+      subject:
+        input.selection.draft.kind === "inline"
+          ? input.selection.draft.subject
+          : (template?.subject ?? ""),
+      body:
+        input.selection.draft.kind === "inline"
+          ? input.selection.draft.body
+          : (template?.bodyHtml ?? template?.body ?? ""),
+      channel: "email",
+      templateId: template?.id ?? null,
+      meetingId: input.selection.meetingId,
+    });
+  };
+}
+
+const resolveCommunicationEvrySendAudience =
+  createCommunicationEvrySendAudienceResolver();
 
 export const COMMUNICATION_MESSAGE_SEND_PLAN = defineEvryPlanCapability({
   identity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
@@ -437,18 +559,10 @@ export async function proposeCommunicationEvryMessageEffect(input: {
   if (!actor) return null;
 
   if (input.selection.kind === "send") {
-    const recipientIds =
-      input.selection.recipientIds ??
-      (input.pageContext?.kind === "person"
-        ? [input.pageContext.recordId]
-        : []);
-    const audience = await resolveEvryCommunicationAudience({
-      churchId: actor.plantId,
-      recipientIds,
-      subject: input.selection.subject,
-      body: input.selection.body,
-      templateId: input.selection.templateId,
-      meetingId: input.selection.meetingId,
+    const audience = await resolveCommunicationEvrySendAudience({
+      actor,
+      pageContext: input.pageContext,
+      selection: input.selection,
     });
     const parsedAudience = audienceSchema.safeParse(audience);
     if (!parsedAudience.success) return null;
