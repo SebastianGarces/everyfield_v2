@@ -1,4 +1,5 @@
 import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
+import type { EvryConversationPlanTargetValidator } from "@/lib/evry/conversations/plan-resume";
 import { createEvryExecutionCapabilityRegistry } from "@/lib/evry/executor";
 
 import { composeEvryCapabilityConversationContinuations } from "./conversation";
@@ -28,20 +29,20 @@ export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
   ]);
 export const PRODUCTION_EVRY_PLAN_REGISTRY =
   PRODUCTION_EVRY_EXECUTION_REGISTRY.planRegistry;
-export const PRODUCTION_EVRY_REVIEW_REGISTRY =
-  createEvryArtifactReviewRegistry([
+export const PRODUCTION_EVRY_REVIEW_REGISTRY = createEvryArtifactReviewRegistry(
+  [
     ...COMMUNICATION_MESSAGE_REVIEWS,
     ...COMMUNICATION_TEMPLATE_REVIEWS,
     ...MEETINGS_ARTIFACT_REVIEWS,
-  ]);
+  ]
+);
 export const continueProductionEvryCapabilityConversation =
   composeEvryCapabilityConversationContinuations([
     continueCommunicationEvryConversation,
     continueMeetingsEvryConversation,
   ]);
-export const productionEvryPlanTargetIsCurrent = async (
-  input: Parameters<typeof meetingsPlanTargetIsCurrent>[0]
-) =>
-  input.step.capabilityIdentity.startsWith("meetings.")
-    ? meetingsPlanTargetIsCurrent(input)
-    : communicationEvryPlanTargetIsCurrent(input);
+export const productionEvryPlanTargetIsCurrent: EvryConversationPlanTargetValidator =
+  async (input) =>
+    input.step.capabilityIdentity.startsWith("meetings.")
+      ? meetingsPlanTargetIsCurrent(input)
+      : communicationEvryPlanTargetIsCurrent(input);
