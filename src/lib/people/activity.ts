@@ -149,7 +149,10 @@ export async function claimEvryPersonNoteEdit(input: {
     mutation: sql`
       update person_activities a
       set metadata = ${input.expectedMetadataJson}::jsonb ||
-          jsonb_build_object('note', ${input.note}, 'editedAt', ${input.editedAt})
+          jsonb_build_object(
+            'note', ${input.note}::text,
+            'editedAt', ${input.editedAt}::text
+          )
       from eligible e
       where a.id = ${input.activityId}::uuid
         and a.church_id = e.church_id

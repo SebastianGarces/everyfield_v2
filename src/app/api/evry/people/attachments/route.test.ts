@@ -94,6 +94,44 @@ test("multipart and plan routes reject oversized bodies before parsing", async (
   assert.equal(plan.jsonReads, 0);
 });
 
+test("a definitely refused attachment plan removes its exact staged input", async () => {
+  const actor = {
+    userId: "10000000-0000-4000-8000-000000000001",
+    plantId: "20000000-0000-4000-8000-000000000001",
+    seat: "owner",
+  } as unknown as EvryPlantActor;
+  const body = JSON.stringify({
+    kind: "person_photo",
+    reference: "signed-staged-reference",
+    conversationId: null,
+    requestKey: "30000000-0000-4000-8000-000000000001",
+  });
+  const removed: unknown[] = [];
+  const response = await createEvryPeopleAttachmentPlanPost({
+    requireViewer: () => Promise.resolve(actor),
+    proposePhoto: async () => null,
+    removeAttachment: async (input) => {
+      removed.push(input);
+      return true;
+    },
+  })(
+    new Request("https://example.test/api/evry/people/attachments/plan", {
+      method: "POST",
+      body,
+      headers: { "content-length": String(Buffer.byteLength(body)) },
+    })
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(removed, [
+    {
+      actor,
+      reference: "signed-staged-reference",
+      expectedKind: "person_photo",
+    },
+  ]);
+});
+
 for (const refusal of [
   new UnauthorizedError(),
   new EvryPlantViewerRefusalError(),

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { z } from "zod";
 
@@ -103,14 +104,102 @@ const importRowSchema = z
       });
     }
   });
+const importRowsSchema = z
+  .array(importRowSchema)
+  .min(1)
+  .max(25)
+  .superRefine((rows, context) => {
+    const unique = (
+      values: readonly (string | number | null)[],
+      path: string,
+      allowNull = false
+    ) => {
+      const present = allowNull
+        ? values.filter((value) => value !== null)
+        : values;
+      if (new Set(present).size !== present.length) {
+        context.addIssue({
+          code: "custom",
+          path: [path],
+          message: `Import ${path} values must be unique`,
+        });
+      }
+    };
+    unique(
+      rows.map(({ rowNumber }) => rowNumber),
+      "rowNumber"
+    );
+    unique(
+      rows.map(({ rowKey }) => rowKey),
+      "rowKey"
+    );
+    unique(
+      rows.map(({ personId }) => personId),
+      "personId"
+    );
+    unique(
+      rows
+        .filter(({ disposition }) => disposition === "merge")
+        .map(({ targetPersonId }) => targetPersonId),
+      "targetPersonId",
+      true
+    );
+  });
 const rowsJson = z.string().refine((value) => {
   try {
-    return z.array(importRowSchema).min(1).max(25).safeParse(JSON.parse(value))
-      .success;
+    return importRowsSchema.safeParse(JSON.parse(value)).success;
   } catch {
     return false;
   }
 });
+const importSnapshotRowSchema = z
+  .strictObject({
+    rowNumber: z.number().int().min(2).max(27),
+    email: z.string().email().max(255).nullable(),
+    phone: z.string().max(50).nullable(),
+    firstName: z.string().trim().min(1).max(255),
+    lastName: z.string().trim().min(1).max(255),
+    matchIds: z.array(z.string().uuid()).max(6),
+    disposition: z.enum(["create", "merge", "skip"]),
+    targetPersonId: z.string().uuid().nullable(),
+  })
+  .superRefine((row, context) => {
+    if (
+      (row.disposition === "merge") !== (row.targetPersonId !== null) ||
+      (row.targetPersonId !== null &&
+        !row.matchIds.includes(row.targetPersonId))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["targetPersonId"],
+        message:
+          "Import merge targets must be exact reviewed duplicate matches",
+      });
+    }
+  });
+const importSnapshotSchema = z
+  .array(importSnapshotRowSchema)
+  .min(1)
+  .max(25)
+  .superRefine((rows, context) => {
+    if (new Set(rows.map(({ rowNumber }) => rowNumber)).size !== rows.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["rowNumber"],
+        message: "Import preview rows must be unique",
+      });
+    }
+    const mergeTargets = rows.flatMap((row) =>
+      row.targetPersonId ? [row.targetPersonId] : []
+    );
+    if (new Set(mergeTargets).size !== mergeTargets.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["targetPersonId"],
+        message: "Two import rows cannot merge into one existing person",
+      });
+    }
+  });
 const importSchema = z.strictObject({
   attachmentReference: reference,
   attachmentDigest: digest,
@@ -118,30 +207,13 @@ const importSchema = z.strictObject({
   previewFingerprint: digest,
   duplicateSnapshotJson: z.string().refine((value) => {
     try {
-      return z
-        .array(
-          z.strictObject({
-            rowNumber: z.number().int().min(2).max(27),
-            email: z.string().email().max(255).nullable(),
-            phone: z.string().max(50).nullable(),
-            firstName: z.string().trim().min(1).max(255),
-            lastName: z.string().trim().min(1).max(255),
-            matchIds: z.array(z.string().uuid()).max(6),
-          })
-        )
-        .min(1)
-        .max(25)
-        .safeParse(JSON.parse(value)).success;
+      return importSnapshotSchema.safeParse(JSON.parse(value)).success;
     } catch {
       return false;
     }
   }),
   rowsJson,
   totalRows: z.number().int().min(1).max(25),
-  createCount: z.number().int().nonnegative().max(25),
-  mergeCount: z.number().int().nonnegative().max(25),
-  skipCount: z.number().int().nonnegative().max(25),
-  invalidCount: z.number().int().nonnegative().max(25),
 });
 
 const PLANS = {
@@ -166,25 +238,91 @@ function exactTuple(input: EvryEffectInput, identity: string): boolean {
   );
 }
 function parseRows(value: string): EvryImportPersonRow[] {
-  return z.array(importRowSchema).parse(JSON.parse(value));
+  return importRowsSchema.parse(JSON.parse(value));
+}
+function parseImportSnapshot(value: string) {
+  return importSnapshotSchema.parse(JSON.parse(value));
 }
 function fingerprint(preview: ImportPreview): string {
   return createHash("sha256").update(JSON.stringify(preview)).digest("hex");
 }
-function duplicateSnapshot(preview: ImportPreview) {
+function duplicateSnapshot(
+  preview: ImportPreview,
+  resolutions: Readonly<Record<string, "skip" | "create" | "merge">>
+) {
   return [...preview.validRows, ...preview.duplicateRows]
     .toSorted((a, b) => a.rowNumber - b.rowNumber)
-    .map((row) => ({
-      rowNumber: row.rowNumber,
-      email: row.data.email?.trim().toLocaleLowerCase("en-US") || null,
-      phone: row.data.phone || null,
-      firstName: row.data.firstName?.trim() ?? "",
-      lastName: row.data.lastName?.trim() ?? "",
-      matchIds: [
-        ...(row.duplicates.exactMatch ? [row.duplicates.exactMatch.id] : []),
-        ...row.duplicates.potentialMatches.map(({ id }) => id),
-      ],
-    }));
+    .map((row) => {
+      const duplicate = preview.duplicateRows.some(
+        ({ rowNumber }) => rowNumber === row.rowNumber
+      );
+      const disposition = duplicate
+        ? resolutions[String(row.rowNumber)]!
+        : ("create" as const);
+      const mergeTarget =
+        disposition === "merge"
+          ? (row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0])
+          : null;
+      return importSnapshotRowSchema.parse({
+        rowNumber: row.rowNumber,
+        email: row.data.email?.trim().toLocaleLowerCase("en-US") || null,
+        phone: row.data.phone || null,
+        firstName: row.data.firstName?.trim() ?? "",
+        lastName: row.data.lastName?.trim() ?? "",
+        matchIds: [
+          ...(row.duplicates.exactMatch ? [row.duplicates.exactMatch.id] : []),
+          ...row.duplicates.potentialMatches.map(({ id }) => id),
+        ],
+        disposition,
+        targetPersonId: mergeTarget?.id ?? null,
+      });
+    });
+}
+
+function plannedImportMatchesPreview(input: {
+  actor: EvryPlantActor;
+  digest: string;
+  preview: ImportPreview;
+  rows: readonly EvryImportPersonRow[];
+  snapshot: z.infer<typeof importSnapshotSchema>;
+}): boolean {
+  const duplicateRowNumbers = new Set(
+    input.preview.duplicateRows.map(({ rowNumber }) => rowNumber)
+  );
+  const resolutions = Object.fromEntries(
+    input.snapshot
+      .filter(({ rowNumber }) => duplicateRowNumbers.has(rowNumber))
+      .map(({ rowNumber, disposition }) => [String(rowNumber), disposition])
+  ) as Record<string, "skip" | "create" | "merge">;
+  const expectedSnapshot = duplicateSnapshot(input.preview, resolutions);
+  if (!isDeepStrictEqual(input.snapshot, expectedSnapshot)) return false;
+  const previewRows = new Map(
+    [...input.preview.validRows, ...input.preview.duplicateRows].map((row) => [
+      row.rowNumber,
+      row,
+    ])
+  );
+  const rowsByNumber = new Map(input.rows.map((row) => [row.rowNumber, row]));
+  if (rowsByNumber.size !== input.rows.length) return false;
+  for (const decision of input.snapshot) {
+    const row = rowsByNumber.get(decision.rowNumber);
+    if (decision.disposition === "skip") {
+      if (row) return false;
+      continue;
+    }
+    const source = previewRows.get(decision.rowNumber);
+    if (!row || !source) return false;
+    const normalized = normalizedRow({
+      actor: input.actor,
+      digest: input.digest,
+      row: source,
+      disposition: decision.disposition,
+      targetPersonId: decision.targetPersonId,
+      expectedTargetJson: row.expectedTargetJson,
+    });
+    if (!normalized || !isDeepStrictEqual(row, normalized)) return false;
+  }
+  return input.rows.length === rowsByNumber.size;
 }
 function uuidFromHash(value: string): string {
   const hex = createHash("sha256")
@@ -264,12 +402,24 @@ export const PEOPLE_FILE_EXECUTIONS = [
         attachment.bytes.toString("utf8"),
         input.authorization.actor.plantId
       );
-      if (fingerprint(preview) !== args.data.previewFingerprint)
+      const rows = parseRows(args.data.rowsJson);
+      const snapshot = parseImportSnapshot(args.data.duplicateSnapshotJson);
+      if (
+        fingerprint(preview) !== args.data.previewFingerprint ||
+        preview.totalRows !== args.data.totalRows ||
+        !plannedImportMatchesPreview({
+          actor: input.authorization.actor,
+          digest: args.data.attachmentDigest,
+          preview,
+          rows,
+          snapshot,
+        })
+      )
         return { status: "refused", excludedCount: 1 };
       return claimEvryBulkImport({
         execution: input.execution,
         effectKey: input.effectKey,
-        rows: parseRows(args.data.rowsJson),
+        rows,
         duplicateSnapshotJson: args.data.duplicateSnapshotJson,
       });
     },
@@ -286,6 +436,57 @@ function target(label: string, value: string, href?: string) {
     value,
     sourceLink: href ? { label: `Open ${value}`, href } : null,
   };
+}
+
+function importCounts(
+  snapshot: z.infer<typeof importSnapshotSchema>,
+  total: number
+) {
+  const count = (disposition: "create" | "merge" | "skip") =>
+    snapshot.filter((row) => row.disposition === disposition).length;
+  return {
+    create: count("create"),
+    merge: count("merge"),
+    skip: count("skip"),
+    invalid: total - snapshot.length,
+  };
+}
+
+function importRowDisclosure(row: EvryImportPersonRow): string {
+  const incoming = {
+    firstName: row.firstName,
+    lastName: row.lastName,
+    email: row.email,
+    phone: row.phone,
+    source: row.source,
+    addressLine1: row.addressLine1,
+    addressLine2: row.addressLine2,
+    city: row.city,
+    state: row.state,
+    postalCode: row.postalCode,
+    country: row.country,
+    notes: row.notes,
+  };
+  return JSON.stringify(
+    row.disposition === "create"
+      ? { disposition: "create", rowNumber: row.rowNumber, incoming }
+      : {
+          disposition: "merge",
+          rowNumber: row.rowNumber,
+          targetPersonId: row.targetPersonId,
+          before: JSON.parse(row.expectedTargetJson!),
+          incoming,
+        }
+  );
+}
+
+function exactImportRowPages(row: EvryImportPersonRow) {
+  const content = importRowDisclosure(row);
+  const pages = Math.max(1, Math.ceil(content.length / 4_000));
+  return Array.from({ length: pages }, (_, index) => ({
+    label: `Row ${row.rowNumber} ${row.disposition} · page ${index + 1} of ${pages}`,
+    content: content.slice(index * 4_000, (index + 1) * 4_000),
+  }));
 }
 export const PEOPLE_FILE_REVIEWS = [
   defineEvryArtifactReview({
@@ -347,14 +548,16 @@ export const PEOPLE_FILE_REVIEWS = [
       const step = document.steps[0]!;
       const args = importSchema.parse(step.arguments);
       const rows = parseRows(args.rowsJson);
+      const snapshot = parseImportSnapshot(args.duplicateSnapshotJson);
+      const counts = importCounts(snapshot, args.totalRows);
       return buildEvryConfirmationArtifact({
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Apply ${args.createCount + args.mergeCount} People changes from ${args.originalName}`,
+        title: `Apply ${counts.create + counts.merge} People changes from ${args.originalName}`,
         actionLabel: "Import people",
         consequences: [
-          "Creates every listed person and timeline entry atomically. Any changed duplicate result refuses the whole import.",
+          `Creates ${counts.create} People records, merges ${counts.merge} exact existing targets, and writes one timeline entry per changed CSV row atomically. Any changed duplicate result refuses the whole import.`,
         ],
         steps: [
           {
@@ -380,32 +583,39 @@ export const PEOPLE_FILE_REVIEWS = [
             }),
             counts: [
               { label: "CSV rows", count: args.totalRows },
-              { label: "People to create", count: args.createCount },
-              { label: "People to merge", count: args.mergeCount },
-              { label: "Rows to skip", count: args.skipCount },
-              { label: "Invalid rows", count: args.invalidCount },
+              { label: "People to create", count: counts.create },
+              { label: "People to merge", count: counts.merge },
+              { label: "Rows to skip", count: counts.skip },
+              { label: "Invalid rows", count: counts.invalid },
             ],
             exclusions: [
-              ...(args.skipCount
+              ...(counts.skip
                 ? [
                     {
                       reason: "Duplicate rows explicitly marked skip",
-                      count: args.skipCount,
+                      count: counts.skip,
                     },
                   ]
                 : []),
-              ...(args.invalidCount
-                ? [{ reason: "Invalid CSV rows", count: args.invalidCount }]
+              ...(counts.invalid
+                ? [{ reason: "Invalid CSV rows", count: counts.invalid }]
                 : []),
             ],
             dateTime: null,
             contentPreviews: [
               { label: "CSV SHA-256", content: args.attachmentDigest },
+              ...rows.flatMap(exactImportRowPages),
             ],
             beforeAfter: rows.map((row) => ({
               label: `Row ${row.rowNumber}: ${row.firstName} ${row.lastName}`,
-              before: "No new person",
-              after: "Person created",
+              before:
+                row.disposition === "create"
+                  ? "No person"
+                  : "Exact existing merge target shown below",
+              after:
+                row.disposition === "create"
+                  ? "Person created from the exact reviewed row"
+                  : "Existing person receives only the exact reviewed merge fields",
               count: 1,
             })),
           },
@@ -647,7 +857,21 @@ export async function proposePeopleImport(input: {
   const allRows = [...rows, ...mergeRows].toSorted(
     (a, b) => (a?.rowNumber ?? 0) - (b?.rowNumber ?? 0)
   );
-  if (!allRows.length || allRows.some((row) => !row)) return null;
+  const plannedRows = importRowsSchema.safeParse(allRows);
+  const snapshot = importSnapshotSchema.safeParse(
+    duplicateSnapshot(preview, input.duplicateResolutions)
+  );
+  if (!plannedRows.success || !snapshot.success) return null;
+  if (
+    !plannedImportMatchesPreview({
+      actor: input.actor,
+      digest: opened.digest,
+      preview,
+      rows: plannedRows.data,
+      snapshot: snapshot.data,
+    })
+  )
+    return null;
   return storeProposal({
     actor: input.actor,
     requestKey: input.requestKey,
@@ -658,15 +882,9 @@ export async function proposePeopleImport(input: {
       attachmentDigest: opened.digest,
       originalName: opened.originalName,
       previewFingerprint: fingerprint(preview),
-      duplicateSnapshotJson: JSON.stringify(duplicateSnapshot(preview)),
-      rowsJson: JSON.stringify(allRows),
+      duplicateSnapshotJson: JSON.stringify(snapshot.data),
+      rowsJson: JSON.stringify(plannedRows.data),
       totalRows: preview.totalRows,
-      createCount: rows.length,
-      mergeCount: mergeRows.length,
-      skipCount: duplicateRows.filter(
-        (row) => input.duplicateResolutions[String(row.rowNumber)] === "skip"
-      ).length,
-      invalidCount: preview.invalidRows.length,
     },
   });
 }
@@ -707,12 +925,19 @@ export async function peopleFileTargetIsCurrent(input: {
     expectedDigest: args.data.attachmentDigest,
   });
   if (!attachment) return false;
+  const preview = await parseCsvImport(
+    attachment.bytes.toString("utf8"),
+    input.actor.plantId
+  );
   return (
-    fingerprint(
-      await parseCsvImport(
-        attachment.bytes.toString("utf8"),
-        input.actor.plantId
-      )
-    ) === args.data.previewFingerprint
+    fingerprint(preview) === args.data.previewFingerprint &&
+    preview.totalRows === args.data.totalRows &&
+    plannedImportMatchesPreview({
+      actor: input.actor,
+      digest: args.data.attachmentDigest,
+      preview,
+      rows: parseRows(args.data.rowsJson),
+      snapshot: parseImportSnapshot(args.data.duplicateSnapshotJson),
+    })
   );
 }

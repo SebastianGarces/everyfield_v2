@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
-import { openEvryPeopleAttachmentReference } from "@/lib/evry/capabilities/people/attachments";
+import {
+  openEvryPeopleAttachmentReference,
+  removeEvryPeopleAttachment,
+} from "@/lib/evry/capabilities/people/attachments";
 import {
   persistEvryPeopleFileReview,
   recoverEvryPeopleFileReview,
@@ -59,8 +62,12 @@ const bodySchema = z.discriminatedUnion("kind", [
 
 export function createEvryPeopleAttachmentPlanPost({
   requireViewer = requireEvryPlantViewer,
+  removeAttachment = removeEvryPeopleAttachment,
+  proposePhoto = proposePeoplePhotoUpload,
 }: {
   requireViewer?: typeof requireEvryPlantViewer;
+  removeAttachment?: typeof removeEvryPeopleAttachment;
+  proposePhoto?: typeof proposePeoplePhotoUpload;
 } = {}) {
   return async function evryPeopleAttachmentPlanPost(request: Request) {
     try {
@@ -91,6 +98,20 @@ export function createEvryPeopleAttachmentPlanPost({
           { status: "invalid" },
           { status: 400, headers: PRIVATE_HEADERS }
         );
+      const removeRefusedAttachment = async () => {
+        try {
+          await removeAttachment({
+            actor,
+            reference: parsed.data.reference,
+            expectedKind: parsed.data.kind,
+          });
+        } catch (error) {
+          console.error(
+            "[evry:people] failed to remove a refused staged attachment",
+            error
+          );
+        }
+      };
       const labels = {
         person_photo: {
           user: "Attached a person photo for review.",
@@ -135,7 +156,7 @@ export function createEvryPeopleAttachmentPlanPost({
       ];
       let proposal;
       if (parsed.data.kind === "person_photo") {
-        proposal = await proposePeoplePhotoUpload({
+        proposal = await proposePhoto({
           actor,
           reference: parsed.data.reference,
           requestKey: deriveEvryPlanRequestKey(
@@ -186,11 +207,13 @@ export function createEvryPeopleAttachmentPlanPost({
             })
           : null;
       }
-      if (!proposal)
+      if (!proposal) {
+        await removeRefusedAttachment();
         return NextResponse.json(
           { status: "unavailable" },
           { status: 404, headers: PRIVATE_HEADERS }
         );
+      }
       const preview =
         parsed.data.kind === "people_csv"
           ? await readPeopleImportPreviewArtifact({
@@ -217,21 +240,23 @@ export function createEvryPeopleAttachmentPlanPost({
         plan: proposal.plan,
         now,
       });
-      return persisted
-        ? NextResponse.json(
-            {
-              status: parsed.data.conversationId ? "continued" : "created",
-              conversation: publicEvryConversation(persisted),
-            },
-            {
-              status: parsed.data.conversationId ? 200 : 201,
-              headers: PRIVATE_HEADERS,
-            }
-          )
-        : NextResponse.json(
-            { status: "unavailable" },
-            { status: 404, headers: PRIVATE_HEADERS }
-          );
+      if (!persisted) {
+        await removeRefusedAttachment();
+        return NextResponse.json(
+          { status: "unavailable" },
+          { status: 404, headers: PRIVATE_HEADERS }
+        );
+      }
+      return NextResponse.json(
+        {
+          status: parsed.data.conversationId ? "continued" : "created",
+          conversation: publicEvryConversation(persisted),
+        },
+        {
+          status: parsed.data.conversationId ? 200 : 201,
+          headers: PRIVATE_HEADERS,
+        }
+      );
     } catch (error) {
       const refused =
         isUnauthorized(error) || error instanceof EvryPlantViewerRefusalError;

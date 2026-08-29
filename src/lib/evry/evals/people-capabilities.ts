@@ -36,8 +36,9 @@ function fixtureFor(identity: string): EvryCapabilityEvalFixture {
     (capability) => capability.identity === identity
   )?.operationKind;
   const cases = (layer: EvryCapabilityEvalLayer) =>
-    operationKind === "effect" &&
-    ["tenancy", "execution", "idempotency", "errors"].includes(layer)
+    (operationKind === "effect" &&
+      ["tenancy", "execution", "idempotency", "errors"].includes(layer)) ||
+    (operationKind === "read" && ["execution", "idempotency"].includes(layer))
       ? [fixtureCase(identity, layer), liveOutcomeCase(identity, layer)]
       : [fixtureCase(identity, layer)];
   return defineEvryCapabilityEvalFixture({

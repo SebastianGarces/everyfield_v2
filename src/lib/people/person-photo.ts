@@ -9,6 +9,7 @@ import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
 import {
   deleteFile,
   getExtensionFromMimeType,
+  listFileKeys,
   personPhotoStorageKey,
   uploadFile,
 } from "@/lib/storage";
@@ -134,12 +135,47 @@ export type EvryPersonPhotoMutation =
 export type EvryPersonPhotoStorageEffects = Readonly<{
   store(key: string, bytes: Buffer, contentType: string): Promise<unknown>;
   remove(key: string): Promise<unknown>;
+  list(prefix: string): Promise<readonly string[]>;
 }>;
 
 const LIVE_EVRY_PHOTO_STORAGE: EvryPersonPhotoStorageEffects = {
   store: uploadFile,
   remove: deleteFile,
+  list: listFileKeys,
 };
+
+/**
+ * Remove every no-longer-referenced object below one exact tenant/person
+ * prefix. The database pointer is loaded first and is never deleted. Failed
+ * deletes remain discoverable by the next terminal cleanup or operator sweep.
+ */
+export async function sweepEvryPersonPhotoObjects(input: {
+  plantId: string;
+  personId: string;
+  storage?: EvryPersonPhotoStorageEffects;
+  load?: typeof getPersonPhotoKey;
+}): Promise<Readonly<{ removed: number; failed: number }>> {
+  const current = await (input.load ?? getPersonPhotoKey)(
+    input.plantId,
+    input.personId
+  );
+  if (!current) return { removed: 0, failed: 0 };
+  const storage = input.storage ?? LIVE_EVRY_PHOTO_STORAGE;
+  const prefix = `people/${input.plantId}/${input.personId}/`;
+  const keys = await storage.list(prefix);
+  let removed = 0;
+  let failed = 0;
+  for (const key of keys) {
+    if (!key.startsWith(prefix) || key === current.photoKey) continue;
+    try {
+      await storage.remove(key);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { removed, failed };
+}
 
 /**
  * Claim one exact Evry photo change through the same single writer as the

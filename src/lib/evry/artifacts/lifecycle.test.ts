@@ -106,10 +106,8 @@ function startingConversation(): EvryStoredConversation {
 function harness() {
   let conversation = startingConversation();
   let planStatus:
-    | "awaiting_confirmation"
-    | "approved"
-    | "executing"
-    | "cancelled" = "awaiting_confirmation";
+    "awaiting_confirmation" | "approved" | "executing" | "cancelled" =
+    "awaiting_confirmation";
   const calls: string[] = [];
   let executeResult: Awaited<
     ReturnType<EvryArtifactLifecycleBoundaries["execute"]>
@@ -361,6 +359,52 @@ test("cancel and edit durably cancel the exact plan and clear conversation autho
       action === "edit" ? /fresh plan/ : /cancelled/
     );
   }
+});
+
+test("terminal lifecycle states clean exact plan resources while safe retry preserves them", async () => {
+  for (const action of ["cancel", "edit", "execute"] as const) {
+    const fake = harness();
+    const cleaned: unknown[] = [];
+    const result = await createEvryArtifactLifecycle({
+      ...fake.boundaries,
+      cleanupPlanResources: async (input) => void cleaned.push(input),
+    })(request(action));
+    assert.equal(
+      result.status,
+      action === "cancel"
+        ? "cancelled"
+        : action === "edit"
+          ? "editing"
+          : "executed"
+    );
+    assert.deepEqual(cleaned, [
+      {
+        actor: ACTOR,
+        plan: EVRY_CONFIRMATION_FIXTURES.meeting.plan,
+      },
+    ]);
+  }
+
+  const fake = harness();
+  fake.setExecuteResult({
+    status: "retryable",
+    correlationId: "a0000000-0000-4000-8000-000000000003",
+    steps: EVRY_CONFIRMATION_FIXTURES.meeting.steps.map((step) => ({
+      stepId: step.stepId,
+      capabilityIdentity: "fixture.effect",
+      status: "retryable",
+      durable: false,
+      affectedCount: 0,
+      excludedCount: 0,
+    })),
+  });
+  let cleanupCalls = 0;
+  const retryable = await createEvryArtifactLifecycle({
+    ...fake.boundaries,
+    cleanupPlanResources: async () => void cleanupCalls++,
+  })(request("execute"));
+  assert.equal(retryable.status, "retryable");
+  assert.equal(cleanupCalls, 0);
 });
 
 test("a mismatched conversation plan reaches no plan or persistence boundary", async () => {

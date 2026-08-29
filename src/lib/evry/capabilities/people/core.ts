@@ -478,12 +478,44 @@ function changes(
         : [
             {
               label: fieldLabels[key],
-              before: before?.[key] ?? "Not set",
-              after: after?.[key] ?? "Not set",
+              before:
+                key === "notes"
+                  ? noteDisclosureSummary(before?.notes ?? null)
+                  : (before?.[key] ?? "Not set"),
+              after:
+                key === "notes"
+                  ? noteDisclosureSummary(after?.notes ?? null)
+                  : (after?.[key] ?? "Not set"),
               count: 1,
             },
           ]
   );
+}
+
+const NOTE_DISCLOSURE_PAGE_CHARACTERS = 4_000;
+
+function noteDisclosureSummary(value: string | null): string {
+  if (value === null) return "Not set";
+  const pages = Math.max(
+    1,
+    Math.ceil(value.length / NOTE_DISCLOSURE_PAGE_CHARACTERS)
+  );
+  return `Exact content shown in ${pages} ${pages === 1 ? "page" : "pages"} below`;
+}
+
+function noteDisclosurePages(phase: "before" | "after", value: string | null) {
+  if (value === null) return [];
+  const pages = Math.max(
+    1,
+    Math.ceil(value.length / NOTE_DISCLOSURE_PAGE_CHARACTERS)
+  );
+  return Array.from({ length: pages }, (_, index) => ({
+    label: `Notes ${phase} · page ${index + 1} of ${pages}`,
+    content: value.slice(
+      index * NOTE_DISCLOSURE_PAGE_CHARACTERS,
+      (index + 1) * NOTE_DISCLOSURE_PAGE_CHARACTERS
+    ),
+  }));
 }
 
 export const PEOPLE_CORE_REVIEWS = [
@@ -529,7 +561,7 @@ export const PEOPLE_CORE_REVIEWS = [
               ],
               exclusions: [],
               dateTime: null,
-              contentPreviews: [],
+              contentPreviews: noteDisclosurePages("after", person.notes),
               beforeAfter: changes(null, person),
             },
           ],
@@ -566,7 +598,13 @@ export const PEOPLE_CORE_REVIEWS = [
             counts: [{ label: "People to update", count: 1 }],
             exclusions: [],
             dateTime: null,
-            contentPreviews: [],
+            contentPreviews:
+              before.notes === after.notes
+                ? []
+                : [
+                    ...noteDisclosurePages("before", before.notes),
+                    ...noteDisclosurePages("after", after.notes),
+                  ],
             beforeAfter: changes(before, after),
           },
         ],

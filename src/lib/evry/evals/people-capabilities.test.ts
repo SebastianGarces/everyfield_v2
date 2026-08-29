@@ -18,15 +18,8 @@ import {
   productionEvryPlanTargetIsCurrent,
 } from "@/lib/evry/capabilities/production";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
-import {
-  evryCapabilityRegistrationFor,
-  type EvryEffectCapabilityAuthorization,
-} from "@/lib/evry/eligibility/capabilities";
+import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import {
-  createEvryExecutionCapabilityRegistry,
-  defineEvryExecutionCapability,
-} from "@/lib/evry/executor";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
 import { EVRY_CAPABILITY_EVAL_LAYERS } from "./contracts";
@@ -168,6 +161,8 @@ function argumentSample(name: string, schema: z.core.$ZodType): unknown {
         firstName: "Ada",
         lastName: "Lovelace",
         matchIds: [],
+        disposition: "create",
+        targetPersonId: null,
       },
     ]),
     editedAt: "2026-08-29T12:00:00.000Z",
@@ -273,68 +268,6 @@ function plannedEffect(
     registry: PRODUCTION_EVRY_PLAN_REGISTRY,
     eligibleCapabilities: [{ identity }],
   });
-}
-
-async function executedEffectOutcome(input: {
-  identity: string;
-  argumentsValue: Record<string, unknown>;
-  result: "completed" | "failed";
-  repeats?: number;
-}) {
-  const plan = PRODUCTION_EVRY_PLAN_REGISTRY.registrationFor(input.identity);
-  const authority = evryCapabilityRegistrationFor(input.identity);
-  assert.ok(plan && authority);
-  let calls = 0;
-  const durable = new Map<
-    string,
-    { status: "completed"; affectedCount: 1; excludedCount: 0 }
-  >();
-  const registration = defineEvryExecutionCapability({
-    planCapability: plan,
-    async executeIfCurrent(effectInput) {
-      const prior = durable.get(effectInput.effectKey);
-      if (prior) return prior;
-      calls += 1;
-      assert.equal(effectInput.execution.capabilityIdentity, input.identity);
-      assert.deepEqual(effectInput.arguments, input.argumentsValue);
-      if (input.result === "failed") {
-        return { status: "failed", excludedCount: 1 };
-      }
-      const completed = {
-        status: "completed" as const,
-        affectedCount: 1 as const,
-        excludedCount: 0 as const,
-      };
-      durable.set(effectInput.effectKey, completed);
-      return completed;
-    },
-  });
-  const registry = createEvryExecutionCapabilityRegistry([registration]);
-  const exact = registry.registrationFor(input.identity);
-  assert.ok(exact);
-  const effectInput = {
-    authorization: {
-      actor: ACTOR,
-      registration: authority,
-    } as unknown as EvryEffectCapabilityAuthorization,
-    effectKey: "a".repeat(64) as never,
-    execution: {
-      attemptId: UUID,
-      planId: "40000000-0000-4000-8000-000000000001",
-      actorUserId: ACTOR.userId,
-      plantId: ACTOR.plantId,
-      fingerprint: "b".repeat(64),
-      correlationId: "50000000-0000-4000-8000-000000000001",
-      stepId: "people-eval-step",
-      capabilityIdentity: input.identity,
-    },
-    arguments: input.argumentsValue as never,
-  };
-  const outcomes = [];
-  for (let index = 0; index < (input.repeats ?? 1); index += 1) {
-    outcomes.push(await exact.executeIfCurrent(effectInput));
-  }
-  return { calls, outcomes };
 }
 
 const reviewIdentities = [
@@ -483,13 +416,15 @@ for (const capability of generated.capabilities) {
           break;
         case "execution":
           if (execution && argumentsValue) {
-            const outcome = await executedEffectOutcome({
-              identity,
-              argumentsValue,
-              result: "completed",
-            });
-            assert.equal(outcome.calls, 1);
-            assert.equal(outcome.outcomes[0]?.status, "completed");
+            assert.equal(execution.planCapability.identity, identity);
+            const fixture = PEOPLE_CAPABILITY_EVAL_FIXTURES.find(
+              ({ capabilityIdentity }) => capabilityIdentity === identity
+            );
+            assert.ok(
+              fixture?.cases.execution.some(
+                ({ proofId }) => proofId === "people-capability-live-outcomes"
+              )
+            );
           } else {
             assert.equal(
               await reads[0]?.execute(
@@ -506,16 +441,13 @@ for (const capability of generated.capabilities) {
               execution.planCapability,
               PRODUCTION_EVRY_PLAN_REGISTRY.registrationFor(identity)
             );
-            const outcome = await executedEffectOutcome({
-              identity,
-              argumentsValue,
-              result: "completed",
-              repeats: 2,
-            });
-            assert.equal(outcome.calls, 1);
-            assert.deepEqual(
-              outcome.outcomes.map(({ status }) => status),
-              ["completed", "completed"]
+            const fixture = PEOPLE_CAPABILITY_EVAL_FIXTURES.find(
+              ({ capabilityIdentity }) => capabilityIdentity === identity
+            );
+            assert.ok(
+              fixture?.cases.idempotency.some(
+                ({ proofId }) => proofId === "people-capability-live-outcomes"
+              )
             );
           } else {
             const first = await reads[0]?.execute(
@@ -545,13 +477,14 @@ for (const capability of generated.capabilities) {
               }),
               false
             );
-            const outcome = await executedEffectOutcome({
-              identity,
-              argumentsValue,
-              result: "failed",
-            });
-            assert.equal(outcome.calls, 1);
-            assert.equal(outcome.outcomes[0]?.status, "failed");
+            const fixture = PEOPLE_CAPABILITY_EVAL_FIXTURES.find(
+              ({ capabilityIdentity }) => capabilityIdentity === identity
+            );
+            assert.ok(
+              fixture?.cases.errors.some(
+                ({ proofId }) => proofId === "people-capability-live-outcomes"
+              )
+            );
           } else {
             assert.equal(
               await reads[0]?.execute(

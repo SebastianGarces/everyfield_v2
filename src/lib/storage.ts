@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -63,6 +64,28 @@ export async function deleteFile(key: string): Promise<void> {
   });
 
   await s3Client.send(command);
+}
+
+/** List every private object key below one closed application prefix. */
+export async function listFileKeys(prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const result = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+    for (const object of result.Contents ?? []) {
+      if (object.Key) keys.push(object.Key);
+    }
+    continuationToken = result.IsTruncated
+      ? result.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+  return keys;
 }
 
 // ============================================================================

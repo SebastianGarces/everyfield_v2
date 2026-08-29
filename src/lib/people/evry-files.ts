@@ -38,6 +38,25 @@ interface DuplicateSnapshotCount extends Record<string, unknown> {
   matched_count: number;
 }
 
+export function evryImportRowsHaveUniqueTargets(
+  rows: readonly EvryImportPersonRow[]
+): boolean {
+  const mergeTargets = rows.flatMap((row) =>
+    row.disposition === "merge" && row.targetPersonId
+      ? [row.targetPersonId]
+      : []
+  );
+  return (
+    rows.length > 0 &&
+    new Set(rows.map(({ rowNumber }) => rowNumber)).size === rows.length &&
+    new Set(rows.map(({ rowKey }) => rowKey)).size === rows.length &&
+    new Set(rows.map(({ personId }) => personId)).size === rows.length &&
+    mergeTargets.length ===
+      rows.filter(({ disposition }) => disposition === "merge").length &&
+    new Set(mergeTargets).size === mergeTargets.length
+  );
+}
+
 function personSnapshot(alias: ReturnType<typeof sql>) {
   return sql`jsonb_build_object(
     'firstName', ${alias}.first_name, 'lastName', ${alias}.last_name,
@@ -104,6 +123,27 @@ async function duplicateSnapshotIsCurrent(input: {
   return result.rows[0]?.matched_count === expectedCount;
 }
 
+async function importMergeTargetsAreCurrent(input: {
+  plantId: string;
+  rows: readonly EvryImportPersonRow[];
+}): Promise<boolean> {
+  const mergeRows = input.rows.filter((row) => row.disposition === "merge");
+  if (mergeRows.length === 0) return true;
+  const result = await db.execute<DuplicateSnapshotCount>(sql`
+    with requested as materialized (
+      select * from jsonb_to_recordset(${JSON.stringify(mergeRows)}::jsonb) as r(
+        "targetPersonId" uuid, "expectedTargetJson" text
+      )
+    )
+    select count(*)::integer as matched_count
+    from requested r join persons p
+      on p.id = r."targetPersonId" and p.church_id = ${input.plantId}::uuid
+      and p.deleted_at is null
+      and ${personSnapshot(sql`p`)} = r."expectedTargetJson"::jsonb
+  `);
+  return result.rows[0]?.matched_count === mergeRows.length;
+}
+
 export async function claimEvryBulkImport(
   input: EffectIdentity & {
     rows: readonly EvryImportPersonRow[];
@@ -112,6 +152,9 @@ export async function claimEvryBulkImport(
 ): Promise<EvryEffectResult> {
   const replay = await recoverCompletedEvryPeopleEffect(input);
   if (replay) return replay;
+  if (!evryImportRowsHaveUniqueTargets(input.rows)) {
+    return { status: "refused", excludedCount: 1 };
+  }
   const rowsJson = JSON.stringify(input.rows);
   const count = input.rows.length;
   const duplicateCount = (JSON.parse(input.duplicateSnapshotJson) as unknown[])
@@ -179,6 +222,34 @@ export async function claimEvryBulkImport(
             state text, "postalCode" text, country text, notes text,
             disposition text, "targetPersonId" uuid, "expectedTargetJson" text
           )
+        ), requested_shape_current as materialized (
+          select count(*) = ${count}
+            and count(distinct "rowKey") = ${count}
+            and count(distinct "personId") = ${count}
+            and count(*) filter (where disposition = 'merge') =
+              count("targetPersonId") filter (where disposition = 'merge')
+            and count(*) filter (where disposition = 'merge') =
+              count(distinct "targetPersonId") filter (where disposition = 'merge')
+            as is_current
+          from requested
+        ), merge_targets_current as materialized (
+          select count(*) filter (where r.disposition = 'merge') =
+            count(*) filter (
+              where r.disposition = 'merge' and exists (
+                select 1
+                from persons p cross join eligible e
+                where p.id = r."targetPersonId" and p.church_id = e.church_id
+                  and p.deleted_at is null
+                  and ${personSnapshot(sql`p`)} = r."expectedTargetJson"::jsonb
+              )
+            ) as is_current
+          from requested r
+        ), import_preconditions_current as materialized (
+          select
+            (select is_current from duplicate_snapshot_current)
+            and (select is_current from requested_shape_current)
+            and (select is_current from merge_targets_current)
+            as is_current
         ), created_people as (
           insert into persons (
             id, church_id, first_name, last_name, email, phone, source,
@@ -192,10 +263,7 @@ export async function claimEvryBulkImport(
           from requested r cross join eligible e
           join duplicate_scope d on d.id = e.church_id
           where r.disposition = 'create'
-            and (select is_current from duplicate_snapshot_current)
-            and (select count(*) from requested) = ${count}
-            and (select count(distinct "rowKey") from requested) = ${count}
-            and (select count(distinct "personId") from requested) = ${count}
+            and (select is_current from import_preconditions_current)
           returning church_id, id
         ), merged_people as (
           update persons p set
@@ -215,7 +283,7 @@ export async function claimEvryBulkImport(
           from requested r cross join eligible e
           join duplicate_scope d on d.id = e.church_id
           where r.disposition = 'merge'
-            and (select is_current from duplicate_snapshot_current)
+            and (select is_current from import_preconditions_current)
             and p.id = r."targetPersonId" and p.church_id = e.church_id
             and p.deleted_at is null
             and ${personSnapshot(sql`p`)} = r."expectedTargetJson"::jsonb
@@ -243,11 +311,16 @@ export async function claimEvryBulkImport(
       select count(*)::integer as affected_count, 0 as excluded_count
       from activities having count(*) = ${count}
     `,
-    targetIsCurrent: () =>
-      duplicateSnapshotIsCurrent({
+    targetIsCurrent: async () =>
+      evryImportRowsHaveUniqueTargets(input.rows) &&
+      (await duplicateSnapshotIsCurrent({
         database: db,
         plantId: input.execution.plantId,
         snapshotJson: input.duplicateSnapshotJson,
-      }),
+      })) &&
+      (await importMergeTargetsAreCurrent({
+        plantId: input.execution.plantId,
+        rows: input.rows,
+      })),
   });
 }

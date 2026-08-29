@@ -137,3 +137,83 @@ test("destructive person review binds the complete immutable baseline", () => {
     })
   );
 });
+
+function coreReview(input: {
+  identity: string;
+  stepId: string;
+  argumentsValue: Record<string, unknown>;
+}) {
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: input.stepId,
+          capabilityIdentity: input.identity,
+          arguments: input.argumentsValue,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: PEOPLE_CORE_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity: input.identity }],
+  });
+  return trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: PLAN_ID,
+      fingerprint: "c".repeat(64),
+    }),
+    document,
+    reviewRegistry: PEOPLE_CORE_REVIEW_REGISTRY,
+  });
+}
+
+function disclosedNotes(
+  review: NonNullable<ReturnType<typeof coreReview>>,
+  phase: "before" | "after"
+) {
+  return review.confirmation.steps[0]!.contentPreviews.filter(({ label }) =>
+    label.startsWith(`Notes ${phase} · page `)
+  )
+    .map(({ content }) => content)
+    .join("");
+}
+
+test("create and update disclose every legal 20k note character losslessly in bounded pages", () => {
+  const beforeNotes = `  ${"b".repeat(19_996)}  `;
+  const afterNotes = `\n${"a".repeat(19_998)}\t`;
+  assert.equal(beforeNotes.length, 20_000);
+  assert.equal(afterNotes.length, 20_000);
+
+  const created = coreReview({
+    identity: PEOPLE_CORE_IDENTITIES.create,
+    stepId: "create-person",
+    argumentsValue: {
+      personJson: JSON.stringify({ ...PERSON, notes: afterNotes }),
+      activitySource: "form",
+      expectedHouseholdName: null,
+    },
+  });
+  assert.ok(created);
+  assert.equal(disclosedNotes(created, "after"), afterNotes);
+  assert.equal(
+    created.confirmation.steps[0]?.contentPreviews.every(
+      ({ content }) => content.length <= 4_000
+    ),
+    true
+  );
+
+  const updated = coreReview({
+    identity: PEOPLE_CORE_IDENTITIES.update,
+    stepId: "update-person",
+    argumentsValue: {
+      personId: PERSON_ID,
+      personLabel: "Ada Lovelace",
+      baselineJson: JSON.stringify({ ...PERSON, notes: beforeNotes }),
+      afterJson: JSON.stringify({ ...PERSON, notes: afterNotes }),
+    },
+  });
+  assert.ok(updated);
+  assert.equal(disclosedNotes(updated, "before"), beforeNotes);
+  assert.equal(disclosedNotes(updated, "after"), afterNotes);
+  assert.equal(updated.confirmation.steps[0]?.contentPreviews.length, 10);
+});

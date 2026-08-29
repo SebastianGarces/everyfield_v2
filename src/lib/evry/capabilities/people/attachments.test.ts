@@ -3,10 +3,14 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
+  EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS,
   EVRY_PEOPLE_CSV_MAX_BYTES,
+  evryPeopleStagedAttachmentStorageKey,
   openEvryPeopleAttachmentReference,
   readExactEvryPeopleAttachment,
+  removeEvryPeopleAttachment,
   stageEvryPeopleAttachment,
+  sweepExpiredEvryPeopleAttachments,
 } from "./attachments";
 
 const ACTOR = {
@@ -89,7 +93,7 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
 
 test("CSV staging returns an immutable actor and plant scoped digest reference", async () => {
   const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
-  let stored: { key: string; bytes: Buffer; type: string } | null = null;
+  const storedEvents: { key: string; bytes: Buffer; type: string }[] = [];
   const result = await stageEvryPeopleAttachment({
     actor: ACTOR,
     kind: "people_csv",
@@ -104,10 +108,11 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
       duplicateRows: [],
     }),
     store: async (key, body, type) => {
-      stored = { key, bytes: body, type };
+      storedEvents.push({ key, bytes: body, type });
       return key;
     },
   });
+  const stored = storedEvents[0];
   assert.ok(result && stored);
   assert.equal(
     result.metadata.digest,
@@ -156,4 +161,88 @@ test("CSV staging returns an immutable actor and plant scoped digest reference",
           : null,
     })
   );
+  assert.match(
+    stored.key,
+    new RegExp(
+      `^evry-inputs/${ACTOR.plantId}/${ACTOR.userId}/${NOW.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS}-[0-9a-f]{64}\\.csv$`
+    )
+  );
+});
+
+test("exact staged removal remains actor-scoped after reference expiry", async () => {
+  const bytes = Buffer.from("First Name *,Last Name *\nAda,Lovelace");
+  const result = await stageEvryPeopleAttachment({
+    actor: ACTOR,
+    kind: "people_csv",
+    personId: null,
+    file: file("people.csv", "text/csv", bytes),
+    now: NOW,
+    secret: SECRET,
+    parseImport: async () => ({
+      totalRows: 1,
+      validRows: [],
+      invalidRows: [],
+      duplicateRows: [],
+    }),
+    store: async (key) => key,
+  });
+  assert.ok(result);
+  const removed: string[] = [];
+  assert.equal(
+    await removeEvryPeopleAttachment({
+      actor: OTHER_ACTOR,
+      reference: result.reference,
+      expectedKind: "people_csv",
+      secret: SECRET,
+      remove: async (key) => void removed.push(key),
+    }),
+    false
+  );
+  assert.equal(
+    await removeEvryPeopleAttachment({
+      actor: ACTOR,
+      reference: result.reference,
+      expectedKind: "people_csv",
+      secret: SECRET,
+      remove: async (key) => void removed.push(key),
+    }),
+    true
+  );
+  assert.equal(removed.length, 1);
+});
+
+test("expired unclaimed attachments sweep idempotently and retry failed deletes", async () => {
+  const digest = "a".repeat(64);
+  const expired = evryPeopleStagedAttachmentStorageKey({
+    actor: ACTOR,
+    expiresAt: new Date(NOW.getTime() - 1),
+    digest,
+    extension: "csv",
+  });
+  const future = evryPeopleStagedAttachmentStorageKey({
+    actor: ACTOR,
+    expiresAt: new Date(NOW.getTime() + 60_000),
+    digest: "b".repeat(64),
+    extension: "csv",
+  });
+  const keys = [expired, future, `${expired}.unexpected`];
+  let fail = true;
+  const removed: string[] = [];
+  const sweep = () =>
+    sweepExpiredEvryPeopleAttachments({
+      actor: ACTOR,
+      now: NOW,
+      list: async () => keys,
+      remove: async (key) => {
+        if (fail) {
+          fail = false;
+          throw new Error("temporary object-store failure");
+        }
+        removed.push(key);
+      },
+    });
+
+  assert.deepEqual(await sweep(), { removed: 0, failed: 1 });
+  assert.deepEqual(await sweep(), { removed: 1, failed: 0 });
+  assert.deepEqual(removed, [expired]);
 });

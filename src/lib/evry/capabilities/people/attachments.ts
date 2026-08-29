@@ -10,13 +10,15 @@ import {
   getFileBytes,
   isAllowedCommitmentFileType,
   isValidCommitmentFileSize,
+  deleteFile,
+  listFileKeys,
   uploadFile,
 } from "@/lib/storage";
 
 export const EVRY_PEOPLE_CSV_MAX_BYTES = 1024 * 1024;
 export const EVRY_PEOPLE_IMPORT_MAX_ROWS = 25;
 const CSV_TYPES = new Set(["text/csv", "application/vnd.ms-excel"]);
-const MAX_AGE_MS = 30 * 60_000;
+export const EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS = 30 * 60_000;
 
 const referenceDocumentSchema = z.strictObject({
   version: z.literal(1),
@@ -72,6 +74,18 @@ export function openEvryPeopleAttachmentReference(input: {
   now?: Date;
   secret?: string;
 }): EvryPeopleAttachmentReference | null {
+  const value = openScopedEvryPeopleAttachmentReference(input);
+  return value && new Date(value.expiresAt) > (input.now ?? new Date())
+    ? value
+    : null;
+}
+
+function openScopedEvryPeopleAttachmentReference(input: {
+  reference: string;
+  actor: Scope;
+  expectedKind: EvryPeopleAttachmentReference["kind"];
+  secret?: string;
+}): EvryPeopleAttachmentReference | null {
   const [payload, suppliedValue, extra] = input.reference.split(".");
   if (!payload || !suppliedValue || extra) return null;
   let supplied: Buffer;
@@ -100,11 +114,70 @@ export function openEvryPeopleAttachmentReference(input: {
     value.kind !== input.expectedKind ||
     value.actorUserId !== input.actor.userId ||
     value.plantId !== input.actor.plantId ||
-    !value.storageKey.startsWith(prefix) ||
-    new Date(value.expiresAt) <= (input.now ?? new Date())
+    !value.storageKey.startsWith(prefix)
   )
     return null;
   return value;
+}
+
+function stagedAttachmentPrefix(actor?: Scope): string {
+  return actor
+    ? `evry-inputs/${actor.plantId}/${actor.userId}/`
+    : "evry-inputs/";
+}
+
+export function evryPeopleStagedAttachmentStorageKey(input: {
+  actor: Scope;
+  expiresAt: Date;
+  digest: string;
+  extension: string;
+}): string {
+  return `${stagedAttachmentPrefix(input.actor)}${input.expiresAt.getTime()}-${input.digest}.${input.extension}`;
+}
+
+/** Idempotently remove one exact actor/plant-scoped staged attachment. */
+export async function removeEvryPeopleAttachment(input: {
+  reference: string;
+  actor: Scope;
+  expectedKind: EvryPeopleAttachmentReference["kind"];
+  secret?: string;
+  remove?: typeof deleteFile;
+}): Promise<boolean> {
+  const document = openScopedEvryPeopleAttachmentReference(input);
+  if (!document) return false;
+  await (input.remove ?? deleteFile)(document.storageKey);
+  return true;
+}
+
+/**
+ * Sweep expired, unclaimed staged inputs by the expiry embedded in their
+ * first-party key. Deletion is idempotent, so an interrupted sweep converges.
+ */
+export async function sweepExpiredEvryPeopleAttachments(
+  input: {
+    actor?: Scope;
+    now?: Date;
+    list?: typeof listFileKeys;
+    remove?: typeof deleteFile;
+  } = {}
+): Promise<Readonly<{ removed: number; failed: number }>> {
+  const prefix = stagedAttachmentPrefix(input.actor);
+  const keys = await (input.list ?? listFileKeys)(prefix);
+  const now = (input.now ?? new Date()).getTime();
+  let removed = 0;
+  let failed = 0;
+  for (const key of keys) {
+    const tail = key.slice(prefix.length);
+    const expiry = /^(\d{13})-[0-9a-f]{64}\.[a-z0-9]+$/i.exec(tail)?.[1];
+    if (!expiry || Number(expiry) > now) continue;
+    try {
+      await (input.remove ?? deleteFile)(key);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { removed, failed };
 }
 
 export async function stageEvryPeopleAttachment(input: {
@@ -117,8 +190,18 @@ export async function stageEvryPeopleAttachment(input: {
   loadPerson?: typeof getPerson;
   parseImport?: typeof parseCsvImport;
   store?: typeof uploadFile;
+  sweep?: typeof sweepExpiredEvryPeopleAttachments;
 }) {
   const now = input.now ?? new Date();
+  const sweep =
+    input.sweep ?? (input.store ? null : sweepExpiredEvryPeopleAttachments);
+  if (sweep) {
+    try {
+      await sweep({ actor: input.actor, now });
+    } catch (error) {
+      console.error("[evry:people] staged attachment sweep failed", error);
+    }
+  }
   if (!input.file.name || input.file.name.length > 255 || input.file.size <= 0)
     return null;
   if (input.kind === "person_photo" || input.kind === "commitment_document") {
@@ -167,7 +250,13 @@ export async function stageEvryPeopleAttachment(input: {
           : input.file.type === "image/webp"
             ? "webp"
             : "jpg";
-  const storageKey = `evry-inputs/${input.actor.plantId}/${input.actor.userId}/${digest}.${extension}`;
+  const expiresAt = new Date(now.getTime() + EVRY_PEOPLE_ATTACHMENT_MAX_AGE_MS);
+  const storageKey = evryPeopleStagedAttachmentStorageKey({
+    actor: input.actor,
+    expiresAt,
+    digest,
+    extension,
+  });
   await (input.store ?? uploadFile)(storageKey, bytes, input.file.type);
   const document = referenceDocumentSchema.parse({
     version: 1,
@@ -180,7 +269,7 @@ export async function stageEvryPeopleAttachment(input: {
     contentType: input.file.type,
     size: bytes.length,
     originalName: input.file.name,
-    expiresAt: new Date(now.getTime() + MAX_AGE_MS).toISOString(),
+    expiresAt: expiresAt.toISOString(),
   });
   return {
     reference: sealEvryPeopleAttachmentReference(document, input.secret),

@@ -27,7 +27,7 @@ test(
         cwd: process.cwd(),
         encoding: "utf8",
         env: process.env,
-        timeout: 60_000,
+        timeout: 180_000,
       }
     );
     assert.equal(

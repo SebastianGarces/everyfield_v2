@@ -1,8 +1,10 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import { commitments } from "@/db/schema";
 import type { EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import { deleteFile, listFileKeys } from "@/lib/storage";
 
 import { claimEvryPeopleEffect } from "./evry-effect";
 
@@ -16,6 +18,54 @@ type PersonBaseline = Readonly<{
   lastName: string;
   status: string;
 }>;
+
+/**
+ * Sweep unreferenced final commitment objects below one exact person prefix.
+ * Database references are authoritative; failures remain visible to reruns.
+ */
+export async function sweepEvryCommitmentDocumentObjects(input: {
+  plantId: string;
+  personId: string;
+  loadReferenced?: (scope: {
+    plantId: string;
+    personId: string;
+  }) => Promise<readonly string[]>;
+  list?: typeof listFileKeys;
+  remove?: typeof deleteFile;
+}): Promise<Readonly<{ removed: number; failed: number }>> {
+  const referenced = new Set(
+    input.loadReferenced
+      ? await input.loadReferenced({
+          plantId: input.plantId,
+          personId: input.personId,
+        })
+      : (
+          await db
+            .select({ key: commitments.documentUrl })
+            .from(commitments)
+            .where(
+              and(
+                eq(commitments.churchId, input.plantId),
+                eq(commitments.personId, input.personId)
+              )
+            )
+        ).flatMap(({ key }) => (key ? [key] : []))
+  );
+  const prefix = `commitments/${input.plantId}/${input.personId}/`;
+  const keys = await (input.list ?? listFileKeys)(prefix);
+  let removed = 0;
+  let failed = 0;
+  for (const key of keys) {
+    if (!key.startsWith(prefix) || referenced.has(key)) continue;
+    try {
+      await (input.remove ?? deleteFile)(key);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { removed, failed };
+}
 
 async function hasRow(query: ReturnType<typeof sql>): Promise<boolean> {
   return (await db.execute(query)).rows.length === 1;

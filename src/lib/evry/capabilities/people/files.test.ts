@@ -83,7 +83,7 @@ test("photo plan binds exact private reference metadata and rejects generic URLs
 
 test("import review discloses every exact row, exclusion, and file fingerprint", () => {
   const identity = PEOPLE_FILE_IDENTITIES.import;
-  const row = {
+  const createRow = {
     rowNumber: 2,
     rowKey: "b".repeat(64),
     personId: PERSON_ID,
@@ -103,34 +103,72 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
     targetPersonId: null,
     expectedTargetJson: null,
   };
+  const mergeTargetId = "10000000-0000-4000-8000-000000000002";
+  const mergeRow = {
+    ...createRow,
+    rowNumber: 3,
+    rowKey: "d".repeat(64),
+    personId: "10000000-0000-4000-8000-000000000003",
+    firstName: "Grace",
+    lastName: "Hopper",
+    email: "grace@example.com",
+    disposition: "merge" as const,
+    targetPersonId: mergeTargetId,
+    expectedTargetJson: JSON.stringify({
+      firstName: "Grace",
+      lastName: "Hopper",
+      email: null,
+      notes: "Existing",
+    }),
+  };
+  const snapshot = [
+    {
+      rowNumber: 2,
+      email: createRow.email,
+      phone: createRow.phone,
+      firstName: createRow.firstName,
+      lastName: createRow.lastName,
+      matchIds: [],
+      disposition: "create",
+      targetPersonId: null,
+    },
+    {
+      rowNumber: 3,
+      email: mergeRow.email,
+      phone: mergeRow.phone,
+      firstName: mergeRow.firstName,
+      lastName: mergeRow.lastName,
+      matchIds: [mergeTargetId],
+      disposition: "merge",
+      targetPersonId: mergeTargetId,
+    },
+    {
+      rowNumber: 4,
+      email: "skip@example.com",
+      phone: null,
+      firstName: "Skip",
+      lastName: "Row",
+      matchIds: ["10000000-0000-4000-8000-000000000004"],
+      disposition: "skip",
+      targetPersonId: null,
+    },
+  ];
+  const argumentsValue = {
+    attachmentReference: "first-party-signed-reference",
+    attachmentDigest: DIGEST,
+    originalName: "people.csv",
+    previewFingerprint: "c".repeat(64),
+    duplicateSnapshotJson: JSON.stringify(snapshot),
+    rowsJson: JSON.stringify([createRow, mergeRow]),
+    totalRows: 4,
+  };
   const document = parseEvryActionPlanCandidate({
     candidate: {
       steps: [
         {
           id: "bulk-import",
           capabilityIdentity: identity,
-          arguments: {
-            attachmentReference: "first-party-signed-reference",
-            attachmentDigest: DIGEST,
-            originalName: "people.csv",
-            previewFingerprint: "c".repeat(64),
-            duplicateSnapshotJson: JSON.stringify([
-              {
-                rowNumber: 2,
-                email: row.email,
-                phone: row.phone,
-                firstName: row.firstName,
-                lastName: row.lastName,
-                matchIds: [],
-              },
-            ]),
-            rowsJson: JSON.stringify([row]),
-            totalRows: 3,
-            createCount: 1,
-            mergeCount: 0,
-            skipCount: 1,
-            invalidCount: 1,
-          },
+          arguments: argumentsValue,
           dependsOn: [],
         },
       ],
@@ -149,9 +187,9 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
   assert.ok(review);
   assert.equal(review.confirmation.steps[0]?.effectKind, "file_import");
   assert.deepEqual(review.confirmation.steps[0]?.counts, [
-    { label: "CSV rows", count: 3 },
+    { label: "CSV rows", count: 4 },
     { label: "People to create", count: 1 },
-    { label: "People to merge", count: 0 },
+    { label: "People to merge", count: 1 },
     { label: "Rows to skip", count: 1 },
     { label: "Invalid rows", count: 1 },
   ]);
@@ -159,5 +197,123 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
     { reason: "Duplicate rows explicitly marked skip", count: 1 },
     { reason: "Invalid CSV rows", count: 1 },
   ]);
-  assert.equal(review.confirmation.steps[0]?.beforeAfter.length, 1);
+  assert.deepEqual(
+    review.confirmation.steps[0]?.resolvedTargets.map(({ label }) => label),
+    ["New person", "Merge target"]
+  );
+  assert.deepEqual(
+    review.confirmation.steps[0]?.beforeAfter.map(({ before, after }) => ({
+      before,
+      after,
+    })),
+    [
+      {
+        before: "No person",
+        after: "Person created from the exact reviewed row",
+      },
+      {
+        before: "Exact existing merge target shown below",
+        after: "Existing person receives only the exact reviewed merge fields",
+      },
+    ]
+  );
+  const exactRowDocuments =
+    review.confirmation.steps[0]!.contentPreviews.filter(({ label }) =>
+      /^Row \d+ (create|merge) · page /.test(label)
+    ).reduce<Record<string, string>>((documents, page) => {
+      const rowNumber = page.label.split(" ")[1]!;
+      documents[rowNumber] = (documents[rowNumber] ?? "") + page.content;
+      return documents;
+    }, {});
+  assert.equal(JSON.parse(exactRowDocuments["2"]!).disposition, "create");
+  assert.equal(JSON.parse(exactRowDocuments["3"]!).disposition, "merge");
+
+  assert.throws(() =>
+    parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: "bulk-import",
+            capabilityIdentity: identity,
+            arguments: { ...argumentsValue, createCount: 2 },
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: PEOPLE_FILE_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity }],
+    })
+  );
+});
+
+test("import plan validation refuses two merge rows targeting one person", () => {
+  const identity = PEOPLE_FILE_IDENTITIES.import;
+  const targetPersonId = "10000000-0000-4000-8000-000000000002";
+  const baseRow = {
+    rowNumber: 2,
+    rowKey: "1".repeat(64),
+    personId: "10000000-0000-4000-8000-000000000003",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    email: "ada@example.com",
+    phone: null,
+    source: null,
+    addressLine1: null,
+    addressLine2: null,
+    city: null,
+    state: null,
+    postalCode: null,
+    country: "US",
+    notes: null,
+    disposition: "merge",
+    targetPersonId,
+    expectedTargetJson: JSON.stringify({
+      firstName: "Target",
+      lastName: "Person",
+    }),
+  };
+  const rows = [
+    baseRow,
+    {
+      ...baseRow,
+      rowNumber: 3,
+      rowKey: "2".repeat(64),
+      personId: "10000000-0000-4000-8000-000000000004",
+      email: "ada+second@example.com",
+    },
+  ];
+  const snapshot = rows.map((row) => ({
+    rowNumber: row.rowNumber,
+    email: row.email,
+    phone: null,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    matchIds: [targetPersonId],
+    disposition: "merge",
+    targetPersonId,
+  }));
+  assert.throws(() =>
+    parseEvryActionPlanCandidate({
+      candidate: {
+        steps: [
+          {
+            id: "bulk-import",
+            capabilityIdentity: identity,
+            arguments: {
+              attachmentReference: "first-party-signed-reference",
+              attachmentDigest: DIGEST,
+              originalName: "people.csv",
+              previewFingerprint: "c".repeat(64),
+              duplicateSnapshotJson: JSON.stringify(snapshot),
+              rowsJson: JSON.stringify(rows),
+              totalRows: 2,
+            },
+            dependsOn: [],
+          },
+        ],
+      },
+      registry: PEOPLE_FILE_PLAN_REGISTRY,
+      eligibleCapabilities: [{ identity }],
+    })
+  );
 });
