@@ -265,6 +265,16 @@ export async function startEvryRunRecoveryPreviewFixture(input: {
       startedAt,
     });
     run = claim.run;
+    const execution = await boundaries.startExecution({
+      planId: plan.id,
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      fingerprint: plan.fingerprint,
+      startedAt,
+    });
+    if (!execution) {
+      throw new Error("Preview recovery execution attempt did not persist");
+    }
   }
   const proof = await previewProof({
     actor: input.actor,

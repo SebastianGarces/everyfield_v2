@@ -46,7 +46,7 @@ function response(completed: boolean): Response {
       runId: RUN_ID,
       conversationId: CONVERSATION_ID,
       planId: PLAN_ID,
-      attemptId: completed ? ATTEMPT_ID : null,
+      attemptId: ATTEMPT_ID,
       starts: 1,
       effectCount: completed ? 1 : 0,
       stage: completed ? "complete" : "executing",
@@ -145,6 +145,10 @@ test("the fixture writes the production marker, performs a full reload, and then
       .children[0],
     "1"
   );
+  const attemptBeforeReload = renderer.root.findByProps({
+    "data-testid": "reconnect-attempt-id",
+  }).children[0];
+  assert.equal(attemptBeforeReload, ATTEMPT_ID);
 
   await act(async () =>
     button(renderer, "Reload page during run").props.onClick()
@@ -176,7 +180,7 @@ test("the fixture writes the production marker, performs a full reload, and then
   assert.equal(
     renderer.root.findByProps({ "data-testid": "reconnect-attempt-id" })
       .children[0],
-    ATTEMPT_ID
+    attemptBeforeReload
   );
   assert.equal(
     renderer.root.findByProps({ "data-testid": "reconnect-effect-count" })
