@@ -58,7 +58,11 @@ test("every Task effect has its trusted review in the production registry", () =
 });
 
 test("Task and Communication selection remain disjoint in production", () => {
-  for (const text of Object.values(TASK_EFFECT_SELECTION_FIXTURES)) {
+  for (const text of [
+    ...Object.values(TASK_EFFECT_SELECTION_FIXTURES),
+    "Show the pending phase checklist prompt",
+    "Load more tasks after 10000000-0000-4000-8000-000000000001",
+  ]) {
     const input = { literalUserText: text } as never;
     assert.equal(continueTaskEvryConversation.matches(input), true, text);
     assert.equal(

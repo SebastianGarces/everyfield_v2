@@ -62,6 +62,10 @@ const READ_METADATA = {
     label: "List tasks",
     argumentKeys: ["filters", "cursor"],
   },
+  "tasks.read.phase-template-prompt": {
+    label: "Review phase checklist prompt",
+    argumentKeys: [],
+  },
   "tasks.read.planning-options": {
     label: "Review task planning options",
     argumentKeys: ["taskId"],

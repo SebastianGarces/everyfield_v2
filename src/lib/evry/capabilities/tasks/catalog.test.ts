@@ -17,14 +17,14 @@ test("generated Task inventory is current and has zero unclassified surfaces", a
   assert.deepEqual(inventory.summary, {
     actions: 18,
     routes: 4,
-    rscReads: 22,
-    exclusions: 7,
-    readCapabilities: 4,
+    rscReads: 25,
+    exclusions: 9,
+    readCapabilities: 5,
     effectCapabilities: 17,
     unclassified: 0,
   });
-  assert.equal(TASK_AUTHORITATIVE_SURFACES.length, 37);
-  assert.equal(TASK_CAPABILITIES.length, 21);
+  assert.equal(TASK_AUTHORITATIVE_SURFACES.length, 38);
+  assert.equal(TASK_CAPABILITIES.length, 22);
   assert.equal(Object.keys(TASK_ACTION_CONTRACTS).length, 18);
 });
 
@@ -35,7 +35,7 @@ test("Task reads never request confirmation and every effect names its material 
   const effects = TASK_CAPABILITIES.filter(
     ({ operationKind }) => operationKind === "effect"
   );
-  assert.equal(reads.length, 4);
+  assert.equal(reads.length, 5);
   assert.equal(effects.length, 17);
   assert.ok(reads.every(({ actionLabel }) => actionLabel === null));
   assert.ok(effects.every(({ actionLabel }) => Boolean(actionLabel)));
@@ -53,6 +53,7 @@ test("write-only Task planning reads keep the product permission without becomin
   assert.deepEqual(permission, {
     "tasks.read.detail": "read",
     "tasks.read.list": "read",
+    "tasks.read.phase-template-prompt": "phase.signal",
     "tasks.read.planning-options": "tasks.write",
     "tasks.read.templates": "tasks.write",
   });
