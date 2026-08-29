@@ -27,10 +27,12 @@ import {
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
+import { claimEvryCreatePerson } from "./evry-core";
 import { claimEvryAssignTag } from "./evry-taxonomies";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
 const TAG_IDENTITY = "people.crm.tags.assign-tag";
+const CREATE_PERSON_IDENTITY = "people.crm.people.create-person";
 const FINGERPRINT = "a".repeat(64);
 
 async function seedAttempt(input: {
@@ -231,6 +233,43 @@ async function main(): Promise<void> {
     { status: "refused", excludedCount: 1 }
   );
 
+  const createAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: CREATE_PERSON_IDENTITY,
+    stepId: "create-person",
+  });
+  const createInput = {
+    ...createAttempt,
+    person: {
+      firstName: "Grace",
+      lastName: "Hopper",
+      email: "grace@scratch.invalid",
+      phone: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      country: "US",
+      status: "prospect",
+      backgroundCheckStatus: "not_started",
+      source: null,
+      sourceDetails: null,
+      notes: null,
+      householdId: null,
+      householdRole: null,
+    },
+    activitySource: "form" as const,
+    expectedHouseholdName: null,
+  };
+  await claimEvryCreatePerson(createInput); // committed; pretend its response vanished
+  assert.deepEqual(await claimEvryCreatePerson(createInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+
   const [tag] = await db
     .insert(tags)
     .values({ churchId: plant.id, name: "Follow-up", color: "blue" })
@@ -262,37 +301,49 @@ async function main(): Promise<void> {
     excludedCount: 0,
   });
 
-  const [activityCount, outcomeCount, membershipCount] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(personActivities)
-      .where(
-        and(
-          eq(personActivities.churchId, plant.id),
-          eq(personActivities.personId, person.id)
+  const [activityCount, outcomeCount, membershipCount, createdPersonCount] =
+    await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(personActivities)
+        .where(
+          and(
+            eq(personActivities.churchId, plant.id),
+            eq(personActivities.personId, person.id)
+          )
         )
-      )
-      .then(([row]) => row?.count ?? 0),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(evryExecutionOutcomes)
-      .where(eq(evryExecutionOutcomes.churchId, plant.id))
-      .then(([row]) => row?.count ?? 0),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(personTags)
-      .where(
-        and(
-          eq(personTags.churchId, plant.id),
-          eq(personTags.personId, person.id),
-          eq(personTags.tagId, tag.id)
+        .then(([row]) => row?.count ?? 0),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.churchId, plant.id))
+        .then(([row]) => row?.count ?? 0),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(personTags)
+        .where(
+          and(
+            eq(personTags.churchId, plant.id),
+            eq(personTags.personId, person.id),
+            eq(personTags.tagId, tag.id)
+          )
         )
-      )
-      .then(([row]) => row?.count ?? 0),
-  ]);
+        .then(([row]) => row?.count ?? 0),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(persons)
+        .where(
+          and(
+            eq(persons.churchId, plant.id),
+            eq(persons.email, "grace@scratch.invalid")
+          )
+        )
+        .then(([row]) => row?.count ?? 0),
+    ]);
   assert.equal(activityCount, 3);
-  assert.equal(outcomeCount, 3);
+  assert.equal(outcomeCount, 4);
   assert.equal(membershipCount, 1);
+  assert.equal(createdPersonCount, 1);
 
   process.stdout.write("People effect live proof passed\n");
 }
