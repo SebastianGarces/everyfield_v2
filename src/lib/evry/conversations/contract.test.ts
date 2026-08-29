@@ -14,12 +14,83 @@ import {
   storedEvryReadArtifactDocument,
 } from "./artifacts";
 import {
+  evryConversationReplayMetadataSchema,
   evryConversationStateDocumentSchema,
   initialEvryConversationState,
   parseStoredEvryConversationState,
 } from "./contract";
 
 const MESSAGE_ID = "10000000-0000-4000-8000-000000000001";
+
+test("replay reference snapshots pair exactly with idempotency metadata", () => {
+  const reference = {
+    key: "person.alex",
+    entityType: "person",
+    entityId: "person-1",
+    label: "Alex Rivera",
+    distinguishingFacts: [],
+    sourceLink: { label: "Alex Rivera", href: "/people/person-1" },
+    aliases: ["alex"],
+    sourceMessageId: MESSAGE_ID,
+    resolvedAt: "2026-08-20T12:00:00.000Z",
+    validThrough: null,
+  };
+  const resolvedContext = {
+    status: "resolved" as const,
+    referenceKey: "person.alex",
+    entityType: "person",
+    entityId: "person-1",
+  };
+  const resolvedReplay = {
+    status: "resolved" as const,
+    reference,
+    relevanceKeys: ["person.alex"],
+  };
+  for (const valid of [
+    { idempotencyContext: { status: "none" }, replayReference: null },
+    {
+      idempotencyContext: { status: "clarification", reason: "missing" },
+      replayReference: null,
+    },
+    {
+      idempotencyContext: { status: "not_applicable" },
+      replayReference: { status: "not_applicable" },
+    },
+    { idempotencyContext: resolvedContext, replayReference: resolvedReplay },
+  ]) {
+    assert.equal(
+      evryConversationReplayMetadataSchema.safeParse(valid).success,
+      true
+    );
+  }
+  for (const hostile of [
+    {
+      idempotencyContext: { status: "not_applicable" },
+      replayReference: null,
+    },
+    {
+      idempotencyContext: { status: "none" },
+      replayReference: { status: "not_applicable" },
+    },
+    {
+      idempotencyContext: { status: "clarification", reason: "stale" },
+      replayReference: { status: "not_applicable" },
+    },
+    { idempotencyContext: resolvedContext, replayReference: null },
+    {
+      idempotencyContext: resolvedContext,
+      replayReference: {
+        ...resolvedReplay,
+        reference: { ...reference, entityId: "person-2" },
+      },
+    },
+  ]) {
+    assert.equal(
+      evryConversationReplayMetadataSchema.safeParse(hostile).success,
+      false
+    );
+  }
+});
 
 test("conversation state is closed and choices name exact persisted references", () => {
   const initial = initialEvryConversationState();

@@ -25,6 +25,7 @@ import {
 import {
   evryConversationIdSchema,
   evryConversationMessageIdSchema,
+  evryConversationReplayReferenceSchema,
   evryConversationRequestKeySchema,
   type EvryConversationId,
   type EvryConversationMessageId,
@@ -286,10 +287,13 @@ function durableCapabilityReplayReference(input: {
     (message) =>
       message.requestKey === input.requestKey && message.author === "user"
   );
-  if (!userMessage?.replayReference) {
+  const replayReference = evryConversationReplayReferenceSchema.safeParse(
+    userMessage?.replayReference
+  );
+  if (!replayReference.success) {
     throw new EvryConversationIdempotencyError();
   }
-  return userMessage.replayReference;
+  return replayReference.data;
 }
 
 /** Persist one user turn and any deterministic clarification; no model runs. */
@@ -338,6 +342,10 @@ export async function continueEvryConversation(input: {
       message: input.message,
       pageContext: input.pageContext,
     });
+    const replayReference = durableCapabilityReplayReference({
+      conversation: current,
+      requestKey: requestKey.data,
+    });
     const resumed = await resumeEvryConversation({
       actor: input.actor,
       conversationId: current.id,
@@ -349,10 +357,7 @@ export async function continueEvryConversation(input: {
       ? {
           status: "continued",
           resumed,
-          reference: durableCapabilityReplayReference({
-            conversation: current,
-            requestKey: requestKey.data,
-          }),
+          reference: replayReference,
         }
       : null;
   }

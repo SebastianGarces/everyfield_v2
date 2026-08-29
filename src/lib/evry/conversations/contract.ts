@@ -220,6 +220,34 @@ export type EvryConversationReplayReference = z.infer<
   typeof evryConversationReplayReferenceSchema
 >;
 
+export const evryConversationReplayMetadataSchema = z
+  .strictObject({
+    idempotencyContext: evryConversationMessageIdempotencyContextSchema,
+    replayReference: evryConversationReplayReferenceSchema.nullable(),
+  })
+  .superRefine((metadata, context) => {
+    const idempotency = metadata.idempotencyContext;
+    const replay = metadata.replayReference;
+    const exact =
+      (idempotency.status === "resolved" &&
+        replay?.status === "resolved" &&
+        replay.reference.key === idempotency.referenceKey &&
+        replay.reference.entityType === idempotency.entityType &&
+        replay.reference.entityId === idempotency.entityId) ||
+      (idempotency.status === "not_applicable" &&
+        replay?.status === "not_applicable") ||
+      ((idempotency.status === "none" ||
+        idempotency.status === "clarification") &&
+        replay === null);
+    if (!exact) {
+      context.addIssue({
+        code: "custom",
+        path: ["replayReference"],
+        message: "Replay metadata must exactly match idempotency metadata",
+      });
+    }
+  });
+
 const evryOfferedReferenceSchema = z
   .object({
     referenceKey: evryConversationReferenceKeySchema,

@@ -33,9 +33,9 @@ import {
   EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS,
   EvryConversationStorageError,
   evryConversationIdSchema,
-  evryConversationMessageIdempotencyContextSchema,
   evryConversationMessageIdSchema,
   evryConversationPlanIdentitySchema,
+  evryConversationReplayMetadataSchema,
   evryConversationReplayReferenceSchema,
   evryConversationRelevanceKeysSchema,
   evryConversationRequestKeySchema,
@@ -518,7 +518,7 @@ export async function createEvryConversationRecord(input: {
     fingerprintEvryConversationMessageRequest(fingerprintInput);
   const messageContext = storedMessageContext({
     pageContext,
-    replayReference: { status: "not_applicable" },
+    replayReference: null,
   });
   const conversationId = evryConversationIdSchema.parse(randomUUID());
   const messageId = evryConversationMessageIdSchema.parse(randomUUID());
@@ -696,29 +696,11 @@ export async function appendEvryConversationRecord(input: {
     input.relevanceKeys
   );
   const deliveryStatus = deliverySchema.parse(input.deliveryStatus);
-  const idempotencyContext =
-    evryConversationMessageIdempotencyContextSchema.parse(
-      input.idempotencyContext
-    );
-  const replayReference = evryConversationReplayReferenceSchema
-    .nullable()
-    .parse(input.replayReference ?? null);
-  if (
-    (idempotencyContext.status === "resolved" &&
-      (replayReference?.status !== "resolved" ||
-        replayReference.reference.key !== idempotencyContext.referenceKey ||
-        replayReference.reference.entityType !==
-          idempotencyContext.entityType ||
-        replayReference.reference.entityId !== idempotencyContext.entityId ||
-        replayReference.relevanceKeys.length !== 1 ||
-        String(replayReference.relevanceKeys[0]) !==
-          String(idempotencyContext.referenceKey))) ||
-    (idempotencyContext.status !== "resolved" &&
-      replayReference?.status === "resolved") ||
-    (idempotencyContext.status === "clarification" && replayReference !== null)
-  ) {
-    throw new EvryConversationStorageError();
-  }
+  const { idempotencyContext, replayReference } =
+    evryConversationReplayMetadataSchema.parse({
+      idempotencyContext: input.idempotencyContext,
+      replayReference: input.replayReference,
+    });
   const messageContext = storedMessageContext({
     pageContext,
     replayReference,

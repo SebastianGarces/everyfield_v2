@@ -58,6 +58,7 @@ function memoryStore(loss: {
 }): EvryConversationStore & {
   current(): EvryStoredConversation | null;
   changeState(): void;
+  corruptReplayReference(value: unknown): void;
 } {
   let current: EvryStoredConversation | null = null;
   let generated = 0;
@@ -82,7 +83,7 @@ function memoryStore(loss: {
             author: "user",
             body: input.body,
             createdAt: input.createdAt,
-            replayReference: { status: "not_applicable" },
+            replayReference: null,
           }),
         ],
       };
@@ -143,6 +144,21 @@ function memoryStore(loss: {
             resolvedReference(`later-${index}`, index)
           ),
         },
+      };
+    },
+    corruptReplayReference(value: unknown) {
+      if (!current) throw new Error("missing conversation");
+      current = {
+        ...current,
+        activePlan: {
+          planId: "80000000-0000-4000-8000-000000000001",
+          fingerprint: "a".repeat(64),
+        } as never,
+        messages: current.messages.map((stored) =>
+          stored.requestKey === CONTINUE_REQUEST && stored.author === "user"
+            ? ({ ...stored, replayReference: value } as never)
+            : stored
+        ),
       };
     },
   };
@@ -305,5 +321,74 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     assert.equal(replay.reference.reference.key, "original-person");
     assert.equal(replay.reference.reference.entityType, "person");
     assert.equal(replay.reference.reference.entityId, "person-99");
+  }
+});
+
+test("missing or malformed replay metadata fails before any replay work", async () => {
+  for (const corrupted of [
+    null,
+    { status: "resolved", reference: { entityId: "incomplete" } },
+  ]) {
+    const loss = { throwAfterFirstResultCommit: true };
+    const store = memoryStore(loss);
+    await store.create({
+      actorUserId: ACTOR.userId,
+      plantId: ACTOR.plantId,
+      requestKey: CREATE_REQUEST,
+      body: "Start",
+      pageContext: null,
+      requestPageContext: null,
+      createdAt: NOW,
+    });
+    const calls = {
+      matches: 0,
+      reads: 0,
+      references: 0,
+      revalidations: 0,
+      source: "Original People result",
+    };
+    const input = {
+      actor: ACTOR,
+      conversationId: CONVERSATION_ID,
+      requestKey: CONTINUE_REQUEST,
+      message: "List people",
+      pageContext: null,
+      requestPageContext: null,
+      now: NOW,
+      store,
+      continueCapabilityConversation: lostResponseContinuation(calls),
+      resolveReference() {
+        calls.references += 1;
+        return {
+          status: "resolved" as const,
+          reference: resolvedReference("original-person", 99),
+          relevanceKeys: ["original-person" as EvryConversationRelevanceKey],
+        };
+      },
+      async revalidatePlan() {
+        calls.revalidations += 1;
+        throw new Error("revalidation must not run");
+      },
+    };
+
+    await assert.rejects(
+      continueEvryConversation(input),
+      /response lost after durable continuation commit/
+    );
+    store.corruptReplayReference(corrupted);
+    await assert.rejects(
+      continueEvryConversation(input),
+      /request key was already used/
+    );
+    assert.deepEqual(
+      {
+        matches: calls.matches,
+        reads: calls.reads,
+        references: calls.references,
+        revalidations: calls.revalidations,
+        messages: store.current()?.messages.length,
+      },
+      { matches: 1, reads: 1, references: 1, revalidations: 0, messages: 3 }
+    );
   }
 });
