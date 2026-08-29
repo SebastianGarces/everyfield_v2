@@ -1,0 +1,923 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "pnpm evry:communication-inventory",
+  "authoritativeSources": {
+    "actions": "src/lib/auth/capability-map.ts",
+    "routes": "src/app/(dashboard)/communication/**/page.tsx",
+    "rscReads": "async @/lib/communication/* imports in dashboard server components",
+    "external": "Communication provider and RSVP route handlers"
+  },
+  "capabilities": [
+    {
+      "identity": "communication.compose.get-context",
+      "surfaceIdentities": ["route:/communication/compose"],
+      "parityCapability": "communication",
+      "domain": "compose",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.delivery.get-church-totals",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#getChurchDeliveryTotals"
+      ],
+      "parityCapability": "communication",
+      "domain": "delivery",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.delivery.get-meeting-tracking",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → @/lib/communication/service#getMeetingTrackingByPerson"
+      ],
+      "parityCapability": "communication",
+      "domain": "delivery",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.delivery.get-message",
+      "surfaceIdentities": [
+        "route:/communication/[id]",
+        "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/service#getCommunication"
+      ],
+      "parityCapability": "communication",
+      "domain": "delivery",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.delivery.get-message-recipients",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/service#getCommunicationRecipients"
+      ],
+      "parityCapability": "communication",
+      "domain": "delivery",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.history.get-meeting",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/meetings/[id]/page.tsx → @/lib/communication/service#getMeetingCommunications"
+      ],
+      "parityCapability": "communication",
+      "domain": "history",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.history.get-person",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/people/[id]/communication/page.tsx → @/lib/communication/service#getPersonCommunications"
+      ],
+      "parityCapability": "communication",
+      "domain": "history",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.history.list",
+      "surfaceIdentities": [
+        "route:/communication",
+        "route:/communication/history",
+        "rsc-read:src/app/(dashboard)/communication/history/page.tsx → @/lib/communication/service#getCommunications",
+        "rsc-read:src/app/(dashboard)/communication/history/page.tsx → @/lib/communication/service#resolveSubjects",
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#countCommunications",
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#countSentSince",
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#getCommunications",
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#resolveSubjects"
+      ],
+      "parityCapability": "communication",
+      "domain": "history",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.messages.send",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "messages",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "external_send",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.recipients.list-teams",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/recipient-groups#listRecipientTeams"
+      ],
+      "parityCapability": "communication",
+      "domain": "recipients",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.recipients.resolve-group",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → resolveGroupAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "recipients",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.recipients.search-people",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → searchPeopleAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "recipients",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.resends.get-eligible-non-openers",
+      "surfaceIdentities": [
+        "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/send#getNonOpenerSummary"
+      ],
+      "parityCapability": "communication",
+      "domain": "resends",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.resends.send-to-non-openers",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → resendToNonOpenersAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "resends",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "external_resend",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.create",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → createTemplateAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "single_create",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.delete",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → deleteTemplateAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "single_delete",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.fork",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → forkTemplateAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "compound_write",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.get",
+      "surfaceIdentities": [
+        "route:/communication/templates/[id]/edit",
+        "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/templates#getTemplate",
+        "rsc-read:src/app/(dashboard)/communication/templates/[id]/edit/page.tsx → @/lib/communication/templates#getTemplate"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.list",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → getTemplatesAction",
+        "route:/communication/templates",
+        "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/templates#getTemplates",
+        "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/templates#getTemplates",
+        "rsc-read:src/app/(dashboard)/communication/templates/page.tsx → @/lib/communication/templates#getTemplates"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
+      "identity": "communication.templates.update",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/communication/actions.ts → updateTemplateAction"
+      ],
+      "parityCapability": "communication",
+      "domain": "templates",
+      "operationKind": "effect",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "mutationShape": "single_update",
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → createTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "createTemplateAction",
+      "capabilityIdentity": "communication.templates.create",
+      "domain": "templates",
+      "operationKind": "effect",
+      "mutationShape": "single_create",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → deleteTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "deleteTemplateAction",
+      "capabilityIdentity": "communication.templates.delete",
+      "domain": "templates",
+      "operationKind": "effect",
+      "mutationShape": "single_delete",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → forkTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "forkTemplateAction",
+      "capabilityIdentity": "communication.templates.fork",
+      "domain": "templates",
+      "operationKind": "effect",
+      "mutationShape": "compound_write",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → getTemplatesAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "getTemplatesAction",
+      "capabilityIdentity": "communication.templates.list",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → resendToNonOpenersAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "resendToNonOpenersAction",
+      "capabilityIdentity": "communication.resends.send-to-non-openers",
+      "domain": "resends",
+      "operationKind": "effect",
+      "mutationShape": "external_resend",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → resolveGroupAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "resolveGroupAction",
+      "capabilityIdentity": "communication.recipients.resolve-group",
+      "domain": "recipients",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → searchPeopleAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "searchPeopleAction",
+      "capabilityIdentity": "communication.recipients.search-people",
+      "domain": "recipients",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "sendMessageAction",
+      "capabilityIdentity": "communication.messages.send",
+      "domain": "messages",
+      "operationKind": "effect",
+      "mutationShape": "external_send",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "action",
+      "identity": "action:src/app/(dashboard)/communication/actions.ts → updateTemplateAction",
+      "source": "src/app/(dashboard)/communication/actions.ts",
+      "exportName": "updateTemplateAction",
+      "capabilityIdentity": "communication.templates.update",
+      "domain": "templates",
+      "operationKind": "effect",
+      "mutationShape": "single_update",
+      "applicationCapability": "communication.send",
+      "confirmation": "required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "external",
+      "identity": "handler:GET|POST:/api/rsvp/[token]",
+      "source": "src/app/api/rsvp/[token]/route.ts",
+      "exportName": null,
+      "capabilityIdentity": "communication.rsvp.respond-by-token",
+      "domain": "rsvp",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "external",
+      "identity": "handler:POST:/api/webhooks/resend",
+      "source": "src/app/api/webhooks/resend/route.ts",
+      "exportName": "POST",
+      "capabilityIdentity": "communication.delivery.ingest-provider-event",
+      "domain": "delivery",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": {
+        "state": "excluded",
+        "reason": "public_or_sessionless"
+      }
+    },
+    {
+      "kind": "product_gap",
+      "identity": "product-gap:communication.drafts.persist",
+      "source": "src/db/schema/communication.ts",
+      "exportName": null,
+      "capabilityIdentity": "communication.drafts.persist",
+      "domain": "drafts",
+      "operationKind": "excluded",
+      "applicationCapability": null,
+      "confirmation": "excluded",
+      "mutationShape": null,
+      "classification": { "state": "excluded", "reason": "owning_product_gap" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/[id]",
+      "source": "src/app/(dashboard)/communication/[id]/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.delivery.get-message",
+      "domain": "delivery",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/compose",
+      "source": "src/app/(dashboard)/communication/compose/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.compose.get-context",
+      "domain": "compose",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/history",
+      "source": "src/app/(dashboard)/communication/history/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/templates",
+      "source": "src/app/(dashboard)/communication/templates/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.templates.list",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "route",
+      "identity": "route:/communication/templates/[id]/edit",
+      "source": "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
+      "exportName": null,
+      "capabilityIdentity": "communication.templates.get",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/send#getNonOpenerSummary",
+      "source": "src/app/(dashboard)/communication/[id]/page.tsx",
+      "exportName": "getNonOpenerSummary",
+      "capabilityIdentity": "communication.resends.get-eligible-non-openers",
+      "domain": "resends",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/service#getCommunication",
+      "source": "src/app/(dashboard)/communication/[id]/page.tsx",
+      "exportName": "getCommunication",
+      "capabilityIdentity": "communication.delivery.get-message",
+      "domain": "delivery",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/[id]/page.tsx → @/lib/communication/service#getCommunicationRecipients",
+      "source": "src/app/(dashboard)/communication/[id]/page.tsx",
+      "exportName": "getCommunicationRecipients",
+      "capabilityIdentity": "communication.delivery.get-message-recipients",
+      "domain": "delivery",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/recipient-groups#listRecipientTeams",
+      "source": "src/app/(dashboard)/communication/compose/page.tsx",
+      "exportName": "listRecipientTeams",
+      "capabilityIdentity": "communication.recipients.list-teams",
+      "domain": "recipients",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/templates#getTemplate",
+      "source": "src/app/(dashboard)/communication/compose/page.tsx",
+      "exportName": "getTemplate",
+      "capabilityIdentity": "communication.templates.get",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/compose/page.tsx → @/lib/communication/templates#getTemplates",
+      "source": "src/app/(dashboard)/communication/compose/page.tsx",
+      "exportName": "getTemplates",
+      "capabilityIdentity": "communication.templates.list",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/history/page.tsx → @/lib/communication/service#getCommunications",
+      "source": "src/app/(dashboard)/communication/history/page.tsx",
+      "exportName": "getCommunications",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/history/page.tsx → @/lib/communication/service#resolveSubjects",
+      "source": "src/app/(dashboard)/communication/history/page.tsx",
+      "exportName": "resolveSubjects",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#countCommunications",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "countCommunications",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#countSentSince",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "countSentSince",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#getChurchDeliveryTotals",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "getChurchDeliveryTotals",
+      "capabilityIdentity": "communication.delivery.get-church-totals",
+      "domain": "delivery",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#getCommunications",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "getCommunications",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/service#resolveSubjects",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "resolveSubjects",
+      "capabilityIdentity": "communication.history.list",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/page.tsx → @/lib/communication/templates#getTemplates",
+      "source": "src/app/(dashboard)/communication/page.tsx",
+      "exportName": "getTemplates",
+      "capabilityIdentity": "communication.templates.list",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/templates/[id]/edit/page.tsx → @/lib/communication/templates#getTemplate",
+      "source": "src/app/(dashboard)/communication/templates/[id]/edit/page.tsx",
+      "exportName": "getTemplate",
+      "capabilityIdentity": "communication.templates.get",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/communication/templates/page.tsx → @/lib/communication/templates#getTemplates",
+      "source": "src/app/(dashboard)/communication/templates/page.tsx",
+      "exportName": "getTemplates",
+      "capabilityIdentity": "communication.templates.list",
+      "domain": "templates",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/meetings/[id]/invitations/page.tsx → @/lib/communication/service#getMeetingTrackingByPerson",
+      "source": "src/app/(dashboard)/meetings/[id]/invitations/page.tsx",
+      "exportName": "getMeetingTrackingByPerson",
+      "capabilityIdentity": "communication.delivery.get-meeting-tracking",
+      "domain": "delivery",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/meetings/[id]/page.tsx → @/lib/communication/service#getMeetingCommunications",
+      "source": "src/app/(dashboard)/meetings/[id]/page.tsx",
+      "exportName": "getMeetingCommunications",
+      "capabilityIdentity": "communication.history.get-meeting",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    },
+    {
+      "kind": "rsc_read",
+      "identity": "rsc-read:src/app/(dashboard)/people/[id]/communication/page.tsx → @/lib/communication/service#getPersonCommunications",
+      "source": "src/app/(dashboard)/people/[id]/communication/page.tsx",
+      "exportName": "getPersonCommunications",
+      "capabilityIdentity": "communication.history.get-person",
+      "domain": "history",
+      "operationKind": "read",
+      "mutationShape": null,
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "classification": { "state": "supported" }
+    }
+  ],
+  "summary": {
+    "actions": 9,
+    "routes": 6,
+    "rscReads": 19,
+    "externalExclusions": 2,
+    "productGaps": 1,
+    "readCapabilities": 14,
+    "effectCapabilities": 6,
+    "unclassified": 0
+  }
+}
