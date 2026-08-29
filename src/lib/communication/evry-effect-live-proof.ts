@@ -53,7 +53,21 @@ const UPDATE_TEMPLATE = "communication.templates.update";
 const DELETE_TEMPLATE = "communication.templates.delete";
 const FORK_TEMPLATE = "communication.templates.fork";
 const SEND_MESSAGE = "communication.messages.send";
+const RESEND_MESSAGE = "communication.resends.send-to-non-openers";
 const FINGERPRINT = "a".repeat(64);
+
+const effectOutcomes = new Map<
+  string,
+  { execution: boolean; idempotency: boolean; errors: boolean }
+>();
+
+function recordEffectOutcome(identity: string) {
+  effectOutcomes.set(identity, {
+    execution: true,
+    idempotency: true,
+    errors: true,
+  });
+}
 
 async function seedEffect(input: {
   churchId: string;
@@ -85,7 +99,8 @@ async function seedEffect(input: {
             id: input.stepId,
             capabilityIdentity: input.capabilityIdentity,
             effectClass:
-              input.capabilityIdentity === SEND_MESSAGE
+              input.capabilityIdentity === SEND_MESSAGE ||
+              input.capabilityIdentity === RESEND_MESSAGE
                 ? "outbound_communication"
                 : "database_write",
             arguments: {},
@@ -340,6 +355,14 @@ async function main(): Promise<void> {
     affectedCount: 1,
     excludedCount: 0,
   });
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateCreate({
+      ...createInput,
+      identity: UPDATE_TEMPLATE,
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  recordEffectOutcome(CREATE_TEMPLATE);
   const createdSnapshot = await getEvryCommunicationTemplateSnapshot({
     churchId: plant.id,
     templateId: createdTemplateId,
@@ -365,6 +388,21 @@ async function main(): Promise<void> {
     affectedCount: 1,
     excludedCount: 0,
   });
+  const staleUpdateEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: UPDATE_TEMPLATE,
+    stepId: "stale-update-template",
+  });
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateUpdate({
+      ...updateInput,
+      effect: staleUpdateEffect,
+      expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  recordEffectOutcome(UPDATE_TEMPLATE);
 
   const systemRows = await db
     .insert(messageTemplates)
@@ -417,6 +455,34 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateFork({
+      effect: forkEffect,
+      identity: FORK_TEMPLATE,
+      source: forkSnapshot,
+      forkId,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  const staleForkEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: FORK_TEMPLATE,
+    stepId: "stale-fork-template",
+  });
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateFork({
+      effect: staleForkEffect,
+      identity: FORK_TEMPLATE,
+      source: {
+        ...forkSnapshot,
+        updatedAt: "2020-01-01T00:00:00.000Z",
+      },
+      forkId: randomUUID(),
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  recordEffectOutcome(FORK_TEMPLATE);
   const systemEditEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -461,6 +527,31 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateDelete({
+      effect: deleteEffect,
+      identity: DELETE_TEMPLATE,
+      templateId: deletableId,
+      expectedUpdatedAt: deletable.updatedAt,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  const staleDeleteEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: DELETE_TEMPLATE,
+    stepId: "stale-delete-template",
+  });
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateDelete({
+      effect: staleDeleteEffect,
+      identity: DELETE_TEMPLATE,
+      templateId: createdTemplateId,
+      expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  recordEffectOutcome(DELETE_TEMPLATE);
 
   const audience = await resolveEvryCommunicationAudience({
     churchId: plant.id,
@@ -606,6 +697,58 @@ async function main(): Promise<void> {
     excludedCount: 6,
   });
   assert.equal(permanentMailer.calls.length, 1);
+  recordEffectOutcome(SEND_MESSAGE);
+
+  const resendEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: RESEND_MESSAGE,
+    stepId: "resend-non-openers",
+  });
+  const resendMailer = deterministicMailer();
+  const resendInput = {
+    effect: resendEffect,
+    identity: RESEND_MESSAGE,
+    communicationId: randomUUID(),
+    audience,
+    mailer: resendMailer.mailer,
+  };
+  assert.deepEqual(await sendFrozenEvryCommunication(resendInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 5,
+  });
+  assert.deepEqual(await sendFrozenEvryCommunication(resendInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 5,
+  });
+  assert.equal(resendMailer.calls.length, 1);
+
+  const failedResendEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: RESEND_MESSAGE,
+    stepId: "failed-resend-non-openers",
+  });
+  const failedResendMailer = deterministicMailer(["permanent"]);
+  const failedResendInput = {
+    effect: failedResendEffect,
+    identity: RESEND_MESSAGE,
+    communicationId: randomUUID(),
+    audience,
+    mailer: failedResendMailer.mailer,
+  };
+  assert.deepEqual(await sendFrozenEvryCommunication(failedResendInput), {
+    status: "failed",
+    excludedCount: 6,
+  });
+  assert.deepEqual(await sendFrozenEvryCommunication(failedResendInput), {
+    status: "failed",
+    excludedCount: 6,
+  });
+  assert.equal(failedResendMailer.calls.length, 1);
+  recordEffectOutcome(RESEND_MESSAGE);
 
   const [counts] = await db
     .select({
@@ -624,8 +767,8 @@ async function main(): Promise<void> {
     )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
-  assert.equal(counts.communications, 4);
-  assert.equal(counts.recipients, 4);
+  assert.equal(counts.communications, 6);
+  assert.equal(counts.recipients, 6);
   assert.ok(counts.outcomes >= 8);
 
   const foreignMessage = await db
@@ -635,7 +778,21 @@ async function main(): Promise<void> {
     .then(([row]) => row?.count ?? 0);
   assert.equal(foreignMessage, 0);
 
+  assert.deepEqual(
+    [...effectOutcomes.keys()].sort(),
+    [
+      CREATE_TEMPLATE,
+      DELETE_TEMPLATE,
+      FORK_TEMPLATE,
+      RESEND_MESSAGE,
+      SEND_MESSAGE,
+      UPDATE_TEMPLATE,
+    ].sort()
+  );
   process.stdout.write("Communication effect live proof passed\n");
+  process.stdout.write(
+    `EVRY_COMMUNICATION_EFFECT_OUTCOMES=${JSON.stringify(Object.fromEntries(effectOutcomes))}\n`
+  );
 }
 
 main().catch((error: unknown) => {

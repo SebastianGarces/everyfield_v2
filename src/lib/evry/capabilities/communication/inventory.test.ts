@@ -29,10 +29,20 @@ test("generated Communication inventory is current and fully classified", async 
     );
     assert.ok(fixture, `missing eval fixture for ${capability.identity}`);
     for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
-      assert.ok(
-        fixture.cases[layer].length > 0,
-        `missing ${layer} proof for ${capability.identity}`
-      );
+      const live =
+        capability.operationKind === "effect" &&
+        ["execution", "idempotency", "errors"].includes(layer);
+      assert.deepEqual(fixture.cases[layer], [
+        {
+          id: `${capability.identity}:${layer}`,
+          proofId: live
+            ? "communication-effect-live"
+            : "communication-capability-contract",
+          testName: live
+            ? `${capability.identity}:${layer}:live`
+            : `${capability.identity}:${layer}`,
+        },
+      ]);
     }
     assert.equal(
       capability.confirmation,

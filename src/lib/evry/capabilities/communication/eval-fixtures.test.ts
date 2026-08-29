@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 import test from "node:test";
 
 import communicationInventory from "./inventory.generated.json";
-import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
 import { storedTemplateContent } from "@/lib/communication/templates";
 import { evryDetailedConfirmationArtifactDocumentSchema } from "@/lib/evry/artifacts/review";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import {
   evryCapabilityRegistrationFor,
+  eligibleEvryCapabilitiesFor,
   type EvryEffectCapabilityAuthorization,
 } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type { EvryEffectInput } from "@/lib/evry/executor";
-import { EVRY_CAPABILITY_EVAL_LAYERS } from "@/lib/evry/evals/contracts";
+import {
+  EVRY_CAPABILITY_EVAL_LAYERS,
+  type EvryCapabilityEvalLayer,
+} from "@/lib/evry/evals/contracts";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
 import {
@@ -22,7 +27,6 @@ import {
   selectCommunicationEvryMessageEffect,
 } from "./messages";
 import {
-  COMMUNICATION_EVRY_READ_REGISTRATIONS,
   COMMUNICATION_READ_IDENTITIES,
   selectCommunicationEvryRead,
 } from "./reads";
@@ -45,6 +49,10 @@ const ACTOR = {
   userId: "20000000-0000-4000-8000-000000000001",
   plantId: "30000000-0000-4000-8000-000000000001",
   seat: "owner",
+} as unknown as EvryPlantActor;
+const MEMBER_ACTOR = {
+  ...ACTOR,
+  seat: "member",
 } as unknown as EvryPlantActor;
 const PLAN = evryConversationPlanIdentitySchema.parse({
   planId: "40000000-0000-4000-8000-000000000001",
@@ -117,6 +125,60 @@ const effectSelections: Record<string, string> = {
   [COMMUNICATION_TEMPLATE_FORK_IDENTITY]: `Fork template ${ID}`,
   [COMMUNICATION_TEMPLATE_UPDATE_IDENTITY]: `Update template ${ID} | Follow up | Hello | Welcome`,
 };
+
+const LIVE_EFFECT_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "execution",
+  "idempotency",
+  "errors",
+]);
+type ReadOutcome = Readonly<{
+  execution: boolean;
+  idempotency: boolean;
+  arguments: boolean;
+  tenancy: boolean;
+  permission: boolean;
+  confirmation: boolean;
+  errors: boolean;
+  uiArtifact: boolean;
+}>;
+
+let cachedReadOutcomes: Readonly<Record<string, ReadOutcome>> | null = null;
+
+function readOutcomes(): Readonly<Record<string, ReadOutcome>> {
+  if (cachedReadOutcomes) return cachedReadOutcomes;
+  const proof = spawnSync(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--experimental-test-module-mocks",
+      "--import",
+      "tsx",
+      path.join(
+        process.cwd(),
+        "src/lib/evry/capabilities/communication/eval-read-proof.ts"
+      ),
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: process.env,
+      timeout: 60_000,
+    }
+  );
+  assert.equal(
+    proof.status,
+    0,
+    `Communication read proof failed\nerror: ${proof.error?.message ?? "none"}\nsignal: ${proof.signal ?? "none"}\nstdout:\n${proof.stdout}\nstderr:\n${proof.stderr}`
+  );
+  const encoded = /^EVRY_COMMUNICATION_READ_OUTCOMES=(.+)$/m.exec(
+    proof.stdout
+  )?.[1];
+  assert.ok(encoded, "Communication read proof returned no outcomes");
+  cachedReadOutcomes = JSON.parse(encoded) as Readonly<
+    Record<string, ReadOutcome>
+  >;
+  return cachedReadOutcomes;
+}
 
 function effectArguments(identity: string): Record<string, unknown> {
   switch (identity) {
@@ -212,7 +274,28 @@ function effectInput(identity: string, args: Record<string, unknown>) {
   } as unknown as EvryEffectInput;
 }
 
-async function exercise(identity: string, layer: string) {
+function readOutcomeFor(
+  outcome: ReadOutcome,
+  layer: EvryCapabilityEvalLayer
+): boolean {
+  switch (layer) {
+    case "arguments":
+    case "tenancy":
+    case "permission":
+    case "confirmation":
+    case "execution":
+    case "idempotency":
+    case "errors":
+      return outcome[layer];
+    case "ui_artifact":
+      return outcome.uiArtifact;
+    case "policy":
+    case "selection":
+      throw new Error(`${layer} is not a read continuation outcome`);
+  }
+}
+
+async function exercise(identity: string, layer: EvryCapabilityEvalLayer) {
   const inventory = communicationInventory.capabilities.find(
     (candidate) => candidate.identity === identity
   );
@@ -220,7 +303,7 @@ async function exercise(identity: string, layer: string) {
   const registration = evryCapabilityRegistrationFor(identity);
   assert.ok(registration);
 
-  if (layer === "policy" || layer === "permission") {
+  if (layer === "policy") {
     assert.equal(registration.parityCapability, "communication");
     assert.equal(
       registration.applicationCapability,
@@ -228,34 +311,39 @@ async function exercise(identity: string, layer: string) {
     );
     return;
   }
-  if (layer === "selection" || layer === "idempotency") {
+  if (layer === "selection") {
     assert.ok(selectionFor(identity));
     assert.deepEqual(selectionFor(identity), selectionFor(identity));
-    if (inventory.operationKind === "effect") {
-      assert.equal(
-        communicationEvryEffectUuid(identity, "fixture"),
-        communicationEvryEffectUuid(identity, "fixture")
-      );
+    return;
+  }
+  if (layer === "permission") {
+    assert.equal(
+      eligibleEvryCapabilitiesFor(ACTOR).some(
+        (candidate) => candidate.identity === identity
+      ),
+      true
+    );
+    assert.equal(
+      eligibleEvryCapabilitiesFor(MEMBER_ACTOR).some(
+        (candidate) => candidate.identity === identity
+      ),
+      inventory.operationKind === "read"
+    );
+    if (inventory.operationKind === "read") {
+      assert.equal(readOutcomes()[identity]?.permission, true);
     }
     return;
   }
   if (inventory.operationKind === "read") {
-    const read = COMMUNICATION_EVRY_READ_REGISTRATIONS.find(
-      (candidate) => candidate.capabilityIdentity === identity
-    );
-    assert.ok(read);
-    // Invalid arguments fail before authorization or any application read.
-    assert.equal(
-      await read.execute(
-        { literalUserText: "fixture", pageContext: null },
-        { unexpected: true }
-      ),
-      null
-    );
-    assert.equal(
-      COMMUNICATION_EVRY_EXECUTION_REGISTRY.registrationFor(identity),
-      null
-    );
+    const outcome = readOutcomes()[identity];
+    assert.ok(outcome, `missing read outcome for ${identity}`);
+    assert.equal(readOutcomeFor(outcome, layer), true);
+    if (layer === "confirmation") {
+      assert.equal(
+        COMMUNICATION_EVRY_EXECUTION_REGISTRY.registrationFor(identity),
+        null
+      );
+    }
     return;
   }
 
@@ -264,7 +352,7 @@ async function exercise(identity: string, layer: string) {
   assert.ok(execution);
   const args = effectArguments(identity);
   const schema = execution.planCapability.argumentsSchema;
-  if (layer === "arguments" || layer === "errors") {
+  if (layer === "arguments") {
     assert.equal(schema.safeParse(args).success, true);
     assert.equal(
       schema.safeParse({ ...args, url: "https://example.com" }).success,
@@ -272,7 +360,7 @@ async function exercise(identity: string, layer: string) {
     );
     return;
   }
-  if (layer === "tenancy" || layer === "execution") {
+  if (layer === "tenancy") {
     assert.deepEqual(
       await execution.executeIfCurrent(effectInput(identity, args)),
       {
@@ -282,6 +370,11 @@ async function exercise(identity: string, layer: string) {
     );
     return;
   }
+  assert.equal(
+    LIVE_EFFECT_LAYERS.has(layer),
+    false,
+    `${identity}:${layer} belongs to the live outcome proof`
+  );
   const document = effectDocument(identity);
   const review = trustedReviewForEvryPlanDocument({
     plan: PLAN,
@@ -297,8 +390,11 @@ async function exercise(identity: string, layer: string) {
   );
 }
 
-for (const { identity } of communicationInventory.capabilities) {
+for (const { identity, operationKind } of communicationInventory.capabilities) {
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
+    if (operationKind === "effect" && LIVE_EFFECT_LAYERS.has(layer)) {
+      continue;
+    }
     test(`${identity}:${layer}`, () => exercise(identity, layer));
   }
 }

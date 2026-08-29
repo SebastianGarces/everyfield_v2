@@ -9,8 +9,8 @@ import {
   defineEvryCapabilityEvalFixture,
   defineEvryRecipeEvalFixture,
   EVRY_ABSOLUTE_SAFETY_GATES,
-  EVRY_CAPABILITY_EVAL_LAYERS,
   type EvryCapabilityEvalFixture,
+  type EvryCapabilityEvalLayer,
   type EvryEvalProof,
   type EvryRecipeEvalFixture,
 } from "./contracts";
@@ -52,6 +52,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     id: "communication-capability-contract",
     testFile: "src/lib/evry/capabilities/communication/eval-fixtures.test.ts",
     lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "communication-effect-live",
+    testFile: "src/lib/communication/evry-effect-live.test.ts",
+    lane: "live_database",
     safetyGates: [],
   },
   {
@@ -150,6 +156,57 @@ function capabilityFixture(
   });
 }
 
+const COMMUNICATION_LIVE_EFFECT_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "execution",
+  "idempotency",
+  "errors",
+]);
+
+function communicationProofCase(
+  identity: string,
+  operationKind: "read" | "effect",
+  layer: EvryCapabilityEvalLayer
+) {
+  const live =
+    operationKind === "effect" && COMMUNICATION_LIVE_EFFECT_LAYERS.has(layer);
+  return Object.freeze({
+    id: `${identity}:${layer}`,
+    proofId: live
+      ? "communication-effect-live"
+      : "communication-capability-contract",
+    testName: live ? `${identity}:${layer}:live` : `${identity}:${layer}`,
+  });
+}
+
+function communicationCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Communication capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const evalCase = (layer: EvryCapabilityEvalLayer) => [
+    communicationProofCase(capabilityIdentity, operationKind, layer),
+  ];
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
@@ -164,22 +221,8 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
         )
     )
     .map(capabilityFixture),
-  ...communicationInventory.capabilities.map(({ identity }) =>
-    defineEvryCapabilityEvalFixture({
-      capabilityIdentity: identity,
-      cases: Object.fromEntries(
-        EVRY_CAPABILITY_EVAL_LAYERS.map((layer) => [
-          layer,
-          [
-            {
-              id: `${identity}:${layer}`,
-              proofId: "communication-capability-contract",
-              testName: `${identity}:${layer}`,
-            },
-          ],
-        ])
-      ) as unknown as EvryCapabilityEvalFixture["cases"],
-    })
+  ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
+    communicationCapabilityFixture(identity, operationKind)
   ),
 ]);
 
