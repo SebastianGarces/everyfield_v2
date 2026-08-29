@@ -1276,6 +1276,397 @@ async function runRecurringChecklistSourceDrift(input: {
   console.log("PASS tasks:recurring-checklist-source-drift");
 }
 
+async function runStatusCompletionCreatorLineage(input: {
+  actor: EvryPlantActor;
+  assigneeId: string;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  const [creator] = await db
+    .insert(users)
+    .values({
+      email: `${randomUUID()}@tasks.invalid`,
+      passwordHash: "not-used",
+      name: "Task Proof Creator",
+      seat: "member",
+      churchId: input.actor.plantId,
+    })
+    .returning({ id: users.id });
+  assert.ok(creator);
+  const parent = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: creator.id,
+    assignedToId: input.assigneeId,
+    title: `Recurring creator lineage ${randomUUID()}`,
+    dueDate: "2026-09-01",
+    isRecurring: true,
+    recurrenceRule: { interval: "weekly", endDate: null },
+  });
+  const checklist = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: creator.id,
+    assignedToId: input.assigneeId,
+    parentTaskId: parent.id,
+    title: "Creator lineage checklist",
+  });
+  const resolved = await input.resolve({
+    actor: input.actor,
+    selection: {
+      kind: "effect",
+      exportName: "updateTaskStatusAction",
+      values: { taskId: parent.id, status: "complete" },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(resolved);
+  assert.equal(resolved.arguments.operation, "updateTaskStatusAction");
+  assert.deepEqual(
+    resolved.arguments.sourceTasks.map(({ id }) => id),
+    [checklist.id]
+  );
+  const creates = resolved.arguments.taskWrites.filter(
+    ({ before }) => before === null
+  );
+  assert.equal(creates.length, 2);
+  assert.equal(
+    creates.every(({ after }) => after.createdById === creator.id),
+    true
+  );
+  assert.equal(
+    creates.every(({ after }) => after.assignedToId === input.assigneeId),
+    true
+  );
+
+  const prepared = await preparedEffect({
+    actor: input.actor,
+    resolved,
+    authorize: input.authorize,
+    effectKey: input.effectKey,
+  });
+  const completed = await input.execute(prepared.input);
+  assert.deepEqual(completed, {
+    status: "completed",
+    affectedCount: 3,
+    excludedCount: 0,
+  });
+  assert.deepEqual(await input.execute(prepared.input), completed);
+
+  const committed = await db
+    .select({
+      id: tasks.id,
+      status: tasks.status,
+      parentTaskId: tasks.parentTaskId,
+      assignedToId: tasks.assignedToId,
+      createdById: tasks.createdById,
+      completedById: tasks.completedById,
+    })
+    .from(tasks)
+    .where(
+      inArray(tasks.id, [parent.id, ...creates.map(({ taskId }) => taskId)])
+    );
+  const completedParent = committed.find(({ id }) => id === parent.id);
+  assert.deepEqual(
+    {
+      status: completedParent?.status,
+      completedById: completedParent?.completedById,
+      assignedToId: completedParent?.assignedToId,
+      createdById: completedParent?.createdById,
+    },
+    {
+      status: "complete",
+      completedById: input.actor.userId,
+      assignedToId: input.assigneeId,
+      createdById: creator.id,
+    }
+  );
+  for (const created of committed.filter(({ id }) => id !== parent.id)) {
+    assert.equal(created.createdById, creator.id);
+    assert.equal(created.assignedToId, input.assigneeId);
+    assert.equal(created.completedById, null);
+  }
+  console.log("PASS tasks:status-completion-creator-lineage");
+}
+
+async function runMixedBulkPartialOutcomes(input: {
+  owner: EvryPlantActor;
+  memberId: string;
+  foreignTaskId: string;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  current: typeof import("./atomic-effect").taskEffectArgumentsAreCurrent;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  const own = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    assignedToId: input.memberId,
+    title: "Member-owned eligible bulk task",
+  });
+  const complete = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    assignedToId: input.memberId,
+    title: "Already-completed bulk task",
+    status: "complete",
+  });
+  const somebodyElses = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    assignedToId: input.owner.userId,
+    title: "Somebody else's bulk task",
+  });
+  const stale = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    assignedToId: input.memberId,
+    title: "Deleted stale bulk task",
+  });
+  await db.update(tasks).set({ deletedAt: NOW }).where(eq(tasks.id, stale.id));
+  const missingId = randomUUID();
+
+  await db
+    .update(sessions)
+    .set({ userId: input.memberId })
+    .where(eq(sessions.id, SESSION_ID));
+  sessionUser = {
+    id: input.memberId,
+    churchId: input.owner.plantId,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    seat: "member",
+  };
+  const memberAuthorization = await input.authorize(
+    TASK_ACTION_CONTRACTS.bulkCompleteTasksAction.operationId
+  );
+  assert.ok(memberAuthorization);
+  const member = memberAuthorization.actor;
+  const resolvedComplete = await input.resolve({
+    actor: member,
+    selection: {
+      kind: "effect",
+      exportName: "bulkCompleteTasksAction",
+      values: {
+        taskIds: [
+          own.id,
+          complete.id,
+          stale.id,
+          missingId,
+          input.foreignTaskId,
+          somebodyElses.id,
+        ],
+      },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(resolvedComplete);
+  const completeSelection = resolvedComplete.arguments.sourceAssertion;
+  assert.equal(completeSelection.kind, "bulk_selection");
+  if (completeSelection.kind !== "bulk_selection") {
+    assert.fail("bulk completion omitted its exact selection partition");
+  }
+  assert.deepEqual(completeSelection.requestedTaskIds, [
+    own.id,
+    complete.id,
+    stale.id,
+    missingId,
+    input.foreignTaskId,
+    somebodyElses.id,
+  ]);
+  assert.deepEqual(completeSelection.actionableTaskIds, [own.id]);
+  assert.deepEqual(
+    completeSelection.excludedTasks.map(({ taskId, reason }) => ({
+      taskId,
+      reason,
+    })),
+    [
+      { taskId: complete.id, reason: "Task is already complete" },
+      { taskId: stale.id, reason: "Task not found" },
+      { taskId: missingId, reason: "Task not found" },
+      { taskId: input.foreignTaskId, reason: "Task not found" },
+      {
+        taskId: somebodyElses.id,
+        reason: "That task is assigned to somebody else",
+      },
+    ]
+  );
+  assert.deepEqual(
+    completeSelection.excludedTasks.map(({ expectedTask }) =>
+      expectedTask ? expectedTask.id : null
+    ),
+    [complete.id, null, null, null, somebodyElses.id]
+  );
+  assert.deepEqual(
+    resolvedComplete.arguments.exclusions
+      .slice(0, 5)
+      .map(({ target, reason }) => ({
+        target,
+        reason,
+      })),
+    [
+      {
+        target: `Task ${complete.id}: ${complete.title}`,
+        reason: "Task is already complete",
+      },
+      { target: `Task ${stale.id}`, reason: "Task not found" },
+      { target: `Task ${missingId}`, reason: "Task not found" },
+      { target: `Task ${input.foreignTaskId}`, reason: "Task not found" },
+      {
+        target: `Task ${somebodyElses.id}: ${somebodyElses.title}`,
+        reason: "That task is assigned to somebody else",
+      },
+    ]
+  );
+  assert.equal(
+    await input.current({
+      actorUserId: member.userId,
+      plantId: member.plantId,
+      exportName: resolvedComplete.exportName,
+      args: resolvedComplete.arguments,
+    }),
+    true
+  );
+  const preparedComplete = await preparedEffect({
+    actor: member,
+    resolved: resolvedComplete,
+    authorize: input.authorize,
+    effectKey: input.effectKey,
+  });
+  assert.deepEqual(await input.execute(preparedComplete.input), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 5,
+  });
+  const completedRows = await db
+    .select({ id: tasks.id, status: tasks.status })
+    .from(tasks)
+    .where(inArray(tasks.id, [own.id, complete.id, somebodyElses.id]));
+  assert.equal(
+    completedRows.find(({ id }) => id === own.id)?.status,
+    "complete"
+  );
+  assert.equal(
+    completedRows.find(({ id }) => id === complete.id)?.status,
+    "complete"
+  );
+  assert.equal(
+    completedRows.find(({ id }) => id === somebodyElses.id)?.status,
+    "not_started"
+  );
+
+  await db
+    .update(sessions)
+    .set({ userId: input.owner.userId })
+    .where(eq(sessions.id, SESSION_ID));
+  sessionUser = {
+    id: input.owner.userId,
+    churchId: input.owner.plantId,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    seat: "owner",
+  };
+  const reschedule = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    title: "Eligible bulk reschedule",
+    dueDate: "2026-09-01",
+  });
+  const completedReschedule = await seedTask({
+    plantId: input.owner.plantId,
+    actorId: input.owner.userId,
+    title: "Completed bulk reschedule",
+    status: "complete",
+    dueDate: "2026-09-02",
+  });
+  const missingRescheduleId = randomUUID();
+  const resolvedReschedule = await input.resolve({
+    actor: input.owner,
+    selection: {
+      kind: "effect",
+      exportName: "bulkRescheduleTasksAction",
+      values: {
+        taskIds: [
+          reschedule.id,
+          completedReschedule.id,
+          missingRescheduleId,
+          input.foreignTaskId,
+        ],
+        dueDate: "2026-10-15",
+      },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(resolvedReschedule);
+  assert.equal(
+    resolvedReschedule.arguments.sourceAssertion.kind,
+    "bulk_selection"
+  );
+  if (resolvedReschedule.arguments.sourceAssertion.kind !== "bulk_selection") {
+    assert.fail("bulk reschedule omitted its exact selection partition");
+  }
+  assert.equal(
+    resolvedReschedule.arguments.sourceAssertion.excludedTasks.length,
+    3
+  );
+  assert.deepEqual(
+    resolvedReschedule.arguments.sourceAssertion.excludedTasks.map(
+      ({ taskId, reason }) => ({ taskId, reason })
+    ),
+    [
+      {
+        taskId: completedReschedule.id,
+        reason: "Task is complete — reopen it before rescheduling",
+      },
+      { taskId: missingRescheduleId, reason: "Task not found" },
+      { taskId: input.foreignTaskId, reason: "Task not found" },
+    ]
+  );
+  assert.deepEqual(resolvedReschedule.arguments.exclusions, [
+    {
+      target: `Task ${completedReschedule.id}: ${completedReschedule.title}`,
+      reason: "Task is complete — reopen it before rescheduling",
+    },
+    { target: `Task ${missingRescheduleId}`, reason: "Task not found" },
+    { target: `Task ${input.foreignTaskId}`, reason: "Task not found" },
+  ]);
+  const preparedReschedule = await preparedEffect({
+    actor: input.owner,
+    resolved: resolvedReschedule,
+    authorize: input.authorize,
+    effectKey: input.effectKey,
+  });
+  assert.deepEqual(await input.execute(preparedReschedule.input), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 3,
+  });
+  const [rescheduled, stillComplete] = await Promise.all([
+    db
+      .select({ dueDate: tasks.dueDate })
+      .from(tasks)
+      .where(eq(tasks.id, reschedule.id))
+      .then((rows) => rows[0]),
+    db
+      .select({ dueDate: tasks.dueDate })
+      .from(tasks)
+      .where(eq(tasks.id, completedReschedule.id))
+      .then((rows) => rows[0]),
+  ]);
+  assert.equal(rescheduled?.dueDate, "2026-10-15");
+  assert.equal(stillComplete?.dueDate, "2026-09-02");
+  console.log("PASS tasks:mixed-bulk-partial-outcomes");
+}
+
 async function runLargeSourceHandoff(input: {
   actor: EvryPlantActor;
   memberId: string;
@@ -2202,6 +2593,26 @@ async function main() {
   });
   await runRecurringChecklistSourceDrift({
     actor,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    current: atomic.taskEffectArgumentsAreCurrent,
+    execute: atomic.executeTaskEffect,
+  });
+  await runStatusCompletionCreatorLineage({
+    actor,
+    assigneeId: seeded.memberId,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    execute: atomic.executeTaskEffect,
+  });
+  await runMixedBulkPartialOutcomes({
+    owner: actor,
+    memberId: seeded.memberId,
+    foreignTaskId: foreignTask!.id,
     resolve: resolver.resolveTaskEvryEffect,
     mintRequestKey: plans.mintEvryPlanRequestKey,
     authorize: eligibility.authorizeEvryEffectCapability,

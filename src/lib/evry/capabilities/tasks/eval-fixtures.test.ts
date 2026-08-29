@@ -268,6 +268,12 @@ test("a 100-Task bulk confirmation discloses every exact before/after target", (
       ...base.notifications,
       scopedTaskIds: writes.map(({ taskId }) => taskId),
     },
+    sourceAssertion: {
+      ...base.sourceAssertion,
+      requestedTaskIds: writes.map(({ taskId }) => taskId),
+      actionableTaskIds: writes.map(({ taskId }) => taskId),
+      excludedTasks: [],
+    },
     completionEffects: {
       ...base.completionEffects,
       contactLogs: writes.map(({ taskId }) => ({
@@ -440,6 +446,12 @@ test("large compound Task evidence remains byte-exact through persistence, publi
     notifications: {
       ...base.notifications,
       scopedTaskIds: writes.map(({ taskId }) => taskId),
+    },
+    sourceAssertion: {
+      ...base.sourceAssertion,
+      requestedTaskIds: writes.map(({ taskId }) => taskId),
+      actionableTaskIds: writes.map(({ taskId }) => taskId),
+      excludedTasks: [],
     },
     disclosure: {
       ...base.disclosure,
