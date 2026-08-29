@@ -34,7 +34,7 @@ test("candidate recipe output compiles into the real confirmation plan", async (
     document.recipe && [
       "meetings.create",
       "meetings.add-guests",
-      "communication.send",
+      "communication.messages.send",
     ]
   );
 });

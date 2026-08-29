@@ -20,7 +20,7 @@ import {
 
 export const CREATE_MEETING_IDENTITY = "meetings.create";
 export const ADD_GUESTS_IDENTITY = "meetings.add-guests";
-export const SEND_MESSAGE_IDENTITY = "communication.send";
+export const SEND_MESSAGE_IDENTITY = "communication.messages.send";
 export const RECIPE_IDENTITY = "fixture:meeting.invitation";
 export const RESOLVER_IDENTITY = "fixture:people.resolve";
 export const PRECONDITION_IDENTITY = "fixture:audience.present";

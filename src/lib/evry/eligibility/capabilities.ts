@@ -1,3 +1,4 @@
+import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
@@ -94,6 +95,29 @@ function generatedPeopleRegistrations(): EvryCapabilityRegistration[] {
   });
 }
 
+function generatedCommunicationRegistrations(): EvryCapabilityRegistration[] {
+  return communicationInventory.capabilities.map((capability) => {
+    const [firstSurface, ...otherSurfaces] = capability.surfaceIdentities;
+    if (
+      !isApplicationCapability(capability.applicationCapability) ||
+      !firstSurface ||
+      (capability.operationKind !== "read" &&
+        capability.operationKind !== "effect")
+    ) {
+      throw new Error(
+        `Invalid generated Communication capability: ${capability.identity}`
+      );
+    }
+    return defineEvryCapabilityRegistration({
+      identity: capability.identity,
+      surfaceIdentities: [firstSurface, ...otherSurfaces],
+      parityCapability: capability.parityCapability,
+      operationKind: capability.operationKind,
+      applicationCapability: capability.applicationCapability,
+    });
+  });
+}
+
 /** Explicit shared proof registrations, replaced in place by owning packs. */
 const REFERENCE_REGISTRATIONS = [
   defineEvryCapabilityRegistration({
@@ -141,15 +165,6 @@ const REFERENCE_REGISTRATIONS = [
     operationKind: "effect",
     applicationCapability: "meetings.write",
   }),
-  defineEvryCapabilityRegistration({
-    identity: "communication.send",
-    surfaceIdentities: [
-      "action:src/app/(dashboard)/communication/actions.ts → sendMessageAction",
-    ],
-    parityCapability: "communication",
-    operationKind: "effect",
-    applicationCapability: "communication.send",
-  }),
 ] as const;
 
 function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
@@ -167,6 +182,28 @@ function generatedPeopleSurfaces(): EvryAuthoritativeCapabilitySurface[] {
         identity: entry.identity,
         capabilityIdentity: entry.capabilityIdentity,
         parityCapability: "people",
+        operationKind: entry.operationKind,
+        applicationCapability: entry.applicationCapability,
+      },
+    ];
+  });
+}
+
+function generatedCommunicationSurfaces(): EvryAuthoritativeCapabilitySurface[] {
+  return communicationInventory.entries.flatMap((entry) => {
+    if (
+      entry.classification.state !== "supported" ||
+      (entry.operationKind !== "read" && entry.operationKind !== "effect") ||
+      entry.applicationCapability === null ||
+      !isApplicationCapability(entry.applicationCapability)
+    ) {
+      return [];
+    }
+    return [
+      {
+        identity: entry.identity,
+        capabilityIdentity: entry.capabilityIdentity,
+        parityCapability: "communication",
         operationKind: entry.operationKind,
         applicationCapability: entry.applicationCapability,
       },
@@ -204,9 +241,14 @@ function referenceSurfaces(): EvryAuthoritativeCapabilitySurface[] {
 const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
+    ...generatedCommunicationRegistrations(),
     ...REFERENCE_REGISTRATIONS,
   ],
-  authoritativeSurfaces: [...generatedPeopleSurfaces(), ...referenceSurfaces()],
+  authoritativeSurfaces: [
+    ...generatedPeopleSurfaces(),
+    ...generatedCommunicationSurfaces(),
+    ...referenceSurfaces(),
+  ],
 });
 
 function isReadRegistration(

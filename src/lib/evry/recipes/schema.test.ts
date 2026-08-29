@@ -65,7 +65,7 @@ test("registration rejects unknown capabilities, cycles, hidden effects, and mis
   rejectsRegistration((definition) => {
     definition.eligibleCapabilities = [
       ADD_GUESTS_IDENTITY,
-      "communication.send",
+      "communication.messages.send",
     ];
   }, /hidden effect/);
 
