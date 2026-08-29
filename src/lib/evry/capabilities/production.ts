@@ -68,6 +68,17 @@ import {
 } from "./people/taxonomies";
 
 /** The one production composition seam capability packs extend. */
+const PRODUCTION_PEOPLE_EFFECT_EXECUTIONS = [
+  PEOPLE_EVRY_ADD_NOTE_EXECUTION,
+  PEOPLE_EVRY_EDIT_NOTE_EXECUTION,
+  PEOPLE_EVRY_DELETE_NOTE_EXECUTION,
+  ...PEOPLE_CORE_EXECUTIONS,
+  ...TAXONOMY_EXECUTIONS,
+  ...HOUSEHOLD_EXECUTIONS,
+  ...MILESTONE_EXECUTIONS,
+  ...PEOPLE_FILE_EXECUTIONS,
+] as const;
+
 export const PRODUCTION_EVRY_PLAN_REGISTRY = createEvryPlanCapabilityRegistry([
   ...COMMUNICATION_MESSAGE_EXECUTIONS.map(
     ({ planCapability }) => planCapability
@@ -75,27 +86,15 @@ export const PRODUCTION_EVRY_PLAN_REGISTRY = createEvryPlanCapabilityRegistry([
   ...COMMUNICATION_TEMPLATE_EXECUTIONS.map(
     ({ planCapability }) => planCapability
   ),
-  PEOPLE_EVRY_ADD_NOTE_EXECUTION.planCapability,
-  PEOPLE_EVRY_EDIT_NOTE_EXECUTION.planCapability,
-  PEOPLE_EVRY_DELETE_NOTE_EXECUTION.planCapability,
-  ...PEOPLE_CORE_EXECUTIONS.map(({ planCapability }) => planCapability),
-  ...TAXONOMY_EXECUTIONS.map(({ planCapability }) => planCapability),
-  ...HOUSEHOLD_EXECUTIONS.map(({ planCapability }) => planCapability),
-  ...MILESTONE_EXECUTIONS.map(({ planCapability }) => planCapability),
-  ...PEOPLE_FILE_EXECUTIONS.map(({ planCapability }) => planCapability),
+  ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS.map(
+    ({ planCapability }) => planCapability
+  ),
 ]);
 export const PRODUCTION_EVRY_EXECUTION_REGISTRY =
   createEvryExecutionCapabilityRegistry([
     ...COMMUNICATION_MESSAGE_EXECUTIONS,
     ...COMMUNICATION_TEMPLATE_EXECUTIONS,
-    PEOPLE_EVRY_ADD_NOTE_EXECUTION,
-    PEOPLE_EVRY_EDIT_NOTE_EXECUTION,
-    PEOPLE_EVRY_DELETE_NOTE_EXECUTION,
-    ...PEOPLE_CORE_EXECUTIONS,
-    ...TAXONOMY_EXECUTIONS,
-    ...HOUSEHOLD_EXECUTIONS,
-    ...MILESTONE_EXECUTIONS,
-    ...PEOPLE_FILE_EXECUTIONS,
+    ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS,
   ]);
 export const PRODUCTION_EVRY_REVIEW_REGISTRY = createEvryArtifactReviewRegistry(
   [
@@ -116,6 +115,16 @@ export const PRODUCTION_EVRY_READ_REGISTRATIONS = Object.freeze([
   ...PEOPLE_DOMAIN_READ_REGISTRATIONS,
   ...PEOPLE_FILE_READ_REGISTRATIONS,
 ]);
+export const PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES = Object.freeze(
+  [
+    ...PRODUCTION_PEOPLE_EFFECT_EXECUTIONS.map(
+      ({ planCapability }) => planCapability.identity
+    ),
+    ...PRODUCTION_EVRY_READ_REGISTRATIONS.map(
+      ({ capabilityIdentity }) => capabilityIdentity
+    ),
+  ].toSorted()
+);
 export const continueProductionEvryCapabilityConversation =
   composeEvryCapabilityConversationContinuations([
     continueCommunicationEvryConversation,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { isUnauthorized } from "@/lib/auth/unauthorized";
 import { stageEvryPeopleAttachment } from "@/lib/evry/capabilities/people/attachments";
+import { readPeopleImportPreviewArtifact } from "@/lib/evry/capabilities/people/file-reads";
 import {
   authorizeEvryEffectCapability,
   authorizeEvryReadCapability,
@@ -55,15 +56,23 @@ export async function POST(request: Request) {
       personId,
       file,
     });
-    return result
-      ? NextResponse.json(
-          { status: "staged", ...result },
-          { headers: PRIVATE_HEADERS }
-        )
-      : NextResponse.json(
-          { status: "invalid" },
-          { status: 400, headers: PRIVATE_HEADERS }
-        );
+    if (!result)
+      return NextResponse.json(
+        { status: "invalid" },
+        { status: 400, headers: PRIVATE_HEADERS }
+      );
+    const artifact =
+      kind === "people_csv"
+        ? await readPeopleImportPreviewArtifact({
+            actor: authorization.actor,
+            attachmentReference: result.reference,
+            attachmentDigest: result.metadata.digest,
+          })
+        : null;
+    return NextResponse.json(
+      { status: "staged", ...result, ...(artifact ? { artifact } : {}) },
+      { headers: PRIVATE_HEADERS }
+    );
   } catch (error) {
     return NextResponse.json(
       { status: isUnauthorized(error) ? "unavailable" : "failed" },

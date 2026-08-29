@@ -5,10 +5,7 @@ import { z } from "zod";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { parseCsvImport } from "@/lib/people/import";
 import { getPerson } from "@/lib/people/service";
-import {
-  PROFILE_PHOTO_MAX_BYTES,
-  profilePhotoRefusal,
-} from "@/lib/profile-photo";
+import { profilePhotoRefusal } from "@/lib/profile-photo";
 import {
   getFileBytes,
   isAllowedCommitmentFileType,

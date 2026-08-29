@@ -29,6 +29,10 @@ import {
   planEventKey,
 } from "@/lib/evry/audit/identity";
 import {
+  PEOPLE_CORE_EXECUTION_REGISTRY,
+  PEOPLE_CORE_IDENTITIES,
+} from "@/lib/evry/capabilities/people/core";
+import {
   PEOPLE_FILE_EXECUTION_REGISTRY,
   PEOPLE_FILE_IDENTITIES,
 } from "@/lib/evry/capabilities/people/files";
@@ -40,7 +44,7 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
-import { claimEvryCreatePerson } from "./evry-core";
+import { claimEvryCreatePerson, claimEvryRemovePersonPhoto } from "./evry-core";
 import { claimEvryBulkImport, claimEvryUploadPersonPhoto } from "./evry-files";
 import { claimEvryCreateHouseholdWithHead } from "./evry-households";
 import {
@@ -553,12 +557,16 @@ async function main(): Promise<void> {
     capabilityIdentity: PEOPLE_FILE_IDENTITIES.photo,
     stepId: "upload-photo",
   });
-  await claimEvryUploadPersonPhoto({
-    ...photoAttempt,
-    personId: person.id,
-    currentPhotoKey: null,
-    newPhotoKey: `people/${plant.id}/${person.id}/${randomUUID()}.jpg`,
-  });
+  const uploadedPhotoKey = `people/${plant.id}/${person.id}/${randomUUID()}.jpg`;
+  assert.deepEqual(
+    await claimEvryUploadPersonPhoto({
+      ...photoAttempt,
+      personId: person.id,
+      currentPhotoKey: null,
+      newPhotoKey: uploadedPhotoKey,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
   const photoRegistration = evryCapabilityRegistrationFor(
     PEOPLE_FILE_IDENTITIES.photo
   );
@@ -585,6 +593,46 @@ async function main(): Promise<void> {
         contentType: "image/jpeg",
         size: 1,
         originalName: "unread.jpg",
+      },
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+
+  const removePhotoAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: PEOPLE_CORE_IDENTITIES.removePhoto,
+    stepId: "remove-photo",
+  });
+  assert.deepEqual(
+    await claimEvryRemovePersonPhoto({
+      ...removePhotoAttempt,
+      personId: person.id,
+      currentPhotoKey: uploadedPhotoKey,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  const removePhotoRegistration = evryCapabilityRegistrationFor(
+    PEOPLE_CORE_IDENTITIES.removePhoto
+  );
+  const removePhotoExecution = PEOPLE_CORE_EXECUTION_REGISTRY.registrationFor(
+    PEOPLE_CORE_IDENTITIES.removePhoto
+  );
+  assert.ok(removePhotoRegistration && removePhotoExecution);
+  assert.deepEqual(
+    await removePhotoExecution.executeIfCurrent({
+      authorization: {
+        actor: authorization.actor,
+        registration: removePhotoRegistration,
+      } as unknown as EvryEffectCapabilityAuthorization,
+      execution: removePhotoAttempt.execution,
+      effectKey: removePhotoAttempt.effectKey,
+      arguments: {
+        personId: person.id,
+        personLabel: "Ada Lovelace",
+        photoDigest: createHash("sha256")
+          .update(uploadedPhotoKey)
+          .digest("hex"),
       },
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
@@ -756,7 +804,7 @@ async function main(): Promise<void> {
       .then(([row]) => row?.count ?? 0),
   ]);
   assert.equal(activityCount, 4);
-  assert.equal(outcomeCount, 10);
+  assert.equal(outcomeCount, 11);
   assert.equal(membershipCount, 1);
   assert.equal(createdPersonCount, 2);
   assert.equal(householdCount, 1);

@@ -6,6 +6,7 @@ import {
   trustedEvryApplicationSourceLink,
 } from "@/lib/evry/artifacts/core";
 import { readExactEvryPeopleAttachment } from "@/lib/evry/capabilities/people/attachments";
+import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { defineEvryReadRegistration } from "@/lib/evry/reads/contract";
 import { createEvryReadContinuation } from "@/lib/evry/reads/core";
 import { getCommitment } from "@/lib/people/commitments";
@@ -137,6 +138,65 @@ const TEMPLATE_READ = defineEvryReadRegistration({
     });
   },
 });
+export async function readPeopleImportPreviewArtifact(input: {
+  actor: EvryPlantActor;
+  attachmentReference: string;
+  attachmentDigest: string;
+}) {
+  const attachment = await readExactEvryPeopleAttachment({
+    reference: input.attachmentReference,
+    actor: input.actor,
+    expectedKind: "people_csv",
+    expectedDigest: input.attachmentDigest,
+  });
+  const preview = attachment
+    ? await parseCsvImport(
+        attachment.bytes.toString("utf8"),
+        input.actor.plantId
+      )
+    : null;
+  const rows = preview
+    ? [
+        ...preview.validRows,
+        ...preview.duplicateRows,
+        ...preview.invalidRows,
+      ].toSorted((a, b) => a.rowNumber - b.rowNumber)
+    : [];
+  return buildEvryReadArtifact({
+    title: preview
+      ? `Preview ${attachment!.document.originalName}`
+      : "Import preview unavailable",
+    filters: [{ label: "Plant", value: "Current plant" }],
+    exclusions: preview
+      ? preview.invalidRows.map((row) => ({
+          reason: `Row ${row.rowNumber}: ${row.errors.join("; ")}`,
+          count: 1,
+        }))
+      : [{ reason: "Attachment unavailable", count: 1 }],
+    items: rows.map((row) => ({
+      id: `csv-row-${row.rowNumber}`,
+      label:
+        `Row ${row.rowNumber}: ${row.data.firstName ?? ""} ${row.data.lastName ?? ""}`.trim(),
+      facts: [
+        {
+          label: "Status",
+          value: row.valid
+            ? row.duplicates.exactMatch ||
+              row.duplicates.potentialMatches.length
+              ? "Duplicate review"
+              : "Valid"
+            : "Invalid",
+        },
+      ],
+      sourceLink: trustedEvryApplicationSourceLink({
+        label: "Open People import",
+        href: "/people/import",
+      }),
+    })),
+    sourceLinks: [],
+  });
+}
+
 export const IMPORT_PREVIEW_READ = defineEvryReadRegistration({
   id: "people.import-preview",
   capabilityIdentity: PEOPLE_FILE_READ_IDENTITIES.preview,
@@ -144,60 +204,11 @@ export const IMPORT_PREVIEW_READ = defineEvryReadRegistration({
     attachmentReference: z.string().min(1).max(4_000),
     attachmentDigest: digest,
   },
-  async run({ authorization }, input) {
-    const attachment = await readExactEvryPeopleAttachment({
-      reference: input.attachmentReference,
+  run: ({ authorization }, input) =>
+    readPeopleImportPreviewArtifact({
       actor: authorization.actor,
-      expectedKind: "people_csv",
-      expectedDigest: input.attachmentDigest,
-    });
-    const preview = attachment
-      ? await parseCsvImport(
-          attachment.bytes.toString("utf8"),
-          authorization.actor.plantId
-        )
-      : null;
-    const rows = preview
-      ? [
-          ...preview.validRows,
-          ...preview.duplicateRows,
-          ...preview.invalidRows,
-        ].toSorted((a, b) => a.rowNumber - b.rowNumber)
-      : [];
-    return buildEvryReadArtifact({
-      title: preview
-        ? `Preview ${attachment!.document.originalName}`
-        : "Import preview unavailable",
-      filters: [{ label: "Plant", value: "Current plant" }],
-      exclusions: preview
-        ? preview.invalidRows.map((row) => ({
-            reason: `Row ${row.rowNumber}: ${row.errors.join("; ")}`,
-            count: 1,
-          }))
-        : [{ reason: "Attachment unavailable", count: 1 }],
-      items: rows.map((row) => ({
-        id: `csv-row-${row.rowNumber}`,
-        label:
-          `Row ${row.rowNumber}: ${row.data.firstName ?? ""} ${row.data.lastName ?? ""}`.trim(),
-        facts: [
-          {
-            label: "Status",
-            value: row.valid
-              ? row.duplicates.exactMatch ||
-                row.duplicates.potentialMatches.length
-                ? "Duplicate review"
-                : "Valid"
-              : "Invalid",
-          },
-        ],
-        sourceLink: trustedEvryApplicationSourceLink({
-          label: "Open People import",
-          href: "/people/import",
-        }),
-      })),
-      sourceLinks: [],
-    });
-  },
+      ...input,
+    }),
 });
 const EXPORT_READ = defineEvryReadRegistration({
   id: "people.export",

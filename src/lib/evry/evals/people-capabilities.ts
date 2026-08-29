@@ -1,4 +1,5 @@
 import generated from "@/lib/evry/capabilities/people/inventory.generated.json";
+import { PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES } from "@/lib/evry/capabilities/production";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -42,11 +43,12 @@ function fixtureFor(identity: string): EvryCapabilityEvalFixture {
 }
 
 /**
- * The fixture roster is derived from the generated authoritative inventory,
- * never a second hand-maintained list of capabilities.
+ * The fixture roster is derived from the live production registrations. The
+ * completeness assertion below independently binds that roster back to the
+ * generated authoritative inventory.
  */
 export const PEOPLE_CAPABILITY_EVAL_FIXTURES = Object.freeze(
-  generated.capabilities.map(({ identity }) => fixtureFor(identity))
+  PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES.map(fixtureFor)
 );
 
 export function assertPeopleCapabilityEvalRegistryComplete(

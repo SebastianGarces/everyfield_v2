@@ -42,6 +42,7 @@ import {
   claimEvryUpdatePerson,
   type EvryPersonPayload,
 } from "@/lib/people/evry-core";
+import { recoverCompletedEvryPeopleEffect } from "@/lib/people/evry-effect";
 import { getHousehold } from "@/lib/people/household";
 import { getPersonPhotoKey } from "@/lib/people/person-photo";
 import { getPerson } from "@/lib/people/service";
@@ -422,6 +423,8 @@ export const PEOPLE_CORE_EXECUTIONS = [
       const args = removePhotoSchema.safeParse(input.arguments);
       if (!args.success || !exactTuple(input, PLANS.removePhoto.identity))
         return { status: "refused", excludedCount: 1 };
+      const replay = await recoverCompletedEvryPeopleEffect(input);
+      if (replay) return replay;
       const current = await getPersonPhotoKey(
         input.authorization.actor.plantId,
         args.data.personId

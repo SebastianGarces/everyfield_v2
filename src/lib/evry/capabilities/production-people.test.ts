@@ -10,6 +10,7 @@ import { PEOPLE_EVRY_REVIEWS } from "./people/runtime";
 import { TAXONOMY_REVIEWS } from "./people/taxonomies";
 import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
+  PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES,
   PRODUCTION_EVRY_PLAN_REGISTRY,
   PRODUCTION_EVRY_READ_REGISTRATIONS,
 } from "./production";
@@ -57,4 +58,8 @@ test("production composes every generated People read exactly once", () => {
   ).toSorted();
   assert.equal(new Set(registrations).size, registrations.length);
   assert.deepEqual(registrations, reads);
+  assert.deepEqual(
+    [...PRODUCTION_EVRY_PEOPLE_CAPABILITY_IDENTITIES],
+    generated.capabilities.map(({ identity }) => identity).toSorted()
+  );
 });
