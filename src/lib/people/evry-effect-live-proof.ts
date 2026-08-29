@@ -28,10 +28,20 @@ import {
   executionAttemptKey,
   planEventKey,
 } from "@/lib/evry/audit/identity";
+import {
+  PEOPLE_FILE_EXECUTION_REGISTRY,
+  PEOPLE_FILE_IDENTITIES,
+} from "@/lib/evry/capabilities/people/files";
+import {
+  evryCapabilityRegistrationFor,
+  type EvryEffectCapabilityAuthorization,
+} from "@/lib/evry/eligibility/capabilities";
+import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
 import { claimEvryCreatePerson } from "./evry-core";
+import { claimEvryBulkImport, claimEvryUploadPersonPhoto } from "./evry-files";
 import { claimEvryCreateHouseholdWithHead } from "./evry-households";
 import {
   claimEvryCreateAssessment,
@@ -39,6 +49,7 @@ import {
   claimEvryCreateInterview,
 } from "./evry-milestones";
 import { claimEvryAssignTag } from "./evry-taxonomies";
+import { createPerson } from "./service";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
 const TAG_IDENTITY = "people.crm.tags.assign-tag";
@@ -48,6 +59,7 @@ const CREATE_HOUSEHOLD_IDENTITY =
 const ASSESSMENT_IDENTITY = "people.crm.assessments.create-assessment";
 const INTERVIEW_IDENTITY = "people.crm.assessments.create-interview";
 const COMMITMENT_IDENTITY = "people.crm.assessments.create-commitment";
+const IMPORT_IDENTITY = "people.crm.imports.execute-bulk-import";
 const FINGERPRINT = "a".repeat(64);
 
 async function seedAttempt(input: {
@@ -274,18 +286,51 @@ async function main(): Promise<void> {
       notes: null,
       householdId: null,
       householdRole: null,
-    },
+    } as const,
     activitySource: "form" as const,
     expectedHouseholdName: null,
   };
+  const interfacePerson = await createPerson(
+    plant.id,
+    owner.id,
+    {
+      firstName: createInput.person.firstName,
+      lastName: createInput.person.lastName,
+      email: createInput.person.email,
+      country: createInput.person.country,
+      status: createInput.person.status,
+      backgroundCheckStatus: createInput.person.backgroundCheckStatus,
+    },
+    "form"
+  );
   await claimEvryCreatePerson(createInput); // committed; pretend its response vanished
   assert.deepEqual(await claimEvryCreatePerson(createInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
-  const [grace] = await db
-    .select({ id: persons.id })
+  const graceRows = await db
+    .select({
+      id: persons.id,
+      firstName: persons.firstName,
+      lastName: persons.lastName,
+      email: persons.email,
+      phone: persons.phone,
+      addressLine1: persons.addressLine1,
+      addressLine2: persons.addressLine2,
+      city: persons.city,
+      state: persons.state,
+      postalCode: persons.postalCode,
+      country: persons.country,
+      status: persons.status,
+      backgroundCheckStatus: persons.backgroundCheckStatus,
+      source: persons.source,
+      sourceDetails: persons.sourceDetails,
+      notes: persons.notes,
+      householdId: persons.householdId,
+      householdRole: persons.householdRole,
+      createdBy: persons.createdBy,
+    })
     .from(persons)
     .where(
       and(
@@ -293,7 +338,39 @@ async function main(): Promise<void> {
         eq(persons.email, "grace@scratch.invalid")
       )
     );
+  const grace = graceRows.find(({ id }) => id !== interfacePerson.id);
   assert.ok(grace);
+  const interfaceRow = graceRows.find(({ id }) => id === interfacePerson.id);
+  assert.ok(interfaceRow);
+  const normalizeCreatedPerson = ({
+    id: _id,
+    ...row
+  }: (typeof graceRows)[number]) => row;
+  assert.deepEqual(
+    normalizeCreatedPerson(grace),
+    normalizeCreatedPerson(interfaceRow)
+  );
+  const creationActivities = await db
+    .select({
+      personId: personActivities.personId,
+      metadata: personActivities.metadata,
+    })
+    .from(personActivities)
+    .where(
+      and(
+        eq(personActivities.churchId, plant.id),
+        eq(personActivities.activityType, "person_created"),
+        sql`${personActivities.personId} in (${grace.id}::uuid, ${interfacePerson.id}::uuid)`
+      )
+    );
+  assert.deepEqual(
+    creationActivities
+      .map(({ metadata }) => metadata)
+      .toSorted((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right))
+      ),
+    [{ source: "form" }, { source: "form" }]
+  );
 
   const assessmentAttempt = await seedAttempt({
     churchId: plant.id,
@@ -381,6 +458,133 @@ async function main(): Promise<void> {
         witnessedBy: owner.id,
         witnessLabel: "Proof owner",
         notes: null,
+        documentKey: null,
+      },
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  const importAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: IMPORT_IDENTITY,
+    stepId: "bulk-import",
+  });
+  const importedIds = [randomUUID(), randomUUID()];
+  const importInput = {
+    ...importAttempt,
+    rows: [
+      {
+        rowNumber: 2,
+        rowKey: "1".repeat(64),
+        personId: importedIds[0]!,
+        firstName: "Katherine",
+        lastName: "Johnson",
+        email: "katherine@scratch.invalid",
+        phone: null,
+        source: null,
+        addressLine1: null,
+        addressLine2: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: "US",
+        notes: null,
+      },
+      {
+        rowNumber: 3,
+        rowKey: "2".repeat(64),
+        personId: importedIds[1]!,
+        firstName: "Dorothy",
+        lastName: "Vaughan",
+        email: "dorothy@scratch.invalid",
+        phone: null,
+        source: null,
+        addressLine1: null,
+        addressLine2: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: "US",
+        notes: null,
+      },
+    ],
+  };
+  await claimEvryBulkImport(importInput);
+  assert.deepEqual(await claimEvryBulkImport(importInput), {
+    status: "completed",
+    affectedCount: 2,
+    excludedCount: 0,
+  });
+  const importRegistration = evryCapabilityRegistrationFor(IMPORT_IDENTITY);
+  const importExecution =
+    PEOPLE_FILE_EXECUTION_REGISTRY.registrationFor(IMPORT_IDENTITY);
+  assert.ok(importRegistration && importExecution);
+  const authorization = {
+    actor: {
+      userId: owner.id,
+      plantId: plant.id,
+      seat: "owner",
+    } as EvryPlantActor,
+    registration: importRegistration,
+  } as unknown as EvryEffectCapabilityAuthorization;
+  assert.deepEqual(
+    await importExecution.executeIfCurrent({
+      authorization,
+      execution: importAttempt.execution,
+      effectKey: importAttempt.effectKey,
+      arguments: {
+        attachmentReference: "unread-because-the-durable-result-exists",
+        attachmentDigest: "f".repeat(64),
+        originalName: "unread.csv",
+        previewFingerprint: "e".repeat(64),
+        rowsJson: JSON.stringify(importInput.rows),
+        totalRows: 2,
+        createCount: 2,
+        skipCount: 0,
+        invalidCount: 0,
+      },
+    }),
+    { status: "completed", affectedCount: 2, excludedCount: 0 }
+  );
+
+  const photoAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: PEOPLE_FILE_IDENTITIES.photo,
+    stepId: "upload-photo",
+  });
+  await claimEvryUploadPersonPhoto({
+    ...photoAttempt,
+    personId: person.id,
+    currentPhotoKey: null,
+    newPhotoKey: `people/${plant.id}/${person.id}/${randomUUID()}.jpg`,
+  });
+  const photoRegistration = evryCapabilityRegistrationFor(
+    PEOPLE_FILE_IDENTITIES.photo
+  );
+  const photoExecution = PEOPLE_FILE_EXECUTION_REGISTRY.registrationFor(
+    PEOPLE_FILE_IDENTITIES.photo
+  );
+  assert.ok(photoRegistration && photoExecution);
+  assert.deepEqual(
+    await photoExecution.executeIfCurrent({
+      authorization: {
+        actor: authorization.actor,
+        registration: photoRegistration,
+      } as unknown as EvryEffectCapabilityAuthorization,
+      execution: photoAttempt.execution,
+      effectKey: photoAttempt.effectKey,
+      arguments: {
+        personId: person.id,
+        personLabel: "Ada Lovelace",
+        expectedFirstName: "Ada",
+        expectedLastName: "Lovelace",
+        currentPhotoDigest: null,
+        attachmentReference: "unread-because-the-durable-result-exists",
+        attachmentDigest: "f".repeat(64),
+        contentType: "image/jpeg",
+        size: 1,
+        originalName: "unread.jpg",
       },
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
@@ -460,6 +664,7 @@ async function main(): Promise<void> {
     interviewCount,
     commitmentCount,
     graceStatus,
+    importedCount,
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -539,16 +744,27 @@ async function main(): Promise<void> {
       .from(persons)
       .where(and(eq(persons.churchId, plant.id), eq(persons.id, grace.id)))
       .then(([row]) => row?.status),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.churchId, plant.id),
+          sql`${persons.id} in (${importedIds[0]}::uuid, ${importedIds[1]}::uuid)`
+        )
+      )
+      .then(([row]) => row?.count ?? 0),
   ]);
   assert.equal(activityCount, 4);
-  assert.equal(outcomeCount, 8);
+  assert.equal(outcomeCount, 10);
   assert.equal(membershipCount, 1);
-  assert.equal(createdPersonCount, 1);
+  assert.equal(createdPersonCount, 2);
   assert.equal(householdCount, 1);
   assert.equal(assessmentCount, 1);
   assert.equal(interviewCount, 1);
   assert.equal(commitmentCount, 1);
   assert.equal(graceStatus, "core_group");
+  assert.equal(importedCount, 2);
 
   process.stdout.write("People effect live proof passed\n");
 }

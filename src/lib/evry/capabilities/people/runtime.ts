@@ -435,159 +435,156 @@ export const PEOPLE_EVRY_EXECUTION_REGISTRY: EvryExecutionCapabilityRegistry =
 export const PEOPLE_EVRY_PLAN_REGISTRY =
   PEOPLE_EVRY_EXECUTION_REGISTRY.planRegistry;
 
+export const PEOPLE_EVRY_REVIEWS = [
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [PEOPLE_EVRY_ADD_NOTE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = peopleAddNoteArgumentsSchema.parse(step?.arguments);
+      const label = personLabel(parsed.firstName, parsed.lastName);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Add a note for ${label}`,
+        actionLabel: "Add note",
+        consequences: ["This adds one note to the person’s activity timeline."],
+        steps: [
+          {
+            stepId: step?.id ?? "add-note",
+            title: "Add activity note",
+            effectKind: "other",
+            reversibility: "reversible",
+            resolvedTargets: [
+              {
+                label: "Person",
+                value: label,
+                sourceLink: {
+                  label: `Open ${label}`,
+                  href: `/people/${parsed.personId}`,
+                },
+              },
+            ],
+            counts: [{ label: "Notes to add", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [{ label: "Note", content: parsed.note }],
+            beforeAfter: [],
+          },
+        ],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [PEOPLE_EVRY_EDIT_NOTE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = peopleEditNoteArgumentsSchema.parse(step?.arguments);
+      const expectedNote = noteFromMetadataJson(parsed.expectedMetadataJson);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Edit a note for ${parsed.personLabel}`,
+        actionLabel: "Save note edit",
+        consequences: [
+          "This replaces the selected activity note and records an edit time.",
+        ],
+        steps: [
+          {
+            stepId: step?.id ?? "edit-note",
+            title: "Edit activity note",
+            effectKind: "other",
+            reversibility: "reversible",
+            resolvedTargets: [
+              {
+                label: "Person",
+                value: parsed.personLabel,
+                sourceLink: {
+                  label: `Open ${parsed.personLabel}`,
+                  href: `/people/${parsed.personId}/activity`,
+                },
+              },
+              { label: "Note", value: parsed.activityId, sourceLink: null },
+            ],
+            counts: [{ label: "Notes to edit", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [],
+            beforeAfter: [
+              {
+                label: "Note",
+                before: expectedNote,
+                after: parsed.note,
+                count: 1,
+              },
+            ],
+          },
+        ],
+      });
+    },
+  }),
+  defineEvryArtifactReview({
+    source: {
+      kind: "generic",
+      capabilityIdentities: [PEOPLE_EVRY_DELETE_NOTE_IDENTITY],
+    },
+    build({ plan, document }) {
+      const step = document.steps[0];
+      const parsed = peopleDeleteNoteArgumentsSchema.parse(step?.arguments);
+      const expectedNote = noteFromMetadataJson(parsed.expectedMetadataJson);
+      return buildEvryConfirmationArtifact({
+        kind: "confirmation",
+        artifactVersion: 1,
+        plan,
+        title: `Delete a note for ${parsed.personLabel}`,
+        actionLabel: "Delete note",
+        consequences: ["This permanently removes the selected activity note."],
+        steps: [
+          {
+            stepId: step?.id ?? "delete-note",
+            title: "Delete activity note",
+            effectKind: "destructive",
+            reversibility: "irreversible",
+            resolvedTargets: [
+              {
+                label: "Person",
+                value: parsed.personLabel,
+                sourceLink: {
+                  label: `Open ${parsed.personLabel}`,
+                  href: `/people/${parsed.personId}/activity`,
+                },
+              },
+              { label: "Note", value: parsed.activityId, sourceLink: null },
+            ],
+            counts: [{ label: "Notes to delete", count: 1 }],
+            exclusions: [],
+            dateTime: null,
+            contentPreviews: [
+              { label: "Note to delete", content: expectedNote },
+            ],
+            beforeAfter: [
+              {
+                label: "Note",
+                before: expectedNote,
+                after: "Deleted",
+                count: 1,
+              },
+            ],
+          },
+        ],
+      });
+    },
+  }),
+] as const;
 export const PEOPLE_EVRY_REVIEW_REGISTRY: EvryArtifactReviewRegistry =
-  createEvryArtifactReviewRegistry([
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [PEOPLE_EVRY_ADD_NOTE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = peopleAddNoteArgumentsSchema.parse(step?.arguments);
-        const label = personLabel(parsed.firstName, parsed.lastName);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Add a note for ${label}`,
-          actionLabel: "Add note",
-          consequences: [
-            "This adds one note to the person’s activity timeline.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "add-note",
-              title: "Add activity note",
-              effectKind: "other",
-              reversibility: "reversible",
-              resolvedTargets: [
-                {
-                  label: "Person",
-                  value: label,
-                  sourceLink: {
-                    label: `Open ${label}`,
-                    href: `/people/${parsed.personId}`,
-                  },
-                },
-              ],
-              counts: [{ label: "Notes to add", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [{ label: "Note", content: parsed.note }],
-              beforeAfter: [],
-            },
-          ],
-        });
-      },
-    }),
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [PEOPLE_EVRY_EDIT_NOTE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = peopleEditNoteArgumentsSchema.parse(step?.arguments);
-        const expectedNote = noteFromMetadataJson(parsed.expectedMetadataJson);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Edit a note for ${parsed.personLabel}`,
-          actionLabel: "Save note edit",
-          consequences: [
-            "This replaces the selected activity note and records an edit time.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "edit-note",
-              title: "Edit activity note",
-              effectKind: "other",
-              reversibility: "reversible",
-              resolvedTargets: [
-                {
-                  label: "Person",
-                  value: parsed.personLabel,
-                  sourceLink: {
-                    label: `Open ${parsed.personLabel}`,
-                    href: `/people/${parsed.personId}/activity`,
-                  },
-                },
-                { label: "Note", value: parsed.activityId, sourceLink: null },
-              ],
-              counts: [{ label: "Notes to edit", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [],
-              beforeAfter: [
-                {
-                  label: "Note",
-                  before: expectedNote,
-                  after: parsed.note,
-                  count: 1,
-                },
-              ],
-            },
-          ],
-        });
-      },
-    }),
-    defineEvryArtifactReview({
-      source: {
-        kind: "generic",
-        capabilityIdentities: [PEOPLE_EVRY_DELETE_NOTE_IDENTITY],
-      },
-      build({ plan, document }) {
-        const step = document.steps[0];
-        const parsed = peopleDeleteNoteArgumentsSchema.parse(step?.arguments);
-        const expectedNote = noteFromMetadataJson(parsed.expectedMetadataJson);
-        return buildEvryConfirmationArtifact({
-          kind: "confirmation",
-          artifactVersion: 1,
-          plan,
-          title: `Delete a note for ${parsed.personLabel}`,
-          actionLabel: "Delete note",
-          consequences: [
-            "This permanently removes the selected activity note.",
-          ],
-          steps: [
-            {
-              stepId: step?.id ?? "delete-note",
-              title: "Delete activity note",
-              effectKind: "destructive",
-              reversibility: "irreversible",
-              resolvedTargets: [
-                {
-                  label: "Person",
-                  value: parsed.personLabel,
-                  sourceLink: {
-                    label: `Open ${parsed.personLabel}`,
-                    href: `/people/${parsed.personId}/activity`,
-                  },
-                },
-                { label: "Note", value: parsed.activityId, sourceLink: null },
-              ],
-              counts: [{ label: "Notes to delete", count: 1 }],
-              exclusions: [],
-              dateTime: null,
-              contentPreviews: [
-                { label: "Note to delete", content: expectedNote },
-              ],
-              beforeAfter: [
-                {
-                  label: "Note",
-                  before: expectedNote,
-                  after: "Deleted",
-                  count: 1,
-                },
-              ],
-            },
-          ],
-        });
-      },
-    }),
-  ]);
+  createEvryArtifactReviewRegistry(PEOPLE_EVRY_REVIEWS);
 
 export async function proposePeopleEvryNote(input: {
   actor: EvryPlantActor;

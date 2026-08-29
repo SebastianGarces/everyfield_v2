@@ -8,6 +8,7 @@ import { assertPersonInChurch } from "@/lib/people/service";
 import { changeStatus } from "@/lib/people/status";
 import type { ActionResult } from "@/lib/people/types";
 import {
+  commitmentDocumentStorageKey,
   getExtensionFromMimeType,
   getSignedDownloadUrl,
   isAllowedCommitmentFileType,
@@ -118,10 +119,7 @@ export async function createInterviewAction(
     seasonStatus: "pass" | "fail" | "concern";
     seasonNotes?: string;
     overallResult:
-      | "qualified"
-      | "qualified_with_notes"
-      | "not_qualified"
-      | "follow_up";
+      "qualified" | "qualified_with_notes" | "not_qualified" | "follow_up";
     nextSteps?: string;
   }
 ): Promise<ActionResult<Interview>> {
@@ -252,9 +250,12 @@ export async function createCommitmentAction(
         }
 
         // Generate a temporary ID for the file key (will be replaced with actual commitment ID)
-        const tempId = crypto.randomUUID();
         const extension = getExtensionFromMimeType(file.type);
-        documentKey = `commitments/${churchId}/${personId}/${tempId}.${extension}`;
+        documentKey = commitmentDocumentStorageKey(
+          churchId,
+          personId,
+          extension
+        );
 
         // Upload the file
         const fileBuffer = Buffer.from(await file.arrayBuffer());

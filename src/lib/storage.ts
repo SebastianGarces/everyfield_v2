@@ -169,9 +169,10 @@ export function getExtensionFromMimeType(mimeType: string): string {
 export function personPhotoStorageKey(
   churchId: string,
   personId: string,
-  ext: string
+  ext: string,
+  objectId: string = crypto.randomUUID()
 ): string {
-  return `people/${churchId}/${personId}/${crypto.randomUUID()}.${ext}`;
+  return `people/${churchId}/${personId}/${objectId}.${ext}`;
 }
 
 // ============================================================================
@@ -223,6 +224,15 @@ export function isAllowedCommitmentFileType(mimeType: string): boolean {
  * Maximum file size for commitment documents (10MB).
  */
 export const MAX_COMMITMENT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+export function commitmentDocumentStorageKey(
+  churchId: string,
+  personId: string,
+  ext: string,
+  objectId: string = crypto.randomUUID()
+): string {
+  return `commitments/${churchId}/${personId}/${objectId}.${ext}`;
+}
 
 /**
  * Validate file size for commitment documents.

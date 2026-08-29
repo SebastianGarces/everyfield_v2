@@ -182,6 +182,7 @@ export async function claimEvryCreateCommitment(
       witnessedBy: string | null;
       witnessLabel: string | null;
       notes: string | null;
+      documentKey: string | null;
     }>;
   }
 ): Promise<EvryEffectResult> {
@@ -208,7 +209,7 @@ export async function claimEvryCreateCommitment(
           document_url, notes, created_at
         )
         select church_id, id, ${value.commitmentType}, ${value.signedDate}::date,
-          ${value.witnessedBy}::uuid, null, ${value.notes}, transaction_timestamp()
+          ${value.witnessedBy}::uuid, ${value.documentKey}, ${value.notes}, transaction_timestamp()
         from current_person returning church_id, person_id, id
       ), commitment_activity as (
         insert into person_activities (
@@ -217,7 +218,8 @@ export async function claimEvryCreateCommitment(
         select church_id, person_id, 'commitment_recorded',
           jsonb_build_object(
             'commitmentId', id, 'commitmentType', ${value.commitmentType}::text,
-            'signedDate', ${value.signedDate}::text, 'hasDocument', false
+            'signedDate', ${value.signedDate}::text,
+            'hasDocument', ${value.documentKey !== null}::boolean
           ), ${input.execution.actorUserId}::uuid, transaction_timestamp()
         from created_commitment returning church_id, person_id
       ), changed_status as (

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -10,6 +12,10 @@ import {
   users,
 } from "@/db/schema";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
+import {
+  openEvryPeopleAttachmentReference,
+  readExactEvryPeopleAttachment,
+} from "@/lib/evry/capabilities/people/attachments";
 import {
   createEvryArtifactReviewRegistry,
   defineEvryArtifactReview,
@@ -39,7 +45,13 @@ import {
   claimEvryCreateCommitment,
   claimEvryCreateInterview,
 } from "@/lib/people/evry-milestones";
+import { recoverCompletedEvryPeopleEffect } from "@/lib/people/evry-effect";
 import { getPerson } from "@/lib/people/service";
+import {
+  commitmentDocumentStorageKey,
+  getExtensionFromMimeType,
+  uploadFile,
+} from "@/lib/storage";
 
 export const MILESTONE_IDENTITIES = {
   assessment: "people.crm.assessments.create-assessment",
@@ -105,13 +117,38 @@ const witnessJson = z.string().refine((value) => {
     return false;
   }
 });
+const commitmentAttachmentSchema = z
+  .strictObject({
+    reference: z.string().min(1).max(4_000),
+    digest: z.string().regex(/^[0-9a-f]{64}$/),
+    contentType: z.enum([
+      "application/pdf",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+    ]),
+    size: z
+      .number()
+      .int()
+      .positive()
+      .max(10 * 1024 * 1024),
+    originalName: z.string().min(1).max(255),
+  })
+  .nullable();
+const attachmentJson = z.string().refine((value) => {
+  try {
+    return commitmentAttachmentSchema.safeParse(JSON.parse(value)).success;
+  } catch {
+    return false;
+  }
+});
 const commitmentShape = {
   ...personBaseline,
   commitmentType: z.enum(commitmentTypes),
   signedDate: calendarDate,
   witnessJson,
   notes: nullableNotes,
-  document: z.null(),
+  attachmentJson,
   resultingStatus: z.literal("core_group"),
 };
 const commitmentSchema = z.strictObject(commitmentShape);
@@ -276,6 +313,42 @@ export const MILESTONE_EXECUTIONS = [
       const args = commitmentSchema.safeParse(input.arguments);
       if (!args.success || !exactTuple(input, PLANS.commitment.identity))
         return { status: "refused", excludedCount: 1 };
+      const replay = await recoverCompletedEvryPeopleEffect(input);
+      if (replay) return replay;
+      const plannedAttachment = commitmentAttachmentOf(
+        args.data.attachmentJson
+      );
+      let documentKey: string | null = null;
+      if (plannedAttachment) {
+        const attachment = await readExactEvryPeopleAttachment({
+          reference: plannedAttachment.reference,
+          actor: input.authorization.actor,
+          expectedKind: "commitment_document",
+          expectedDigest: plannedAttachment.digest,
+        });
+        if (
+          !attachment ||
+          attachment.document.personId !== args.data.personId ||
+          attachment.document.contentType !== plannedAttachment.contentType ||
+          attachment.document.size !== plannedAttachment.size ||
+          attachment.document.originalName !== plannedAttachment.originalName
+        )
+          return { status: "refused", excludedCount: 1 };
+        const objectId = objectIdFor(
+          `${input.effectKey}:${plannedAttachment.digest}`
+        );
+        documentKey = commitmentDocumentStorageKey(
+          input.authorization.actor.plantId,
+          args.data.personId,
+          getExtensionFromMimeType(plannedAttachment.contentType),
+          objectId
+        );
+        await uploadFile(
+          documentKey,
+          attachment.bytes,
+          plannedAttachment.contentType
+        );
+      }
       return claimEvryCreateCommitment({
         execution: input.execution,
         effectKey: input.effectKey,
@@ -286,6 +359,7 @@ export const MILESTONE_EXECUTIONS = [
           witnessedBy: witnessOf(args.data.witnessJson)?.id ?? null,
           witnessLabel: witnessOf(args.data.witnessJson)?.label ?? null,
           notes: args.data.notes,
+          documentKey,
         },
       });
     },
@@ -309,6 +383,24 @@ function preview(label: string, content: string | null) {
 
 function witnessOf(value: string): z.infer<typeof witnessSchema> {
   return witnessSchema.parse(JSON.parse(value));
+}
+
+function commitmentAttachmentOf(
+  value: string
+): z.infer<typeof commitmentAttachmentSchema> {
+  return commitmentAttachmentSchema.parse(JSON.parse(value));
+}
+
+function objectIdFor(value: string): string {
+  const hex = createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  hex[12] = "4";
+  hex[16] = "8";
+  const joined = hex.join("");
+  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
 }
 
 export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(
@@ -448,6 +540,7 @@ export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(
           });
         }
         const args = commitmentSchema.parse(step.arguments);
+        const attachment = commitmentAttachmentOf(args.attachmentJson);
         return buildEvryConfirmationArtifact({
           kind: "confirmation",
           artifactVersion: 1,
@@ -455,7 +548,7 @@ export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(
           title: `Record commitment for ${args.personLabel}`,
           actionLabel: "Record commitment",
           consequences: [
-            "Creates one permanent commitment without an attachment and advances the person to core group status.",
+            `Creates one permanent commitment${attachment ? " with the exact staged attachment" : " without an attachment"} and advances the person to core group status.`,
           ],
           steps: [
             {
@@ -468,20 +561,27 @@ export const MILESTONE_REVIEWS = Object.values(MILESTONE_IDENTITIES).map(
                 ...(witnessOf(args.witnessJson)
                   ? [target("Witness", witnessOf(args.witnessJson)!.label)]
                   : []),
+                ...(attachment
+                  ? [target("File", attachment.originalName)]
+                  : []),
               ],
               counts: [
                 { label: "Commitments to create", count: 1 },
-                { label: "Attachments", count: 0 },
+                { label: "Attachments", count: attachment ? 1 : 0 },
               ],
-              exclusions: [
-                {
-                  reason:
-                    "This closed request does not include a file attachment.",
-                  count: 0,
-                },
-              ],
+              exclusions: [],
               dateTime: null,
-              contentPreviews: preview("Notes", args.notes),
+              contentPreviews: [
+                ...preview("Notes", args.notes),
+                ...(attachment
+                  ? [
+                      {
+                        label: "Attachment SHA-256",
+                        content: attachment.digest,
+                      },
+                    ]
+                  : []),
+              ],
               beforeAfter: [
                 {
                   label: "Commitment type",
@@ -524,6 +624,7 @@ export async function proposeMilestoneEffect(input: {
   pageContext: EvryResolvedPageContext | null;
   selection: MilestoneSelection;
   requestKey: EvryPlanRequestKey;
+  attachmentReference?: string;
 }) {
   const identity = MILESTONE_IDENTITIES[input.selection.kind];
   const authorization = await authorizeEvryEffectCapability(identity);
@@ -620,6 +721,22 @@ export async function proposeMilestoneEffect(input: {
       if (!witness) return null;
       witnessLabel = witness.name ?? witness.email;
     }
+    let attachment: z.infer<typeof commitmentAttachmentSchema> = null;
+    if (input.attachmentReference) {
+      const opened = openEvryPeopleAttachmentReference({
+        reference: input.attachmentReference,
+        actor: input.actor,
+        expectedKind: "commitment_document",
+      });
+      if (!opened || opened.personId !== person.id) return null;
+      attachment = commitmentAttachmentSchema.parse({
+        reference: input.attachmentReference,
+        digest: opened.digest,
+        contentType: opened.contentType,
+        size: opened.size,
+        originalName: opened.originalName,
+      });
+    }
     args = {
       ...base,
       commitmentType: value.type,
@@ -628,7 +745,7 @@ export async function proposeMilestoneEffect(input: {
         witnessedBy ? { id: witnessedBy, label: witnessLabel } : null
       ),
       notes: note(value, "notes"),
-      document: null,
+      attachmentJson: JSON.stringify(attachment),
       resultingStatus: "core_group",
     };
   }
@@ -688,18 +805,33 @@ export async function milestoneTargetIsCurrent(input: {
     return true;
   const args = commitmentSchema.parse(parsed.data);
   const expectedWitness = witnessOf(args.witnessJson);
-  if (!expectedWitness) return true;
-  const [witness] = await db
-    .select({ label: users.name, email: users.email })
-    .from(users)
-    .where(
-      and(
-        eq(users.churchId, input.actor.plantId),
-        eq(users.id, expectedWitness.id)
+  if (expectedWitness) {
+    const [witness] = await db
+      .select({ label: users.name, email: users.email })
+      .from(users)
+      .where(
+        and(
+          eq(users.churchId, input.actor.plantId),
+          eq(users.id, expectedWitness.id)
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
+    if (!witness || (witness.label ?? witness.email) !== expectedWitness.label)
+      return false;
+  }
+  const expectedAttachment = commitmentAttachmentOf(args.attachmentJson);
+  if (!expectedAttachment) return true;
+  const attachment = await readExactEvryPeopleAttachment({
+    reference: expectedAttachment.reference,
+    actor: input.actor,
+    expectedKind: "commitment_document",
+    expectedDigest: expectedAttachment.digest,
+  });
   return Boolean(
-    witness && (witness.label ?? witness.email) === expectedWitness.label
+    attachment &&
+    attachment.document.personId === args.personId &&
+    attachment.document.contentType === expectedAttachment.contentType &&
+    attachment.document.size === expectedAttachment.size &&
+    attachment.document.originalName === expectedAttachment.originalName
   );
 }

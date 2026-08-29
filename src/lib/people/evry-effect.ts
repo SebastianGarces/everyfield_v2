@@ -18,7 +18,7 @@ interface CompletedEffectRow extends Record<string, unknown> {
   excluded_count: number;
 }
 
-async function exactCompletedOutcome(
+export async function recoverCompletedEvryPeopleEffect(
   input: Pick<EvryEffectInput, "execution" | "effectKey">
 ): Promise<EvryEffectResult | null> {
   const [row] = await db
@@ -139,7 +139,7 @@ export async function claimEvryPeopleEffect(input: {
     ) {
       throw error;
     }
-    const replay = await exactCompletedOutcome(input);
+    const replay = await recoverCompletedEvryPeopleEffect(input);
     return replay ?? { status: "retryable" };
   }
 
@@ -151,7 +151,7 @@ export async function claimEvryPeopleEffect(input: {
       excludedCount: row.excluded_count,
     };
   }
-  const replay = await exactCompletedOutcome(input);
+  const replay = await recoverCompletedEvryPeopleEffect(input);
   if (replay) return replay;
   return (await input.targetIsCurrent())
     ? { status: "retryable" }

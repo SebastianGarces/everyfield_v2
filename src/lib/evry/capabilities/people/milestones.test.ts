@@ -64,7 +64,7 @@ test("commitment plan requires exact witness identity and label pairing", () => 
     signedDate: "2026-08-29",
     witnessJson: JSON.stringify({ id: PERSON_ID, label: "Grace Hopper" }),
     notes: null,
-    document: null,
+    attachmentJson: "null",
     resultingStatus: "core_group",
   };
   const document = parseEvryActionPlanCandidate({
