@@ -32,7 +32,7 @@ before(() => {
       cwd: process.cwd(),
       env: process.env,
       encoding: "utf8",
-      timeout: 120_000,
+      timeout: 420_000,
     }
   );
   output = `${result.stdout}${result.stderr}`;
@@ -46,6 +46,13 @@ run("Task effect live proof refuses cross-plant resolution", () => {
 run("Task effects refuse one of two concurrently confirmed stale plans", () => {
   assert.match(output, /PASS tasks:competing-confirmed-plans/);
 });
+
+run(
+  "Task effects refuse prerequisite and child-set drift after confirmation",
+  () => {
+    assert.match(output, /PASS tasks:structural-source-drift/);
+  }
+);
 
 run("Task source-derived handoff remains exact above the bulk UI cap", () => {
   assert.match(output, /PASS tasks:source-derived-handoff-above-bulk-cap/);

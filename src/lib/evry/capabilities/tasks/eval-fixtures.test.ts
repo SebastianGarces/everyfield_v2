@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { evryDetailedConfirmationArtifactDocumentSchema } from "@/lib/evry/artifacts/review";
+import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+import {
+  hydrateStoredEvryConversationArtifact,
+  parseEvryConversationArtifactDocument,
+} from "@/lib/evry/conversations/artifacts";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import { evryCapabilityRegistrationFor } from "@/lib/evry/eligibility/capabilities";
 import {
@@ -10,6 +17,10 @@ import {
   type EvryCapabilityEvalLayer,
 } from "@/lib/evry/evals/contracts";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
+import {
+  EvryArtifactRenderer,
+  renderableEvryArtifact,
+} from "@/components/evry/artifacts/artifact-renderer";
 
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 import { TASKS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
@@ -308,4 +319,92 @@ test("a source-derived handoff above the bulk UI cap remains fully reviewable", 
   assert.equal(targets.length, 101);
   assert.match(targets[100]!.value, /Follow-up 101/);
   assert.match(targets[100]!.value, /assignedToId/);
+});
+
+test("large compound Task evidence remains byte-exact through persistence, public projection, and rendering", () => {
+  const identity = TASK_ACTION_CONTRACTS.bulkRescheduleTasksAction.operationId;
+  const base = taskEffectPlanFixture("bulkRescheduleTasksAction");
+  const midpoint = "TASK_DESCRIPTION_MIDPOINT_SENTINEL";
+  const description = `${"a".repeat(3_500)}${midpoint}${"z".repeat(3_500)}`;
+  const writes = Array.from({ length: 8 }, (_, index) => {
+    const taskId = `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+    const original = base.taskWrites[0]!;
+    return {
+      ...original,
+      taskId,
+      before: {
+        ...original.before!,
+        id: taskId,
+        title: `Large compound task ${index + 1}`,
+        description: `${description}-${index}`,
+      },
+      after: {
+        ...original.after,
+        id: taskId,
+        title: `Large compound task ${index + 1}`,
+        description: `${description}-${index}`,
+      },
+    };
+  });
+  const arguments_ = {
+    ...base,
+    taskWrites: writes,
+    notifications: {
+      ...base.notifications,
+      scopedTaskIds: writes.map(({ taskId }) => taskId),
+    },
+    disclosure: {
+      ...base.disclosure,
+      targets: writes.map(
+        ({ taskId, after }) => `Task ${taskId}: ${after.title}`
+      ),
+      counts: [{ label: "Tasks", count: writes.length }],
+      changes: writes.map(({ before, after }) => ({
+        label: `${after.title} — due date`,
+        before: before.dueDate ?? "No date",
+        after: after.dueDate ?? "No date",
+      })),
+    },
+  };
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: identity,
+          capabilityIdentity: identity,
+          arguments: arguments_,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: TASK_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity }],
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: PLAN,
+    document,
+    reviewRegistry: TASK_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+  const stored = parseEvryConversationArtifactDocument(
+    JSON.parse(JSON.stringify(review.confirmation))
+  );
+  const publicArtifact = publicEvryArtifact(
+    hydrateStoredEvryConversationArtifact(stored)
+  );
+  assert.equal(publicArtifact.kind, "confirmation");
+  assert.ok("artifactVersion" in publicArtifact);
+  const evidence = publicArtifact.steps[0]!.contentPreviews.map(
+    ({ content }) => content
+  ).join("");
+  assert.equal(
+    JSON.parse(evidence).taskWrites[7].before.description,
+    `${description}-7`
+  );
+  const markup = renderToStaticMarkup(
+    createElement(EvryArtifactRenderer, {
+      model: renderableEvryArtifact(publicArtifact),
+    })
+  );
+  assert.match(markup, new RegExp(midpoint));
 });
