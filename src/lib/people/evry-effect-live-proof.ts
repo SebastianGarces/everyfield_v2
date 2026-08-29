@@ -12,6 +12,7 @@ import {
   evryExecutionOutcomes,
   evryPlanConfirmations,
   evryProductAuditEvents,
+  households,
   personActivities,
   personTags,
   persons,
@@ -28,11 +29,14 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
 import { claimEvryCreatePerson } from "./evry-core";
+import { claimEvryCreateHouseholdWithHead } from "./evry-households";
 import { claimEvryAssignTag } from "./evry-taxonomies";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
 const TAG_IDENTITY = "people.crm.tags.assign-tag";
 const CREATE_PERSON_IDENTITY = "people.crm.people.create-person";
+const CREATE_HOUSEHOLD_IDENTITY =
+  "people.crm.households.create-household-with-head";
 const FINGERPRINT = "a".repeat(64);
 
 async function seedAttempt(input: {
@@ -270,6 +274,39 @@ async function main(): Promise<void> {
     excludedCount: 0,
   });
 
+  const householdAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: CREATE_HOUSEHOLD_IDENTITY,
+    stepId: "create-household",
+  });
+  const householdId = randomUUID();
+  const householdInput = {
+    ...householdAttempt,
+    person: {
+      personId: person.id,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      householdId: null,
+      householdRole: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: null,
+      state: null,
+      postalCode: null,
+      country: "US",
+    },
+    householdId,
+    householdName: "Lovelace",
+    usePersonAddress: false,
+  };
+  await claimEvryCreateHouseholdWithHead(householdInput);
+  assert.deepEqual(await claimEvryCreateHouseholdWithHead(householdInput), {
+    status: "completed",
+    affectedCount: 2,
+    excludedCount: 0,
+  });
+
   const [tag] = await db
     .insert(tags)
     .values({ churchId: plant.id, name: "Follow-up", color: "blue" })
@@ -301,49 +338,62 @@ async function main(): Promise<void> {
     excludedCount: 0,
   });
 
-  const [activityCount, outcomeCount, membershipCount, createdPersonCount] =
-    await Promise.all([
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(personActivities)
-        .where(
-          and(
-            eq(personActivities.churchId, plant.id),
-            eq(personActivities.personId, person.id)
-          )
+  const [
+    activityCount,
+    outcomeCount,
+    membershipCount,
+    createdPersonCount,
+    householdCount,
+  ] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(personActivities)
+      .where(
+        and(
+          eq(personActivities.churchId, plant.id),
+          eq(personActivities.personId, person.id)
         )
-        .then(([row]) => row?.count ?? 0),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(evryExecutionOutcomes)
-        .where(eq(evryExecutionOutcomes.churchId, plant.id))
-        .then(([row]) => row?.count ?? 0),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(personTags)
-        .where(
-          and(
-            eq(personTags.churchId, plant.id),
-            eq(personTags.personId, person.id),
-            eq(personTags.tagId, tag.id)
-          )
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionOutcomes)
+      .where(eq(evryExecutionOutcomes.churchId, plant.id))
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(personTags)
+      .where(
+        and(
+          eq(personTags.churchId, plant.id),
+          eq(personTags.personId, person.id),
+          eq(personTags.tagId, tag.id)
         )
-        .then(([row]) => row?.count ?? 0),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(persons)
-        .where(
-          and(
-            eq(persons.churchId, plant.id),
-            eq(persons.email, "grace@scratch.invalid")
-          )
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.churchId, plant.id),
+          eq(persons.email, "grace@scratch.invalid")
         )
-        .then(([row]) => row?.count ?? 0),
-    ]);
-  assert.equal(activityCount, 3);
-  assert.equal(outcomeCount, 4);
+      )
+      .then(([row]) => row?.count ?? 0),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(households)
+      .where(
+        and(eq(households.churchId, plant.id), eq(households.id, householdId))
+      )
+      .then(([row]) => row?.count ?? 0),
+  ]);
+  assert.equal(activityCount, 4);
+  assert.equal(outcomeCount, 5);
   assert.equal(membershipCount, 1);
   assert.equal(createdPersonCount, 1);
+  assert.equal(householdCount, 1);
 
   process.stdout.write("People effect live proof passed\n");
 }
