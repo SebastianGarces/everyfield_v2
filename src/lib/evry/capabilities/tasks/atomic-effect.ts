@@ -224,6 +224,15 @@ function taskStateCurrent(execution: Execution): SQL {
       )
     )
     and not exists (
+      select 1 from source_task_plan source
+      where not exists (
+        select 1 from tasks current_source
+        where current_source.id = source.task_id
+          and current_source.church_id = ${execution.plantId}::uuid
+          and ${serializedTask(sql`current_source`)} = source.before_state
+      )
+    )
+    and not exists (
       select 1 from task_plan p
       where p.before_state is null
         and (p.after_state->>'createdById')::uuid <> ${execution.actorUserId}::uuid
@@ -332,15 +341,72 @@ function taskStateCurrent(execution: Execution): SQL {
 }
 
 function dependencyStateCurrent(execution: Execution): SQL {
+  return sql`
+    case when not exists (select 1 from dependency_plan) then true else (
+    not exists (
+      select 1 from dependency_plan p
+      where coalesce((
+        select jsonb_agg(d.prerequisite_task_id::text order by d.prerequisite_task_id::text)
+        from task_dependencies d
+        where d.church_id = ${execution.plantId}::uuid and d.task_id = p.task_id
+      ), '[]'::jsonb) <> coalesce((
+        select jsonb_agg(value order by value)
+        from jsonb_array_elements_text(p.before_ids) value
+      ), '[]'::jsonb)
+    )
+    and not exists (
+      select 1
+      from dependency_plan p,
+           jsonb_array_elements_text(p.after_ids) prerequisite(prerequisite_id)
+      where prerequisite.prerequisite_id::uuid = p.task_id
+        or not exists (
+          select 1 from tasks prerequisite_task
+          where prerequisite_task.id = prerequisite.prerequisite_id::uuid
+            and prerequisite_task.church_id = ${execution.plantId}::uuid
+            and prerequisite_task.deleted_at is null
+            and prerequisite_task.parent_task_id is null
+        )
+    )
+    and not exists (
+      with recursive prospective_edges(task_id, prerequisite_task_id) as (
+        select dependency.task_id, dependency.prerequisite_task_id
+        from task_dependencies dependency
+        where dependency.church_id = ${execution.plantId}::uuid
+          and not exists (
+            select 1 from dependency_plan replacement
+            where replacement.task_id = dependency.task_id
+          )
+        union all
+        select replacement.task_id, prerequisite.prerequisite_id::uuid
+        from dependency_plan replacement,
+             jsonb_array_elements_text(replacement.after_ids) prerequisite(prerequisite_id)
+      ), reachability(origin_task_id, prerequisite_task_id) as (
+        select replacement.task_id, prerequisite.prerequisite_id::uuid
+        from dependency_plan replacement,
+             jsonb_array_elements_text(replacement.after_ids) prerequisite(prerequisite_id)
+        union
+        select reachability.origin_task_id, edge.prerequisite_task_id
+        from reachability
+        join prospective_edges edge
+          on edge.task_id = reachability.prerequisite_task_id
+      )
+      select 1 from reachability
+      where origin_task_id = prerequisite_task_id
+    )) end`;
+}
+
+function childSetStateCurrent(execution: Execution): SQL {
   return sql`not exists (
-    select 1 from dependency_plan p
+    select 1 from child_set_plan expected
     where coalesce((
-      select jsonb_agg(d.prerequisite_task_id::text order by d.prerequisite_task_id::text)
-      from task_dependencies d
-      where d.church_id = ${execution.plantId}::uuid and d.task_id = p.task_id
+      select jsonb_agg(child.id::text order by child.id::text)
+      from tasks child
+      where child.church_id = ${execution.plantId}::uuid
+        and child.parent_task_id = expected.parent_task_id
+        and child.deleted_at is null
     ), '[]'::jsonb) <> coalesce((
       select jsonb_agg(value order by value)
-      from jsonb_array_elements_text(p.before_ids) value
+      from jsonb_array_elements_text(expected.task_ids) value
     ), '[]'::jsonb)
   )`;
 }
@@ -525,6 +591,7 @@ function mutationStatement(input: {
     ${authorityCurrent(input)}
     and ${taskStateCurrent(input.execution)}
     and ${dependencyStateCurrent(input.execution)}
+    and ${childSetStateCurrent(input.execution)}
     and ${notificationStateCurrent(input.execution)}
     and ${sourceStateCurrent(input.execution)}
     and ${phaseStateCurrent(input.execution)}
@@ -535,6 +602,8 @@ function mutationStatement(input: {
       select
         document->'taskWrites' as task_writes,
         document->'subjectTasks' as subject_tasks,
+        document->'sourceTasks' as source_tasks,
+        document->'childSets' as child_sets,
         document->'dependencySets' as dependency_sets,
         document->'notifications'->'scopedTaskIds' as notification_scope_ids,
         document->'beforeRows' as before_rows,
@@ -556,6 +625,14 @@ function mutationStatement(input: {
     ), subject_plan as materialized (
       select (value->>'id')::uuid as task_id, value as before_state
       from plan, jsonb_array_elements(plan.subject_tasks) value
+    ), source_task_plan as materialized (
+      select (value->>'id')::uuid as task_id, value as before_state
+      from plan, jsonb_array_elements(plan.source_tasks) value
+    ), child_set_plan as materialized (
+      select
+        (value->>'parentTaskId')::uuid as parent_task_id,
+        value->'taskIds' as task_ids
+      from plan, jsonb_array_elements(plan.child_sets) value
     ), dependency_plan as materialized (
       select
         (value->>'taskId')::uuid as task_id,
@@ -821,6 +898,8 @@ export async function taskEffectArgumentsAreCurrent(input: {
       select
         document->'taskWrites' as task_writes,
         document->'subjectTasks' as subject_tasks,
+        document->'sourceTasks' as source_tasks,
+        document->'childSets' as child_sets,
         document->'dependencySets' as dependency_sets,
         document->'notifications'->'scopedTaskIds' as notification_scope_ids,
         document->'beforeRows' as before_rows,
@@ -841,6 +920,13 @@ export async function taskEffectArgumentsAreCurrent(input: {
     ), subject_plan as materialized (
       select (value->>'id')::uuid as task_id, value as before_state
       from plan, jsonb_array_elements(plan.subject_tasks) value
+    ), source_task_plan as materialized (
+      select (value->>'id')::uuid as task_id, value as before_state
+      from plan, jsonb_array_elements(plan.source_tasks) value
+    ), child_set_plan as materialized (
+      select (value->>'parentTaskId')::uuid as parent_task_id,
+             value->'taskIds' as task_ids
+      from plan, jsonb_array_elements(plan.child_sets) value
     ), dependency_plan as materialized (
       select (value->>'taskId')::uuid as task_id,
              value->'beforePrerequisiteIds' as before_ids,
@@ -877,6 +963,7 @@ export async function taskEffectArgumentsAreCurrent(input: {
       ${authorityCurrent({ execution, exportName: input.exportName })}
       and ${taskStateCurrent(execution)}
       and ${dependencyStateCurrent(execution)}
+      and ${childSetStateCurrent(execution)}
       and ${notificationStateCurrent(execution)}
       and ${sourceStateCurrent(execution)}
       and ${phaseStateCurrent(execution)}

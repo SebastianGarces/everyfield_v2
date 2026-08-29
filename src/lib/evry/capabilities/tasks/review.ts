@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
   createEvryArtifactReviewRegistry,
@@ -18,42 +16,23 @@ import {
 
 const PREVIEW_CHUNK = 3_800;
 
-function serializedPreview(value: unknown): string {
+function serialized(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (!serialized)
     throw new Error("Task confirmation content is not serializable");
-  if (serialized.length <= PREVIEW_CHUNK) return serialized;
-  const digest = createHash("sha256").update(serialized).digest("hex");
-  const marker = "… exact middle omitted from this display …";
-  const footer = `Exact length ${serialized.length}; SHA-256 ${digest}`;
-  const room = PREVIEW_CHUNK - marker.length - footer.length - 2;
-  const prefix = Math.ceil(room / 2);
-  const suffix = Math.floor(room / 2);
-  return `${serialized.slice(0, prefix)}\n${marker}\n${serialized.slice(-suffix)}\n${footer}`;
+  return serialized;
 }
 
 function chunks(value: unknown, label: string) {
-  const serialized = JSON.stringify(value);
-  if (!serialized)
-    throw new Error("Task confirmation content is not serializable");
-  if (serialized.length <= PREVIEW_CHUNK) {
-    return [{ label, content: serialized }];
+  const exact = serialized(value);
+  if (exact.length <= PREVIEW_CHUNK) {
+    return [{ label, content: exact }];
   }
   const parts: { label: string; content: string }[] = [];
-  for (
-    let index = 0;
-    index < serialized.length && parts.length < 7;
-    index += PREVIEW_CHUNK
-  ) {
+  for (let index = 0; index < exact.length; index += PREVIEW_CHUNK) {
     parts.push({
       label: `${label} (${parts.length + 1})`,
-      content: serialized.slice(index, index + PREVIEW_CHUNK),
-    });
-  }
-  if (parts.length * PREVIEW_CHUNK < serialized.length) {
-    parts.push({
-      label: `${label} integrity`,
-      content: serializedPreview(value),
+      content: exact.slice(index, index + PREVIEW_CHUNK),
     });
   }
   return parts;
@@ -81,12 +60,14 @@ function taskWriteTarget(
           : [];
       })
   );
+  const exactChanges = serialized({ title: write.after.title, changes });
+  const targetPrefix = `Task ${write.taskId}: `;
   return {
     label: `Task ${index + 1}`,
-    value: `Task ${write.taskId}: ${serializedPreview({
-      title: write.after.title,
-      changes,
-    })}`,
+    value:
+      targetPrefix.length + exactChanges.length <= 4_000
+        ? `${targetPrefix}${exactChanges}`
+        : `${targetPrefix}${write.after.title}. Full exact before/after content is displayed in Immutable Task plan evidence below.`,
     sourceLink:
       write.before === null
         ? null
@@ -179,18 +160,7 @@ function reviewFor(input: {
           count: 1,
         })),
         dateTime: null,
-        contentPreviews: chunks(
-          {
-            operation: args.operation,
-            taskWrites: args.taskWrites,
-            dependencySets: args.dependencySets,
-            notifications: args.notifications,
-            phaseTransition: args.phaseTransition,
-            completionEffects: args.completionEffects,
-            sourceAssertion: args.sourceAssertion,
-          },
-          "Immutable Task plan evidence"
-        ),
+        contentPreviews: chunks(args, "Immutable Task plan evidence"),
         beforeAfter: disclosure.changes.slice(0, 32).map((item) => ({
           ...item,
           count: 1,

@@ -17,7 +17,6 @@ import { collectActionSurfaces, collectRouteSurfaces } from "./inventory";
 import {
   discoverTaskPageReadOperations,
   discoverTaskActionIdentities,
-  TASK_ACTION_SOURCES,
   TASKS_DISCOVERED_READ_EXCLUSIONS,
   taskReadIdentity,
 } from "./tasks-source-discovery";
@@ -30,8 +29,6 @@ const GENERATED_INVENTORY = path.join(
   "tasks",
   "inventory.generated.json"
 );
-
-const TASK_ACTION_SOURCE_SET = new Set(TASK_ACTION_SOURCES);
 
 type TaskReadDomain = "detail" | "list" | "planning" | "templates";
 type TaskDomain =
@@ -230,7 +227,7 @@ function supportedSurface(
 
 function actionEntries(repoRoot: string): TaskEvrySurface[] {
   const guarded = collectActionSurfaces().filter(({ source }) =>
-    TASK_ACTION_SOURCE_SET.has(source as (typeof TASK_ACTION_SOURCES)[number])
+    source.startsWith("src/app/(dashboard)/tasks/")
   );
   const discovered = discoverTaskActionIdentities(repoRoot);
   const guardedIdentities = guarded.map(({ identity }) => identity).toSorted();

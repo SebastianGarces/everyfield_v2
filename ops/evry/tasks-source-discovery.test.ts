@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   discoverTaskActionIdentities,
+  discoverTaskActionSources,
   discoverTaskPageReadOperations,
   discoverTaskPageSources,
   TASKS_DISCOVERED_READ_EXCLUSIONS,
@@ -10,6 +14,11 @@ import {
 } from "./tasks-source-discovery";
 
 test("Task action discovery starts from every server export", () => {
+  assert.deepEqual(discoverTaskActionSources(), [
+    "src/app/(dashboard)/tasks/actions.ts",
+    "src/app/(dashboard)/tasks/follow-up-actions.ts",
+    "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
+  ]);
   assert.deepEqual(discoverTaskActionIdentities(), [
     "action:src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
     "action:src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
@@ -30,6 +39,30 @@ test("Task action discovery starts from every server export", () => {
     "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → dismissPhaseTemplatePromptAction",
     "action:src/app/(dashboard)/tasks/phase-prompt-actions.ts → importPhaseTemplatesAction",
   ]);
+});
+
+test("Task action discovery cannot overlook a new nested server module", () => {
+  const repoRoot = mkdtempSync(path.join(tmpdir(), "task-action-discovery-"));
+  const nested = path.join(
+    repoRoot,
+    "src/app/(dashboard)/tasks/nested/new-actions.ts"
+  );
+  mkdirSync(path.dirname(nested), { recursive: true });
+  writeFileSync(
+    nested,
+    '"use server";\nexport async function newlyAddedTaskAction() {}\nexport const anotherTaskAction = async () => {};\n'
+  );
+  try {
+    assert.deepEqual(discoverTaskActionSources(repoRoot), [
+      "src/app/(dashboard)/tasks/nested/new-actions.ts",
+    ]);
+    assert.deepEqual(discoverTaskActionIdentities(repoRoot), [
+      "action:src/app/(dashboard)/tasks/nested/new-actions.ts → anotherTaskAction",
+      "action:src/app/(dashboard)/tasks/nested/new-actions.ts → newlyAddedTaskAction",
+    ]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("Task page discovery walks every authenticated route recursively", () => {

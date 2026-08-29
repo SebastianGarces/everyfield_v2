@@ -24,12 +24,6 @@ const TASK_PAGE_SOURCES = [
   "src/app/(dashboard)/tasks/templates/page.tsx",
 ] as const;
 
-export const TASK_ACTION_SOURCES = [
-  "src/app/(dashboard)/tasks/actions.ts",
-  "src/app/(dashboard)/tasks/follow-up-actions.ts",
-  "src/app/(dashboard)/tasks/phase-prompt-actions.ts",
-] as const;
-
 /** Imported calls that are boundaries/query builders rather than Task reads. */
 export const TASKS_DISCOVERED_READ_EXCLUSIONS = Object.freeze([
   ...TASK_PAGE_SOURCES.map((source) =>
@@ -65,6 +59,20 @@ function pageSources(directory: string): readonly string[] {
     .toSorted();
 }
 
+function moduleSources(directory: string): readonly string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) return moduleSources(candidate);
+      return entry.isFile() &&
+        /\.(?:ts|tsx)$/.test(entry.name) &&
+        !/\.(?:test|spec)\.(?:ts|tsx)$/.test(entry.name)
+        ? [candidate]
+        : [];
+    })
+    .toSorted();
+}
+
 /** Every authenticated Task Management page, discovered from the route tree. */
 export function discoverTaskPageSources(
   repoRoot = process.cwd()
@@ -74,6 +82,102 @@ export function discoverTaskPageSources(
     pageSources(routeRoot).map((source) =>
       normalizeSource(path.relative(repoRoot, source))
     )
+  );
+}
+
+function parsedSource(source: string, absoluteSource: string): ts.SourceFile {
+  return ts.createSourceFile(
+    source,
+    readFileSync(absoluteSource, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    source.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+}
+
+function isServerModule(sourceFile: ts.SourceFile): boolean {
+  return sourceFile.statements.some(
+    (statement) =>
+      ts.isExpressionStatement(statement) &&
+      ts.isStringLiteral(statement.expression) &&
+      statement.expression.text === "use server"
+  );
+}
+
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+  return Boolean(
+    ts.canHaveModifiers(node) &&
+    ts.getModifiers(node)?.some((modifier) => modifier.kind === kind)
+  );
+}
+
+function exportedRuntimeNames(sourceFile: ts.SourceFile): readonly string[] {
+  const names: string[] = [];
+  for (const statement of sourceFile.statements) {
+    if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement) ||
+        ts.isEnumDeclaration(statement)) &&
+      hasModifier(statement, ts.SyntaxKind.ExportKeyword)
+    ) {
+      if (hasModifier(statement, ts.SyntaxKind.DefaultKeyword)) {
+        names.push("default");
+      } else if (statement.name) {
+        names.push(statement.name.text);
+      } else {
+        throw new Error(
+          `Task server module has an unnamed exported runtime declaration: ${sourceFile.fileName}`
+        );
+      }
+      continue;
+    }
+    if (
+      ts.isVariableStatement(statement) &&
+      hasModifier(statement, ts.SyntaxKind.ExportKeyword)
+    ) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) {
+          throw new Error(
+            `Task server module has an unsupported exported binding: ${sourceFile.fileName}`
+          );
+        }
+        names.push(declaration.name.text);
+      }
+      continue;
+    }
+    if (ts.isExportDeclaration(statement) && !statement.isTypeOnly) {
+      if (!statement.exportClause) {
+        throw new Error(
+          `Task server module has an unbounded star export: ${sourceFile.fileName}`
+        );
+      }
+      if (ts.isNamespaceExport(statement.exportClause)) {
+        names.push(statement.exportClause.name.text);
+      } else {
+        for (const element of statement.exportClause.elements) {
+          if (!element.isTypeOnly) names.push(element.name.text);
+        }
+      }
+      continue;
+    }
+    if (ts.isExportAssignment(statement)) names.push("default");
+  }
+  return names.toSorted();
+}
+
+/** Every server-action module under the authenticated Task route tree. */
+export function discoverTaskActionSources(
+  repoRoot = process.cwd()
+): readonly string[] {
+  const routeRoot = path.join(repoRoot, TASKS_ROUTE_ROOT);
+  return Object.freeze(
+    moduleSources(routeRoot)
+      .filter((absoluteSource) => {
+        const source = normalizeSource(path.relative(repoRoot, absoluteSource));
+        return isServerModule(parsedSource(source, absoluteSource));
+      })
+      .map((source) => normalizeSource(path.relative(repoRoot, source)))
+      .toSorted()
   );
 }
 
@@ -141,13 +245,7 @@ export function discoverTaskPageReadOperations(
   const discovered = new Set<string>();
   for (const source of discoverTaskPageSources(repoRoot)) {
     const absoluteSource = path.join(repoRoot, source);
-    const sourceFile = ts.createSourceFile(
-      source,
-      readFileSync(absoluteSource, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX
-    );
+    const sourceFile = parsedSource(source, absoluteSource);
     const imports = importedCalls(sourceFile);
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && awaitedByPage(node, sourceFile)) {
@@ -170,37 +268,10 @@ export function discoverTaskActionIdentities(
   repoRoot = process.cwd()
 ): readonly string[] {
   const identities: string[] = [];
-  for (const source of TASK_ACTION_SOURCES) {
-    const sourceFile = ts.createSourceFile(
-      source,
-      readFileSync(path.join(repoRoot, source), "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TS
-    );
-    const serverModule = sourceFile.statements.some(
-      (statement) =>
-        ts.isExpressionStatement(statement) &&
-        ts.isStringLiteral(statement.expression) &&
-        statement.expression.text === "use server"
-    );
-    if (!serverModule) {
-      throw new Error(`Task action source is missing use server: ${source}`);
-    }
-    for (const statement of sourceFile.statements) {
-      if (
-        !ts.isFunctionDeclaration(statement) ||
-        !statement.name ||
-        !statement.modifiers?.some(
-          ({ kind }) => kind === ts.SyntaxKind.ExportKeyword
-        ) ||
-        !statement.modifiers.some(
-          ({ kind }) => kind === ts.SyntaxKind.AsyncKeyword
-        )
-      ) {
-        continue;
-      }
-      identities.push(`action:${source} → ${statement.name.text}`);
+  for (const source of discoverTaskActionSources(repoRoot)) {
+    const sourceFile = parsedSource(source, path.join(repoRoot, source));
+    for (const exportName of exportedRuntimeNames(sourceFile)) {
+      identities.push(`action:${source} → ${exportName}`);
     }
   }
   return Object.freeze(identities.toSorted());

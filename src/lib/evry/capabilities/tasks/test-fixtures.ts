@@ -146,6 +146,8 @@ export function taskEffectPlanFixture(exportName: TaskEffectExport) {
   return {
     operation: exportName,
     subjectTasks: own.has(exportName) ? [before] : [],
+    sourceTasks: [],
+    childSets: [],
     taskWrites: writes,
     dependencySets:
       exportName === "createTaskAction" || exportName === "updateTaskAction"
