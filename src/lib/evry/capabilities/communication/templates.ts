@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
+  assertEvryPlanDocumentReviewable,
   createEvryArtifactReviewRegistry,
   defineEvryArtifactReview,
   trustedReviewForEvryPlanDocument,
@@ -39,6 +40,8 @@ import {
 } from "@/lib/communication/evry-template-effect";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
 import { storedTemplateContent } from "@/lib/communication/templates";
+
+import { communicationEvryUnavailable } from "./refusal";
 
 export const COMMUNICATION_TEMPLATE_CREATE_IDENTITY =
   "communication.templates.create";
@@ -636,7 +639,7 @@ async function storeTemplatePlan(input: {
     authorization.actor.userId !== input.actor.userId ||
     authorization.actor.plantId !== input.actor.plantId
   ) {
-    return null;
+    return communicationEvryUnavailable("Communication change");
   }
   const document = parseEvryActionPlanCandidate({
     candidate: {
@@ -651,6 +654,10 @@ async function storeTemplatePlan(input: {
     },
     registry: COMMUNICATION_TEMPLATE_PLAN_REGISTRY,
     eligibleCapabilities: eligibleEvryCapabilitiesFor(authorization.actor),
+  });
+  assertEvryPlanDocumentReviewable({
+    document,
+    reviewRegistry: COMMUNICATION_TEMPLATE_REVIEW_REGISTRY,
   });
   const stored = await createEvryActionPlanRecord({
     actorUserId: authorization.actor.userId,
@@ -667,7 +674,10 @@ async function storeTemplatePlan(input: {
     document,
     reviewRegistry: COMMUNICATION_TEMPLATE_REVIEW_REGISTRY,
   });
-  return review ? { plan, confirmation: review.confirmation } : null;
+  if (!review) {
+    throw new Error("Stored Communication plan has no complete trusted review");
+  }
+  return { kind: "plan" as const, plan, confirmation: review.confirmation };
 }
 
 export async function proposeCommunicationEvryTemplateEffect(input: {
@@ -710,16 +720,18 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
     authorization.actor.userId !== input.actor.userId ||
     authorization.actor.plantId !== input.actor.plantId
   ) {
-    return null;
+    return communicationEvryUnavailable("Communication change");
   }
   const snapshot = await getEvryCommunicationTemplateSnapshot({
     churchId: authorization.actor.plantId,
     templateId: input.selection.templateId,
   });
-  if (!snapshot) return null;
+  if (!snapshot) return communicationEvryUnavailable("Communication template");
 
   if (input.selection.kind === "delete_template") {
-    if (snapshot.isSystem) return null;
+    if (snapshot.isSystem) {
+      return communicationEvryUnavailable("Template deletion");
+    }
     return storeTemplatePlan({
       actor: input.actor,
       identity,
@@ -729,7 +741,9 @@ export async function proposeCommunicationEvryTemplateEffect(input: {
     });
   }
   if (input.selection.kind === "fork_template") {
-    if (!snapshot.isSystem) return null;
+    if (!snapshot.isSystem) {
+      return communicationEvryUnavailable("Template fork");
+    }
     return storeTemplatePlan({
       actor: input.actor,
       identity,

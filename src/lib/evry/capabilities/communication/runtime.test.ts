@@ -408,16 +408,14 @@ test("outbound selection is closed and each message effect has an exact trusted 
     templateId: null,
     meetingId: null,
     messageClass: "relationship_message",
-    recipients: [
-      {
-        personId: TEMPLATE_ID,
-        label: "Ada Lovelace",
-        email: "ada@example.test",
-        subject: "Hello Ada",
-        bodyHtml: content.bodyHtml,
-        bodyText: content.body,
-      },
-    ],
+    recipients: interfaceSizedAudience.map((personId, index) => ({
+      personId,
+      label: `Recipient ${index + 1}`,
+      email: `recipient-${index + 1}@example.test`,
+      subject: `Hello recipient ${index + 1}`,
+      bodyHtml: content.bodyHtml,
+      bodyText: content.body,
+    })),
     exclusions: [],
   } as const;
   const source = {
@@ -430,7 +428,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
     meetingId: null,
     status: "sent",
     sentAt: UPDATED_AT,
-    recipientCount: 1,
+    recipientCount: interfaceSizedAudience.length,
   } as const;
   const plan = evryConversationPlanIdentitySchema.parse({
     planId: PLAN_ID,
@@ -476,7 +474,10 @@ test("outbound selection is closed and each message effect has an exact trusted 
       reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
     });
     assert.ok(review);
-    assert.equal(review.confirmation.steps[0]?.resolvedTargets.length, 1);
+    assert.equal(
+      review.confirmation.steps[0]?.resolvedTargets.length,
+      interfaceSizedAudience.length
+    );
     assert.match(JSON.stringify(review.confirmation), /Hello/);
   }
 });
@@ -549,8 +550,10 @@ test("group and template drafts resolve inside the actor plant before confirmati
     selection,
   });
 
-  assert.equal(audience?.templateId, TEMPLATE_ID);
-  assert.equal(audience?.meetingId, RESULT_ID);
+  assert.equal(audience.kind, "resolved");
+  if (audience.kind !== "resolved") return;
+  assert.equal(audience.audience.templateId, TEMPLATE_ID);
+  assert.equal(audience.audience.meetingId, RESULT_ID);
   assert.deepEqual(calls, [
     { kind: "group", churchId: TEMPLATE_ID, selector: "leaders" },
     { kind: "template", templateId: TEMPLATE_ID, churchId: TEMPLATE_ID },
@@ -567,6 +570,65 @@ test("group and template drafts resolve inside the actor plant before confirmati
       },
     },
   ]);
+});
+
+test("valid selections with unavailable sources or zero eligible recipients return reviewable refusals", async () => {
+  let audienceCalls = 0;
+  const resolver = createCommunicationEvrySendAudienceResolver({
+    async getGroupRecipients() {
+      return [];
+    },
+    async getTemplate() {
+      return undefined;
+    },
+    async resolveAudience() {
+      audienceCalls += 1;
+      return null;
+    },
+  });
+  const actor = {
+    userId: PLAN_ID,
+    plantId: TEMPLATE_ID,
+    seat: "owner",
+  } as never;
+  const emptyGroup = selectCommunicationEvryMessageEffect(
+    "Send email to group leaders: Hello | Welcome"
+  );
+  assert.ok(emptyGroup?.kind === "send");
+  const empty = await resolver({
+    actor,
+    pageContext: null,
+    selection: emptyGroup,
+  });
+  assert.equal(empty.kind, "refusal");
+  assert.match(JSON.stringify(empty), /No eligible email recipients/);
+  assert.equal(audienceCalls, 0);
+
+  const missingTemplate = selectCommunicationEvryMessageEffect(
+    `Send template ${TEMPLATE_ID} to people ${RESULT_ID}`
+  );
+  assert.ok(missingTemplate?.kind === "send");
+  const unavailable = await resolver({
+    actor,
+    pageContext: null,
+    selection: missingTemplate,
+  });
+  assert.equal(unavailable.kind, "refusal");
+  assert.match(JSON.stringify(unavailable), /template unavailable/i);
+  assert.equal(audienceCalls, 0);
+
+  const missingMeeting = selectCommunicationEvryMessageEffect(
+    `Send email to people ${RESULT_ID} for meeting ${PLAN_ID}: Hello | Welcome`
+  );
+  assert.ok(missingMeeting?.kind === "send");
+  const unavailableMeeting = await resolver({
+    actor,
+    pageContext: null,
+    selection: missingMeeting,
+  });
+  assert.equal(unavailableMeeting.kind, "refusal");
+  assert.match(JSON.stringify(unavailableMeeting), /meeting unavailable/i);
+  assert.equal(audienceCalls, 1);
 });
 
 test("draft, stored, preview, and sent rich text share one sanitized source", () => {

@@ -14,12 +14,7 @@ const EFFECT_IDENTITIES = [
 ] as const;
 const LIVE_LAYERS = ["execution", "idempotency", "errors"] as const;
 
-type EffectOutcomes = Readonly<
-  Record<
-    string,
-    Readonly<{ execution: boolean; idempotency: boolean; errors: boolean }>
-  >
->;
+type EffectOutcomes = ReadonlySet<string>;
 
 let cachedOutcomes: EffectOutcomes | null = null;
 
@@ -55,7 +50,11 @@ function effectOutcomes(): EffectOutcomes {
     proof.stdout
   )?.[1];
   assert.ok(encoded, "Communication effect proof returned no outcomes");
-  cachedOutcomes = JSON.parse(encoded) as EffectOutcomes;
+  const parsed = JSON.parse(encoded) as unknown;
+  assert.ok(Array.isArray(parsed));
+  assert.ok(parsed.every((outcome) => typeof outcome === "string"));
+  cachedOutcomes = new Set(parsed);
+  assert.equal(cachedOutcomes.size, parsed.length);
   return cachedOutcomes;
 }
 
@@ -69,7 +68,7 @@ for (const identity of EFFECT_IDENTITIES) {
           : "opt-in: run `LIVE_DB_TESTS=1 pnpm test:live` — real Postgres is required",
       },
       () => {
-        assert.equal(effectOutcomes()[identity]?.[layer], true);
+        assert.ok(effectOutcomes().has(`${identity}:${layer}`));
       }
     );
   }

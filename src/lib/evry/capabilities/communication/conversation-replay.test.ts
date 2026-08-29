@@ -17,6 +17,7 @@ import type { StoredEvryActionPlan } from "@/lib/evry/plans/repository";
 
 import { createCommunicationEvryConversationContinuation } from "./conversation";
 import { COMMUNICATION_MESSAGE_SEND_IDENTITY } from "./messages";
+import { communicationEvryRefusal } from "./refusal";
 import {
   COMMUNICATION_EVRY_PLAN_REGISTRY,
   COMMUNICATION_EVRY_REVIEW_REGISTRY,
@@ -67,16 +68,14 @@ function storedPlan(): StoredEvryActionPlan {
               templateId: null,
               meetingId: null,
               messageClass: "relationship_message",
-              recipients: [
-                {
-                  personId: PERSON_ID,
-                  label: "Original recipient",
-                  email: "original@example.test",
-                  subject: "Original subject",
-                  bodyHtml: content.bodyHtml,
-                  bodyText: content.body,
-                },
-              ],
+              recipients: Array.from({ length: 101 }, (_, index) => ({
+                personId: `60000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+                label: `Original recipient ${index + 1}`,
+                email: `original-${index + 1}@example.test`,
+                subject: "Original subject",
+                bodyHtml: content.bodyHtml,
+                bodyText: content.body,
+              })),
               exclusions: [],
             },
           },
@@ -126,6 +125,7 @@ test("a committed Communication plan is recovered before changed or deleted sour
     reviewRegistry: COMMUNICATION_EVRY_REVIEW_REGISTRY,
   });
   assert.ok(review);
+  assert.equal(review.confirmation.steps[0]?.resolvedTargets.length, 101);
 
   let committed: StoredEvryActionPlan | null = null;
   let sourceReads = 0;
@@ -139,6 +139,7 @@ test("a committed Communication plan is recovered before changed or deleted sour
         sourceReads += 1;
         committed = stored;
         return {
+          kind: "plan",
           plan: evryConversationPlanIdentitySchema.parse({
             planId: stored.id,
             fingerprint: stored.fingerprint,
@@ -165,7 +166,10 @@ test("a committed Communication plan is recovered before changed or deleted sour
           loseFirstResponse = false;
           throw new Error("response lost after plan commit");
         }
-        assert.match(JSON.stringify(request.artifacts), /Original recipient/);
+        assert.match(
+          JSON.stringify(request.artifacts),
+          /Original recipient 101/
+        );
         return conversation();
       },
     },
@@ -224,4 +228,48 @@ test("a request-key plan with a different capability identity fails closed", asy
     } as never),
     /integrity validation/
   );
+});
+
+test("a matched unavailable Communication request appends a durable neutral result", async () => {
+  const refusal = communicationEvryRefusal({
+    title: "No eligible email recipients",
+    body: "Evry did not prepare a send because every selected recipient was excluded.",
+    exclusions: [{ reason: "No email address", count: 1 }],
+  });
+  const appends: { body: string; artifacts: unknown[] }[] = [];
+  const continuation = composeEvryCapabilityConversationContinuations([
+    createCommunicationEvryConversationContinuation({
+      async findPlanByRequestKey() {
+        return null;
+      },
+      async proposeMessage() {
+        return refusal;
+      },
+      async proposeTemplate() {
+        throw new Error("template source must not run");
+      },
+    }),
+  ]);
+
+  await continuation({
+    actor: ACTOR,
+    conversation: conversation(),
+    userRequestKey: USER_REQUEST_KEY,
+    literalUserText: `Send email to people ${PERSON_ID}: Subject | Body`,
+    pageContext: null,
+    requestPageContext: null,
+    now: CREATED_AT,
+    store: {
+      async append(request: { body: string; artifacts: unknown[] }) {
+        appends.push(request);
+        return conversation();
+      },
+    },
+  } as never);
+
+  const appended = appends[0];
+  assert.ok(appended);
+  assert.equal(appended?.body, refusal.body);
+  assert.match(JSON.stringify(appended?.artifacts), /No email address/);
+  assert.match(JSON.stringify(appended), /"activePlan":\{"mode":"preserve"\}/);
 });

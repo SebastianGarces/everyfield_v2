@@ -8,7 +8,10 @@ import { findExactEvryActionPlan } from "@/lib/evry/plans/repository";
 import { parseStoredEvryActionPlan } from "@/lib/evry/plans/schema";
 import { storedDocumentMatchesEvryRecipe } from "@/lib/evry/recipes/contract";
 import type { EvryRecipeRegistry } from "@/lib/evry/recipes/schema";
-import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
+import {
+  evryConversationPlanIdentitySchema,
+  type EvryConversationPlanIdentity,
+} from "@/lib/evry/conversations/contract";
 
 import type { EvryTrustedPlanReview } from "./lifecycle";
 import {
@@ -240,6 +243,30 @@ export function trustedReviewForEvryPlanDocument(input: {
     });
   } catch {
     return null;
+  }
+}
+
+const REVIEWABILITY_PROBE_PLAN = evryConversationPlanIdentitySchema.parse({
+  planId: "00000000-0000-4000-8000-000000000001",
+  fingerprint: "0".repeat(64),
+});
+
+/**
+ * Prove an internally compiled document can produce its complete trusted
+ * review before any repository call makes that document durable.
+ */
+export function assertEvryPlanDocumentReviewable(input: {
+  document: EvryActionPlanDocument;
+  reviewRegistry: EvryArtifactReviewRegistry;
+}): void {
+  if (
+    !trustedReviewForEvryPlanDocument({
+      plan: REVIEWABILITY_PROBE_PLAN,
+      document: input.document,
+      reviewRegistry: input.reviewRegistry,
+    })
+  ) {
+    throw new Error("Evry plan document has no complete trusted review");
   }
 }
 

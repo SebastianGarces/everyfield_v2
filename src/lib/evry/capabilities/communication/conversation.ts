@@ -208,15 +208,19 @@ export function createCommunicationEvryConversationContinuation(
             requestKey,
             now: new Date(),
           });
-      return proposal
-        ? {
-            body: "Review this exact Communication change before anything is saved or sent.",
-            artifacts: [
-              parseEvryConversationArtifactDocument(proposal.confirmation),
-            ],
-            activePlan: { mode: "set", plan: proposal.plan },
-          }
-        : null;
+      if (proposal.kind === "refusal") {
+        return {
+          body: proposal.body,
+          artifacts: [proposal.artifact],
+        };
+      }
+      return {
+        body: "Review this exact Communication change before anything is saved or sent.",
+        artifacts: [
+          parseEvryConversationArtifactDocument(proposal.confirmation),
+        ],
+        activePlan: { mode: "set", plan: proposal.plan },
+      };
     },
   };
 }

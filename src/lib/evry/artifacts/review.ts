@@ -108,7 +108,12 @@ const confirmationStepSchema = z
       "difficult_to_reverse",
       "irreversible",
     ]),
-    resolvedTargets: z.array(resolvedTargetSchema).min(1).max(100).readonly(),
+    // A target set is application-owned plan data, not a user-supplied page
+    // size. Communication groups can legitimately resolve past one hundred
+    // people, and every resolved person still has to cross the confirmation
+    // boundary. A hidden artifact cap made those otherwise valid plans
+    // impossible to review after they had already been stored.
+    resolvedTargets: z.array(resolvedTargetSchema).min(1).readonly(),
     counts: z.array(reviewCountSchema).min(1).max(16).readonly(),
     exclusions: z.array(reviewExclusionSchema).max(32).readonly(),
     dateTime: evryConfirmationDateTimeRangeSchema.nullable(),

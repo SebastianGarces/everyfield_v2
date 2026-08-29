@@ -38,6 +38,7 @@ import {
   resolveEvryCommunicationAudience,
   sendFrozenEvryCommunication,
 } from "./evry-send";
+import { createCommunicationEvryMessageExecutions } from "@/lib/evry/capabilities/communication/messages";
 import {
   claimEvryCommunicationSystemTemplateUpdate,
   claimEvryCommunicationTemplateCreate,
@@ -56,17 +57,11 @@ const SEND_MESSAGE = "communication.messages.send";
 const RESEND_MESSAGE = "communication.resends.send-to-non-openers";
 const FINGERPRINT = "a".repeat(64);
 
-const effectOutcomes = new Map<
-  string,
-  { execution: boolean; idempotency: boolean; errors: boolean }
->();
+type LiveLayer = "execution" | "idempotency" | "errors";
+const effectOutcomes = new Set<string>();
 
-function recordEffectOutcome(identity: string) {
-  effectOutcomes.set(identity, {
-    execution: true,
-    idempotency: true,
-    errors: true,
-  });
+function recordEffectOutcome(identity: string, layer: LiveLayer) {
+  effectOutcomes.add(`${identity}:${layer}`);
 }
 
 async function seedEffect(input: {
@@ -196,7 +191,12 @@ function content(body: string) {
 }
 
 function deterministicMailer(
-  outcomes: readonly ("accepted" | "retryable" | "permanent")[] = ["accepted"]
+  outcomes: readonly (
+    | "accepted"
+    | "accepted_response_lost"
+    | "retryable"
+    | "permanent"
+  )[] = ["accepted"]
 ) {
   const calls: string[] = [];
   const deliveries = new Map<string, string>();
@@ -215,6 +215,9 @@ function deterministicMailer(
       }
       const providerId = `fake-${deliveries.size + 1}`;
       deliveries.set(input.idempotencyKey, providerId);
+      if (outcome === "accepted_response_lost") {
+        throw new Error("response lost after provider acceptance");
+      }
       return { status: "accepted", providerId };
     },
   };
@@ -349,12 +352,18 @@ async function main(): Promise<void> {
     templateId: createdTemplateId,
     content: content("<p>Hello Ada</p>"),
   };
-  await claimEvryCommunicationTemplateCreate(createInput);
   assert.deepEqual(await claimEvryCommunicationTemplateCreate(createInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
+  recordEffectOutcome(CREATE_TEMPLATE, "execution");
+  assert.deepEqual(await claimEvryCommunicationTemplateCreate(createInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  recordEffectOutcome(CREATE_TEMPLATE, "idempotency");
   assert.deepEqual(
     await claimEvryCommunicationTemplateCreate({
       ...createInput,
@@ -362,7 +371,7 @@ async function main(): Promise<void> {
     }),
     { status: "refused", excludedCount: 1 }
   );
-  recordEffectOutcome(CREATE_TEMPLATE);
+  recordEffectOutcome(CREATE_TEMPLATE, "errors");
   const createdSnapshot = await getEvryCommunicationTemplateSnapshot({
     churchId: plant.id,
     templateId: createdTemplateId,
@@ -382,12 +391,18 @@ async function main(): Promise<void> {
     expectedUpdatedAt: createdSnapshot.updatedAt,
     content: content("<p>Updated Ada</p>"),
   };
-  await claimEvryCommunicationTemplateUpdate(updateInput);
   assert.deepEqual(await claimEvryCommunicationTemplateUpdate(updateInput), {
     status: "completed",
     affectedCount: 1,
     excludedCount: 0,
   });
+  recordEffectOutcome(UPDATE_TEMPLATE, "execution");
+  assert.deepEqual(await claimEvryCommunicationTemplateUpdate(updateInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  recordEffectOutcome(UPDATE_TEMPLATE, "idempotency");
   const staleUpdateEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -402,7 +417,7 @@ async function main(): Promise<void> {
     }),
     { status: "refused", excludedCount: 1 }
   );
-  recordEffectOutcome(UPDATE_TEMPLATE);
+  recordEffectOutcome(UPDATE_TEMPLATE, "errors");
 
   const systemRows = await db
     .insert(messageTemplates)
@@ -455,6 +470,7 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  recordEffectOutcome(FORK_TEMPLATE, "execution");
   assert.deepEqual(
     await claimEvryCommunicationTemplateFork({
       effect: forkEffect,
@@ -464,6 +480,7 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  recordEffectOutcome(FORK_TEMPLATE, "idempotency");
   const staleForkEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -482,7 +499,7 @@ async function main(): Promise<void> {
     }),
     { status: "refused", excludedCount: 1 }
   );
-  recordEffectOutcome(FORK_TEMPLATE);
+  recordEffectOutcome(FORK_TEMPLATE, "errors");
   const systemEditEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -527,6 +544,7 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  recordEffectOutcome(DELETE_TEMPLATE, "execution");
   assert.deepEqual(
     await claimEvryCommunicationTemplateDelete({
       effect: deleteEffect,
@@ -536,6 +554,7 @@ async function main(): Promise<void> {
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  recordEffectOutcome(DELETE_TEMPLATE, "idempotency");
   const staleDeleteEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -551,7 +570,7 @@ async function main(): Promise<void> {
     }),
     { status: "refused", excludedCount: 1 }
   );
-  recordEffectOutcome(DELETE_TEMPLATE);
+  recordEffectOutcome(DELETE_TEMPLATE, "errors");
 
   const audience = await resolveEvryCommunicationAudience({
     churchId: plant.id,
@@ -597,6 +616,7 @@ async function main(): Promise<void> {
       { status: "completed", affectedCount: 1, excludedCount: 5 },
     ]
   );
+  recordEffectOutcome(SEND_MESSAGE, "execution");
   assert.equal(new Set(concurrentMailer.calls).size, 1);
   assert.equal(concurrentMailer.deliveries.size, 1);
   assert.deepEqual(await sendFrozenEvryCommunication(concurrentInput), {
@@ -605,6 +625,7 @@ async function main(): Promise<void> {
     excludedCount: 5,
   });
   assert.equal(concurrentMailer.deliveries.size, 1);
+  recordEffectOutcome(SEND_MESSAGE, "idempotency");
 
   const transientEffect = await seedEffect({
     churchId: plant.id,
@@ -697,34 +718,150 @@ async function main(): Promise<void> {
     excludedCount: 6,
   });
   assert.equal(permanentMailer.calls.length, 1);
-  recordEffectOutcome(SEND_MESSAGE);
+  recordEffectOutcome(SEND_MESSAGE, "errors");
 
+  async function seedResendSource(sentAt: Date) {
+    const sourceId = randomUUID();
+    const source = {
+      id: sourceId,
+      subject: "Original message",
+      body: "Original body",
+      bodyHtml: null,
+      channel: "email" as const,
+      templateId: null,
+      meetingId: null,
+      status: "sent" as const,
+      sentAt: sentAt.toISOString(),
+      recipientCount: 1,
+    };
+    await db.insert(communications).values({
+      ...source,
+      sentAt,
+      churchId: plant.id,
+      createdById: owner.id,
+    });
+    await db.insert(communicationRecipients).values({
+      churchId: plant.id,
+      communicationId: sourceId,
+      personId: recipient.id,
+      email: recipientEmail,
+      channel: "email",
+      status: "delivered",
+      deliveredAt: sentAt,
+    });
+    const resolved = await resolveEvryCommunicationAudience({
+      churchId: plant.id,
+      recipientIds: [recipient.id],
+      subject: source.subject,
+      body: source.body,
+      channel: "email",
+    });
+    assert.ok(resolved);
+    return { source, audience: resolved };
+  }
+
+  const resendSource = await seedResendSource(
+    new Date(Date.now() - 48 * 60 * 60_000)
+  );
   const resendEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
     capabilityIdentity: RESEND_MESSAGE,
     stepId: "resend-non-openers",
   });
-  const resendMailer = deterministicMailer();
-  const resendInput = {
-    effect: resendEffect,
-    identity: RESEND_MESSAGE,
-    communicationId: randomUUID(),
-    audience,
+  const resendMailer = deterministicMailer(["accepted_response_lost"]);
+  const resendAdapter = createCommunicationEvryMessageExecutions({
     mailer: resendMailer.mailer,
+  }).resend;
+  const resendInput = {
+    ...resendEffect,
+    arguments: {
+      source: resendSource.source,
+      communicationId: randomUUID(),
+      audience: resendSource.audience,
+    },
   };
-  assert.deepEqual(await sendFrozenEvryCommunication(resendInput), {
+  assert.deepEqual(await resendAdapter.executeIfCurrent(resendInput), {
+    status: "retryable",
+  });
+  assert.deepEqual(await resendAdapter.executeIfCurrent(resendInput), {
     status: "completed",
     affectedCount: 1,
-    excludedCount: 5,
+    excludedCount: 0,
   });
-  assert.deepEqual(await sendFrozenEvryCommunication(resendInput), {
+  recordEffectOutcome(RESEND_MESSAGE, "execution");
+  assert.deepEqual(await resendAdapter.executeIfCurrent(resendInput), {
     status: "completed",
     affectedCount: 1,
-    excludedCount: 5,
+    excludedCount: 0,
   });
-  assert.equal(resendMailer.calls.length, 1);
+  assert.equal(resendMailer.deliveries.size, 1);
+  assert.equal(new Set(resendMailer.calls).size, 1);
+  recordEffectOutcome(RESEND_MESSAGE, "idempotency");
 
+  const refusedEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: RESEND_MESSAGE,
+    stepId: "resend-wrong-source",
+  });
+  assert.deepEqual(
+    await resendAdapter.executeIfCurrent({
+      ...refusedEffect,
+      arguments: {
+        ...resendInput.arguments,
+        source: { ...resendSource.source, subject: "Changed source" },
+      },
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+
+  const cooldownSource = await seedResendSource(new Date());
+  const cooldownEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: RESEND_MESSAGE,
+    stepId: "resend-cooldown",
+  });
+  assert.deepEqual(
+    await resendAdapter.executeIfCurrent({
+      ...cooldownEffect,
+      arguments: {
+        source: cooldownSource.source,
+        communicationId: randomUUID(),
+        audience: cooldownSource.audience,
+      },
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+
+  await db
+    .update(communicationRecipients)
+    .set({ status: "opened", openedAt: new Date() })
+    .where(eq(communicationRecipients.communicationId, resendSource.source.id));
+  const openerEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: RESEND_MESSAGE,
+    stepId: "resend-current-openers",
+  });
+  assert.deepEqual(
+    await resendAdapter.executeIfCurrent({
+      ...openerEffect,
+      arguments: {
+        source: resendSource.source,
+        communicationId: randomUUID(),
+        audience: resendSource.audience,
+      },
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  assert.equal(resendMailer.calls.length, 2);
+  assert.equal(resendMailer.deliveries.size, 1);
+
+  const failedSource = await seedResendSource(
+    new Date(Date.now() - 48 * 60 * 60_000)
+  );
   const failedResendEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -732,23 +869,27 @@ async function main(): Promise<void> {
     stepId: "failed-resend-non-openers",
   });
   const failedResendMailer = deterministicMailer(["permanent"]);
-  const failedResendInput = {
-    effect: failedResendEffect,
-    identity: RESEND_MESSAGE,
-    communicationId: randomUUID(),
-    audience,
+  const failedResendAdapter = createCommunicationEvryMessageExecutions({
     mailer: failedResendMailer.mailer,
+  }).resend;
+  const failedResendInput = {
+    ...failedResendEffect,
+    arguments: {
+      source: failedSource.source,
+      communicationId: randomUUID(),
+      audience: failedSource.audience,
+    },
   };
-  assert.deepEqual(await sendFrozenEvryCommunication(failedResendInput), {
-    status: "failed",
-    excludedCount: 6,
-  });
-  assert.deepEqual(await sendFrozenEvryCommunication(failedResendInput), {
-    status: "failed",
-    excludedCount: 6,
-  });
+  assert.deepEqual(
+    await failedResendAdapter.executeIfCurrent(failedResendInput),
+    { status: "failed", excludedCount: 1 }
+  );
+  assert.deepEqual(
+    await failedResendAdapter.executeIfCurrent(failedResendInput),
+    { status: "failed", excludedCount: 1 }
+  );
   assert.equal(failedResendMailer.calls.length, 1);
-  recordEffectOutcome(RESEND_MESSAGE);
+  recordEffectOutcome(RESEND_MESSAGE, "errors");
 
   const [counts] = await db
     .select({
@@ -767,8 +908,8 @@ async function main(): Promise<void> {
     )
     .where(eq(communications.churchId, plant.id));
   assert.ok(counts);
-  assert.equal(counts.communications, 6);
-  assert.equal(counts.recipients, 6);
+  assert.ok(counts.communications >= 9);
+  assert.ok(counts.recipients >= 9);
   assert.ok(counts.outcomes >= 8);
 
   const foreignMessage = await db
@@ -779,7 +920,7 @@ async function main(): Promise<void> {
   assert.equal(foreignMessage, 0);
 
   assert.deepEqual(
-    [...effectOutcomes.keys()].sort(),
+    [...effectOutcomes].sort(),
     [
       CREATE_TEMPLATE,
       DELETE_TEMPLATE,
@@ -787,11 +928,17 @@ async function main(): Promise<void> {
       RESEND_MESSAGE,
       SEND_MESSAGE,
       UPDATE_TEMPLATE,
-    ].sort()
+    ]
+      .flatMap((identity) =>
+        ["execution", "idempotency", "errors"].map(
+          (layer) => `${identity}:${layer}`
+        )
+      )
+      .sort()
   );
   process.stdout.write("Communication effect live proof passed\n");
   process.stdout.write(
-    `EVRY_COMMUNICATION_EFFECT_OUTCOMES=${JSON.stringify(Object.fromEntries(effectOutcomes))}\n`
+    `EVRY_COMMUNICATION_EFFECT_OUTCOMES=${JSON.stringify([...effectOutcomes].sort())}\n`
   );
 }
 

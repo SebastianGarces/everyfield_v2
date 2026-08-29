@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   type EvryCommunicationAudienceSnapshot,
+  type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
   sendFrozenEvryCommunication,
 } from "@/lib/communication/evry-send";
@@ -10,7 +11,10 @@ import {
   getGroupRecipients,
   isRecipientGroupSelector,
 } from "@/lib/communication/recipient-groups";
-import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
+import {
+  evaluateResendEligibility,
+  resendBlockedHint,
+} from "@/lib/communication/resend-policy";
 import { getCommunication } from "@/lib/communication/service";
 import { getNonOpenerSummary } from "@/lib/communication/send";
 import { getTemplate } from "@/lib/communication/templates";
@@ -18,6 +22,7 @@ import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
   createEvryArtifactReviewRegistry,
   defineEvryArtifactReview,
+  assertEvryPlanDocumentReviewable,
   trustedReviewForEvryPlanDocument,
 } from "@/lib/evry/artifacts/trusted-plan-review";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
@@ -39,6 +44,12 @@ import {
 import { createEvryActionPlanRecord } from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 import type { EvryResolvedPageContext } from "@/lib/evry/resolvers/contract";
+
+import {
+  communicationEvryRefusal,
+  communicationEvryUnavailable,
+  type CommunicationEvryRefusal,
+} from "./refusal";
 
 export const COMMUNICATION_MESSAGE_SEND_IDENTITY =
   "communication.messages.send";
@@ -125,6 +136,13 @@ type CommunicationEvrySendAudienceDependencies = Readonly<{
   getTemplate: typeof getTemplate;
   resolveAudience: typeof resolveEvryCommunicationAudience;
 }>;
+
+type CommunicationEvrySendAudienceResolution =
+  | Readonly<{
+      kind: "resolved";
+      audience: EvryCommunicationAudienceSnapshot;
+    }>
+  | CommunicationEvryRefusal;
 
 const productionSendAudienceDependencies: CommunicationEvrySendAudienceDependencies =
   {
@@ -220,7 +238,7 @@ export function createCommunicationEvrySendAudienceResolver(
     actor: EvryPlantActor;
     pageContext: EvryResolvedPageContext | null;
     selection: CommunicationEvrySendSelection;
-  }) {
+  }): Promise<CommunicationEvrySendAudienceResolution> {
     const recipientIds =
       input.selection.audience.kind === "people"
         ? input.selection.audience.recipientIds
@@ -245,9 +263,15 @@ export function createCommunicationEvrySendAudienceResolver(
       input.selection.draft.kind === "template" &&
       (!template || template.channel === "sms" || !template.subject?.trim())
     ) {
-      return null;
+      return communicationEvryUnavailable("Communication template");
     }
-    return dependencies.resolveAudience({
+    if (recipientIds.length === 0) {
+      return communicationEvryRefusal({
+        title: "No eligible email recipients",
+        body: "Evry did not prepare a send because the selected audience has no eligible recipients.",
+      });
+    }
+    const audience = await dependencies.resolveAudience({
       churchId: input.actor.plantId,
       recipientIds,
       subject:
@@ -262,6 +286,19 @@ export function createCommunicationEvrySendAudienceResolver(
       templateId: template?.id ?? null,
       meetingId: input.selection.meetingId,
     });
+    if (!audience) {
+      return communicationEvryUnavailable(
+        input.selection.meetingId ? "Meeting" : "Recipient selection"
+      );
+    }
+    if (audience.recipients.length === 0) {
+      return communicationEvryRefusal({
+        title: "No eligible email recipients",
+        body: "Evry did not prepare a send because every selected recipient was excluded.",
+        exclusions: audience.exclusions,
+      });
+    }
+    return { kind: "resolved", audience };
   };
 }
 
@@ -289,8 +326,10 @@ function exactExecutionTuple(input: EvryEffectInput, identity: string) {
   );
 }
 
-export const COMMUNICATION_MESSAGE_SEND_EXECUTION =
-  defineEvryExecutionCapability({
+export function createCommunicationEvryMessageExecutions(
+  dependencies: Readonly<{ mailer?: EvryCommunicationMailer }> = {}
+) {
+  const send = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_MESSAGE_SEND_PLAN,
     async executeIfCurrent(input) {
       const parsed = sendArgumentsSchema.safeParse(input.arguments);
@@ -306,6 +345,7 @@ export const COMMUNICATION_MESSAGE_SEND_EXECUTION =
           identity: COMMUNICATION_MESSAGE_SEND_IDENTITY,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
+          mailer: dependencies.mailer,
         });
       } catch {
         return { status: "retryable" };
@@ -313,8 +353,7 @@ export const COMMUNICATION_MESSAGE_SEND_EXECUTION =
     },
   });
 
-export const COMMUNICATION_RESEND_NON_OPENERS_EXECUTION =
-  defineEvryExecutionCapability({
+  const resend = defineEvryExecutionCapability({
     planCapability: COMMUNICATION_RESEND_NON_OPENERS_PLAN,
     async executeIfCurrent(input) {
       const parsed = resendArgumentsSchema.safeParse(input.arguments);
@@ -350,6 +389,7 @@ export const COMMUNICATION_RESEND_NON_OPENERS_EXECUTION =
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
           eligiblePersonIds: new Set(summary.personIds),
+          mailer: dependencies.mailer,
         });
       } catch {
         return { status: "retryable" };
@@ -357,10 +397,22 @@ export const COMMUNICATION_RESEND_NON_OPENERS_EXECUTION =
     },
   });
 
-export const COMMUNICATION_MESSAGE_EXECUTIONS = [
-  COMMUNICATION_MESSAGE_SEND_EXECUTION,
-  COMMUNICATION_RESEND_NON_OPENERS_EXECUTION,
-] as const;
+  return Object.freeze({
+    send,
+    resend,
+    registrations: Object.freeze([send, resend] as const),
+  });
+}
+
+const productionMessageExecutions = createCommunicationEvryMessageExecutions();
+
+export const COMMUNICATION_MESSAGE_SEND_EXECUTION =
+  productionMessageExecutions.send;
+export const COMMUNICATION_RESEND_NON_OPENERS_EXECUTION =
+  productionMessageExecutions.resend;
+
+export const COMMUNICATION_MESSAGE_EXECUTIONS =
+  productionMessageExecutions.registrations;
 
 export const COMMUNICATION_MESSAGE_EXECUTION_REGISTRY =
   createEvryExecutionCapabilityRegistry(COMMUNICATION_MESSAGE_EXECUTIONS);
@@ -486,6 +538,10 @@ async function storePlan(input: {
     registry: COMMUNICATION_MESSAGE_PLAN_REGISTRY,
     eligibleCapabilities: eligibleEvryCapabilitiesFor(input.actor),
   });
+  assertEvryPlanDocumentReviewable({
+    document,
+    reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
+  });
   const stored = await createEvryActionPlanRecord({
     actorUserId: input.actor.userId,
     plantId: input.actor.plantId,
@@ -501,7 +557,10 @@ async function storePlan(input: {
     document,
     reviewRegistry: COMMUNICATION_MESSAGE_REVIEW_REGISTRY,
   });
-  return review ? { plan, confirmation: review.confirmation } : null;
+  if (!review) {
+    throw new Error("Stored Communication plan has no complete trusted review");
+  }
+  return { kind: "plan" as const, plan, confirmation: review.confirmation };
 }
 
 function sourceSnapshot(
@@ -556,7 +615,7 @@ export async function proposeCommunicationEvryMessageEffect(input: {
       ? COMMUNICATION_MESSAGE_SEND_IDENTITY
       : COMMUNICATION_RESEND_NON_OPENERS_IDENTITY;
   const actor = await authorizeExactActor(input.actor, identity);
-  if (!actor) return null;
+  if (!actor) return communicationEvryUnavailable("Communication change");
 
   if (input.selection.kind === "send") {
     const audience = await resolveCommunicationEvrySendAudience({
@@ -564,8 +623,11 @@ export async function proposeCommunicationEvryMessageEffect(input: {
       pageContext: input.pageContext,
       selection: input.selection,
     });
-    const parsedAudience = audienceSchema.safeParse(audience);
-    if (!parsedAudience.success) return null;
+    if (audience.kind === "refusal") return audience;
+    const parsedAudience = audienceSchema.safeParse(audience.audience);
+    if (!parsedAudience.success) {
+      throw new Error("Resolved Communication audience is invalid");
+    }
     return storePlan({
       actor,
       identity,
@@ -585,20 +647,29 @@ export async function proposeCommunicationEvryMessageEffect(input: {
     actor.plantId,
     input.selection.communicationId
   );
-  if (!original) return null;
+  if (!original) return communicationEvryUnavailable("Original message");
   const source = sourceSnapshot(original);
-  if (!source.success) return null;
+  if (!source.success) return communicationEvryUnavailable("Original message");
   const summary = await getNonOpenerSummary(actor.plantId, original.id);
-  if (
-    !evaluateResendEligibility({
-      status: original.status,
-      sentAt: original.sentAt,
-      deliveredCount: summary.delivered,
-      nonOpenerCount: summary.personIds.length,
-      now: input.now,
-    }).allowed
-  ) {
-    return null;
+  const eligibility = evaluateResendEligibility({
+    status: original.status,
+    sentAt: original.sentAt,
+    deliveredCount: summary.delivered,
+    nonOpenerCount: summary.personIds.length,
+    now: input.now,
+  });
+  if (!eligibility.allowed) {
+    const reason = resendBlockedHint(eligibility.reason ?? "notSent");
+    return communicationEvryRefusal({
+      title: "This message is not eligible for resend",
+      body: reason,
+      exclusions: [
+        {
+          reason,
+          count: Math.max(1, summary.total),
+        },
+      ],
+    });
   }
   const audience = await resolveEvryCommunicationAudience({
     churchId: actor.plantId,
@@ -609,8 +680,18 @@ export async function proposeCommunicationEvryMessageEffect(input: {
     templateId: original.templateId,
     meetingId: original.meetingId,
   });
+  if (!audience) return communicationEvryUnavailable("Message recipients");
+  if (audience.recipients.length === 0) {
+    return communicationEvryRefusal({
+      title: "No eligible email recipients",
+      body: "Evry did not prepare a resend because every current non-opener was excluded.",
+      exclusions: audience.exclusions,
+    });
+  }
   const parsedAudience = audienceSchema.safeParse(audience);
-  if (!parsedAudience.success) return null;
+  if (!parsedAudience.success) {
+    throw new Error("Resolved Communication resend audience is invalid");
+  }
   return storePlan({
     actor,
     identity,
