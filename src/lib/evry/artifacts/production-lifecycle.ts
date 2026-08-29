@@ -3,9 +3,7 @@ import {
   type EvryArtifactLifecycleRequest,
   type EvryArtifactLifecycleResult,
 } from "@/lib/evry/artifacts/lifecycle";
-import {
-  trustedEvryPlanReview,
-} from "@/lib/evry/artifacts/trusted-plan-review";
+import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review";
 import {
   PRODUCTION_EVRY_EXECUTION_REGISTRY,
   PRODUCTION_EVRY_PLAN_REGISTRY,
@@ -17,9 +15,7 @@ import {
   resumeEvryConversation,
 } from "@/lib/evry/conversations/service";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import {
-  executeEvryActionPlan,
-} from "@/lib/evry/executor";
+import { executeEvryActionPlan } from "@/lib/evry/executor";
 import { confirmEvryActionPlan } from "@/lib/evry/plans";
 import { cancelExactEvryActionPlan } from "@/lib/evry/plans/repository";
 
