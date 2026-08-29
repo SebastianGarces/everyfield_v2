@@ -33,20 +33,17 @@ import {
 } from "@/lib/evry/capabilities/people/attachments";
 import {
   claimEvryBulkImport,
-  claimEvryUploadPersonPhoto,
   type EvryImportPersonRow,
 } from "@/lib/people/evry-files";
 import { recoverCompletedEvryPeopleEffect } from "@/lib/people/evry-effect";
 import { parseCsvImport } from "@/lib/people/import";
-import { getPersonPhotoKey } from "@/lib/people/person-photo";
+import {
+  claimEvryPersonPhotoMutation,
+  getEvryPersonPhotoSnapshot,
+} from "@/lib/people/person-photo";
 import { getPerson } from "@/lib/people/service";
 import type { ImportPreview, ImportRow } from "@/lib/people/types";
 import { personCreateSchema } from "@/lib/validations/people";
-import {
-  getExtensionFromMimeType,
-  personPhotoStorageKey,
-  uploadFile,
-} from "@/lib/storage";
 
 export const PEOPLE_FILE_IDENTITIES = {
   photo: "people.crm.people.upload-person-photo",
@@ -71,23 +68,41 @@ const photoSchema = z.strictObject({
     .max(3 * 1024 * 1024),
   originalName: z.string().min(1).max(255),
 });
-const importRowSchema = z.strictObject({
-  rowNumber: z.number().int().min(2).max(27),
-  rowKey: digest,
-  personId: z.string().uuid(),
-  firstName: z.string().trim().min(1).max(255),
-  lastName: z.string().trim().min(1).max(255),
-  email: z.string().email().max(255).nullable(),
-  phone: z.string().max(50).nullable(),
-  source: z.enum(personSources).nullable(),
-  addressLine1: z.string().max(255).nullable(),
-  addressLine2: z.string().max(255).nullable(),
-  city: z.string().max(100).nullable(),
-  state: z.string().max(100).nullable(),
-  postalCode: z.string().max(20).nullable(),
-  country: z.string().max(100),
-  notes: z.string().max(20_000).nullable(),
-});
+const importRowSchema = z
+  .strictObject({
+    rowNumber: z.number().int().min(2).max(27),
+    rowKey: digest,
+    personId: z.string().uuid(),
+    firstName: z.string().trim().min(1).max(255),
+    lastName: z.string().trim().min(1).max(255),
+    email: z.string().email().max(255).nullable(),
+    phone: z.string().max(50).nullable(),
+    source: z.enum(personSources).nullable(),
+    addressLine1: z.string().max(255).nullable(),
+    addressLine2: z.string().max(255).nullable(),
+    city: z.string().max(100).nullable(),
+    state: z.string().max(100).nullable(),
+    postalCode: z.string().max(20).nullable(),
+    country: z.string().max(100),
+    notes: z.string().max(20_000).nullable(),
+    disposition: z.enum(["create", "merge"]),
+    targetPersonId: z.string().uuid().nullable(),
+    expectedTargetJson: z.string().max(40_000).nullable(),
+  })
+  .superRefine((row, context) => {
+    if (
+      (row.disposition === "create" &&
+        (row.targetPersonId !== null || row.expectedTargetJson !== null)) ||
+      (row.disposition === "merge" &&
+        (row.targetPersonId === null || row.expectedTargetJson === null))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["disposition"],
+        message: "Import disposition and target must agree",
+      });
+    }
+  });
 const rowsJson = z.string().refine((value) => {
   try {
     return z.array(importRowSchema).min(1).max(25).safeParse(JSON.parse(value))
@@ -101,9 +116,30 @@ const importSchema = z.strictObject({
   attachmentDigest: digest,
   originalName: z.string().min(1).max(255),
   previewFingerprint: digest,
+  duplicateSnapshotJson: z.string().refine((value) => {
+    try {
+      return z
+        .array(
+          z.strictObject({
+            rowNumber: z.number().int().min(2).max(27),
+            email: z.string().email().max(255).nullable(),
+            phone: z.string().max(50).nullable(),
+            firstName: z.string().trim().min(1).max(255),
+            lastName: z.string().trim().min(1).max(255),
+            matchIds: z.array(z.string().uuid()).max(6),
+          })
+        )
+        .min(1)
+        .max(25)
+        .safeParse(JSON.parse(value)).success;
+    } catch {
+      return false;
+    }
+  }),
   rowsJson,
   totalRows: z.number().int().min(1).max(25),
-  createCount: z.number().int().min(1).max(25),
+  createCount: z.number().int().nonnegative().max(25),
+  mergeCount: z.number().int().nonnegative().max(25),
   skipCount: z.number().int().nonnegative().max(25),
   invalidCount: z.number().int().nonnegative().max(25),
 });
@@ -129,8 +165,26 @@ function exactTuple(input: EvryEffectInput, identity: string): boolean {
     input.execution.plantId === input.authorization.actor.plantId
   );
 }
-function photoDigest(key: string | null): string | null {
-  return key ? createHash("sha256").update(key).digest("hex") : null;
+function parseRows(value: string): EvryImportPersonRow[] {
+  return z.array(importRowSchema).parse(JSON.parse(value));
+}
+function fingerprint(preview: ImportPreview): string {
+  return createHash("sha256").update(JSON.stringify(preview)).digest("hex");
+}
+function duplicateSnapshot(preview: ImportPreview) {
+  return [...preview.validRows, ...preview.duplicateRows]
+    .toSorted((a, b) => a.rowNumber - b.rowNumber)
+    .map((row) => ({
+      rowNumber: row.rowNumber,
+      email: row.data.email?.trim().toLocaleLowerCase("en-US") || null,
+      phone: row.data.phone || null,
+      firstName: row.data.firstName?.trim() ?? "",
+      lastName: row.data.lastName?.trim() ?? "",
+      matchIds: [
+        ...(row.duplicates.exactMatch ? [row.duplicates.exactMatch.id] : []),
+        ...row.duplicates.potentialMatches.map(({ id }) => id),
+      ],
+    }));
 }
 function uuidFromHash(value: string): string {
   const hex = createHash("sha256")
@@ -143,12 +197,6 @@ function uuidFromHash(value: string): string {
   const joined = hex.join("");
   return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
 }
-function parseRows(value: string): EvryImportPersonRow[] {
-  return z.array(importRowSchema).parse(JSON.parse(value));
-}
-function fingerprint(preview: ImportPreview): string {
-  return createHash("sha256").update(JSON.stringify(preview)).digest("hex");
-}
 
 export const PEOPLE_FILE_EXECUTIONS = [
   defineEvryExecutionCapability({
@@ -159,14 +207,11 @@ export const PEOPLE_FILE_EXECUTIONS = [
         return { status: "refused", excludedCount: 1 };
       const replay = await recoverCompletedEvryPeopleEffect(input);
       if (replay) return replay;
-      const current = await getPersonPhotoKey(
+      const current = await getEvryPersonPhotoSnapshot(
         input.authorization.actor.plantId,
         args.data.personId
       );
-      if (
-        !current ||
-        photoDigest(current.photoKey) !== args.data.currentPhotoDigest
-      )
+      if (!current || current.digest !== args.data.currentPhotoDigest)
         return { status: "refused", excludedCount: 1 };
       const attachment = await readExactEvryPeopleAttachment({
         reference: args.data.attachmentReference,
@@ -182,22 +227,17 @@ export const PEOPLE_FILE_EXECUTIONS = [
         attachment.document.originalName !== args.data.originalName
       )
         return { status: "refused", excludedCount: 1 };
-      const objectId = uuidFromHash(
-        `${input.effectKey}:${args.data.attachmentDigest}`
-      );
-      const key = personPhotoStorageKey(
-        input.authorization.actor.plantId,
-        args.data.personId,
-        getExtensionFromMimeType(args.data.contentType),
-        objectId
-      );
-      await uploadFile(key, attachment.bytes, args.data.contentType);
-      return claimEvryUploadPersonPhoto({
+      return claimEvryPersonPhotoMutation({
         execution: input.execution,
         effectKey: input.effectKey,
         personId: args.data.personId,
-        currentPhotoKey: current.photoKey,
-        newPhotoKey: key,
+        expectedDigest: args.data.currentPhotoDigest,
+        mutation: {
+          kind: "upload",
+          attachmentDigest: args.data.attachmentDigest,
+          bytes: attachment.bytes,
+          contentType: args.data.contentType,
+        },
       });
     },
   }),
@@ -230,6 +270,7 @@ export const PEOPLE_FILE_EXECUTIONS = [
         execution: input.execution,
         effectKey: input.effectKey,
         rows: parseRows(args.data.rowsJson),
+        duplicateSnapshotJson: args.data.duplicateSnapshotJson,
       });
     },
   }),
@@ -310,7 +351,7 @@ export const PEOPLE_FILE_REVIEWS = [
         kind: "confirmation",
         artifactVersion: 1,
         plan,
-        title: `Import ${args.createCount} people from ${args.originalName}`,
+        title: `Apply ${args.createCount + args.mergeCount} People changes from ${args.originalName}`,
         actionLabel: "Import people",
         consequences: [
           "Creates every listed person and timeline entry atomically. Any changed duplicate result refuses the whole import.",
@@ -321,12 +362,26 @@ export const PEOPLE_FILE_REVIEWS = [
             title: "Execute bulk import",
             effectKind: "file_import",
             reversibility: "difficult_to_reverse",
-            resolvedTargets: rows.map((row) =>
-              target("New person", `${row.firstName} ${row.lastName}`)
-            ),
+            resolvedTargets: rows.map((row) => {
+              if (row.disposition === "create")
+                return target("New person", `${row.firstName} ${row.lastName}`);
+              const existing = z
+                .strictObject({
+                  firstName: z.string(),
+                  lastName: z.string(),
+                })
+                .passthrough()
+                .parse(JSON.parse(row.expectedTargetJson!));
+              return target(
+                "Merge target",
+                `${existing.firstName} ${existing.lastName}`,
+                `/people/${row.targetPersonId}`
+              );
+            }),
             counts: [
               { label: "CSV rows", count: args.totalRows },
               { label: "People to create", count: args.createCount },
+              { label: "People to merge", count: args.mergeCount },
               { label: "Rows to skip", count: args.skipCount },
               { label: "Invalid rows", count: args.invalidCount },
             ],
@@ -366,6 +421,9 @@ function normalizedRow(input: {
   actor: EvryPlantActor;
   digest: string;
   row: ImportRow;
+  disposition?: "create" | "merge";
+  targetPersonId?: string | null;
+  expectedTargetJson?: string | null;
 }): EvryImportPersonRow | null {
   const parsed = personCreateSchema.safeParse({
     ...input.row.data,
@@ -403,6 +461,9 @@ function normalizedRow(input: {
     postalCode: parsed.data.postalCode || null,
     country: parsed.data.country,
     notes: parsed.data.notes || null,
+    disposition: input.disposition ?? "create",
+    targetPersonId: input.targetPersonId ?? null,
+    expectedTargetJson: input.expectedTargetJson ?? null,
   });
 }
 
@@ -470,7 +531,7 @@ export async function proposePeoplePhotoUpload(input: {
   if (!attachment?.personId) return null;
   const [person, current] = await Promise.all([
     getPerson(input.actor.plantId, attachment.personId),
-    getPersonPhotoKey(input.actor.plantId, attachment.personId),
+    getEvryPersonPhotoSnapshot(input.actor.plantId, attachment.personId),
   ]);
   if (!person || !current) return null;
   return storeProposal({
@@ -483,7 +544,7 @@ export async function proposePeoplePhotoUpload(input: {
       personLabel: `${person.firstName} ${person.lastName}`.trim(),
       expectedFirstName: person.firstName,
       expectedLastName: person.lastName,
-      currentPhotoDigest: photoDigest(current.photoKey),
+      currentPhotoDigest: current.digest,
       attachmentReference: input.reference,
       attachmentDigest: attachment.digest,
       contentType: attachment.contentType,
@@ -496,7 +557,7 @@ export async function proposePeoplePhotoUpload(input: {
 export async function proposePeopleImport(input: {
   actor: EvryPlantActor;
   reference: string;
-  duplicateResolutions: Readonly<Record<string, "skip" | "create">>;
+  duplicateResolutions: Readonly<Record<string, "skip" | "create" | "merge">>;
   requestKey: EvryPlanRequestKey;
 }) {
   const authorization = await authorizeEvryEffectCapability(
@@ -544,7 +605,49 @@ export async function proposePeopleImport(input: {
   const rows = createRows.map((row) =>
     normalizedRow({ actor: input.actor, digest: opened.digest, row })
   );
-  if (!rows.length || rows.some((row) => !row)) return null;
+  const mergeRows = await Promise.all(
+    duplicateRows
+      .filter(
+        (row) => input.duplicateResolutions[String(row.rowNumber)] === "merge"
+      )
+      .map(async (row) => {
+        const target =
+          row.duplicates.exactMatch ?? row.duplicates.potentialMatches[0];
+        if (!target) return null;
+        const person = await getPerson(input.actor.plantId, target.id);
+        if (!person) return null;
+        return normalizedRow({
+          actor: input.actor,
+          digest: opened.digest,
+          row,
+          disposition: "merge",
+          targetPersonId: person.id,
+          expectedTargetJson: JSON.stringify({
+            firstName: person.firstName,
+            lastName: person.lastName,
+            email: person.email,
+            phone: person.phone,
+            addressLine1: person.addressLine1,
+            addressLine2: person.addressLine2,
+            city: person.city,
+            state: person.state,
+            postalCode: person.postalCode,
+            country: person.country,
+            status: person.status,
+            backgroundCheckStatus: person.backgroundCheckStatus,
+            source: person.source,
+            sourceDetails: person.sourceDetails,
+            notes: person.notes,
+            householdId: person.householdId,
+            householdRole: person.householdRole,
+          }),
+        });
+      })
+  );
+  const allRows = [...rows, ...mergeRows].toSorted(
+    (a, b) => (a?.rowNumber ?? 0) - (b?.rowNumber ?? 0)
+  );
+  if (!allRows.length || allRows.some((row) => !row)) return null;
   return storeProposal({
     actor: input.actor,
     requestKey: input.requestKey,
@@ -555,9 +658,11 @@ export async function proposePeopleImport(input: {
       attachmentDigest: opened.digest,
       originalName: opened.originalName,
       previewFingerprint: fingerprint(preview),
-      rowsJson: JSON.stringify(rows),
+      duplicateSnapshotJson: JSON.stringify(duplicateSnapshot(preview)),
+      rowsJson: JSON.stringify(allRows),
       totalRows: preview.totalRows,
       createCount: rows.length,
+      mergeCount: mergeRows.length,
       skipCount: duplicateRows.filter(
         (row) => input.duplicateResolutions[String(row.rowNumber)] === "skip"
       ).length,
@@ -575,7 +680,7 @@ export async function peopleFileTargetIsCurrent(input: {
     if (!args.success) return false;
     const [person, current, attachment] = await Promise.all([
       getPerson(input.actor.plantId, args.data.personId),
-      getPersonPhotoKey(input.actor.plantId, args.data.personId),
+      getEvryPersonPhotoSnapshot(input.actor.plantId, args.data.personId),
       readExactEvryPeopleAttachment({
         reference: args.data.attachmentReference,
         actor: input.actor,
@@ -589,7 +694,7 @@ export async function peopleFileTargetIsCurrent(input: {
       attachment &&
       person.firstName === args.data.expectedFirstName &&
       person.lastName === args.data.expectedLastName &&
-      photoDigest(current.photoKey) === args.data.currentPhotoDigest &&
+      current.digest === args.data.currentPhotoDigest &&
       attachment.document.personId === person.id
     );
   }

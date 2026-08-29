@@ -24,20 +24,35 @@ function fixtureCase(identity: string, layer: EvryCapabilityEvalLayer) {
   });
 }
 
+function liveOutcomeCase(identity: string, layer: EvryCapabilityEvalLayer) {
+  return Object.freeze({
+    id: `${identity}:${layer}:live-database`,
+    proofId: "people-capability-live-outcomes",
+  });
+}
+
 function fixtureFor(identity: string): EvryCapabilityEvalFixture {
+  const operationKind = generated.capabilities.find(
+    (capability) => capability.identity === identity
+  )?.operationKind;
+  const cases = (layer: EvryCapabilityEvalLayer) =>
+    operationKind === "effect" &&
+    ["tenancy", "execution", "idempotency", "errors"].includes(layer)
+      ? [fixtureCase(identity, layer), liveOutcomeCase(identity, layer)]
+      : [fixtureCase(identity, layer)];
   return defineEvryCapabilityEvalFixture({
     capabilityIdentity: identity,
     cases: {
-      policy: [fixtureCase(identity, "policy")],
-      selection: [fixtureCase(identity, "selection")],
-      arguments: [fixtureCase(identity, "arguments")],
-      tenancy: [fixtureCase(identity, "tenancy")],
-      permission: [fixtureCase(identity, "permission")],
-      confirmation: [fixtureCase(identity, "confirmation")],
-      execution: [fixtureCase(identity, "execution")],
-      idempotency: [fixtureCase(identity, "idempotency")],
-      errors: [fixtureCase(identity, "errors")],
-      ui_artifact: [fixtureCase(identity, "ui_artifact")],
+      policy: cases("policy"),
+      selection: cases("selection"),
+      arguments: cases("arguments"),
+      tenancy: cases("tenancy"),
+      permission: cases("permission"),
+      confirmation: cases("confirmation"),
+      execution: cases("execution"),
+      idempotency: cases("idempotency"),
+      errors: cases("errors"),
+      ui_artifact: cases("ui_artifact"),
     },
   });
 }

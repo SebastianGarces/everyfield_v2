@@ -44,8 +44,8 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 
 import { claimEvryPersonNote } from "./activity";
-import { claimEvryCreatePerson, claimEvryRemovePersonPhoto } from "./evry-core";
-import { claimEvryBulkImport, claimEvryUploadPersonPhoto } from "./evry-files";
+import { claimEvryCreatePerson } from "./evry-core";
+import { claimEvryBulkImport } from "./evry-files";
 import { claimEvryCreateHouseholdWithHead } from "./evry-households";
 import {
   claimEvryCreateAssessment,
@@ -53,6 +53,11 @@ import {
   claimEvryCreateInterview,
 } from "./evry-milestones";
 import { claimEvryAssignTag } from "./evry-taxonomies";
+import {
+  claimEvryPersonPhotoMutation,
+  getEvryPersonPhotoSnapshot,
+} from "./person-photo";
+import { executeBulkImport } from "./import";
 import { createPerson } from "./service";
 
 const NOTE_IDENTITY = "people.crm.notes.add-note";
@@ -476,6 +481,24 @@ async function main(): Promise<void> {
   const importedIds = [randomUUID(), randomUUID()];
   const importInput = {
     ...importAttempt,
+    duplicateSnapshotJson: JSON.stringify([
+      {
+        rowNumber: 2,
+        email: "katherine@scratch.invalid",
+        phone: null,
+        firstName: "Katherine",
+        lastName: "Johnson",
+        matchIds: [],
+      },
+      {
+        rowNumber: 3,
+        email: "dorothy@scratch.invalid",
+        phone: null,
+        firstName: "Dorothy",
+        lastName: "Vaughan",
+        matchIds: [],
+      },
+    ]),
     rows: [
       {
         rowNumber: 2,
@@ -493,6 +516,9 @@ async function main(): Promise<void> {
         postalCode: null,
         country: "US",
         notes: null,
+        disposition: "create" as const,
+        targetPersonId: null,
+        expectedTargetJson: null,
       },
       {
         rowNumber: 3,
@@ -510,6 +536,9 @@ async function main(): Promise<void> {
         postalCode: null,
         country: "US",
         notes: null,
+        disposition: "create" as const,
+        targetPersonId: null,
+        expectedTargetJson: null,
       },
     ],
   };
@@ -519,6 +548,196 @@ async function main(): Promise<void> {
     affectedCount: 2,
     excludedCount: 0,
   });
+
+  const [mergeTarget] = await db
+    .select({
+      firstName: persons.firstName,
+      lastName: persons.lastName,
+      email: persons.email,
+      phone: persons.phone,
+      addressLine1: persons.addressLine1,
+      addressLine2: persons.addressLine2,
+      city: persons.city,
+      state: persons.state,
+      postalCode: persons.postalCode,
+      country: persons.country,
+      status: persons.status,
+      backgroundCheckStatus: persons.backgroundCheckStatus,
+      source: persons.source,
+      sourceDetails: persons.sourceDetails,
+      notes: persons.notes,
+      householdId: persons.householdId,
+      householdRole: persons.householdRole,
+    })
+    .from(persons)
+    .where(and(eq(persons.churchId, plant.id), eq(persons.id, person.id)));
+  assert.ok(mergeTarget);
+  const mergeAttempt = await seedAttempt({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: IMPORT_IDENTITY,
+    stepId: "merge-import",
+  });
+  const mergeInput = {
+    ...mergeAttempt,
+    duplicateSnapshotJson: JSON.stringify([
+      {
+        rowNumber: 2,
+        email: "ada@scratch.invalid",
+        phone: "+1 555 0199",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        matchIds: [person.id],
+      },
+    ]),
+    rows: [
+      {
+        rowNumber: 2,
+        rowKey: "3".repeat(64),
+        personId: randomUUID(),
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "ada@scratch.invalid",
+        phone: "+1 555 0199",
+        source: null,
+        addressLine1: null,
+        addressLine2: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: "US",
+        notes: "Merged from the import review",
+        disposition: "merge" as const,
+        targetPersonId: person.id,
+        expectedTargetJson: JSON.stringify(mergeTarget),
+      },
+    ],
+  };
+  await claimEvryBulkImport(mergeInput);
+  assert.deepEqual(await claimEvryBulkImport(mergeInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  assert.deepEqual(
+    await db
+      .select({ phone: persons.phone, notes: persons.notes })
+      .from(persons)
+      .where(and(eq(persons.churchId, plant.id), eq(persons.id, person.id)))
+      .then(([row]) => row),
+    { phone: "+1 555 0199", notes: "Merged from the import review" }
+  );
+  assert.deepEqual(
+    await executeBulkImport(
+      plant.id,
+      owner.id,
+      [
+        {
+          rowNumber: 2,
+          data: {
+            firstName: "Grace",
+            lastName: "Hopper",
+            email: "grace@scratch.invalid",
+            city: "Arlington",
+            notes: "Merged through the People import workflow",
+          },
+          valid: true,
+          errors: [],
+          duplicates: {
+            exactMatch: {
+              id: interfacePerson.id,
+              displayName: "Grace Hopper",
+            },
+            potentialMatches: [],
+          },
+        },
+      ],
+      { 2: "merge" }
+    ),
+    { created: 0, merged: 1, skipped: 0, errors: 0 }
+  );
+  assert.deepEqual(
+    await db
+      .select({ city: persons.city, notes: persons.notes })
+      .from(persons)
+      .where(
+        and(eq(persons.churchId, plant.id), eq(persons.id, interfacePerson.id))
+      )
+      .then(([row]) => row),
+    {
+      city: "Arlington",
+      notes: "Merged through the People import workflow",
+    }
+  );
+
+  const duplicateSnapshotJson = JSON.stringify([
+    {
+      rowNumber: 2,
+      email: "race@scratch.invalid",
+      phone: null,
+      firstName: "Concurrent",
+      lastName: "Writer",
+      matchIds: [],
+    },
+  ]);
+  const racingImports = await Promise.all(
+    await Promise.all(
+      ["duplicate-race-import-a", "duplicate-race-import-b"].map((stepId) =>
+        seedAttempt({
+          churchId: plant.id,
+          actorUserId: owner.id,
+          capabilityIdentity: IMPORT_IDENTITY,
+          stepId,
+        })
+      )
+    ).then((attempts) =>
+      attempts.map((attempt, index) =>
+        claimEvryBulkImport({
+          ...attempt,
+          duplicateSnapshotJson,
+          rows: [
+            {
+              rowNumber: 2,
+              rowKey: String(4 + index).repeat(64),
+              personId: randomUUID(),
+              firstName: "Concurrent",
+              lastName: "Writer",
+              email: "race@scratch.invalid",
+              phone: null,
+              source: null,
+              addressLine1: null,
+              addressLine2: null,
+              city: null,
+              state: null,
+              postalCode: null,
+              country: "US",
+              notes: null,
+              disposition: "create",
+              targetPersonId: null,
+              expectedTargetJson: null,
+            },
+          ],
+        })
+      )
+    )
+  );
+  assert.deepEqual(racingImports.map((result) => result.status).sort(), [
+    "completed",
+    "refused",
+  ]);
+  assert.equal(
+    await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.churchId, plant.id),
+          eq(persons.email, "race@scratch.invalid")
+        )
+      )
+      .then(([row]) => row?.count),
+    1
+  );
   const importRegistration = evryCapabilityRegistrationFor(IMPORT_IDENTITY);
   const importExecution =
     PEOPLE_FILE_EXECUTION_REGISTRY.registrationFor(IMPORT_IDENTITY);
@@ -541,9 +760,11 @@ async function main(): Promise<void> {
         attachmentDigest: "f".repeat(64),
         originalName: "unread.csv",
         previewFingerprint: "e".repeat(64),
+        duplicateSnapshotJson: importInput.duplicateSnapshotJson,
         rowsJson: JSON.stringify(importInput.rows),
         totalRows: 2,
         createCount: 2,
+        mergeCount: 0,
         skipCount: 0,
         invalidCount: 0,
       },
@@ -557,13 +778,29 @@ async function main(): Promise<void> {
     capabilityIdentity: PEOPLE_FILE_IDENTITIES.photo,
     stepId: "upload-photo",
   });
-  const uploadedPhotoKey = `people/${plant.id}/${person.id}/${randomUUID()}.jpg`;
+  const photoStorageEvents: string[] = [];
+  const photoStorage = {
+    store(key: string) {
+      photoStorageEvents.push(`store:${key}`);
+      return Promise.resolve();
+    },
+    remove(key: string) {
+      photoStorageEvents.push(`remove:${key}`);
+      return Promise.resolve();
+    },
+  };
   assert.deepEqual(
-    await claimEvryUploadPersonPhoto({
+    await claimEvryPersonPhotoMutation({
       ...photoAttempt,
       personId: person.id,
-      currentPhotoKey: null,
-      newPhotoKey: uploadedPhotoKey,
+      expectedDigest: null,
+      mutation: {
+        kind: "upload",
+        attachmentDigest: "f".repeat(64),
+        bytes: Buffer.from("photo"),
+        contentType: "image/jpeg",
+      },
+      storage: photoStorage,
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
@@ -604,13 +841,23 @@ async function main(): Promise<void> {
     capabilityIdentity: PEOPLE_CORE_IDENTITIES.removePhoto,
     stepId: "remove-photo",
   });
+  const uploadedPhoto = await getEvryPersonPhotoSnapshot(plant.id, person.id);
+  assert.ok(uploadedPhoto?.digest);
   assert.deepEqual(
-    await claimEvryRemovePersonPhoto({
+    await claimEvryPersonPhotoMutation({
       ...removePhotoAttempt,
       personId: person.id,
-      currentPhotoKey: uploadedPhotoKey,
+      expectedDigest: uploadedPhoto.digest,
+      mutation: { kind: "remove" },
+      storage: photoStorage,
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
+  );
+  assert.equal(photoStorageEvents.length, 2);
+  assert.match(photoStorageEvents[0] ?? "", /^store:people\//);
+  assert.equal(
+    photoStorageEvents[1],
+    `remove:${photoStorageEvents[0]?.slice(6)}`
   );
   const removePhotoRegistration = evryCapabilityRegistrationFor(
     PEOPLE_CORE_IDENTITIES.removePhoto
@@ -630,9 +877,7 @@ async function main(): Promise<void> {
       arguments: {
         personId: person.id,
         personLabel: "Ada Lovelace",
-        photoDigest: createHash("sha256")
-          .update(uploadedPhotoKey)
-          .digest("hex"),
+        photoDigest: uploadedPhoto.digest,
       },
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
@@ -803,8 +1048,8 @@ async function main(): Promise<void> {
       )
       .then(([row]) => row?.count ?? 0),
   ]);
-  assert.equal(activityCount, 4);
-  assert.equal(outcomeCount, 11);
+  assert.equal(activityCount, 5);
+  assert.equal(outcomeCount, 13);
   assert.equal(membershipCount, 1);
   assert.equal(createdPersonCount, 2);
   assert.equal(householdCount, 1);

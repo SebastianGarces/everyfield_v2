@@ -59,8 +59,16 @@ export async function claimEvryCreatePerson(
   const person = input.person;
   return claimEvryPeopleEffect({
     ...input,
+    lock: sql`
+      select id from churches
+      where id = ${input.execution.plantId}::uuid
+      for update
+    `,
     beforeMutation: sql`
-      created_person as (
+      duplicate_scope as materialized (
+        select id from churches
+        where id = ${input.execution.plantId}::uuid
+      ), created_person as (
         insert into persons (
           church_id, first_name, last_name, email, phone, address_line1,
           address_line2, city, state, postal_code, country, status,
@@ -76,6 +84,7 @@ export async function claimEvryCreatePerson(
           ${person.householdRole}, 0, e.actor_user_id,
           transaction_timestamp(), transaction_timestamp()
         from eligible e
+        join duplicate_scope d on d.id = e.church_id
         where ${person.householdId}::uuid is null or exists (
           select 1 from households h
           where h.id = ${person.householdId}::uuid and h.church_id = e.church_id
@@ -116,6 +125,17 @@ export async function claimEvryUpdatePerson(
   const current = personSnapshot(sql`p`);
   return claimEvryPeopleEffect({
     ...input,
+    lock: sql`
+      select id from churches
+      where id = ${input.execution.plantId}::uuid
+      for update
+    `,
+    beforeMutation: sql`
+      duplicate_scope as materialized (
+        select id from churches
+        where id = ${input.execution.plantId}::uuid
+      ),
+    `,
     mutation: sql`
       update persons p set
         first_name = ${after.firstName}, last_name = ${after.lastName},
@@ -126,8 +146,9 @@ export async function claimEvryUpdatePerson(
         source = ${after.source}, source_details = ${after.sourceDetails}, notes = ${after.notes},
         household_id = ${after.householdId}::uuid, household_role = ${after.householdRole},
         updated_at = transaction_timestamp()
-      from eligible e
+      from eligible e, duplicate_scope d
       where p.id = ${input.personId}::uuid and p.church_id = e.church_id
+        and d.id = e.church_id
         and p.deleted_at is null and ${current} = ${input.baselineJson}::jsonb
         and (${after.householdId}::uuid is null or exists (
           select 1 from households h
@@ -155,10 +176,22 @@ export async function claimEvryDeletePerson(
   const current = personSnapshot(sql`p`);
   return claimEvryPeopleEffect({
     ...input,
+    lock: sql`
+      select id from churches
+      where id = ${input.execution.plantId}::uuid
+      for update
+    `,
+    beforeMutation: sql`
+      duplicate_scope as materialized (
+        select id from churches
+        where id = ${input.execution.plantId}::uuid
+      ),
+    `,
     mutation: sql`
       update persons p set deleted_at = transaction_timestamp(), updated_at = transaction_timestamp()
-      from eligible e
+      from eligible e, duplicate_scope d
       where p.id = ${input.personId}::uuid and p.church_id = e.church_id
+        and d.id = e.church_id
         and p.deleted_at is null and ${current} = ${input.baselineJson}::jsonb
       returning 1 as affected_count, 0 as excluded_count
     `,
@@ -266,27 +299,6 @@ export async function claimEvryReorderPeople(
         where p.church_id = ${input.execution.plantId}::uuid and p.deleted_at is null
           and p.status = r."expectedStatus" and p.pipeline_sort_order = r."expectedOrder"
         having count(*) = ${input.entries.length}
-      `),
-  });
-}
-
-export async function claimEvryRemovePersonPhoto(
-  input: EffectIdentity & { personId: string; currentPhotoKey: string }
-): Promise<EvryEffectResult> {
-  return claimEvryPeopleEffect({
-    ...input,
-    mutation: sql`
-      update persons p set photo_url = null, updated_at = transaction_timestamp()
-      from eligible e
-      where p.id = ${input.personId}::uuid and p.church_id = e.church_id
-        and p.deleted_at is null and p.photo_url = ${input.currentPhotoKey}
-      returning 1 as affected_count, 0 as excluded_count
-    `,
-    targetIsCurrent: () =>
-      hasRow(sql`
-        select 1 from persons where id = ${input.personId}::uuid
-          and church_id = ${input.execution.plantId}::uuid and deleted_at is null
-          and photo_url = ${input.currentPhotoKey}
       `),
   });
 }

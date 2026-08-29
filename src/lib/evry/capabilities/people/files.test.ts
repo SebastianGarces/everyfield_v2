@@ -99,6 +99,9 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
     postalCode: null,
     country: "US",
     notes: null,
+    disposition: "create" as const,
+    targetPersonId: null,
+    expectedTargetJson: null,
   };
   const document = parseEvryActionPlanCandidate({
     candidate: {
@@ -111,9 +114,20 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
             attachmentDigest: DIGEST,
             originalName: "people.csv",
             previewFingerprint: "c".repeat(64),
+            duplicateSnapshotJson: JSON.stringify([
+              {
+                rowNumber: 2,
+                email: row.email,
+                phone: row.phone,
+                firstName: row.firstName,
+                lastName: row.lastName,
+                matchIds: [],
+              },
+            ]),
             rowsJson: JSON.stringify([row]),
             totalRows: 3,
             createCount: 1,
+            mergeCount: 0,
             skipCount: 1,
             invalidCount: 1,
           },
@@ -137,6 +151,7 @@ test("import review discloses every exact row, exclusion, and file fingerprint",
   assert.deepEqual(review.confirmation.steps[0]?.counts, [
     { label: "CSV rows", count: 3 },
     { label: "People to create", count: 1 },
+    { label: "People to merge", count: 0 },
     { label: "Rows to skip", count: 1 },
     { label: "Invalid rows", count: 1 },
   ]);

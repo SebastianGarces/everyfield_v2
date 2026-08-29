@@ -33,6 +33,11 @@ import {
   type PendingEvrySubmission,
 } from "./interaction-state";
 import {
+  duplicateRowNumbersFromPeopleStage,
+  pendingPeopleFileSubmissionFor,
+  type PendingPeopleFileSubmission,
+} from "./people-file-state";
+import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
@@ -105,9 +110,25 @@ type EvryShellValue = Readonly<{
     state: EvryWorkState
   ) => boolean;
   suggestions: readonly EligibleEvrySuggestion[];
+  submitPeopleFile: (input: EvryPeopleFileSubmission) => Promise<boolean>;
   workRequestId: string | null;
   workState: EvryWorkState;
 }>;
+
+export type EvryPeopleFileSubmission =
+  | Readonly<{
+      kind: "people_csv";
+      file: File;
+      duplicateDisposition: "skip" | "create" | "merge";
+    }>
+  | Readonly<{ kind: "person_photo"; file: File; personId: string }>
+  | Readonly<{
+      kind: "commitment_document";
+      file: File;
+      personId: string;
+      commitmentType: "core_group" | "launch_team";
+      signedDate: string;
+    }>;
 
 const EvryShellContext = createContext<EvryShellValue | null>(null);
 
@@ -170,6 +191,7 @@ export function EvryShell({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
+  const pendingPeopleFileRef = useRef<PendingPeopleFileSubmission | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
   const workAbortRef = useRef<Readonly<{
@@ -823,6 +845,151 @@ export function EvryShell({
     updateWork,
   ]);
 
+  const submitPeopleFile = useCallback(
+    async (input: EvryPeopleFileSubmission): Promise<boolean> => {
+      if (
+        isSending ||
+        isWorking ||
+        isLoading ||
+        requestedConversationId !== null
+      )
+        return false;
+      const semanticKey = [
+        input.kind,
+        input.file.name,
+        input.file.type,
+        input.file.size,
+        input.file.lastModified,
+        "personId" in input ? input.personId : "",
+        "commitmentType" in input ? input.commitmentType : "",
+        "signedDate" in input ? input.signedDate : "",
+        "duplicateDisposition" in input ? input.duplicateDisposition : "",
+        conversation?.id ?? "new",
+      ].join(":");
+      const pending = pendingPeopleFileSubmissionFor(
+        pendingPeopleFileRef.current,
+        semanticKey,
+        () => crypto.randomUUID()
+      );
+      pendingPeopleFileRef.current = pending;
+      setAcknowledgement({
+        requestId: pending.requestKey,
+        submittedAt: performance.now(),
+      });
+      setSending(true);
+      setError(null);
+      beginWork(pending.requestKey, {
+        phase: "reading",
+        message: "Checking the file and current People records",
+      });
+      try {
+        const form = new FormData();
+        form.set("kind", input.kind);
+        form.set("file", input.file);
+        if ("personId" in input) form.set("personId", input.personId);
+        const stagedResponse = await fetch("/api/evry/people/attachments", {
+          method: "POST",
+          body: form,
+        });
+        const staged: unknown = await stagedResponse.json();
+        if (
+          !stagedResponse.ok ||
+          typeof staged !== "object" ||
+          staged === null ||
+          !("status" in staged) ||
+          staged.status !== "staged" ||
+          !("reference" in staged) ||
+          typeof staged.reference !== "string"
+        ) {
+          throw new Error("Unable to stage this file.");
+        }
+        const duplicateResolutions: Record<
+          string,
+          "skip" | "create" | "merge"
+        > = {};
+        for (const rowNumber of duplicateRowNumbersFromPeopleStage(staged)) {
+          duplicateResolutions[String(rowNumber)] =
+            input.kind === "people_csv" ? input.duplicateDisposition : "skip";
+        }
+        updateWork(pending.requestKey, 1, {
+          phase: "planning",
+          message: "Preparing the exact file review",
+        });
+        const planBody =
+          input.kind === "people_csv"
+            ? {
+                kind: input.kind,
+                reference: staged.reference,
+                duplicateResolutions,
+                conversationId: conversation?.id ?? null,
+                requestKey: pending.requestKey,
+              }
+            : input.kind === "person_photo"
+              ? {
+                  kind: input.kind,
+                  reference: staged.reference,
+                  conversationId: conversation?.id ?? null,
+                  requestKey: pending.requestKey,
+                }
+              : {
+                  kind: input.kind,
+                  reference: staged.reference,
+                  commitmentType: input.commitmentType,
+                  signedDate: input.signedDate,
+                  witness: null,
+                  notes: null,
+                  conversationId: conversation?.id ?? null,
+                  requestKey: pending.requestKey,
+                };
+        const reviewResponse = await fetch(
+          "/api/evry/people/attachments/plan",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(planBody),
+          }
+        );
+        const nextConversation = await responseConversation(reviewResponse);
+        setConversation(nextConversation);
+        pendingPeopleFileRef.current = null;
+        setDraft("");
+        updateWork(
+          pending.requestKey,
+          2,
+          evryWorkStateForConversation(nextConversation)
+        );
+        finishWork(pending.requestKey, 3);
+        requestAnimationFrame(() =>
+          document.getElementById("evry-work-status")?.focus()
+        );
+        return true;
+      } catch {
+        const failure =
+          "Unable to prepare this file review. Keep the file selected and try again.";
+        setError(failure);
+        updateWork(pending.requestKey, 2, {
+          phase: "failed",
+          message: failure,
+        });
+        finishWork(pending.requestKey, 3);
+        return false;
+      } finally {
+        setSending(false);
+      }
+    },
+    [
+      beginWork,
+      conversation,
+      finishWork,
+      isLoading,
+      isSending,
+      isWorking,
+      requestedConversationId,
+      setDraft,
+      updateWork,
+    ]
+  );
+
   const value = useMemo<EvryShellValue>(
     () => ({
       activeContext,
@@ -859,6 +1026,7 @@ export function EvryShell({
       stopWatching,
       updateWork,
       suggestions,
+      submitPeopleFile,
       workRequestId: sequencedWork?.requestId ?? null,
       workState: sequencedWork?.state ?? { phase: "idle" },
     }),
@@ -895,6 +1063,7 @@ export function EvryShell({
       stopWatching,
       sequencedWork,
       suggestions,
+      submitPeopleFile,
       updateWork,
     ]
   );

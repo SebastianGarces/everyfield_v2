@@ -547,12 +547,7 @@ export const HOUSEHOLD_REVIEWS = definitions.map((identity) =>
                   count: args.expectedMemberIds.length,
                 },
               ],
-              exclusions: [
-                {
-                  reason: "The action refuses if any member is present.",
-                  count: 0,
-                },
-              ],
+              exclusions: [],
               dateTime: null,
               contentPreviews: [],
               beforeAfter: [
@@ -710,13 +705,7 @@ export const HOUSEHOLD_REVIEWS = definitions.map((identity) =>
               ),
             ],
             counts: [{ label: "People to update", count: members.length }],
-            exclusions: [
-              {
-                reason:
-                  "The action refuses if household membership or any listed address changes.",
-                count: 0,
-              },
-            ],
+            exclusions: [],
             dateTime: null,
             contentPreviews: [],
             beforeAfter: members.map((member) => ({

@@ -1,9 +1,22 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
-import { deleteFile } from "@/lib/storage";
+import type { EvryAuditKey } from "@/lib/evry/audit/identity";
+import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import {
+  deleteFile,
+  getExtensionFromMimeType,
+  personPhotoStorageKey,
+  uploadFile,
+} from "@/lib/storage";
 
+import {
+  claimEvryPeopleEffect,
+  recoverCompletedEvryPeopleEffect,
+} from "./evry-effect";
 import { toPersonForClient, type PersonForClient } from "./types";
 
 // ============================================================================
@@ -69,6 +82,175 @@ export async function getPersonPhotoKey(
     .limit(1);
 
   return row ?? null;
+}
+
+function digestForPersonPhoto(photoKey: string | null): string | null {
+  return photoKey ? createHash("sha256").update(photoKey).digest("hex") : null;
+}
+
+/**
+ * The closed Evry-facing view of a private person-photo key. Capability code
+ * may bind a plan to the digest and whether an image exists, but the storage
+ * locator never leaves this module.
+ */
+export async function getEvryPersonPhotoSnapshot(
+  churchId: string,
+  personId: string
+): Promise<Readonly<{ digest: string | null; present: boolean }> | null> {
+  const current = await getPersonPhotoKey(churchId, personId);
+  return current
+    ? {
+        digest: digestForPersonPhoto(current.photoKey),
+        present: current.photoKey !== null,
+      }
+    : null;
+}
+
+function uuidFromPhotoIdentity(value: string): string {
+  const hex = createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  hex[12] = "4";
+  hex[16] = ["8", "9", "a", "b"][Number.parseInt(hex[16]!, 16) % 4]!;
+  const joined = hex.join("");
+  return `${joined.slice(0, 8)}-${joined.slice(8, 12)}-${joined.slice(12, 16)}-${joined.slice(16, 20)}-${joined.slice(20)}`;
+}
+
+type EvryPhotoEffectIdentity = Pick<EvryEffectInput, "execution"> & {
+  effectKey: EvryAuditKey;
+};
+
+export type EvryPersonPhotoMutation =
+  | Readonly<{ kind: "remove" }>
+  | Readonly<{
+      kind: "upload";
+      attachmentDigest: string;
+      bytes: Buffer;
+      contentType: "image/jpeg" | "image/jpg" | "image/png" | "image/webp";
+    }>;
+
+export type EvryPersonPhotoStorageEffects = Readonly<{
+  store(key: string, bytes: Buffer, contentType: string): Promise<unknown>;
+  remove(key: string): Promise<unknown>;
+}>;
+
+const LIVE_EVRY_PHOTO_STORAGE: EvryPersonPhotoStorageEffects = {
+  store: uploadFile,
+  remove: deleteFile,
+};
+
+/**
+ * Claim one exact Evry photo change through the same single writer as the
+ * owning interface. The object is stored first, the row changes only inside
+ * the durable effect claim, and the old object is removed only after the row
+ * no longer names it. Replays return the durable outcome before storage work.
+ */
+export async function claimEvryPersonPhotoMutation(
+  input: EvryPhotoEffectIdentity & {
+    personId: string;
+    expectedDigest: string | null;
+    mutation: EvryPersonPhotoMutation;
+    storage?: EvryPersonPhotoStorageEffects;
+  }
+): Promise<EvryEffectResult> {
+  const replay = await recoverCompletedEvryPeopleEffect(input);
+  if (replay) return replay;
+
+  const current = await getPersonPhotoKey(
+    input.execution.plantId,
+    input.personId
+  );
+  if (
+    !current ||
+    digestForPersonPhoto(current.photoKey) !== input.expectedDigest
+  )
+    return { status: "refused", excludedCount: 1 };
+
+  const nextPhotoKey =
+    input.mutation.kind === "remove"
+      ? null
+      : personPhotoStorageKey(
+          input.execution.plantId,
+          input.personId,
+          getExtensionFromMimeType(input.mutation.contentType),
+          uuidFromPhotoIdentity(
+            `${input.effectKey}:${input.mutation.attachmentDigest}`
+          )
+        );
+  if (input.mutation.kind === "upload") {
+    await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).store(
+      nextPhotoKey!,
+      input.mutation.bytes,
+      input.mutation.contentType
+    );
+  }
+
+  let result: EvryEffectResult;
+  try {
+    result = await claimEvryPeopleEffect({
+      ...input,
+      mutation: sql`
+        update persons p set photo_url = ${nextPhotoKey},
+          updated_at = transaction_timestamp()
+        from eligible e
+        where p.id = ${input.personId}::uuid and p.church_id = e.church_id
+          and p.deleted_at is null
+          and p.photo_url is not distinct from ${current.photoKey}
+        returning 1 as affected_count, 0 as excluded_count
+      `,
+      targetIsCurrent: async () => {
+        const latest = await getPersonPhotoKey(
+          input.execution.plantId,
+          input.personId
+        );
+        return (
+          latest !== null &&
+          digestForPersonPhoto(latest.photoKey) === input.expectedDigest
+        );
+      },
+    });
+  } catch (error) {
+    if (input.mutation.kind === "upload") {
+      try {
+        await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(nextPhotoKey!);
+      } catch (cleanupError) {
+        console.error(
+          "[evry:people] failed to clean up an unclaimed photo object:",
+          cleanupError
+        );
+      }
+    }
+    throw error;
+  }
+
+  if (result.status !== "completed" && input.mutation.kind === "upload") {
+    try {
+      await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(nextPhotoKey!);
+    } catch (error) {
+      console.error(
+        "[evry:people] failed to clean up an unclaimed photo object:",
+        error
+      );
+    }
+  }
+
+  if (
+    result.status === "completed" &&
+    current.photoKey &&
+    current.photoKey !== nextPhotoKey
+  ) {
+    try {
+      await (input.storage ?? LIVE_EVRY_PHOTO_STORAGE).remove(current.photoKey);
+    } catch (error) {
+      console.error(
+        "[evry:people] failed to delete replaced photo object:",
+        error
+      );
+    }
+  }
+  return result;
 }
 
 /**

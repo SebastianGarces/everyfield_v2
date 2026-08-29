@@ -12,7 +12,7 @@ test("generated People inventory is current and classifies every concrete surfac
     routes: 10,
     routeHandlers: 1,
     rscReads: 19,
-    productGaps: 1,
+    productGaps: 0,
     readCapabilities: 22,
     effectCapabilities: 30,
     unclassified: 0,
@@ -89,14 +89,18 @@ test("photo read is covered and route composition does not invent navigation too
   });
 });
 
-test("the absent duplicate merge is an owning-product gap, not fake parity", () => {
-  const merge = generated.entries.find(
-    ({ identity }) => identity === "product-gap:people.duplicates.merge"
+test("duplicate resolution is implemented by the owning import workflow", () => {
+  assert.equal(
+    generated.entries.some(
+      ({ identity }) => identity === "product-gap:people.duplicates.merge"
+    ),
+    false
   );
-  assert.deepEqual(merge?.classification, {
-    state: "excluded",
-    reason: "owning_product_gap",
-  });
+  assert.ok(
+    generated.capabilities.some(
+      ({ identity }) => identity === "people.crm.imports.execute-bulk-import"
+    )
+  );
 });
 
 test("every generated capability declares all required fixture classes", () => {

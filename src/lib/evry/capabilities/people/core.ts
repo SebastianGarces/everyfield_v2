@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 import {
@@ -37,14 +35,16 @@ import {
   claimEvryChangePersonStatus,
   claimEvryCreatePerson,
   claimEvryDeletePerson,
-  claimEvryRemovePersonPhoto,
   claimEvryReorderPeople,
   claimEvryUpdatePerson,
   type EvryPersonPayload,
 } from "@/lib/people/evry-core";
 import { recoverCompletedEvryPeopleEffect } from "@/lib/people/evry-effect";
 import { getHousehold } from "@/lib/people/household";
-import { getPersonPhotoKey } from "@/lib/people/person-photo";
+import {
+  claimEvryPersonPhotoMutation,
+  getEvryPersonPhotoSnapshot,
+} from "@/lib/people/person-photo";
 import { getPerson } from "@/lib/people/service";
 import { validateStatusTransition } from "@/lib/people/status";
 
@@ -425,21 +425,12 @@ export const PEOPLE_CORE_EXECUTIONS = [
         return { status: "refused", excludedCount: 1 };
       const replay = await recoverCompletedEvryPeopleEffect(input);
       if (replay) return replay;
-      const current = await getPersonPhotoKey(
-        input.authorization.actor.plantId,
-        args.data.personId
-      );
-      if (
-        !current?.photoKey ||
-        createHash("sha256").update(current.photoKey).digest("hex") !==
-          args.data.photoDigest
-      )
-        return { status: "refused", excludedCount: 1 };
-      return claimEvryRemovePersonPhoto({
+      return claimEvryPersonPhotoMutation({
         execution: input.execution,
         effectKey: input.effectKey,
         personId: args.data.personId,
-        currentPhotoKey: current.photoKey,
+        expectedDigest: args.data.photoDigest,
+        mutation: { kind: "remove" },
       });
     },
   }),
@@ -903,12 +894,15 @@ export async function proposePeopleCoreEffect(input: {
       };
     }
     if (input.selection.kind === "remove_photo") {
-      const photo = await getPersonPhotoKey(input.actor.plantId, person.id);
-      if (!photo?.photoKey) return null;
+      const photo = await getEvryPersonPhotoSnapshot(
+        input.actor.plantId,
+        person.id
+      );
+      if (!photo?.present || !photo.digest) return null;
       args = {
         personId: person.id,
         personLabel: label,
-        photoDigest: createHash("sha256").update(photo.photoKey).digest("hex"),
+        photoDigest: photo.digest,
       };
     }
   }
@@ -1017,10 +1011,6 @@ export async function peopleCoreTargetIsCurrent(input: {
   }
   const parsed = removePhotoSchema.safeParse(input.step.arguments);
   if (!parsed.success) return false;
-  const photo = await getPersonPhotoKey(input.actor.plantId, personId);
-  return Boolean(
-    photo?.photoKey &&
-    createHash("sha256").update(photo.photoKey).digest("hex") ===
-      parsed.data.photoDigest
-  );
+  const photo = await getEvryPersonPhotoSnapshot(input.actor.plantId, personId);
+  return Boolean(photo?.present && photo.digest === parsed.data.photoDigest);
 }

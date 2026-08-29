@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
-import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { getTagsForPeople } from "./tags";
 import {
   toPersonForClient,
@@ -45,6 +45,7 @@ export async function findDuplicateMatches(
       .select()
       .from(persons)
       .where(and(...baseConditions, ilike(persons.email, normalizedEmail)))
+      .orderBy(asc(persons.id))
       .limit(1);
 
     exactRow = emailMatches[0] ?? null;
@@ -86,6 +87,7 @@ export async function findDuplicateMatches(
           or(...fuzzyConditions)
         )
       )
+      .orderBy(asc(persons.id))
       .limit(5);
   }
 

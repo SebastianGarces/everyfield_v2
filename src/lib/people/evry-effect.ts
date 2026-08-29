@@ -66,6 +66,7 @@ export async function recoverCompletedEvryPeopleEffect(
 export async function claimEvryPeopleEffect(input: {
   execution: EvryEffectInput["execution"];
   effectKey: EvryAuditKey;
+  lock?: SQL;
   beforeMutation?: SQL;
   mutation: SQL;
   targetIsCurrent(): Promise<boolean>;
@@ -76,61 +77,70 @@ export async function claimEvryPeopleEffect(input: {
     input.execution.stepId
   );
   let result: Awaited<ReturnType<typeof db.execute<CompletedEffectRow>>>;
-  try {
-    result = await db.execute<CompletedEffectRow>(sql`
-      with existing as materialized (
-        select o.affected_count, o.excluded_count
-        from evry_execution_outcomes o
-        where o.attempt_id = ${input.execution.attemptId}::uuid
-          and o.plan_id = ${input.execution.planId}::uuid
-          and o.church_id = ${input.execution.plantId}::uuid
-          and o.actor_user_id = ${input.execution.actorUserId}::uuid
-          and o.plan_fingerprint = ${input.execution.fingerprint}
-          and o.correlation_id = ${input.execution.correlationId}::uuid
-          and o.outcome_key = ${outcomeKey}
-          and o.effect_key = ${input.effectKey}
-          and o.subject = 'step'
-          and o.step_id = ${input.execution.stepId}
-          and o.capability_identity = ${input.execution.capabilityIdentity}
-          and o.status = 'completed'
-      ), eligible as materialized (
-        select a.id, a.plan_id, a.church_id, a.actor_user_id,
-               a.plan_fingerprint, a.correlation_id
-        from evry_execution_attempts a
-        join evry_action_plan_states s
-          on s.plan_id = a.plan_id and s.church_id = a.church_id
-        where a.id = ${input.execution.attemptId}::uuid
-          and a.plan_id = ${input.execution.planId}::uuid
-          and a.church_id = ${input.execution.plantId}::uuid
-          and a.actor_user_id = ${input.execution.actorUserId}::uuid
-          and a.plan_fingerprint = ${input.execution.fingerprint}
-          and a.correlation_id = ${input.execution.correlationId}::uuid
-          and s.status = 'executing'
-          and not exists (select 1 from existing)
-      ), ${input.beforeMutation ?? sql``} mutation as materialized (
-        ${input.mutation}
-      ), claimed as (
-        insert into evry_execution_outcomes (
-          attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
-          correlation_id, outcome_key, effect_key, subject, step_id,
-          capability_identity, status, result_code, affected_count,
-          excluded_count, occurred_at
-        )
-        select
-          e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
-          e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
-          ${input.execution.stepId}, ${input.execution.capabilityIdentity},
-          'completed', 'effect_completed', m.affected_count,
-          m.excluded_count, transaction_timestamp()
-        from eligible e
-        cross join mutation m
-        returning affected_count, excluded_count
+  const claim = sql`
+    with existing as materialized (
+      select o.affected_count, o.excluded_count
+      from evry_execution_outcomes o
+      where o.attempt_id = ${input.execution.attemptId}::uuid
+        and o.plan_id = ${input.execution.planId}::uuid
+        and o.church_id = ${input.execution.plantId}::uuid
+        and o.actor_user_id = ${input.execution.actorUserId}::uuid
+        and o.plan_fingerprint = ${input.execution.fingerprint}
+        and o.correlation_id = ${input.execution.correlationId}::uuid
+        and o.outcome_key = ${outcomeKey}
+        and o.effect_key = ${input.effectKey}
+        and o.subject = 'step'
+        and o.step_id = ${input.execution.stepId}
+        and o.capability_identity = ${input.execution.capabilityIdentity}
+        and o.status = 'completed'
+    ), eligible as materialized (
+      select a.id, a.plan_id, a.church_id, a.actor_user_id,
+             a.plan_fingerprint, a.correlation_id
+      from evry_execution_attempts a
+      join evry_action_plan_states s
+        on s.plan_id = a.plan_id and s.church_id = a.church_id
+      where a.id = ${input.execution.attemptId}::uuid
+        and a.plan_id = ${input.execution.planId}::uuid
+        and a.church_id = ${input.execution.plantId}::uuid
+        and a.actor_user_id = ${input.execution.actorUserId}::uuid
+        and a.plan_fingerprint = ${input.execution.fingerprint}
+        and a.correlation_id = ${input.execution.correlationId}::uuid
+        and s.status = 'executing'
+        and not exists (select 1 from existing)
+    ), ${input.beforeMutation ?? sql``} mutation as materialized (
+      ${input.mutation}
+    ), claimed as (
+      insert into evry_execution_outcomes (
+        attempt_id, plan_id, church_id, actor_user_id, plan_fingerprint,
+        correlation_id, outcome_key, effect_key, subject, step_id,
+        capability_identity, status, result_code, affected_count,
+        excluded_count, occurred_at
       )
-      select affected_count, excluded_count from existing
-      union all
-      select affected_count, excluded_count from claimed
-      limit 1
-    `);
+      select
+        e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
+        e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
+        ${input.execution.stepId}, ${input.execution.capabilityIdentity},
+        'completed', 'effect_completed', m.affected_count,
+        m.excluded_count, transaction_timestamp()
+      from eligible e
+      cross join mutation m
+      returning affected_count, excluded_count
+    )
+    select affected_count, excluded_count from existing
+    union all
+    select affected_count, excluded_count from claimed
+    limit 1
+  `;
+  try {
+    if (input.lock) {
+      const [, claimed] = await db.batch([
+        db.execute(input.lock),
+        db.execute<CompletedEffectRow>(claim),
+      ]);
+      result = claimed;
+    } else {
+      result = await db.execute<CompletedEffectRow>(claim);
+    }
   } catch (error) {
     if (
       !isUniqueViolation(error, EFFECT_UNIQUE) &&

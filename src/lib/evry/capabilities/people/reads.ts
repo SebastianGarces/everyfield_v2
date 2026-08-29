@@ -15,7 +15,7 @@ import {
   listHouseholds,
 } from "@/lib/people/household";
 import { getPipelineData } from "@/lib/people/pipeline";
-import { getPersonPhotoKey } from "@/lib/people/person-photo";
+import { getEvryPersonPhotoSnapshot } from "@/lib/people/person-photo";
 import { getPerson, listPeople } from "@/lib/people/service";
 import { getPersonSkills } from "@/lib/people/skills";
 import { getPersonTags, listTags } from "@/lib/people/tags";
@@ -222,9 +222,9 @@ const PHOTO_READ = defineEvryReadRegistration({
   async run({ authorization }, input) {
     const [person, photo] = await Promise.all([
       getPerson(authorization.actor.plantId, input.personId),
-      getPersonPhotoKey(authorization.actor.plantId, input.personId),
+      getEvryPersonPhotoSnapshot(authorization.actor.plantId, input.personId),
     ]);
-    const hasPhoto = Boolean(person && photo?.photoKey);
+    const hasPhoto = Boolean(person && photo?.present);
     return buildEvryReadArtifact({
       title: "Person photo",
       filters: [{ label: "Plant", value: "Current plant" }],
