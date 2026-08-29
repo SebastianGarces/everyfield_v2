@@ -55,6 +55,16 @@ export {
   type EvryStoredConversationMessage,
 } from "./repository";
 export {
+  buildEvryConversationHistoryQuery,
+  EVRY_CONVERSATION_HISTORY_LIMIT,
+  evryConversationActionableState,
+  evryConversationHistorySearchSchema,
+  listEvryConversationHistory,
+  listEvryConversationHistoryRecords,
+  type EvryConversationActionableState,
+  type EvryConversationHistoryItem,
+} from "./history";
+export {
   resolveEvryConversationReference,
   type EvryConversationReferenceResolution,
 } from "./references";

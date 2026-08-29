@@ -73,6 +73,13 @@ test("the mounted workspace attaches a conversation created after expansion", ()
   );
 });
 
+test("created conversation URL sync preserves history search", () => {
+  assert.equal(
+    evryWorkspaceConversationHref(null, "conversation-b", "core team"),
+    "/evry?q=core+team&conversation=conversation-b"
+  );
+});
+
 test("workspace query sync cannot dispatch router navigation during a pending transition", () => {
   const routerNavigations: string[] = [];
   const historyReplacements: Array<{
@@ -112,6 +119,34 @@ test("workspace query sync cannot dispatch router navigation during a pending tr
   assert.equal(pendingSidebarDestination, "/people");
   assert.deepEqual(patchedHistoryReplacements, []);
   assert.deepEqual(routerNavigations, []);
+});
+
+test("created-conversation sync retries after an older route transition commits", () => {
+  const replacements: string[] = [];
+  const replace = (
+    _state: unknown,
+    _unused: string,
+    href?: string | URL | null
+  ) => {
+    replacements.push(String(href));
+  };
+
+  assert.equal(
+    syncEvryWorkspaceConversationHistory(
+      {},
+      replace,
+      "conversation-a",
+      "conversation-b"
+    ),
+    false
+  );
+  assert.deepEqual(replacements, []);
+
+  assert.equal(
+    syncEvryWorkspaceConversationHistory({}, replace, null, "conversation-b"),
+    true
+  );
+  assert.deepEqual(replacements, ["/evry?conversation=conversation-b"]);
 });
 
 test("changing any semantic request input rotates the retry key", () => {

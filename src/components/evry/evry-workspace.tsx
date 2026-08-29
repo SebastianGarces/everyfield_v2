@@ -1,40 +1,26 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
-import { useEffect } from "react";
 
+import { ConversationHistoryWorkspace } from "@/components/evry/conversation-history/conversation-history-workspace";
 import { ConversationSurface } from "@/components/evry/conversation-surface";
 import { useEvryShell } from "@/components/evry/evry-shell";
-import { syncEvryWorkspaceConversationHistory } from "@/components/evry/interaction-state";
-import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import { Button } from "@/components/ui/button";
+import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
+import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/history";
 
 export function EvryWorkspace({
+  conversations,
   conversationId,
+  newConversation,
+  searchQuery,
 }: {
+  conversations: readonly EvryConversationHistoryItem[];
   conversationId: string | null;
+  newConversation: boolean;
+  searchQuery: string | null;
 }) {
-  const { conversation, loadConversation, returnToPage } = useEvryShell();
-
-  useEffect(() => {
-    if (conversationId) void loadConversation(conversationId);
-  }, [conversationId, loadConversation]);
-
-  useEffect(() => {
-    // A second App Router transition could cancel a pending sidebar destination.
-    syncEvryWorkspaceConversationHistory(
-      window.history.state,
-      (state, unused, href) =>
-        window.History.prototype.replaceState.call(
-          window.history,
-          state,
-          unused,
-          href
-        ),
-      conversationId,
-      conversation?.id ?? null
-    );
-  }, [conversation?.id, conversationId]);
+  const { returnToPage } = useEvryShell();
 
   return (
     <PageCanvas
@@ -57,11 +43,18 @@ export function EvryWorkspace({
           <div className="min-w-0">
             <h1 className="font-semibold">Evry workspace</h1>
             <p className="text-muted-foreground text-sm">
-              Continue this conversation whenever you need it.
+              Your private conversation history
             </p>
           </div>
         </header>
-        <ConversationSurface />
+        <ConversationHistoryWorkspace
+          key={newConversation ? "new" : "history"}
+          conversations={conversations}
+          conversationId={conversationId}
+          conversationSurface={<ConversationSurface />}
+          newConversation={newConversation}
+          searchQuery={searchQuery}
+        />
       </WorkspacePanel>
     </PageCanvas>
   );
