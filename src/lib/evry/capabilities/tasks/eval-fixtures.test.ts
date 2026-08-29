@@ -31,6 +31,7 @@ import { TASK_REVIEW_REGISTRY } from "./review";
 import { selectTaskEvryEffect } from "./selection";
 import {
   TASK_EFFECT_SELECTION_FIXTURES,
+  TASK_FIXTURE_ACTOR_ID,
   TASK_FIXTURE_ID,
   taskEffectPlanFixture,
 } from "./test-fixtures";
@@ -66,6 +67,54 @@ test("Task list selection preserves filters and the owning cursor for load more"
       search: "",
       includeCompleted: false,
       cursor: TASK_FIXTURE_ID,
+    }
+  );
+});
+
+test("Task detail continuations preserve their parent and typed section", () => {
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more checklist items for task ${TASK_FIXTURE_ID} after ${TASK_FIXTURE_ACTOR_ID}`
+    ),
+    {
+      kind: "detail_checklist",
+      taskId: TASK_FIXTURE_ID,
+      cursor: TASK_FIXTURE_ACTOR_ID,
+    }
+  );
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more prerequisites for task ${TASK_FIXTURE_ID} after ${TASK_FIXTURE_ACTOR_ID}`
+    ),
+    {
+      kind: "detail_prerequisites",
+      taskId: TASK_FIXTURE_ID,
+      cursor: TASK_FIXTURE_ACTOR_ID,
+    }
+  );
+});
+
+test("Task planning continuations preserve option type, task, search, and cursor", () => {
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more task assignees for task ${TASK_FIXTURE_ID} matching launch owner after ${TASK_FIXTURE_ACTOR_ID}`
+    ),
+    {
+      kind: "planning_assignees",
+      taskId: TASK_FIXTURE_ID,
+      search: "launch owner",
+      cursor: TASK_FIXTURE_ACTOR_ID,
+    }
+  );
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more task prerequisites for task ${TASK_FIXTURE_ID} matching venue after ${TASK_FIXTURE_ACTOR_ID}`
+    ),
+    {
+      kind: "planning_prerequisites",
+      taskId: TASK_FIXTURE_ID,
+      search: "venue",
+      cursor: TASK_FIXTURE_ACTOR_ID,
     }
   );
 });

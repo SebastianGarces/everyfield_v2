@@ -29,6 +29,7 @@ export const TASK_READ_IDENTITIES = {
 
 const uuid = z.string().uuid();
 const TASK_READ_LIMIT = 50;
+export const TASK_RELATED_READ_LIMIT = 25;
 
 function displayText(
   value: string | null | undefined,
@@ -75,6 +76,120 @@ function taskFacts(task: {
     { label: "Assignee", value: task.assignedToId ?? "Unassigned" },
     { label: "Category", value: task.category ?? "General" },
   ];
+}
+
+type CursorRow = Readonly<{ id: string }>;
+
+function cursorPage<Row extends CursorRow>(
+  rows: readonly Row[],
+  cursor: string | null,
+  limit = TASK_RELATED_READ_LIMIT
+): Readonly<{
+  items: readonly Row[];
+  nextCursor: string | null;
+}> | null {
+  const cursorIndex = cursor ? rows.findIndex(({ id }) => id === cursor) : -1;
+  if (cursor && cursorIndex === -1) return null;
+
+  const start = cursorIndex + 1;
+  const items = rows.slice(start, start + limit);
+  return {
+    items,
+    nextCursor:
+      start + items.length < rows.length
+        ? (items[items.length - 1]?.id ?? null)
+        : null,
+  };
+}
+
+function compareDisplayRows<
+  Row extends Readonly<{ id: string; displayValue: string }>,
+>(left: Row, right: Row): number {
+  const leftKey = left.displayValue
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US");
+  const rightKey = right.displayValue
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US");
+  if (leftKey < rightKey) return -1;
+  if (leftKey > rightKey) return 1;
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
+function literalSearchMatch(search: string, values: readonly string[]) {
+  if (!search) return true;
+  const needle = search.normalize("NFKC").toLocaleLowerCase("en-US");
+  return values.some((value) =>
+    value.normalize("NFKC").toLocaleLowerCase("en-US").includes(needle)
+  );
+}
+
+function unavailableTaskArtifact(taskId: string) {
+  return buildEvryReadArtifact({
+    title: "Task unavailable",
+    filters: [{ label: "Task", value: taskId }],
+    exclusions: [{ reason: "Unavailable in this plant", count: 1 }],
+    items: [],
+    sourceLinks: [link("Open Tasks", "/tasks")],
+  });
+}
+
+function unavailableCursorArtifact(input: {
+  title: string;
+  taskId: string | null;
+  section: string;
+  cursor: string;
+}) {
+  return buildEvryReadArtifact({
+    title: input.title,
+    filters: [
+      ...(input.taskId
+        ? [{ label: "Task", value: input.taskId }]
+        : [{ label: "Task", value: "New task" }]),
+      { label: "Section", value: input.section },
+      { label: "Page cursor", value: input.cursor },
+    ],
+    exclusions: [{ reason: "Cursor is not in this result set", count: 1 }],
+    items: [],
+    sourceLinks: [
+      link(
+        input.taskId ? "Open task" : "Create a task",
+        input.taskId ? `/tasks/${input.taskId}` : "/tasks/new"
+      ),
+    ],
+  });
+}
+
+function taskPageSource(taskId: string | null) {
+  return link(
+    taskId ? "Open task" : "Create a task",
+    taskId ? `/tasks/${taskId}` : "/tasks/new"
+  );
+}
+
+function detailContinuationCommand(
+  section: "checklist" | "prerequisites",
+  taskId: string,
+  cursor: string | null
+) {
+  const subject = section === "checklist" ? "checklist items" : "prerequisites";
+  return cursor
+    ? `Load more ${subject} for task ${taskId} after ${cursor}`
+    : `Show ${subject} for task ${taskId}`;
+}
+
+function planningContinuationCommand(input: {
+  optionKind: "assignees" | "prerequisites";
+  taskId: string | null;
+  search: string;
+  cursor: string | null;
+}) {
+  const subject = `task ${input.optionKind}`;
+  const context = input.taskId ? ` for task ${input.taskId}` : "";
+  const search = input.search ? ` matching ${input.search}` : "";
+  return input.cursor
+    ? `Load more ${subject}${context}${search} after ${input.cursor}`
+    : `Show ${subject}${context}${search}`;
 }
 
 export const TASK_LIST_READ = defineEvryReadRegistration({
@@ -187,28 +302,39 @@ export const TASK_DETAIL_READ = defineEvryReadRegistration({
   inputShape: { taskId: uuid },
   async run({ authorization }, { taskId }) {
     const task = await getTask(authorization.actor.plantId, taskId);
-    if (!task) {
-      return buildEvryReadArtifact({
-        title: "Task unavailable",
-        filters: [{ label: "Task", value: taskId }],
-        exclusions: [{ reason: "Unavailable in this plant", count: 1 }],
-        items: [],
-        sourceLinks: [link("Open Tasks", "/tasks")],
-      });
-    }
+    if (!task) return unavailableTaskArtifact(taskId);
     const [subtasks, prerequisites] = await Promise.all([
       listSubtasks(authorization.actor.plantId, task.id),
       listTaskPrerequisites(authorization.actor.plantId, task.id),
     ]);
     return buildEvryReadArtifact({
       title: artifactTitle(task.title, "Task"),
-      filters: [{ label: "Task", value: task.id }],
+      filters: [
+        { label: "Task", value: task.id },
+        { label: "Detail section", value: "Summary" },
+        {
+          label: "Description scope",
+          value: "Plain-text preview; open the Task for full rich text",
+        },
+        {
+          label: "Checklist command",
+          value: detailContinuationCommand("checklist", task.id, null),
+        },
+        {
+          label: "Prerequisites command",
+          value: detailContinuationCommand("prerequisites", task.id, null),
+        },
+      ],
       exclusions: [],
       items: [
         {
           id: task.id,
           label: artifactLabel(task.title, "Untitled task"),
           facts: [
+            {
+              label: "Full title",
+              value: artifactFact(task.title, "Untitled task"),
+            },
             ...taskFacts(task),
             {
               label: "Description preview",
@@ -219,32 +345,6 @@ export const TASK_DETAIL_READ = defineEvryReadRegistration({
             },
             { label: "Checklist items", value: String(subtasks.length) },
             { label: "Prerequisites", value: String(prerequisites.length) },
-            ...(subtasks.length > 0
-              ? [
-                  {
-                    label: "Checklist",
-                    value: artifactFact(
-                      subtasks
-                        .map((row) => `${row.title} (${row.status})`)
-                        .join("; "),
-                      "No checklist items"
-                    ),
-                  },
-                ]
-              : []),
-            ...(prerequisites.length > 0
-              ? [
-                  {
-                    label: "Waits on",
-                    value: artifactFact(
-                      prerequisites
-                        .map((row) => `${row.title} (${row.status})`)
-                        .join("; "),
-                      "No prerequisites"
-                    ),
-                  },
-                ]
-              : []),
           ],
           sourceLink: link(
             artifactLabel(`Open ${task.title}`, "Open task"),
@@ -262,70 +362,399 @@ export const TASK_DETAIL_READ = defineEvryReadRegistration({
   },
 });
 
+export const TASK_CHECKLIST_DETAIL_READ = defineEvryReadRegistration({
+  id: "tasks.detail.checklist",
+  capabilityIdentity: TASK_READ_IDENTITIES.detail,
+  inputShape: { taskId: uuid, cursor: uuid.nullable() },
+  async run({ authorization }, { taskId, cursor }) {
+    const task = await getTask(authorization.actor.plantId, taskId);
+    if (!task) return unavailableTaskArtifact(taskId);
+
+    const rows = await listSubtasks(authorization.actor.plantId, task.id);
+    const page = cursorPage(rows, cursor);
+    if (!page && cursor) {
+      return unavailableCursorArtifact({
+        title: "Task checklist cursor unavailable",
+        taskId,
+        section: "Checklist items",
+        cursor,
+      });
+    }
+    if (!page) throw new Error("First Task checklist page must be available");
+
+    return buildEvryReadArtifact({
+      title: artifactTitle(`${task.title} checklist`, "Task checklist"),
+      filters: [
+        { label: "Task", value: task.id },
+        { label: "Detail section", value: "Checklist items" },
+        { label: "Matching checklist items", value: String(rows.length) },
+        { label: "Page cursor", value: cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: page.nextCursor ?? "End of results",
+        },
+        {
+          label: "Next page command",
+          value: page.nextCursor
+            ? detailContinuationCommand("checklist", task.id, page.nextCursor)
+            : "End of results",
+        },
+      ],
+      exclusions: [],
+      items: page.items.map((subtask) => ({
+        id: subtask.id,
+        label: artifactLabel(subtask.title, "Untitled checklist item"),
+        facts: [
+          {
+            label: "Full title",
+            value: artifactFact(subtask.title, "Untitled checklist item"),
+          },
+          { label: "Checklist item ID", value: subtask.id },
+          ...taskFacts(subtask),
+          { label: "Blocked", value: subtask.isBlocked ? "Yes" : "No" },
+          {
+            label: "Description preview",
+            value: artifactFact(
+              subtask.descriptionPreview,
+              "No description preview"
+            ),
+          },
+        ],
+        sourceLink: link(
+          artifactLabel(`Open ${subtask.title}`, "Open checklist item"),
+          `/tasks/${subtask.id}`
+        ),
+      })),
+      sourceLinks: [taskPageSource(task.id)],
+    });
+  },
+});
+
+export const TASK_PREREQUISITE_DETAIL_READ = defineEvryReadRegistration({
+  id: "tasks.detail.prerequisites",
+  capabilityIdentity: TASK_READ_IDENTITIES.detail,
+  inputShape: { taskId: uuid, cursor: uuid.nullable() },
+  async run({ authorization }, { taskId, cursor }) {
+    const task = await getTask(authorization.actor.plantId, taskId);
+    if (!task) return unavailableTaskArtifact(taskId);
+
+    const rows = await listTaskPrerequisites(
+      authorization.actor.plantId,
+      task.id
+    );
+    const page = cursorPage(rows, cursor);
+    if (!page && cursor) {
+      return unavailableCursorArtifact({
+        title: "Task prerequisite cursor unavailable",
+        taskId,
+        section: "Prerequisites",
+        cursor,
+      });
+    }
+    if (!page)
+      throw new Error("First Task prerequisite page must be available");
+
+    return buildEvryReadArtifact({
+      title: artifactTitle(`${task.title} prerequisites`, "Task prerequisites"),
+      filters: [
+        { label: "Task", value: task.id },
+        { label: "Detail section", value: "Prerequisites" },
+        { label: "Matching prerequisites", value: String(rows.length) },
+        { label: "Page cursor", value: cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: page.nextCursor ?? "End of results",
+        },
+        {
+          label: "Next page command",
+          value: page.nextCursor
+            ? detailContinuationCommand(
+                "prerequisites",
+                task.id,
+                page.nextCursor
+              )
+            : "End of results",
+        },
+      ],
+      exclusions: [],
+      items: page.items.map((prerequisite) => ({
+        id: prerequisite.id,
+        label: artifactLabel(prerequisite.title, "Untitled prerequisite"),
+        facts: [
+          {
+            label: "Full title",
+            value: artifactFact(prerequisite.title, "Untitled prerequisite"),
+          },
+          { label: "Prerequisite task ID", value: prerequisite.id },
+          { label: "Status", value: prerequisite.status },
+        ],
+        sourceLink: link(
+          artifactLabel(`Open ${prerequisite.title}`, "Open prerequisite"),
+          `/tasks/${prerequisite.id}`
+        ),
+      })),
+      sourceLinks: [taskPageSource(task.id)],
+    });
+  },
+});
+
 export const TASK_PLANNING_READ = defineEvryReadRegistration({
   id: "tasks.planning-options",
   capabilityIdentity: TASK_READ_IDENTITIES.planning,
   inputShape: { taskId: uuid.nullable() },
   async run({ authorization }, { taskId }) {
-    const [plantUsers, followUpAssignees, prerequisites] = await Promise.all([
+    if (taskId) {
+      const task = await getTask(authorization.actor.plantId, taskId);
+      if (!task) return unavailableTaskArtifact(taskId);
+    }
+    const [plantUsers, prerequisites] = await Promise.all([
       db
-        .select({ id: users.id, name: users.name, email: users.email })
+        .select({ id: users.id })
         .from(users)
         .where(eq(users.churchId, authorization.actor.plantId)),
-      listFollowUpAssignees(authorization.actor.plantId),
       listPrerequisiteCandidates(
         authorization.actor.plantId,
         taskId ?? undefined
       ),
     ]);
-    const items = [
-      ...plantUsers.slice(0, TASK_READ_LIMIT).map((user) => ({
-        id: `assignee:${user.id}`,
-        label: artifactLabel(user.name?.trim() || user.email, "Plant member"),
+    return buildEvryReadArtifact({
+      title: "Task planning options",
+      filters: [
+        { label: "Task context", value: taskId ?? "New task" },
+        {
+          label: "Assignee command",
+          value: planningContinuationCommand({
+            optionKind: "assignees",
+            taskId,
+            search: "",
+            cursor: null,
+          }),
+        },
+        {
+          label: "Prerequisite command",
+          value: planningContinuationCommand({
+            optionKind: "prerequisites",
+            taskId,
+            search: "",
+            cursor: null,
+          }),
+        },
+      ],
+      exclusions: [],
+      items: [
+        {
+          id: "assignees",
+          label: "Assignee options",
+          facts: [
+            { label: "Matching options", value: String(plantUsers.length) },
+            {
+              label: "Retrieve",
+              value: planningContinuationCommand({
+                optionKind: "assignees",
+                taskId,
+                search: "",
+                cursor: null,
+              }),
+            },
+          ],
+          sourceLink: taskPageSource(taskId),
+        },
+        {
+          id: "prerequisites",
+          label: "Prerequisite options",
+          facts: [
+            { label: "Matching options", value: String(prerequisites.length) },
+            {
+              label: "Retrieve",
+              value: planningContinuationCommand({
+                optionKind: "prerequisites",
+                taskId,
+                search: "",
+                cursor: null,
+              }),
+            },
+          ],
+          sourceLink: taskPageSource(taskId),
+        },
+      ],
+      sourceLinks: [taskPageSource(taskId)],
+    });
+  },
+});
+
+async function plantAssigneeOptions(plantId: string) {
+  return db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.churchId, plantId));
+}
+
+export const TASK_ASSIGNEE_PLANNING_READ = defineEvryReadRegistration({
+  id: "tasks.planning-options.assignees",
+  capabilityIdentity: TASK_READ_IDENTITIES.planning,
+  inputShape: {
+    taskId: uuid.nullable(),
+    search: z.string().trim().max(160),
+    cursor: uuid.nullable(),
+  },
+  async run({ authorization }, { taskId, search, cursor }) {
+    if (taskId) {
+      const task = await getTask(authorization.actor.plantId, taskId);
+      if (!task) return unavailableTaskArtifact(taskId);
+    }
+    const [plantUsers, followUpAssignees] = await Promise.all([
+      plantAssigneeOptions(authorization.actor.plantId),
+      listFollowUpAssignees(authorization.actor.plantId),
+    ]);
+    const followUpIds = new Set(followUpAssignees.map(({ id }) => id));
+    const rows = plantUsers
+      .map((user) => ({
+        ...user,
+        displayValue: user.name?.trim() || user.email,
+      }))
+      .filter((user) =>
+        literalSearchMatch(search, [user.name ?? "", user.email])
+      )
+      .sort(compareDisplayRows);
+    const page = cursorPage(rows, cursor);
+    if (!page && cursor) {
+      return unavailableCursorArtifact({
+        title: "Task assignee cursor unavailable",
+        taskId,
+        section: "Assignee options",
+        cursor,
+      });
+    }
+    if (!page) throw new Error("First Task assignee page must be available");
+
+    return buildEvryReadArtifact({
+      title: "Task assignees",
+      filters: [
+        { label: "Option type", value: "Assignees" },
+        { label: "Task context", value: taskId ?? "New task" },
+        ...(search ? [{ label: "Search", value: search }] : []),
+        { label: "Matching options", value: String(rows.length) },
+        { label: "Page cursor", value: cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: page.nextCursor ?? "End of results",
+        },
+        {
+          label: "Next page command",
+          value: page.nextCursor
+            ? planningContinuationCommand({
+                optionKind: "assignees",
+                taskId,
+                search,
+                cursor: page.nextCursor,
+              })
+            : "End of results",
+        },
+      ],
+      exclusions: [],
+      items: page.items.map((user) => ({
+        id: user.id,
+        label: artifactLabel(user.displayValue, "Plant member"),
         facts: [
-          { label: "Kind", value: "Task assignee" },
+          { label: "User ID", value: user.id },
+          ...(user.name
+            ? [
+                {
+                  label: "Full name",
+                  value: artifactFact(user.name, "Unnamed plant member"),
+                },
+              ]
+            : []),
+          { label: "Email", value: artifactFact(user.email, "No email") },
           {
             label: "Follow-up eligible",
-            value: followUpAssignees.some(({ id }) => id === user.id)
-              ? "Yes"
-              : "No",
+            value: followUpIds.has(user.id) ? "Yes" : "No",
           },
         ],
-        sourceLink: link("Open Tasks", "/tasks"),
+        sourceLink: taskPageSource(taskId),
       })),
-      ...prerequisites.slice(0, TASK_READ_LIMIT).map((task) => ({
-        id: `prerequisite:${task.id}`,
-        label: artifactLabel(task.title, "Untitled task"),
+      sourceLinks: [taskPageSource(taskId)],
+    });
+  },
+});
+
+export const TASK_PREREQUISITE_PLANNING_READ = defineEvryReadRegistration({
+  id: "tasks.planning-options.prerequisites",
+  capabilityIdentity: TASK_READ_IDENTITIES.planning,
+  inputShape: {
+    taskId: uuid.nullable(),
+    search: z.string().trim().max(160),
+    cursor: uuid.nullable(),
+  },
+  async run({ authorization }, { taskId, search, cursor }) {
+    if (taskId) {
+      const task = await getTask(authorization.actor.plantId, taskId);
+      if (!task) return unavailableTaskArtifact(taskId);
+    }
+    const rows = (
+      await listPrerequisiteCandidates(
+        authorization.actor.plantId,
+        taskId ?? undefined
+      )
+    )
+      .map((task) => ({ ...task, displayValue: task.title }))
+      .filter((task) => literalSearchMatch(search, [task.title]))
+      .sort(compareDisplayRows);
+    const page = cursorPage(rows, cursor);
+    if (!page && cursor) {
+      return unavailableCursorArtifact({
+        title: "Task prerequisite option cursor unavailable",
+        taskId,
+        section: "Prerequisite options",
+        cursor,
+      });
+    }
+    if (!page) {
+      throw new Error("First Task prerequisite option page must be available");
+    }
+
+    return buildEvryReadArtifact({
+      title: "Task prerequisite options",
+      filters: [
+        { label: "Option type", value: "Prerequisites" },
+        { label: "Task context", value: taskId ?? "New task" },
+        ...(search ? [{ label: "Search", value: search }] : []),
+        { label: "Matching options", value: String(rows.length) },
+        { label: "Page cursor", value: cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: page.nextCursor ?? "End of results",
+        },
+        {
+          label: "Next page command",
+          value: page.nextCursor
+            ? planningContinuationCommand({
+                optionKind: "prerequisites",
+                taskId,
+                search,
+                cursor: page.nextCursor,
+              })
+            : "End of results",
+        },
+      ],
+      exclusions: [],
+      items: page.items.map((task) => ({
+        id: task.id,
+        label: artifactLabel(task.title, "Untitled prerequisite"),
         facts: [
-          { label: "Kind", value: "Prerequisite candidate" },
+          {
+            label: "Full title",
+            value: artifactFact(task.title, "Untitled prerequisite"),
+          },
+          { label: "Prerequisite task ID", value: task.id },
           { label: "Status", value: task.status },
         ],
         sourceLink: link(
-          artifactLabel(`Open ${task.title}`, "Open task"),
+          artifactLabel(`Open ${task.title}`, "Open prerequisite"),
           `/tasks/${task.id}`
         ),
       })),
-    ].slice(0, TASK_READ_LIMIT);
-    const total = plantUsers.length + prerequisites.length;
-    return buildEvryReadArtifact({
-      title: "Task planning options",
-      filters: taskId ? [{ label: "Editing task", value: taskId }] : [],
-      exclusions:
-        total > items.length
-          ? [
-              {
-                reason: "Not shown on this result page",
-                count: total - items.length,
-              },
-            ]
-          : [],
-      items,
-      sourceLinks: [
-        link(
-          taskId ? "Open task" : "Create a task",
-          taskId ? `/tasks/${taskId}` : "/tasks/new"
-        ),
-      ],
+      sourceLinks: [taskPageSource(taskId)],
     });
   },
 });
@@ -375,8 +804,30 @@ export type TaskEvryReadSelection =
       cursor: string | null;
     }>
   | Readonly<{ kind: "detail"; taskId: string | null }>
+  | Readonly<{
+      kind: "detail_checklist";
+      taskId: string | null;
+      cursor: string | null;
+    }>
+  | Readonly<{
+      kind: "detail_prerequisites";
+      taskId: string | null;
+      cursor: string | null;
+    }>
   | Readonly<{ kind: "phase_prompt" }>
   | Readonly<{ kind: "planning"; taskId: string | null }>
+  | Readonly<{
+      kind: "planning_assignees";
+      taskId: string | null;
+      search: string;
+      cursor: string | null;
+    }>
+  | Readonly<{
+      kind: "planning_prerequisites";
+      taskId: string | null;
+      search: string;
+      cursor: string | null;
+    }>
   | Readonly<{ kind: "templates" }>;
 
 const UUID =
@@ -436,11 +887,235 @@ export function selectTaskEvryRead(
       cursor: null,
     };
   }
+  match = new RegExp(
+    `^load more checklist items for task\\s+${UUID}\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "detail_checklist",
+      taskId: match[1],
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^load more prerequisites for task\\s+${UUID}\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "detail_prerequisites",
+      taskId: match[1],
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^show checklist items for task\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return { kind: "detail_checklist", taskId: match[1], cursor: null };
+  }
+  if (/^show checklist items for this task[.!?]*$/i.test(text)) {
+    return { kind: "detail_checklist", taskId: null, cursor: null };
+  }
+  match = new RegExp(
+    `^show prerequisites for task\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return { kind: "detail_prerequisites", taskId: match[1], cursor: null };
+  }
+  if (/^show prerequisites for this task[.!?]*$/i.test(text)) {
+    return { kind: "detail_prerequisites", taskId: null, cursor: null };
+  }
   match = new RegExp(`^show task\\s+${UUID}[.!?]*$`, "i").exec(text);
   if (match?.[1]) return { kind: "detail", taskId: match[1] };
   if (/^show (?:this )?task(?: details)?[.!?]*$/i.test(text)) {
     return { kind: "detail", taskId: null };
   }
+
+  match = new RegExp(
+    `^load more task assignees for task\\s+${UUID}\\s+matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2] && match[3]) {
+    return {
+      kind: "planning_assignees",
+      taskId: match[1],
+      search: match[2].trim(),
+      cursor: match[3],
+    };
+  }
+  match = new RegExp(
+    `^load more task assignees matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_assignees",
+      taskId: null,
+      search: match[1].trim(),
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^load more task assignees for task\\s+${UUID}\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_assignees",
+      taskId: match[1],
+      search: "",
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^load more task assignees after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_assignees",
+      taskId: null,
+      search: "",
+      cursor: match[1],
+    };
+  }
+  match = new RegExp(
+    `^load more task prerequisites for task\\s+${UUID}\\s+matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2] && match[3]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: match[1],
+      search: match[2].trim(),
+      cursor: match[3],
+    };
+  }
+  match = new RegExp(
+    `^load more task prerequisites matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: null,
+      search: match[1].trim(),
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^load more task prerequisites for task\\s+${UUID}\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: match[1],
+      search: "",
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(
+    `^load more task prerequisites after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: null,
+      search: "",
+      cursor: match[1],
+    };
+  }
+
+  match = new RegExp(
+    `^show task assignees for task\\s+${UUID}\\s+matching\\s+(.+?)[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_assignees",
+      taskId: match[1],
+      search: match[2].trim(),
+      cursor: null,
+    };
+  }
+  match = /^show task assignees matching\s+(.+?)[.!?]*$/i.exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_assignees",
+      taskId: null,
+      search: match[1].trim(),
+      cursor: null,
+    };
+  }
+  match = new RegExp(
+    `^show task assignees for task\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_assignees",
+      taskId: match[1],
+      search: "",
+      cursor: null,
+    };
+  }
+  if (/^show task assignees[.!?]*$/i.test(text)) {
+    return {
+      kind: "planning_assignees",
+      taskId: null,
+      search: "",
+      cursor: null,
+    };
+  }
+
+  match = new RegExp(
+    `^show task prerequisites for task\\s+${UUID}\\s+matching\\s+(.+?)[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: match[1],
+      search: match[2].trim(),
+      cursor: null,
+    };
+  }
+  match = /^show task prerequisites matching\s+(.+?)[.!?]*$/i.exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: null,
+      search: match[1].trim(),
+      cursor: null,
+    };
+  }
+  match = new RegExp(
+    `^show task prerequisites for task\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1]) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: match[1],
+      search: "",
+      cursor: null,
+    };
+  }
+  if (/^show task prerequisites[.!?]*$/i.test(text)) {
+    return {
+      kind: "planning_prerequisites",
+      taskId: null,
+      search: "",
+      cursor: null,
+    };
+  }
+
   match = new RegExp(
     `^show planning options for task\\s+${UUID}[.!?]*$`,
     "i"
@@ -464,8 +1139,12 @@ export function selectTaskEvryRead(
 export const TASK_EVRY_READ_REGISTRATIONS = [
   TASK_LIST_READ,
   TASK_DETAIL_READ,
+  TASK_CHECKLIST_DETAIL_READ,
+  TASK_PREREQUISITE_DETAIL_READ,
   TASK_PHASE_TEMPLATE_PROMPT_READ,
   TASK_PLANNING_READ,
+  TASK_ASSIGNEE_PLANNING_READ,
+  TASK_PREREQUISITE_PLANNING_READ,
   TASK_TEMPLATES_READ,
 ] as const;
 
@@ -493,6 +1172,28 @@ export const continueTaskEvryRead = createEvryReadContinuation({
             ? { readId: TASK_DETAIL_READ.id, input: { taskId } }
             : null;
         }
+        case "detail_checklist": {
+          const taskId =
+            selection.taskId ??
+            (pageContext?.kind === "task" ? pageContext.recordId : null);
+          return taskId
+            ? {
+                readId: TASK_CHECKLIST_DETAIL_READ.id,
+                input: { taskId, cursor: selection.cursor },
+              }
+            : null;
+        }
+        case "detail_prerequisites": {
+          const taskId =
+            selection.taskId ??
+            (pageContext?.kind === "task" ? pageContext.recordId : null);
+          return taskId
+            ? {
+                readId: TASK_PREREQUISITE_DETAIL_READ.id,
+                input: { taskId, cursor: selection.cursor },
+              }
+            : null;
+        }
         case "planning":
           return {
             readId: TASK_PLANNING_READ.id,
@@ -500,6 +1201,28 @@ export const continueTaskEvryRead = createEvryReadContinuation({
               taskId:
                 selection.taskId ??
                 (pageContext?.kind === "task" ? pageContext.recordId : null),
+            },
+          };
+        case "planning_assignees":
+          return {
+            readId: TASK_ASSIGNEE_PLANNING_READ.id,
+            input: {
+              taskId:
+                selection.taskId ??
+                (pageContext?.kind === "task" ? pageContext.recordId : null),
+              search: selection.search,
+              cursor: selection.cursor,
+            },
+          };
+        case "planning_prerequisites":
+          return {
+            readId: TASK_PREREQUISITE_PLANNING_READ.id,
+            input: {
+              taskId:
+                selection.taskId ??
+                (pageContext?.kind === "task" ? pageContext.recordId : null),
+              search: selection.search,
+              cursor: selection.cursor,
             },
           };
         case "phase_prompt":
