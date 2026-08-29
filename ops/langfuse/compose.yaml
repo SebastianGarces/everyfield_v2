@@ -82,6 +82,7 @@ services:
     volumes:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse-logger.xml:/etc/clickhouse-server/config.d/everyfield-logger.xml:ro
     ports:
       - "127.0.0.1:${LANGFUSE_CLICKHOUSE_HTTP_HOST_PORT:?run ./ops/langfuse/manage.sh init}:8123"
       - "127.0.0.1:${LANGFUSE_CLICKHOUSE_NATIVE_HOST_PORT:?run ./ops/langfuse/manage.sh init}:9000"
