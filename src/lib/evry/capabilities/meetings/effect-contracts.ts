@@ -11,11 +11,13 @@ import {
 } from "@/db/schema/meetings";
 import { notificationStatuses } from "@/db/schema/notifications";
 import { personStatuses } from "@/db/schema/people";
+import { taskPriorities } from "@/db/schema/tasks";
 import {
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
 } from "@/lib/meetings/agenda";
+import { CHURCH_LEADERSHIP_STATUSES } from "@/lib/onboarding/leadership";
 
 import {
   MEETINGS_ACTION_CONTRACTS,
@@ -308,32 +310,64 @@ const attendanceRecordChangeSchema = z
       });
     }
   });
-const followUpTargetSchema = z.strictObject({
+const taskTargetState = {
   taskId: uuid,
-  personId: uuid,
   title: z.string().trim().min(1).max(500),
   dueDate: z.string().date(),
-  assignedToId: uuid,
+  assignedToId: nullableUuid,
+  priority: z.enum(taskPriorities),
   expectedTaskAbsent: z.boolean(),
   beforeStatus: z
     .enum(["not_started", "in_progress", "blocked", "complete"])
     .nullable(),
   expectedUpdatedAt: nullableTimestamp,
-  notificationTargets: taskNotificationTargetsSchema,
-});
-const evaluationTaskTargetSchema = z.strictObject({
-  taskId: uuid,
-  title: z.string().trim().min(1).max(500),
-  dueDate: z.string().date(),
-  assignedToId: uuid,
-  expectedTaskAbsent: z.boolean(),
-  beforeStatus: z
-    .enum(["not_started", "in_progress", "blocked", "complete"])
-    .nullable(),
-  expectedUpdatedAt: nullableTimestamp,
-  pendingNotifications: pendingTaskNotificationsSchema,
-  notificationTargets: taskNotificationTargetsSchema,
-});
+} as const;
+
+function refineTaskTarget(
+  value: {
+    assignedToId: string | null;
+    priority: (typeof taskPriorities)[number];
+    expectedTaskAbsent: boolean;
+    beforeStatus: string | null;
+    expectedUpdatedAt: string | null;
+  },
+  context: z.RefinementCtx
+) {
+  const newTask = value.expectedTaskAbsent;
+  if (
+    (newTask &&
+      (value.beforeStatus !== null || value.expectedUpdatedAt !== null)) ||
+    (!newTask &&
+      (value.beforeStatus === null || value.expectedUpdatedAt === null))
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Task target state must identify one new or retained row",
+    });
+  }
+  if (newTask && (value.assignedToId === null || value.priority !== "high")) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "New finalization tasks require the canonical high-priority assignee",
+    });
+  }
+}
+
+const followUpTargetSchema = z
+  .strictObject({
+    ...taskTargetState,
+    personId: uuid,
+    notificationTargets: taskNotificationTargetsSchema,
+  })
+  .superRefine(refineTaskTarget);
+const evaluationTaskTargetSchema = z
+  .strictObject({
+    ...taskTargetState,
+    pendingNotifications: pendingTaskNotificationsSchema,
+    notificationTargets: taskNotificationTargetsSchema,
+  })
+  .superRefine(refineTaskTarget);
 const evaluationCompletionTaskSchema = z.strictObject({
   taskId: uuid,
   title: z.string().trim().min(1).max(500),
@@ -342,35 +376,22 @@ const evaluationCompletionTaskSchema = z.strictObject({
 });
 
 export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
-  addAttendeeAction: z
-    .strictObject({
-      meetingId: uuid,
-      attendanceId: uuid,
-      personId: uuid,
-      attendanceType: z.enum(attendanceTypes),
-      attendanceTypeIsDerived: z.boolean(),
-      attendanceDerivation: attendanceDerivationBaselineSchema.nullable(),
-      status: z.literal("attended"),
-      invitedById: nullableUuid,
-      responseStatus: z.enum(responseStatuses).nullable(),
-      notes: nullableText,
-      expectedMeetingUpdatedAt: timestamp,
-      expectedPersonUpdatedAt: timestamp,
-      expectedAttendanceAbsent: z.literal(true),
-      notificationBaseline: notificationPlanBaselineSchema,
-      notificationTargets: meetingNotificationTargetsSchema,
-    })
-    .superRefine((value, context) => {
-      if (
-        value.attendanceTypeIsDerived !==
-        (value.attendanceDerivation !== null)
-      ) {
-        context.addIssue({
-          code: "custom",
-          message: "Implicit attendance requires one derivation baseline",
-        });
-      }
-    }),
+  addAttendeeAction: z.strictObject({
+    meetingId: uuid,
+    attendanceId: uuid,
+    personId: uuid,
+    attendanceType: z.enum(attendanceTypes),
+    attendanceDerivation: attendanceDerivationBaselineSchema,
+    status: z.literal("attended"),
+    invitedById: nullableUuid,
+    responseStatus: z.enum(responseStatuses).nullable(),
+    notes: nullableText,
+    expectedMeetingUpdatedAt: timestamp,
+    expectedPersonUpdatedAt: timestamp,
+    expectedAttendanceAbsent: z.literal(true),
+    notificationBaseline: notificationPlanBaselineSchema,
+    notificationTargets: meetingNotificationTargetsSchema,
+  }),
   addAttendeeNoteAction: z.strictObject({
     meetingId: uuid,
     personId: uuid,
@@ -489,6 +510,8 @@ export const MEETINGS_EFFECT_ARGUMENT_SCHEMAS = {
     personStatusChanges: z.array(personStatusChangeSchema).max(1_000),
     followUpTaskTargets: z.array(followUpTargetSchema),
     evaluationTaskTarget: evaluationTaskTargetSchema.nullable(),
+    expectedTaskAssigneeId: nullableUuid,
+    expectedLeadershipStatus: z.enum(CHURCH_LEADERSHIP_STATUSES).nullable(),
     expectedChurchMaterialEventAt: nullableTimestamp,
   }),
   quickAddAttendeeAction: z.strictObject({

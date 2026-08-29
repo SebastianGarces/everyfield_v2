@@ -1093,15 +1093,8 @@ function addAttendanceStatement<
           and invited.deleted_at is null
       )`
     : sql`true`;
-  const requiresDerivation =
-    status === "attended" &&
-    !(
-      input.exportName === "addAttendeeAction" &&
-      "attendanceTypeIsDerived" in args &&
-      !args.attendanceTypeIsDerived
-    );
   const attendanceTypeCurrent =
-    requiresDerivation && "attendanceDerivation" in args
+    status === "attended" && "attendanceDerivation" in args
       ? attendanceDerivationBaselineMatches({
           plantId: input.execution.plantId,
           meetingId: sql`${args.meetingId}::uuid`,
@@ -1109,7 +1102,7 @@ function addAttendanceStatement<
           attendanceType: sql`${attendanceType}`,
           baseline: args.attendanceDerivation!,
         })
-      : sql`${!requiresDerivation}`;
+      : sql`${status !== "attended"}`;
   return sql`
     with ${effectPrelude({
       ...input,
@@ -1257,7 +1250,10 @@ function quickAddPersonStatement<
   const invitedById = "invitedById" in args ? args.invitedById : null;
   const source =
     input.exportName === "quickAddAttendeeAction" ? "vision_meeting" : null;
-  const activitySource = isGuest ? "meeting_guest_list" : "meeting_attendance";
+  const activitySource =
+    input.exportName === "quickAddAttendeeAction"
+      ? "meeting_attendance"
+      : "meeting_guest_list";
   const invitedByCurrent = invitedById
     ? sql`exists (
         select 1 from persons invited
@@ -1882,11 +1878,10 @@ function finalizeAttendanceStatement(input: {
     ...(evaluation?.notificationTargets ?? []),
   ];
   const taskBindings = [
-    ...args.followUpTaskTargets.map(({ taskId, assignedToId }) => ({
-      taskId,
-      assignedToId,
-    })),
-    ...(evaluation
+    ...args.followUpTaskTargets.flatMap(({ taskId, assignedToId }) =>
+      assignedToId ? [{ taskId, assignedToId }] : []
+    ),
+    ...(evaluation?.assignedToId
       ? [
           {
             taskId: evaluation.taskId,
@@ -1917,9 +1912,13 @@ function finalizeAttendanceStatement(input: {
           where t.id = ${target.taskId}::uuid
             and t.church_id = ${input.execution.plantId}::uuid
             and t.title = ${target.title} and t.status = ${target.beforeStatus}
-            and t.priority = 'high' and t.category = 'follow_up'
+            and t.priority = ${target.priority} and t.category = 'follow_up'
             and t.due_date = ${target.dueDate}::date
-            and t.assigned_to_id = ${target.assignedToId}::uuid
+            and t.assigned_to_id is not distinct from ${target.assignedToId}::uuid
+            and (${target.assignedToId}::uuid is null or exists (
+              select 1 from users u where u.id = ${target.assignedToId}::uuid
+                and u.church_id = ${input.execution.plantId}::uuid
+            ))
             and t.related_type = 'person' and t.related_id = ${target.personId}::uuid
             and ${serializedTimestampMatches(
               sql`t.updated_at`,
@@ -1929,7 +1928,9 @@ function finalizeAttendanceStatement(input: {
         )`
   );
   const evaluationCurrent = !evaluation
-    ? sql`not exists (
+    ? args.expectedTaskAssigneeId === null
+      ? sql`true`
+      : sql`not exists (
         select 1 from tasks t
         where t.church_id = ${input.execution.plantId}::uuid
           and t.related_type = 'meeting' and t.related_id = ${args.meetingId}::uuid
@@ -1951,9 +1952,13 @@ function finalizeAttendanceStatement(input: {
           where t.id = ${evaluation.taskId}::uuid
             and t.church_id = ${input.execution.plantId}::uuid
             and t.title = ${evaluation.title} and t.status = ${evaluation.beforeStatus}
-            and t.priority = 'high' and t.category = 'vision_meeting'
+            and t.priority = ${evaluation.priority} and t.category = 'vision_meeting'
             and t.due_date = ${evaluation.dueDate}::date
-            and t.assigned_to_id = ${evaluation.assignedToId}::uuid
+            and t.assigned_to_id is not distinct from ${evaluation.assignedToId}::uuid
+            and (${evaluation.assignedToId}::uuid is null or exists (
+              select 1 from users u where u.id = ${evaluation.assignedToId}::uuid
+                and u.church_id = ${input.execution.plantId}::uuid
+            ))
             and t.related_type = 'meeting' and t.related_id = ${args.meetingId}::uuid
             and t.completion_event = 'meeting.evaluation.completed'
             and ${serializedTimestampMatches(
@@ -1966,11 +1971,14 @@ function finalizeAttendanceStatement(input: {
     [...taskTargetsCurrent, evaluationCurrent],
     sql` and `
   );
-  const assigneeIds = [
-    ...args.followUpTaskTargets.map(({ assignedToId }) => assignedToId),
-    ...(evaluation ? [evaluation.assignedToId] : []),
-  ];
-  const oneAssignee = new Set(assigneeIds).size <= 1;
+  const newTasksUseCanonicalAssignee = [
+    ...args.followUpTaskTargets,
+    ...(evaluation ? [evaluation] : []),
+  ].every(
+    (target) =>
+      !target.expectedTaskAbsent ||
+      target.assignedToId === args.expectedTaskAssigneeId
+  );
   const insertedTaskCount =
     args.followUpTaskTargets.filter(
       ({ expectedTaskAbsent }) => expectedTaskAbsent
@@ -1979,8 +1987,8 @@ function finalizeAttendanceStatement(input: {
     with ${effectPrelude({
       ...input,
       affectedCount: 1 + args.personStatusChanges.length + insertedTaskCount,
-      current: sql`${oneAssignee}
-        and ${(args.meetingType === "vision_meeting") === (evaluation !== null)}
+      current: sql`${newTasksUseCanonicalAssignee}
+        and ${(args.expectedTaskAssigneeId !== null) === (evaluation !== null)}
         and exists (
           select 1 from church_meetings m
           where m.id = ${args.meetingId}::uuid
@@ -1994,10 +2002,30 @@ function finalizeAttendanceStatement(input: {
         and exists (
           select 1 from churches ch
           where ch.id = ${input.execution.plantId}::uuid
+            and ch.leadership_status is not distinct from ${args.expectedLeadershipStatus}
             and ${nullableSerializedTimestampMatches(
               sql`ch.last_material_event_at`,
               args.expectedChurchMaterialEventAt
             )}
+            and (
+              (${args.expectedTaskAssigneeId}::uuid is null and (
+                ${args.meetingType} <> 'vision_meeting'
+                or ch.leadership_status = 'no_planter'
+                or not exists (
+                  select 1 from users owner
+                  where owner.church_id = ch.id and owner.seat = 'owner'
+                )
+              ))
+              or (${args.expectedTaskAssigneeId}::uuid is not null
+                and ${args.meetingType} = 'vision_meeting'
+                and ch.leadership_status is distinct from 'no_planter'
+                and exists (
+                  select 1 from users owner
+                  where owner.id = ${args.expectedTaskAssigneeId}::uuid
+                    and owner.church_id = ch.id and owner.seat = 'owner'
+                )
+              )
+            )
         )
         and not exists (
           select a.id, a.person_id, a.attendance_type,
@@ -2022,20 +2050,22 @@ function finalizeAttendanceStatement(input: {
             and a.meeting_id = ${args.meetingId}::uuid and a.status = 'attended'
         )
         and not exists (
-          select p.id, date_trunc('milliseconds', p.updated_at)
+          select p.id, date_trunc('milliseconds', p.updated_at), p.created_by
           from persons p
           join meeting_attendance a on a.person_id = p.id and a.church_id = p.church_id
           where p.church_id = ${input.execution.plantId}::uuid
             and a.meeting_id = ${args.meetingId}::uuid and a.status = 'attended'
             and p.status = 'prospect' and p.deleted_at is null
             and ${args.meetingType} = 'vision_meeting'
-          except select (x->>'personId')::uuid, (x->>'expectedUpdatedAt')::timestamp
+          except select (x->>'personId')::uuid,
+            (x->>'expectedUpdatedAt')::timestamp, (x->>'performedById')::uuid
           from jsonb_array_elements(${statusChanges}::jsonb) x
         )
         and not exists (
-          select (x->>'personId')::uuid, (x->>'expectedUpdatedAt')::timestamp
+          select (x->>'personId')::uuid, (x->>'expectedUpdatedAt')::timestamp,
+            (x->>'performedById')::uuid
           from jsonb_array_elements(${statusChanges}::jsonb) x
-          except select p.id, date_trunc('milliseconds', p.updated_at)
+          except select p.id, date_trunc('milliseconds', p.updated_at), p.created_by
           from persons p
           join meeting_attendance a on a.person_id = p.id and a.church_id = p.church_id
           where p.church_id = ${input.execution.plantId}::uuid
@@ -2046,7 +2076,7 @@ function finalizeAttendanceStatement(input: {
         and not exists (
           select (x->>'personId')::uuid
           from jsonb_array_elements(${attendees}::jsonb) x
-          where ${args.meetingType} = 'vision_meeting'
+          where ${args.expectedTaskAssigneeId}::uuid is not null
             and x->>'attendanceType' = 'first_time'
           except select (f->>'personId')::uuid
           from jsonb_array_elements(${followUps}::jsonb) f
@@ -2056,13 +2086,12 @@ function finalizeAttendanceStatement(input: {
           from jsonb_array_elements(${followUps}::jsonb) f
           except select (x->>'personId')::uuid
           from jsonb_array_elements(${attendees}::jsonb) x
-          where ${args.meetingType} = 'vision_meeting'
+          where ${args.expectedTaskAssigneeId}::uuid is not null
             and x->>'attendanceType' = 'first_time'
         )
         and not exists (
           select 1 from jsonb_array_elements(${statusChanges}::jsonb) s
-          where (s->>'performedById')::uuid <> ${input.execution.actorUserId}::uuid
-             or exists (
+          where exists (
                select 1 from person_activities a
                where a.id = (s->>'activityId')::uuid
              )
@@ -2075,13 +2104,7 @@ function finalizeAttendanceStatement(input: {
           cancelling: pendingEvaluationNotifications,
         })}
         and ${evaluationNotificationsChange && evaluation ? pendingTaskNotificationsCurrent({ plantId: input.execution.plantId, taskId: evaluation.taskId, pending: pendingEvaluationNotifications }) : sql`true`}
-        and not exists (
-          select 1 from jsonb_array_elements(${followUps}::jsonb) f
-          where (f->>'assignedToId')::uuid not in (
-            select u.id from users u
-            where u.church_id = ${input.execution.plantId}::uuid and u.seat = 'owner'
-          )
-        )`,
+        `,
     })}, status_input as materialized (
       select change from jsonb_array_elements(${statusChanges}::jsonb) change
     ), persons_updated as (

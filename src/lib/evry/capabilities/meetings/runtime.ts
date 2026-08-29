@@ -49,6 +49,7 @@ import {
 } from "@/lib/evry/plans/repository";
 import { defineEvryPlanCapability } from "@/lib/evry/plans/registry";
 import { attendanceTypeFromDerivationFacts } from "@/lib/meetings/attendance-type";
+import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 
 import {
   MEETINGS_ACTION_CONTRACTS,
@@ -966,12 +967,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
     const addition = MEETINGS_EFFECT_ARGUMENT_SCHEMAS[exportName].parse(
       input.step.arguments
     );
-    const requiresDerivation =
-      exportName === "addWalkInAttendeeAction" ||
-      ("attendanceTypeIsDerived" in addition &&
-        addition.attendanceTypeIsDerived);
     if (
-      requiresDerivation &&
       !(await attendanceDerivationIsCurrent({
         plantId,
         meetingId: addition.meetingId,
@@ -1327,7 +1323,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
       MEETINGS_EFFECT_ARGUMENT_SCHEMAS.finalizeAttendanceAction.parse(
         input.step.arguments
       );
-    const [attended, church, meeting] = await Promise.all([
+    const [attended, church, meeting, owner] = await Promise.all([
       db
         .select({
           attendanceId: meetingAttendance.id,
@@ -1344,7 +1340,10 @@ export async function meetingsPlanTargetIsCurrent(input: {
           )
         ),
       db
-        .select({ lastMaterialEventAt: churches.lastMaterialEventAt })
+        .select({
+          leadershipStatus: churches.leadershipStatus,
+          lastMaterialEventAt: churches.lastMaterialEventAt,
+        })
         .from(churches)
         .where(eq(churches.id, plantId))
         .limit(1),
@@ -1363,14 +1362,26 @@ export async function meetingsPlanTargetIsCurrent(input: {
           )
         )
         .limit(1),
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.churchId, plantId), eq(users.seat, "owner")))
+        .limit(1),
     ]);
+    const currentTaskAssigneeId = meeting[0]
+      ? meetingFinalizationTaskAssigneeId({
+          meetingType: meeting[0].type,
+          leadershipStatus: church[0]?.leadershipStatus ?? null,
+          ownerId: owner[0]?.id ?? null,
+        })
+      : null;
     if (
       !meeting[0] ||
       meeting[0].type !== finalization.meetingType ||
       meeting[0].title !== finalization.meetingTitle ||
       !sameInstant(meeting[0].datetime, finalization.meetingDatetime) ||
       meeting[0].actualAttendance !== finalization.expectedActualAttendance ||
-      (finalization.meetingType === "vision_meeting") !==
+      (finalization.expectedTaskAssigneeId !== null) !==
         (finalization.evaluationTaskTarget !== null) ||
       !sameStrings(
         attended.map((row) =>
@@ -1382,12 +1393,15 @@ export async function meetingsPlanTargetIsCurrent(input: {
         finalization.attendees.map((row) => JSON.stringify(row))
       ) ||
       (church[0]?.lastMaterialEventAt?.toISOString() ?? null) !==
-        finalization.expectedChurchMaterialEventAt
+        finalization.expectedChurchMaterialEventAt ||
+      (church[0]?.leadershipStatus ?? null) !==
+        finalization.expectedLeadershipStatus ||
+      currentTaskAssigneeId !== finalization.expectedTaskAssigneeId
     ) {
       return false;
     }
     const firstTimePeople =
-      finalization.meetingType === "vision_meeting"
+      finalization.expectedTaskAssigneeId !== null
         ? finalization.attendees
             .filter(({ attendanceType }) => attendanceType === "first_time")
             .map(({ personId }) => personId)
@@ -1396,9 +1410,6 @@ export async function meetingsPlanTargetIsCurrent(input: {
       !sameStrings(
         firstTimePeople,
         finalization.followUpTaskTargets.map(({ personId }) => personId)
-      ) ||
-      finalization.personStatusChanges.some(
-        ({ performedById }) => performedById !== input.actor.userId
       )
     ) {
       return false;
@@ -1406,7 +1417,11 @@ export async function meetingsPlanTargetIsCurrent(input: {
     for (const change of finalization.personStatusChanges) {
       const [[person], [activity]] = await Promise.all([
         db
-          .select({ status: persons.status, updatedAt: persons.updatedAt })
+          .select({
+            status: persons.status,
+            createdBy: persons.createdBy,
+            updatedAt: persons.updatedAt,
+          })
           .from(persons)
           .where(
             and(
@@ -1426,6 +1441,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
         !person ||
         activity ||
         person.status !== change.beforeStatus ||
+        person.createdBy !== change.performedById ||
         !sameInstant(person.updatedAt, change.expectedUpdatedAt)
       ) {
         return false;
@@ -1470,7 +1486,7 @@ export async function meetingsPlanTargetIsCurrent(input: {
         task.churchId === plantId &&
         task.title === target.title &&
         task.status === target.beforeStatus &&
-        task.priority === "high" &&
+        task.priority === target.priority &&
         task.category ===
           ("personId" in target ? "follow_up" : "vision_meeting") &&
         task.dueDate === target.dueDate &&
@@ -1483,19 +1499,24 @@ export async function meetingsPlanTargetIsCurrent(input: {
         target.expectedUpdatedAt &&
         sameInstant(task.updatedAt, target.expectedUpdatedAt)
       );
-      const [assignee] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(
-          and(
-            eq(users.id, target.assignedToId),
-            eq(users.churchId, plantId),
-            eq(users.seat, "owner")
-          )
-        )
-        .limit(1);
+      const [assignee] = target.assignedToId
+        ? await db
+            .select({ id: users.id })
+            .from(users)
+            .where(
+              and(
+                eq(users.id, target.assignedToId),
+                eq(users.churchId, plantId)
+              )
+            )
+            .limit(1)
+        : [];
+      const assigneeIsCurrent = target.expectedTaskAbsent
+        ? target.assignedToId === finalization.expectedTaskAssigneeId &&
+          assignee?.id === finalization.expectedTaskAssigneeId
+        : target.assignedToId === null || assignee?.id === target.assignedToId;
       if (
-        !assignee ||
+        !assigneeIsCurrent ||
         (target.expectedTaskAbsent && taskRows.length > 0) ||
         (!target.expectedTaskAbsent && !exactTask)
       ) {

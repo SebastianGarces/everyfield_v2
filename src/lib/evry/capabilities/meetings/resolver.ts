@@ -28,7 +28,9 @@ import {
   parseAgenda,
 } from "@/lib/meetings/agenda";
 import { attendanceTypeFromDerivationFacts } from "@/lib/meetings/attendance-type";
+import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 import { kitTemplate } from "@/lib/meetings/kit-template";
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import {
   listCoreGroupUserIds,
   listGuestListUserIds,
@@ -683,12 +685,25 @@ export async function resolveMeetingsEvryEffect(input: {
             .from(churchMeetings)
             .where(eq(churchMeetings.churchId, actor.plantId))
         : [{ value: null }];
+    const meetingNumber = meetingNumberRow?.value ?? null;
+    const requestedTitle =
+      typeof values.title === "string" ? values.title : null;
+    const storedTitle =
+      requestedTitle ??
+      (type === "vision_meeting" && meetingNumber
+        ? meetingDisplayTitle({
+            type,
+            title: null,
+            meetingNumber,
+            teamName: null,
+          })
+        : null);
     const facts: MeetingNotificationFacts = {
       id: meetingId,
       churchId: actor.plantId,
       type,
-      title: typeof values.title === "string" ? values.title : null,
-      meetingNumber: meetingNumberRow?.value ?? null,
+      title: storedTitle,
+      meetingNumber,
       teamName: team?.name ?? null,
       datetime: new Date(datetime),
       status: "planning",
@@ -1283,7 +1298,10 @@ export async function resolveMeetingsEvryEffect(input: {
         .where(and(eq(users.churchId, actor.plantId), eq(users.seat, "owner")))
         .limit(1),
       db
-        .select({ lastMaterialEventAt: churches.lastMaterialEventAt })
+        .select({
+          leadershipStatus: churches.leadershipStatus,
+          lastMaterialEventAt: churches.lastMaterialEventAt,
+        })
         .from(churches)
         .where(eq(churches.id, actor.plantId))
         .limit(1),
@@ -1312,8 +1330,12 @@ export async function resolveMeetingsEvryEffect(input: {
         )
         .limit(1),
     ]);
-    const ownerId = ownerRows[0]?.id;
-    if (!ownerId) return null;
+    const leadershipStatus = churchRows[0]?.leadershipStatus ?? null;
+    const taskAssigneeId = meetingFinalizationTaskAssigneeId({
+      meetingType: meeting.type,
+      leadershipStatus,
+      ownerId: ownerRows[0]?.id ?? null,
+    });
     const personById = new Map(
       prospectRows.map((person) => [person.id, person])
     );
@@ -1332,14 +1354,14 @@ export async function resolveMeetingsEvryEffect(input: {
                       requestKey,
                       `status-activity:${index}:${person.id}`
                     ),
-                    performedById: actor.userId,
+                    performedById: person.createdBy,
                   },
                 ]
               : [];
           })
         : [];
     const firstTimers =
-      meeting.type === "vision_meeting"
+      taskAssigneeId !== null
         ? attended.filter(
             ({ attendanceType }) => attendanceType === "first_time"
           )
@@ -1347,6 +1369,7 @@ export async function resolveMeetingsEvryEffect(input: {
     const dueDate = addCalendarDays(meeting.datetime, 2);
     const unresolvedFollowUpTaskTargets = await Promise.all(
       firstTimers.map(async (attendance, index) => {
+        if (!taskAssigneeId) return null;
         const existing = followUps.find(
           (task) =>
             task.relatedId === attendance.personId && task.dueDate === dueDate
@@ -1364,7 +1387,8 @@ export async function resolveMeetingsEvryEffect(input: {
           personId: attendance.personId,
           title,
           dueDate,
-          assignedToId: ownerId,
+          assignedToId: existing ? existing.assignedToId : taskAssigneeId,
+          priority: existing?.priority ?? ("high" as const),
           expectedTaskAbsent: !existing,
           beforeStatus: existing?.status ?? null,
           expectedUpdatedAt: existing ? iso(existing.updatedAt) : null,
@@ -1375,7 +1399,7 @@ export async function resolveMeetingsEvryEffect(input: {
                 taskId,
                 title,
                 dueDate,
-                assignedToId: ownerId,
+                assignedToId: taskAssigneeId,
                 plantId: actor.plantId,
                 now,
               }),
@@ -1388,7 +1412,7 @@ export async function resolveMeetingsEvryEffect(input: {
     const followUpTaskTargets = unresolvedFollowUpTaskTargets.filter(
       (target): target is NonNullable<typeof target> => target !== null
     );
-    const existingEvaluation = evaluationTasks[0];
+    const existingEvaluation = taskAssigneeId ? evaluationTasks[0] : undefined;
     const evaluationTaskId =
       existingEvaluation?.id ?? derivedUuid(requestKey, "evaluation-task");
     const evaluationTitle =
@@ -1397,12 +1421,15 @@ export async function resolveMeetingsEvryEffect(input: {
     const evaluationDueDate =
       existingEvaluation?.dueDate ?? addCalendarDays(now, 1);
     const evaluationTaskTarget =
-      meeting.type === "vision_meeting"
+      taskAssigneeId !== null
         ? {
             taskId: evaluationTaskId,
             title: evaluationTitle,
             dueDate: evaluationDueDate,
-            assignedToId: ownerId,
+            assignedToId: existingEvaluation
+              ? existingEvaluation.assignedToId
+              : taskAssigneeId,
+            priority: existingEvaluation?.priority ?? ("high" as const),
             expectedTaskAbsent: !existingEvaluation,
             beforeStatus: existingEvaluation?.status ?? null,
             expectedUpdatedAt: existingEvaluation
@@ -1416,7 +1443,7 @@ export async function resolveMeetingsEvryEffect(input: {
                   taskId: evaluationTaskId,
                   title: evaluationTitle,
                   dueDate: evaluationDueDate,
-                  assignedToId: ownerId,
+                  assignedToId: taskAssigneeId,
                   plantId: actor.plantId,
                   now,
                 }),
@@ -1439,6 +1466,8 @@ export async function resolveMeetingsEvryEffect(input: {
       personStatusChanges: statusChanges,
       followUpTaskTargets,
       evaluationTaskTarget,
+      expectedTaskAssigneeId: taskAssigneeId,
+      expectedLeadershipStatus: leadershipStatus,
       expectedChurchMaterialEventAt:
         churchRows[0]?.lastMaterialEventAt?.toISOString() ?? null,
     });
@@ -1474,23 +1503,16 @@ export async function resolveMeetingsEvryEffect(input: {
       notificationTargets,
     };
     if (exportName === "addAttendeeAction") {
-      const attendanceTypeIsDerived =
-        values.attendanceType === null || values.attendanceType === undefined;
-      const derivation = attendanceTypeIsDerived
-        ? await attendanceDerivationBaseline({
-            plantId: actor.plantId,
-            meeting,
-            person,
-          })
-        : null;
-      if (attendanceTypeIsDerived && !derivation) return null;
+      const derivation = await attendanceDerivationBaseline({
+        plantId: actor.plantId,
+        meeting,
+        person,
+      });
+      if (!derivation) return null;
       return parseResolved(exportName, {
         ...common,
-        attendanceType: attendanceTypeIsDerived
-          ? derivation!.attendanceType
-          : values.attendanceType,
-        attendanceTypeIsDerived,
-        attendanceDerivation: derivation?.baseline ?? null,
+        attendanceType: derivation.attendanceType,
+        attendanceDerivation: derivation.baseline,
         status: "attended",
         invitedById: null,
         responseStatus: null,

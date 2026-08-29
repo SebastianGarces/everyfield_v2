@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mock } from "node:test";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -190,7 +190,7 @@ async function seedMeeting(actor: EvryPlantActor, vision = false) {
   return meeting;
 }
 
-async function seedPerson(actor: EvryPlantActor) {
+async function seedPerson(actor: EvryPlantActor, createdBy = actor.userId) {
   const [person] = await db
     .insert(persons)
     .values({
@@ -198,7 +198,7 @@ async function seedPerson(actor: EvryPlantActor) {
       firstName: "Alex",
       lastName: randomUUID(),
       status: "prospect",
-      createdBy: actor.userId,
+      createdBy,
     })
     .returning();
   return person;
@@ -223,6 +223,17 @@ async function seedAttendance(input: {
     })
     .returning();
   return attendance;
+}
+
+async function setLeadershipStatus(
+  actor: EvryPlantActor,
+  leadershipStatus: "no_planter" | "planter_confirmed"
+): Promise<void> {
+  await db.execute(sql`
+    update churches
+    set leadership_status = ${leadershipStatus}
+    where id = ${actor.plantId}::uuid
+  `);
 }
 
 async function fixtureSelection(input: {
@@ -297,7 +308,7 @@ async function fixtureSelection(input: {
         exportName,
         values: {
           type: "vision_meeting",
-          title: SCRATCH,
+          title: null,
           datetime: MEETING_AT.toISOString(),
           timezone: "America/New_York",
           locationId: null,
@@ -382,7 +393,17 @@ async function fixtureSelection(input: {
         where id = ${pending.id}::uuid`);
     }
     if (exportName === "finalizeAttendanceAction") {
-      const person = await seedPerson(actor);
+      const [creator] = await db
+        .insert(users)
+        .values({
+          email: `${randomUUID()}@scratch.invalid`,
+          passwordHash: "scratch",
+          name: `${SCRATCH} creator`,
+          seat: "member",
+          churchId: actor.plantId,
+        })
+        .returning({ id: users.id });
+      const person = await seedPerson(actor, creator.id);
       await seedAttendance({
         actor,
         meetingId: meeting.id,
@@ -687,6 +708,7 @@ async function assertExactNotifications(
 
 async function assertMutationCardinality(
   plantId: string,
+  actorUserId: string,
   resolved: ResolvedMeetingsEffect
 ): Promise<void> {
   const topLevelNotifications =
@@ -771,7 +793,11 @@ async function assertMutationCardinality(
     const [meetingRows, checklistRows, attendanceRows, locationRows] =
       await Promise.all([
         db
-          .select({ id: churchMeetings.id })
+          .select({
+            id: churchMeetings.id,
+            title: churchMeetings.title,
+            meetingNumber: churchMeetings.meetingNumber,
+          })
           .from(churchMeetings)
           .where(eq(churchMeetings.id, args.meetingId)),
         args.checklistItems.length === 0
@@ -804,6 +830,11 @@ async function assertMutationCardinality(
           : Promise.resolve([]),
       ]);
     assert.equal(meetingRows.length, 1);
+    assert.equal(
+      meetingRows[0]?.title,
+      `Vision Meeting #${meetingRows[0]?.meetingNumber}`,
+      "untitled vision meeting did not store the canonical numbered title"
+    );
     assert.equal(checklistRows.length, args.checklistItems.length);
     assert.equal(attendanceRows.length, args.attendanceRows.length);
     assert.equal(locationRows.length, args.savedLocationId ? 1 : 0);
@@ -908,6 +939,12 @@ async function assertMutationCardinality(
     assert.equal(personRows.length, 1);
     assert.equal(attendanceRows.length, 1);
     assert.equal(activityRows.length, 1);
+    assert.deepEqual(activityRows[0]?.metadata, {
+      source:
+        resolved.exportName === "quickAddAttendeeAction"
+          ? "meeting_attendance"
+          : "meeting_guest_list",
+    });
   }
 
   if (resolved.exportName === "addAttendeeNoteAction") {
@@ -966,7 +1003,10 @@ async function assertMutationCardinality(
       args.personStatusChanges.length === 0
         ? []
         : await db
-            .select({ id: personActivities.id })
+            .select({
+              id: personActivities.id,
+              performedBy: personActivities.performedBy,
+            })
             .from(personActivities)
             .where(
               inArray(
@@ -975,6 +1015,15 @@ async function assertMutationCardinality(
               )
             );
     assert.equal(activities.length, args.personStatusChanges.length);
+    const activityById = new Map(activities.map((row) => [row.id, row]));
+    for (const change of args.personStatusChanges) {
+      assert.equal(
+        activityById.get(change.activityId)?.performedBy,
+        change.performedById,
+        "automatic status activity performer diverged from the person creator"
+      );
+      assert.notEqual(change.performedById, actorUserId);
+    }
     const [meeting] = await db
       .select({ actualAttendance: churchMeetings.actualAttendance })
       .from(churchMeetings)
@@ -1224,7 +1273,11 @@ async function runEffect(input: {
       )
     );
   assert.equal(outcomes.length, 1, input.exportName);
-  await assertMutationCardinality(input.actor.plantId, resolved);
+  await assertMutationCardinality(
+    input.actor.plantId,
+    input.actor.userId,
+    resolved
+  );
   console.log(`PASS ${execution.capabilityIdentity}:execution`);
 
   // Simulate a response lost after commit: source rows are now in their
@@ -1425,6 +1478,344 @@ async function assertAttendanceDerivationDriftRefuses(input: {
   console.log("PASS meetings:attendance-derivation-drift-matrix");
 }
 
+async function assertFinalizationParity(input: {
+  actor: EvryPlantActor;
+  resolveMeetingsEvryEffect: typeof import("./resolver").resolveMeetingsEvryEffect;
+  mintEvryPlanRequestKey: typeof import("@/lib/evry/plans").mintEvryPlanRequestKey;
+  authorizeEvryEffectCapability: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  executionEffectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  executeMeetingsEffect: typeof import("./atomic-effect").executeMeetingsEffect;
+}) {
+  async function resolveFinalization(meetingId: string, title: string | null) {
+    const resolved = await input.resolveMeetingsEvryEffect({
+      actor: input.actor,
+      selection: {
+        kind: "effect",
+        exportName: "finalizeAttendanceAction",
+        values: {},
+      },
+      pageContext: {
+        kind: "meeting",
+        recordId: meetingId,
+        label: title ?? "Meeting",
+      },
+      requestKey: input.mintEvryPlanRequestKey(),
+      now: NOW,
+    });
+    assert.ok(resolved);
+    assert.equal(resolved.exportName, "finalizeAttendanceAction");
+    return resolved as Extract<
+      ResolvedMeetingsEffect,
+      { exportName: "finalizeAttendanceAction" }
+    >;
+  }
+
+  async function execute(
+    resolved: Extract<
+      ResolvedMeetingsEffect,
+      { exportName: "finalizeAttendanceAction" }
+    >,
+    existingExecution?: Awaited<ReturnType<typeof seedExecution>>
+  ) {
+    const execution =
+      existingExecution ??
+      (await seedExecution({ actor: input.actor, resolved }));
+    const authorization = await input.authorizeEvryEffectCapability(
+      execution.capabilityIdentity
+    );
+    assert.ok(authorization);
+    return {
+      execution,
+      result: await input.executeMeetingsEffect({
+        authorization,
+        execution,
+        effectKey: input.executionEffectKey(
+          execution.planId,
+          execution.fingerprint,
+          execution.stepId
+        ),
+        arguments: resolved.arguments,
+      }),
+    };
+  }
+
+  const [creator] = await db
+    .insert(users)
+    .values({
+      email: `${randomUUID()}@scratch.invalid`,
+      passwordHash: "scratch",
+      name: `${SCRATCH} alternate creator`,
+      seat: "member",
+      churchId: input.actor.plantId,
+    })
+    .returning({ id: users.id });
+  await db.insert(persons).values({
+    churchId: input.actor.plantId,
+    userId: creator.id,
+    firstName: "Committed",
+    lastName: "Assignee",
+    status: "core_group",
+    createdBy: input.actor.userId,
+  });
+
+  await setLeadershipStatus(input.actor, "no_planter");
+  const noPlanterMeeting = await seedMeeting(input.actor, true);
+  const noPlanterPerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: noPlanterMeeting.id,
+    personId: noPlanterPerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const noPlanter = await resolveFinalization(
+    noPlanterMeeting.id,
+    noPlanterMeeting.title
+  );
+  assert.equal(noPlanter.arguments.expectedTaskAssigneeId, null);
+  assert.equal(noPlanter.arguments.expectedLeadershipStatus, "no_planter");
+  assert.deepEqual(noPlanter.arguments.followUpTaskTargets, []);
+  assert.equal(noPlanter.arguments.evaluationTaskTarget, null);
+  assert.equal((await execute(noPlanter)).result.status, "completed");
+  const [noPlanterPersonAfter] = await db
+    .select({ status: persons.status })
+    .from(persons)
+    .where(eq(persons.id, noPlanterPerson.id));
+  assert.equal(noPlanterPersonAfter?.status, "attendee");
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.churchId, input.actor.plantId),
+            or(
+              eq(tasks.relatedId, noPlanterMeeting.id),
+              eq(tasks.relatedId, noPlanterPerson.id)
+            )
+          )
+        )
+    ).length,
+    0
+  );
+
+  await setLeadershipStatus(input.actor, "planter_confirmed");
+  await db
+    .update(users)
+    .set({ seat: "admin" })
+    .where(eq(users.id, input.actor.userId));
+  sessionUser = sessionUser ? { ...sessionUser, seat: "admin" } : null;
+  const noOwnerMeeting = await seedMeeting(input.actor, true);
+  const noOwnerPerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: noOwnerMeeting.id,
+    personId: noOwnerPerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const noOwner = await resolveFinalization(
+    noOwnerMeeting.id,
+    noOwnerMeeting.title
+  );
+  assert.equal(noOwner.arguments.expectedTaskAssigneeId, null);
+  assert.equal(noOwner.arguments.expectedLeadershipStatus, "planter_confirmed");
+  assert.deepEqual(noOwner.arguments.followUpTaskTargets, []);
+  assert.equal(noOwner.arguments.evaluationTaskTarget, null);
+  assert.equal((await execute(noOwner)).result.status, "completed");
+  const [noOwnerPersonAfter] = await db
+    .select({ status: persons.status })
+    .from(persons)
+    .where(eq(persons.id, noOwnerPerson.id));
+  assert.equal(noOwnerPersonAfter?.status, "attendee");
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.churchId, input.actor.plantId),
+            or(
+              eq(tasks.relatedId, noOwnerMeeting.id),
+              eq(tasks.relatedId, noOwnerPerson.id)
+            )
+          )
+        )
+    ).length,
+    0
+  );
+  await db
+    .update(users)
+    .set({ seat: "owner" })
+    .where(eq(users.id, input.actor.userId));
+  sessionUser = sessionUser ? { ...sessionUser, seat: "owner" } : null;
+
+  const retainedMeeting = await seedMeeting(input.actor, true);
+  const retainedPerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: retainedMeeting.id,
+    personId: retainedPerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const [followUp, evaluation] = await db
+    .insert(tasks)
+    .values([
+      {
+        churchId: input.actor.plantId,
+        title: "Legally reassigned follow-up",
+        status: "in_progress" as const,
+        priority: "medium" as const,
+        dueDate: "2026-10-01",
+        assignedToId: creator.id,
+        category: "follow_up" as const,
+        relatedType: "person" as const,
+        relatedId: retainedPerson.id,
+        createdById: input.actor.userId,
+      },
+      {
+        churchId: input.actor.plantId,
+        title: "Legally unassigned evaluation",
+        status: "blocked" as const,
+        priority: "urgent" as const,
+        dueDate: "2026-09-30",
+        assignedToId: null,
+        category: "vision_meeting" as const,
+        relatedType: "meeting" as const,
+        relatedId: retainedMeeting.id,
+        completionEvent: "meeting.evaluation.completed",
+        createdById: input.actor.userId,
+      },
+    ])
+    .returning();
+  assert.ok(followUp && evaluation);
+  const retained = await resolveFinalization(
+    retainedMeeting.id,
+    retainedMeeting.title
+  );
+  assert.deepEqual(
+    retained.arguments.followUpTaskTargets.map((target) => ({
+      taskId: target.taskId,
+      assignedToId: target.assignedToId,
+      priority: target.priority,
+      expectedTaskAbsent: target.expectedTaskAbsent,
+    })),
+    [
+      {
+        taskId: followUp.id,
+        assignedToId: creator.id,
+        priority: "medium",
+        expectedTaskAbsent: false,
+      },
+    ]
+  );
+  assert.deepEqual(
+    retained.arguments.evaluationTaskTarget && {
+      taskId: retained.arguments.evaluationTaskTarget.taskId,
+      assignedToId: retained.arguments.evaluationTaskTarget.assignedToId,
+      priority: retained.arguments.evaluationTaskTarget.priority,
+      expectedTaskAbsent:
+        retained.arguments.evaluationTaskTarget.expectedTaskAbsent,
+    },
+    {
+      taskId: evaluation.id,
+      assignedToId: null,
+      priority: "urgent",
+      expectedTaskAbsent: false,
+    }
+  );
+  assert.equal((await execute(retained)).result.status, "completed");
+  const retainedRows = await db
+    .select({
+      id: tasks.id,
+      assignedToId: tasks.assignedToId,
+      priority: tasks.priority,
+      updatedAt: tasks.updatedAt,
+    })
+    .from(tasks)
+    .where(inArray(tasks.id, [followUp.id, evaluation.id]));
+  const retainedById = new Map(retainedRows.map((row) => [row.id, row]));
+  assert.deepEqual(retainedById.get(followUp.id), {
+    id: followUp.id,
+    assignedToId: creator.id,
+    priority: "medium",
+    updatedAt: followUp.updatedAt,
+  });
+  assert.deepEqual(retainedById.get(evaluation.id), {
+    id: evaluation.id,
+    assignedToId: null,
+    priority: "urgent",
+    updatedAt: evaluation.updatedAt,
+  });
+
+  const taskDriftMeeting = await seedMeeting(input.actor, true);
+  const taskDriftPerson = await seedPerson(input.actor, creator.id);
+  await seedAttendance({
+    actor: input.actor,
+    meetingId: taskDriftMeeting.id,
+    personId: taskDriftPerson.id,
+    status: "attended",
+    attendanceType: "first_time",
+  });
+  const [taskDriftFollowUp] = await db
+    .insert(tasks)
+    .values({
+      churchId: input.actor.plantId,
+      title: "Task drift follow-up",
+      status: "not_started",
+      priority: "medium",
+      dueDate: "2026-10-01",
+      assignedToId: creator.id,
+      category: "follow_up",
+      relatedType: "person",
+      relatedId: taskDriftPerson.id,
+      createdById: input.actor.userId,
+    })
+    .returning();
+  assert.ok(taskDriftFollowUp);
+  const taskDriftPlan = await resolveFinalization(
+    taskDriftMeeting.id,
+    taskDriftMeeting.title
+  );
+  const taskDriftExecution = await seedExecution({
+    actor: input.actor,
+    resolved: taskDriftPlan,
+  });
+  await db
+    .update(tasks)
+    .set({ priority: "urgent" })
+    .where(eq(tasks.id, taskDriftFollowUp.id));
+  assert.equal(
+    (await execute(taskDriftPlan, taskDriftExecution)).result.status,
+    "refused"
+  );
+
+  const driftMeeting = await seedMeeting(input.actor, true);
+  const driftPlan = await resolveFinalization(
+    driftMeeting.id,
+    driftMeeting.title
+  );
+  assert.equal(
+    driftPlan.arguments.expectedLeadershipStatus,
+    "planter_confirmed"
+  );
+  const driftExecution = await seedExecution({
+    actor: input.actor,
+    resolved: driftPlan,
+  });
+  await setLeadershipStatus(input.actor, "no_planter");
+  assert.equal(
+    (await execute(driftPlan, driftExecution)).result.status,
+    "refused"
+  );
+  await setLeadershipStatus(input.actor, "planter_confirmed");
+
+  console.log("PASS meetings:finalization-canonical-parity");
+}
+
 async function assertCrossPlantRefusals(input: {
   actor: EvryPlantActor;
   resolveMeetingsEvryEffect: typeof import("./resolver").resolveMeetingsEvryEffect;
@@ -1578,6 +1969,14 @@ async function main() {
     });
   }
   await assertAttendanceDerivationDriftRefuses({
+    actor,
+    resolveMeetingsEvryEffect: resolver.resolveMeetingsEvryEffect,
+    mintEvryPlanRequestKey: plans.mintEvryPlanRequestKey,
+    authorizeEvryEffectCapability: eligibility.authorizeEvryEffectCapability,
+    executionEffectKey: audit.executionEffectKey,
+    executeMeetingsEffect: atomic.executeMeetingsEffect,
+  });
+  await assertFinalizationParity({
     actor,
     resolveMeetingsEvryEffect: resolver.resolveMeetingsEvryEffect,
     mintEvryPlanRequestKey: plans.mintEvryPlanRequestKey,

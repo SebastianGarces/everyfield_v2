@@ -8,7 +8,6 @@ export const MEETINGS_ACTION_CONTRACTS = {
     "attendanceId",
     "personId",
     "attendanceType",
-    "attendanceTypeIsDerived",
     "attendanceDerivation",
     "status",
     "invitedById",
@@ -166,6 +165,8 @@ export const MEETINGS_ACTION_CONTRACTS = {
       "personStatusChanges",
       "followUpTaskTargets",
       "evaluationTaskTarget",
+      "expectedTaskAssigneeId",
+      "expectedLeadershipStatus",
       "expectedChurchMaterialEventAt",
     ]
   ),

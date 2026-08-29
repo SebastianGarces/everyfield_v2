@@ -118,6 +118,94 @@ test("checklist updates carry notes and assignee while walk-ins stay server-deri
     selectMeetingsEvryRequest(`add walk-in ${personId} as first_time`),
     null
   );
+  assert.equal(
+    selectMeetingsEvryRequest(`add attendee ${personId} as first_time`),
+    null
+  );
+});
+
+test("NFKC classifies commands without changing any authored Meetings field", () => {
+  const id = "10000000-0000-4000-8000-000000000001";
+  const exact = "ﬁ ① Ｆ 👨‍👩‍👧‍👦";
+  const ideographicSpace = "\u3000";
+
+  assert.deepEqual(
+    selectMeetingsEvryRequest(
+      `ｃｒｅａｔｅ${ideographicSpace}ｍｅｅｔｉｎｇ： ｔｙｐｅ＝orientation ｜ ｄａｔｅｔｉｍｅ＝2026-09-13T14:00:00.000Z ｜ ｔｉｍｅｚｏｎｅ＝America/New_York ｜ ｔｉｔｌｅ＝${exact} ｜ ｌｏｃａｔｉｏｎＮａｍｅ＝${exact} ｜ ｌｏｃａｔｉｏｎＡｄｄｒｅｓｓ＝${exact} ｜ ｎｏｔｅｓ＝${exact}`
+    ),
+    {
+      kind: "effect",
+      exportName: "createMeetingAction",
+      values: {
+        type: "orientation",
+        datetime: "2026-09-13T14:00:00.000Z",
+        timezone: "America/New_York",
+        title: exact,
+        locationId: null,
+        locationName: exact,
+        locationAddress: exact,
+        teamId: null,
+        meetingSubtype: null,
+        estimatedAttendance: null,
+        durationMinutes: null,
+        notes: exact,
+      },
+    }
+  );
+
+  const location = selectMeetingsEvryRequest(
+    `create meeting location: name=${exact} | address=${exact} | contactName=${exact} | contactPhone=${exact} | contactEmail=alex@example.com | cost=${exact} | capacity=１２ | notes=${exact}`
+  );
+  assert.equal(location?.kind, "effect");
+  if (location?.kind === "effect") {
+    assert.deepEqual(location.values, {
+      name: exact,
+      address: exact,
+      contactName: exact,
+      contactPhone: exact,
+      contactEmail: "alex@example.com",
+      cost: exact,
+      capacity: 12,
+      notes: exact,
+    });
+  }
+
+  const update = selectMeetingsEvryRequest(
+    `update this meeting: timezone=America/New_York | title=${exact} | locationName=${exact} | locationAddress=${exact} | notes=${exact}`
+  );
+  assert.equal(update?.kind, "effect");
+  if (update?.kind === "effect") {
+    assert.equal(update.values.title, exact);
+    assert.equal(update.values.locationName, exact);
+    assert.equal(update.values.locationAddress, exact);
+    assert.equal(update.values.notes, exact);
+  }
+
+  for (const [request, keys] of [
+    [
+      `create and add attendee: ${exact} | ${exact} | alex@example.com | ${exact}`,
+      ["firstName", "lastName", "phone"],
+    ],
+    [`add attendee note ${id}: ${exact}`, ["note"]],
+    [`record response ${id} as interested: ${exact}`, ["notes"]],
+    [`update checklist ${id}: notes=${exact}`, ["notes"]],
+    [`evaluate this meeting: 4,4,4,4,4,4,4,4 | ${exact}`, ["notes"]],
+  ] as const) {
+    const selected = selectMeetingsEvryRequest(request);
+    assert.equal(selected?.kind, "effect", request);
+    if (selected?.kind === "effect") {
+      for (const key of keys)
+        assert.equal(selected.values[key], exact, request);
+    }
+  }
+
+  const agenda = selectMeetingsEvryRequest(`set agenda: ${exact}=１０`);
+  assert.equal(agenda?.kind, "effect");
+  if (agenda?.kind === "effect") {
+    assert.deepEqual(agenda.values.sections, [
+      { id: "evry-section-1", title: exact, minutes: 10 },
+    ]);
+  }
 });
 
 test("the closed Meetings grammar selects each read without confirmation", () => {

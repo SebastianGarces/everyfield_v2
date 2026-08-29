@@ -81,7 +81,6 @@
         "attendanceId",
         "personId",
         "attendanceType",
-        "attendanceTypeIsDerived",
         "attendanceDerivation",
         "status",
         "invitedById",
@@ -148,6 +147,8 @@
         "personStatusChanges",
         "followUpTaskTargets",
         "evaluationTaskTarget",
+        "expectedTaskAssigneeId",
+        "expectedLeadershipStatus",
         "expectedChurchMaterialEventAt"
       ],
       "difficultToReverse": false,

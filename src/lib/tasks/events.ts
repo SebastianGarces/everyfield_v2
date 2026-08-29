@@ -10,7 +10,7 @@ import {
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import type { FinalizedAttendee } from "@/lib/meetings/events";
-import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
+import { meetingFinalizationTaskAssigneeId } from "@/lib/meetings/finalization";
 
 import { addCalendarDays } from "@/lib/datetime";
 
@@ -304,17 +304,16 @@ export async function handleMeetingAttendanceFinalized(
     .limit(1);
 
   // 2. Otherwise: infer the planter from the OWNER seat, as before.
-  const planter = churchHasNoPlanter({
-    leadershipStatus: church?.leadershipStatus,
-  })
-    ? []
-    : await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
-        .limit(1);
-
-  const planterId = planter[0]?.id;
+  const planter = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.churchId, churchId), eq(users.seat, "owner")))
+    .limit(1);
+  const planterId = meetingFinalizationTaskAssigneeId({
+    meetingType,
+    leadershipStatus: church?.leadershipStatus ?? null,
+    ownerId: planter[0]?.id ?? null,
+  });
   if (!planterId) {
     // Deliberately NOT an error: with no planter there is nobody to assign the
     // tasks to, and that is a stable data condition rather than a transient

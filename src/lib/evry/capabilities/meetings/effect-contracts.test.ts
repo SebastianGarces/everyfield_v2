@@ -191,6 +191,7 @@ function fixtureValue(exportName: string, key: string): unknown {
         title: "Follow up with Alex Rivera",
         dueDate: "2026-08-31",
         assignedToId: ID,
+        priority: "high",
         expectedTaskAbsent: true,
         beforeStatus: null,
         expectedUpdatedAt: null,
@@ -218,6 +219,7 @@ function fixtureValue(exportName: string, key: string): unknown {
       title: "Evaluate Vision Meeting",
       dueDate: "2026-08-30",
       assignedToId: ID,
+      priority: "high",
       expectedTaskAbsent: true,
       beforeStatus: null,
       expectedUpdatedAt: null,
@@ -240,7 +242,6 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "attendanceType" || key === "afterAttendanceType") {
     return "first_time";
   }
-  if (key === "attendanceTypeIsDerived") return true;
   if (key === "attendanceDerivation") {
     return {
       personStatus: "prospect",
@@ -256,6 +257,8 @@ function fixtureValue(exportName: string, key: string): unknown {
   if (key === "actualAttendance") return null;
   if (key === "createdById") return ID;
   if (key === "meetingType") return "vision_meeting";
+  if (key === "expectedTaskAssigneeId") return ID;
+  if (key === "expectedLeadershipStatus") return "planter_confirmed";
   if (key === "note") return "Follow up next week.";
   if (key === "expectedPersonUpdatedAt") return WHEN;
   if (key.endsWith("Score")) return 4;
@@ -610,7 +613,7 @@ test("finalization distinguishes created tasks from retained tasks", () => {
   );
 });
 
-test("derived attendance plans require one closed raw-input baseline", () => {
+test("attendance plans require one closed raw-input baseline and reject overrides", () => {
   const add = validArguments("addAttendeeAction");
   assert.equal(
     MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addAttendeeAction.safeParse({
@@ -694,6 +697,23 @@ test("a legal 5,000-character attendee note is disclosed losslessly", () => {
   assert.deepEqual(step.counts, [
     { label: "Person activities created", count: 1 },
   ]);
+});
+
+test("compatibility characters and one grapheme survive immutable review", () => {
+  const note = "ﬁ ① Ｆ 👨‍👩‍👧‍👦";
+  const arguments_ = {
+    ...validArguments("addAttendeeNoteAction"),
+    note,
+  };
+  const { step } = reviewForArguments("addAttendeeNoteAction", arguments_);
+  assert.equal(
+    joinedPreviewPages(step.contentPreviews, "Note"),
+    JSON.stringify(note)
+  );
+  assert.equal(
+    joinedStatePages(step.beforeAfter, "Attendee note activity", "after"),
+    note
+  );
 });
 
 test("a cardinality-heavy legal plan preserves every exact target and plan byte", () => {

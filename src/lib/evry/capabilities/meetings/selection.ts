@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   attendanceStatuses,
-  attendanceTypes,
   meetingStatuses,
   meetingSubtypes,
   meetingTypes,
@@ -25,6 +24,79 @@ const zone = z
       return false;
     }
   });
+
+type LiteralText = Readonly<{
+  literal: string;
+  normalized: string;
+  boundaries: readonly number[];
+}>;
+
+type LiteralMatch = RegExpExecArray & {
+  indices: readonly (readonly [number, number] | undefined)[];
+};
+
+/** Keep an exact literal beside the NFKC classifier text and align their spans. */
+function literalText(value: string): LiteralText {
+  const literal = value.trim();
+  let normalized = "";
+  const boundaries: number[] = [0];
+  let literalOffset = 0;
+  for (const character of literal) {
+    const classified = character.normalize("NFKC");
+    const normalizedOffset = normalized.length;
+    normalized += classified;
+    for (let index = normalizedOffset; index < normalized.length; index += 1) {
+      boundaries[index] = literalOffset;
+    }
+    literalOffset += character.length;
+    boundaries[normalized.length] = literalOffset;
+  }
+  return { literal, normalized, boundaries };
+}
+
+function literalSlice(
+  value: LiteralText,
+  start: number,
+  end: number
+): LiteralText {
+  const literalStart = value.boundaries[start];
+  const literalEnd = value.boundaries[end];
+  if (literalStart === undefined || literalEnd === undefined) {
+    throw new Error("Normalized literal span is not aligned");
+  }
+  return literalText(value.literal.slice(literalStart, literalEnd));
+}
+
+function execLiteral(pattern: RegExp, value: LiteralText): LiteralMatch | null {
+  const flags = pattern.flags.includes("d")
+    ? pattern.flags
+    : `${pattern.flags}d`;
+  return new RegExp(pattern.source, flags).exec(
+    value.normalized
+  ) as LiteralMatch | null;
+}
+
+function capturedLiteral(
+  value: LiteralText,
+  match: LiteralMatch,
+  index: number
+): LiteralText | null {
+  const span = match.indices[index];
+  return span ? literalSlice(value, span[0], span[1]) : null;
+}
+
+function splitLiteral(value: LiteralText, separator: string): LiteralText[] {
+  const parts: LiteralText[] = [];
+  let start = 0;
+  let at = value.normalized.indexOf(separator);
+  while (at !== -1) {
+    parts.push(literalSlice(value, start, at));
+    start = at + separator.length;
+    at = value.normalized.indexOf(separator, start);
+  }
+  parts.push(literalSlice(value, start, value.normalized.length));
+  return parts;
+}
 
 export type MeetingsEvryReadSelection =
   | Readonly<{ kind: "read_list" }>
@@ -56,16 +128,18 @@ function exactEnum<T extends readonly string[]>(
   return values.includes(value as T[number]) ? (value as T[number]) : null;
 }
 
-function personFields(value: string) {
-  const [firstName, lastName, email = "", phone = ""] = value
-    .split("|")
-    .map((part) => part.trim());
-  if (!firstName || !lastName) return null;
+function personFields(value: LiteralText) {
+  const [firstName, lastName, email, phone] = splitLiteral(value, "|");
+  const firstNameLiteral = firstName?.literal.trim() ?? "";
+  const lastNameLiteral = lastName?.literal.trim() ?? "";
+  const emailLiteral = email?.literal.trim() ?? "";
+  const phoneLiteral = phone?.literal.trim() ?? "";
+  if (!firstNameLiteral || !lastNameLiteral) return null;
   return {
-    firstName,
-    lastName,
-    email: email || null,
-    phone: phone || null,
+    firstName: firstNameLiteral,
+    lastName: lastNameLiteral,
+    email: emailLiteral || null,
+    phone: phoneLiteral || null,
   };
 }
 
@@ -80,9 +154,12 @@ function attendanceBatch(value: string) {
   return records.length > 0 && records.every(Boolean) ? records : null;
 }
 
-function agendaSections(value: string) {
-  const sections = value.split(";").map((part, index) => {
-    const [title, rawMinutes] = part.split("=").map((item) => item.trim());
+function agendaSections(value: LiteralText) {
+  const sections = splitLiteral(value, ";").map((part, index) => {
+    const separator = part.normalized.indexOf("=");
+    if (separator <= 0) return null;
+    const title = literalSlice(part, 0, separator).literal.trim();
+    const rawMinutes = part.normalized.slice(separator + 1).trim();
     const minutes = Number(rawMinutes);
     return title && Number.isInteger(minutes) && minutes >= 0
       ? { id: `evry-section-${index + 1}`, title, minutes }
@@ -133,52 +210,64 @@ const UPDATE_MEETING_FIELDS = new Set([
 const UPDATE_CHECKLIST_FIELDS = new Set(["notes", "assignedTo"]);
 
 function closedFields(
-  value: string,
+  value: LiteralText,
   allowed: ReadonlySet<string>
-): ReadonlyMap<string, string> | null {
-  const entries = value.split("|").map((part) => part.trim());
-  const fields = new Map<string, string>();
+): ReadonlyMap<string, LiteralText> | null {
+  const entries = splitLiteral(value, "|");
+  const fields = new Map<string, LiteralText>();
   for (const entry of entries) {
-    const separator = entry.indexOf("=");
+    const separator = entry.normalized.indexOf("=");
     if (separator <= 0) return null;
-    const key = entry.slice(0, separator).trim();
-    const fieldValue = entry.slice(separator + 1).trim();
-    if (!allowed.has(key) || fields.has(key) || fieldValue.length === 0) {
+    const key = entry.normalized.slice(0, separator).trim();
+    const fieldValue = literalSlice(
+      entry,
+      separator + 1,
+      entry.normalized.length
+    );
+    if (
+      !allowed.has(key) ||
+      fields.has(key) ||
+      fieldValue.normalized.trim().length === 0
+    ) {
       return null;
     }
-    fields.set(key, fieldValue);
+    fields.set(key, literalText(fieldValue.literal));
   }
   return fields;
 }
 
-function nullableValue(value: string): string | null {
-  return value.toLowerCase() === "none" ? null : value;
+function nullableValue(value: LiteralText): string | null {
+  return value.normalized.toLowerCase() === "none" ? null : value.literal;
 }
 
-function nullableInteger(value: string): number | null | undefined {
-  if (value.toLowerCase() === "none") return null;
-  const parsed = Number(value);
+function nullableClassifiedValue(value: LiteralText): string | null {
+  return value.normalized.toLowerCase() === "none" ? null : value.normalized;
+}
+
+function nullableInteger(value: LiteralText): number | null | undefined {
+  if (value.normalized.toLowerCase() === "none") return null;
+  const parsed = Number(value.normalized);
   return Number.isInteger(parsed) ? parsed : undefined;
 }
 
 function closedCreateMeetingFields(
-  value: string
+  value: LiteralText
 ): Readonly<Record<string, unknown>> | null {
   const fields = closedFields(value, CREATE_MEETING_FIELDS);
   if (!fields) return null;
-  const type = exactEnum(fields.get("type") ?? "", meetingTypes);
-  const datetime = fields.get("datetime");
-  const timezone = fields.get("timezone");
-  const teamId = fields.get("teamId") ?? null;
-  const meetingSubtype = fields.get("meetingSubtype") ?? null;
-  const locationId = fields.get("locationId") ?? null;
-  const locationName = fields.get("locationName") ?? null;
-  const locationAddress = fields.get("locationAddress") ?? null;
+  const type = exactEnum(fields.get("type")?.normalized ?? "", meetingTypes);
+  const datetime = fields.get("datetime")?.normalized;
+  const timezone = fields.get("timezone")?.normalized;
+  const teamId = fields.get("teamId")?.normalized ?? null;
+  const meetingSubtype = fields.get("meetingSubtype")?.normalized ?? null;
+  const locationId = fields.get("locationId")?.normalized ?? null;
+  const locationName = fields.get("locationName")?.literal ?? null;
+  const locationAddress = fields.get("locationAddress")?.literal ?? null;
   const estimatedAttendance = fields.has("estimatedAttendance")
-    ? Number(fields.get("estimatedAttendance"))
+    ? Number(fields.get("estimatedAttendance")?.normalized)
     : null;
   const durationMinutes = fields.has("durationMinutes")
-    ? Number(fields.get("durationMinutes"))
+    ? Number(fields.get("durationMinutes")?.normalized)
     : null;
   if (
     !type ||
@@ -206,7 +295,7 @@ function closedCreateMeetingFields(
     type,
     datetime,
     timezone,
-    title: fields.get("title") ?? null,
+    title: fields.get("title")?.literal ?? null,
     locationId,
     locationName,
     locationAddress,
@@ -214,12 +303,12 @@ function closedCreateMeetingFields(
     meetingSubtype,
     estimatedAttendance,
     durationMinutes,
-    notes: fields.get("notes") ?? null,
+    notes: fields.get("notes")?.literal ?? null,
   };
 }
 
 function closedLocationFields(
-  value: string,
+  value: LiteralText,
   mode: "create" | "update"
 ): Readonly<Record<string, unknown>> | null {
   const fields = closedFields(value, LOCATION_FIELDS);
@@ -259,11 +348,13 @@ function closedLocationFields(
 }
 
 function closedMeetingUpdateFields(
-  value: string
+  value: LiteralText
 ): Readonly<Record<string, unknown>> | null {
   const fields = closedFields(value, UPDATE_MEETING_FIELDS);
   if (!fields || fields.size < 2 || !fields.has("timezone")) return null;
-  const result: Record<string, unknown> = { timezone: fields.get("timezone") };
+  const result: Record<string, unknown> = {
+    timezone: fields.get("timezone")?.normalized,
+  };
   for (const [key, fieldValue] of fields) {
     if (key === "timezone") continue;
     if (key === "estimatedAttendance" || key === "durationMinutes") {
@@ -277,6 +368,12 @@ function closedMeetingUpdateFields(
         return null;
       }
       result[key] = parsed;
+    } else if (
+      key === "datetime" ||
+      key === "locationId" ||
+      key === "meetingSubtype"
+    ) {
+      result[key] = nullableClassifiedValue(fieldValue);
     } else {
       result[key] = nullableValue(fieldValue);
     }
@@ -308,14 +405,14 @@ function closedMeetingUpdateFields(
 }
 
 function closedChecklistUpdateFields(
-  value: string
+  value: LiteralText
 ): Readonly<Record<string, unknown>> | null {
   const fields = closedFields(value, UPDATE_CHECKLIST_FIELDS);
   if (!fields || fields.size === 0) return null;
   const result: Record<string, unknown> = {};
   if (fields.has("notes")) result.notes = nullableValue(fields.get("notes")!);
   if (fields.has("assignedTo")) {
-    result.assignedTo = nullableValue(fields.get("assignedTo")!);
+    result.assignedTo = nullableClassifiedValue(fields.get("assignedTo")!);
   }
   const parsed = z
     .strictObject({
@@ -330,7 +427,8 @@ function closedChecklistUpdateFields(
 export function selectMeetingsEvryRequest(
   literalUserText: string
 ): MeetingsEvryRequestSelection | null {
-  const text = literalUserText.normalize("NFKC").trim();
+  const input = literalText(literalUserText);
+  const text = input.normalized;
   if (/^(?:show|list)(?: me)? meetings[.!?]*$/i.test(text)) {
     return { kind: "read_list" };
   }
@@ -344,34 +442,46 @@ export function selectMeetingsEvryRequest(
     return { kind: "read_detail" };
   }
 
-  const fullCreate = /^create meeting:\s*([\s\S]+)$/i.exec(text);
+  const fullCreate = execLiteral(/^create meeting:\s*([\s\S]+)$/i, input);
   if (fullCreate?.[1]) {
-    const fields = closedCreateMeetingFields(fullCreate[1]);
+    const captured = capturedLiteral(input, fullCreate, 1);
+    const fields = captured ? closedCreateMeetingFields(captured) : null;
     return fields ? effect("createMeetingAction", fields) : null;
   }
 
-  const createLocationFields = /^create meeting location:\s*([\s\S]+)$/i.exec(
-    text
+  const createLocationFields = execLiteral(
+    /^create meeting location:\s*([\s\S]+)$/i,
+    input
   );
   if (createLocationFields?.[1]?.includes("=")) {
-    const fields = closedLocationFields(createLocationFields[1], "create");
+    const captured = capturedLiteral(input, createLocationFields, 1);
+    const fields = captured ? closedLocationFields(captured, "create") : null;
     return fields ? effect("createLocationAction", fields) : null;
   }
-  let match = /^create meeting location:\s*([^|]+)\|([\s\S]+)$/i.exec(text);
+  let match = execLiteral(
+    /^create meeting location:\s*([^|]+)\|([\s\S]+)$/i,
+    input
+  );
   if (match?.[1]?.trim() && match[2]?.trim()) {
+    const name = capturedLiteral(input, match, 1)?.literal;
+    const address = capturedLiteral(input, match, 2)?.literal;
+    if (!name || !address) return null;
     return effect("createLocationAction", {
-      name: match[1].trim(),
-      address: match[2].trim(),
+      name,
+      address,
     });
   }
-  const updateLocationFields =
-    /^update meeting location\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i.exec(text);
+  const updateLocationFields = execLiteral(
+    /^update meeting location\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i,
+    input
+  );
   if (
     updateLocationFields?.[1] &&
     uuid.safeParse(updateLocationFields[1]).success &&
     updateLocationFields[2]?.includes("=")
   ) {
-    const fields = closedLocationFields(updateLocationFields[2], "update");
+    const captured = capturedLiteral(input, updateLocationFields, 2);
+    const fields = captured ? closedLocationFields(captured, "update") : null;
     return fields
       ? effect("updateLocationAction", {
           locationId: updateLocationFields[1],
@@ -379,26 +489,29 @@ export function selectMeetingsEvryRequest(
         })
       : null;
   }
-  match =
-    /^update meeting location\s+([0-9a-f-]{36}):\s*([^|]+)\|([\s\S]+)$/i.exec(
-      text
-    );
+  match = execLiteral(
+    /^update meeting location\s+([0-9a-f-]{36}):\s*([^|]+)\|([\s\S]+)$/i,
+    input
+  );
   if (
     match &&
     uuid.safeParse(match[1]).success &&
     match[2]?.trim() &&
     match[3]?.trim()
   ) {
+    const name = capturedLiteral(input, match, 2)?.literal;
+    const address = capturedLiteral(input, match, 3)?.literal;
+    if (!name || !address) return null;
     return effect("updateLocationAction", {
       locationId: match[1],
-      name: match[2].trim(),
-      address: match[3].trim(),
+      name,
+      address,
     });
   }
-  match =
-    /^create (vision_meeting|orientation) at (\S+) in (\S+)(?: titled ([\s\S]+))?$/i.exec(
-      text
-    );
+  match = execLiteral(
+    /^create (vision_meeting|orientation) at (\S+) in (\S+)(?: titled ([\s\S]+))?$/i,
+    input
+  );
   if (
     match &&
     exactEnum(match[1] ?? "", meetingTypes) &&
@@ -409,7 +522,7 @@ export function selectMeetingsEvryRequest(
       type: match[1],
       datetime: match[2],
       timezone: match[3],
-      title: match[4]?.trim() || null,
+      title: capturedLiteral(input, match, 4)?.literal || null,
       locationId: null,
       locationName: null,
       locationAddress: null,
@@ -423,14 +536,19 @@ export function selectMeetingsEvryRequest(
   if (/^delete (?:this )?meeting[.!?]*$/i.test(text)) {
     return effect("deleteMeetingAction");
   }
-  const updateMeetingFields = /^update (?:this )?meeting:\s*([\s\S]+)$/i.exec(
-    text
+  const updateMeetingFields = execLiteral(
+    /^update (?:this )?meeting:\s*([\s\S]+)$/i,
+    input
   );
   if (updateMeetingFields?.[1]) {
-    const fields = closedMeetingUpdateFields(updateMeetingFields[1]);
+    const captured = capturedLiteral(input, updateMeetingFields, 1);
+    const fields = captured ? closedMeetingUpdateFields(captured) : null;
     return fields ? effect("updateMeetingAction", fields) : null;
   }
-  match = /^reschedule (?:this )?meeting to (\S+) in (\S+)$/i.exec(text);
+  match = execLiteral(
+    /^reschedule (?:this )?meeting to (\S+) in (\S+)$/i,
+    input
+  );
   if (
     match &&
     instant.safeParse(match[1]).success &&
@@ -441,7 +559,10 @@ export function selectMeetingsEvryRequest(
       timezone: match[2],
     });
   }
-  match = /^set (?:this )?meeting status to ([a-z_]+)[.!?]*$/i.exec(text);
+  match = execLiteral(
+    /^set (?:this )?meeting status to ([a-z_]+)[.!?]*$/i,
+    input
+  );
   const meetingStatus = match
     ? exactEnum(match[1] ?? "", meetingStatuses)
     : null;
@@ -452,25 +573,15 @@ export function selectMeetingsEvryRequest(
     return effect("finalizeAttendanceAction");
   }
 
-  match = /^add attendee\s+([0-9a-f-]{36})(?: as ([a-z_]+))?[.!?]*$/i.exec(
-    text
-  );
+  match = execLiteral(/^add attendee\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
-    const attendanceType = match[2]
-      ? exactEnum(match[2], attendanceTypes)
-      : null;
-    if (!match[2] || attendanceType) {
-      return effect("addAttendeeAction", {
-        personId: match[1],
-        attendanceType,
-      });
-    }
+    return effect("addAttendeeAction", { personId: match[1] });
   }
-  match = /^add guest\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
+  match = execLiteral(/^add guest\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
     return effect("addToGuestListAction", { personId: match[1] });
   }
-  match = /^add walk-in\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
+  match = execLiteral(/^add walk-in\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
     return effect("addWalkInAttendeeAction", { personId: match[1] });
   }
@@ -479,24 +590,31 @@ export function selectMeetingsEvryRequest(
     ["create and add guest", "quickAddPersonToGuestListAction"],
     ["create and add walk-in", "quickAddWalkInAction"],
   ] as const) {
-    const quick = new RegExp(`^${prefix}:\\s*([\\s\\S]+)$`, "i").exec(text);
+    const quick = execLiteral(
+      new RegExp(`^${prefix}:\\s*([\\s\\S]+)$`, "i"),
+      input
+    );
     if (!quick?.[1]) continue;
-    const fields = personFields(quick[1]);
+    const captured = capturedLiteral(input, quick, 1);
+    const fields = captured ? personFields(captured) : null;
     if (fields) return effect(exportName, fields);
   }
-  match = /^remove attendee\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
+  match = execLiteral(/^remove attendee\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
     return effect("removeAttendeeAction", { personId: match[1] });
   }
-  match = /^remove guest\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
+  match = execLiteral(/^remove guest\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
     return effect("removeFromGuestListAction", { personId: match[1] });
   }
-  match = /^record attendance:\s*([\s\S]+)$/i.exec(text);
+  match = execLiteral(/^record attendance:\s*([\s\S]+)$/i, input);
   const batch = match?.[1] ? attendanceBatch(match[1]) : null;
   if (batch) return effect("recordAttendanceBatchAction", { records: batch });
 
-  match = /^set rsvp\s+([0-9a-f-]{36}) to ([a-z_]+)[.!?]*$/i.exec(text);
+  match = execLiteral(
+    /^set rsvp\s+([0-9a-f-]{36}) to ([a-z_]+)[.!?]*$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success) {
     const status = exactEnum(match[2] ?? "", responseStatuses);
     if (status) {
@@ -506,56 +624,69 @@ export function selectMeetingsEvryRequest(
       });
     }
   }
-  match = /^mark guest\s+([0-9a-f-]{36}) (attended|absent)[.!?]*$/i.exec(text);
+  match = execLiteral(
+    /^mark guest\s+([0-9a-f-]{36}) (attended|absent)[.!?]*$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success) {
     return effect("toggleAttendanceStatusAction", {
       personId: match[1],
       status: match[2],
     });
   }
-  match = /^add attendee note\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i.exec(text);
+  match = execLiteral(
+    /^add attendee note\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success && match[2]?.trim()) {
+    const note = capturedLiteral(input, match, 2)?.literal;
+    if (!note) return null;
     return effect("addAttendeeNoteAction", {
       personId: match[1],
-      note: match[2].trim(),
+      note,
     });
   }
-  match =
-    /^record response\s+([0-9a-f-]{36}) as ([a-z_]+)(?:\s*:\s*([\s\S]+))?$/i.exec(
-      text
-    );
+  match = execLiteral(
+    /^record response\s+([0-9a-f-]{36}) as ([a-z_]+)(?:\s*:\s*([\s\S]+))?$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success) {
     const responseType = exactEnum(match[2] ?? "", responseCardTypes);
     if (responseType) {
       return effect("recordResponseCardAction", {
         personId: match[1],
         responseType,
-        notes: match[3]?.trim() || null,
+        notes: capturedLiteral(input, match, 3)?.literal || null,
       });
     }
   }
-  match = /^clear response\s+([0-9a-f-]{36})[.!?]*$/i.exec(text);
+  match = execLiteral(/^clear response\s+([0-9a-f-]{36})[.!?]*$/i, input);
   if (match && uuid.safeParse(match[1]).success) {
     return effect("clearResponseCardAction", { personId: match[1] });
   }
-  match = /^set agenda:\s*([\s\S]+)$/i.exec(text);
-  const sections = match?.[1] ? agendaSections(match[1]) : null;
+  match = execLiteral(/^set agenda:\s*([\s\S]+)$/i, input);
+  const agenda = match ? capturedLiteral(input, match, 1) : null;
+  const sections = agenda ? agendaSections(agenda) : null;
   if (sections) return effect("saveAgendaAction", { sections });
 
-  match =
-    /^toggle checklist\s+([0-9a-f-]{36}) (checked|unchecked)[.!?]*$/i.exec(
-      text
-    );
+  match = execLiteral(
+    /^toggle checklist\s+([0-9a-f-]{36}) (checked|unchecked)[.!?]*$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success) {
     return effect("toggleChecklistItemAction", {
       itemId: match[1],
       checked: match[2] === "checked",
     });
   }
-  match = /^update checklist\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i.exec(text);
+  match = execLiteral(
+    /^update checklist\s+([0-9a-f-]{36}):\s*([\s\S]+)$/i,
+    input
+  );
   if (match && uuid.safeParse(match[1]).success) {
+    const captured = capturedLiteral(input, match, 2);
     if (match[2]?.includes("=")) {
-      const fields = closedChecklistUpdateFields(match[2]);
+      const fields = captured ? closedChecklistUpdateFields(captured) : null;
       return fields
         ? effect("updateChecklistItemAction", {
             itemId: match[1],
@@ -565,17 +696,17 @@ export function selectMeetingsEvryRequest(
     }
     return effect("updateChecklistItemAction", {
       itemId: match[1],
-      notes: match[2]?.trim() || null,
+      notes: captured?.literal || null,
     });
   }
-  match =
-    /^evaluate (?:this )?meeting:\s*([1-5](?:\s*,\s*[1-5]){7})(?:\s*\|\s*([\s\S]+))?$/i.exec(
-      text
-    );
+  match = execLiteral(
+    /^evaluate (?:this )?meeting:\s*([1-5](?:\s*,\s*[1-5]){7})(?:\s*\|\s*([\s\S]+))?$/i,
+    input
+  );
   if (match?.[1]) {
     return effect("createEvaluationAction", {
       scores: match[1].split(",").map((value) => Number(value.trim())),
-      notes: match[2]?.trim() || null,
+      notes: capturedLiteral(input, match, 2)?.literal || null,
     });
   }
   return null;
@@ -584,8 +715,7 @@ export function selectMeetingsEvryRequest(
 export const MEETINGS_SELECTION_EXAMPLES: Readonly<
   Record<MeetingsActionExport, string>
 > = Object.freeze({
-  addAttendeeAction:
-    "add attendee 10000000-0000-4000-8000-000000000001 as first_time",
+  addAttendeeAction: "add attendee 10000000-0000-4000-8000-000000000001",
   addAttendeeNoteAction:
     "add attendee note 10000000-0000-4000-8000-000000000001: Follow up next week",
   addToGuestListAction: "add guest 10000000-0000-4000-8000-000000000001",
