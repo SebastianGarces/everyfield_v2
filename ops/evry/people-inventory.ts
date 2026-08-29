@@ -132,7 +132,7 @@ function actionDomain(source: string, exportName: string): string {
   if (source.endsWith("/skill-actions.ts")) return "skills";
   if (source.endsWith("/tag-actions.ts")) return "tags";
   if (source.endsWith("/import-export-actions.ts")) {
-    return exportName.includes("Export") ? "exports" : "imports";
+    return exportName === "exportPeopleAction" ? "exports" : "imports";
   }
   return "people";
 }

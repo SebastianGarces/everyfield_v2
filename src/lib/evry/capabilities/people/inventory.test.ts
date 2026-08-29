@@ -53,6 +53,19 @@ test("read/effect kind is independent from the required product capability", () 
   }
 });
 
+test("the export action keeps its own semantic domain", () => {
+  const exportPeople = generated.entries.find(
+    ({ exportName }) => exportName === "exportPeopleAction"
+  );
+  assert.ok(exportPeople);
+  assert.equal(exportPeople.domain, "exports");
+  assert.equal(
+    exportPeople.capabilityIdentity,
+    "people.crm.exports.export-people"
+  );
+  assert.equal(exportPeople.operationKind, "read");
+});
+
 test("photo read is covered and route composition does not invent navigation tools", () => {
   const photo = generated.entries.find(
     ({ identity }) => identity === "handler:GET:/api/people/[personId]/photo"

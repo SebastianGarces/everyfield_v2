@@ -112,6 +112,7 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
+  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
@@ -126,7 +127,10 @@ export async function createEvryConversation(input: {
     createdAt: input.now,
   });
   await input.reportStage?.("compiling_response");
-  const continued = await continueProductionEvryCapabilityConversation({
+  const continued = await (
+    input.continueCapabilityConversation ??
+    continueProductionEvryCapabilityConversation
+  )({
     actor: input.actor,
     conversation,
     userRequestKey: requestKey,
@@ -247,6 +251,7 @@ export async function continueEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
+  continueCapabilityConversation?: typeof continueProductionEvryCapabilityConversation;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
   reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
 }): Promise<EvryConversationContinuation | null> {
@@ -327,7 +332,10 @@ export async function continueEvryConversation(input: {
     });
   } else {
     appended =
-      (await continueProductionEvryCapabilityConversation({
+      (await (
+        input.continueCapabilityConversation ??
+        continueProductionEvryCapabilityConversation
+      )({
         actor: input.actor,
         conversation: appended,
         userRequestKey: requestKey.data,

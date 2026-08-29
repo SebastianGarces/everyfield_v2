@@ -190,6 +190,26 @@
       ]
     },
     {
+      "identity": "people.crm.exports.export-people",
+      "surfaceIdentities": [
+        "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction"
+      ],
+      "parityCapability": "people",
+      "domain": "exports",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null,
+      "fixtureClasses": [
+        "selection",
+        "arguments",
+        "confirmation",
+        "execution",
+        "idempotency",
+        "failure"
+      ]
+    },
+    {
       "identity": "people.crm.households.add-to-household",
       "surfaceIdentities": [
         "action:src/app/(dashboard)/people/household-actions.ts → addToHouseholdAction"
@@ -403,26 +423,6 @@
       "applicationCapability": "people.write",
       "confirmation": "required",
       "mutationShape": "bulk_import",
-      "fixtureClasses": [
-        "selection",
-        "arguments",
-        "confirmation",
-        "execution",
-        "idempotency",
-        "failure"
-      ]
-    },
-    {
-      "identity": "people.crm.imports.export-people",
-      "surfaceIdentities": [
-        "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction"
-      ],
-      "parityCapability": "people",
-      "domain": "imports",
-      "operationKind": "read",
-      "applicationCapability": "read",
-      "confirmation": "not_required",
-      "mutationShape": null,
       "fixtureClasses": [
         "selection",
         "arguments",
@@ -1435,8 +1435,8 @@
       "identity": "action:src/app/(dashboard)/people/import-export-actions.ts → exportPeopleAction",
       "source": "src/app/(dashboard)/people/import-export-actions.ts",
       "exportName": "exportPeopleAction",
-      "capabilityIdentity": "people.crm.imports.export-people",
-      "domain": "imports",
+      "capabilityIdentity": "people.crm.exports.export-people",
+      "domain": "exports",
       "operationKind": "read",
       "applicationCapability": "read",
       "confirmation": "not_required",
