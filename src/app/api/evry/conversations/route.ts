@@ -15,6 +15,7 @@ import {
   evryConversationJson,
   publicEvryConversation,
 } from "./shared";
+import { evryConversationStream, wantsEvryConversationStream } from "./stream";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,29 @@ export function createEvryConversationCreatePost({
         actor,
         pageContext: requestPageContext,
       });
+
+      if (wantsEvryConversationStream(request)) {
+        return evryConversationStream({
+          requestId: parsed.data.requestKey,
+          status: 201,
+          run: async (reportStage) => {
+            const resumed = await create({
+              actor,
+              requestKey: parsed.data.requestKey,
+              message: parsed.data.message,
+              pageContext,
+              requestPageContext,
+              now: now(),
+              reportStage,
+            });
+            return { conversation: publicEvryConversation(resumed) };
+          },
+          failureCode: (error) =>
+            error instanceof EvryConversationIdempotencyError
+              ? "stale"
+              : "unavailable",
+        });
+      }
 
       const resumed = await create({
         actor,

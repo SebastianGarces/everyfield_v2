@@ -4,6 +4,7 @@ import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { PublicEvryConversation } from "@/components/evry/client-contract";
+import { useEvryShell } from "@/components/evry/evry-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   buildEvryProgressArtifact,
@@ -99,7 +100,7 @@ function sameActiveProgress(
 function ActionNotice({ state }: { state: LocalState }) {
   if (state.status === "submitting") {
     return (
-      <Alert role="status" aria-live="polite">
+      <Alert role="group">
         <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" />
         <AlertTitle>
           {state.action === "retry"
@@ -117,7 +118,7 @@ function ActionNotice({ state }: { state: LocalState }) {
   if (state.status === "complete") {
     if (state.action === "execute" || state.action === "retry") return null;
     return (
-      <Alert role="status" aria-live="polite">
+      <Alert role="group">
         <AlertCircle aria-hidden="true" />
         <AlertTitle>
           {state.action === "edit"
@@ -134,7 +135,7 @@ function ActionNotice({ state }: { state: LocalState }) {
   }
   if (state.status === "error") {
     return (
-      <Alert variant="destructive">
+      <Alert role="group" variant="destructive">
         <AlertCircle aria-hidden="true" />
         <AlertTitle>
           {state.error.kind === "expected"
@@ -170,7 +171,6 @@ export function EvryProductionArtifact({
   conversationStateVersion,
   interactive,
   messageId,
-  onConversation,
   onEdit,
 }: {
   artifact: EvryPublicArtifact;
@@ -180,14 +180,21 @@ export function EvryProductionArtifact({
   conversationStateVersion: number;
   interactive: boolean;
   messageId: string;
-  onConversation(conversation: PublicEvryConversation): void;
   onEdit(confirmation: EvryDetailedConfirmationArtifactDocument): void;
 }) {
   const confirmation = detailedConfirmation(artifact);
   const progress = detailedProgress(artifact);
+  const {
+    applyWorkConversation,
+    beginWork,
+    finishWork,
+    isWorking,
+    updateWork,
+  } = useEvryShell();
   const [state, setState] = useState<LocalState>({ status: "idle" });
   const actionStarted = useRef(false);
   const canControl =
+    !isWorking &&
     interactive &&
     state.status === "idle" &&
     ((confirmation !== null && sameActivePlan(confirmation, activePlan)) ||
@@ -204,16 +211,33 @@ export function EvryProductionArtifact({
       return;
     }
     actionStarted.current = true;
+    const requestKey = crypto.randomUUID();
     if (action === "execute" && confirmation) {
+      beginWork(requestKey, {
+        phase: "execution",
+        message: confirmation.steps[0]?.title ?? "Starting the confirmed plan",
+      });
       setState({ status: "progress", progress: pendingProgress(confirmation) });
     } else if (action !== "execute") {
+      beginWork(requestKey, {
+        phase: action === "retry" ? "execution" : "reading",
+        message:
+          action === "retry"
+            ? "Retrying this exact plan"
+            : action === "edit"
+              ? "Invalidating this confirmation"
+              : "Cancelling this plan",
+      });
       setState({ status: "submitting", action });
     }
+    requestAnimationFrame(() =>
+      document.getElementById("evry-work-status")?.focus()
+    );
 
     const result = await coordinateEvryProductionArtifactRequest({
       conversationId,
       action,
-      requestKey: crypto.randomUUID(),
+      requestKey,
       plan,
       baseline: {
         stateVersion: conversationStateVersion,
@@ -222,11 +246,33 @@ export function EvryProductionArtifact({
       },
     });
     if (result.status === "conversation") {
-      onConversation(result.conversation);
+      if (!applyWorkConversation(requestKey, 1, result.conversation)) return;
+      if (action === "cancel" || action === "edit") {
+        updateWork(requestKey, 2, {
+          phase: "complete",
+          message:
+            action === "edit"
+              ? "Confirmation invalidated. Update the request for a fresh review."
+              : "Plan cancelled. Nothing was executed.",
+        });
+        finishWork(requestKey, 3);
+      } else {
+        finishWork(requestKey, 2);
+      }
       setState({ status: "complete", action });
       if (action === "edit" && confirmation) onEdit(confirmation);
       return;
     }
+    updateWork(requestKey, 1, {
+      phase: result.error.kind === "expected" ? "blocked" : "failed",
+      message:
+        result.error.kind === "expected"
+          ? result.error.message
+          : result.error.kind === "unexpected"
+            ? EVRY_UNEXPECTED_ERROR_COPY
+            : "Evry could not confirm the outcome. Reopen this conversation before trying anything else.",
+    });
+    finishWork(requestKey, 2);
     setState({ status: "error", error: result.error });
   }
 

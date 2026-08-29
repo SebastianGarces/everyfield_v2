@@ -113,6 +113,10 @@ function metadataFor(trace: EvryTraceDocument, span: EvryTraceSpan) {
     resultCode: span.resultCode,
     capabilityIdentity: span.capabilityIdentity,
     recipeIdentity: trace.recipeIdentity,
+    latencySegment:
+      span.details.kind === "generation"
+        ? "model"
+        : (span.details.latencySegment ?? null),
     auditRecordCount: trace.auditRecordCount,
   });
 }

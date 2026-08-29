@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
+import dynamic from "next/dynamic";
 
 import { EvryArtifactBrowserFixture } from "@/components/evry/artifacts/browser-fixture";
 import { ConversationHistoryWorkspace } from "@/components/evry/conversation-history/conversation-history-workspace";
@@ -10,18 +11,26 @@ import { Button } from "@/components/ui/button";
 import { PageCanvas, WorkspacePanel } from "@/components/layout/page-frame";
 import type { EvryConversationHistoryItem } from "@/lib/evry/conversations/history";
 
+const EvryStreamingBrowserFixture = dynamic(() =>
+  import("@/components/evry/streaming/browser-fixture").then(
+    (module) => module.EvryStreamingBrowserFixture
+  )
+);
+
 export function EvryWorkspace({
   conversations,
   conversationId,
   newConversation,
   searchQuery,
   showArtifactFixture = false,
+  showStreamingFixture = false,
 }: {
   conversations: readonly EvryConversationHistoryItem[];
   conversationId: string | null;
   newConversation: boolean;
   searchQuery: string | null;
   showArtifactFixture?: boolean;
+  showStreamingFixture?: boolean;
 }) {
   const { returnToPage } = useEvryShell();
 
@@ -50,7 +59,9 @@ export function EvryWorkspace({
             </p>
           </div>
         </header>
-        {showArtifactFixture ? (
+        {showStreamingFixture ? (
+          <EvryStreamingBrowserFixture />
+        ) : showArtifactFixture ? (
           <EvryArtifactBrowserFixture />
         ) : (
           <ConversationHistoryWorkspace

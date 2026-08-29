@@ -106,7 +106,7 @@ function ArtifactFrame({
   children,
   footer,
   className,
-  live,
+  busy,
   variant,
 }: {
   badge: string;
@@ -115,7 +115,7 @@ function ArtifactFrame({
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
-  live?: boolean;
+  busy?: boolean;
   variant: EvryArtifactRenderVariant;
 }) {
   const titleId = useId();
@@ -123,8 +123,7 @@ function ArtifactFrame({
     <article
       data-artifact-variant={variant}
       aria-labelledby={titleId}
-      role={live ? "status" : undefined}
-      aria-live={live ? "polite" : undefined}
+      aria-busy={busy}
     >
       <Card className={cn("gap-4 py-4 shadow-none", className)}>
         <CardHeader className="gap-2 px-4 sm:px-5">
@@ -601,7 +600,7 @@ function renderProgress(
           <LoaderCircle className="size-4 motion-safe:animate-spin" />
         )
       }
-      live
+      busy={!canRetry}
       footer={
         canRetry && options.progressControls ? (
           <Button type="button" onClick={options.progressControls.onSafeRetry}>
@@ -614,6 +613,7 @@ function renderProgress(
         value={completed}
         max={steps.length}
         aria-label={`${completed} of ${steps.length} steps completed`}
+        className="[&_[data-slot=progress-indicator]]:motion-reduce:transition-none"
       />
       <ol className="space-y-2">
         {steps.map((step) => (
@@ -646,10 +646,7 @@ function ReceiptError({
   >;
 }) {
   return (
-    <div
-      role="alert"
-      className="border-destructive/40 bg-destructive/5 mt-3 rounded-lg border p-3 text-sm"
-    >
+    <div className="border-destructive/40 bg-destructive/5 mt-3 rounded-lg border p-3 text-sm">
       <p className="font-medium">
         {error.kind === "expected"
           ? "This step needs attention"
@@ -675,7 +672,6 @@ function renderReceipt(artifact: ArtifactByVariant["receipt"]) {
       badge="Execution receipt"
       title={artifact.title}
       icon={<FileText className="size-4" />}
-      live
     >
       <ol className="space-y-3">
         {artifact.steps.map((step) => (

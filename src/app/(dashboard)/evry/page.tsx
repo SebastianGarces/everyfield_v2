@@ -67,6 +67,11 @@ export default async function EvryPage({
         typeof params.artifactFixture === "string" &&
         params.artifactFixture === "typed-artifacts"
       }
+      showStreamingFixture={
+        process.env.VERCEL_ENV === "preview" &&
+        typeof params.artifactFixture === "string" &&
+        params.artifactFixture === "streaming-states"
+      }
     />
   );
 }

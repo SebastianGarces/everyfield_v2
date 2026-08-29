@@ -9,6 +9,7 @@ import type {
   EvryPageContext,
   EvryResolvedPageContext,
 } from "@/lib/evry/resolvers/contract";
+import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
 
 import {
   storedEvryClarificationArtifactDocument,
@@ -110,6 +111,7 @@ export async function createEvryConversation(input: {
   requestPageContext: EvryPageContext | null;
   now: Date;
   store?: EvryConversationStore;
+  reportStage?: (stage: EvryConversationStreamStage) => void;
 }): Promise<EvryResumedConversation> {
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   const conversation = await (input.store ?? evryConversationStore).create({
@@ -121,6 +123,7 @@ export async function createEvryConversation(input: {
     requestPageContext: input.requestPageContext,
     createdAt: input.now,
   });
+  input.reportStage?.("compiling_response");
   return Object.freeze({
     conversation,
     activePlan: null,
@@ -222,6 +225,7 @@ export async function continueEvryConversation(input: {
   now: Date;
   store?: EvryConversationStore;
   revalidatePlan?: EvryConversationPlanResumeRevalidator;
+  reportStage?: (stage: EvryConversationStreamStage) => void;
 }): Promise<EvryConversationContinuation | null> {
   const store = input.store ?? evryConversationStore;
   const conversationId = evryConversationIdSchema.safeParse(
@@ -239,6 +243,7 @@ export async function continueEvryConversation(input: {
   });
   if (!current) return null;
 
+  input.reportStage?.("resolving_references");
   const reference = resolveEvryConversationReference({
     text: input.message,
     state: current.state,
@@ -299,6 +304,9 @@ export async function continueEvryConversation(input: {
     });
   }
 
+  input.reportStage?.(
+    current.activePlan ? "revalidating_plan" : "compiling_response"
+  );
   const resumed = await resumeEvryConversation({
     actor: input.actor,
     conversationId: appended.id,

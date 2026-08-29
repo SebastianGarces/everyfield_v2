@@ -6,6 +6,7 @@ import {
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
   evryDraftAfterSubmission,
+  evryConversationSubmissionEndpoint,
   evrySubmissionMessage,
   evryWorkspaceConversationHref,
   finishEvryConversationLoad,
@@ -13,6 +14,8 @@ import {
   isEvryConversationLoading,
   isLatestEvryConversationLoad,
   pendingEvrySubmissionFor,
+  pendingEvrySubmissionAfterConversation,
+  shouldFollowEvryTranscript,
   syncEvryWorkspaceConversationHistory,
   type EvrySubmission,
 } from "./interaction-state";
@@ -34,10 +37,47 @@ test("a response-loss retry keeps one request key until success", () => {
   const retry = pendingEvrySubmissionFor(first, { ...SUBMISSION }, mint);
   assert.equal(first.requestKey, "request-1");
   assert.equal(retry.requestKey, first.requestKey);
+  assert.equal(
+    evryConversationSubmissionEndpoint(retry),
+    "/api/evry/conversations"
+  );
+  assert.equal(minted, 1);
+
+  const presented = pendingEvrySubmissionAfterConversation(
+    first,
+    first.requestKey,
+    "10000000-0000-4000-8000-000000000009"
+  );
+  const retryAfterDurableFrame = pendingEvrySubmissionFor(
+    presented,
+    {
+      ...SUBMISSION,
+      conversationId: "10000000-0000-4000-8000-000000000009",
+    },
+    mint
+  );
+  assert.equal(retryAfterDurableFrame.requestKey, first.requestKey);
+  assert.equal(
+    evryConversationSubmissionEndpoint(retryAfterDurableFrame),
+    "/api/evry/conversations"
+  );
   assert.equal(minted, 1);
 
   const afterSuccess = pendingEvrySubmissionFor(null, SUBMISSION, mint);
   assert.equal(afterSuccess.requestKey, "request-2");
+});
+
+test("a continuation retry preserves its original conversation endpoint", () => {
+  const conversationId = "10000000-0000-4000-8000-000000000008";
+  const pending = pendingEvrySubmissionFor(
+    null,
+    { ...SUBMISSION, conversationId },
+    () => "request-continue"
+  );
+  assert.equal(
+    evryConversationSubmissionEndpoint(pending),
+    `/api/evry/conversations/${conversationId}/messages`
+  );
 });
 
 test("draft validation preserves every accepted message byte", () => {
@@ -261,5 +301,29 @@ test("leaving the workspace makes every in-flight load stale", () => {
   assert.equal(
     finishEvryConversationLoad(cancelled, load.attempt).applies,
     false
+  );
+});
+
+test("streamed transcript updates preserve a reader's scroll and composer focus", () => {
+  assert.equal(
+    shouldFollowEvryTranscript({
+      distanceFromEnd: 240,
+      focusInComposer: false,
+    }),
+    false
+  );
+  assert.equal(
+    shouldFollowEvryTranscript({
+      distanceFromEnd: 80,
+      focusInComposer: false,
+    }),
+    true
+  );
+  assert.equal(
+    shouldFollowEvryTranscript({
+      distanceFromEnd: 240,
+      focusInComposer: true,
+    }),
+    true
   );
 });

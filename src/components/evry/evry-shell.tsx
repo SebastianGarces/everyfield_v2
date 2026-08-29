@@ -21,6 +21,7 @@ import {
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
   evryConversationRequestBody,
+  evryConversationSubmissionEndpoint,
   evryDraftAfterSubmission,
   evrySubmissionMessage,
   finishEvryConversationLoad,
@@ -28,6 +29,7 @@ import {
   isEvryConversationLoading,
   isLatestEvryConversationLoad,
   pendingEvrySubmissionFor,
+  pendingEvrySubmissionAfterConversation,
   type PendingEvrySubmission,
 } from "./interaction-state";
 import {
@@ -36,6 +38,18 @@ import {
 } from "./page-context";
 import { evrySuggestionsForPathname } from "./suggestions/pathname";
 import type { EligibleEvrySuggestion } from "./suggestions/types";
+import { evryWorkStateForConversation } from "./streaming/conversation-state";
+import type { EvryAcknowledgementTarget } from "./streaming/work-status";
+import {
+  evryWorkStateForStreamEvent,
+  readEvryConversationStream,
+} from "@/lib/evry/streaming/conversation-wire";
+import {
+  applyEvrySequencedWork,
+  beginEvrySequencedWork,
+  type EvrySequencedWorkState,
+  type EvryWorkState,
+} from "@/lib/evry/streaming/state";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -43,27 +57,41 @@ const EvryPanel = dynamic(() =>
 
 type EvryShellValue = Readonly<{
   activeContext: VisibleEvryPageContext | null;
+  acknowledgement: EvryAcknowledgementTarget | null;
+  applyWorkConversation: (
+    requestId: string,
+    sequence: number,
+    conversation: PublicEvryConversation
+  ) => boolean;
+  beginWork: (requestId: string, state: EvryWorkState) => void;
   clearContext: () => void;
   closePanel: () => void;
   conversation: PublicEvryConversation | null;
   draft: string;
   error: string | null;
   expandToWorkspace: () => void;
+  finishWork: (requestId: string, sequence: number) => boolean;
   isEnabled: boolean;
   isComposerBlocked: boolean;
   isLoading: boolean;
   isPanelOpen: boolean;
   isSending: boolean;
+  isWorking: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
   openPanel: (trigger: HTMLButtonElement) => void;
-  replaceConversation: (conversation: PublicEvryConversation) => void;
   resetConversation: () => void;
   restoreLauncherFocus: () => void;
   returnToPage: () => void;
   sendMessage: () => Promise<void>;
   setDraft: (draft: string) => void;
-  statusMessage: string;
+  updateWork: (
+    requestId: string,
+    sequence: number,
+    state: EvryWorkState
+  ) => boolean;
   suggestions: readonly EligibleEvrySuggestion[];
+  workRequestId: string | null;
+  workState: EvryWorkState;
 }>;
 
 const EvryShellContext = createContext<EvryShellValue | null>(null);
@@ -101,7 +129,13 @@ export function EvryShell({
     useState<PublicEvryConversation | null>(null);
   const [draft, setDraftState] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState("");
+  const [acknowledgement, setAcknowledgement] =
+    useState<EvryAcknowledgementTarget | null>(null);
+  const [sequencedWork, setSequencedWork] =
+    useState<EvrySequencedWorkState | null>(null);
+  const [pendingWorkRequestId, setPendingWorkRequestId] = useState<
+    string | null
+  >(null);
   const [isPanelOpen, setPanelOpen] = useState(false);
   const [hasOpenedPanel, setHasOpenedPanel] = useState(false);
   const [isSending, setSending] = useState(false);
@@ -113,13 +147,96 @@ export function EvryShell({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
+  const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
+  const pendingWorkRequestIdRef = useRef<string | null>(null);
   const previousPathnameRef = useRef(pathname);
   const draftRef = useRef(draft);
+  const isWorking = pendingWorkRequestId !== null;
 
   const setDraft = useCallback((nextDraft: string) => {
     draftRef.current = nextDraft;
     setDraftState(nextDraft);
   }, []);
+
+  const presentWork = useCallback((requestId: string, state: EvryWorkState) => {
+    const next = beginEvrySequencedWork(requestId, state);
+    sequencedWorkRef.current = next;
+    setSequencedWork(next);
+  }, []);
+
+  const beginWork = useCallback(
+    (requestId: string, state: EvryWorkState) => {
+      setAcknowledgement((current) =>
+        current?.requestId === requestId ? current : null
+      );
+      presentWork(requestId, state);
+      pendingWorkRequestIdRef.current = requestId;
+      setPendingWorkRequestId(requestId);
+    },
+    [presentWork]
+  );
+
+  const updateWork = useCallback(
+    (requestId: string, sequence: number, state: EvryWorkState) => {
+      const current = sequencedWorkRef.current;
+      if (!current) return false;
+      const next = applyEvrySequencedWork(current, {
+        requestId,
+        sequence,
+        state,
+      });
+      if (next === current) return false;
+      sequencedWorkRef.current = next;
+      setSequencedWork(next);
+      return true;
+    },
+    []
+  );
+
+  const finishWork = useCallback((requestId: string, sequence: number) => {
+    const current = sequencedWorkRef.current;
+    if (!current || pendingWorkRequestIdRef.current !== requestId) return false;
+    const next = applyEvrySequencedWork(current, {
+      requestId,
+      sequence,
+      state: current.state,
+    });
+    if (next === current) return false;
+    sequencedWorkRef.current = next;
+    pendingWorkRequestIdRef.current = null;
+    setSequencedWork(next);
+    setPendingWorkRequestId(null);
+    return true;
+  }, []);
+
+  const clearWork = useCallback(() => {
+    sequencedWorkRef.current = null;
+    pendingWorkRequestIdRef.current = null;
+    setSequencedWork(null);
+    setPendingWorkRequestId(null);
+  }, []);
+
+  const applyWorkConversation = useCallback(
+    (
+      requestId: string,
+      sequence: number,
+      nextConversation: PublicEvryConversation
+    ) => {
+      if (
+        !updateWork(
+          requestId,
+          sequence,
+          evryWorkStateForConversation(nextConversation)
+        )
+      ) {
+        return false;
+      }
+      setConversation(nextConversation);
+      setError(null);
+      return true;
+    },
+    [updateWork]
+  );
 
   const cancelActiveConversationLoads = useCallback(() => {
     conversationLoadStateRef.current = cancelEvryConversationLoads(
@@ -182,17 +299,9 @@ export function EvryShell({
   }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
   const clearContext = useCallback(() => setActiveContext(null), []);
-  const replaceConversation = useCallback(
-    (nextConversation: PublicEvryConversation) => {
-      setConversation(nextConversation);
-      setError(null);
-    },
-    []
-  );
-
   const loadConversation = useCallback(
     async (conversationId: string) => {
-      if (isSending) return;
+      if (isSending || isWorking) return;
       if (conversation?.id === conversationId) {
         setRequestedConversationId(null);
         return;
@@ -239,6 +348,10 @@ export function EvryShell({
         }
         setConversation(loadedConversation);
         setRequestedConversationId(null);
+        presentWork(
+          `load:${load.attempt.conversationId}:${load.attempt.ordinal}`,
+          evryWorkStateForConversation(loadedConversation)
+        );
       } catch {
         if (
           isLatestEvryConversationLoad(
@@ -261,25 +374,33 @@ export function EvryShell({
         }
       }
     },
-    [conversation?.id, isSending]
+    [conversation?.id, isSending, isWorking, presentWork]
   );
 
   const resetConversation = useCallback(() => {
-    if (isSending) return;
+    if (isSending || isWorking) return;
     cancelActiveConversationLoads();
     pendingSubmissionRef.current = null;
     setConversation(null);
     setActiveContext(null);
     setDraft("");
     setError(null);
-    setStatusMessage("");
-  }, [cancelActiveConversationLoads, isSending, setDraft]);
+    setAcknowledgement(null);
+    clearWork();
+  }, [
+    cancelActiveConversationLoads,
+    clearWork,
+    isSending,
+    isWorking,
+    setDraft,
+  ]);
 
   const sendMessage = useCallback(async () => {
     const message = evrySubmissionMessage(draft);
     if (
       message === null ||
       isSending ||
+      isWorking ||
       isLoading ||
       requestedConversationId !== null ||
       conversationLoadStateRef.current.latest !== null
@@ -287,82 +408,147 @@ export function EvryShell({
       return;
     }
 
+    const pageContext = activeContext?.wire ?? null;
+    const pendingSubmission = pendingEvrySubmissionFor(
+      pendingSubmissionRef.current,
+      {
+        conversationId: conversation?.id ?? null,
+        message,
+        pageContext,
+      },
+      () => crypto.randomUUID()
+    );
+    setAcknowledgement({
+      requestId: pendingSubmission.requestKey,
+      submittedAt: performance.now(),
+    });
     setSending(true);
     setError(null);
-    setStatusMessage("Saving your request…");
+    beginWork(pendingSubmission.requestKey, {
+      phase: "reading",
+      message: pageContext
+        ? "Checking this conversation and page context"
+        : "Checking this conversation",
+    });
     try {
-      const pageContext = activeContext?.wire ?? null;
-      const pendingSubmission = pendingEvrySubmissionFor(
-        pendingSubmissionRef.current,
-        {
-          conversationId: conversation?.id ?? null,
-          message,
-          pageContext,
-        },
-        () => crypto.randomUUID()
-      );
       pendingSubmissionRef.current = pendingSubmission;
       const body = evryConversationRequestBody(pendingSubmission);
+      let lastSequence = 0;
       const response = await fetch(
-        conversation
-          ? `/api/evry/conversations/${conversation.id}/messages`
-          : "/api/evry/conversations",
+        evryConversationSubmissionEndpoint(pendingSubmission),
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            accept: "application/x-ndjson",
+            "content-type": "application/json",
+          },
           body,
         }
       );
-      const nextConversation = await responseConversation(response);
+      const streamed = await readEvryConversationStream(response, {
+        requestId: pendingSubmission.requestKey,
+        expectedConversationId: conversation?.id ?? null,
+        onEvent(event) {
+          lastSequence = event.sequence;
+          if (event.type === "work") {
+            updateWork(
+              event.requestId,
+              event.sequence,
+              evryWorkStateForStreamEvent(event)
+            );
+          } else if (event.type === "conversation") {
+            if (
+              applyWorkConversation(
+                event.requestId,
+                event.sequence,
+                event.conversation
+              )
+            ) {
+              pendingSubmissionRef.current =
+                pendingEvrySubmissionAfterConversation(
+                  pendingSubmission,
+                  event.requestId,
+                  event.conversation.id
+                );
+            }
+          } else if (event.type === "complete") {
+            finishWork(event.requestId, event.sequence);
+          }
+        },
+      });
       pendingSubmissionRef.current = null;
-      setConversation(nextConversation);
+      if (!streamed.sawComplete || lastSequence < 2) {
+        throw new Error("Evry response did not complete.");
+      }
       setDraft(evryDraftAfterSubmission(draftRef.current, message));
-      setStatusMessage("Added to this conversation.");
     } catch {
-      setError(
-        "Unable to save your request. Check your connection and try again."
-      );
-      setStatusMessage("");
+      const failure =
+        "Unable to save your request. Check your connection and try again.";
+      setError(failure);
+      const failureSequence =
+        (sequencedWorkRef.current?.requestId === pendingSubmission.requestKey
+          ? sequencedWorkRef.current.sequence
+          : 0) + 1;
+      updateWork(pendingSubmission.requestKey, failureSequence, {
+        phase: "failed",
+        message: failure,
+      });
+      finishWork(pendingSubmission.requestKey, failureSequence + 1);
     } finally {
       setSending(false);
     }
   }, [
     activeContext,
+    applyWorkConversation,
+    beginWork,
     conversation,
     draft,
+    finishWork,
     isLoading,
     isSending,
+    isWorking,
     requestedConversationId,
     setDraft,
+    updateWork,
   ]);
 
   const value = useMemo<EvryShellValue>(
     () => ({
       activeContext,
+      acknowledgement,
+      applyWorkConversation,
+      beginWork,
       clearContext,
       closePanel,
       conversation,
       draft,
       error,
       expandToWorkspace,
+      finishWork,
       isEnabled: enabled,
-      isComposerBlocked: isLoading || requestedConversationId !== null,
+      isComposerBlocked:
+        isLoading || isWorking || requestedConversationId !== null,
       isLoading,
       isPanelOpen,
       isSending,
+      isWorking,
       loadConversation,
       openPanel,
-      replaceConversation,
       resetConversation,
       restoreLauncherFocus,
       returnToPage,
       sendMessage,
       setDraft,
-      statusMessage,
+      updateWork,
       suggestions,
+      workRequestId: sequencedWork?.requestId ?? null,
+      workState: sequencedWork?.state ?? { phase: "idle" },
     }),
     [
       activeContext,
+      acknowledgement,
+      applyWorkConversation,
+      beginWork,
       clearContext,
       closePanel,
       conversation,
@@ -370,20 +556,22 @@ export function EvryShell({
       enabled,
       error,
       expandToWorkspace,
+      finishWork,
       isLoading,
       isPanelOpen,
       isSending,
+      isWorking,
       loadConversation,
       openPanel,
-      replaceConversation,
       resetConversation,
       requestedConversationId,
       restoreLauncherFocus,
       returnToPage,
       sendMessage,
       setDraft,
-      statusMessage,
+      sequencedWork,
       suggestions,
+      updateWork,
     ]
   );
 
