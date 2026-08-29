@@ -836,13 +836,13 @@ test("an org seat invitation grants the ORG's FK and writes no person row", () =
     // `createChurchForPlanter` argument above is true and the account type is
     // `planter`; the invitation overrides both.
     assert.equal(plan.userChurchId, null, `${what}: no church on the insert`);
-    assert.deepEqual(plan.statements, [], `${what}: no org is created`);
+    assert.equal(plan.statements.length, 0, `${what}: no org is created`);
 
     // AC 3 — `persons` IS UNCHANGED. The plant-side match-or-create must not
     // fire here: there is no directory on an org for a person row to live in.
-    assert.deepEqual(
-      plan.linkStatements,
-      [],
+    assert.equal(
+      plan.linkStatements.length,
+      0,
       `${what}: an org seat writes no persons row`
     );
   }
@@ -871,10 +871,10 @@ test("a redeemed COACH invitation writes no tenancy, no seat and no person", () 
   assert.equal(plan.userChurchId, null, "…and the users insert writes none");
   assert.equal(plan.sendingChurchId, null);
   assert.equal(plan.sendingNetworkId, null);
-  assert.deepEqual(plan.statements, []);
+  assert.equal(plan.statements.length, 0, "a coach creates no organization");
   // NO PERSON ROW. AS-013's link is about somebody JOINING the plant; a coach
   // reads it and is not part of it.
-  assert.deepEqual(plan.linkStatements, []);
+  assert.equal(plan.linkStatements.length, 0, "a coach writes no persons row");
 });
 
 test("an ordinary registration still writes no tenancy on the users insert", () => {
