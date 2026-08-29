@@ -20,6 +20,7 @@ import {
   beginEvryConversationLoad,
   canApplyEvryConversationLoadResponse,
   cancelEvryConversationLoads,
+  evryConversationRequestBody,
   evryDraftAfterSubmission,
   evrySubmissionMessage,
   finishEvryConversationLoad,
@@ -33,6 +34,8 @@ import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
+import { evrySuggestionsForPathname } from "./suggestions/pathname";
+import type { EligibleEvrySuggestion } from "./suggestions/types";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -58,6 +61,7 @@ type EvryShellValue = Readonly<{
   sendMessage: () => Promise<void>;
   setDraft: (draft: string) => void;
   statusMessage: string;
+  suggestions: readonly EligibleEvrySuggestion[];
 }>;
 
 const EvryShellContext = createContext<EvryShellValue | null>(null);
@@ -72,9 +76,11 @@ async function responseConversation(response: Response) {
 export function EvryShell({
   children,
   enabled,
+  eligibleSuggestions,
 }: {
   children: ReactNode;
   enabled: boolean;
+  eligibleSuggestions: readonly EligibleEvrySuggestion[];
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -82,6 +88,10 @@ export function EvryShell({
   const visibleContext = useMemo(
     () => visibleEvryPageContextFor(pathname, breadcrumbs),
     [breadcrumbs, pathname]
+  );
+  const suggestions = useMemo(
+    () => evrySuggestionsForPathname(pathname, eligibleSuggestions),
+    [eligibleSuggestions, pathname]
   );
   const [activeContext, setActiveContext] =
     useState<VisibleEvryPageContext | null>(null);
@@ -271,11 +281,7 @@ export function EvryShell({
         () => crypto.randomUUID()
       );
       pendingSubmissionRef.current = pendingSubmission;
-      const body = JSON.stringify({
-        requestKey: pendingSubmission.requestKey,
-        message,
-        pageContext,
-      });
+      const body = evryConversationRequestBody(pendingSubmission);
       const response = await fetch(
         conversation
           ? `/api/evry/conversations/${conversation.id}/messages`
@@ -330,6 +336,7 @@ export function EvryShell({
       sendMessage,
       setDraft,
       statusMessage,
+      suggestions,
     }),
     [
       activeContext,
@@ -351,6 +358,7 @@ export function EvryShell({
       sendMessage,
       setDraft,
       statusMessage,
+      suggestions,
     ]
   );
 

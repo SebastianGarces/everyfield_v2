@@ -30,7 +30,7 @@ const appendRoute = read(
 test("one persistent shell owns the launcher, panel, and dedicated workspace state", () => {
   assert.match(
     layout,
-    /<HeaderProvider>[\s\S]*<EvryShell enabled=\{evryEnabled\}>/
+    /<HeaderProvider>[\s\S]*<EvryShell[\s\S]*enabled=\{evryEnabled\}[\s\S]*eligibleSuggestions=\{evrySuggestions\}/
   );
   assert.match(
     layout,
@@ -142,7 +142,8 @@ test("message retries keep their semantic request identity until success", () =>
     shell,
     /pendingEvrySubmissionFor\([\s\S]*pendingSubmissionRef\.current[\s\S]*conversationId:[\s\S]*message,[\s\S]*pageContext/
   );
-  assert.match(shell, /requestKey: pendingSubmission\.requestKey/);
+  assert.match(shell, /evryConversationRequestBody\(pendingSubmission\)/);
+  assert.match(interaction, /requestKey: submission\.requestKey/);
   assert.match(
     shell,
     /const nextConversation = await responseConversation\(response\);[\s\S]*pendingSubmissionRef\.current = null/
@@ -181,8 +182,9 @@ test("removing context removes it from the request body", () => {
   );
   assert.match(
     shell,
-    /const pageContext = activeContext\?\.wire \?\? null[\s\S]*JSON\.stringify\(\{[\s\S]*pageContext,/
+    /const pageContext = activeContext\?\.wire \?\? null[\s\S]*evryConversationRequestBody\(pendingSubmission\)/
   );
+  assert.match(interaction, /pageContext: submission\.pageContext/);
 });
 
 test("both conversation writes resolve the untrusted hint after auth and before persistence", () => {

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { EvryLauncher } from "@/components/evry/evry-launcher";
 import { EvryShell } from "@/components/evry/evry-shell";
+import { evrySuggestionsForActor } from "@/components/evry/suggestions/server";
 import { HeaderProvider } from "@/components/header";
 import { GlobalAppBar } from "@/components/header/global-app-bar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -162,6 +163,7 @@ export default async function DashboardLayout({
   // and it is carried from here so no screen re-derives it.
   const capabilities = heldCapabilities(user);
   const evryEnabled = evryPlantStandingOf(user).status === "eligible";
+  const evrySuggestions = evrySuggestionsForActor(evryEnabled, capabilities);
 
   return (
     <ViewerCapabilitiesProvider capabilities={capabilities}>
@@ -177,7 +179,10 @@ export default async function DashboardLayout({
           Skip to content
         </a>
         <HeaderProvider>
-          <EvryShell enabled={evryEnabled}>
+          <EvryShell
+            enabled={evryEnabled}
+            eligibleSuggestions={evrySuggestions}
+          >
             <GlobalAppBar shell={shell} user={sidebarUser}>
               {viewer && (
                 <Suspense

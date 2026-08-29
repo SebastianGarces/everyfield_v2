@@ -10,6 +10,11 @@ import { cn } from "@/lib/utils";
 
 import { useEvryShell } from "./evry-shell";
 import type { VisibleEvryPageContext } from "./page-context";
+import { EvrySuggestionList } from "./suggestions/suggestion-list";
+import {
+  populateComposerFromSuggestion,
+  shouldOfferEvrySuggestions,
+} from "./suggestions/interaction";
 
 export function EvryContextChip({
   context,
@@ -55,8 +60,10 @@ export function ConversationSurface({ className }: { className?: string }) {
     sendMessage,
     setDraft,
     statusMessage,
+    suggestions,
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
+  const showSuggestions = shouldOfferEvrySuggestions(conversation);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest" });
@@ -78,45 +85,57 @@ export function ConversationSurface({ className }: { className?: string }) {
             Opening conversation…
           </div>
         ) : conversation?.messages.length ? (
-          <ol
-            role="log"
-            aria-label="Conversation messages"
-            aria-live="polite"
-            aria-relevant="additions text"
-            className="space-y-4"
-          >
-            {conversation.messages.map((message) => (
-              <li
-                key={message.id}
-                className={cn(
-                  "flex",
-                  message.author === "user" ? "justify-end" : "justify-start"
-                )}
-              >
-                <div
+          <div className="space-y-6">
+            <ol
+              role="log"
+              aria-label="Conversation messages"
+              aria-live="polite"
+              aria-relevant="additions text"
+              className="space-y-4"
+            >
+              {conversation.messages.map((message) => (
+                <li
+                  key={message.id}
                   className={cn(
-                    "max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere]",
-                    message.author === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
+                    "flex",
+                    message.author === "user" ? "justify-end" : "justify-start"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">
-                    <span className="sr-only">
-                      {message.author === "user" ? "You" : "Evry"}:{" "}
-                    </span>
-                    {message.body}
-                  </p>
-                  {message.pageContext ? (
-                    <p className="mt-2 flex items-center gap-1 text-xs opacity-75">
-                      <MapPin aria-hidden="true" className="size-3" />
-                      <span>{message.pageContext.label}</span>
+                  <div
+                    className={cn(
+                      "max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed [overflow-wrap:anywhere]",
+                      message.author === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-foreground"
+                    )}
+                  >
+                    <p className="whitespace-pre-wrap">
+                      <span className="sr-only">
+                        {message.author === "user" ? "You" : "Evry"}:{" "}
+                      </span>
+                      {message.body}
                     </p>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ol>
+                    {message.pageContext ? (
+                      <p className="mt-2 flex items-center gap-1 text-xs opacity-75">
+                        <MapPin aria-hidden="true" className="size-3" />
+                        <span>{message.pageContext.label}</span>
+                      </p>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {showSuggestions ? (
+              <EvrySuggestionList
+                suggestions={suggestions}
+                onSelect={(suggestion) =>
+                  populateComposerFromSuggestion(suggestion, setDraft, () =>
+                    document.getElementById("evry-message")?.focus()
+                  )
+                }
+              />
+            ) : null}
+          </div>
         ) : (
           <div className="mx-auto flex min-h-48 max-w-sm flex-col items-center justify-center text-center">
             <div className="bg-muted mb-4 grid size-10 place-items-center rounded-full">
@@ -130,6 +149,18 @@ export function ConversationSurface({ className }: { className?: string }) {
               Ask Evry to help with people, meetings, teams, tasks, or your
               launch.
             </p>
+            {showSuggestions ? (
+              <div className="mt-6 w-full">
+                <EvrySuggestionList
+                  suggestions={suggestions}
+                  onSelect={(suggestion) =>
+                    populateComposerFromSuggestion(suggestion, setDraft, () =>
+                      document.getElementById("evry-message")?.focus()
+                    )
+                  }
+                />
+              </div>
+            ) : null}
           </div>
         )}
         <div ref={endRef} />
