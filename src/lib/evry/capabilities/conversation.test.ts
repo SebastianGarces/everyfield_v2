@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { INITIAL_MEETING_CONFIRMATION } from "@/lib/evry/artifacts/fixtures";
 import { storedEvryClarificationArtifactDocument } from "@/lib/evry/conversations/artifacts";
 import type { EvryStoredConversation } from "@/lib/evry/conversations/repository";
 
@@ -8,6 +9,7 @@ import {
   composeEvryCapabilityConversationContinuations,
   EvryCapabilityConversationAmbiguityError,
   evryCapabilityConversationResultIdentity,
+  hasDurableEvryCapabilityConversationResult,
   type EvryCapabilityConversationContinuation,
   type EvryCapabilityConversationResult,
 } from "./conversation";
@@ -55,6 +57,37 @@ function selectionInput(input: {
       },
     },
   } as never;
+}
+
+function durableResultMessage(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const identity = evryCapabilityConversationResultIdentity({
+    conversationId: "10000000-0000-4000-8000-000000000001",
+    userRequestKey: "40000000-0000-4000-8000-000000000001",
+  });
+  return {
+    id: identity.messageId,
+    requestKey: identity.requestKey,
+    sequence: 1,
+    author: "assistant",
+    body: "Which person?",
+    pageContext: null,
+    replayReference: null,
+    relevanceKeys: [],
+    deliveryStatus: "complete",
+    createdAt: new Date("2026-08-29T12:00:00.000Z"),
+    artifacts: [
+      {
+        id: "50000000-0000-4000-8000-000000000001",
+        ordinal: 0,
+        kind: clarification.kind,
+        document: clarification,
+        artifact: clarification,
+      },
+    ],
+    ...overrides,
+  };
 }
 
 function registration(input: {
@@ -118,6 +151,7 @@ test("composition evaluates every pure matcher then shared code appends one resu
     deliveryStatus: "complete",
     artifacts: [clarification],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: { mode: "preserve" },
     createdAt: new Date("2026-08-29T12:00:00.000Z"),
   });
@@ -142,17 +176,7 @@ test("ambiguous packs fail before any continuation or append can mutate", async 
 test("a durable request result is recovered before match or append work", async () => {
   const calls: string[] = [];
   const appendCalls: unknown[] = [];
-  const identity = evryCapabilityConversationResultIdentity({
-    conversationId: "10000000-0000-4000-8000-000000000001",
-    userRequestKey: "40000000-0000-4000-8000-000000000001",
-  });
-  const current = conversation([
-    {
-      id: identity.messageId,
-      requestKey: identity.requestKey,
-      author: "assistant",
-    },
-  ]);
+  const current = conversation([durableResultMessage()]);
   const continuation = composeEvryCapabilityConversationContinuations([
     registration({ identity: "people", match: true, calls }),
   ]);
@@ -163,6 +187,93 @@ test("a durable request result is recovered before match or append work", async 
   );
   assert.deepEqual(calls, []);
   assert.deepEqual(appendCalls, []);
+});
+
+test("interrupted, empty, and corrupt deterministic rows do not count as durable results", () => {
+  const malformed = [
+    durableResultMessage({ deliveryStatus: "interrupted" }),
+    durableResultMessage({ artifacts: [] }),
+    durableResultMessage({
+      artifacts: [
+        {
+          id: "50000000-0000-4000-8000-000000000001",
+          ordinal: 0,
+          kind: "clarification",
+          document: { kind: "clarification", prompt: "missing mode" },
+          artifact: {},
+        },
+      ],
+    }),
+  ];
+  for (const candidate of malformed) {
+    assert.equal(
+      hasDurableEvryCapabilityConversationResult({
+        conversation: conversation([candidate]),
+        userRequestKey: "40000000-0000-4000-8000-000000000001",
+      }),
+      false
+    );
+  }
+});
+
+test("an active plan is one-to-one with one exact trusted confirmation", async () => {
+  const calls: string[] = [];
+  const exactPlan = INITIAL_MEETING_CONFIRMATION.plan;
+  const cases: readonly EvryCapabilityConversationResult[] = [
+    {
+      body: "Review",
+      artifacts: [clarification],
+      activePlan: { mode: "set", plan: exactPlan },
+    },
+    {
+      body: "Review",
+      artifacts: [INITIAL_MEETING_CONFIRMATION],
+    },
+    {
+      body: "Review",
+      artifacts: [INITIAL_MEETING_CONFIRMATION],
+      activePlan: {
+        mode: "set",
+        plan: {
+          planId: "90000000-0000-4000-8000-000000000001",
+          fingerprint: "f".repeat(64),
+        } as never,
+      },
+    },
+    {
+      body: "Review",
+      artifacts: [INITIAL_MEETING_CONFIRMATION, INITIAL_MEETING_CONFIRMATION],
+      activePlan: { mode: "set", plan: exactPlan },
+    },
+  ];
+
+  for (const result of cases) {
+    const appendCalls: unknown[] = [];
+    const continuation = composeEvryCapabilityConversationContinuations([
+      registration({ identity: "hostile", match: true, calls, result }),
+    ]);
+    await assert.rejects(
+      continuation(selectionInput({ appendCalls })),
+      /bind one exact active plan/
+    );
+    assert.deepEqual(appendCalls, []);
+  }
+
+  const appendCalls: unknown[] = [];
+  const valid = composeEvryCapabilityConversationContinuations([
+    registration({
+      identity: "valid",
+      match: true,
+      calls,
+      result: {
+        body: "Review",
+        artifacts: [INITIAL_MEETING_CONFIRMATION],
+        activePlan: { mode: "set", plan: exactPlan },
+      },
+    }),
+  ]);
+  await valid(selectionInput({ appendCalls }));
+  assert.equal(appendCalls.length, 1);
 });
 
 test("a pack cannot choose result identity or conversation state", async () => {

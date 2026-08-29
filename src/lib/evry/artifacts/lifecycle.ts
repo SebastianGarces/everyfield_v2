@@ -102,11 +102,7 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
 export type EvryArtifactLifecycleResult =
   | Readonly<{
       status:
-        | "cancelled"
-        | "editing"
-        | "executed"
-        | "retryable"
-        | "already_finished";
+        "cancelled" | "editing" | "executed" | "retryable" | "already_finished";
       resumed: EvryResumedConversation;
     }>
   | Readonly<{
@@ -474,8 +470,7 @@ function appendLifecycleMessage(input: {
   purpose: string;
   body: string;
   artifact?:
-    | EvryDetailedProgressArtifactDocument
-    | EvryDetailedReceiptArtifactDocument;
+    EvryDetailedProgressArtifactDocument | EvryDetailedReceiptArtifactDocument;
   clearPlan: boolean;
   now: Date;
 }): Promise<EvryStoredConversation> {
@@ -494,6 +489,7 @@ function appendLifecycleMessage(input: {
     deliveryStatus: "complete",
     artifacts: input.artifact ? [input.artifact] : [],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: input.clearPlan ? { mode: "clear" } : { mode: "preserve" },
     now: input.now,
   });

@@ -863,6 +863,7 @@ async function main(): Promise<void> {
     deliveryStatus: "complete",
     artifacts: [confirmation],
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: { mode: "set", plan: PLAN },
     now: START,
     store,

@@ -36,6 +36,7 @@ import {
   evryConversationMessageIdempotencyContextSchema,
   evryConversationMessageIdSchema,
   evryConversationPlanIdentitySchema,
+  evryConversationReplayReferenceSchema,
   evryConversationRelevanceKeysSchema,
   evryConversationRequestKeySchema,
   initialEvryConversationState,
@@ -44,6 +45,7 @@ import {
   type EvryConversationMessageId,
   type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
+  type EvryConversationReplayReference,
   type EvryConversationRelevanceKey,
   type EvryConversationRequestKey,
   type EvryConversationStateDocument,
@@ -76,6 +78,7 @@ export type EvryStoredConversationMessage = Readonly<{
   author: EvryConversationAuthor;
   body: string;
   pageContext: EvryResolvedPageContext | null;
+  replayReference?: EvryConversationReplayReference | null;
   relevanceKeys: readonly EvryConversationRelevanceKey[];
   deliveryStatus: EvryConversationDeliveryStatus;
   createdAt: Date;
@@ -160,6 +163,34 @@ function parsePageContext(input: unknown): EvryResolvedPageContext | null {
   return parsed.data;
 }
 
+const storedMessageContextSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    pageContext: evryStoredPageContextSchema.nullable(),
+    replayReference: evryConversationReplayReferenceSchema.nullable(),
+  })
+  .strict();
+
+function storedMessageContext(input: {
+  pageContext: EvryResolvedPageContext | null;
+  replayReference: EvryConversationReplayReference | null;
+}): z.infer<typeof storedMessageContextSchema> {
+  return storedMessageContextSchema.parse({
+    schemaVersion: 1,
+    pageContext: input.pageContext,
+    replayReference: input.replayReference,
+  });
+}
+
+function parseStoredMessageContext(input: unknown): {
+  pageContext: EvryResolvedPageContext | null;
+  replayReference: EvryConversationReplayReference | null;
+} {
+  const envelope = storedMessageContextSchema.safeParse(input);
+  if (envelope.success) return envelope.data;
+  return { pageContext: parsePageContext(input), replayReference: null };
+}
+
 function labelFreePageContext(
   input: EvryResolvedPageContext | null
 ): EvryPageContext | null {
@@ -240,6 +271,7 @@ function parseMessageRow(input: {
   const relevanceKeys = evryConversationRelevanceKeysSchema.safeParse(
     input.relevanceKeys
   );
+  const storedContext = parseStoredMessageContext(input.pageContext);
   if (
     !id.success ||
     !requestKey.success ||
@@ -262,7 +294,8 @@ function parseMessageRow(input: {
     sequence: input.sequence,
     author: author.data,
     body: body.data,
-    pageContext: parsePageContext(input.pageContext),
+    pageContext: storedContext.pageContext,
+    replayReference: storedContext.replayReference,
     relevanceKeys: relevanceKeys.data,
     deliveryStatus: delivery.data,
     createdAt: input.createdAt,
@@ -483,6 +516,10 @@ export async function createEvryConversationRecord(input: {
   } as const;
   const semanticFingerprint =
     fingerprintEvryConversationMessageRequest(fingerprintInput);
+  const messageContext = storedMessageContext({
+    pageContext,
+    replayReference: { status: "not_applicable" },
+  });
   const conversationId = evryConversationIdSchema.parse(randomUUID());
   const messageId = evryConversationMessageIdSchema.parse(randomUUID());
 
@@ -516,7 +553,7 @@ export async function createEvryConversationRecord(input: {
         sequence: 0,
         author: "user",
         body,
-        pageContext,
+        pageContext: messageContext,
         relevanceKeys: [],
         deliveryStatus: "complete",
         createdAt: input.createdAt,
@@ -535,7 +572,8 @@ export async function createEvryConversationRecord(input: {
       !matchesEvryConversationRequestFingerprint({
         fingerprintInput,
         storedFingerprint: existing.requestFingerprint,
-        storedPageContext: parsePageContext(existing.pageContext),
+        storedPageContext: parseStoredMessageContext(existing.pageContext)
+          .pageContext,
       })
     ) {
       throw new EvryConversationIdempotencyError();
@@ -627,6 +665,7 @@ export async function appendEvryConversationRecord(input: {
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
   idempotencyContext: EvryConversationMessageIdempotencyContext;
+  replayReference: EvryConversationReplayReference | null;
   activePlan?: ActivePlanMutation;
   createdAt: Date;
 }): Promise<EvryStoredConversation> {
@@ -661,6 +700,29 @@ export async function appendEvryConversationRecord(input: {
     evryConversationMessageIdempotencyContextSchema.parse(
       input.idempotencyContext
     );
+  const replayReference = evryConversationReplayReferenceSchema
+    .nullable()
+    .parse(input.replayReference ?? null);
+  if (
+    (idempotencyContext.status === "resolved" &&
+      (replayReference?.status !== "resolved" ||
+        replayReference.reference.key !== idempotencyContext.referenceKey ||
+        replayReference.reference.entityType !==
+          idempotencyContext.entityType ||
+        replayReference.reference.entityId !== idempotencyContext.entityId ||
+        replayReference.relevanceKeys.length !== 1 ||
+        String(replayReference.relevanceKeys[0]) !==
+          String(idempotencyContext.referenceKey))) ||
+    (idempotencyContext.status !== "resolved" &&
+      replayReference?.status === "resolved") ||
+    (idempotencyContext.status === "clarification" && replayReference !== null)
+  ) {
+    throw new EvryConversationStorageError();
+  }
+  const messageContext = storedMessageContext({
+    pageContext,
+    replayReference,
+  });
   const messageId = evryConversationMessageIdSchema.parse(input.messageId);
   const requestKey = evryConversationRequestKeySchema.parse(input.requestKey);
   if (input.artifacts.length > MAX_ARTIFACTS_PER_MESSAGE) {
@@ -701,7 +763,8 @@ export async function appendEvryConversationRecord(input: {
       !matchesEvryConversationRequestFingerprint({
         fingerprintInput,
         storedFingerprint: existing.requestFingerprint,
-        storedPageContext: parsePageContext(existing.pageContext),
+        storedPageContext: parseStoredMessageContext(existing.pageContext)
+          .pageContext,
       })
     ) {
       throw new EvryConversationIdempotencyError();
@@ -757,7 +820,7 @@ export async function appendEvryConversationRecord(input: {
         ${messageId}::uuid, ${input.conversationId}::uuid, ${input.plantId}::uuid,
         ${input.actorUserId}::uuid, ${requestKey}::uuid, ${fingerprint},
         ${semanticFingerprint}, sequence,
-        ${author}, ${body}, ${pageContext === null ? null : JSON.stringify(pageContext)}::jsonb,
+        ${author}, ${body}, ${JSON.stringify(messageContext)}::jsonb,
         ${JSON.stringify(relevanceKeys)}::jsonb, ${deliveryStatus},
         ${input.createdAt}
       from conversation_updated

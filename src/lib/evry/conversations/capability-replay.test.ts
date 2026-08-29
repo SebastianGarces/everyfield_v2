@@ -38,6 +38,7 @@ function message(input: {
   createdAt: Date;
   pageContext?: EvryStoredConversationMessage["pageContext"];
   relevanceKeys?: EvryStoredConversationMessage["relevanceKeys"];
+  replayReference?: EvryStoredConversationMessage["replayReference"];
   artifacts?: EvryStoredConversationMessage["artifacts"];
 }): EvryStoredConversationMessage {
   return {
@@ -45,6 +46,7 @@ function message(input: {
     id: input.id as never,
     requestKey: input.requestKey as never,
     pageContext: input.pageContext ?? null,
+    replayReference: input.replayReference ?? null,
     relevanceKeys: input.relevanceKeys ?? [],
     deliveryStatus: "complete",
     artifacts: input.artifacts ?? [],
@@ -80,6 +82,7 @@ function memoryStore(loss: {
             author: "user",
             body: input.body,
             createdAt: input.createdAt,
+            replayReference: { status: "not_applicable" },
           }),
         ],
       };
@@ -104,6 +107,7 @@ function memoryStore(loss: {
         createdAt: input.createdAt,
         pageContext: input.pageContext,
         relevanceKeys: input.relevanceKeys,
+        replayReference: input.replayReference,
         artifacts: input.artifacts.map((document, ordinal) => ({
           id: `70000000-0000-4000-8000-${String(generated).padStart(12, "0")}`,
           ordinal,
@@ -296,4 +300,10 @@ test("continue replay survives bounded-reference pruning with zero rerun work", 
     { matches: 1, reads: 1, references: 1 }
   );
   assert.equal(store.current()?.messages.length, 3);
+  assert.equal(replay.reference.status, "resolved");
+  if (replay.reference.status === "resolved") {
+    assert.equal(replay.reference.reference.key, "original-person");
+    assert.equal(replay.reference.reference.entityType, "person");
+    assert.equal(replay.reference.reference.entityId, "person-99");
+  }
 });

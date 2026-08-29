@@ -79,10 +79,7 @@ test("append atomically orders state CAS, activity, message, and artifacts", () 
   assert.match(append, /isUniqueViolation\(error, MESSAGE_REQUEST_UNIQUE\)/);
   assert.match(append, /jsonb_to_recordset/);
   assert.match(append, /parseEvryConversationArtifactDocument/);
-  assert.match(
-    append,
-    /pageContext === null \? null : JSON\.stringify\(pageContext\)/
-  );
+  assert.match(append, /\$\{JSON\.stringify\(messageContext\)\}::jsonb/);
   assert.match(
     append,
     /evryConversationMessageIdSchema\.parse\(input\.messageId\)/

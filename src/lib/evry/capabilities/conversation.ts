@@ -18,6 +18,7 @@ import {
 import type {
   appendEvryConversationRecord,
   EvryStoredConversation,
+  EvryStoredConversationMessage,
 } from "@/lib/evry/conversations/repository";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
@@ -125,12 +126,12 @@ export function hasDurableEvryCapabilityConversationResult(input: {
     conversationId: input.conversation.id,
     userRequestKey: input.userRequestKey,
   });
-  return input.conversation.messages.some(
-    (message) =>
-      message.id === identity.messageId &&
-      message.requestKey === identity.requestKey &&
-      message.author === "assistant"
+  const message = input.conversation.messages.find(
+    (candidate) =>
+      candidate.id === identity.messageId &&
+      candidate.requestKey === identity.requestKey
   );
+  return message ? isCompleteCapabilityResultMessage(message) : false;
 }
 
 const activePlanMutationSchema = z.discriminatedUnion("mode", [
@@ -141,7 +142,7 @@ const activePlanMutationSchema = z.discriminatedUnion("mode", [
   }),
 ]);
 const resultSchema = z.strictObject({
-  body: z.string().min(1).max(EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS),
+  body: z.string().trim().min(1).max(EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS),
   artifacts: z.array(z.unknown()).min(1).max(16),
   activePlan: activePlanMutationSchema.optional(),
 });
@@ -150,12 +151,52 @@ function parseCapabilityResult(
   input: EvryCapabilityConversationResult
 ): EvryCapabilityConversationResult {
   const parsed = resultSchema.parse(input);
+  const artifacts = Object.freeze(
+    parsed.artifacts.map(parseEvryConversationArtifactDocument)
+  );
+  const confirmationPlans = artifacts.flatMap((artifact) =>
+    artifact.kind === "confirmation" ? [artifact.plan] : []
+  );
+  const setPlan =
+    parsed.activePlan?.mode === "set" ? parsed.activePlan.plan : null;
+  if (
+    (setPlan === null && confirmationPlans.length !== 0) ||
+    (setPlan !== null &&
+      (confirmationPlans.length !== 1 ||
+        confirmationPlans[0]?.planId !== setPlan.planId ||
+        confirmationPlans[0]?.fingerprint !== setPlan.fingerprint))
+  ) {
+    throw new Error(
+      "Evry capability confirmation must bind one exact active plan"
+    );
+  }
   return Object.freeze({
     body: parsed.body,
-    artifacts: Object.freeze(
-      parsed.artifacts.map(parseEvryConversationArtifactDocument)
-    ),
+    artifacts,
     activePlan: parsed.activePlan,
+  });
+}
+
+function isCompleteCapabilityResultMessage(
+  message: EvryStoredConversationMessage
+): boolean {
+  if (
+    message.author !== "assistant" ||
+    message.deliveryStatus !== "complete" ||
+    message.body.trim().length === 0 ||
+    message.body.length > EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS ||
+    message.artifacts.length < 1 ||
+    message.artifacts.length > 16
+  ) {
+    return false;
+  }
+  return message.artifacts.every((artifact) => {
+    try {
+      const parsed = parseEvryConversationArtifactDocument(artifact.document);
+      return parsed.kind === artifact.kind;
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -182,6 +223,7 @@ async function appendResult(input: {
     deliveryStatus: "complete",
     artifacts: result.artifacts,
     idempotencyContext: { status: "none" },
+    replayReference: null,
     activePlan: result.activePlan ?? { mode: "preserve" },
     createdAt: input.selection.now,
   });

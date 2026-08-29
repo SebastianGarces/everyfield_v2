@@ -254,8 +254,7 @@ test(
       .find((line) => line.startsWith("{"));
     assert.ok(firstJson, firstCreate);
     const conversationId = JSON.parse(firstJson).conversationId as
-      | EvryConversationId
-      | undefined;
+      EvryConversationId | undefined;
     assert.ok(conversationId);
 
     const replayCreate = runWorker("create", common);
@@ -412,6 +411,7 @@ test(
       deliveryStatus: "complete" as const,
       artifacts: [],
       idempotencyContext: { status: "none" as const },
+      replayReference: null,
       createdAt: new Date("2026-08-28T12:00:01.000Z"),
     };
     const [firstReplay, secondReplay] = await Promise.all([

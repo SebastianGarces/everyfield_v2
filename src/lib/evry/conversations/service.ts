@@ -30,6 +30,7 @@ import {
   type EvryConversationMessageId,
   type EvryConversationMessageIdempotencyContext,
   type EvryConversationPlanIdentity,
+  type EvryConversationReplayReference,
   type EvryConversationRelevanceKey,
   type EvryConversationRequestKey,
   type EvryConversationStateDocument,
@@ -178,6 +179,7 @@ export async function appendTrustedEvryConversationMessage(input: {
   deliveryStatus: EvryConversationDeliveryStatus;
   artifacts: readonly StoredEvryConversationArtifactDocument[];
   idempotencyContext: EvryConversationMessageIdempotencyContext;
+  replayReference: EvryConversationReplayReference | null;
   activePlan?:
     | Readonly<{ mode: "preserve" }>
     | Readonly<{ mode: "clear" }>
@@ -201,6 +203,7 @@ export async function appendTrustedEvryConversationMessage(input: {
     deliveryStatus: input.deliveryStatus,
     artifacts: input.artifacts,
     idempotencyContext: input.idempotencyContext,
+    replayReference: input.replayReference,
     activePlan: input.activePlan,
     createdAt: input.now,
   });
@@ -275,6 +278,20 @@ function assertDurableCapabilityReplayRequest(input: {
   }
 }
 
+function durableCapabilityReplayReference(input: {
+  conversation: EvryStoredConversation;
+  requestKey: EvryConversationRequestKey;
+}): EvryConversationReplayReference {
+  const userMessage = input.conversation.messages.find(
+    (message) =>
+      message.requestKey === input.requestKey && message.author === "user"
+  );
+  if (!userMessage?.replayReference) {
+    throw new EvryConversationIdempotencyError();
+  }
+  return userMessage.replayReference;
+}
+
 /** Persist one user turn and any deterministic clarification; no model runs. */
 export async function continueEvryConversation(input: {
   actor: EvryPlantActor;
@@ -332,9 +349,10 @@ export async function continueEvryConversation(input: {
       ? {
           status: "continued",
           resumed,
-          // The immutable conversation is the result. Advisory reference
-          // metadata is not rebuilt from the mutable bounded cache on replay.
-          reference: { status: "not_applicable" },
+          reference: durableCapabilityReplayReference({
+            conversation: current,
+            requestKey: requestKey.data,
+          }),
         }
       : null;
   }
@@ -360,6 +378,16 @@ export async function continueEvryConversation(input: {
       : reference.status === "clarification"
         ? { status: "clarification", reason: reference.reason }
         : { status: "not_applicable" };
+  const replayReference: EvryConversationReplayReference | null =
+    reference.status === "resolved"
+      ? {
+          status: "resolved",
+          reference: reference.reference,
+          relevanceKeys: reference.relevanceKeys,
+        }
+      : reference.status === "not_applicable"
+        ? { status: "not_applicable" }
+        : null;
   let appended = await appendTrustedEvryConversationMessage({
     messageId: evryConversationMessageIdSchema.parse(randomUUID()),
     actor: input.actor,
@@ -375,6 +403,7 @@ export async function continueEvryConversation(input: {
     deliveryStatus: "complete",
     artifacts: [],
     idempotencyContext,
+    replayReference,
     activePlan: { mode: "preserve" },
     now: input.now,
     store,
@@ -396,6 +425,7 @@ export async function continueEvryConversation(input: {
       deliveryStatus: "complete",
       artifacts: [storedEvryClarificationArtifactDocument(reference.artifact)],
       idempotencyContext: { status: "none" },
+      replayReference: null,
       activePlan: { mode: "preserve" },
       now: input.now,
       store,
