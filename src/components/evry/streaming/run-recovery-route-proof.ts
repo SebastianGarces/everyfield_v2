@@ -129,6 +129,7 @@ test("navigation pauses one observation, rejects its stale completion, and recon
     return createElement("output", {
       "data-conversation": shell.conversation?.id ?? "none",
       "data-working": String(shell.isWorking),
+      "data-stoppable": String(shell.canStopWatching),
     });
   }
 
@@ -150,6 +151,11 @@ test("navigation pauses one observation, rejects its stale completion, and recon
 
   await act(async () => navigate(`?conversation=${CONVERSATION_B_ID}`));
   assert.equal(probe()["data-working"], "false");
+  await act(async () => navigate(`?conversation=${CONVERSATION_A_ID}`));
+  assert.equal(readCount, 2);
+  assert.equal(probe()["data-working"], "true");
+  assert.equal(probe()["data-stoppable"], "true");
+
   firstRead.resolve(
     Response.json({
       status: "durable",
@@ -172,12 +178,15 @@ test("navigation pauses one observation, rejects its stale completion, and recon
   assert.equal(
     probe()["data-conversation"],
     "none",
-    "A's completion cannot replace B after navigation"
+    "the aborted observer cannot settle the replacement"
   );
-  assert.equal(probe()["data-working"], "false");
+  assert.equal(probe()["data-working"], "true");
+  assert.equal(
+    probe()["data-stoppable"],
+    "true",
+    "the aborted observer cannot clear replacement ownership"
+  );
 
-  await act(async () => navigate(`?conversation=${CONVERSATION_A_ID}`));
-  assert.equal(readCount, 2);
   secondRead.resolve(
     Response.json({
       status: "durable",

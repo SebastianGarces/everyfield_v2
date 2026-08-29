@@ -444,7 +444,10 @@ export function EvryShell({
         });
         setDetachedRequestId(marker.requestId);
       } finally {
-        if (workAbortRef.current?.requestId === marker.requestId) {
+        if (
+          workAbortRef.current?.requestId === marker.requestId &&
+          workAbortRef.current.controller === controller
+        ) {
           workAbortRef.current = null;
           setObservedRequestId(null);
         }
