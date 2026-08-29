@@ -4,11 +4,21 @@ import {
   storedEvryReadArtifactDocument,
 } from "@/lib/evry/conversations/artifacts";
 import { eligibleEvryCapabilitiesFor } from "@/lib/evry/eligibility/capabilities";
-import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
+import {
+  deriveEvryPlanRequestKey,
+  parseStoredEvryActionPlan,
+} from "@/lib/evry/plans";
+import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
+import {
+  findEvryActionPlanByRequestKey,
+  type StoredEvryActionPlan,
+} from "@/lib/evry/plans/repository";
 
 import type { EvryCapabilityConversationContinuation } from "../conversation";
 
 import {
+  COMMUNICATION_MESSAGE_SEND_IDENTITY,
+  COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
   proposeCommunicationEvryMessageEffect,
   selectCommunicationEvryMessageEffect,
 } from "./messages";
@@ -17,13 +27,100 @@ import {
   selectCommunicationEvryRead,
 } from "./reads";
 import {
+  COMMUNICATION_TEMPLATE_CREATE_IDENTITY,
+  COMMUNICATION_TEMPLATE_DELETE_IDENTITY,
+  COMMUNICATION_TEMPLATE_FORK_IDENTITY,
+  COMMUNICATION_TEMPLATE_UPDATE_IDENTITY,
   proposeCommunicationEvryTemplateEffect,
   selectCommunicationEvryTemplateEffect,
 } from "./templates";
+import {
+  COMMUNICATION_EVRY_PLAN_REGISTRY,
+  COMMUNICATION_EVRY_REVIEW_REGISTRY,
+} from "./runtime";
+import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+
+type CommunicationEvryConversationDependencies = Readonly<{
+  findPlanByRequestKey: typeof findEvryActionPlanByRequestKey;
+  proposeMessage: typeof proposeCommunicationEvryMessageEffect;
+  proposeTemplate: typeof proposeCommunicationEvryTemplateEffect;
+}>;
+
+const productionDependencies: CommunicationEvryConversationDependencies = {
+  findPlanByRequestKey: findEvryActionPlanByRequestKey,
+  proposeMessage: proposeCommunicationEvryMessageEffect,
+  proposeTemplate: proposeCommunicationEvryTemplateEffect,
+};
+
+function expectedEffectIdentity(
+  selection:
+    | ReturnType<typeof selectCommunicationEvryMessageEffect>
+    | ReturnType<typeof selectCommunicationEvryTemplateEffect>
+): string | null {
+  switch (selection?.kind) {
+    case "send":
+      return COMMUNICATION_MESSAGE_SEND_IDENTITY;
+    case "resend":
+      return COMMUNICATION_RESEND_NON_OPENERS_IDENTITY;
+    case "create_template":
+      return COMMUNICATION_TEMPLATE_CREATE_IDENTITY;
+    case "update_template":
+      return COMMUNICATION_TEMPLATE_UPDATE_IDENTITY;
+    case "delete_template":
+      return COMMUNICATION_TEMPLATE_DELETE_IDENTITY;
+    case "fork_template":
+      return COMMUNICATION_TEMPLATE_FORK_IDENTITY;
+    default:
+      return null;
+  }
+}
+
+function recoveredPlanResult(input: {
+  stored: StoredEvryActionPlan;
+  expectedIdentity: string;
+}) {
+  if (
+    !validateStoredEvryActionPlan(
+      input.stored,
+      COMMUNICATION_EVRY_PLAN_REGISTRY
+    )
+  ) {
+    throw new Error("Stored Communication plan failed integrity validation");
+  }
+  const document = parseStoredEvryActionPlan({
+    document: input.stored.document,
+    registry: COMMUNICATION_EVRY_PLAN_REGISTRY,
+  });
+  if (
+    document.steps.length !== 1 ||
+    document.steps[0]?.capabilityIdentity !== input.expectedIdentity
+  ) {
+    throw new Error("Stored Communication plan does not match the request");
+  }
+  const plan = {
+    planId: input.stored.id,
+    fingerprint: input.stored.fingerprint,
+  };
+  const review = trustedReviewForEvryPlanDocument({
+    plan,
+    document,
+    reviewRegistry: COMMUNICATION_EVRY_REVIEW_REGISTRY,
+  });
+  if (!review) {
+    throw new Error("Stored Communication plan has no trusted review");
+  }
+  return {
+    body: "Review this exact Communication change before anything is saved or sent.",
+    artifacts: [parseEvryConversationArtifactDocument(review.confirmation)],
+    activePlan: { mode: "set" as const, plan },
+  };
+}
 
 /** One closed Communication continuation: deterministic reads or reviewed effects. */
-export const continueCommunicationEvryConversation: EvryCapabilityConversationContinuation =
-  {
+export function createCommunicationEvryConversationContinuation(
+  dependencies: CommunicationEvryConversationDependencies = productionDependencies
+): EvryCapabilityConversationContinuation {
+  return {
     identity: "communication",
     matches(input) {
       return Boolean(
@@ -85,13 +182,25 @@ export const continueCommunicationEvryConversation: EvryCapabilityConversationCo
           input.userRequestKey,
         ]
       );
+      const expectedIdentity = expectedEffectIdentity(
+        templateSelection ?? messageSelection
+      );
+      if (!expectedIdentity) return null;
+      const stored = await dependencies.findPlanByRequestKey({
+        actorUserId: input.actor.userId,
+        plantId: input.actor.plantId,
+        requestKey,
+      });
+      if (stored) {
+        return recoveredPlanResult({ stored, expectedIdentity });
+      }
       const proposal = templateSelection
-        ? await proposeCommunicationEvryTemplateEffect({
+        ? await dependencies.proposeTemplate({
             actor: input.actor,
             selection: templateSelection,
             requestKey,
           })
-        : await proposeCommunicationEvryMessageEffect({
+        : await dependencies.proposeMessage({
             actor: input.actor,
             pageContext: input.pageContext,
             selection: messageSelection!,
@@ -109,3 +218,7 @@ export const continueCommunicationEvryConversation: EvryCapabilityConversationCo
         : null;
     },
   };
+}
+
+export const continueCommunicationEvryConversation =
+  createCommunicationEvryConversationContinuation();
