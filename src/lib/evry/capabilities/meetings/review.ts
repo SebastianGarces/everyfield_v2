@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
 import { buildEvryConfirmationArtifact } from "@/lib/evry/artifacts/review";
 import {
@@ -13,6 +15,7 @@ import { meetingsEffectDisclosure } from "./effect-disclosure";
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "./effect-contracts";
 
 const MAX_PREVIEW_CHARACTERS = 4_000;
+const MAX_RESOLVED_TARGETS = 100;
 
 function humanize(value: string): string {
   return value
@@ -21,12 +24,32 @@ function humanize(value: string): string {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
-function compactJson(value: unknown): string {
-  const serialized = JSON.stringify(value);
-  if (!serialized || serialized.length > MAX_PREVIEW_CHARACTERS) {
-    throw new Error("Meetings confirmation content is too large to disclose");
+function boundedSerializedPreview(input: {
+  serialized: string;
+  format: "JSON" | "text";
+}): Readonly<{ content: string; complete: boolean }> {
+  if (input.serialized.length <= MAX_PREVIEW_CHARACTERS) {
+    return { content: input.serialized, complete: true };
   }
-  return serialized;
+  const digest = createHash("sha256").update(input.serialized).digest("hex");
+  const marker = "\n… middle omitted from this display …\n";
+  const footer = `\nExact ${input.format} length: ${input.serialized.length} characters; SHA-256: ${digest}`;
+  const visibleCharacters =
+    MAX_PREVIEW_CHARACTERS - marker.length - footer.length;
+  const prefixLength = Math.ceil(visibleCharacters / 2);
+  const suffixLength = Math.floor(visibleCharacters / 2);
+  return {
+    content: `${input.serialized.slice(0, prefixLength)}${marker}${input.serialized.slice(-suffixLength)}${footer}`,
+    complete: false,
+  };
+}
+
+function boundedJson(value: unknown) {
+  const serialized = JSON.stringify(value);
+  if (!serialized) {
+    throw new Error("Meetings confirmation content is not serializable");
+  }
+  return boundedSerializedPreview({ serialized, format: "JSON" });
 }
 
 function sourceLinkFor(source: "meeting" | "person" | "none", value: string) {
@@ -52,17 +75,49 @@ function collectContentPreviews(arguments_: Readonly<Record<string, unknown>>) {
   const previews = previewKeys.flatMap((key) => {
     const value = arguments_[key];
     if (value === undefined || value === null || value === "") return [];
-    return [{ label: humanize(key), content: compactJson(value) }];
+    return [{ label: humanize(key), content: boundedJson(value).content }];
   });
+  const immutablePlan = boundedJson(arguments_);
   previews.push({
-    label: "Complete immutable plan",
-    content: compactJson(arguments_),
+    label: immutablePlan.complete
+      ? "Complete immutable plan"
+      : "Immutable plan summary",
+    content: immutablePlan.content,
   });
   return previews;
 }
 
 function displayState(value: unknown): string {
-  return typeof value === "string" ? value : compactJson(value);
+  return typeof value === "string"
+    ? boundedSerializedPreview({ serialized: value, format: "text" }).content
+    : boundedJson(value).content;
+}
+
+function resolvedTargetsFor(
+  targets: ReturnType<typeof meetingsEffectDisclosure>["targets"]
+) {
+  const directTargets = targets
+    .slice(
+      0,
+      targets.length <= MAX_RESOLVED_TARGETS
+        ? MAX_RESOLVED_TARGETS
+        : MAX_RESOLVED_TARGETS - 1
+    )
+    .map(({ label, value, source }) => ({
+      label,
+      value,
+      sourceLink: sourceLinkFor(source, value),
+    }));
+  const additionalTargets = targets.slice(directTargets.length);
+  if (additionalTargets.length === 0) return directTargets;
+  return [
+    ...directTargets,
+    {
+      label: `Additional targets (${additionalTargets.length})`,
+      value: boundedJson(additionalTargets).content,
+      sourceLink: null,
+    },
+  ];
 }
 
 function localTime(instant: Date, timeZone: string): string {
@@ -146,11 +201,7 @@ function reviewFor(input: {
         title: contract.label,
         effectKind: effectKind(input.identity),
         reversibility: disclosure.reversibility,
-        resolvedTargets: disclosure.targets.map(({ label, value, source }) => ({
-          label,
-          value,
-          sourceLink: sourceLinkFor(source, value),
-        })),
+        resolvedTargets: resolvedTargetsFor(disclosure.targets),
         counts: disclosure.counts.map(({ label, count }) => ({ label, count })),
         exclusions: [],
         dateTime: dateTimeFor(arguments_),

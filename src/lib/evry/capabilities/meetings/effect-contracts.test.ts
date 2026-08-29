@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
@@ -315,6 +316,44 @@ function validArguments(exportName: keyof typeof MEETINGS_ACTION_CONTRACTS) {
   );
 }
 
+function reviewForArguments(
+  exportName: keyof typeof MEETINGS_ACTION_CONTRACTS,
+  arguments_: Readonly<Record<string, unknown>>
+) {
+  const contract = MEETINGS_ACTION_CONTRACTS[exportName];
+  const plan = evryConversationPlanIdentitySchema.parse({
+    planId: "30000000-0000-4000-8000-000000000001",
+    fingerprint: "a".repeat(64),
+  });
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: contract.operationId,
+          capabilityIdentity: contract.operationId,
+          arguments: arguments_,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: MEETINGS_PLAN_REGISTRY,
+    eligibleCapabilities: [{ identity: contract.operationId }],
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan,
+    document,
+    reviewRegistry: MEETINGS_ARTIFACT_REVIEW_REGISTRY,
+  });
+  assert.ok(review, exportName);
+  const step = review.confirmation.steps[0];
+  assert.ok(step, exportName);
+  return { confirmation: review.confirmation, step };
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 test("every authoritative effect has one strict complete fingerprint contract", () => {
   assert.doesNotThrow(assertMeetingsEffectContractsComplete);
   for (const exportName of Object.keys(
@@ -432,4 +471,118 @@ test("every Meetings effect renders its exact complete confirmation", () => {
     );
     assert.ok(step.beforeAfter.length > 0, exportName);
   }
+});
+
+test("a legal 5,000-character attendee note remains confirmable and exactly identified", () => {
+  const note = "x".repeat(5_000);
+  const arguments_ = {
+    ...validArguments("addAttendeeNoteAction"),
+    note,
+  };
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addAttendeeNoteAction.safeParse(arguments_)
+      .success,
+    true
+  );
+
+  const { confirmation, step } = reviewForArguments(
+    "addAttendeeNoteAction",
+    arguments_
+  );
+  const preview = step.contentPreviews.find(({ label }) => label === "Note");
+  assert.ok(preview);
+  const serializedNote = JSON.stringify(note);
+  assert.match(preview.content, /middle omitted from this display/);
+  assert.match(
+    preview.content,
+    new RegExp(`Exact JSON length: ${serializedNote.length} characters`)
+  );
+  assert.match(preview.content, new RegExp(sha256(serializedNote)));
+  assert.ok(preview.content.length <= 4_000);
+  assert.ok(step.beforeAfter[0]?.after.length <= 4_000);
+  assert.deepEqual(confirmation.consequences, [
+    "The disclosed note will be added to this person's plant-visible activity timeline.",
+  ]);
+  assert.deepEqual(
+    step.resolvedTargets.map(({ label, value }) => ({ label, value })),
+    meetingsEffectDisclosure(
+      "addAttendeeNoteAction",
+      MEETINGS_EFFECT_ARGUMENT_SCHEMAS.addAttendeeNoteAction.parse(arguments_)
+    ).targets.map(({ label, value }) => ({ label, value }))
+  );
+  assert.deepEqual(step.counts, [
+    { label: "Person activities created", count: 1 },
+  ]);
+});
+
+test("a cardinality-heavy legal plan preserves direct and summarized target disclosure", () => {
+  const records = Array.from({ length: 100 }, (_, index) => {
+    const suffix = String(index + 1).padStart(12, "0");
+    const personSuffix = String(index + 1_001).padStart(12, "0");
+    return {
+      attendanceId: `10000000-0000-4000-8000-${suffix}`,
+      personId: `20000000-0000-4000-8000-${personSuffix}`,
+      before: {
+        id: `10000000-0000-4000-8000-${suffix}`,
+        exists: true,
+        status: "absent",
+        attendanceType: null,
+        responseStatus: "confirmed",
+        notes: null,
+        updatedAt: WHEN,
+      },
+      afterStatus: "attended",
+      afterAttendanceType: "first_time",
+    };
+  });
+  const arguments_ = {
+    ...validArguments("recordAttendanceBatchAction"),
+    records,
+  };
+  const parsed =
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.recordAttendanceBatchAction.parse(
+      arguments_
+    );
+  const expected = meetingsEffectDisclosure(
+    "recordAttendanceBatchAction",
+    parsed
+  );
+  assert.equal(expected.targets.length, 201);
+
+  const { confirmation, step } = reviewForArguments(
+    "recordAttendanceBatchAction",
+    arguments_
+  );
+  assert.equal(step.resolvedTargets.length, 100);
+  assert.deepEqual(
+    step.resolvedTargets.slice(0, 99).map(({ label, value }) => ({
+      label,
+      value,
+    })),
+    expected.targets.slice(0, 99).map(({ label, value }) => ({ label, value }))
+  );
+  const additional = step.resolvedTargets[99];
+  assert.equal(additional?.label, "Additional targets (102)");
+  const serializedAdditionalTargets = JSON.stringify(
+    expected.targets.slice(99)
+  );
+  assert.match(
+    additional?.value ?? "",
+    new RegExp(sha256(serializedAdditionalTargets))
+  );
+  assert.match(additional?.value ?? "", /Exact JSON length:/);
+  assert.ok((additional?.value.length ?? 4_001) <= 4_000);
+  assert.deepEqual(step.counts, [
+    { label: "Attendance records changed", count: 100 },
+  ]);
+  assert.deepEqual(confirmation.consequences, expected.consequences);
+  assert.equal(step.reversibility, expected.reversibility);
+  assert.ok(
+    step.contentPreviews.every(({ content }) => content.length <= 4_000)
+  );
+  assert.ok(
+    step.beforeAfter.every(
+      ({ before, after }) => before.length <= 4_000 && after.length <= 4_000
+    )
+  );
 });
