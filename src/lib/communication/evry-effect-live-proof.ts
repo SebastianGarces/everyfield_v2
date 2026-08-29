@@ -34,6 +34,7 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 
 import {
+  EVRY_COMMUNICATION_PERMANENT_PREFIX,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
   sendFrozenEvryCommunication,
@@ -429,6 +430,7 @@ async function main(): Promise<void> {
         subject: "Legacy",
         body: "Legacy plain text",
         bodyHtml: null,
+        mergeFields: ["first_name"],
         isSystem: true,
       },
       {
@@ -438,13 +440,24 @@ async function main(): Promise<void> {
         subject: "Legacy",
         body: "Legacy plain text",
         bodyHtml: null,
+        mergeFields: ["first_name"],
+        isSystem: true,
+      },
+      {
+        name: "System merge-field drift",
+        category: "other",
+        channel: "email",
+        subject: "Legacy",
+        body: "Legacy plain text",
+        bodyHtml: null,
+        mergeFields: ["first_name"],
         isSystem: true,
       },
     ])
     .returning();
-  assert.equal(systemRows.length, 2);
-  const [systemFork, systemEdit] = systemRows;
-  assert.ok(systemFork && systemEdit);
+  assert.equal(systemRows.length, 3);
+  const [systemFork, systemEdit, systemDrift] = systemRows;
+  assert.ok(systemFork && systemEdit && systemDrift);
   const forkSnapshot = await getEvryCommunicationTemplateSnapshot({
     churchId: plant.id,
     templateId: systemFork.id,
@@ -453,7 +466,11 @@ async function main(): Promise<void> {
     churchId: plant.id,
     templateId: systemEdit.id,
   });
-  assert.ok(forkSnapshot && editSnapshot);
+  const driftSnapshot = await getEvryCommunicationTemplateSnapshot({
+    churchId: plant.id,
+    templateId: systemDrift.id,
+  });
+  assert.ok(forkSnapshot && editSnapshot && driftSnapshot);
   const forkEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -481,6 +498,11 @@ async function main(): Promise<void> {
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
   recordEffectOutcome(FORK_TEMPLATE, "idempotency");
+  const frozenFork = await getEvryCommunicationTemplateSnapshot({
+    churchId: plant.id,
+    templateId: forkId,
+  });
+  assert.deepEqual(frozenFork?.mergeFields, forkSnapshot.mergeFields);
   const staleForkEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
@@ -500,22 +522,75 @@ async function main(): Promise<void> {
     { status: "refused", excludedCount: 1 }
   );
   recordEffectOutcome(FORK_TEMPLATE, "errors");
+
+  await db
+    .update(messageTemplates)
+    .set({ mergeFields: ["church_name"] })
+    .where(eq(messageTemplates.id, systemDrift.id));
+  const drifted = await getEvryCommunicationTemplateSnapshot({
+    churchId: plant.id,
+    templateId: systemDrift.id,
+  });
+  assert.ok(drifted);
+  assert.equal(
+    drifted.updatedAt,
+    driftSnapshot.updatedAt,
+    "the regression changes only merge_fields, as the seed script can"
+  );
+  assert.notDeepEqual(drifted.mergeFields, driftSnapshot.mergeFields);
+  const driftedForkEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: FORK_TEMPLATE,
+    stepId: "drifted-fork",
+  });
+  assert.deepEqual(
+    await claimEvryCommunicationTemplateFork({
+      effect: driftedForkEffect,
+      identity: FORK_TEMPLATE,
+      source: driftSnapshot,
+      forkId: randomUUID(),
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  const driftedEditEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: UPDATE_TEMPLATE,
+    stepId: "drifted-system-update",
+  });
+  assert.deepEqual(
+    await claimEvryCommunicationSystemTemplateUpdate({
+      effect: driftedEditEffect,
+      identity: UPDATE_TEMPLATE,
+      source: driftSnapshot,
+      forkId: randomUUID(),
+      content: content("<p>Unapproved merge fields</p>"),
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
   const systemEditEffect = await seedEffect({
     churchId: plant.id,
     actorUserId: owner.id,
     capabilityIdentity: UPDATE_TEMPLATE,
     stepId: "edit-system-template",
   });
+  const systemEditForkId = randomUUID();
   assert.deepEqual(
     await claimEvryCommunicationSystemTemplateUpdate({
       effect: systemEditEffect,
       identity: UPDATE_TEMPLATE,
       source: editSnapshot,
-      forkId: randomUUID(),
+      forkId: systemEditForkId,
       content: content("<p>Edited legacy content</p>"),
     }),
     { status: "completed", affectedCount: 1, excludedCount: 0 }
   );
+  const editedSystemCopy = await getEvryCommunicationTemplateSnapshot({
+    churchId: plant.id,
+    templateId: systemEditForkId,
+  });
+  assert.deepEqual(editedSystemCopy?.mergeFields, editSnapshot.mergeFields);
 
   const deletableId = randomUUID();
   await db.insert(messageTemplates).values({
@@ -711,6 +786,91 @@ async function main(): Promise<void> {
         .then(([row]) => row?.count ?? -1),
     ]),
     [0, 0]
+  );
+
+  // A webhook can suppress a later recipient while an already-approved batch
+  // is in flight. The provider seam records that suppression after recipient
+  // one, proving recipient two is rechecked rather than mailed from the stale
+  // whole-batch snapshot.
+  const raceEmails = [
+    `${randomUUID()}@scratch.invalid`,
+    `${randomUUID()}@scratch.invalid`,
+  ] as const;
+  const racePeople = await Promise.all(
+    raceEmails.map((email, index) =>
+      db
+        .insert(persons)
+        .values({
+          churchId: plant.id,
+          firstName: `Race ${index + 1}`,
+          lastName: "Recipient",
+          email,
+          createdBy: owner.id,
+        })
+        .returning({ id: persons.id })
+        .then(([row]) => row)
+    )
+  );
+  assert.ok(racePeople[0] && racePeople[1]);
+  const raceAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [racePeople[0].id, racePeople[1].id],
+    subject: "Suppression race",
+    body: "Approved batch",
+  });
+  assert.ok(raceAudience && raceAudience.recipients.length === 2);
+  const laterRecipient = raceAudience.recipients[1];
+  assert.ok(laterRecipient);
+  const raceCalls: string[] = [];
+  const raceMailer: EvryCommunicationMailer = {
+    async send(input) {
+      raceCalls.push(input.to);
+      if (raceCalls.length === 1) {
+        await recordAddressSuppression({
+          email: laterRecipient.email,
+          reason: "spam_complaint",
+          source: "live-proof-between-provider-calls",
+        });
+      }
+      return { status: "accepted", providerId: `race-${raceCalls.length}` };
+    },
+  };
+  const raceEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-suppression-race",
+  });
+  const raceCommunicationId = randomUUID();
+  assert.deepEqual(
+    await sendFrozenEvryCommunication({
+      effect: raceEffect,
+      identity: SEND_MESSAGE,
+      communicationId: raceCommunicationId,
+      audience: raceAudience,
+      mailer: raceMailer,
+    }),
+    { status: "completed", affectedCount: 1, excludedCount: 1 }
+  );
+  assert.deepEqual(raceCalls, [raceAudience.recipients[0]?.email]);
+  const raceRows = await db
+    .select({
+      personId: communicationRecipients.personId,
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communicationRecipients)
+    .where(eq(communicationRecipients.communicationId, raceCommunicationId));
+  assert.equal(raceRows.length, 2);
+  const skipped = raceRows.find(
+    ({ personId }) => personId === laterRecipient.personId
+  );
+  assert.equal(skipped?.status, "failed");
+  assert.equal(skipped?.externalId, null);
+  assert.match(
+    skipped?.errorMessage ?? "",
+    new RegExp(`^${EVRY_COMMUNICATION_PERMANENT_PREFIX}`)
   );
 
   const groupEmail = `${randomUUID()}@scratch.invalid`;

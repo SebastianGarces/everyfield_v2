@@ -15,6 +15,7 @@ export type EvryCommunicationTemplateSnapshot = Readonly<{
   subject: string | null;
   body: string;
   bodyHtml: string | null;
+  mergeFields: readonly string[] | null;
   isSystem: boolean;
   sourceTemplateId: string | null;
   updatedAt: string;
@@ -31,6 +32,7 @@ const templateSnapshotProjection = {
   subject: messageTemplates.subject,
   body: messageTemplates.body,
   bodyHtml: messageTemplates.bodyHtml,
+  mergeFields: messageTemplates.mergeFields,
   isSystem: messageTemplates.isSystem,
   sourceTemplateId: messageTemplates.sourceTemplateId,
   updatedAt: sql<string>`to_char(${messageTemplates.updatedAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
@@ -83,6 +85,19 @@ function exactTuple(input: EvryEffectInput, identity: string): boolean {
     input.execution.capabilityIdentity === identity &&
     input.execution.actorUserId === actor.userId &&
     input.execution.plantId === actor.plantId
+  );
+}
+
+function frozenMergeFieldsSql(value: readonly string[] | null) {
+  return value === null ? sql`null` : sql`${JSON.stringify(value)}::jsonb`;
+}
+
+function sameTemplateSnapshot(
+  current: EvryCommunicationTemplateSnapshot | null,
+  expected: EvryCommunicationTemplateSnapshot
+) {
+  return Boolean(
+    current && JSON.stringify(current) === JSON.stringify(expected)
   );
 }
 
@@ -179,6 +194,7 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
     return { status: "refused", excludedCount: 1 };
   }
   const churchId = input.effect.execution.plantId;
+  const mergeFields = frozenMergeFieldsSql(input.source.mergeFields);
   return claimEvryCommunicationDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
@@ -191,13 +207,22 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
         ${input.forkId}::uuid, e.church_id, ${input.content.name},
         ${input.content.description}, ${input.content.category},
         ${input.content.channel}, ${input.content.subject}, ${input.content.body},
-        ${input.content.bodyHtml}, s.merge_fields, false, s.id,
+        ${input.content.bodyHtml}, ${mergeFields}, false, s.id,
         transaction_timestamp()
       from eligible e
       join message_templates s on s.id = ${input.source.id}::uuid
       where s.is_system = true
         and s.church_id is null
         and s.updated_at = ${input.source.updatedAt}::timestamptz
+        and s.name = ${input.source.name}
+        and s.description is not distinct from ${input.source.description}
+        and s.category = ${input.source.category}
+        and s.channel = ${input.source.channel}
+        and s.subject is not distinct from ${input.source.subject}
+        and s.body = ${input.source.body}
+        and s.body_html is not distinct from ${input.source.bodyHtml}
+        and s.merge_fields is not distinct from ${mergeFields}
+        and s.source_template_id is not distinct from ${input.source.sourceTemplateId}::uuid
       on conflict (church_id, source_template_id)
         where source_template_id is not null
         do nothing
@@ -215,9 +240,7 @@ export async function claimEvryCommunicationSystemTemplateUpdate(input: {
         }),
       ]);
       return Boolean(
-        source?.isSystem &&
-        source.updatedAt === input.source.updatedAt &&
-        fork === null
+        sameTemplateSnapshot(source, input.source) && fork === null
       );
     },
   });
@@ -288,6 +311,7 @@ export async function claimEvryCommunicationTemplateFork(input: {
     return { status: "refused", excludedCount: 1 };
   }
   const churchId = input.effect.execution.plantId;
+  const mergeFields = frozenMergeFieldsSql(input.source.mergeFields);
   return claimEvryCommunicationDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
@@ -297,13 +321,24 @@ export async function claimEvryCommunicationTemplateFork(input: {
         body_html, merge_fields, is_system, source_template_id
       )
       select
-        ${input.forkId}::uuid, e.church_id, s.name, s.description, s.category,
-        s.channel, s.subject, s.body, s.body_html, s.merge_fields, false, s.id
+        ${input.forkId}::uuid, e.church_id, ${input.source.name},
+        ${input.source.description}, ${input.source.category},
+        ${input.source.channel}, ${input.source.subject}, ${input.source.body},
+        ${input.source.bodyHtml}, ${mergeFields}, false, s.id
       from eligible e
       join message_templates s on s.id = ${input.source.id}::uuid
       where s.is_system = true
         and s.church_id is null
         and s.updated_at = ${input.source.updatedAt}::timestamptz
+        and s.name = ${input.source.name}
+        and s.description is not distinct from ${input.source.description}
+        and s.category = ${input.source.category}
+        and s.channel = ${input.source.channel}
+        and s.subject is not distinct from ${input.source.subject}
+        and s.body = ${input.source.body}
+        and s.body_html is not distinct from ${input.source.bodyHtml}
+        and s.merge_fields is not distinct from ${mergeFields}
+        and s.source_template_id is not distinct from ${input.source.sourceTemplateId}::uuid
       on conflict (church_id, source_template_id)
         where source_template_id is not null
         do nothing
@@ -321,9 +356,7 @@ export async function claimEvryCommunicationTemplateFork(input: {
         }),
       ]);
       return Boolean(
-        source?.isSystem &&
-        source.updatedAt === input.source.updatedAt &&
-        fork === null
+        sameTemplateSnapshot(source, input.source) && fork === null
       );
     },
   });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  EVRY_COMMUNICATION_MAX_RECIPIENTS,
   type EvryCommunicationAudienceSnapshot,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
@@ -73,7 +74,10 @@ const audienceSchema = z.strictObject({
   templateId: z.string().uuid().nullable(),
   meetingId: z.string().uuid().nullable(),
   messageClass: z.enum(["transactional_meeting", "relationship_message"]),
-  recipients: z.array(recipientSchema).min(1),
+  recipients: z
+    .array(recipientSchema)
+    .min(1)
+    .max(EVRY_COMMUNICATION_MAX_RECIPIENTS),
   exclusions: z
     .array(
       z.strictObject({
@@ -91,7 +95,10 @@ const resolvedRecipientSourceSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("people"),
-    recipientIds: z.array(z.string().uuid()).min(1),
+    recipientIds: z
+      .array(z.string().uuid())
+      .min(1)
+      .max(EVRY_COMMUNICATION_MAX_RECIPIENTS),
   }),
   z.strictObject({
     kind: z.literal("group"),
@@ -124,7 +131,10 @@ const sendArgumentsSchema = z.strictObject({
 
 const resendArgumentsSchema = z.strictObject({
   source: sourceMessageSchema,
-  nonOpenerPersonIds: z.array(z.string().uuid()).min(1),
+  nonOpenerPersonIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(EVRY_COMMUNICATION_MAX_RECIPIENTS),
   communicationId: z.string().uuid(),
   audience: audienceSchema,
 });
@@ -186,6 +196,7 @@ function audienceSelection(
   if (people?.[1]) {
     const recipientIds = people[1].split(",").map((id) => id.trim());
     return recipientIds.length > 0 &&
+      recipientIds.length <= EVRY_COMMUNICATION_MAX_RECIPIENTS &&
       recipientIds.every((id) => z.string().uuid().safeParse(id).success)
       ? { kind: "people", recipientIds }
       : null;
@@ -307,6 +318,12 @@ export function createCommunicationEvrySendAudienceResolver(
       return communicationEvryRefusal({
         title: "No eligible email recipients",
         body: "Evry did not prepare a send because the selected audience has no eligible recipients.",
+      });
+    }
+    if (recipientIds.length > EVRY_COMMUNICATION_MAX_RECIPIENTS) {
+      return communicationEvryRefusal({
+        title: "Audience is too large for one Evry send",
+        body: `Choose at most ${EVRY_COMMUNICATION_MAX_RECIPIENTS} recipients for one reviewable send. Larger audiences can be sent as separate confirmed batches.`,
       });
     }
     const audience = await dependencies.resolveAudience({

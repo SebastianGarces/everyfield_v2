@@ -614,6 +614,33 @@ function exportedHttpMethods(sourceFile: ts.SourceFile): string[] {
   return [...methods].toSorted(compareStrings);
 }
 
+function isCommunicationModuleSpecifier(value: string): boolean {
+  return (
+    value.startsWith("@/lib/communication/") ||
+    value === "@/db/schema/communication"
+  );
+}
+
+function communicationOwnedRoute(sourceFile: ts.SourceFile): boolean {
+  return sourceFile.statements.some((statement) => {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      return isCommunicationModuleSpecifier(statement.moduleSpecifier.text);
+    }
+    // `export { handler as POST } from "…"` has no ImportDeclaration. The
+    // export module is itself the ownership edge and must fail closed just as
+    // an imported handler does.
+    return Boolean(
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      isCommunicationModuleSpecifier(statement.moduleSpecifier.text)
+    );
+  });
+}
+
 /** Discover exact exported HTTP methods for communication-owned API routes. */
 export function discoverCommunicationRouteHandlers(
   repoRoot: string
@@ -630,13 +657,7 @@ export function discoverCommunicationRouteHandlers(
       ts.ScriptTarget.Latest,
       true
     );
-    const communicationOwned = sourceFile.statements.some(
-      (statement) =>
-        ts.isImportDeclaration(statement) &&
-        ts.isStringLiteral(statement.moduleSpecifier) &&
-        (statement.moduleSpecifier.text.startsWith("@/lib/communication/") ||
-          statement.moduleSpecifier.text === "@/db/schema/communication")
-    );
+    const communicationOwned = communicationOwnedRoute(sourceFile);
     if (!communicationOwned) continue;
     const routePath = appRoutePath(repoRoot, file);
     for (const method of exportedHttpMethods(sourceFile)) {

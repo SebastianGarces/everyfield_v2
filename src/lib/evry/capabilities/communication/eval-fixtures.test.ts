@@ -70,6 +70,7 @@ const templateContent = {
 const templateSnapshot = {
   id: ID,
   ...templateContent,
+  mergeFields: null,
   isSystem: false,
   sourceTemplateId: null,
   updatedAt: "2026-08-29T06:00:00.000Z",

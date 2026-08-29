@@ -157,17 +157,14 @@ test("external route discovery names exact handlers and fails closed on a new me
     writeFixture(
       fixtureRoot,
       "src/app/api/rsvp/[token]/route.ts",
-      [
-        'import { resolveConfirmation } from "@/lib/communication/confirmation";',
-        "export async function POST() { return resolveConfirmation; }",
-      ].join("\n")
+      'export { resolveConfirmation as POST } from "@/lib/communication/confirmation";'
     );
     writeFixture(
       fixtureRoot,
       "src/app/api/webhooks/resend/route.ts",
       [
         'import { communicationRecipients } from "@/db/schema/communication";',
-        "export async function POST() { return communicationRecipients; }",
+        "export const POST = async () => communicationRecipients;",
       ].join("\n")
     );
     writeFixture(
@@ -188,9 +185,7 @@ test("external route discovery names exact handlers and fails closed on a new me
       fixtureRoot,
       "src/app/api/rsvp/[token]/route.ts",
       [
-        'import { resolveConfirmation } from "@/lib/communication/confirmation";',
-        "export async function GET() { return resolveConfirmation; }",
-        "export async function POST() { return resolveConfirmation; }",
+        'export { resolveConfirmation as POST, resolveConfirmation as GET } from "@/lib/communication/confirmation";',
       ].join("\n")
     );
     assert.throws(

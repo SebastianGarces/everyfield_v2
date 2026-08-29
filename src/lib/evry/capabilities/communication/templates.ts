@@ -88,6 +88,7 @@ const snapshotSchema = z.strictObject({
   subject: contentShape.subject,
   body: contentShape.body,
   bodyHtml: z.string().min(1).max(200_000).nullable(),
+  mergeFields: z.array(z.string().trim().min(1).max(100)).max(32).nullable(),
   isSystem: z.boolean(),
   sourceTemplateId: z.string().uuid().nullable(),
   updatedAt: z.string().datetime(),
@@ -421,6 +422,12 @@ function reviewNullable(value: string | null | undefined) {
   return reviewText(value, "(None)");
 }
 
+function reviewMergeFields(value: readonly string[] | null) {
+  return value?.length
+    ? value.map((field) => `{{${field}}}`).join(", ")
+    : "(None)";
+}
+
 function renderedBodyPreview(label: string, bodyHtml: string) {
   return {
     label,
@@ -469,6 +476,12 @@ function templateFieldChanges(input: {
       label: "Body",
       before: before ? "See exact previous body preview" : "Absent",
       after: "See exact rendered body preview",
+      count: 1,
+    },
+    {
+      label: "Merge fields",
+      before: before ? reviewMergeFields(before.mergeFields) : "Absent",
+      after: before ? reviewMergeFields(before.mergeFields) : "(None)",
       count: 1,
     },
   ] as const;
@@ -685,6 +698,12 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
                 after: "Deleted",
                 count: 1,
               },
+              {
+                label: "Merge fields",
+                before: reviewMergeFields(parsed.expected.mergeFields),
+                after: "Deleted",
+                count: 1,
+              },
             ],
           },
         ],
@@ -773,6 +792,12 @@ export const COMMUNICATION_TEMPLATE_REVIEWS = [
                 label: "Body",
                 before: "Absent",
                 after: "See exact rendered body preview",
+                count: 1,
+              },
+              {
+                label: "Merge fields",
+                before: "Absent",
+                after: reviewMergeFields(parsed.source.mergeFields),
                 count: 1,
               },
             ],

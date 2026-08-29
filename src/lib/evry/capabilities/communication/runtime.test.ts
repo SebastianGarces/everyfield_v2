@@ -18,6 +18,7 @@ import {
 } from "@/lib/evry/plans";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
+import { EVRY_COMMUNICATION_MAX_RECIPIENTS } from "@/lib/communication/evry-send";
 import { renderEmailBodyHtml } from "@/lib/communication/merge";
 import { isRecipientGroupSelector } from "@/lib/communication/recipient-groups";
 import { storedTemplateContent } from "@/lib/communication/templates";
@@ -63,6 +64,7 @@ const content = {
 const ownedSnapshot = {
   id: TEMPLATE_ID,
   ...content,
+  mergeFields: null,
   isSystem: false,
   sourceTemplateId: null,
   updatedAt: UPDATED_AT,
@@ -190,7 +192,15 @@ test("every template mutation shape has strict arguments and a complete trusted 
     assert.equal(step.counts[0]?.count, 1);
     assert.deepEqual(
       step.beforeAfter.map(({ label }) => label),
-      ["Name", "Description", "Category", "Channel", "Subject", "Body"]
+      [
+        "Name",
+        "Description",
+        "Category",
+        "Channel",
+        "Subject",
+        "Body",
+        "Merge fields",
+      ]
     );
     assert.ok(
       step.contentPreviews.every(({ format }) => format === "rich_text")
@@ -218,6 +228,7 @@ test("every template mutation shape has strict arguments and a complete trusted 
           before: "Absent",
           after: "See exact rendered body preview",
         },
+        "Merge fields": { before: "Absent", after: "(None)" },
       });
     } else if (identity === COMMUNICATION_TEMPLATE_UPDATE_IDENTITY) {
       const updated = storedTemplateContent("<p>Hello Grace</p>");
@@ -237,6 +248,7 @@ test("every template mutation shape has strict arguments and a complete trusted 
           before: "See exact previous body preview",
           after: "See exact rendered body preview",
         },
+        "Merge fields": { before: "(None)", after: "(None)" },
       });
     } else if (identity === COMMUNICATION_TEMPLATE_DELETE_IDENTITY) {
       assert.deepEqual(
@@ -256,6 +268,7 @@ test("every template mutation shape has strict arguments and a complete trusted 
           Channel: "Deleted",
           Subject: "Deleted",
           Body: "Deleted",
+          "Merge fields": "Deleted",
         }
       );
     } else {
@@ -276,6 +289,7 @@ test("every template mutation shape has strict arguments and a complete trusted 
           Channel: "Absent",
           Subject: "Absent",
           Body: "Absent",
+          "Merge fields": "Absent",
         }
       );
     }
@@ -483,6 +497,7 @@ test("legacy system templates without HTML have reviewable update and fork plans
     ...ownedSnapshot,
     body: "Legacy plain text",
     bodyHtml: null,
+    mergeFields: ["first_name"],
     isSystem: true,
   } as const;
   for (const [identity, args] of [
@@ -521,6 +536,7 @@ test("legacy system templates without HTML have reviewable update and fork plans
     });
     assert.ok(review);
     assert.match(JSON.stringify(review.confirmation), /Legacy plain text/);
+    assert.match(JSON.stringify(review.confirmation), /\{\{first_name\}\}/);
     const step = review.confirmation.steps[0];
     assert.ok(step);
     assert.equal(step.contentPreviews[0]?.format, "rich_text");
@@ -551,21 +567,31 @@ test("outbound selection is closed and each message effect has an exact trusted 
       meetingId: null,
     }
   );
-  const interfaceSizedAudience = Array.from(
-    { length: 101 },
+  const supportedAudience = Array.from(
+    { length: EVRY_COMMUNICATION_MAX_RECIPIENTS },
     (_, index) =>
       `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
   );
   assert.deepEqual(
     selectCommunicationEvryMessageEffect(
-      `Send email to people ${interfaceSizedAudience.join(",")}: Hello | Welcome`
+      `Send email to people ${supportedAudience.join(",")}: Hello | Welcome`
     ),
     {
       kind: "send",
-      audience: { kind: "people", recipientIds: interfaceSizedAudience },
+      audience: { kind: "people", recipientIds: supportedAudience },
       draft: { kind: "inline", subject: "Hello", body: "Welcome" },
       meetingId: null,
     }
+  );
+  const oversizedAudience = [
+    ...supportedAudience,
+    "10000000-0000-4000-8000-000000000101",
+  ];
+  assert.equal(
+    selectCommunicationEvryMessageEffect(
+      `Send email to people ${oversizedAudience.join(",")}: Hello | Welcome`
+    ),
+    null
   );
   assert.deepEqual(
     selectCommunicationEvryMessageEffect(
@@ -608,7 +634,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
     templateId: null,
     meetingId: null,
     messageClass: "relationship_message",
-    recipients: interfaceSizedAudience.map((personId, index) => ({
+    recipients: supportedAudience.map((personId, index) => ({
       personId,
       label: index === 0 ? "R".repeat(511) : `Recipient ${index + 1}`,
       email: `recipient-${index + 1}@example.test`,
@@ -628,7 +654,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
     meetingId: null,
     status: "sent",
     sentAt: UPDATED_AT,
-    recipientCount: interfaceSizedAudience.length,
+    recipientCount: supportedAudience.length,
   } as const;
   const plan = evryConversationPlanIdentitySchema.parse({
     planId: PLAN_ID,
@@ -641,7 +667,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
         communicationId: RESULT_ID,
         recipientSource: {
           kind: "people",
-          recipientIds: interfaceSizedAudience,
+          recipientIds: supportedAudience,
         },
         audience,
       },
@@ -650,7 +676,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
       COMMUNICATION_RESEND_NON_OPENERS_IDENTITY,
       {
         source,
-        nonOpenerPersonIds: interfaceSizedAudience,
+        nonOpenerPersonIds: supportedAudience,
         communicationId: RESULT_ID,
         audience,
       },
@@ -688,7 +714,7 @@ test("outbound selection is closed and each message effect has an exact trusted 
     assert.ok(review);
     assert.equal(
       review.confirmation.steps[0]?.resolvedTargets.length,
-      interfaceSizedAudience.length
+      EVRY_COMMUNICATION_MAX_RECIPIENTS
     );
     assert.ok(
       review.confirmation.steps[0]?.resolvedTargets.every(
@@ -697,6 +723,29 @@ test("outbound selection is closed and each message effect has an exact trusted 
     );
     assert.match(JSON.stringify(review.confirmation), /Hello/);
   }
+
+  const sendRegistration = COMMUNICATION_MESSAGE_PLAN_REGISTRY.registrationFor(
+    COMMUNICATION_MESSAGE_SEND_IDENTITY
+  );
+  assert.ok(sendRegistration);
+  assert.equal(
+    sendRegistration.argumentsSchema.safeParse({
+      communicationId: RESULT_ID,
+      recipientSource: { kind: "people", recipientIds: oversizedAudience },
+      audience: {
+        ...audience,
+        recipients: [
+          ...audience.recipients,
+          {
+            ...audience.recipients[0],
+            personId: "10000000-0000-4000-8000-000000000101",
+          },
+        ],
+      },
+    }).success,
+    false,
+    "the immutable plan and rendered confirmation have an explicit batch bound"
+  );
 });
 
 test("group and template drafts resolve inside the actor plant before confirmation", async () => {
@@ -846,6 +895,46 @@ test("valid selections with unavailable sources or zero eligible recipients retu
   assert.equal(unavailableMeeting.kind, "refusal");
   assert.match(JSON.stringify(unavailableMeeting), /meeting unavailable/i);
   assert.equal(audienceCalls, 1);
+});
+
+test("group resolution refuses a batch above the plan and DOM bound", async () => {
+  let audienceCalls = 0;
+  const resolver = createCommunicationEvrySendAudienceResolver({
+    async getGroupRecipients() {
+      return Array.from(
+        { length: EVRY_COMMUNICATION_MAX_RECIPIENTS + 1 },
+        (_, index) => ({
+          id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          firstName: `Recipient ${index + 1}`,
+          lastName: "",
+          email: `recipient-${index + 1}@example.test`,
+        })
+      );
+    },
+    async getTemplate() {
+      return undefined;
+    },
+    async resolveAudience() {
+      audienceCalls += 1;
+      return null;
+    },
+  });
+  const selection = selectCommunicationEvryMessageEffect(
+    "Send email to group leaders: Hello | Welcome"
+  );
+  assert.ok(selection?.kind === "send");
+  const result = await resolver({
+    actor: {
+      userId: PLAN_ID,
+      plantId: TEMPLATE_ID,
+      seat: "owner",
+    } as never,
+    pageContext: null,
+    selection,
+  });
+  assert.equal(result.kind, "refusal");
+  assert.match(JSON.stringify(result), /at most 100 recipients/);
+  assert.equal(audienceCalls, 0);
 });
 
 test("draft, stored, preview, and sent rich text share one sanitized source", async () => {

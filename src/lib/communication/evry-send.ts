@@ -40,6 +40,12 @@ import { storedTemplateContent } from "./templates";
 
 export const EVRY_COMMUNICATION_TRANSIENT_PREFIX = "evry-transient:";
 export const EVRY_COMMUNICATION_PERMANENT_PREFIX = "evry-permanent:";
+/**
+ * One Evry confirmation is intentionally one provider-sized send batch. This
+ * keeps the immutable plan, API response, and eagerly rendered confirmation
+ * bounded while still matching Resend's documented batch cardinality.
+ */
+export const EVRY_COMMUNICATION_MAX_RECIPIENTS = 100;
 
 export type EvryCommunicationMessageClass =
   | "transactional_meeting"
@@ -102,7 +108,12 @@ export async function resolveEvryCommunicationAudience(input: {
 }): Promise<EvryCommunicationAudienceSnapshot | null> {
   const selected = [...new Set(input.recipientIds)].sort();
   const duplicateSelections = input.recipientIds.length - selected.length;
-  if (selected.length === 0) return null;
+  if (
+    selected.length === 0 ||
+    selected.length > EVRY_COMMUNICATION_MAX_RECIPIENTS
+  ) {
+    return null;
+  }
 
   const [[church], meeting, selectedPeople] = await Promise.all([
     db.select().from(churches).where(eq(churches.id, input.churchId)).limit(1),
@@ -406,6 +417,17 @@ async function currentRecipientIds(input: {
   );
 }
 
+async function recipientIsStillDispatchable(input: {
+  churchId: string;
+  recipient: EvryCommunicationRecipientSnapshot;
+}) {
+  const current = await currentRecipientIds({
+    churchId: input.churchId,
+    recipients: [input.recipient],
+  });
+  return current.has(input.recipient.personId);
+}
+
 async function renderedOutbound(input: {
   churchName: string;
   churchId: string;
@@ -463,7 +485,8 @@ export async function sendFrozenEvryCommunication(input: {
     input.effect.execution.capabilityIdentity !== input.identity ||
     input.effect.execution.actorUserId !== actor.userId ||
     input.effect.execution.plantId !== actor.plantId ||
-    input.audience.channel !== "email"
+    input.audience.channel !== "email" ||
+    input.audience.recipients.length > EVRY_COMMUNICATION_MAX_RECIPIENTS
   ) {
     return { status: "refused", excludedCount: 1 };
   }
@@ -538,6 +561,30 @@ export async function sendFrozenEvryCommunication(input: {
       meetingId: input.audience.meetingId,
       recipient,
     });
+    // A complaint or hard-bounce webhook can arrive after the whole-audience
+    // stale-plan gate above. Recheck this exact address after composition and
+    // immediately before the provider boundary so a later recipient is never
+    // mailed from a now-stale batch. The terminal row makes the skip visible
+    // and prevents a retry from attempting it again.
+    if (
+      !(await recipientIsStillDispatchable({
+        churchId: actor.plantId,
+        recipient,
+      }))
+    ) {
+      await db
+        .update(communicationRecipients)
+        .set({
+          status: "failed",
+          errorMessage: `${EVRY_COMMUNICATION_PERMANENT_PREFIX}recipient or suppression changed immediately before provider send`,
+        })
+        .where(
+          and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+        );
+      permanentProviderFailures += 1;
+      excludedCount += 1;
+      continue;
+    }
     const result = await mailer.send({
       to: recipient.email,
       subject: recipient.subject,
