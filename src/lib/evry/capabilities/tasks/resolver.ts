@@ -113,6 +113,10 @@ function snapshot(row: Task): TaskEffectSnapshot {
   };
 }
 
+function uniqueSnapshots(rows: readonly Task[]): TaskEffectSnapshot[] {
+  return [...new Map(rows.map((row) => [row.id, snapshot(row)])).values()];
+}
+
 function createSnapshot(input: {
   id: string;
   actor: EvryPlantActor;
@@ -293,18 +297,18 @@ async function dependencyIds(
   return rows.map(({ prerequisiteTaskId }) => prerequisiteTaskId);
 }
 
-async function prerequisiteSetIsValid(input: {
+async function validPrerequisiteTasks(input: {
   plantId: string;
   taskId: string;
   ids: readonly string[];
-}): Promise<boolean> {
-  if (input.ids.includes(input.taskId)) return false;
+}): Promise<Task[] | null> {
+  if (input.ids.includes(input.taskId)) return null;
   const requested = await loadExactTasks(input.plantId, input.ids);
   if (
     !requested ||
     requested.some(({ parentTaskId }) => parentTaskId !== null)
   ) {
-    return false;
+    return null;
   }
   const edges = await db
     .select({
@@ -313,13 +317,15 @@ async function prerequisiteSetIsValid(input: {
     })
     .from(taskDependencies)
     .where(eq(taskDependencies.churchId, input.plantId));
-  return !hasCycle([
+  return hasCycle([
     ...edges.filter(({ taskId }) => taskId !== input.taskId),
     ...input.ids.map((prerequisiteTaskId) => ({
       taskId: input.taskId,
       prerequisiteTaskId,
     })),
-  ]);
+  ])
+    ? null
+    : requested;
 }
 
 async function pendingNotifications(
@@ -633,6 +639,8 @@ async function resolved<ExportName extends TaskEffectExport>(input: {
   now: Date;
   writes: TaskWrite[];
   subjectTasks?: TaskEffectSnapshot[];
+  sourceTasks?: TaskEffectSnapshot[];
+  childSets?: AnyTaskEffectArguments["childSets"];
   dependencySets?: AnyTaskEffectArguments["dependencySets"];
   phaseTransition?: AnyTaskEffectArguments["phaseTransition"];
   sourceAssertion?: AnyTaskEffectArguments["sourceAssertion"];
@@ -656,6 +664,8 @@ async function resolved<ExportName extends TaskEffectExport>(input: {
   const args = {
     operation: input.exportName,
     subjectTasks: input.subjectTasks ?? [],
+    sourceTasks: input.sourceTasks ?? [],
+    childSets: input.childSets ?? [],
     taskWrites: input.writes,
     dependencySets: input.dependencySets ?? [],
     notifications: await notificationChange({
@@ -937,8 +947,9 @@ export async function resolveTaskEvryEffect(input: {
     ) {
       return null;
     }
+    let parent: Task | null = null;
     if (after.parentTaskId) {
-      const parent = await loadTask(actor.plantId, after.parentTaskId);
+      parent = await loadTask(actor.plantId, after.parentTaskId);
       if (!parent || parent.parentTaskId || !mayAct(actor, parent)) return null;
       after.assignedToId = after.assignedToId ?? parent.assignedToId;
     }
@@ -955,15 +966,12 @@ export async function resolveTaskEvryEffect(input: {
           (value): value is string => typeof value === "string"
         )
       : [];
-    if (
-      !(await prerequisiteSetIsValid({
-        plantId: actor.plantId,
-        taskId,
-        ids: prerequisiteTaskIds,
-      }))
-    ) {
-      return null;
-    }
+    const prerequisiteTasks = await validPrerequisiteTasks({
+      plantId: actor.plantId,
+      taskId,
+      ids: prerequisiteTaskIds,
+    });
+    if (!prerequisiteTasks) return null;
     const writes = [{ taskId, before: null, after }];
     return resolved({
       exportName,
@@ -971,6 +979,10 @@ export async function resolveTaskEvryEffect(input: {
       requestKey,
       now,
       writes,
+      sourceTasks: uniqueSnapshots([
+        ...(parent ? [parent] : []),
+        ...prerequisiteTasks,
+      ]),
       dependencySets:
         exportName === "createTaskAction"
           ? [
@@ -1080,8 +1092,10 @@ export async function resolveTaskEvryEffect(input: {
     ) {
       return null;
     }
+    let parent: Task | null = null;
+    let childIds: string[] | null = null;
     if (after.parentTaskId) {
-      const parent = await loadTask(actor.plantId, after.parentTaskId);
+      parent = await loadTask(actor.plantId, after.parentTaskId);
       const children = await db
         .select({ id: tasks.id })
         .from(tasks)
@@ -1092,6 +1106,7 @@ export async function resolveTaskEvryEffect(input: {
             isNull(tasks.deletedAt)
           )
         );
+      childIds = children.map(({ id }) => id).toSorted();
       if (
         !parent ||
         parent.parentTaskId ||
@@ -1107,15 +1122,12 @@ export async function resolveTaskEvryEffect(input: {
           (value): value is string => typeof value === "string"
         )
       : beforePrerequisiteIds;
-    if (
-      !(await prerequisiteSetIsValid({
-        plantId: actor.plantId,
-        taskId: row.id,
-        ids: afterPrerequisiteIds,
-      }))
-    ) {
-      return null;
-    }
+    const prerequisiteTasks = await validPrerequisiteTasks({
+      plantId: actor.plantId,
+      taskId: row.id,
+      ids: afterPrerequisiteIds,
+    });
+    if (!prerequisiteTasks) return null;
     const writes = [{ taskId: row.id, before, after }];
     return resolved({
       exportName,
@@ -1123,6 +1135,12 @@ export async function resolveTaskEvryEffect(input: {
       requestKey,
       now,
       writes,
+      sourceTasks: uniqueSnapshots([
+        ...(parent ? [parent] : []),
+        ...prerequisiteTasks,
+      ]),
+      childSets:
+        childIds === null ? [] : [{ parentTaskId: row.id, taskIds: childIds }],
       dependencySets: [
         { taskId: row.id, beforePrerequisiteIds, afterPrerequisiteIds },
       ],

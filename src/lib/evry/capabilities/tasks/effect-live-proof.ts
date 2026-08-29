@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mock } from "node:test";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -529,7 +529,7 @@ async function runEffect(input: {
     execution: { ...execution, plantId: randomUUID() },
   });
   assert.equal(tenantRefusal.status, "refused");
-  console.log(`PASS ${execution.capabilityIdentity}:tenancy`);
+  console.log(`PASS ${execution.capabilityIdentity}:execution-tuple-tenancy`);
 
   const stale = await input.execute({
     ...effectInput,
@@ -628,6 +628,204 @@ async function runEffect(input: {
   console.log(`PASS ${execution.capabilityIdentity}:idempotency`);
 }
 
+function foreignSelection(input: {
+  exportName: TaskEffectExport;
+  foreignTaskId: string;
+  foreignUserId: string;
+  foreignPersonId: string;
+  foreignTransitionId: string;
+  localUserId: string;
+}): TaskEvryEffectSelection | null {
+  const effect = (values: Readonly<Record<string, unknown>>) => ({
+    kind: "effect" as const,
+    exportName: input.exportName,
+    values,
+  });
+  switch (input.exportName) {
+    case "createTaskAction":
+      return effect({
+        title: "Foreign assignee",
+        assignedToId: input.foreignUserId,
+      });
+    case "quickAddTaskAction":
+    case "importTaskTemplateAction":
+      return null;
+    case "createAndAssignFollowUpAction":
+      return effect({
+        personId: input.foreignPersonId,
+        personName: "Unavailable person",
+        assigneeId: input.localUserId,
+      });
+    case "importPhaseTemplatesAction":
+      return effect({
+        transitionId: input.foreignTransitionId,
+        templateKeys: ["discernment-and-preparation"],
+      });
+    case "dismissPhaseTemplatePromptAction":
+      return effect({ transitionId: input.foreignTransitionId });
+    case "bulkCompleteTasksAction":
+      return effect({ taskIds: [input.foreignTaskId] });
+    case "bulkRescheduleTasksAction":
+      return effect({ taskIds: [input.foreignTaskId], dueDate: "2026-10-01" });
+    case "handOffFollowUpsAction":
+      return effect({
+        fromAssigneeId: input.foreignUserId,
+        toAssigneeId: input.localUserId,
+      });
+    case "addSubtaskAction":
+      return effect({
+        parentTaskId: input.foreignTaskId,
+        title: "Unavailable parent",
+      });
+    case "setSubtaskCompletionAction":
+      return effect({ subtaskId: input.foreignTaskId, complete: true });
+    case "assignFollowUpAction":
+      return effect({
+        taskId: input.foreignTaskId,
+        assigneeId: input.localUserId,
+      });
+    case "updateTaskAction":
+      return effect({ taskId: input.foreignTaskId, title: "Unavailable task" });
+    case "updateTaskStatusAction":
+      return effect({ taskId: input.foreignTaskId, status: "in_progress" });
+    case "completeTaskAction":
+    case "deleteTaskAction":
+    case "reopenTaskAction":
+      return effect({ taskId: input.foreignTaskId });
+  }
+}
+
+async function durableCounts() {
+  const [taskCount, outcomeCount] = await Promise.all([
+    db.select({ count: sql<number>`count(*)::int` }).from(tasks),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(evryExecutionOutcomes),
+  ]);
+  return {
+    tasks: taskCount[0]?.count ?? 0,
+    outcomes: outcomeCount[0]?.count ?? 0,
+  };
+}
+
+async function runForeignEffectTenancy(input: {
+  actor: EvryPlantActor;
+  memberId: string;
+  foreignPlantId: string;
+  foreignTaskId: string;
+  foreignUserId: string;
+  foreignPersonId: string;
+  foreignTransitionId: string;
+  exportName: TaskEffectExport;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  current: typeof import("./atomic-effect").taskEffectArgumentsAreCurrent;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  const selection = foreignSelection({
+    exportName: input.exportName,
+    foreignTaskId: input.foreignTaskId,
+    foreignUserId: input.foreignUserId,
+    foreignPersonId: input.foreignPersonId,
+    foreignTransitionId: input.foreignTransitionId,
+    localUserId: input.memberId,
+  });
+  if (selection) {
+    const before = await durableCounts();
+    const result = await input.resolve({
+      actor: input.actor,
+      selection,
+      pageContext: null,
+      requestKey: input.mintRequestKey(),
+      now: NOW,
+    });
+    assert.equal(result, null, `${input.exportName} exposed a foreign source`);
+    assert.deepEqual(await durableCounts(), before);
+    console.log(
+      `PASS ${TASK_ACTION_CONTRACTS[input.exportName].operationId}:tenancy`
+    );
+    return;
+  }
+
+  const localSelection = await fixtureFor(input);
+  const resolved = await input.resolve({
+    actor: input.actor,
+    selection: localSelection,
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(resolved);
+  const execution = await seedExecution({ actor: input.actor, resolved });
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: input.exportName,
+      args: resolved.arguments,
+    }),
+    true
+  );
+  const collisionId = resolved.arguments.taskWrites[0]?.taskId;
+  assert.ok(collisionId);
+  await db.insert(tasks).values({
+    id: collisionId,
+    churchId: input.foreignPlantId,
+    createdById: input.foreignUserId,
+    assignedToId: input.foreignUserId,
+    title: "Foreign ID collision",
+  });
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: input.exportName,
+      args: resolved.arguments,
+    }),
+    false
+  );
+  const authorization = await input.authorize(execution.capabilityIdentity);
+  assert.ok(authorization);
+  const effectKey = input.effectKey(
+    execution.planId,
+    execution.fingerprint,
+    execution.stepId
+  );
+  const before = await durableCounts();
+  assert.deepEqual(
+    await input.execute({
+      authorization,
+      execution,
+      effectKey,
+      arguments: resolved.arguments,
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  assert.deepEqual(await durableCounts(), before);
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            inArray(
+              tasks.id,
+              resolved.arguments.taskWrites.map(({ taskId }) => taskId)
+            ),
+            eq(tasks.churchId, input.actor.plantId)
+          )
+        )
+    ).length,
+    0
+  );
+  console.log(
+    `PASS ${TASK_ACTION_CONTRACTS[input.exportName].operationId}:tenancy`
+  );
+}
+
 async function runCompetingPlans(input: {
   actor: EvryPlantActor;
   resolve: typeof import("./resolver").resolveTaskEvryEffect;
@@ -707,6 +905,190 @@ async function runCompetingPlans(input: {
     );
   assert.equal(logged.length, 1);
   console.log("PASS tasks:competing-confirmed-plans");
+}
+
+async function runStructuralSourceDrift(input: {
+  actor: EvryPlantActor;
+  resolve: typeof import("./resolver").resolveTaskEvryEffect;
+  mintRequestKey: () => EvryPlanRequestKey;
+  authorize: typeof import("@/lib/evry/eligibility/capabilities").authorizeEvryEffectCapability;
+  effectKey: typeof import("@/lib/evry/audit/identity").executionEffectKey;
+  current: typeof import("./atomic-effect").taskEffectArgumentsAreCurrent;
+  execute: typeof import("./atomic-effect").executeTaskEffect;
+}) {
+  const prerequisite = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: input.actor.userId,
+    title: `Prerequisite ${randomUUID()}`,
+  });
+  const create = await input.resolve({
+    actor: input.actor,
+    selection: {
+      kind: "effect",
+      exportName: "createTaskAction",
+      values: {
+        title: `Dependent ${randomUUID()}`,
+        prerequisiteTaskIds: [prerequisite.id],
+      },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(create);
+  const createExecution = await seedExecution({
+    actor: input.actor,
+    resolved: create,
+  });
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: create.exportName,
+      args: create.arguments,
+    }),
+    true
+  );
+  await db
+    .update(tasks)
+    .set({ deletedAt: new Date(NOW.getTime() + 1_000) })
+    .where(eq(tasks.id, prerequisite.id));
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: create.exportName,
+      args: create.arguments,
+    }),
+    false
+  );
+  const createAuthorization = await input.authorize(
+    createExecution.capabilityIdentity
+  );
+  assert.ok(createAuthorization);
+  const createEffectKey = input.effectKey(
+    createExecution.planId,
+    createExecution.fingerprint,
+    createExecution.stepId
+  );
+  assert.deepEqual(
+    await input.execute({
+      authorization: createAuthorization,
+      execution: createExecution,
+      effectKey: createEffectKey,
+      arguments: create.arguments,
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.id, create.arguments.taskWrites[0]!.taskId))
+    ).length,
+    0
+  );
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.effectKey, createEffectKey))
+    ).length,
+    0
+  );
+
+  const parent = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: input.actor.userId,
+    title: `Parent ${randomUUID()}`,
+  });
+  const target = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: input.actor.userId,
+    title: `Nesting target ${randomUUID()}`,
+  });
+  const update = await input.resolve({
+    actor: input.actor,
+    selection: {
+      kind: "effect",
+      exportName: "updateTaskAction",
+      values: {
+        taskId: target.id,
+        title: "Nesting target changed",
+        parentTaskId: parent.id,
+      },
+    },
+    pageContext: null,
+    requestKey: input.mintRequestKey(),
+    now: NOW,
+  });
+  assert.ok(update);
+  const updateExecution = await seedExecution({
+    actor: input.actor,
+    resolved: update,
+  });
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: update.exportName,
+      args: update.arguments,
+    }),
+    true
+  );
+  await seedTask({
+    plantId: input.actor.plantId,
+    actorId: input.actor.userId,
+    parentTaskId: target.id,
+    title: "Concurrent child",
+  });
+  assert.equal(
+    await input.current({
+      actorUserId: input.actor.userId,
+      plantId: input.actor.plantId,
+      exportName: update.exportName,
+      args: update.arguments,
+    }),
+    false
+  );
+  const updateAuthorization = await input.authorize(
+    updateExecution.capabilityIdentity
+  );
+  assert.ok(updateAuthorization);
+  const updateEffectKey = input.effectKey(
+    updateExecution.planId,
+    updateExecution.fingerprint,
+    updateExecution.stepId
+  );
+  assert.deepEqual(
+    await input.execute({
+      authorization: updateAuthorization,
+      execution: updateExecution,
+      effectKey: updateEffectKey,
+      arguments: update.arguments,
+    }),
+    { status: "refused", excludedCount: 1 }
+  );
+  const [unchanged] = await db
+    .select({ title: tasks.title, parentTaskId: tasks.parentTaskId })
+    .from(tasks)
+    .where(eq(tasks.id, target.id));
+  assert.deepEqual(unchanged, {
+    title: target.title,
+    parentTaskId: null,
+  });
+  assert.equal(
+    (
+      await db
+        .select({ id: evryExecutionOutcomes.id })
+        .from(evryExecutionOutcomes)
+        .where(eq(evryExecutionOutcomes.effectKey, updateEffectKey))
+    ).length,
+    0
+  );
+  console.log("PASS tasks:structural-source-drift");
 }
 
 async function runLargeSourceHandoff(input: {
@@ -884,6 +1266,26 @@ async function main() {
       title: foreignTaskTitle,
     })
     .returning({ id: tasks.id });
+  const [foreignPerson] = await db
+    .select({ id: persons.id })
+    .from(persons)
+    .where(eq(persons.churchId, seeded.foreignPlantId))
+    .limit(1);
+  assert.ok(foreignPerson);
+  const [foreignTransition] = await db
+    .insert(phaseTransitions)
+    .values({
+      churchId: seeded.foreignPlantId,
+      fromPhase: 1,
+      toPhase: 0,
+      initiatedById: seeded.foreignUserId,
+      reason: "Foreign Task proof",
+      kind: "transition",
+      rubricVersion: "task-proof-v1",
+      createdAt: NOW,
+    })
+    .returning({ id: phaseTransitions.id });
+  assert.ok(foreignTransition);
   const foreignResolution = await resolver.resolveTaskEvryEffect({
     actor,
     selection: {
@@ -953,12 +1355,41 @@ async function main() {
     .where(eq(users.id, actor.userId));
   sessionUser = sessionUser ? { ...sessionUser, seat: "owner" } : null;
 
+  for (const [exportName, contract] of Object.entries(TASK_ACTION_CONTRACTS)) {
+    if (contract.operationKind !== "effect") continue;
+    await runForeignEffectTenancy({
+      actor,
+      memberId: seeded.memberId,
+      foreignPlantId: seeded.foreignPlantId,
+      foreignTaskId: foreignTask!.id,
+      foreignUserId: seeded.foreignUserId,
+      foreignPersonId: foreignPerson.id,
+      foreignTransitionId: foreignTransition.id,
+      exportName: exportName as TaskEffectExport,
+      resolve: resolver.resolveTaskEvryEffect,
+      mintRequestKey: plans.mintEvryPlanRequestKey,
+      authorize: eligibility.authorizeEvryEffectCapability,
+      effectKey: audit.executionEffectKey,
+      current: atomic.taskEffectArgumentsAreCurrent,
+      execute: atomic.executeTaskEffect,
+    });
+  }
+
   await runCompetingPlans({
     actor,
     resolve: resolver.resolveTaskEvryEffect,
     mintRequestKey: plans.mintEvryPlanRequestKey,
     authorize: eligibility.authorizeEvryEffectCapability,
     effectKey: audit.executionEffectKey,
+    execute: atomic.executeTaskEffect,
+  });
+  await runStructuralSourceDrift({
+    actor,
+    resolve: resolver.resolveTaskEvryEffect,
+    mintRequestKey: plans.mintEvryPlanRequestKey,
+    authorize: eligibility.authorizeEvryEffectCapability,
+    effectKey: audit.executionEffectKey,
+    current: atomic.taskEffectArgumentsAreCurrent,
     execute: atomic.executeTaskEffect,
   });
   await runLargeSourceHandoff({

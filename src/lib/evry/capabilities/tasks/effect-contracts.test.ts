@@ -84,3 +84,56 @@ test("completion contracts cannot omit or detach material and contact-log effect
     false
   );
 });
+
+test("create and update contracts bind every structural Task source fact", () => {
+  const parentId = "00000000-0000-4000-8000-000000000004";
+  const prerequisiteId = "00000000-0000-4000-8000-000000000005";
+  const create = taskEffectPlanFixture("createTaskAction");
+  const createdWrite = create.taskWrites[0]!;
+
+  assert.equal(
+    TASKS_EFFECT_ARGUMENT_SCHEMAS.createTaskAction.safeParse({
+      ...create,
+      taskWrites: [
+        {
+          ...createdWrite,
+          after: { ...createdWrite.after, parentTaskId: parentId },
+        },
+      ],
+    }).success,
+    false,
+    "an existing parent must be present as an exact Task source snapshot"
+  );
+
+  assert.equal(
+    TASKS_EFFECT_ARGUMENT_SCHEMAS.createTaskAction.safeParse({
+      ...create,
+      dependencySets: [
+        {
+          taskId: TASK_FIXTURE_ID,
+          beforePrerequisiteIds: [],
+          afterPrerequisiteIds: [prerequisiteId],
+        },
+      ],
+    }).success,
+    false,
+    "every prerequisite must be present as an exact Task source snapshot"
+  );
+
+  const update = taskEffectPlanFixture("updateTaskAction");
+  const updatedWrite = update.taskWrites[0]!;
+  assert.equal(
+    TASKS_EFFECT_ARGUMENT_SCHEMAS.updateTaskAction.safeParse({
+      ...update,
+      sourceTasks: [taskFixtureSnapshot(parentId)],
+      taskWrites: [
+        {
+          ...updatedWrite,
+          after: { ...updatedWrite.after, parentTaskId: parentId },
+        },
+      ],
+    }).success,
+    false,
+    "nesting an existing Task must bind its exact current child set"
+  );
+});

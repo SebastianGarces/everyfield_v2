@@ -81,6 +81,11 @@ const dependencySetSchema = z.strictObject({
   afterPrerequisiteIds: uniqueUuids,
 });
 
+const childSetSchema = z.strictObject({
+  parentTaskId: uuid,
+  taskIds: uniqueUuids,
+});
+
 const notificationSnapshotSchema = z.strictObject({
   notificationId: uuid,
   recipientUserId: uuid,
@@ -196,6 +201,10 @@ const disclosureSchema = z.strictObject({
 const commonShape = {
   /** Exact rows on which the `tasks.own` subject rule was decided. */
   subjectTasks: z.array(taskEffectSnapshotSchema).max(100),
+  /** Exact existing Task rows used to derive parents or prerequisites. */
+  sourceTasks: z.array(taskEffectSnapshotSchema),
+  /** Exact live child sets used to decide whether nesting remains legal. */
+  childSets: z.array(childSetSchema).max(100),
   // Source-derived effects (handoff, parent deletion, recurrence cloning) do
   // not share the UI's 100-row selection cap. Every valid resolved row must
   // remain representable so confirmation never stores an unreplayable subset.
@@ -279,6 +288,62 @@ function operationSchema<ExportName extends TaskActionExport>(
           code: "custom",
           message: "Own-duty subjects must be unique",
         });
+      }
+      const sourceIds = value.sourceTasks.map(({ id }) => id);
+      if (new Set(sourceIds).size !== sourceIds.length) {
+        context.addIssue({
+          code: "custom",
+          message: "Task source snapshots must be unique",
+        });
+      }
+      const childSetIds = value.childSets.map(
+        ({ parentTaskId }) => parentTaskId
+      );
+      if (new Set(childSetIds).size !== childSetIds.length) {
+        context.addIssue({
+          code: "custom",
+          message: "Task child-set assertions must be unique",
+        });
+      }
+      const boundSourceIds = new Set([...subjectIds, ...sourceIds]);
+      const plannedTaskIds = new Set(taskIds);
+      for (const write of value.taskWrites) {
+        const parentTaskId = write.after.parentTaskId;
+        if (
+          parentTaskId &&
+          (write.before === null || exportName === "updateTaskAction") &&
+          !boundSourceIds.has(parentTaskId) &&
+          !plannedTaskIds.has(parentTaskId)
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Every existing parent Task must have an exact source snapshot",
+          });
+        }
+        if (
+          write.before !== null &&
+          parentTaskId !== null &&
+          exportName === "updateTaskAction" &&
+          !value.childSets.some(
+            ({ parentTaskId }) => parentTaskId === write.taskId
+          )
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "Nesting an existing Task must bind its exact child set",
+          });
+        }
+      }
+      for (const dependency of value.dependencySets) {
+        for (const prerequisiteTaskId of dependency.afterPrerequisiteIds) {
+          if (!sourceIds.includes(prerequisiteTaskId)) {
+            context.addIssue({
+              code: "custom",
+              message: "Every prerequisite must have an exact source snapshot",
+            });
+          }
+        }
       }
       const creates = value.taskWrites.filter(({ before }) => before === null);
       const updates = value.taskWrites.filter(({ before }) => before !== null);
