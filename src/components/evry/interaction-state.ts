@@ -7,7 +7,13 @@ export type EvrySubmission = Readonly<{
 }>;
 
 export type PendingEvrySubmission = EvrySubmission &
-  Readonly<{ requestKey: string }>;
+  Readonly<{
+    requestKey: string;
+    target:
+      | Readonly<{ kind: "create" }>
+      | Readonly<{ kind: "continue"; conversationId: string }>;
+    presentedConversationId: string | null;
+  }>;
 
 /** The ordinary conversation request contract; UI affordances add no metadata. */
 export function evryConversationRequestBody(
@@ -88,8 +94,13 @@ function sameSubmission(
   left: PendingEvrySubmission,
   right: EvrySubmission
 ): boolean {
+  const sameConversation =
+    left.target.kind === "create"
+      ? right.conversationId === null ||
+        right.conversationId === left.presentedConversationId
+      : right.conversationId === left.target.conversationId;
   return (
-    left.conversationId === right.conversationId &&
+    sameConversation &&
     left.message === right.message &&
     samePageContext(left.pageContext, right.pageContext)
   );
@@ -103,7 +114,36 @@ export function pendingEvrySubmissionFor(
 ): PendingEvrySubmission {
   return pending !== null && sameSubmission(pending, submission)
     ? pending
-    : { ...submission, requestKey: mintRequestKey() };
+    : {
+        ...submission,
+        requestKey: mintRequestKey(),
+        target:
+          submission.conversationId === null
+            ? { kind: "create" }
+            : {
+                kind: "continue",
+                conversationId: submission.conversationId,
+              },
+        presentedConversationId: null,
+      };
+}
+
+export function pendingEvrySubmissionAfterConversation(
+  pending: PendingEvrySubmission,
+  requestKey: string,
+  conversationId: string
+): PendingEvrySubmission {
+  return pending.requestKey === requestKey
+    ? { ...pending, presentedConversationId: conversationId }
+    : pending;
+}
+
+export function evryConversationSubmissionEndpoint(
+  pending: PendingEvrySubmission
+): string {
+  return pending.target.kind === "create"
+    ? "/api/evry/conversations"
+    : `/api/evry/conversations/${encodeURIComponent(pending.target.conversationId)}/messages`;
 }
 
 export type EvryConversationLoadAttempt = Readonly<{
@@ -177,4 +217,11 @@ export function cancelEvryConversationLoads(
   state: EvryConversationLoadState
 ): EvryConversationLoadState {
   return { ...state, latest: null };
+}
+
+export function shouldFollowEvryTranscript(input: {
+  distanceFromEnd: number;
+  focusInComposer: boolean;
+}): boolean {
+  return input.focusInComposer || input.distanceFromEnd <= 80;
 }

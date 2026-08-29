@@ -17,6 +17,8 @@ import {
   populateComposerFromSuggestion,
   shouldOfferEvrySuggestions,
 } from "./suggestions/interaction";
+import { EvryWorkStatus } from "./streaming/work-status";
+import { shouldFollowEvryTranscript } from "./interaction-state";
 
 export function EvryContextChip({
   context,
@@ -52,6 +54,7 @@ export function EvryContextChip({
 export function ConversationSurface({ className }: { className?: string }) {
   const {
     activeContext,
+    acknowledgement,
     clearContext,
     conversation,
     draft,
@@ -59,14 +62,22 @@ export function ConversationSurface({ className }: { className?: string }) {
     isComposerBlocked,
     isLoading,
     isSending,
-    replaceConversation,
     sendMessage,
     setDraft,
-    statusMessage,
     suggestions,
+    workRequestId,
+    workState,
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
-  const showSuggestions = shouldOfferEvrySuggestions(conversation);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
+  const latestMessage = conversation?.messages.at(-1);
+  const showSuggestions =
+    !isSending &&
+    workState.phase !== "reading" &&
+    workState.phase !== "planning" &&
+    workState.phase !== "execution" &&
+    shouldOfferEvrySuggestions(conversation);
   const activeArtifactId =
     conversation?.messages
       .flatMap((message) => message.artifacts)
@@ -83,12 +94,26 @@ export function ConversationSurface({ className }: { className?: string }) {
       )?.id ?? null;
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "nearest" });
-  }, [conversation?.messages.length]);
+    const transcript = transcriptRef.current;
+    if (
+      transcript &&
+      shouldFollowEvryTranscript({
+        distanceFromEnd:
+          transcript.scrollHeight -
+          transcript.clientHeight -
+          transcript.scrollTop,
+        focusInComposer:
+          composerRef.current?.contains(document.activeElement) ?? false,
+      })
+    ) {
+      endRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [conversation?.messages.length, latestMessage]);
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       <div
+        ref={transcriptRef}
         data-slot="evry-transcript"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
         aria-busy={isLoading}
@@ -106,7 +131,7 @@ export function ConversationSurface({ className }: { className?: string }) {
             <ol
               role="log"
               aria-label="Conversation messages"
-              aria-live="polite"
+              aria-live="off"
               aria-relevant="additions text"
               className="space-y-4"
             >
@@ -163,7 +188,6 @@ export function ConversationSurface({ className }: { className?: string }) {
                         conversationStateVersion={conversation.stateVersion}
                         interactive={id === activeArtifactId}
                         messageId={message.id}
-                        onConversation={replaceConversation}
                         onEdit={(confirmation) => {
                           setDraft("Revise this plan: " + confirmation.title);
                           requestAnimationFrame(() =>
@@ -218,6 +242,7 @@ export function ConversationSurface({ className }: { className?: string }) {
       </div>
 
       <form
+        ref={composerRef}
         className="bg-background shrink-0 space-y-3 border-t p-4 sm:p-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -240,26 +265,21 @@ export function ConversationSurface({ className }: { className?: string }) {
             rows={3}
             required
             maxLength={8_000}
+            aria-busy={isSending}
             className="max-h-40 min-h-20 resize-y text-base sm:text-sm"
           />
         </div>
 
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            {error ? (
-              <p role="alert" className="text-destructive text-sm">
-                {error}
-              </p>
-            ) : (
-              <p
-                role="status"
-                aria-live="polite"
-                className="text-muted-foreground text-sm"
-              >
-                {statusMessage}
-              </p>
-            )}
-          </div>
+          <EvryWorkStatus
+            acknowledgement={acknowledgement}
+            activeRequestId={workRequestId}
+            state={
+              error && workState.phase !== "failed"
+                ? { phase: "failed", message: error }
+                : workState
+            }
+          />
           <Button
             type="submit"
             disabled={

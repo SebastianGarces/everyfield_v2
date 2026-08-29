@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EVRY_LATENCY_SEGMENTS } from "./latency";
+
 export const EVRY_TRACE_STAGES = [
   "request",
   "policy",
@@ -90,7 +92,12 @@ export const evryTraceSpanFieldsSchema = z
     ]),
     capabilityIdentity: safeIdentitySchema.nullable(),
     details: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("operation") }).strict(),
+      z
+        .object({
+          kind: z.literal("operation"),
+          latencySegment: z.enum(EVRY_LATENCY_SEGMENTS).optional(),
+        })
+        .strict(),
       z
         .object({
           kind: z.literal("generation"),

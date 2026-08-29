@@ -56,6 +56,7 @@ export function ConversationHistoryWorkspace({
     error,
     isLoading,
     isSending,
+    isWorking,
     loadConversation,
     resetConversation,
     setDraft,
@@ -102,6 +103,7 @@ export function ConversationHistoryWorkspace({
   const blocked =
     isLoading ||
     isSending ||
+    isWorking ||
     isConversationNavigationPending ||
     isNewComposerResetPending;
 
@@ -318,7 +320,6 @@ export function ConversationHistoryWorkspace({
             ref={detailStatusRef}
             id="evry-conversation-status"
             tabIndex={-1}
-            aria-busy={isLoading}
             data-focus-pane="detail"
             className="flex min-h-0 flex-1 items-center justify-center p-8 text-center"
           >
@@ -369,9 +370,6 @@ function ConversationStartingStatus({
       ref={statusRef}
       id="evry-conversation-status"
       tabIndex={-1}
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
       data-focus-pane="detail"
       className="flex min-h-0 flex-1 items-center justify-center p-8 text-center"
     >
@@ -395,9 +393,6 @@ function ConversationOpeningStatus({
       ref={statusRef}
       id="evry-conversation-status"
       tabIndex={-1}
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
       data-focus-pane="detail"
       className="flex min-h-0 flex-1 items-center justify-center p-8 text-center"
     >

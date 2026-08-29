@@ -159,6 +159,29 @@ function jsonConversation(
   return Response.json({ status, conversation: value });
 }
 
+function streamedConversation(
+  requestId: string,
+  value: PublicEvryConversation
+): Response {
+  const events = [
+    {
+      type: "work",
+      requestId,
+      sequence: 0,
+      phase: "reading",
+      code: "request_accepted",
+    },
+    { type: "conversation", requestId, sequence: 1, conversation: value },
+    { type: "complete", requestId, sequence: 2 },
+  ];
+  return new Response(
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    {
+      headers: { "content-type": "application/x-ndjson" },
+    }
+  );
+}
+
 function RemountingRoute({
   Surface,
   Workspace,
@@ -290,6 +313,7 @@ test("real shell state survives stale route remounts for first and repeated New 
   });
   let conversationLoads = 0;
   let conversationCreates = 0;
+  const secondLoad = Promise.withResolvers<void>();
   t.mock.method(
     globalThis,
     "fetch",
@@ -297,11 +321,15 @@ test("real shell state survives stale route remounts for first and repeated New 
       const url = String(input);
       if (url.endsWith(`/api/evry/conversations/${CONVERSATION_A_ID}`)) {
         conversationLoads += 1;
+        if (conversationLoads === 2) {
+          await secondLoad.promise;
+        }
         return jsonConversation("available", CONVERSATION_A);
       }
       if (url.endsWith("/api/evry/conversations") && init?.method === "POST") {
         conversationCreates += 1;
-        return jsonConversation("created", CONVERSATION_B);
+        const body = JSON.parse(String(init.body)) as { requestKey: string };
+        return streamedConversation(body.requestKey, CONVERSATION_B);
       }
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     }
@@ -462,6 +490,21 @@ test("real shell state survives stale route remounts for first and repeated New 
     activate(row);
   });
   await act(async () => route.commit(CONVERSATION_A_ID, false));
+  const openingStatus = mountedRenderer.root.findByProps({
+    id: "evry-conversation-status",
+  });
+  assert.equal(openingStatus.props.role, undefined);
+  assert.equal(openingStatus.props["aria-live"], undefined);
+  assert.equal(openingStatus.props["aria-busy"], undefined);
+  assert.equal(
+    openingStatus.findAll(
+      (node) => node.props.role === "status" || node.props.role === "alert"
+    ).length,
+    0,
+    "history handoff must not compete with the stable work-status live regions"
+  );
+  assert.equal(activeElementId(), "evry-conversation-status");
+  secondLoad.resolve();
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });

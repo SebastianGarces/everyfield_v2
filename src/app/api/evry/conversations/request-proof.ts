@@ -153,6 +153,28 @@ function request(url: string, body: unknown): Request {
   });
 }
 
+function streamRequest(url: string, body: unknown): Request {
+  return new TracedRequest(url, {
+    method: "POST",
+    headers: {
+      accept: "application/x-ndjson",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function streamEvents(result: Response): Promise<unknown[]> {
+  assert.match(
+    result.headers.get("content-type") ?? "",
+    /application\/x-ndjson/
+  );
+  return (await result.text())
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+}
+
 let stored: EvryStoredConversation | null = null;
 const requestPageContexts = new Map<string, EvryPageContext | null>();
 
@@ -318,6 +340,7 @@ async function main(): Promise<void> {
   const planResume = await import("@/lib/evry/conversations/plan-resume");
   const planLifecycle = await import("@/lib/evry/plans/lifecycle");
   const planRegistry = await import("@/lib/evry/plans/registry");
+  const streamContract = await import("@/lib/evry/streaming/conversation-wire");
   const createRoute = await import("./route");
   const getRoute = await import("./[conversationId]/route");
   const messageRoute = await import("./[conversationId]/messages/route");
@@ -467,6 +490,40 @@ async function main(): Promise<void> {
   assert.ok(capturedActor);
   assert.ok(stored);
 
+  sessions = [user()];
+  events.length = 0;
+  const createStream = (
+    await streamEvents(
+      await createPost(
+        streamRequest("http://localhost/api/evry/conversations", {
+          requestKey: firstRequestKey,
+          message: LITERAL,
+          pageContext: { kind: "task", recordId: "task-1" },
+        })
+      )
+    )
+  ).map((event) =>
+    streamContract.evryConversationStreamEventSchema.parse(event)
+  );
+  assert.deepEqual(
+    createStream.map((event) => [
+      event.type,
+      "code" in event ? event.code : null,
+    ]),
+    [
+      ["work", "request_accepted"],
+      ["work", "compiling_response"],
+      ["conversation", null],
+      ["complete", null],
+    ]
+  );
+  assert.deepEqual(
+    createStream.map((event) => event.sequence),
+    [0, 1, 2, 3]
+  );
+  assert.equal(createStream[2]?.requestId, firstRequestKey);
+  assert.deepEqual(events, ["auth", "body", "context", "create"]);
+
   pageContextRecordState = "missing";
   sessions = [user()];
   events.length = 0;
@@ -582,6 +639,44 @@ async function main(): Promise<void> {
   );
   const messageCountAfterFirstAppend =
     firstAppend.body.conversation.messages.length;
+
+  sessions = [user()];
+  events.length = 0;
+  const continuationStream = (
+    await streamEvents(
+      await messagePost(
+        streamRequest(
+          `http://localhost/api/evry/conversations/${CONVERSATION_ID}/messages`,
+          {
+            requestKey: appendRetryKey,
+            message: appendRetryBody,
+            pageContext: { kind: "task", recordId: "task-1" },
+          }
+        ),
+        { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+      )
+    )
+  ).map((event) =>
+    streamContract.evryConversationStreamEventSchema.parse(event)
+  );
+  assert.deepEqual(
+    continuationStream.map((event) => [
+      event.type,
+      "code" in event ? event.code : null,
+    ]),
+    [
+      ["work", "request_accepted"],
+      ["work", "resolving_references"],
+      ["work", "compiling_response"],
+      ["conversation", null],
+      ["complete", null],
+    ]
+  );
+  assert.deepEqual(
+    continuationStream.map((event) => event.sequence),
+    [0, 1, 2, 3, 4]
+  );
+  assert.equal(continuationStream[3]?.requestId, appendRetryKey);
 
   pageContextRecordState = "renamed";
   sessions = [user()];

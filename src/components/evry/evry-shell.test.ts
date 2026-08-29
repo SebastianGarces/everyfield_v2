@@ -27,6 +27,7 @@ const historyList = read(
   "history-list.tsx"
 );
 const surface = read("components", "evry", "conversation-surface.tsx");
+const workStatus = read("components", "evry", "streaming", "work-status.tsx");
 const sheet = read("components", "ui", "sheet.tsx");
 const resolver = read("lib", "evry", "resolvers", "page-context.ts");
 const createRoute = read("app", "api", "evry", "conversations", "route.ts");
@@ -151,8 +152,21 @@ test("workspace URL sync cannot compete with App Router navigation and loads use
     shell,
     /requestedConversationId !== null \|\|[\s\S]*conversationLoadStateRef\.current\.latest !== null/
   );
-  assert.match(shell, /if \(isSending\) return/);
-  assert.match(shell, /\[conversation\?\.id, isSending\]\s*\)/);
+  assert.match(shell, /if \(isSending \|\| isWorking\) return/);
+  assert.match(
+    shell,
+    /\[conversation\?\.id, isSending, isWorking, presentWork\]\s*\)/
+  );
+  assert.match(
+    shell,
+    /setConversation\(loadedConversation\);[\s\S]*presentWork\([\s\S]*evryWorkStateForConversation\(loadedConversation\)/,
+    "durable progress is presented without turning a finished load into pending work"
+  );
+  assert.match(
+    shell,
+    /const beginWork = useCallback\([\s\S]*pendingWorkRequestIdRef\.current = requestId;[\s\S]*setPendingWorkRequestId\(requestId\)/,
+    "only locally initiated work should block conversation navigation"
+  );
 });
 
 test("the mounted workspace owns query sync and send preserves in-flight edits", () => {
@@ -184,7 +198,7 @@ test("message retries keep their semantic request identity until success", () =>
   assert.match(interaction, /requestKey: submission\.requestKey/);
   assert.match(
     shell,
-    /const nextConversation = await responseConversation\(response\);[\s\S]*pendingSubmissionRef\.current = null/
+    /const streamed = await readEvryConversationStream\(response,[\s\S]*pendingSubmissionRef\.current = null/
   );
   assert.doesNotMatch(shell, /requestKey: crypto\.randomUUID\(\)/);
   assert.match(
@@ -194,10 +208,14 @@ test("message retries keep their semantic request identity until success", () =>
   assert.match(shell, /const message = evrySubmissionMessage\(draft\)/);
 });
 
-test("the transcript is a live attributed log and renders server-owned context labels", () => {
+test("the transcript is an attributed review log and one dedicated status owns announcements", () => {
   assert.match(surface, /role="log"/);
-  assert.match(surface, /aria-live="polite"/);
+  assert.match(surface, /aria-live="off"/);
   assert.match(surface, /aria-relevant="additions text"/);
+  assert.match(workStatus, /role="status" aria-live="polite"/);
+  assert.match(workStatus, /role="alert"[\s\S]*aria-live="assertive"/);
+  assert.doesNotMatch(workStatus, /aria-busy=/);
+  assert.doesNotMatch(historyWorkspace, /role="status"|aria-live=/);
   assert.match(surface, /message\.author === "user" \? "You" : "Evry"/);
   assert.match(surface, /message\.pageContext\.label/);
   assert.doesNotMatch(surface, /CONTEXT_KIND_LABELS/);
@@ -210,6 +228,17 @@ test("loading remains understandable without motion", () => {
   );
   assert.match(surface, /Opening conversation…/);
   assert.match(surface, /Sending…/);
+});
+
+test("the synthetic streaming lifecycle is preview-only and split from the production bundle", () => {
+  assert.match(
+    evryPage,
+    /process\.env\.VERCEL_ENV === "preview"[\s\S]*params\.artifactFixture === "streaming-states"/
+  );
+  assert.match(
+    workspace,
+    /const EvryStreamingBrowserFixture = dynamic\(\(\) =>[\s\S]*import\("@\/components\/evry\/streaming\/browser-fixture"\)/
+  );
 });
 
 test("removing context removes it from the request body", () => {
