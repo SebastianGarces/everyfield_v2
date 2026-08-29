@@ -1606,20 +1606,26 @@ async function runStructureBarrierRaces(input: {
   }
 }
 
-function readInput(identity: string, taskId: string) {
-  switch (identity) {
-    case READ_IDENTITIES.list:
+function readInput(registration: EvryReadRegistration, taskId: string) {
+  switch (registration.id) {
+    case "tasks.list":
       return { search: SCRATCH, includeCompleted: true, cursor: null };
-    case READ_IDENTITIES.detail:
+    case "tasks.detail":
       return { taskId };
-    case READ_IDENTITIES.phasePrompt:
+    case "tasks.detail.checklist":
+    case "tasks.detail.prerequisites":
+      return { taskId, cursor: null };
+    case "tasks.phase-template-prompt":
       return {};
-    case READ_IDENTITIES.planning:
+    case "tasks.planning-options":
       return { taskId };
-    case READ_IDENTITIES.templates:
+    case "tasks.planning-options.assignees":
+    case "tasks.planning-options.prerequisites":
+      return { taskId, search: "", cursor: null };
+    case "tasks.templates":
       return {};
     default:
-      throw new Error(`No Task read fixture for ${identity}`);
+      throw new Error(`No Task read fixture for ${registration.id}`);
   }
 }
 
@@ -1638,7 +1644,7 @@ async function runReads(input: {
       literalUserText: "Task read proof",
       pageContext: null,
     } as const;
-    const args = readInput(registration.capabilityIdentity, input.localTaskId);
+    const args = readInput(registration, input.localTaskId);
     const first = await registration.execute(invocation, args);
     assert.ok(first, `${registration.capabilityIdentity} did not execute`);
     assert.equal(first.kind, "read");
@@ -1657,8 +1663,10 @@ async function runReads(input: {
     console.log(`PASS ${registration.capabilityIdentity}:errors`);
 
     const foreignAttempt =
-      registration.capabilityIdentity === READ_IDENTITIES.detail
+      registration.capabilityIdentity === READ_IDENTITIES.detail ||
+      registration.capabilityIdentity === READ_IDENTITIES.planning
         ? await registration.execute(invocation, {
+            ...args,
             taskId: input.foreignTaskId,
           })
         : first;
@@ -1730,6 +1738,267 @@ async function runListCursorProof(input: {
     seeded.map(({ id }) => id).toSorted()
   );
   console.log("PASS tasks.read.list:cursor-pagination");
+}
+
+function filterValue(
+  artifact: Readonly<{
+    filters: readonly Readonly<{ label: string; value: string }>[];
+  }>,
+  label: string
+) {
+  return artifact.filters.find((filter) => filter.label === label)?.value;
+}
+
+function assertExactReadReconstruction(input: {
+  artifacts: readonly Readonly<{
+    counts: Readonly<{ excluded: number }>;
+    exclusions: readonly unknown[];
+    items: readonly Readonly<{
+      id: string;
+      facts: readonly Readonly<{ label: string; value: string }>[];
+    }>[];
+  }>[];
+  expected: readonly Readonly<{ id: string; title?: string }>[];
+}) {
+  const items = input.artifacts.flatMap((artifact) => {
+    assert.equal(artifact.counts.excluded, 0);
+    assert.deepEqual(artifact.exclusions, []);
+    return artifact.items;
+  });
+  assert.equal(new Set(items.map(({ id }) => id)).size, items.length);
+  assert.deepEqual(
+    items.map(({ id }) => id).toSorted(),
+    input.expected.map(({ id }) => id).toSorted()
+  );
+  const expectedTitle = new Map(
+    input.expected.flatMap((row) =>
+      row.title === undefined ? [] : [[row.id, row.title] as const]
+    )
+  );
+  for (const item of items) {
+    const title = expectedTitle.get(item.id);
+    if (title !== undefined) {
+      assert.equal(
+        item.facts.find(({ label }) => label === "Full title")?.value,
+        title
+      );
+    }
+  }
+}
+
+async function runRelatedReadCursorProof(input: {
+  actor: EvryPlantActor;
+  continueRead: EvryReadContinuation;
+  eligibleCapabilities: readonly EvryCapabilityRegistration[];
+  detail: EvryReadRegistration;
+  checklist: EvryReadRegistration;
+  prerequisites: EvryReadRegistration;
+  assignees: EvryReadRegistration;
+  prerequisiteOptions: EvryReadRegistration;
+  pageLimit: number;
+}) {
+  const marker = `related-page-${randomUUID()}`;
+  const parent = await seedTask({
+    plantId: input.actor.plantId,
+    actorId: input.actor.userId,
+    title: `${marker} ${"exact parent title ".repeat(30)}`.slice(0, 500).trim(),
+    description: `<p>${"Rich description preview evidence. ".repeat(30)}</p>`,
+  });
+  const cardinality = input.pageLimit + 1;
+  const [checklistRows, prerequisiteRows, assigneeRows] = await Promise.all([
+    db
+      .insert(tasks)
+      .values(
+        Array.from({ length: cardinality }, (_, index) => ({
+          churchId: input.actor.plantId,
+          createdById: input.actor.userId,
+          assignedToId: input.actor.userId,
+          parentTaskId: parent.id,
+          title:
+            `${marker} checklist ${String(index + 1).padStart(2, "0")} ${"full checklist content ".repeat(20)}`
+              .slice(0, 500)
+              .trim(),
+          description: `<p>${marker} checklist description ${index + 1}</p>`,
+        }))
+      )
+      .returning({ id: tasks.id, title: tasks.title }),
+    db
+      .insert(tasks)
+      .values(
+        Array.from({ length: cardinality }, (_, index) => ({
+          churchId: input.actor.plantId,
+          createdById: input.actor.userId,
+          assignedToId: input.actor.userId,
+          title:
+            `${marker} prerequisite ${String(index + 1).padStart(2, "0")} ${"full prerequisite content ".repeat(20)}`
+              .slice(0, 500)
+              .trim(),
+        }))
+      )
+      .returning({ id: tasks.id, title: tasks.title }),
+    db
+      .insert(users)
+      .values(
+        Array.from({ length: cardinality }, (_, index) => ({
+          churchId: input.actor.plantId,
+          email: `${marker}-${index + 1}@tasks.invalid`,
+          passwordHash: "not-used",
+          name: `${marker} assignee ${String(index + 1).padStart(2, "0")}`,
+          seat: "member" as const,
+        }))
+      )
+      .returning({ id: users.id, name: users.name, email: users.email }),
+  ]);
+  await db.insert(taskDependencies).values(
+    prerequisiteRows.map(({ id }) => ({
+      churchId: input.actor.plantId,
+      taskId: parent.id,
+      prerequisiteTaskId: id,
+    }))
+  );
+
+  const invocation = {
+    literalUserText: "Task related read proof",
+    pageContext: null,
+  } as const;
+  const summary = await input.detail.execute(invocation, { taskId: parent.id });
+  assert.ok(summary?.kind === "read");
+  assert.equal(
+    filterValue(summary, "Description scope"),
+    "Plain-text preview; open the Task for full rich text"
+  );
+  assert.equal(
+    summary.items[0]?.facts.find(({ label }) => label === "Checklist items")
+      ?.value,
+    String(cardinality)
+  );
+  assert.equal(
+    summary.items[0]?.facts.find(({ label }) => label === "Prerequisites")
+      ?.value,
+    String(cardinality)
+  );
+  assert.equal(
+    summary.items[0]?.facts.some(({ label }) => label === "Checklist"),
+    false
+  );
+  assert.equal(
+    summary.items[0]?.facts.some(({ label }) => label === "Waits on"),
+    false
+  );
+
+  const firstChecklist = await input.checklist.execute(invocation, {
+    taskId: parent.id,
+    cursor: null,
+  });
+  assert.ok(firstChecklist?.kind === "read");
+  assert.equal(firstChecklist.items.length, input.pageLimit);
+  const checklistCommand = filterValue(firstChecklist, "Next page command");
+  assert.ok(checklistCommand && checklistCommand !== "End of results");
+  const secondChecklist = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText: checklistCommand,
+    pageContext: null,
+  });
+  assert.ok(secondChecklist?.kind === "read");
+  assert.equal(filterValue(secondChecklist, "Task"), parent.id);
+  assertExactReadReconstruction({
+    artifacts: [firstChecklist, secondChecklist],
+    expected: checklistRows,
+  });
+
+  const firstPrerequisites = await input.prerequisites.execute(invocation, {
+    taskId: parent.id,
+    cursor: null,
+  });
+  assert.ok(firstPrerequisites?.kind === "read");
+  assert.equal(firstPrerequisites.items.length, input.pageLimit);
+  const prerequisiteCommand = filterValue(
+    firstPrerequisites,
+    "Next page command"
+  );
+  assert.ok(prerequisiteCommand && prerequisiteCommand !== "End of results");
+  const secondPrerequisites = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText: prerequisiteCommand,
+    pageContext: null,
+  });
+  assert.ok(secondPrerequisites?.kind === "read");
+  assert.equal(filterValue(secondPrerequisites, "Task"), parent.id);
+  assertExactReadReconstruction({
+    artifacts: [firstPrerequisites, secondPrerequisites],
+    expected: prerequisiteRows,
+  });
+  console.log("PASS tasks.read.detail:related-cursor-reconstruction");
+
+  const firstAssignees = await input.assignees.execute(invocation, {
+    taskId: parent.id,
+    search: marker,
+    cursor: null,
+  });
+  assert.ok(firstAssignees?.kind === "read");
+  assert.equal(firstAssignees.items.length, input.pageLimit);
+  const assigneeCommand = filterValue(firstAssignees, "Next page command");
+  assert.ok(assigneeCommand && assigneeCommand !== "End of results");
+  const secondAssignees = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText: assigneeCommand,
+    pageContext: null,
+  });
+  assert.ok(secondAssignees?.kind === "read");
+  assert.equal(filterValue(secondAssignees, "Task context"), parent.id);
+  assert.equal(filterValue(secondAssignees, "Search"), marker);
+  assertExactReadReconstruction({
+    artifacts: [firstAssignees, secondAssignees],
+    expected: assigneeRows,
+  });
+  for (const item of [firstAssignees, secondAssignees].flatMap(
+    (artifact) => artifact.items
+  )) {
+    const expected = assigneeRows.find(({ id }) => id === item.id);
+    assert.ok(expected);
+    assert.equal(
+      item.facts.find(({ label }) => label === "User ID")?.value,
+      expected.id
+    );
+    assert.equal(
+      item.facts.find(({ label }) => label === "Full name")?.value,
+      expected.name
+    );
+    assert.equal(
+      item.facts.find(({ label }) => label === "Email")?.value,
+      expected.email
+    );
+  }
+
+  const firstPrerequisiteOptions = await input.prerequisiteOptions.execute(
+    invocation,
+    { taskId: parent.id, search: marker, cursor: null }
+  );
+  assert.ok(firstPrerequisiteOptions?.kind === "read");
+  assert.equal(firstPrerequisiteOptions.items.length, input.pageLimit);
+  const prerequisiteOptionCommand = filterValue(
+    firstPrerequisiteOptions,
+    "Next page command"
+  );
+  assert.ok(
+    prerequisiteOptionCommand && prerequisiteOptionCommand !== "End of results"
+  );
+  const secondPrerequisiteOptions = await input.continueRead({
+    eligibleCapabilities: input.eligibleCapabilities,
+    literalUserText: prerequisiteOptionCommand,
+    pageContext: null,
+  });
+  assert.ok(secondPrerequisiteOptions?.kind === "read");
+  assert.equal(
+    filterValue(secondPrerequisiteOptions, "Task context"),
+    parent.id
+  );
+  assert.equal(filterValue(secondPrerequisiteOptions, "Search"), marker);
+  assertExactReadReconstruction({
+    artifacts: [firstPrerequisiteOptions, secondPrerequisiteOptions],
+    expected: prerequisiteRows,
+  });
+  console.log("PASS tasks.read.planning-options:typed-cursor-reconstruction");
 }
 
 async function main() {
@@ -1841,6 +2110,17 @@ async function main() {
     eligibleCapabilities: eligibility.eligibleEvryCapabilitiesFor(actor),
     registration: reads.TASK_LIST_READ,
   });
+  await runRelatedReadCursorProof({
+    actor,
+    continueRead: reads.continueTaskEvryRead,
+    eligibleCapabilities: eligibility.eligibleEvryCapabilitiesFor(actor),
+    detail: reads.TASK_DETAIL_READ,
+    checklist: reads.TASK_CHECKLIST_DETAIL_READ,
+    prerequisites: reads.TASK_PREREQUISITE_DETAIL_READ,
+    assignees: reads.TASK_ASSIGNEE_PLANNING_READ,
+    prerequisiteOptions: reads.TASK_PREREQUISITE_PLANNING_READ,
+    pageLimit: reads.TASK_RELATED_READ_LIMIT,
+  });
 
   await db
     .update(users)
@@ -1850,7 +2130,7 @@ async function main() {
   for (const registration of reads.TASK_EVRY_READ_REGISTRATIONS) {
     const result = await registration.execute(
       { literalUserText: "Task read permission proof", pageContext: null },
-      readInput(registration.capabilityIdentity, localReadTask.id)
+      readInput(registration, localReadTask.id)
     );
     assert.equal(
       Boolean(result),

@@ -71,6 +71,26 @@ run("Task list cursors reach 51 matching rows without page exclusions", () => {
   assert.match(output, /PASS tasks\.read\.list:cursor-pagination/);
 });
 
+run(
+  "Task detail cursors reconstruct every checklist and prerequisite row",
+  () => {
+    assert.match(
+      output,
+      /PASS tasks\.read\.detail:related-cursor-reconstruction/
+    );
+  }
+);
+
+run(
+  "Typed planning cursors preserve task/search and reconstruct every option",
+  () => {
+    assert.match(
+      output,
+      /PASS tasks\.read\.planning-options:typed-cursor-reconstruction/
+    );
+  }
+);
+
 for (const race of [
   "dependency-cycle-barrier",
   "reparent-child-barrier",

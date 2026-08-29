@@ -62,6 +62,10 @@ test("Task and Communication selection remain disjoint in production", () => {
     ...Object.values(TASK_EFFECT_SELECTION_FIXTURES),
     "Show the pending phase checklist prompt",
     "Load more tasks after 10000000-0000-4000-8000-000000000001",
+    "Show checklist items for task 10000000-0000-4000-8000-000000000001",
+    "Load more prerequisites for task 10000000-0000-4000-8000-000000000001 after 10000000-0000-4000-8000-000000000002",
+    "Show task assignees for task 10000000-0000-4000-8000-000000000001 matching owner",
+    "Load more task prerequisites for task 10000000-0000-4000-8000-000000000001 matching launch after 10000000-0000-4000-8000-000000000002",
   ]) {
     const input = { literalUserText: text } as never;
     assert.equal(continueTaskEvryConversation.matches(input), true, text);

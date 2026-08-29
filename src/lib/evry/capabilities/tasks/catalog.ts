@@ -56,7 +56,7 @@ const generated = inventoryDocument as Readonly<{
 const READ_METADATA = {
   "tasks.read.detail": {
     label: "Review task details",
-    argumentKeys: ["taskId"],
+    argumentKeys: ["taskId", "detailSection", "cursor"],
   },
   "tasks.read.list": {
     label: "List tasks",
@@ -68,7 +68,7 @@ const READ_METADATA = {
   },
   "tasks.read.planning-options": {
     label: "Review task planning options",
-    argumentKeys: ["taskId"],
+    argumentKeys: ["taskId", "optionType", "search", "cursor"],
   },
   "tasks.read.templates": {
     label: "List task checklist templates",
