@@ -418,6 +418,11 @@ export function importedBindings(
 
 const REACHING_EXPORTS = new Map<string, Set<string>>();
 
+type ReachingNamesResult = {
+  readonly names: Set<string>;
+  readonly cycleFree: boolean;
+};
+
 /**
  * The names that MINT an actor when called from `file`: the two session reads,
  * any LOCAL function that reaches one transitively, and any IMPORTED binding
@@ -444,21 +449,28 @@ const REACHING_EXPORTS = new Map<string, Set<string>>();
  * `requireChurchSession`), and a re-export. That is this walk exactly, and a
  * second copy of it would be a second set of blind spots to keep in sync.
  */
-export function reachingNames(
+function reachingNamesResult(
   file: string,
   code: string,
   roots: readonly string[],
-  stack: ReadonlySet<string> = new Set()
-): Set<string> {
+  stack: ReadonlySet<string>
+): ReachingNamesResult {
   const reaching = new Set(roots);
+  let cycleFree = true;
 
   for (const [local, { module, original }] of importedBindings(file, code)) {
-    if (stack.has(module)) continue;
-    if (
-      reachingExportsOf(module, roots, new Set([...stack, file])).has(original)
-    ) {
-      reaching.add(local);
+    if (stack.has(module)) {
+      cycleFree = false;
+      continue;
     }
+
+    const imported = reachingExportsResult(
+      module,
+      roots,
+      new Set([...stack, file])
+    );
+    cycleFree &&= imported.cycleFree;
+    if (imported.names.has(original)) reaching.add(local);
   }
 
   const bodies = functionBodies(code);
@@ -478,24 +490,32 @@ export function reachingNames(
     if (!grew) break;
   }
 
-  return reaching;
+  return { names: reaching, cycleFree };
 }
 
-/** Which of `file`'s exported functions reach `roots`, for an importer. */
-export function reachingExportsOf(
+export function reachingNames(
+  file: string,
+  code: string,
+  roots: readonly string[],
+  stack: ReadonlySet<string> = new Set()
+): Set<string> {
+  return reachingNamesResult(file, code, roots, stack).names;
+}
+
+function reachingExportsResult(
   file: string,
   roots: readonly string[],
   stack: ReadonlySet<string>
-): Set<string> {
-  const key = `${roots.join(",")} ${file}`;
+): ReachingNamesResult {
+  const key = `${roots.join(",")}\0${file}`;
   const cached = REACHING_EXPORTS.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return { names: cached, cycleFree: true };
 
   const code = codeOf(file);
-  const reaching = reachingNames(file, code, roots, stack);
+  const reaching = reachingNamesResult(file, code, roots, stack);
   const exported = new Set(
     functionBodies(code)
-      .filter((fn) => fn.exported && reaching.has(fn.name))
+      .filter((fn) => fn.exported && reaching.names.has(fn.name))
       .map((fn) => fn.name)
   );
 
@@ -512,8 +532,21 @@ export function reachingExportsOf(
     }
   }
 
-  if (stack.size === 0) REACHING_EXPORTS.set(key, exported);
-  return exported;
+  // A recursive result is context-independent exactly when it never had to
+  // cut an edge back into the active import stack. Cache those completed
+  // subgraphs even when reached below a root call. Cyclic partials stay
+  // uncached, preserving the existing fail-closed cycle behavior.
+  if (reaching.cycleFree) REACHING_EXPORTS.set(key, exported);
+  return { names: exported, cycleFree: reaching.cycleFree };
+}
+
+/** Which of `file`'s exported functions reach `roots`, for an importer. */
+export function reachingExportsOf(
+  file: string,
+  roots: readonly string[],
+  stack: ReadonlySet<string>
+): Set<string> {
+  return reachingExportsResult(file, roots, stack).names;
 }
 
 /** The mint walk — {@link reachingNames} rooted at the two session reads. */

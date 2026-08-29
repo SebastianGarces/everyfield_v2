@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -15,6 +16,7 @@ import {
   isPublicRouteGroup,
   isUseClientModule,
   isUseServerModule,
+  mintingExportsOf,
   mintingNames,
   parsingServerActionExports,
   reachingNames,
@@ -567,6 +569,38 @@ test("a module's own mint helper counts as the mint", () => {
   const pattern = new RegExp(`\\b(?:${[...mints].join("|")})\\s*\\(`);
 
   assert.ok(act.body.search(pattern) < act.body.indexOf(".safeParse("));
+});
+
+test("a cycle-cut result is not cached as a complete import subgraph", () => {
+  const fixture = mkdtempSync(path.join(tmpdir(), "evry-auth-reachability-"));
+  const session = path.join(fixture, "session.ts");
+  const a = path.join(fixture, "a.ts");
+  const b = path.join(fixture, "b.ts");
+  const root = path.join(fixture, "root.ts");
+
+  try {
+    writeFileSync(
+      session,
+      "export async function verifySession() { return true; }\n"
+    );
+    writeFileSync(
+      a,
+      'import { fromB } from "./b";\nexport function fromA() { fromB(); }\n'
+    );
+    writeFileSync(
+      b,
+      'import { fromA } from "./a";\nimport { verifySession } from "./session";\nexport function fromB() { fromA(); verifySession(); }\n'
+    );
+    writeFileSync(
+      root,
+      'import { fromA } from "./a";\nexport function endpoint() { fromA(); }\n'
+    );
+
+    assert.deepEqual([...mintingExportsOf(a, new Set([b]))], []);
+    assert.deepEqual([...mintingExportsOf(root, new Set())], ["endpoint"]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test("a directive is a directive without its semicolon", () => {
