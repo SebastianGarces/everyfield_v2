@@ -176,9 +176,30 @@ export type EvryDetailedConfirmationArtifactDocument = z.infer<
   typeof evryDetailedConfirmationArtifactDocumentSchema
 >;
 
+export const EVRY_UNEXPECTED_ERROR_COPY =
+  "Evry couldn't complete this step. Try again later or contact support.";
+
+export const evryArtifactErrorSchema = z.discriminatedUnion("kind", [
+  z
+    .strictObject({
+      kind: z.literal("expected"),
+      message: z.string().trim().min(1).max(500),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("unexpected"),
+      correlationId: z.string().uuid(),
+    })
+    .readonly(),
+]);
+
+export type EvryArtifactError = z.infer<typeof evryArtifactErrorSchema>;
+
 export const EVRY_ARTIFACT_STEP_STATUSES = [
   "pending",
   "active",
+  "safe_retry",
   "completed",
   "refused",
   "failed",
@@ -202,6 +223,7 @@ export const evryDetailedProgressArtifactDocumentSchema = z
     plan: evryConversationPlanIdentitySchema,
     title: titleSchema,
     steps: z.array(progressStepSchema).min(1).max(32).readonly(),
+    error: evryArtifactErrorSchema.nullable().default(null),
   })
   .superRefine((artifact, context) => {
     const stepIds = artifact.steps.map(({ stepId }) => stepId);
@@ -219,32 +241,32 @@ export const evryDetailedProgressArtifactDocumentSchema = z
         message: "Evry progress may name only one active step",
       });
     }
+    const hasSafeRetry = artifact.steps.some(
+      ({ status }) => status === "safe_retry"
+    );
+    if (
+      hasSafeRetry &&
+      artifact.steps.some(({ status }) => status === "active")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps"],
+        message: "Evry progress cannot run and await a safe retry at once",
+      });
+    }
+    if (hasSafeRetry === (artifact.error === null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["error"],
+        message: "Evry safe-retry progress requires one public error",
+      });
+    }
   })
   .readonly();
 
 export type EvryDetailedProgressArtifactDocument = z.infer<
   typeof evryDetailedProgressArtifactDocumentSchema
 >;
-
-export const EVRY_UNEXPECTED_ERROR_COPY =
-  "Evry couldn't complete this step. Try again later or contact support.";
-
-export const evryArtifactErrorSchema = z.discriminatedUnion("kind", [
-  z
-    .strictObject({
-      kind: z.literal("expected"),
-      message: z.string().trim().min(1).max(500),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      kind: z.literal("unexpected"),
-      correlationId: z.string().uuid(),
-    })
-    .readonly(),
-]);
-
-export type EvryArtifactError = z.infer<typeof evryArtifactErrorSchema>;
 
 const retryStateSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("unavailable") }).readonly(),

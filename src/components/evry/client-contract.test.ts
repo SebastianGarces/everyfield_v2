@@ -9,6 +9,7 @@ import {
 import {
   parseEvryArtifactLifecycleResponse,
   parseEvryConversationEnvelope,
+  type PublicEvryConversation,
 } from "./client-contract";
 
 function envelope(artifact: unknown): unknown {
@@ -128,5 +129,18 @@ test("artifact lifecycle errors cannot expose unexpected detail", () => {
         detail: "provider response and database stack",
       },
     })
+  );
+});
+
+test("the browser accepts persisted safe-retry lifecycle responses", () => {
+  const input = envelope(EVRY_CONFIRMATION_FIXTURES.communication) as {
+    conversation: PublicEvryConversation;
+  };
+  assert.equal(
+    parseEvryArtifactLifecycleResponse({
+      status: "retryable",
+      conversation: input.conversation,
+    }).status,
+    "retryable"
   );
 });

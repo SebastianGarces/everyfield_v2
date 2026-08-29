@@ -67,12 +67,15 @@ export function ConversationSurface({ className }: { className?: string }) {
   } = useEvryShell();
   const endRef = useRef<HTMLDivElement>(null);
   const showSuggestions = shouldOfferEvrySuggestions(conversation);
-  const activeConfirmationArtifactId =
+  const activeArtifactId =
     conversation?.messages
       .flatMap((message) => message.artifacts)
       .findLast(
         ({ artifact }) =>
-          artifact.kind === "confirmation" &&
+          (artifact.kind === "confirmation" ||
+            (artifact.kind === "progress" &&
+              "artifactVersion" in artifact &&
+              artifact.steps.some(({ status }) => status === "safe_retry"))) &&
           "artifactVersion" in artifact &&
           conversation.activePlan?.identity.planId === artifact.plan.planId &&
           conversation.activePlan.identity.fingerprint ===
@@ -156,7 +159,7 @@ export function ConversationSurface({ className }: { className?: string }) {
                         artifact={artifact}
                         activePlan={conversation.activePlan}
                         conversationId={conversation.id}
-                        interactive={id === activeConfirmationArtifactId}
+                        interactive={id === activeArtifactId}
                         onConversation={replaceConversation}
                         onEdit={(confirmation) => {
                           setDraft("Revise this plan: " + confirmation.title);

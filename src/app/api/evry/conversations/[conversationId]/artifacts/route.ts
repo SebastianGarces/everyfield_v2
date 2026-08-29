@@ -8,7 +8,10 @@ import {
   type EvryArtifactLifecycleResult,
   type EvryArtifactLifecycleRequest,
 } from "@/lib/evry/artifacts/lifecycle";
-import { trustedEvryPlanReview } from "@/lib/evry/artifacts/trusted-plan-review";
+import {
+  createEvryArtifactReviewRegistry,
+  trustedEvryPlanReview,
+} from "@/lib/evry/artifacts/trusted-plan-review";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {
   appendTrustedEvryConversationMessage,
@@ -121,6 +124,7 @@ export function createEvryArtifactLifecyclePost({
 // Until then a persisted plan cannot become confirmable or executable.
 const productionPlanRegistry = createEvryPlanCapabilityRegistry([]);
 const productionExecutionRegistry = createEvryExecutionCapabilityRegistry([]);
+const productionReviewRegistry = createEvryArtifactReviewRegistry([]);
 
 const runProductionLifecycle = createEvryArtifactLifecycle({
   planRegistry: productionPlanRegistry,
@@ -131,7 +135,11 @@ const runProductionLifecycle = createEvryArtifactLifecycle({
   confirm: confirmEvryActionPlan,
   execute: executeEvryActionPlan,
   cancel: cancelExactEvryActionPlan,
-  reviewPlan: trustedEvryPlanReview,
+  reviewPlan: (input) =>
+    trustedEvryPlanReview({
+      ...input,
+      reviewRegistry: productionReviewRegistry,
+    }),
   now: () => new Date(),
 });
 

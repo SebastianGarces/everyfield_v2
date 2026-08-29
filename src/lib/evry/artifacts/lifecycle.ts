@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { z } from "zod";
 
@@ -6,6 +7,7 @@ import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
 import type {
   ExecuteEvryActionPlanResult,
   EvryExecutionCapabilityRegistry,
+  EvryExecutionStepResult,
 } from "@/lib/evry/executor";
 import type { EvryPlanCapabilityRegistry } from "@/lib/evry/plans";
 import type { ConfirmEvryActionPlanResult } from "@/lib/evry/plans/repository";
@@ -39,7 +41,7 @@ import {
 
 export const evryArtifactLifecycleRequestSchema = z
   .strictObject({
-    action: z.enum(["cancel", "edit", "execute"]),
+    action: z.enum(["cancel", "edit", "execute", "retry"]),
     requestKey: z.string().uuid(),
     plan: evryConversationPlanIdentitySchema,
   })
@@ -76,15 +78,7 @@ type ResumeConversation = typeof resumeEvryConversation;
 type AppendMessage = typeof appendTrustedEvryConversationMessage;
 
 export type EvryTrustedPlanReview = Readonly<{
-  confirmation: Readonly<{ title: string; actionLabel: string }> | null;
-  steps: readonly Readonly<{
-    stepId: string;
-    disclosure: Readonly<{
-      title: string;
-      items: readonly Readonly<{ label: string; value: string }>[];
-      consequences: readonly string[];
-    }> | null;
-  }>[];
+  confirmation: EvryDetailedConfirmationArtifactDocument;
 }>;
 
 export type EvryArtifactLifecycleBoundaries = Readonly<{
@@ -107,7 +101,12 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
 
 export type EvryArtifactLifecycleResult =
   | Readonly<{
-      status: "cancelled" | "editing" | "executed" | "already_finished";
+      status:
+        | "cancelled"
+        | "editing"
+        | "executed"
+        | "retryable"
+        | "already_finished";
       resumed: EvryResumedConversation;
     }>
   | Readonly<{
@@ -222,47 +221,11 @@ function hasRequestKey(
   return messages.some((message) => message.requestKey === requestKey);
 }
 
-function confirmationMatchesTrustedPlan(
+export function confirmationMatchesTrustedPlan(
   confirmation: EvryDetailedConfirmationArtifactDocument,
   review: EvryTrustedPlanReview
 ): boolean {
-  if (
-    confirmation.steps.length !== review.steps.length ||
-    !confirmation.steps.every(
-      (step, index) => step.stepId === review.steps[index]?.stepId
-    )
-  ) {
-    return false;
-  }
-  if (
-    review.confirmation &&
-    (confirmation.title !== review.confirmation.title ||
-      confirmation.actionLabel !== review.confirmation.actionLabel)
-  ) {
-    return false;
-  }
-  for (const [index, trustedStep] of review.steps.entries()) {
-    if (!trustedStep.disclosure) continue;
-    const displayed = confirmation.steps[index];
-    if (!displayed || displayed.title !== trustedStep.disclosure.title) {
-      return false;
-    }
-    if (
-      trustedStep.disclosure.items.some(
-        (item) =>
-          !displayed.resolvedTargets.some(
-            (target) =>
-              target.label === item.label && target.value === item.value
-          )
-      ) ||
-      trustedStep.disclosure.consequences.some(
-        (consequence) => !confirmation.consequences.includes(consequence)
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return isDeepStrictEqual(confirmation, review.confirmation);
 }
 
 export function pendingEvryProgress(
@@ -273,6 +236,7 @@ export function pendingEvryProgress(
     artifactVersion: 1,
     plan: confirmation.plan,
     title: `Running: ${confirmation.title}`,
+    error: null,
     steps: confirmation.steps.map((step, index) => ({
       stepId: step.stepId,
       label: step.title,
@@ -319,19 +283,32 @@ function publicStepError(status: "failed" | "refused") {
 export function receiptFromEvryExecution(input: {
   confirmation: EvryDetailedConfirmationArtifactDocument;
   result: ExecuteEvryActionPlanResult;
-  fallbackCorrelationId: string;
 }): EvryDetailedReceiptArtifactDocument {
+  if (
+    input.result.status === "retryable" ||
+    input.result.steps.some(
+      ({ durable, status }) => !durable || status === "retryable"
+    )
+  ) {
+    throw new Error("Retryable Evry execution is not a terminal receipt");
+  }
   const byStep = new Map(
     input.result.steps.map((step) => [step.stepId, step] as const)
   );
   const unavailable =
     input.result.status === "unavailable" || input.result.status === "expired";
-  const correlationId =
-    "correlationId" in input.result
-      ? input.result.correlationId
-      : input.fallbackCorrelationId;
+  if (
+    !unavailable &&
+    (byStep.size !== input.confirmation.steps.length ||
+      input.confirmation.steps.some(({ stepId }) => !byStep.has(stepId)))
+  ) {
+    throw new Error("Evry execution result does not match reviewed plan steps");
+  }
   const steps = input.confirmation.steps.map((confirmationStep) => {
     const outcome = byStep.get(confirmationStep.stepId);
+    if (!outcome && !unavailable) {
+      throw new Error("Evry execution omitted a reviewed plan step");
+    }
     const common = {
       stepId: confirmationStep.stepId,
       label: confirmationStep.title,
@@ -370,24 +347,6 @@ export function receiptFromEvryExecution(input: {
         error: null,
       };
     }
-    if (outcome?.status === "retryable") {
-      return {
-        ...common,
-        status: "failed" as const,
-        resultCode: evryConversationResultCodeFor("failed"),
-        affectedCount: outcome.affectedCount,
-        excludedCount: outcome.excludedCount,
-        retry: {
-          status: "safe_retry" as const,
-          label: "A fresh request may safely retry this step",
-        },
-        error: {
-          kind: "expected" as const,
-          message:
-            "This step did not return a durable outcome. Review the receipt before requesting a retry.",
-        },
-      };
-    }
     if (outcome?.status === "failed" || unavailable) {
       return {
         ...common,
@@ -404,15 +363,7 @@ export function receiptFromEvryExecution(input: {
           : publicStepError("failed"),
       };
     }
-    return {
-      ...common,
-      status: "failed" as const,
-      resultCode: evryConversationResultCodeFor("failed"),
-      affectedCount: 0,
-      excludedCount: 0,
-      retry: { status: "unavailable" as const },
-      error: { kind: "unexpected" as const, correlationId },
-    };
+    throw new Error("Evry execution returned a nonterminal step outcome");
   });
   return buildEvryReceiptArtifact({
     kind: "result",
@@ -424,27 +375,94 @@ export function receiptFromEvryExecution(input: {
   });
 }
 
-export function unexpectedEvryReceipt(input: {
+const SAFE_RETRY_MESSAGE =
+  "Evry could not confirm a durable result for every step. Retry this exact plan to reconcile it safely.";
+
+function retryableStepStatus(
+  outcome: EvryExecutionStepResult | undefined
+): EvryDetailedProgressArtifactDocument["steps"][number]["status"] {
+  return outcome?.durable &&
+    (outcome.status === "completed" ||
+      outcome.status === "refused" ||
+      outcome.status === "failed" ||
+      outcome.status === "skipped")
+    ? outcome.status
+    : "safe_retry";
+}
+
+/** Preserve durable outcomes while keeping response-loss recovery nonterminal. */
+export function progressFromRetryableEvryExecution(input: {
   confirmation: EvryDetailedConfirmationArtifactDocument;
-  correlationId: string;
-}): EvryDetailedReceiptArtifactDocument {
-  return buildEvryReceiptArtifact({
-    kind: "result",
+  result: Readonly<{
+    status: "retryable";
+    steps: readonly EvryExecutionStepResult[];
+  }>;
+}): EvryDetailedProgressArtifactDocument {
+  const byStep = new Map(
+    input.result.steps.map((step) => [step.stepId, step] as const)
+  );
+  return buildEvryProgressArtifact({
+    kind: "progress",
     artifactVersion: 1,
     plan: input.confirmation.plan,
-    title: `Receipt: ${input.confirmation.title}`,
-    status: "failed",
-    steps: input.confirmation.steps.map((step) => ({
-      stepId: step.stepId,
-      label: step.title,
-      status: "failed",
-      resultCode: evryConversationResultCodeFor("failed"),
-      affectedCount: 0,
-      excludedCount: 0,
-      sourceLinks: sourceLinksFor(step),
-      retry: { status: "unavailable" },
-      error: { kind: "unexpected", correlationId: input.correlationId },
+    title: `Safe retry available: ${input.confirmation.title}`,
+    error: { kind: "expected", message: SAFE_RETRY_MESSAGE },
+    steps: input.confirmation.steps.map((step) => {
+      const outcome = byStep.get(step.stepId);
+      return {
+        stepId: step.stepId,
+        label: step.title,
+        status: retryableStepStatus(outcome),
+        affectedCount: outcome?.durable ? outcome.affectedCount : 0,
+        excludedCount: outcome?.durable ? outcome.excludedCount : 0,
+      };
+    }),
+  });
+}
+
+function uncertainEvryProgress(input: {
+  confirmation: EvryDetailedConfirmationArtifactDocument;
+  progress: EvryDetailedProgressArtifactDocument;
+  correlationId: string;
+}): EvryDetailedProgressArtifactDocument {
+  return buildEvryProgressArtifact({
+    kind: "progress",
+    artifactVersion: 1,
+    plan: input.confirmation.plan,
+    title: `Safe retry available: ${input.confirmation.title}`,
+    error: { kind: "unexpected", correlationId: input.correlationId },
+    steps: input.progress.steps.map((step) => ({
+      ...step,
+      status:
+        step.status === "completed" ||
+        step.status === "refused" ||
+        step.status === "failed" ||
+        step.status === "skipped"
+          ? step.status
+          : "safe_retry",
     })),
+  });
+}
+
+function retryRunningProgress(input: {
+  confirmation: EvryDetailedConfirmationArtifactDocument;
+  progress: EvryDetailedProgressArtifactDocument;
+}): EvryDetailedProgressArtifactDocument {
+  let activated = false;
+  return buildEvryProgressArtifact({
+    kind: "progress",
+    artifactVersion: 1,
+    plan: input.confirmation.plan,
+    title: `Retrying: ${input.confirmation.title}`,
+    error: null,
+    steps: input.progress.steps.map((step) => {
+      if (step.status !== "safe_retry") return step;
+      if (!activated) {
+        activated = true;
+        return { ...step, status: "active" as const };
+      }
+      return { ...step, status: "pending" as const };
+    }),
   });
 }
 
@@ -518,8 +536,8 @@ export function createEvryArtifactLifecycle(
       return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
 
     const completionPurpose =
-      input.request.action === "execute"
-        ? "execute-receipt"
+      input.request.action === "execute" || input.request.action === "retry"
+        ? `${input.request.action}-receipt`
         : `${input.request.action}-complete`;
     const completionKey = lifecycleRequestKey(
       input.request.requestKey,
@@ -528,7 +546,7 @@ export function createEvryArtifactLifecycle(
     if (hasRequestKey(resumed.conversation.messages, completionKey)) {
       return {
         status:
-          input.request.action === "execute"
+          input.request.action === "execute" || input.request.action === "retry"
             ? "already_finished"
             : input.request.action === "edit"
               ? "editing"
@@ -621,11 +639,33 @@ export function createEvryArtifactLifecycle(
     ) {
       return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
     }
+
+    const progressPurpose =
+      input.request.action === "retry" ? "retry-progress" : "execute-progress";
+    const sameOperationAlreadyStarted = hasRequestKey(
+      resumed.conversation.messages,
+      lifecycleRequestKey(input.request.requestKey, progressPurpose)
+    );
+    const safeRetryAvailable =
+      progress?.steps.some(({ status }) => status === "safe_retry") ?? false;
+
+    if (
+      (input.request.action === "execute" &&
+        progress !== null &&
+        !sameOperationAlreadyStarted) ||
+      (input.request.action === "retry" &&
+        (progress === null ||
+          (!sameOperationAlreadyStarted && !safeRetryAvailable)))
+    ) {
+      return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+    }
+
     if (!progress) {
       if (
-        revalidated.status !== "awaiting_confirmation" &&
-        revalidated.status !== "approved" &&
-        revalidated.status !== "executing"
+        input.request.action !== "execute" ||
+        (revalidated.status !== "awaiting_confirmation" &&
+          revalidated.status !== "approved" &&
+          revalidated.status !== "executing")
       ) {
         return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
       }
@@ -650,35 +690,120 @@ export function createEvryArtifactLifecycle(
         actor: input.actor,
         conversation: resumed.conversation,
         originalRequestKey: input.request.requestKey,
-        purpose: "execute-progress",
+        purpose: progressPurpose,
         body: "Execution started for the exact plan you confirmed.",
         artifact: progress,
         clearPlan: false,
         now,
       });
       resumed = { ...resumed, conversation: progressConversation };
+    } else if (
+      input.request.action === "retry" &&
+      !sameOperationAlreadyStarted
+    ) {
+      if (
+        revalidated.status !== "approved" &&
+        revalidated.status !== "executing"
+      ) {
+        return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+      }
+      progress = retryRunningProgress({ confirmation, progress });
+      const progressConversation = await appendLifecycleMessage({
+        boundaries,
+        actor: input.actor,
+        conversation: resumed.conversation,
+        originalRequestKey: input.request.requestKey,
+        purpose: progressPurpose,
+        body: "Safe retry started for the same exact plan and effect keys.",
+        artifact: progress,
+        clearPlan: false,
+        now,
+      });
+      resumed = { ...resumed, conversation: progressConversation };
+    } else if (
+      revalidated.status !== "approved" &&
+      revalidated.status !== "executing"
+    ) {
+      return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
     }
 
-    let executionReceipt: EvryDetailedReceiptArtifactDocument;
+    let execution: ExecuteEvryActionPlanResult;
     try {
-      const execution = await boundaries.execute({
+      execution = await boundaries.execute({
         actor: input.actor,
         planId: input.request.plan.planId,
         fingerprint: input.request.plan.fingerprint,
         registry: boundaries.executionRegistry,
       });
-      executionReceipt = receiptFromEvryExecution({
-        confirmation,
-        result: execution,
-        fallbackCorrelationId: (boundaries.correlationId ?? randomUUID)(),
-      });
     } catch {
-      executionReceipt = unexpectedEvryReceipt({
+      const retryableProgress = uncertainEvryProgress({
         confirmation,
+        progress,
         correlationId: (boundaries.correlationId ?? randomUUID)(),
       });
+      await appendLifecycleMessage({
+        boundaries,
+        actor: input.actor,
+        conversation: resumed.conversation,
+        originalRequestKey: input.request.requestKey,
+        purpose: `${input.request.action}-retryable`,
+        body: "Evry could not confirm a durable outcome. Only a safe retry of this exact plan is available.",
+        artifact: retryableProgress,
+        clearPlan: false,
+        now,
+      });
+      resumed = await resumeRequired({
+        boundaries,
+        actor: input.actor,
+        conversationId: input.conversationId,
+        now,
+      });
+      if (!resumed) {
+        return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+      }
+      return { status: "retryable", resumed };
     }
 
+    if (
+      execution.status === "retryable" ||
+      execution.steps.some(
+        ({ durable, status }) => !durable || status === "retryable"
+      )
+    ) {
+      const retryableProgress = progressFromRetryableEvryExecution({
+        confirmation,
+        result: {
+          status: "retryable",
+          steps: execution.steps,
+        },
+      });
+      await appendLifecycleMessage({
+        boundaries,
+        actor: input.actor,
+        conversation: resumed.conversation,
+        originalRequestKey: input.request.requestKey,
+        purpose: `${input.request.action}-retryable`,
+        body: "Evry preserved every durable outcome. Retry this exact plan to reconcile the remaining steps safely.",
+        artifact: retryableProgress,
+        clearPlan: false,
+        now,
+      });
+      resumed = await resumeRequired({
+        boundaries,
+        actor: input.actor,
+        conversationId: input.conversationId,
+        now,
+      });
+      if (!resumed) {
+        return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+      }
+      return { status: "retryable", resumed };
+    }
+
+    const executionReceipt = receiptFromEvryExecution({
+      confirmation,
+      result: execution,
+    });
     await appendLifecycleMessage({
       boundaries,
       actor: input.actor,

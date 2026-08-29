@@ -29,10 +29,11 @@ import type {
 import { EVRY_CONFIRMATION_FIXTURES } from "./fixtures";
 import {
   createEvryArtifactLifecycle,
-  receiptFromEvryExecution,
-  unexpectedEvryReceipt,
+  confirmationMatchesTrustedPlan,
+  progressFromRetryableEvryExecution,
   type EvryArtifactLifecycleBoundaries,
 } from "./lifecycle";
+import { buildEvryConfirmationArtifact } from "./review";
 
 const ACTOR = {
   userId: "user-1",
@@ -125,9 +126,8 @@ function harness() {
     })),
   };
   let executeError: unknown = null;
-  let trustedStepIds = EVRY_CONFIRMATION_FIXTURES.meeting.steps.map(
-    ({ stepId }) => stepId
-  );
+  let executeOverride: EvryArtifactLifecycleBoundaries["execute"] | null = null;
+  let trustedConfirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
 
   const resume = (async () => {
     const activePlan = conversation.activePlan
@@ -209,6 +209,7 @@ function harness() {
         EVRY_CONFIRMATION_FIXTURES.meeting.plan.fingerprint
       );
       planStatus = "executing";
+      if (executeOverride) return executeOverride(input);
       if (executeError) throw executeError;
       return executeResult;
     },
@@ -231,13 +232,7 @@ function harness() {
       calls.push("review");
       assert.equal(input.actor, ACTOR);
       assert.deepEqual(input.plan, EVRY_CONFIRMATION_FIXTURES.meeting.plan);
-      return {
-        confirmation: null,
-        steps: trustedStepIds.map((stepId) => ({
-          stepId,
-          disclosure: null,
-        })),
-      };
+      return { confirmation: trustedConfirmation };
     },
     now: () => NOW,
     correlationId: () => "80000000-0000-4000-8000-000000000001",
@@ -249,6 +244,21 @@ function harness() {
     setConversation(next: EvryStoredConversation) {
       conversation = next;
     },
+    setDisplayedConfirmation(
+      confirmation: typeof EVRY_CONFIRMATION_FIXTURES.meeting
+    ) {
+      conversation = {
+        ...conversation,
+        messages: conversation.messages.map((storedMessage, index) =>
+          index === 0
+            ? {
+                ...storedMessage,
+                artifacts: [storedArtifact(confirmation)],
+              }
+            : storedMessage
+        ),
+      };
+    },
     setExecuteResult(
       next: Awaited<ReturnType<EvryArtifactLifecycleBoundaries["execute"]>>
     ) {
@@ -257,19 +267,36 @@ function harness() {
     setExecuteError(error: unknown) {
       executeError = error;
     },
+    setExecuteOverride(override: EvryArtifactLifecycleBoundaries["execute"]) {
+      executeOverride = override;
+    },
     setTrustedStepIds(stepIds: readonly string[]) {
-      trustedStepIds = [...stepIds];
+      trustedConfirmation = {
+        ...trustedConfirmation,
+        steps: trustedConfirmation.steps.map((step, index) => ({
+          ...step,
+          stepId: stepIds[index] ?? step.stepId,
+        })),
+      };
+    },
+    setTrustedConfirmation(
+      confirmation: typeof EVRY_CONFIRMATION_FIXTURES.meeting
+    ) {
+      trustedConfirmation = confirmation;
     },
   };
 }
 
-function request(action: "cancel" | "edit" | "execute") {
+function request(
+  action: "cancel" | "edit" | "execute" | "retry",
+  requestKey = REQUEST_KEY
+) {
   return {
     actor: ACTOR,
     conversationId: CONVERSATION_ID,
     request: {
       action,
-      requestKey: REQUEST_KEY,
+      requestKey,
       plan: evryConversationPlanIdentitySchema.parse(
         EVRY_CONFIRMATION_FIXTURES.meeting.plan
       ),
@@ -366,7 +393,78 @@ test("a confirmation whose step lineage differs from the trusted plan cannot con
   assert.deepEqual(fake.calls, ["review"]);
 });
 
-test("partial execution preserves all disclosed statuses and safe-retry state", () => {
+test("complete trusted matching rejects destructive downgrades and added disclosure", () => {
+  const destructive = EVRY_CONFIRMATION_FIXTURES.destructiveAction;
+  const downgraded = buildEvryConfirmationArtifact({
+    ...destructive,
+    steps: destructive.steps.map((step) => ({
+      ...step,
+      effectKind: "other" as const,
+      reversibility: "reversible" as const,
+      beforeAfter: [],
+    })),
+  });
+  assert.equal(
+    confirmationMatchesTrustedPlan(downgraded, {
+      confirmation: destructive,
+    }),
+    false
+  );
+
+  const expanded = buildEvryConfirmationArtifact({
+    ...destructive,
+    consequences: [...destructive.consequences, "Also removes another task."],
+    steps: destructive.steps.map((step) => ({
+      ...step,
+      resolvedTargets: [
+        ...step.resolvedTargets,
+        { label: "Task", value: "Undisclosed second task", sourceLink: null },
+      ],
+    })),
+  });
+  assert.equal(
+    confirmationMatchesTrustedPlan(expanded, { confirmation: destructive }),
+    false
+  );
+});
+
+test("schema-valid rich disclosure changes fail closed before confirmation", async () => {
+  const fake = harness();
+  const meeting = EVRY_CONFIRMATION_FIXTURES.meeting;
+  const altered = buildEvryConfirmationArtifact({
+    ...meeting,
+    consequences: [...meeting.consequences, "Also changes another record."],
+    steps: meeting.steps.map((step) =>
+      step.stepId === "send-invitations"
+        ? {
+            ...step,
+            effectKind: "other" as const,
+            reversibility: "reversible" as const,
+            resolvedTargets: [
+              ...step.resolvedTargets,
+              {
+                label: "Recipient",
+                value: "Undisclosed recipient",
+                sourceLink: null,
+              },
+            ],
+            contentPreviews: [],
+            beforeAfter: [],
+          }
+        : step
+    ),
+  });
+  fake.setDisplayedConfirmation(altered);
+
+  const result = await createEvryArtifactLifecycle(fake.boundaries)(
+    request("execute")
+  );
+
+  assert.equal(result.status, "unavailable");
+  assert.deepEqual(fake.calls, ["review"]);
+});
+
+test("retryable execution preserves durable statuses in nonterminal progress", () => {
   const confirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
   const statuses = [
     "completed",
@@ -375,12 +473,10 @@ test("partial execution preserves all disclosed statuses and safe-retry state", 
     "skipped",
     "retryable",
   ] as const;
-  const receipt = receiptFromEvryExecution({
+  const progress = progressFromRetryableEvryExecution({
     confirmation,
-    fallbackCorrelationId: "a0000000-0000-4000-8000-000000000001",
     result: {
-      status: "partially_failed",
-      correlationId: "a0000000-0000-4000-8000-000000000002",
+      status: "retryable",
       steps: confirmation.steps.map((step, index) => ({
         stepId: step.stepId,
         capabilityIdentity: "fixture.effect",
@@ -393,43 +489,99 @@ test("partial execution preserves all disclosed statuses and safe-retry state", 
   });
 
   assert.deepEqual(
-    receipt.steps.map(({ status }) => status),
-    ["completed", "refused", "failed", "skipped", "failed"]
+    progress.steps.map(({ status }) => status),
+    ["completed", "refused", "failed", "skipped", "safe_retry"]
   );
-  assert.equal(receipt.steps.at(-1)?.retry.status, "safe_retry");
-  assert.equal(receipt.status, "partially_failed");
+  assert.equal(progress.error?.kind, "expected");
 });
 
-test("unexpected execution errors persist only fixed copy identity, never internals", async () => {
+test("unexpected execution errors remain retryable and persist only server correlation identity", async () => {
   const fake = harness();
   fake.setExecuteError(new Error("provider secret database stack"));
   const result = await createEvryArtifactLifecycle(fake.boundaries)(
     request("execute")
   );
-  assert.equal(result.status, "executed");
-  const receipt = fake
+  assert.equal(result.status, "retryable");
+  const progress = fake
     .conversation()
     .messages.flatMap(({ artifacts }) => artifacts)
     .map(({ document }) => document)
     .findLast(
-      (document) => document.kind === "result" && "artifactVersion" in document
+      (document) =>
+        document.kind === "progress" && "artifactVersion" in document
     );
   assert.ok(
-    receipt && receipt.kind === "result" && "artifactVersion" in receipt
+    progress && progress.kind === "progress" && "artifactVersion" in progress
   );
-  const serialized = JSON.stringify(receipt);
+  const serialized = JSON.stringify(progress);
   assert.match(serialized, /80000000-0000-4000-8000-000000000001/);
   assert.doesNotMatch(serialized, /provider secret|database|stack/);
+  assert.equal(fake.conversation().activePlan?.planId, progress.plan.planId);
+  assert.equal(
+    progress.steps.some(({ status }) => status === "safe_retry"),
+    true
+  );
 });
 
-test("unexpected receipt construction is exact-plan and exact-lineage", () => {
-  const receipt = unexpectedEvryReceipt({
-    confirmation: EVRY_CONFIRMATION_FIXTURES.communication,
-    correlationId: "b0000000-0000-4000-8000-000000000001",
+test("commit-then-response-loss resumes the same plan without a second effect", async () => {
+  const fake = harness();
+  const committedEffectKeys = new Set<string>();
+  let adapterCalls = 0;
+  fake.setExecuteOverride(async (input) => {
+    const effectKey = `${input.planId}:${input.fingerprint}:create-meeting`;
+    adapterCalls++;
+    if (!committedEffectKeys.has(effectKey)) {
+      committedEffectKeys.add(effectKey);
+      return {
+        status: "retryable",
+        correlationId: "a0000000-0000-4000-8000-000000000003",
+        steps: EVRY_CONFIRMATION_FIXTURES.meeting.steps.map((step) => ({
+          stepId: step.stepId,
+          capabilityIdentity: "fixture.effect",
+          status: "retryable" as const,
+          durable: false,
+          affectedCount: 0,
+          excludedCount: 0,
+        })),
+      };
+    }
+    return {
+      status: "completed",
+      correlationId: "a0000000-0000-4000-8000-000000000003",
+      steps: EVRY_CONFIRMATION_FIXTURES.meeting.steps.map((step) => ({
+        stepId: step.stepId,
+        capabilityIdentity: "fixture.effect",
+        status: "completed" as const,
+        durable: true,
+        affectedCount: 1,
+        excludedCount: 0,
+      })),
+    };
   });
-  assert.deepEqual(
-    receipt.steps.map(({ stepId }) => stepId),
-    EVRY_CONFIRMATION_FIXTURES.communication.steps.map(({ stepId }) => stepId)
+  const run = createEvryArtifactLifecycle(fake.boundaries);
+
+  const uncertain = await run(request("execute"));
+  assert.equal(uncertain.status, "retryable");
+  assert.equal(fake.conversation().activePlan !== null, true);
+  assert.equal(
+    fake
+      .conversation()
+      .messages.flatMap(({ artifacts }) => artifacts)
+      .some(({ document }) => document.kind === "result"),
+    false
   );
-  assert.deepEqual(receipt.plan, EVRY_CONFIRMATION_FIXTURES.communication.plan);
+
+  const ordinarySecondExecution = await run(
+    request("execute", "20000000-0000-4000-8000-000000000002")
+  );
+  assert.equal(ordinarySecondExecution.status, "unavailable");
+  assert.equal(adapterCalls, 1);
+
+  const recovered = await run(
+    request("retry", "20000000-0000-4000-8000-000000000003")
+  );
+  assert.equal(recovered.status, "executed");
+  assert.equal(adapterCalls, 2);
+  assert.equal(committedEffectKeys.size, 1);
+  assert.equal(fake.conversation().activePlan, null);
 });

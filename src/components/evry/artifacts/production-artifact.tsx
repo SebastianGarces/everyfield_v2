@@ -3,48 +3,52 @@
 import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useRef, useState } from "react";
 
-import {
-  parseEvryArtifactLifecycleResponse,
-  type PublicEvryConversation,
-} from "@/components/evry/client-contract";
+import type { PublicEvryConversation } from "@/components/evry/client-contract";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   buildEvryProgressArtifact,
-  buildEvryReceiptArtifact,
   EVRY_UNEXPECTED_ERROR_COPY,
   type EvryArtifactError,
   type EvryDetailedConfirmationArtifactDocument,
   type EvryDetailedProgressArtifactDocument,
-  type EvryDetailedReceiptArtifactDocument,
 } from "@/lib/evry/artifacts/review";
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
-import { evryConversationResultCodeFor } from "@/lib/evry/conversations/contract";
 
 import {
   EvryArtifactRenderer,
   renderableEvryArtifact,
 } from "./artifact-renderer";
+import {
+  coordinateEvryProductionArtifactRequest,
+  type EvryProductionArtifactAction,
+} from "./production-request";
 
 type ActivePlan = NonNullable<PublicEvryConversation["activePlan"]>;
+type Action = EvryProductionArtifactAction;
+type LocalError = EvryArtifactError | Readonly<{ kind: "uncertain" }>;
 
 type LocalState =
   | Readonly<{ status: "idle" }>
-  | Readonly<{ status: "submitting"; action: "cancel" | "edit" }>
+  | Readonly<{ status: "submitting"; action: "cancel" | "edit" | "retry" }>
   | Readonly<{
       status: "progress";
       progress: EvryDetailedProgressArtifactDocument;
     }>
-  | Readonly<{
-      status: "receipt";
-      receipt: EvryDetailedReceiptArtifactDocument;
-    }>
-  | Readonly<{ status: "complete"; action: "cancel" | "edit" | "execute" }>
-  | Readonly<{ status: "error"; error: EvryArtifactError }>;
+  | Readonly<{ status: "complete"; action: Action }>
+  | Readonly<{ status: "error"; error: LocalError }>;
 
 function detailedConfirmation(
   artifact: EvryPublicArtifact
 ): EvryDetailedConfirmationArtifactDocument | null {
   return artifact.kind === "confirmation" && "artifactVersion" in artifact
+    ? artifact
+    : null;
+}
+
+function detailedProgress(
+  artifact: EvryPublicArtifact
+): EvryDetailedProgressArtifactDocument | null {
+  return artifact.kind === "progress" && "artifactVersion" in artifact
     ? artifact
     : null;
 }
@@ -57,38 +61,13 @@ function pendingProgress(
     artifactVersion: 1,
     plan: confirmation.plan,
     title: "Running: " + confirmation.title,
+    error: null,
     steps: confirmation.steps.map((step, index) => ({
       stepId: step.stepId,
       label: step.title,
       status: index === 0 ? "active" : "pending",
       affectedCount: 0,
       excludedCount: 0,
-    })),
-  });
-}
-
-function failedReceipt(
-  confirmation: EvryDetailedConfirmationArtifactDocument,
-  error: EvryArtifactError
-): EvryDetailedReceiptArtifactDocument {
-  return buildEvryReceiptArtifact({
-    kind: "result",
-    artifactVersion: 1,
-    plan: confirmation.plan,
-    title: "Receipt: " + confirmation.title,
-    status: "failed",
-    steps: confirmation.steps.map((step) => ({
-      stepId: step.stepId,
-      label: step.title,
-      status: "failed",
-      resultCode: evryConversationResultCodeFor("failed"),
-      affectedCount: 0,
-      excludedCount: 0,
-      sourceLinks: step.resolvedTargets.flatMap(({ sourceLink }) =>
-        sourceLink ? [sourceLink] : []
-      ),
-      retry: { status: "unavailable" },
-      error,
     })),
   });
 }
@@ -105,15 +84,29 @@ function sameActivePlan(
   );
 }
 
+function sameActiveProgress(
+  progress: EvryDetailedProgressArtifactDocument,
+  activePlan: ActivePlan | null
+): boolean {
+  return (
+    (activePlan?.status === "approved" || activePlan?.status === "executing") &&
+    activePlan.identity.planId === progress.plan.planId &&
+    activePlan.identity.fingerprint === progress.plan.fingerprint &&
+    progress.steps.some(({ status }) => status === "safe_retry")
+  );
+}
+
 function ActionNotice({ state }: { state: LocalState }) {
   if (state.status === "submitting") {
     return (
       <Alert role="status" aria-live="polite">
         <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" />
         <AlertTitle>
-          {state.action === "edit"
-            ? "Invalidating this confirmation…"
-            : "Cancelling this plan…"}
+          {state.action === "retry"
+            ? "Retrying this exact plan…"
+            : state.action === "edit"
+              ? "Invalidating this confirmation…"
+              : "Cancelling this plan…"}
         </AlertTitle>
         <AlertDescription>
           No execution control is available while this request is being saved.
@@ -122,7 +115,7 @@ function ActionNotice({ state }: { state: LocalState }) {
     );
   }
   if (state.status === "complete") {
-    if (state.action === "execute") return null;
+    if (state.action === "execute" || state.action === "retry") return null;
     return (
       <Alert role="status" aria-live="polite">
         <AlertCircle aria-hidden="true" />
@@ -152,7 +145,9 @@ function ActionNotice({ state }: { state: LocalState }) {
           <p>
             {state.error.kind === "expected"
               ? state.error.message
-              : EVRY_UNEXPECTED_ERROR_COPY}
+              : state.error.kind === "unexpected"
+                ? EVRY_UNEXPECTED_ERROR_COPY
+                : "Evry couldn't confirm the outcome. Reopen this conversation before trying anything else."}
           </p>
           {state.error.kind === "unexpected" ? (
             <p>
@@ -183,67 +178,45 @@ export function EvryProductionArtifact({
   onEdit(confirmation: EvryDetailedConfirmationArtifactDocument): void;
 }) {
   const confirmation = detailedConfirmation(artifact);
+  const progress = detailedProgress(artifact);
   const [state, setState] = useState<LocalState>({ status: "idle" });
   const actionStarted = useRef(false);
   const canControl =
     interactive &&
     state.status === "idle" &&
-    confirmation !== null &&
-    sameActivePlan(confirmation, activePlan);
+    ((confirmation !== null && sameActivePlan(confirmation, activePlan)) ||
+      (progress !== null && sameActiveProgress(progress, activePlan)));
 
-  async function run(action: "cancel" | "edit" | "execute") {
-    if (!confirmation || actionStarted.current || !canControl) return;
-    actionStarted.current = true;
-    setState(
-      action === "execute"
-        ? { status: "progress", progress: pendingProgress(confirmation) }
-        : { status: "submitting", action }
-    );
-    try {
-      const response = await fetch(
-        "/api/evry/conversations/" +
-          encodeURIComponent(conversationId) +
-          "/artifacts",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            action,
-            requestKey: crypto.randomUUID(),
-            plan: confirmation.plan,
-          }),
-        }
-      );
-      const body: unknown = await response.json();
-      const result = parseEvryArtifactLifecycleResponse(body);
-      if ("conversation" in result) {
-        onConversation(result.conversation);
-        setState({ status: "complete", action });
-        if (action === "edit") onEdit(confirmation);
-        return;
-      }
-      if (action === "execute") {
-        setState({
-          status: "receipt",
-          receipt: failedReceipt(confirmation, result.error),
-        });
-      } else {
-        setState({ status: "error", error: result.error });
-      }
-    } catch {
-      const error = {
-        kind: "unexpected" as const,
-        correlationId: crypto.randomUUID(),
-      };
-      if (action === "execute") {
-        setState({
-          status: "receipt",
-          receipt: failedReceipt(confirmation, error),
-        });
-      } else {
-        setState({ status: "error", error });
-      }
+  async function run(action: Action) {
+    const plan = confirmation?.plan ?? progress?.plan;
+    if (
+      !plan ||
+      actionStarted.current ||
+      !canControl ||
+      (action === "retry" ? !progress : !confirmation)
+    ) {
+      return;
     }
+    actionStarted.current = true;
+    if (action === "execute" && confirmation) {
+      setState({ status: "progress", progress: pendingProgress(confirmation) });
+    } else if (action !== "execute") {
+      setState({ status: "submitting", action });
+    }
+
+    const result = await coordinateEvryProductionArtifactRequest({
+      conversationId,
+      action,
+      requestKey: crypto.randomUUID(),
+      plan,
+    });
+    if (result.status === "conversation") {
+      onConversation(result.conversation);
+      setState({ status: "complete", action });
+      if (action === "edit" && confirmation) onEdit(confirmation);
+      return;
+    }
+    setState({ status: "error", error: result.error });
   }
 
   if (state.status === "progress") {
@@ -253,20 +226,12 @@ export function EvryProductionArtifact({
       />
     );
   }
-  if (state.status === "receipt") {
-    return (
-      <EvryArtifactRenderer
-        model={{ variant: "receipt", artifact: state.receipt }}
-      />
-    );
-  }
-
   return (
     <div className="space-y-2">
       <EvryArtifactRenderer
         model={renderableEvryArtifact(artifact)}
         options={
-          canControl
+          canControl && confirmation
             ? {
                 confirmationControls: {
                   onCancel: () => void run("cancel"),
@@ -274,7 +239,13 @@ export function EvryProductionArtifact({
                   onExecute: () => void run("execute"),
                 },
               }
-            : undefined
+            : canControl && progress
+              ? {
+                  progressControls: {
+                    onSafeRetry: () => void run("retry"),
+                  },
+                }
+              : undefined
         }
       />
       <ActionNotice state={state} />

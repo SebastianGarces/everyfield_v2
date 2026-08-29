@@ -93,7 +93,13 @@ const artifactLifecycleErrorSchema = z.discriminatedUnion("kind", [
 const artifactLifecycleResponseSchema = z.union([
   z
     .object({
-      status: z.enum(["cancelled", "editing", "executed", "already_finished"]),
+      status: z.enum([
+        "cancelled",
+        "editing",
+        "executed",
+        "retryable",
+        "already_finished",
+      ]),
       conversation: publicConversationSchema,
     })
     .strict()

@@ -16,6 +16,7 @@ import {
 } from "@/lib/evry/artifacts/public";
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import { trustedEvryApplicationSourceLink } from "@/lib/evry/artifacts/types";
+import { buildEvryProgressArtifact } from "@/lib/evry/artifacts/review";
 import {
   boundaryArtifactFor,
   settingsHandoffArtifactFor,
@@ -30,19 +31,25 @@ import {
   type EvryRenderableArtifact,
 } from "./artifact-renderer";
 
-function render(model: EvryRenderableArtifact, controls = false): string {
+function render(
+  model: EvryRenderableArtifact,
+  controls: "confirmation" | "progress" | false = false
+): string {
   return renderToStaticMarkup(
     createElement(EvryArtifactRenderer, {
       model,
-      options: controls
-        ? {
-            confirmationControls: {
-              onCancel() {},
-              onEdit() {},
-              onExecute() {},
-            },
-          }
-        : undefined,
+      options:
+        controls === "confirmation"
+          ? {
+              confirmationControls: {
+                onCancel() {},
+                onEdit() {},
+                onExecute() {},
+              },
+            }
+          : controls === "progress"
+            ? { progressControls: { onSafeRetry() {} } }
+            : undefined,
     })
   );
 }
@@ -143,7 +150,7 @@ test("all confirmation families render the evidence their effect requires", () =
   for (const fixture of Object.values(EVRY_CONFIRMATION_FIXTURES)) {
     const markup = render(
       renderableEvryArtifact(evryPublicArtifactSchema.parse(fixture)),
-      true
+      "confirmation"
     );
     assert.match(markup, /Review before Evry acts/);
     assert.match(markup, /Resolved targets/);
@@ -159,7 +166,7 @@ test("all confirmation families render the evidence their effect requires", () =
       renderableEvryArtifact(
         evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.meeting)
       ),
-      true
+      "confirmation"
     ),
     /Wednesday, September 2, 2026 at 10:00 AM EDT–11:30 AM · America\/New_York \(UTC-04:00\)/
   );
@@ -170,7 +177,7 @@ test("all confirmation families render the evidence their effect requires", () =
           EVRY_CONFIRMATION_FIXTURES.bulkStageChange
         )
       ),
-      true
+      "confirmation"
     ),
     /Before and after/
   );
@@ -181,7 +188,7 @@ test("all confirmation families render the evidence their effect requires", () =
           EVRY_CONFIRMATION_FIXTURES.destructiveAction
         )
       ),
-      true
+      "confirmation"
     ),
     /Irreversible/
   );
@@ -190,7 +197,7 @@ test("all confirmation families render the evidence their effect requires", () =
       renderableEvryArtifact(
         evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.fileImport)
       ),
-      true
+      "confirmation"
     ),
     /Difficult to reverse/
   );
@@ -199,7 +206,7 @@ test("all confirmation families render the evidence their effect requires", () =
       renderableEvryArtifact(
         evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.fileImport)
       ),
-      true
+      "confirmation"
     ),
     /Invalid email address/
   );
@@ -210,7 +217,7 @@ test("all confirmation families render the evidence their effect requires", () =
           EVRY_CONFIRMATION_FIXTURES.destructiveAction
         )
       ),
-      true
+      "confirmation"
     ),
     /Open task[\s\S]*Deleted/
   );
@@ -219,7 +226,7 @@ test("all confirmation families render the evidence their effect requires", () =
       renderableEvryArtifact(
         evryPublicArtifactSchema.parse(EVRY_CONFIRMATION_FIXTURES.communication)
       ),
-      true
+      "confirmation"
     ),
     /Content preview[\s\S]*Launch update/
   );
@@ -239,6 +246,33 @@ test("progress and a terminal receipt expose every step state without a second e
   assert.match(progressMarkup, /Pending/);
   assert.match(progressMarkup, /second execution is unavailable/);
   assert.doesNotMatch(progressMarkup, />Create meeting and send/);
+
+  const safeRetryMarkup = render(
+    renderableEvryArtifact(
+      evryPublicArtifactSchema.parse(
+        buildEvryProgressArtifact({
+          kind: "progress",
+          artifactVersion: 1,
+          plan: confirmation.plan,
+          title: "Safe retry available",
+          error: {
+            kind: "expected",
+            message: "Retry this exact plan to reconcile it safely.",
+          },
+          steps: confirmation.steps.map((step) => ({
+            stepId: step.stepId,
+            label: step.title,
+            status: "safe_retry",
+            affectedCount: 0,
+            excludedCount: 0,
+          })),
+        })
+      )
+    ),
+    "progress"
+  );
+  assert.match(safeRetryMarkup, />Retry exact plan safely</);
+  assert.match(safeRetryMarkup, /Only the same exact plan/);
 
   const receiptMarkup = render(
     renderableEvryArtifact(

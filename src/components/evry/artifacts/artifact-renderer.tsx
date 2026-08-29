@@ -89,8 +89,13 @@ export type EvryConfirmationControls = Readonly<{
   onExecute(): void;
 }>;
 
+export type EvryProgressControls = Readonly<{
+  onSafeRetry(): void;
+}>;
+
 export type EvryArtifactRenderOptions = Readonly<{
   confirmationControls?: EvryConfirmationControls;
+  progressControls?: EvryProgressControls;
   onChoice?: (choiceId: string) => void;
 }>;
 
@@ -528,6 +533,7 @@ type StepStatus =
 const STEP_STATUS = {
   pending: { label: "Pending", icon: CircleDashed, badge: "outline" },
   active: { label: "In progress", icon: LoaderCircle, badge: "secondary" },
+  safe_retry: { label: "Safe retry", icon: RotateCcw, badge: "secondary" },
   completed: { label: "Completed", icon: CheckCircle2, badge: "outline" },
   refused: { label: "Refused", icon: ShieldX, badge: "destructive" },
   failed: { label: "Failed", icon: CircleX, badge: "destructive" },
@@ -555,7 +561,10 @@ function StepStatusBadge({ status }: { status: StepStatus }) {
   );
 }
 
-function renderProgress(artifact: ArtifactByVariant["progress"]) {
+function renderProgress(
+  artifact: ArtifactByVariant["progress"],
+  options: EvryArtifactRenderOptions
+) {
   const detailed = "artifactVersion" in artifact;
   const steps = detailed
     ? artifact.steps
@@ -578,13 +587,28 @@ function renderProgress(artifact: ArtifactByVariant["progress"]) {
           : []),
       ];
   const completed = steps.filter(({ status }) => status === "completed").length;
+  const canRetry =
+    detailed && steps.some(({ status }) => status === "safe_retry");
   return (
     <ArtifactFrame
       variant="progress"
       badge="Execution progress"
       title={artifact.title}
-      icon={<LoaderCircle className="size-4 motion-safe:animate-spin" />}
+      icon={
+        canRetry ? (
+          <RotateCcw className="size-4" />
+        ) : (
+          <LoaderCircle className="size-4 motion-safe:animate-spin" />
+        )
+      }
       live
+      footer={
+        canRetry && options.progressControls ? (
+          <Button type="button" onClick={options.progressControls.onSafeRetry}>
+            Retry exact plan safely
+          </Button>
+        ) : null
+      }
     >
       <Progress
         value={completed}
@@ -602,8 +626,13 @@ function renderProgress(artifact: ArtifactByVariant["progress"]) {
           </li>
         ))}
       </ol>
+      {detailed && artifact.error ? (
+        <ReceiptError error={artifact.error} />
+      ) : null}
       <p className="text-muted-foreground text-sm">
-        This plan is already running. A second execution is unavailable.
+        {canRetry
+          ? "Durable outcomes are preserved. Only the same exact plan can resume unfinished work."
+          : "This plan is already running. A second execution is unavailable."}
       </p>
     </ArtifactFrame>
   );
@@ -736,7 +765,7 @@ export const EVRY_ARTIFACT_REGISTRY = {
   read: (artifact, _options) => renderRead(artifact),
   settings: (artifact, _options) => renderSettings(artifact),
   confirmation: (artifact, options) => renderConfirmation(artifact, options),
-  progress: (artifact, _options) => renderProgress(artifact),
+  progress: (artifact, options) => renderProgress(artifact, options),
   receipt: (artifact, _options) => renderReceipt(artifact),
   boundary: (artifact, _options) => renderBoundary(artifact),
 } satisfies EvryArtifactRegistry;

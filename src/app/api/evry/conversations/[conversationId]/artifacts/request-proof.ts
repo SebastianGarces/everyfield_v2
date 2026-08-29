@@ -92,7 +92,7 @@ async function main(): Promise<void> {
       steps: [],
     },
     {
-      action: "retry",
+      action: "rerun",
       requestKey: REQUEST_KEY,
       plan: { planId: PLAN_ID, fingerprint: FINGERPRINT },
     },
