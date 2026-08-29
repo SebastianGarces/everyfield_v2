@@ -7,7 +7,10 @@ const SEMANTIC_KEY_PATTERN = /^[a-z][a-z0-9_.:-]{0,127}$/;
 const PLAN_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 
 export type EvryConversationDurableStepStatus =
-  "completed" | "failed" | "refused" | "skipped";
+  | "completed"
+  | "failed"
+  | "refused"
+  | "skipped";
 
 export const EVRY_CONVERSATION_DURABLE_RESULT_CODES = [
   "effect_completed",

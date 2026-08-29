@@ -254,7 +254,8 @@ test(
       .find((line) => line.startsWith("{"));
     assert.ok(firstJson, firstCreate);
     const conversationId = JSON.parse(firstJson).conversationId as
-      EvryConversationId | undefined;
+      | EvryConversationId
+      | undefined;
     assert.ok(conversationId);
 
     const replayCreate = runWorker("create", common);
