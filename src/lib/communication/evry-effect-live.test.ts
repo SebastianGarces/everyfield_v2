@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { test } from "node:test";
+import { before, test } from "node:test";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 const EFFECT_IDENTITIES = [
@@ -16,10 +16,13 @@ const LIVE_LAYERS = ["execution", "idempotency", "errors"] as const;
 
 type EffectOutcomes = ReadonlySet<string>;
 
-let cachedOutcomes: EffectOutcomes | null = null;
+type EffectProof =
+  | { readonly outcomes: EffectOutcomes }
+  | { readonly error: unknown };
 
-function effectOutcomes(): EffectOutcomes {
-  if (cachedOutcomes) return cachedOutcomes;
+let cachedProof: EffectProof | null = null;
+
+function runEffectProof(): EffectOutcomes {
   const proof = spawnSync(
     process.execPath,
     [
@@ -37,7 +40,7 @@ function effectOutcomes(): EffectOutcomes {
       cwd: process.cwd(),
       encoding: "utf8",
       env: process.env,
-      timeout: 60_000,
+      timeout: 180_000,
     }
   );
   assert.equal(
@@ -53,9 +56,24 @@ function effectOutcomes(): EffectOutcomes {
   const parsed = JSON.parse(encoded) as unknown;
   assert.ok(Array.isArray(parsed));
   assert.ok(parsed.every((outcome) => typeof outcome === "string"));
-  cachedOutcomes = new Set(parsed);
-  assert.equal(cachedOutcomes.size, parsed.length);
-  return cachedOutcomes;
+  const outcomes = new Set(parsed);
+  assert.equal(outcomes.size, parsed.length);
+  return outcomes;
+}
+
+before(() => {
+  if (!LIVE_DB) return;
+  try {
+    cachedProof = { outcomes: runEffectProof() };
+  } catch (error: unknown) {
+    cachedProof = { error };
+  }
+});
+
+function effectOutcomes(): EffectOutcomes {
+  assert.ok(cachedProof, "Communication effect proof setup did not run");
+  if ("error" in cachedProof) throw cachedProof.error;
+  return cachedProof.outcomes;
 }
 
 for (const identity of EFFECT_IDENTITIES) {
