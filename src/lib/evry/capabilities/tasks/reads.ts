@@ -15,12 +15,14 @@ import {
 } from "@/lib/tasks/dependencies";
 import { taskDescriptionPreview } from "@/lib/tasks/descriptions";
 import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
+import { readPhaseTemplatePrompt } from "@/lib/tasks/phase-prompt";
 import { getTask, listSubtasks, listTasks } from "@/lib/tasks/service";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
 
 export const TASK_READ_IDENTITIES = {
   detail: "tasks.read.detail",
   list: "tasks.read.list",
+  phasePrompt: "tasks.read.phase-template-prompt",
   planning: "tasks.read.planning-options",
   templates: "tasks.read.templates",
 } as const;
@@ -81,14 +83,15 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
   inputShape: {
     search: z.string().trim().max(160),
     includeCompleted: z.boolean(),
+    cursor: uuid.nullable(),
   },
   async run({ authorization }, input) {
     const result = await listTasks(authorization.actor.plantId, {
       search: input.search || undefined,
       includeCompleted: input.includeCompleted,
+      cursor: input.cursor ?? undefined,
       limit: TASK_READ_LIMIT,
     });
-    const hidden = Math.max(0, result.total - result.tasks.length);
     return buildEvryReadArtifact({
       title: input.search ? `Tasks matching “${input.search}”` : "Tasks",
       filters: [
@@ -97,15 +100,16 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
           label: "Completed",
           value: input.includeCompleted ? "Included" : "Excluded",
         },
+        { label: "Matching tasks", value: String(result.total) },
+        { label: "Page cursor", value: input.cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: result.nextCursor ?? "End of results",
+        },
       ],
-      exclusions: [
-        ...(input.includeCompleted
-          ? []
-          : [{ reason: "Completed tasks are hidden", count: 0 }]),
-        ...(hidden > 0
-          ? [{ reason: "Not shown on this result page", count: hidden }]
-          : []),
-      ],
+      // Pagination is continuation, not exclusion: the next cursor above
+      // reaches the remaining matching rows without inflating excluded counts.
+      exclusions: [],
       items: result.tasks.map((task) => ({
         id: task.id,
         label: artifactLabel(task.title, "Untitled task"),
@@ -116,6 +120,63 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
         ),
       })),
       sourceLinks: [link("Open Tasks", "/tasks")],
+    });
+  },
+});
+
+export const TASK_PHASE_TEMPLATE_PROMPT_READ = defineEvryReadRegistration({
+  id: "tasks.phase-template-prompt",
+  capabilityIdentity: TASK_READ_IDENTITIES.phasePrompt,
+  inputShape: {},
+  async run({ authorization }) {
+    const { transitionId, prompt } = await readPhaseTemplatePrompt(
+      authorization.actor.plantId
+    );
+    if (!prompt) {
+      return buildEvryReadArtifact({
+        title: "Phase checklist prompt",
+        filters: [
+          { label: "Latest transition", value: transitionId ?? "None" },
+        ],
+        exclusions: [
+          { reason: "No unanswered phase checklist prompt", count: 1 },
+        ],
+        items: [],
+        sourceLinks: [link("Open Tasks", "/tasks")],
+      });
+    }
+    return buildEvryReadArtifact({
+      title: artifactTitle(
+        `${prompt.phaseName} checklist prompt`,
+        "Phase checklist prompt"
+      ),
+      filters: [
+        { label: "Transition", value: prompt.transitionId },
+        { label: "From phase", value: String(prompt.fromPhase) },
+        { label: "To phase", value: String(prompt.toPhase) },
+        {
+          label: "Transitioned at",
+          value: prompt.transitionedAt.toISOString(),
+        },
+        { label: "Tasks offered", value: String(prompt.totalTaskCount) },
+      ],
+      exclusions: [],
+      items: prompt.offers.map((offer) => ({
+        id: `${prompt.transitionId}:${offer.key}`,
+        label: artifactLabel(offer.name, "Task checklist"),
+        facts: [
+          { label: "Template key", value: offer.key },
+          { label: "Tasks", value: String(offer.taskCount) },
+          { label: "First due date", value: offer.firstDueDate },
+          { label: "Last due date", value: offer.lastDueDate },
+          {
+            label: "Description",
+            value: artifactFact(offer.description, "No description"),
+          },
+        ],
+        sourceLink: link("Open phase checklist prompt", "/tasks"),
+      })),
+      sourceLinks: [link("Open phase checklist prompt", "/tasks")],
     });
   },
 });
@@ -307,8 +368,14 @@ export const TASK_TEMPLATES_READ = defineEvryReadRegistration({
 });
 
 export type TaskEvryReadSelection =
-  | Readonly<{ kind: "list"; search: string; includeCompleted: boolean }>
+  | Readonly<{
+      kind: "list";
+      search: string;
+      includeCompleted: boolean;
+      cursor: string | null;
+    }>
   | Readonly<{ kind: "detail"; taskId: string | null }>
+  | Readonly<{ kind: "phase_prompt" }>
   | Readonly<{ kind: "planning"; taskId: string | null }>
   | Readonly<{ kind: "templates" }>;
 
@@ -320,15 +387,54 @@ export function selectTaskEvryRead(
 ): TaskEvryReadSelection | null {
   const text = literalUserText.normalize("NFKC").trim();
   let match: RegExpExecArray | null;
+  match = new RegExp(
+    `^load more tasks matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    return {
+      kind: "list",
+      search: match[1].trim(),
+      includeCompleted: true,
+      cursor: match[2],
+    };
+  }
+  match = new RegExp(`^load more all tasks after\\s+${UUID}[.!?]*$`, "i").exec(
+    text
+  );
+  if (match?.[1]) {
+    return {
+      kind: "list",
+      search: "",
+      includeCompleted: true,
+      cursor: match[1],
+    };
+  }
+  match = new RegExp(`^load more tasks after\\s+${UUID}[.!?]*$`, "i").exec(
+    text
+  );
+  if (match?.[1]) {
+    return {
+      kind: "list",
+      search: "",
+      includeCompleted: false,
+      cursor: match[1],
+    };
+  }
   if (/^(?:show|list)(?: me)? tasks[.!?]*$/i.test(text)) {
-    return { kind: "list", search: "", includeCompleted: false };
+    return { kind: "list", search: "", includeCompleted: false, cursor: null };
   }
   if (/^(?:show|list)(?: me)? all tasks[.!?]*$/i.test(text)) {
-    return { kind: "list", search: "", includeCompleted: true };
+    return { kind: "list", search: "", includeCompleted: true, cursor: null };
   }
   match = /^find tasks matching\s+(.+?)[.!?]*$/i.exec(text);
   if (match?.[1]) {
-    return { kind: "list", search: match[1].trim(), includeCompleted: true };
+    return {
+      kind: "list",
+      search: match[1].trim(),
+      includeCompleted: true,
+      cursor: null,
+    };
   }
   match = new RegExp(`^show task\\s+${UUID}[.!?]*$`, "i").exec(text);
   if (match?.[1]) return { kind: "detail", taskId: match[1] };
@@ -343,6 +449,13 @@ export function selectTaskEvryRead(
   if (/^show task planning options[.!?]*$/i.test(text)) {
     return { kind: "planning", taskId: null };
   }
+  if (
+    /^(?:show|review)(?: the)? (?:pending )?phase (?:checklist )?prompt[.!?]*$/i.test(
+      text
+    )
+  ) {
+    return { kind: "phase_prompt" };
+  }
   return /^(?:show|list) task (?:checklist )?templates[.!?]*$/i.test(text)
     ? { kind: "templates" }
     : null;
@@ -351,6 +464,7 @@ export function selectTaskEvryRead(
 export const TASK_EVRY_READ_REGISTRATIONS = [
   TASK_LIST_READ,
   TASK_DETAIL_READ,
+  TASK_PHASE_TEMPLATE_PROMPT_READ,
   TASK_PLANNING_READ,
   TASK_TEMPLATES_READ,
 ] as const;
@@ -368,6 +482,7 @@ export const continueTaskEvryRead = createEvryReadContinuation({
             input: {
               search: selection.search,
               includeCompleted: selection.includeCompleted,
+              cursor: selection.cursor,
             },
           };
         case "detail": {
@@ -387,6 +502,8 @@ export const continueTaskEvryRead = createEvryReadContinuation({
                 (pageContext?.kind === "task" ? pageContext.recordId : null),
             },
           };
+        case "phase_prompt":
+          return { readId: TASK_PHASE_TEMPLATE_PROMPT_READ.id, input: {} };
         case "templates":
           return { readId: TASK_TEMPLATES_READ.id, input: {} };
       }

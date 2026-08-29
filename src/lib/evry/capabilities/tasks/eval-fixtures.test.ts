@@ -42,8 +42,32 @@ const PLAN = evryConversationPlanIdentitySchema.parse({
 const READ_SELECTIONS: Readonly<Record<string, string>> = Object.freeze({
   [TASK_READ_IDENTITIES.list]: "Show tasks",
   [TASK_READ_IDENTITIES.detail]: `Show task ${TASK_FIXTURE_ID}`,
+  [TASK_READ_IDENTITIES.phasePrompt]: "Show the pending phase checklist prompt",
   [TASK_READ_IDENTITIES.planning]: `Show planning options for task ${TASK_FIXTURE_ID}`,
   [TASK_READ_IDENTITIES.templates]: "Show task checklist templates",
+});
+
+test("Task list selection preserves filters and the owning cursor for load more", () => {
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more tasks matching launch follow-up after ${TASK_FIXTURE_ID}`
+    ),
+    {
+      kind: "list",
+      search: "launch follow-up",
+      includeCompleted: true,
+      cursor: TASK_FIXTURE_ID,
+    }
+  );
+  assert.deepEqual(
+    selectTaskEvryRead(`Load more tasks after ${TASK_FIXTURE_ID}`),
+    {
+      kind: "list",
+      search: "",
+      includeCompleted: false,
+      cursor: TASK_FIXTURE_ID,
+    }
+  );
 });
 const EXPORT_BY_IDENTITY = new Map(
   Object.entries(TASK_ACTION_CONTRACTS).map(([exportName, contract]) => [

@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import ts from "typescript";
 
 const TASKS_ROUTE_ROOT = path.join("src", "app", "(dashboard)", "tasks");
+const TASKS_COMPONENT_ROOT = path.join("src", "components", "tasks");
 
 const normalizeSource = (source: string): string =>
   source.split(path.sep).join("/");
@@ -46,6 +47,16 @@ export const TASKS_DISCOVERED_READ_EXCLUSIONS = Object.freeze([
     "src/app/(dashboard)/tasks/page.tsx",
     "taskListScope",
     "Pure Task-list filter construction; the consuming count read is classified."
+  ),
+  sharedBoundaryExclusion(
+    "src/components/tasks/phase-template-prompt.tsx",
+    "getCurrentSession",
+    "Shared authentication boundary, not Task Management domain data."
+  ),
+  sharedBoundaryExclusion(
+    "src/components/tasks/phase-template-prompt.tsx",
+    "cookies",
+    "Next.js request boundary, not Task Management domain data."
   ),
 ]);
 
@@ -101,6 +112,15 @@ function isServerModule(sourceFile: ts.SourceFile): boolean {
       ts.isExpressionStatement(statement) &&
       ts.isStringLiteral(statement.expression) &&
       statement.expression.text === "use server"
+  );
+}
+
+function isClientModule(sourceFile: ts.SourceFile): boolean {
+  return sourceFile.statements.some(
+    (statement) =>
+      ts.isExpressionStatement(statement) &&
+      ts.isStringLiteral(statement.expression) &&
+      statement.expression.text === "use client"
   );
 }
 
@@ -204,6 +224,59 @@ function importedCalls(sourceFile: ts.SourceFile): ReadonlyMap<string, string> {
   return imports;
 }
 
+function importedModuleSpecifiers(
+  sourceFile: ts.SourceFile
+): readonly string[] {
+  return sourceFile.statements.flatMap((statement) => {
+    if (
+      (ts.isImportDeclaration(statement) ||
+        ts.isExportDeclaration(statement)) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      return [statement.moduleSpecifier.text];
+    }
+    return [];
+  });
+}
+
+function resolveLocalModule(
+  repoRoot: string,
+  source: string,
+  specifier: string
+): string | null {
+  const unresolved = specifier.startsWith("@/")
+    ? path.join(repoRoot, "src", specifier.slice(2))
+    : specifier.startsWith(".")
+      ? path.resolve(repoRoot, path.dirname(source), specifier)
+      : null;
+  if (!unresolved) return null;
+
+  const candidates = [
+    unresolved,
+    `${unresolved}.ts`,
+    `${unresolved}.tsx`,
+    path.join(unresolved, "index.ts"),
+    path.join(unresolved, "index.tsx"),
+  ];
+  const resolved = candidates.find(
+    (candidate) =>
+      /\.tsx?$/.test(candidate) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile()
+  );
+  return resolved ? normalizeSource(path.relative(repoRoot, resolved)) : null;
+}
+
+function isTaskRscSource(source: string): boolean {
+  return (
+    source === normalizeSource(TASKS_ROUTE_ROOT) ||
+    source.startsWith(`${normalizeSource(TASKS_ROUTE_ROOT)}/`) ||
+    source === normalizeSource(TASKS_COMPONENT_ROOT) ||
+    source.startsWith(`${normalizeSource(TASKS_COMPONENT_ROOT)}/`)
+  );
+}
+
 function awaitedByPage(node: ts.Node, sourceFile: ts.SourceFile): boolean {
   for (
     let current = node.parent;
@@ -233,19 +306,25 @@ function importedCallName(
 }
 
 /**
- * Discover imported operations that participate in an awaited Task page read.
+ * Discover imported operations that participate in an awaited Task RSC read.
  *
- * This deliberately starts from the route tree rather than Evry registrations,
- * so a new page or server read is unclassified until the inventory maps or
- * explicitly excludes it.
+ * This deliberately starts from the route tree and follows its local Task
+ * server-component import graph rather than trusting Evry registrations. A
+ * read delegated out of `page.tsx` is therefore still unclassified until the
+ * inventory maps or explicitly excludes it. Client islands and server-action
+ * modules are different execution surfaces and end traversal.
  */
 export function discoverTaskPageReadOperations(
   repoRoot = process.cwd()
 ): readonly string[] {
   const discovered = new Set<string>();
-  for (const source of discoverTaskPageSources(repoRoot)) {
+  const visited = new Set<string>();
+  const visitSource = (source: string): void => {
+    if (visited.has(source)) return;
+    visited.add(source);
     const absoluteSource = path.join(repoRoot, source);
     const sourceFile = parsedSource(source, absoluteSource);
+    if (isClientModule(sourceFile) || isServerModule(sourceFile)) return;
     const imports = importedCalls(sourceFile);
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && awaitedByPage(node, sourceFile)) {
@@ -255,6 +334,15 @@ export function discoverTaskPageReadOperations(
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
+    for (const specifier of importedModuleSpecifiers(sourceFile)) {
+      const importedSource = resolveLocalModule(repoRoot, source, specifier);
+      if (importedSource && isTaskRscSource(importedSource)) {
+        visitSource(importedSource);
+      }
+    }
+  };
+  for (const source of discoverTaskPageSources(repoRoot)) {
+    visitSource(source);
   }
   return Object.freeze([...discovered].toSorted());
 }

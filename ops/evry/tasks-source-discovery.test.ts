@@ -82,10 +82,10 @@ test("Task read exclusions are discovered boundary or query-helper calls", () =>
   assert.equal(new Set(identities).size, identities.length);
   for (const identity of identities)
     assert.equal(discovered.has(identity), true);
-  assert.equal(identities.length, 7);
+  assert.equal(identities.length, 9);
 });
 
-test("Task page discovery reports every awaited imported operation", () => {
+test("Task RSC discovery follows delegated server-component reads", () => {
   const read = taskReadIdentity;
   assert.deepEqual(discoverTaskPageReadOperations(), [
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "db.select"),
@@ -119,5 +119,43 @@ test("Task page discovery reports every awaited imported operation", () => {
       "getCurrentUserChurch"
     ),
     read("src/app/(dashboard)/tasks/templates/page.tsx", "verifySession"),
+    read("src/components/tasks/phase-template-prompt.tsx", "cookies"),
+    read("src/components/tasks/phase-template-prompt.tsx", "getCurrentSession"),
+    read(
+      "src/components/tasks/phase-template-prompt.tsx",
+      "readPhaseTemplatePrompt"
+    ),
   ]);
+});
+
+test("Task RSC discovery cannot falsely pass a delegated Task read", () => {
+  const repoRoot = mkdtempSync(path.join(tmpdir(), "task-read-discovery-"));
+  const page = path.join(repoRoot, "src/app/(dashboard)/tasks/page.tsx");
+  const delegated = path.join(
+    repoRoot,
+    "src/components/tasks/delegated-task-read.tsx"
+  );
+  const taskRead = path.join(repoRoot, "src/lib/tasks/new-task-read.ts");
+  mkdirSync(path.dirname(page), { recursive: true });
+  mkdirSync(path.dirname(delegated), { recursive: true });
+  mkdirSync(path.dirname(taskRead), { recursive: true });
+  writeFileSync(
+    page,
+    'import { DelegatedTaskRead } from "@/components/tasks/delegated-task-read";\nexport default async function Page() { return <DelegatedTaskRead />; }\n'
+  );
+  writeFileSync(
+    delegated,
+    'import { newlyAddedTaskRead } from "@/lib/tasks/new-task-read";\nexport async function DelegatedTaskRead() { const value = await newlyAddedTaskRead(); return <p>{value}</p>; }\n'
+  );
+  writeFileSync(taskRead, "export async function newlyAddedTaskRead() {}\n");
+  try {
+    assert.deepEqual(discoverTaskPageReadOperations(repoRoot), [
+      taskReadIdentity(
+        "src/components/tasks/delegated-task-read.tsx",
+        "newlyAddedTaskRead"
+      ),
+    ]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
