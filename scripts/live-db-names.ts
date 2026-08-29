@@ -20,13 +20,13 @@
 // commit (PR #586).
 //
 // THE LIST IS DATA, NOT A COMMAND LINE. `LIVE_SUITES` below is the one place
-// the membership lives, and every consumer imports it: the runner that spawns
-// node:test, the preload that repoints each child, the preparer that creates
-// the databases, and the coverage test that holds it to the files which
-// actually opt into `LIVE_DB_TESTS`. It used to live inside the `test:live`
-// string in package.json and be recovered from there by regex — which meant an
-// invariant about fourteen databases rested on string-matching a shell command,
-// and consumers could disagree about membership without anything noticing.
+// the membership lives. The runner consumes phases derived from it, the preload
+// repoints each child, the preparer creates the databases, and the coverage test
+// holds it to the files which actually opt into `LIVE_DB_TESTS`. It used to live
+// inside the `test:live` string in package.json and be recovered from there by
+// regex — which meant an invariant about fourteen databases rested on
+// string-matching a shell command, and consumers could disagree about
+// membership without anything noticing.
 //
 // WHY DATABASES AND NOT SCHEMAS. The ruling on #594 offered schema-per-suite
 // with `search_path` as the lighter option. It is not reachable through this
@@ -52,6 +52,9 @@ import { fileURLToPath } from "node:url";
  * `src/db/live-suite-coverage.test.ts` fails the build on any that opts in and
  * is missing, so this list cannot quietly go short.
  */
+export const PEOPLE_EFFECT_LIVE_SUITE =
+  "src/lib/people/evry-effect-live.test.ts" as const;
+
 export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
   "src/lib/auth/access.test.ts",
@@ -73,11 +76,30 @@ export const LIVE_SUITES = [
   "src/lib/launch/readiness-converge-live.test.ts",
   "src/lib/people/person-link-live.test.ts",
   "src/lib/people/duplicate-match-live.test.ts",
-  "src/lib/people/evry-effect-live.test.ts",
+  PEOPLE_EFFECT_LIVE_SUITE,
   "src/lib/phase-engine/transitions/declaration-race.test.ts",
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",
   "src/lib/tasks/subtask-parent-fk.test.ts",
+] as const;
+
+/**
+ * The People proof owns a second child process and exercises every registered
+ * People capability in one fixture lifecycle. Run it without sibling suites
+ * competing for the two-core CI runner and the shared Neon proxy.
+ */
+export const DEDICATED_LIVE_SUITES = [PEOPLE_EFFECT_LIVE_SUITE] as const;
+
+const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
+
+export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
+  (suite) => !dedicatedLiveSuites.has(suite)
+);
+
+/** Ordered, fail-fast phases for the live lane. */
+export const LIVE_SUITE_PHASES = [
+  DEDICATED_LIVE_SUITES,
+  PARALLEL_LIVE_SUITES,
 ] as const;
 
 /**

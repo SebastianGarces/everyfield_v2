@@ -7,6 +7,11 @@ import generated from "@/lib/evry/capabilities/people/inventory.generated.json";
 
 const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 
+// Measured at 81.32s on the isolated local CI stack. This suite now owns a
+// dedicated live-runner phase; five minutes leaves room for a slower two-core
+// hosted runner while still turning a stalled proof into a hard failure.
+const PEOPLE_EFFECT_PROOF_TIMEOUT_MS = 5 * 60_000;
+
 const STORAGE_ENVIRONMENT_KEYS = [
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
@@ -63,7 +68,7 @@ before(() => {
       cwd: process.cwd(),
       encoding: "utf8",
       env: environment,
-      timeout: 180_000,
+      timeout: PEOPLE_EFFECT_PROOF_TIMEOUT_MS,
     }
   );
   assert.doesNotMatch(
