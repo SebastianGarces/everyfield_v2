@@ -33,7 +33,7 @@ before(() => {
       cwd: process.cwd(),
       env: process.env,
       encoding: "utf8",
-      timeout: 420_000,
+      timeout: 600_000,
     }
   );
   output = `${result.stdout}${result.stderr}`;
@@ -57,6 +57,14 @@ run(
 
 run("Recurring completion refuses checklist add/delete/edit drift", () => {
   assert.match(output, /PASS tasks:recurring-checklist-source-drift/);
+});
+
+run("Status completion preserves distinct creator and assignee lineage", () => {
+  assert.match(output, /PASS tasks:status-completion-creator-lineage/);
+});
+
+run("Mixed bulk sets write eligible rows and retain named exclusions", () => {
+  assert.match(output, /PASS tasks:mixed-bulk-partial-outcomes/);
 });
 
 run("Task source-derived handoff remains exact above the bulk UI cap", () => {

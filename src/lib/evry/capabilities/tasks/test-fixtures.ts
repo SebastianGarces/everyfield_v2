@@ -116,25 +116,33 @@ export function taskEffectPlanFixture(exportName: TaskEffectExport) {
         }
       : null;
   const sourceAssertion =
-    exportName === "deleteTaskAction"
+    exportName === "bulkCompleteTasksAction" ||
+    exportName === "bulkRescheduleTasksAction"
       ? {
-          kind: "subtasks" as const,
-          parentTaskId: TASK_FIXTURE_ID,
-          taskIds: [],
+          kind: "bulk_selection" as const,
+          requestedTaskIds: [TASK_FIXTURE_ID],
+          actionableTaskIds: [TASK_FIXTURE_ID],
+          excludedTasks: [],
         }
-      : exportName === "handOffFollowUpsAction"
+      : exportName === "deleteTaskAction"
         ? {
-            kind: "follow_up_owner" as const,
-            fromAssigneeId: TASK_FIXTURE_ACTOR_ID,
-            taskIds: [TASK_FIXTURE_ID],
+            kind: "subtasks" as const,
+            parentTaskId: TASK_FIXTURE_ID,
+            taskIds: [],
           }
-        : phase
+        : exportName === "handOffFollowUpsAction"
           ? {
-              kind: "phase_transition" as const,
-              transitionId: TASK_FIXTURE_ID,
-              templateKeys: dismiss ? [] : ["template"],
+              kind: "follow_up_owner" as const,
+              fromAssigneeId: TASK_FIXTURE_ACTOR_ID,
+              taskIds: [TASK_FIXTURE_ID],
             }
-          : { kind: "none" as const };
+          : phase
+            ? {
+                kind: "phase_transition" as const,
+                transitionId: TASK_FIXTURE_ID,
+                templateKeys: dismiss ? [] : ["template"],
+              }
+            : { kind: "none" as const };
   const own = new Set<TaskEffectExport>([
     "addSubtaskAction",
     "bulkCompleteTasksAction",
@@ -184,7 +192,15 @@ export function taskEffectPlanFixture(exportName: TaskEffectExport) {
         }
       : { materialStamp: null, contactLogs: [] },
     sourceAssertion,
-    exclusions: [],
+    exclusions: completes
+      ? [
+          {
+            target: `Task ${TASK_FIXTURE_ID}`,
+            reason:
+              "This Task is not related to a person, so no contact-log entry applies.",
+          },
+        ]
+      : [],
     disclosure: {
       title: TASK_ACTION_CONTRACTS[exportName].label,
       targets: dismiss

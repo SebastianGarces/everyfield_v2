@@ -92,6 +92,7 @@ function effectPrelude(input: {
   effectKey: EvryAuditKey;
   current: SQL;
   affectedCount: number;
+  excludedCount: number;
 }): SQL {
   const outcomeKey = executionStepOutcomeKey(
     input.execution.planId,
@@ -140,7 +141,7 @@ function effectPrelude(input: {
         e.id, e.plan_id, e.church_id, e.actor_user_id, e.plan_fingerprint,
         e.correlation_id, ${outcomeKey}, ${input.effectKey}, 'step',
         ${input.execution.stepId}, ${input.execution.capabilityIdentity},
-        'completed', 'effect_completed', ${input.affectedCount}, 0,
+        'completed', 'effect_completed', ${input.affectedCount}, ${input.excludedCount},
         transaction_timestamp()
       from eligible e
       on conflict do nothing
@@ -189,7 +190,16 @@ function serializedNotification(alias: SQL): SQL {
   )`;
 }
 
-function taskStateCurrent(execution: Execution): SQL {
+function taskStateCurrent(
+  execution: Execution,
+  exportName: TaskEffectExport
+): SQL {
+  const completionMayInheritCreator = new Set<TaskEffectExport>([
+    "bulkCompleteTasksAction",
+    "completeTaskAction",
+    "setSubtaskCompletionAction",
+    "updateTaskStatusAction",
+  ]).has(exportName);
   return sql`
     not exists (
       select 1 from task_plan p
@@ -236,6 +246,7 @@ function taskStateCurrent(execution: Execution): SQL {
     and not exists (
       select 1 from task_plan p
       where p.before_state is null
+        and ${completionMayInheritCreator} = false
         and (p.after_state->>'createdById')::uuid <> ${execution.actorUserId}::uuid
     )
     and not exists (
@@ -270,6 +281,13 @@ function taskStateCurrent(execution: Execution): SQL {
           where parent.id = (p.after_state->>'parentTaskId')::uuid
             and parent.church_id = ${execution.plantId}::uuid
             and parent.deleted_at is null and parent.parent_task_id is null
+        )
+        and not exists (
+          select 1 from task_plan planned_parent
+          where planned_parent.task_id =
+              (p.after_state->>'parentTaskId')::uuid
+            and planned_parent.before_state is null
+            and nullif(planned_parent.after_state->>'parentTaskId', '') is null
         )
     )
     and not exists (
@@ -489,6 +507,53 @@ function sourceStateCurrent(execution: Execution): SQL {
             and (later.created_at, later.id) > (transition.created_at, transition.id)
         )
     )
+    when 'bulk_selection' then not exists (
+      select 1
+      from jsonb_array_elements(
+        (select source_assertion->'excludedTasks' from plan)
+      ) excluded(value)
+      where case excluded.value->>'reason'
+        when 'Task not found' then exists (
+          select 1 from tasks current_excluded
+          where current_excluded.id = (excluded.value->>'taskId')::uuid
+            and current_excluded.church_id = ${execution.plantId}::uuid
+            and current_excluded.deleted_at is null
+        )
+        when 'Task is already complete' then not exists (
+          select 1 from tasks current_excluded
+          where current_excluded.id = (excluded.value->>'taskId')::uuid
+            and current_excluded.church_id = ${execution.plantId}::uuid
+            and current_excluded.deleted_at is null
+            and current_excluded.status = 'complete'
+            and ${serializedTask(sql`current_excluded`)} = excluded.value->'expectedTask'
+        )
+        when 'Task is complete — reopen it before rescheduling' then not exists (
+          select 1 from tasks current_excluded
+          where current_excluded.id = (excluded.value->>'taskId')::uuid
+            and current_excluded.church_id = ${execution.plantId}::uuid
+            and current_excluded.deleted_at is null
+            and current_excluded.status = 'complete'
+            and ${serializedTask(sql`current_excluded`)} = excluded.value->'expectedTask'
+        )
+        when 'That task is assigned to somebody else' then
+          exists (
+            select 1 from users current_actor
+            where current_actor.id = ${execution.actorUserId}::uuid
+              and current_actor.church_id = ${execution.plantId}::uuid
+              and current_actor.seat in ('owner', 'admin')
+          )
+          or not exists (
+            select 1 from tasks current_excluded
+            where current_excluded.id = (excluded.value->>'taskId')::uuid
+              and current_excluded.church_id = ${execution.plantId}::uuid
+              and current_excluded.deleted_at is null
+              and current_excluded.status <> 'complete'
+              and current_excluded.assigned_to_id is distinct from ${execution.actorUserId}::uuid
+              and ${serializedTask(sql`current_excluded`)} = excluded.value->'expectedTask'
+          )
+        else true
+      end
+    )
     else false
   end`;
 }
@@ -588,9 +653,13 @@ function mutationStatement(input: {
   });
   const affectedCount =
     input.args.taskWrites.length + (input.args.phaseTransition ? 1 : 0);
+  const excludedCount =
+    input.args.sourceAssertion.kind === "bulk_selection"
+      ? input.args.sourceAssertion.excludedTasks.length
+      : 0;
   const current = sql`
     ${authorityCurrent(input)}
-    and ${taskStateCurrent(input.execution)}
+    and ${taskStateCurrent(input.execution, input.exportName)}
     and ${dependencyStateCurrent(input.execution)}
     and ${childSetStateCurrent(input.execution)}
     and ${notificationStateCurrent(input.execution)}
@@ -675,6 +744,7 @@ function mutationStatement(input: {
       effectKey: input.effectKey,
       current,
       affectedCount,
+      excludedCount,
     })}, task_updated as materialized (
       update tasks target
       set
@@ -962,7 +1032,7 @@ export async function taskEffectArgumentsAreCurrent(input: {
     )
     select (
       ${authorityCurrent({ execution, exportName: input.exportName })}
-      and ${taskStateCurrent(execution)}
+      and ${taskStateCurrent(execution, input.exportName)}
       and ${dependencyStateCurrent(execution)}
       and ${childSetStateCurrent(execution)}
       and ${notificationStateCurrent(execution)}
