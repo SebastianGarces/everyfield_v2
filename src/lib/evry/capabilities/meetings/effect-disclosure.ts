@@ -86,12 +86,19 @@ function notificationChanges(input: {
 }): MeetingsDisclosureChange[] {
   return [
     ...(input.scheduled?.length
-      ? [change("Notifications", "Absent", "Scheduled", input.scheduled.length)]
+      ? [
+          change(
+            "Notifications scheduled",
+            "Absent",
+            "Scheduled",
+            input.scheduled.length
+          ),
+        ]
       : []),
     ...(input.cancelled?.length
       ? [
           change(
-            "Notifications",
+            "Notifications cancelled",
             "Pending",
             "Cancelled",
             input.cancelled.length

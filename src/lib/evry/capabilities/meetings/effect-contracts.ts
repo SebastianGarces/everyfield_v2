@@ -41,14 +41,11 @@ const timezone = z
       return false;
     }
   }, "Invalid IANA time zone");
-const uuidSet = z
-  .array(uuid)
-  .max(100)
-  .superRefine((values, context) => {
-    if (new Set(values).size !== values.length) {
-      context.addIssue({ code: "custom", message: "IDs must be unique" });
-    }
-  });
+const uuidSet = z.array(uuid).superRefine((values, context) => {
+  if (new Set(values).size !== values.length) {
+    context.addIssue({ code: "custom", message: "IDs must be unique" });
+  }
+});
 
 const agendaSectionSchema = z.strictObject({
   id: z.string().trim().min(1).max(160),

@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import {
+  EvryArtifactRenderer,
+  renderableEvryArtifact,
+} from "@/components/evry/artifacts/artifact-renderer";
+import { publicEvryArtifact } from "@/lib/evry/artifacts/public";
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+import {
+  hydrateStoredEvryConversationArtifact,
+  parseEvryConversationArtifactDocument,
+} from "@/lib/evry/conversations/artifacts";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 import { parseEvryActionPlanCandidate } from "@/lib/evry/plans";
 
@@ -617,6 +628,82 @@ test("a cardinality-heavy legal plan preserves every exact target and plan byte"
       ({ before, after }) => before.length <= 4_000 && after.length <= 4_000
     )
   );
+});
+
+test("a 101-record delete snapshot discloses every source-owned dependent", () => {
+  const attendanceIds = Array.from(
+    { length: 101 },
+    (_, index) =>
+      `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+  const arguments_ = {
+    ...validArguments("deleteMeetingAction"),
+    expectedAttendanceIds: attendanceIds,
+    expectedChecklistItemIds: [],
+    expectedResponseIds: [],
+    expectedEvaluationId: null,
+    expectedInvitationIds: [],
+    pendingNotifications: [],
+  };
+  assert.equal(
+    MEETINGS_EFFECT_ARGUMENT_SCHEMAS.deleteMeetingAction.safeParse(arguments_)
+      .success,
+    true
+  );
+  const { confirmation, step } = reviewForArguments(
+    "deleteMeetingAction",
+    arguments_
+  );
+  assert.deepEqual(
+    step.resolvedTargets
+      .filter(({ label }) => label === "Attendance record")
+      .map(({ value }) => value),
+    attendanceIds
+  );
+  assert.deepEqual(
+    step.counts.find(({ label }) => label === "Attendance records removed"),
+    { label: "Attendance records removed", count: 101 }
+  );
+  assert.deepEqual(
+    JSON.parse(
+      joinedPreviewPages(step.contentPreviews, "Complete immutable plan")
+    ),
+    arguments_
+  );
+  assert.equal(confirmation.steps[0]?.effectKind, "destructive");
+});
+
+test("reschedule confirmation renders scheduled and cancelled notification changes", () => {
+  const { confirmation, step } = reviewForArguments(
+    "updateMeetingAction",
+    validArguments("updateMeetingAction")
+  );
+  const notificationLabels = step.beforeAfter
+    .map(({ label }) => label)
+    .filter((label) => label.startsWith("Notifications "));
+  assert.deepEqual(notificationLabels, [
+    "Notifications scheduled",
+    "Notifications cancelled",
+  ]);
+  assert.equal(new Set(notificationLabels).size, notificationLabels.length);
+
+  const markup = renderToStaticMarkup(
+    createElement(EvryArtifactRenderer, {
+      model: renderableEvryArtifact(
+        publicEvryArtifact(
+          hydrateStoredEvryConversationArtifact(
+            parseEvryConversationArtifactDocument(confirmation)
+          )
+        )
+      ),
+    })
+  );
+  assert.match(markup, /Notifications scheduled/);
+  assert.match(markup, /Notifications cancelled/);
+  assert.match(markup, /Absent/);
+  assert.match(markup, /Pending/);
+  assert.match(markup, /Scheduled/);
+  assert.match(markup, /Cancelled/);
 });
 
 test("meeting updates disclose the after datetime as the absolute time", () => {

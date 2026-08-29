@@ -30,10 +30,13 @@ import {
 import { UnauthorizedError } from "@/lib/auth/unauthorized";
 import type { EvryEffectInput } from "@/lib/evry/executor";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type { EvryActionPlanDocument } from "@/lib/evry/plans";
+import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
 
 import type { MeetingsActionExport } from "./catalog";
 import { MEETINGS_ACTION_CONTRACTS } from "./catalog";
 import { meetingsEffectDisclosure } from "./effect-disclosure";
+import { MEETINGS_REVIEW_REGISTRY } from "./review";
 import type { ResolvedMeetingsEffect } from "./resolver";
 import type { MeetingsEvryEffectSelection } from "./selection";
 
@@ -305,6 +308,27 @@ async function fixtureSelection(input: {
     exportName === "updateMeetingStatusAction" ||
     exportName === "createEvaluationAction"
   ) {
+    if (exportName === "deleteMeetingAction") {
+      const people = Array.from({ length: 101 }, (_, index) => ({
+        id: randomUUID(),
+        churchId: actor.plantId,
+        firstName: "Delete",
+        lastName: `Dependent ${index + 1}`,
+        status: "prospect" as const,
+        createdBy: actor.userId,
+      }));
+      await db.insert(persons).values(people);
+      await db.insert(meetingAttendance).values(
+        people.map((person) => ({
+          id: randomUUID(),
+          churchId: actor.plantId,
+          meetingId: meeting.id,
+          personId: person.id,
+          status: "absent" as const,
+          createdBy: actor.userId,
+        }))
+      );
+    }
     if (exportName === "updateMeetingAction") {
       const [pending] = await db
         .insert(notifications)
@@ -688,6 +712,22 @@ async function assertMutationCardinality(
     assert.equal(locationRows.length, args.savedLocationId ? 1 : 0);
   }
 
+  if (resolved.exportName === "deleteMeetingAction") {
+    const args = resolved.arguments;
+    const [meetingRows, attendanceRows] = await Promise.all([
+      db
+        .select({ id: churchMeetings.id })
+        .from(churchMeetings)
+        .where(eq(churchMeetings.id, args.meetingId)),
+      db
+        .select({ id: meetingAttendance.id })
+        .from(meetingAttendance)
+        .where(inArray(meetingAttendance.id, args.expectedAttendanceIds)),
+    ]);
+    assert.equal(meetingRows.length, 0, "deleted meeting remains");
+    assert.equal(attendanceRows.length, 0, "dependent attendance remains");
+  }
+
   if (
     resolved.exportName === "quickAddAttendeeAction" ||
     resolved.exportName === "quickAddPersonToGuestListAction" ||
@@ -802,6 +842,52 @@ async function runEffect(input: {
   });
   assert.ok(resolved, `${input.exportName} did not resolve`);
   const execution = await seedExecution({ actor: input.actor, resolved });
+  if (resolved.exportName === "deleteMeetingAction") {
+    assert.equal(
+      resolved.arguments.expectedAttendanceIds.length,
+      101,
+      "resolver truncated source-owned attendance dependents"
+    );
+    const document: EvryActionPlanDocument = {
+      version: 1,
+      steps: [
+        {
+          id: execution.stepId,
+          capabilityIdentity: execution.capabilityIdentity,
+          effectClass: "database_write",
+          arguments: resolved.arguments,
+          dependsOn: [],
+        },
+      ],
+    };
+    const reviewRegistration =
+      MEETINGS_REVIEW_REGISTRY.registrationFor(document);
+    assert.ok(reviewRegistration);
+    const confirmation = reviewRegistration.build({
+      plan: evryConversationPlanIdentitySchema.parse({
+        planId: execution.planId,
+        fingerprint: execution.fingerprint,
+      }),
+      document,
+    });
+    assert.deepEqual(
+      confirmation.steps[0]?.resolvedTargets
+        .filter(({ label }) => label === "Attendance record")
+        .map(({ value }) => value),
+      resolved.arguments.expectedAttendanceIds,
+      "trusted confirmation omitted a source-owned dependent"
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: evryPlanConfirmations.id })
+          .from(evryPlanConfirmations)
+          .where(eq(evryPlanConfirmations.planId, execution.planId))
+      ).length,
+      1,
+      "large delete plan was not durably confirmed"
+    );
+  }
   const authorization = await input.authorizeEvryEffectCapability(
     execution.capabilityIdentity
   );
