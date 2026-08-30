@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { evryExecutionOutcomes } from "@/db/schema";
 import { executionStepOutcomeKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import { syncMeetingNotifications } from "@/lib/meetings/notifications";
 import {
   personHoldsLoginFilter,
   personIsUserInChurch,
@@ -23,6 +24,7 @@ interface CompletedRow extends Record<string, unknown> {
 export type TeamsEffectExecutionDeps = Readonly<{
   findCompletedOutcome: typeof completedOutcome;
   executeStatement: typeof executeStatement;
+  syncMeetingNotifications: typeof syncMeetingNotifications;
 }>;
 
 function exactTuple(input: EvryEffectInput, identity: string): boolean {
@@ -145,7 +147,6 @@ function outcomePrelude(
             (e.table_name = 'locations' and exists (select 1 from locations r where r.id = e.id)) or
             (e.table_name = 'church_meetings' and exists (select 1 from church_meetings r where r.id = e.id)) or
             (e.table_name = 'meeting_attendance' and exists (select 1 from meeting_attendance r where r.id = e.id)) or
-            (e.table_name = 'notifications' and exists (select 1 from notifications r where r.id = e.id)) or
             (e.table_name = 'persons' and exists (select 1 from persons r where r.id = e.id)) or
             (e.table_name = 'person_activities' and exists (select 1 from person_activities r where r.id = e.id))
           )) or (e.state is not null and not (
@@ -159,7 +160,6 @@ function outcomePrelude(
             (e.table_name = 'locations' and exists (select 1 from locations r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state)) or
             (e.table_name = 'church_meetings' and exists (select 1 from church_meetings r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state)) or
             (e.table_name = 'meeting_attendance' and exists (select 1 from meeting_attendance r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state)) or
-            (e.table_name = 'notifications' and exists (select 1 from notifications r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state)) or
             (e.table_name = 'persons' and exists (select 1 from persons r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state)) or
             (e.table_name = 'person_activities' and exists (select 1 from person_activities r where r.id = e.id and r.church_id = ${input.execution.plantId}::uuid and to_jsonb(r) = e.state))
           ))
@@ -226,7 +226,6 @@ function rowWrites(): SQL {
     inserted_locations as (insert into locations select (jsonb_populate_record(null::locations,m.after_state)).* from mutation_plan m, claimed where m.table_name='locations' and m.mode='insert' returning id),
     inserted_meetings as (insert into church_meetings select (jsonb_populate_record(null::church_meetings,m.after_state)).* from mutation_plan m, claimed where m.table_name='church_meetings' and m.mode='insert' returning id),
     inserted_attendance as (insert into meeting_attendance select (jsonb_populate_record(null::meeting_attendance,m.after_state)).* from mutation_plan m, claimed where m.table_name='meeting_attendance' and m.mode='insert' returning id),
-    inserted_notifications as (insert into notifications select (jsonb_populate_record(null::notifications,m.after_state)).* from mutation_plan m, claimed where m.table_name='notifications' and m.mode='insert' returning id),
     updated_persons as (update persons t set status=p.status, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::persons,m.after_state) p where m.table_name='persons' and m.mode='update' and t.id=m.id returning t.id),
     inserted_activities as (insert into person_activities select (jsonb_populate_record(null::person_activities,m.after_state)).* from mutation_plan m, claimed where m.table_name='person_activities' and m.mode='insert' returning id),
     updated_church as (update churches t set last_material_event_at=p.last_material_event_at, updated_at=p.updated_at from mutation_plan m, claimed, lateral jsonb_populate_record(null::churches,m.after_state) p where m.table_name='churches' and m.mode='update' and t.id=m.id returning t.id)`;
@@ -261,6 +260,46 @@ function isSerializableRetry(error: unknown): boolean {
   return code === "40001" || code === "40P01";
 }
 
+async function syncMeetingAfterCommit(
+  input: EvryEffectInput,
+  args: TeamsEffectArguments,
+  synchronize: typeof syncMeetingNotifications
+): Promise<void> {
+  if (args.operation !== "createMeetingAction") return;
+  const meeting = args.mutations.find(
+    ({ table, mode }) => table === "church_meetings" && mode === "insert"
+  );
+  if (!meeting) return;
+  try {
+    // The keyed outcome and meeting/guest rows are already committed. This is
+    // deliberately the same best-effort F11 boundary as meetings/service.ts:
+    // it re-reads facts and audience, gates every recipient, and dedupes each
+    // notification independently. A replay may safely ask it to converge.
+    await synchronize(input.execution.plantId, meeting.id, {
+      mustCancel: false,
+    });
+  } catch (error) {
+    // The canonical implementation never throws. Keep this catch at the
+    // adapter seam so a replacement transport cannot retroactively turn a
+    // committed meeting into a refusal or retryable execution.
+    if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
+      console.error("Teams meeting notification sync debug", error);
+    }
+  }
+}
+
+async function completedWithNotificationSync(
+  result: EvryEffectResult,
+  input: EvryEffectInput,
+  args: TeamsEffectArguments,
+  synchronize: typeof syncMeetingNotifications
+): Promise<EvryEffectResult> {
+  if (result.status === "completed") {
+    await syncMeetingAfterCommit(input, args, synchronize);
+  }
+  return result;
+}
+
 /** One PostgreSQL statement owns exact drift refusal, effect claim, and writes. */
 export async function executeTeamsEffect(
   input: EvryEffectInput,
@@ -268,6 +307,8 @@ export async function executeTeamsEffect(
 ): Promise<EvryEffectResult> {
   const findCompleted = dependencies.findCompletedOutcome ?? completedOutcome;
   const runStatement = dependencies.executeStatement ?? executeStatement;
+  const synchronize =
+    dependencies.syncMeetingNotifications ?? syncMeetingNotifications;
   const operation = input.arguments.operation;
   if (
     typeof operation !== "string" ||
@@ -280,34 +321,52 @@ export async function executeTeamsEffect(
   const identity = TEAMS_EFFECT_IDENTITY_BY_OPERATION[typedOperation];
   if (!exactTuple(input, identity))
     return { status: "refused", excludedCount: 1 };
-  const previous = await findCompleted(input);
-  if (previous) return previous;
   let args: TeamsEffectArguments;
   try {
     args = parseTeamsEffectArguments(typedOperation, input.arguments);
   } catch {
     return { status: "refused", excludedCount: 1 };
   }
+  const previous = await findCompleted(input);
+  if (previous)
+    return completedWithNotificationSync(previous, input, args, synchronize);
   try {
-    return await runStatement(input, args);
+    return await completedWithNotificationSync(
+      await runStatement(input, args),
+      input,
+      args,
+      synchronize
+    );
   } catch (error) {
     if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
       console.error("Teams atomic effect debug", error);
     }
     const replay = await findCompleted(input);
-    if (replay) return replay;
+    if (replay)
+      return completedWithNotificationSync(replay, input, args, synchronize);
     if (isSerializableRetry(error)) {
       // The first transaction lost a real database serialization race. A new
       // transaction can now prove one of the two closed outcomes: the keyed
       // effect committed, or the exact baseline no longer matches.
       try {
-        return await runStatement(input, args);
+        return await completedWithNotificationSync(
+          await runStatement(input, args),
+          input,
+          args,
+          synchronize
+        );
       } catch (retryError) {
         if (process.env.EVRY_TEAMS_EFFECT_DEBUG === "1") {
           console.error("Teams atomic effect retry debug", retryError);
         }
         const retriedReplay = await findCompleted(input);
-        if (retriedReplay) return retriedReplay;
+        if (retriedReplay)
+          return completedWithNotificationSync(
+            retriedReplay,
+            input,
+            args,
+            synchronize
+          );
         return { status: "retryable" };
       }
     }

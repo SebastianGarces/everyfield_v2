@@ -123,13 +123,20 @@ async function main(): Promise<void> {
     };
     const [
       { resolveTeamsEvryEffect },
-      { proposeTeamsEvryEffect, TEAMS_EXECUTION_REGISTRY },
+      {
+        proposeTeamsEvryEffect,
+        TEAMS_EXECUTION_CAPABILITIES,
+        TEAMS_EXECUTION_REGISTRY,
+      },
       planRepository,
       plans,
       route,
       viewer,
       effectContracts,
       teamsConversation,
+      atomicEffect,
+      executor,
+      meetingNotifications,
     ] = await Promise.all([
       import("./resolver"),
       import("./runtime"),
@@ -139,6 +146,9 @@ async function main(): Promise<void> {
       import("@/lib/evry/eligibility/viewer"),
       import("./effect-contracts"),
       import("./conversation"),
+      import("./atomic-effect"),
+      import("@/lib/evry/executor"),
+      import("@/lib/meetings/notifications"),
     ]);
     const actorRef = await viewer.requireEvryPlantViewer();
     const post = route.createEvryPlanExecutePost({
@@ -154,6 +164,11 @@ async function main(): Promise<void> {
     >();
     let plannedMeetingInstant: string | null = null;
     let plannedMeetingNotificationCount: number | null = null;
+    let plannedMeetingNotificationIntents: readonly {
+      recipientUserId: string;
+      type: string;
+      scheduledFor: string;
+    }[] = [];
 
     async function approve(
       selection: Parameters<typeof resolveTeamsEvryEffect>[0]["selection"],
@@ -169,9 +184,10 @@ async function main(): Promise<void> {
       if (selection.operation === "createMeetingAction") {
         plannedMeetingInstant =
           resolved.arguments.disclosure.dateTime?.instantUtc ?? null;
-        plannedMeetingNotificationCount = resolved.arguments.mutations.filter(
-          ({ table }) => table === "notifications"
-        ).length;
+        plannedMeetingNotificationCount =
+          resolved.arguments.notificationIntents.length;
+        plannedMeetingNotificationIntents =
+          resolved.arguments.notificationIntents;
       }
       const proposed = await proposeTeamsEvryEffect({
         actor: planningActor,
@@ -651,6 +667,183 @@ async function main(): Promise<void> {
     assert.ok(
       notificationRows.every(({ body }) => body.includes(displayedMeetingTime)),
       "confirmation, stored UTC wall clock, and notification copy agree"
+    );
+
+    const isolatedFailureReports: Array<
+      Awaited<ReturnType<typeof meetingNotifications.syncMeetingNotifications>>
+    > = [];
+    const failureRegistry = executor.createEvryExecutionCapabilityRegistry(
+      TEAMS_EXECUTION_CAPABILITIES.map((registration) =>
+        registration.planCapability.identity ===
+        effectContracts.TEAMS_EFFECT_IDENTITY_BY_OPERATION.createMeetingAction
+          ? executor.defineEvryExecutionCapability({
+              planCapability: registration.planCapability,
+              executeIfCurrent: (effectInput) =>
+                atomicEffect.executeTeamsEffect(effectInput, {
+                  syncMeetingNotifications: async (
+                    churchId,
+                    meetingId,
+                    options
+                  ) => {
+                    const report =
+                      await meetingNotifications.syncMeetingNotifications(
+                        churchId,
+                        meetingId,
+                        {
+                          ...options,
+                          deps: {
+                            ...meetingNotifications.dbMeetingNotificationDeps,
+                            enqueue: async (notification) => {
+                              if (
+                                notification.recipientUserId ===
+                                ordinaryAccount.id
+                              ) {
+                                throw new Error(
+                                  "isolated recipient enqueue failure"
+                                );
+                              }
+                              return meetingNotifications.dbMeetingNotificationDeps.enqueue(
+                                notification
+                              );
+                            },
+                          },
+                        }
+                      );
+                    isolatedFailureReports.push(report);
+                    return report;
+                  },
+                }),
+            })
+          : registration
+      )
+    );
+    const failurePost = route.createEvryPlanExecutePost({
+      registry: failureRegistry,
+    });
+    const failurePlan = await approve({
+      kind: "effect",
+      operation: "createMeetingAction",
+      values: {
+        teamId: created[0]!.id,
+        title: "Best-effort Failure",
+        datetime: "2031-02-10T18:30",
+        meetingSubtype: "rehearsal",
+      },
+    });
+    assert.equal(plannedMeetingNotificationCount, 7);
+    assert.deepEqual(
+      plannedMeetingNotificationIntents
+        .map(({ recipientUserId, type }) => `${recipientUserId}:${type}`)
+        .toSorted(),
+      [
+        `${ordinaryAccount.id}:meeting.scheduled`,
+        ...[1, 3, 7].map(
+          (days) => `${ordinaryAccount.id}:meeting.reminder.${days}d`
+        ),
+        ...[1, 3, 7].map((days) => `${actorId}:meeting.reminder.${days}d`),
+      ].toSorted(),
+      "the immutable plan discloses every intended recipient and type"
+    );
+    assert.deepEqual(
+      plannedMeetingNotificationIntents
+        .filter(({ type }) => type.startsWith("meeting.reminder."))
+        .map(({ type, scheduledFor }) => `${type}:${scheduledFor}`)
+        .toSorted(),
+      [
+        ...[ordinaryAccount.id, actorId].flatMap(() => [
+          "meeting.reminder.7d:2031-02-03T18:30:00.000Z",
+          "meeting.reminder.3d:2031-02-07T18:30:00.000Z",
+          "meeting.reminder.1d:2031-02-09T18:30:00.000Z",
+        ]),
+      ].toSorted(),
+      "the immutable plan discloses every intended reminder time"
+    );
+    assert.equal((await response(failurePost, failurePlan)).status, 200);
+    assert.deepEqual(isolatedFailureReports, [
+      {
+        cancelled: 0,
+        considered: 7,
+        recorded: 3,
+        created: 3,
+        skipped: 0,
+        failed: 4,
+        reason: null,
+      },
+    ]);
+    const [failureMeeting] = await db
+      .select()
+      .from(churchMeetings)
+      .where(eq(churchMeetings.title, "Best-effort Failure"));
+    assert.ok(failureMeeting, "notification failure kept the meeting");
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(meetingAttendance)
+          .where(eq(meetingAttendance.meetingId, failureMeeting.id))
+      ).length,
+      1,
+      "notification failure kept the exact guest roster"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, failureMeeting.id))
+      ).length,
+      3,
+      "one recipient's failures did not cost the other recipient"
+    );
+    const recoveredNotificationReport =
+      await meetingNotifications.syncMeetingNotifications(
+        plantId,
+        failureMeeting.id,
+        { mustCancel: false }
+      );
+    assert.deepEqual(recoveredNotificationReport, {
+      cancelled: 0,
+      considered: 7,
+      recorded: 7,
+      created: 4,
+      skipped: 0,
+      failed: 0,
+      reason: null,
+    });
+    assert.equal(
+      (await response(failurePost, failurePlan)).status,
+      200,
+      "the exact plan remains a successful keyed replay"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(churchMeetings)
+          .where(eq(churchMeetings.title, "Best-effort Failure"))
+      ).length,
+      1,
+      "replay did not duplicate the meeting"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(meetingAttendance)
+          .where(eq(meetingAttendance.meetingId, failureMeeting.id))
+      ).length,
+      1,
+      "replay did not duplicate guests"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.entityId, failureMeeting.id))
+      ).length,
+      7,
+      "canonical dedupe kept one row per disclosed intent"
     );
 
     const [historyRole] = await db
