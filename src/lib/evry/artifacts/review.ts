@@ -360,6 +360,13 @@ export const evryDetailedReceiptArtifactDocumentSchema = z
     plan: evryConversationPlanIdentitySchema,
     title: titleSchema,
     status: z.enum(["completed", "partially_failed", "failed", "refused"]),
+    reuse: z
+      .strictObject({
+        recipeIdentity: semanticIdSchema,
+        label: z.string().trim().min(1).max(160),
+      })
+      .readonly()
+      .optional(),
     steps: z.array(receiptStepSchema).min(1).max(32).readonly(),
   })
   .superRefine((artifact, context) => {
@@ -385,6 +392,13 @@ export const evryDetailedReceiptArtifactDocumentSchema = z
         code: "custom",
         path: ["status"],
         message: "Evry receipt status must match its step outcomes",
+      });
+    }
+    if (artifact.reuse && artifact.status !== "completed") {
+      context.addIssue({
+        code: "custom",
+        path: ["reuse"],
+        message: "Only a completed recipe receipt may offer reuse",
       });
     }
   })

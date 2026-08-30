@@ -3,7 +3,10 @@
 import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { PublicEvryConversation } from "@/components/evry/client-contract";
+import {
+  parseEvryConversationEnvelope,
+  type PublicEvryConversation,
+} from "@/components/evry/client-contract";
 import { useEvryShell } from "@/components/evry/evry-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -12,6 +15,7 @@ import {
   type EvryArtifactError,
   type EvryDetailedConfirmationArtifactDocument,
   type EvryDetailedProgressArtifactDocument,
+  type EvryDetailedReceiptArtifactDocument,
 } from "@/lib/evry/artifacts/review";
 import type { EvryPublicArtifact } from "@/lib/evry/artifacts/public";
 
@@ -34,12 +38,15 @@ type LocalError = EvryArtifactError | Readonly<{ kind: "uncertain" }>;
 
 type LocalState =
   | Readonly<{ status: "idle" }>
-  | Readonly<{ status: "submitting"; action: "cancel" | "edit" | "retry" }>
+  | Readonly<{
+      status: "submitting";
+      action: "cancel" | "edit" | "retry" | "reuse";
+    }>
   | Readonly<{
       status: "progress";
       progress: EvryDetailedProgressArtifactDocument;
     }>
-  | Readonly<{ status: "complete"; action: Action }>
+  | Readonly<{ status: "complete"; action: Action | "reuse" }>
   | Readonly<{ status: "error"; error: LocalError }>;
 
 function detailedConfirmation(
@@ -54,6 +61,14 @@ function detailedProgress(
   artifact: EvryPublicArtifact
 ): EvryDetailedProgressArtifactDocument | null {
   return artifact.kind === "progress" && "artifactVersion" in artifact
+    ? artifact
+    : null;
+}
+
+function detailedReceipt(
+  artifact: EvryPublicArtifact
+): EvryDetailedReceiptArtifactDocument | null {
+  return artifact.kind === "result" && "artifactVersion" in artifact
     ? artifact
     : null;
 }
@@ -107,11 +122,13 @@ function ActionNotice({ state }: { state: LocalState }) {
       <Alert role="group">
         <LoaderCircle aria-hidden="true" className="motion-safe:animate-spin" />
         <AlertTitle>
-          {state.action === "retry"
-            ? "Retrying this exact plan…"
-            : state.action === "edit"
-              ? "Invalidating this confirmation…"
-              : "Cancelling this plan…"}
+          {state.action === "reuse"
+            ? "Refreshing this recipe…"
+            : state.action === "retry"
+              ? "Retrying this exact plan…"
+              : state.action === "edit"
+                ? "Invalidating this confirmation…"
+                : "Cancelling this plan…"}
         </AlertTitle>
         <AlertDescription>
           No execution control is available while this request is being saved.
@@ -120,7 +137,12 @@ function ActionNotice({ state }: { state: LocalState }) {
     );
   }
   if (state.status === "complete") {
-    if (state.action === "execute" || state.action === "retry") return null;
+    if (
+      state.action === "execute" ||
+      state.action === "retry" ||
+      state.action === "reuse"
+    )
+      return null;
     return (
       <Alert role="group">
         <AlertCircle aria-hidden="true" />
@@ -188,11 +210,13 @@ export function EvryProductionArtifact({
 }) {
   const confirmation = detailedConfirmation(artifact);
   const progress = detailedProgress(artifact);
+  const receipt = detailedReceipt(artifact);
   const {
     applyWorkConversation,
     beginWork,
     finishWork,
     isWorking,
+    navigateToConversation,
     observeWork,
     updateWork,
   } = useEvryShell();
@@ -213,6 +237,60 @@ export function EvryProductionArtifact({
     state.status === "idle" &&
     ((confirmation !== null && sameActivePlan(confirmation, activePlan)) ||
       (progress !== null && sameActiveProgress(progress, activePlan)));
+  const canReuse =
+    !isWorking &&
+    interactive &&
+    state.status === "idle" &&
+    receipt?.status === "completed" &&
+    receipt.reuse !== undefined;
+
+  async function reuseRecipe() {
+    if (!canReuse || !receipt?.reuse) return;
+    const requestKey = crypto.randomUUID();
+    beginWork(requestKey, {
+      phase: "reading",
+      message: "Refreshing this recipe from current application data",
+    });
+    setState({ status: "submitting", action: "reuse" });
+    requestAnimationFrame(() =>
+      document.getElementById("evry-work-status")?.focus()
+    );
+    try {
+      const response = await fetch(
+        `/api/evry/conversations/${encodeURIComponent(conversationId)}/reuse`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ requestKey, resultArtifactId: artifactId }),
+        }
+      );
+      if (!response.ok) throw new Error("reuse unavailable");
+      const nextConversation = parseEvryConversationEnvelope(
+        await response.json()
+      );
+      if (!applyWorkConversation(requestKey, 1, nextConversation)) {
+        throw new Error("stale reuse response");
+      }
+      navigateToConversation(nextConversation.id);
+      finishWork(requestKey, 2);
+      setState({ status: "complete", action: "reuse" });
+    } catch {
+      updateWork(requestKey, 1, {
+        phase: "failed",
+        message:
+          "Unable to reuse this recipe. Reopen the receipt and try again.",
+      });
+      finishWork(requestKey, 2);
+      setState({
+        status: "error",
+        error: {
+          kind: "expected",
+          message:
+            "Unable to reuse this recipe. Reopen the receipt and try again.",
+        },
+      });
+    }
+  }
 
   async function run(action: Action) {
     const plan = confirmation?.plan ?? progress?.plan;
@@ -335,7 +413,15 @@ export function EvryProductionArtifact({
                     onSafeRetry: () => void run("retry"),
                   },
                 }
-              : undefined
+              : receipt?.reuse && interactive
+                ? {
+                    receiptControls: {
+                      disabled: !canReuse,
+                      label: receipt.reuse.label,
+                      onReuse: () => void reuseRecipe(),
+                    },
+                  }
+                : undefined
         }
       />
       <ActionNotice state={state} />

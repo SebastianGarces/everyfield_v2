@@ -88,14 +88,18 @@ export function ConversationSurface({ className }: { className?: string }) {
       .flatMap((message) => message.artifacts)
       .findLast(
         ({ artifact }) =>
-          (artifact.kind === "confirmation" ||
+          (artifact.kind === "result" &&
+            "artifactVersion" in artifact &&
+            artifact.status === "completed" &&
+            artifact.reuse !== undefined) ||
+          ((artifact.kind === "confirmation" ||
             (artifact.kind === "progress" &&
               "artifactVersion" in artifact &&
               artifact.steps.some(({ status }) => status === "safe_retry"))) &&
-          "artifactVersion" in artifact &&
-          conversation.activePlan?.identity.planId === artifact.plan.planId &&
-          conversation.activePlan.identity.fingerprint ===
-            artifact.plan.fingerprint
+            "artifactVersion" in artifact &&
+            conversation.activePlan?.identity.planId === artifact.plan.planId &&
+            conversation.activePlan.identity.fingerprint ===
+              artifact.plan.fingerprint)
       )?.id ?? null;
 
   useEffect(() => {

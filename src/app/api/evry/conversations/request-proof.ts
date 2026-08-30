@@ -350,6 +350,7 @@ async function main(): Promise<void> {
   const createRoute = await import("./route");
   const getRoute = await import("./[conversationId]/route");
   const messageRoute = await import("./[conversationId]/messages/route");
+  const reuseRoute = await import("./[conversationId]/reuse/route");
   const pageContextResolver = await import("@/lib/evry/resolvers/page-context");
 
   let capturedActor: EvryPlantActor | null = null;
@@ -928,6 +929,67 @@ async function main(): Promise<void> {
       body: { status: "unavailable" },
     });
   }
+
+  const reusePost = reuseRoute.createEvryRecipeReusePost({
+    now: () => RETURN,
+    async reuse(input) {
+      events.push("reuse");
+      assert.equal(input.actor.userId, USER_ID);
+      assert.equal(input.actor.plantId, PLANT_ID);
+      assert.equal(input.sourceConversationId, CONVERSATION_ID);
+      assert.equal(input.now, RETURN);
+      assert.ok(stored);
+      return {
+        status: "created",
+        copiedIntent: "Reuse the visible meeting invitation intent.",
+        resumed: {
+          conversation: stored,
+          activePlan: null,
+          context: {} as never,
+        },
+      };
+    },
+  });
+  sessions = [null];
+  events.length = 0;
+  const unauthenticatedReuse = await response(
+    await reusePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/reuse`,
+        {
+          requestKey: "not-a-uuid",
+          resultArtifactId: "not-a-uuid",
+        }
+      ),
+      { params: Promise.resolve({ conversationId: "not-a-uuid" }) }
+    )
+  );
+  assert.deepEqual(events, ["auth"]);
+  assert.deepEqual(unauthenticatedReuse, {
+    status: 401,
+    cacheControl: "private, no-store",
+    body: { status: "unavailable" },
+  });
+
+  sessions = [user()];
+  events.length = 0;
+  const reused = await response(
+    await reusePost(
+      request(
+        `http://localhost/api/evry/conversations/${CONVERSATION_ID}/reuse`,
+        {
+          requestKey: randomUUID(),
+          resultArtifactId: randomUUID(),
+        }
+      ),
+      { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }
+    )
+  );
+  assert.deepEqual(events, ["auth", "body", "reuse"]);
+  assert.equal(reused.status, 201);
+  assert.equal(reused.cacheControl, "private, no-store");
+  assert.equal(reused.body.status, "created");
+  assert.equal(reused.body.conversation.id, CONVERSATION_ID);
 
   process.stdout.write("Evry conversation request proof passed\n");
 }

@@ -32,6 +32,7 @@ import {
   confirmationMatchesTrustedPlan,
   progressFromRetryableEvryExecution,
   type EvryArtifactLifecycleBoundaries,
+  type EvryTrustedPlanReview,
 } from "./lifecycle";
 import { buildEvryConfirmationArtifact } from "./review";
 
@@ -128,6 +129,8 @@ function harness() {
   let executeError: unknown = null;
   let executeOverride: EvryArtifactLifecycleBoundaries["execute"] | null = null;
   let trustedConfirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
+  let trustedSource: EvryTrustedPlanReview["source"] = { kind: "generic" };
+  const reusableRecipeIdentities = new Set<string>();
 
   const resume = (async () => {
     const activePlan = conversation.activePlan
@@ -177,6 +180,7 @@ function harness() {
   const boundaries: EvryArtifactLifecycleBoundaries = {
     planRegistry: createEvryPlanCapabilityRegistry([]),
     executionRegistry: createEvryExecutionCapabilityRegistry([]),
+    reusableRecipeIdentities,
     revalidatePlan,
     resume,
     append,
@@ -232,7 +236,10 @@ function harness() {
       calls.push("review");
       assert.equal(input.actor, ACTOR);
       assert.deepEqual(input.plan, EVRY_CONFIRMATION_FIXTURES.meeting.plan);
-      return { confirmation: trustedConfirmation };
+      return {
+        confirmation: trustedConfirmation,
+        source: trustedSource,
+      };
     },
     now: () => NOW,
     correlationId: () => "80000000-0000-4000-8000-000000000001",
@@ -284,6 +291,10 @@ function harness() {
     ) {
       trustedConfirmation = confirmation;
     },
+    setTrustedRecipe(identity: string, reusable: boolean) {
+      trustedSource = { kind: "recipe", identity };
+      if (reusable) reusableRecipeIdentities.add(identity);
+    },
   };
 }
 
@@ -332,6 +343,38 @@ test("execute persists progress before the effect and a terminal receipt after i
       ? receipt.steps.length
       : 0,
     EVRY_CONFIRMATION_FIXTURES.meeting.steps.length
+  );
+});
+
+test("only a completed registered recipe receipt advertises reuse", async () => {
+  const reusable = harness();
+  reusable.setTrustedRecipe("fixture.recipe", true);
+  await createEvryArtifactLifecycle(reusable.boundaries)(request("execute"));
+  const reusableReceipt = reusable
+    .conversation()
+    .messages.flatMap(({ artifacts }) => artifacts)
+    .findLast(({ document }) => document.kind === "result")?.document;
+  assert.deepEqual(
+    reusableReceipt?.kind === "result" && "artifactVersion" in reusableReceipt
+      ? reusableReceipt.reuse
+      : null,
+    { recipeIdentity: "fixture.recipe", label: "Reuse" }
+  );
+
+  const unregistered = harness();
+  unregistered.setTrustedRecipe("fixture.recipe", false);
+  await createEvryArtifactLifecycle(unregistered.boundaries)(
+    request("execute")
+  );
+  const ordinaryReceipt = unregistered
+    .conversation()
+    .messages.flatMap(({ artifacts }) => artifacts)
+    .findLast(({ document }) => document.kind === "result")?.document;
+  assert.equal(
+    ordinaryReceipt?.kind === "result" && "artifactVersion" in ordinaryReceipt
+      ? ordinaryReceipt.reuse
+      : null,
+    undefined
   );
 });
 
@@ -482,6 +525,7 @@ test("complete trusted matching rejects destructive downgrades and added disclos
   assert.equal(
     confirmationMatchesTrustedPlan(downgraded, {
       confirmation: destructive,
+      source: { kind: "generic" },
     }),
     false
   );
@@ -498,7 +542,10 @@ test("complete trusted matching rejects destructive downgrades and added disclos
     })),
   });
   assert.equal(
-    confirmationMatchesTrustedPlan(expanded, { confirmation: destructive }),
+    confirmationMatchesTrustedPlan(expanded, {
+      confirmation: destructive,
+      source: { kind: "generic" },
+    }),
     false
   );
 });

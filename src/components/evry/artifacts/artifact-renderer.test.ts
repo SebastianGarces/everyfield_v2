@@ -16,7 +16,10 @@ import {
 } from "@/lib/evry/artifacts/public";
 import { buildEvryReadArtifact } from "@/lib/evry/artifacts/core";
 import { trustedEvryApplicationSourceLink } from "@/lib/evry/artifacts/types";
-import { buildEvryProgressArtifact } from "@/lib/evry/artifacts/review";
+import {
+  buildEvryProgressArtifact,
+  buildEvryReceiptArtifact,
+} from "@/lib/evry/artifacts/review";
 import {
   boundaryArtifactFor,
   settingsHandoffArtifactFor,
@@ -33,7 +36,7 @@ import {
 
 function render(
   model: EvryRenderableArtifact,
-  controls: "confirmation" | "progress" | false = false
+  controls: "confirmation" | "progress" | "reuse" | false = false
 ): string {
   return renderToStaticMarkup(
     createElement(EvryArtifactRenderer, {
@@ -49,7 +52,15 @@ function render(
             }
           : controls === "progress"
             ? { progressControls: { onSafeRetry() {} } }
-            : undefined,
+            : controls === "reuse"
+              ? {
+                  receiptControls: {
+                    disabled: false,
+                    label: "Reuse",
+                    onReuse() {},
+                  },
+                }
+              : undefined,
     })
   );
 }
@@ -296,6 +307,38 @@ test("progress and a terminal receipt expose every step state without a second e
   );
   assert.match(receiptMarkup, /has no execute control/);
   assert.doesNotMatch(receiptMarkup, /<button/);
+});
+
+test("a reusable completed receipt exposes one explicit Reuse action", () => {
+  const confirmation = EVRY_CONFIRMATION_FIXTURES.meeting;
+  const reusable = buildEvryReceiptArtifact({
+    kind: "result",
+    artifactVersion: 1,
+    plan: confirmation.plan,
+    title: "Receipt: meeting invitation",
+    status: "completed",
+    reuse: {
+      recipeIdentity: "meeting.invitation.reference",
+      label: "Reuse",
+    },
+    steps: confirmation.steps.map((step) => ({
+      stepId: step.stepId,
+      label: step.title,
+      status: "completed" as const,
+      resultCode: "effect_completed" as const,
+      affectedCount: 1,
+      excludedCount: 0,
+      sourceLinks: [],
+      retry: { status: "unavailable" as const },
+      error: null,
+    })),
+  });
+  const markup = render(
+    renderableEvryArtifact(evryPublicArtifactSchema.parse(reusable)),
+    "reuse"
+  );
+  assert.match(markup, />Reuse</);
+  assert.equal((markup.match(/<button/g) ?? []).length, 1);
 });
 
 test("unexpected errors render only generic copy and their support identity", () => {

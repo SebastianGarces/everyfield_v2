@@ -97,6 +97,7 @@ type EvryShellValue = Readonly<{
   isWorking: boolean;
   isWatchingDetached: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
+  navigateToConversation: (conversationId: string) => void;
   openPanel: (trigger: HTMLButtonElement) => void;
   observeWork: (requestId: string, controller: AbortController) => void;
   resetConversation: () => void;
@@ -604,6 +605,17 @@ export function EvryShell({
     router.push("/dashboard");
   }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
+  const navigateToConversation = useCallback(
+    (conversationId: string) => {
+      if (pathname !== "/evry") return;
+      const next = new URLSearchParams(locationSearch);
+      next.delete("new");
+      next.set("conversation", conversationId);
+      router.push(`/evry?${next.toString()}`);
+    },
+    [locationSearch, pathname, router]
+  );
+
   const clearContext = useCallback(() => setActiveContext(null), []);
   const loadConversation = useCallback(
     async (conversationId: string) => {
@@ -1059,6 +1071,7 @@ export function EvryShell({
       isWorking,
       isWatchingDetached: detachedRequestId !== null,
       loadConversation,
+      navigateToConversation,
       openPanel,
       observeWork: observeWith,
       resetConversation,
@@ -1093,6 +1106,7 @@ export function EvryShell({
       isWorking,
       detachedRequestId,
       loadConversation,
+      navigateToConversation,
       openPanel,
       observeWith,
       observedRequestId,
