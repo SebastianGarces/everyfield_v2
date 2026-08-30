@@ -89,7 +89,7 @@ test("Task RSC discovery follows delegated server-component reads", () => {
   const read = taskReadIdentity;
   assert.deepEqual(discoverTaskPageReadOperations(), [
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "db.select"),
-    read("src/app/(dashboard)/tasks/[id]/page.tsx", "eq"),
+    read("src/app/(dashboard)/tasks/[id]/page.tsx", "exactTaskAssigneeJoin"),
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "getTask"),
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "listFollowUpAssignees"),
     read(
@@ -100,7 +100,7 @@ test("Task RSC discovery follows delegated server-component reads", () => {
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "listTaskPrerequisites"),
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "verifySession"),
     read("src/app/(dashboard)/tasks/new/page.tsx", "db.select"),
-    read("src/app/(dashboard)/tasks/new/page.tsx", "eq"),
+    read("src/app/(dashboard)/tasks/new/page.tsx", "exactTaskAssigneeJoin"),
     read("src/app/(dashboard)/tasks/new/page.tsx", "listFollowUpAssignees"),
     read(
       "src/app/(dashboard)/tasks/new/page.tsx",
