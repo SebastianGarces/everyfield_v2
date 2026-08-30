@@ -119,7 +119,7 @@ export async function recoverEvryActiveRun(input: {
     }
     if (
       run.kind === "conversation" &&
-      run.operation === "create" &&
+      (run.operation === "create" || run.operation === "reuse") &&
       run.stage !== "executing" &&
       run.conversationId === null
     ) {
@@ -127,7 +127,7 @@ export async function recoverEvryActiveRun(input: {
         status: "active",
         requestId: requestKey,
         kind: "conversation",
-        operation: "create",
+        operation: run.operation,
         sequence: run.version,
         stage: run.stage,
         conversationId: null,
@@ -190,7 +190,9 @@ export async function recoverEvryActiveRun(input: {
     }
     if (
       run.kind !== "conversation" ||
-      (run.operation !== "create" && run.operation !== "continue")
+      (run.operation !== "create" &&
+        run.operation !== "continue" &&
+        run.operation !== "reuse")
     ) {
       throw new Error("Evry durable run had an invalid wire identity");
     }
@@ -207,7 +209,11 @@ export async function recoverEvryActiveRun(input: {
     input.now >= run.expiresAt &&
     run.kind === "conversation"
   ) {
-    if (run.operation !== "create" && run.operation !== "continue") {
+    if (
+      run.operation !== "create" &&
+      run.operation !== "continue" &&
+      run.operation !== "reuse"
+    ) {
       throw new Error("Evry expired run had an invalid wire identity");
     }
     return {

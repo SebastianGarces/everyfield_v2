@@ -83,6 +83,7 @@ export const evryActiveRunKinds = ["conversation", "execution"] as const;
 export const evryActiveRunOperations = [
   "create",
   "continue",
+  "reuse",
   "execute",
   "retry",
 ] as const;
@@ -1041,11 +1042,11 @@ export const evryActiveRuns = pgTable(
       "evry_active_runs_shape_check",
       sql`(
         ${table.kind} = 'conversation'
-        and ${table.operation} in ('create', 'continue')
+        and ${table.operation} in ('create', 'continue', 'reuse')
         and ${table.planId} is null
         and ${table.planFingerprint} is null
-        and (${table.operation} <> 'create' or ${table.status} <> 'active' or ${table.conversationId} is null)
-        and (${table.operation} = 'create' or ${table.conversationId} is not null)
+        and (${table.operation} not in ('create', 'reuse') or ${table.status} <> 'active' or ${table.conversationId} is null)
+        and (${table.operation} in ('create', 'reuse') or ${table.conversationId} is not null)
         and ${table.stage} <> 'executing'
       ) or (
         ${table.kind} = 'execution'

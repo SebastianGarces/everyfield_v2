@@ -9,6 +9,7 @@ import { validateStoredEvryActionPlan } from "@/lib/evry/plans/integrity";
 import { findExactEvryActionPlan } from "@/lib/evry/plans/repository";
 import { PRODUCTION_EVRY_RECIPE_REUSE_REGISTRY } from "@/lib/evry/recipes/production-reuse";
 import type { EvryRecipeReuseRegistry } from "@/lib/evry/recipes/reuse";
+import type { EvryConversationStreamStage } from "@/lib/evry/streaming/conversation-wire";
 import { z } from "zod";
 
 import {
@@ -77,8 +78,10 @@ export function createCompletedEvryRecipeReuse(
     actor: EvryPlantActor;
     sourceConversationId: string;
     resultArtifactId: string;
+    recipeIdentity: string;
     requestKey: string;
     now: Date;
+    reportStage?: (stage: EvryConversationStreamStage) => void | Promise<void>;
   }): Promise<EvryCompletedRecipeReuseResult> {
     const sourceConversationId = evryConversationIdSchema.safeParse(
       input.sourceConversationId
@@ -109,10 +112,12 @@ export function createCompletedEvryRecipeReuse(
     if (
       !receipt.success ||
       receipt.data.status !== "completed" ||
-      !receipt.data.reuse
+      !receipt.data.reuse ||
+      receipt.data.reuse.recipeIdentity !== input.recipeIdentity
     ) {
       return { status: "unavailable" };
     }
+    await input.reportStage?.("resolving_references");
     const storedPlan = await boundaries.findPlan({
       planId: receipt.data.plan.planId,
       actorUserId: input.actor.userId,
@@ -151,6 +156,7 @@ export function createCompletedEvryRecipeReuse(
       pageContext: null,
       requestPageContext: null,
       now: input.now,
+      reportStage: input.reportStage,
     });
     if (
       resumed.conversation.id === source.id ||

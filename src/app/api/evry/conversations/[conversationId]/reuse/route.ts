@@ -4,6 +4,11 @@ import { publicEvryConversation } from "@/lib/evry/conversations/public";
 import { EvryConversationIdempotencyError } from "@/lib/evry/conversations/repository";
 import { reuseCompletedEvryRecipe } from "@/lib/evry/conversations/reuse";
 import { requireEvryPlantViewer } from "@/lib/evry/eligibility/viewer";
+import {
+  evryConversationActiveRunCoordinator,
+  type EvryConversationActiveRunCoordinator,
+} from "@/lib/evry/runs/conversation";
+import { EvryActiveRunIdentityError } from "@/lib/evry/runs/contract";
 
 import { evryConversationFailure, evryConversationJson } from "../../shared";
 
@@ -15,6 +20,7 @@ const routeParamsSchema = z.strictObject({
 const reuseBodySchema = z.strictObject({
   requestKey: z.string().uuid(),
   resultArtifactId: z.string().uuid(),
+  recipeIdentity: z.string().trim().min(1).max(160),
 });
 
 type RouteContext = Readonly<{
@@ -24,12 +30,14 @@ type RouteContext = Readonly<{
 export type EvryRecipeReusePostOptions = Readonly<{
   reuse?: typeof reuseCompletedEvryRecipe;
   now?: () => Date;
+  activeRuns?: EvryConversationActiveRunCoordinator;
 }>;
 
 /** Start one fresh production conversation from a registered completed recipe. */
 export function createEvryRecipeReusePost({
   reuse = reuseCompletedEvryRecipe,
   now = () => new Date(),
+  activeRuns = evryConversationActiveRunCoordinator,
 }: EvryRecipeReusePostOptions = {}) {
   return async function evryRecipeReusePost(
     request: Request,
@@ -53,25 +61,62 @@ export function createEvryRecipeReusePost({
       if (!parsed.success) {
         return evryConversationJson({ status: "invalid" }, 400);
       }
-      const result = await reuse({
+      const startedAt = now();
+      const prepared = await activeRuns.prepare({
         actor,
-        sourceConversationId: params.data.conversationId,
-        resultArtifactId: parsed.data.resultArtifactId,
         requestKey: parsed.data.requestKey,
-        now: now(),
+        identity: {
+          kind: "conversation",
+          operation: "reuse",
+          conversationId: null,
+          planId: null,
+          planFingerprint: null,
+        },
+        fingerprintInput: {
+          version: 1,
+          operation: "reuse",
+          sourceConversationId: params.data.conversationId,
+          resultArtifactId: parsed.data.resultArtifactId,
+          recipeIdentity: parsed.data.recipeIdentity,
+        },
+        startedAt,
+        perform: async (reportStage) => {
+          const result = await reuse({
+            actor,
+            sourceConversationId: params.data.conversationId,
+            resultArtifactId: parsed.data.resultArtifactId,
+            recipeIdentity: parsed.data.recipeIdentity,
+            requestKey: parsed.data.requestKey,
+            now: startedAt,
+            reportStage,
+          });
+          return result.status === "created"
+            ? { conversation: publicEvryConversation(result.resumed) }
+            : null;
+        },
       });
-      if (result.status === "unavailable") {
+      const result = await activeRuns.run(prepared, () => undefined);
+      if (result === null) {
         return evryConversationJson({ status: "unavailable" }, 404);
+      }
+      if ("status" in result) {
+        return evryConversationJson(
+          { status: "active", requestId: parsed.data.requestKey },
+          202
+        );
       }
       return evryConversationJson(
         {
           status: "created",
-          conversation: publicEvryConversation(result.resumed),
+          conversation: result.conversation,
         },
         201
       );
     } catch (error) {
-      if (error instanceof EvryConversationIdempotencyError) {
+      if (
+        error instanceof EvryConversationIdempotencyError ||
+        error instanceof EvryActiveRunIdentityError
+      ) {
         return evryConversationJson({ status: "stale" }, 409);
       }
       return evryConversationFailure(error);

@@ -262,6 +262,7 @@ test("completed reuse creates a fresh conversation from copied intent only", asy
     actor: ACTOR,
     sourceConversationId: SOURCE_CONVERSATION_ID,
     resultArtifactId: RESULT_ARTIFACT_ID,
+    recipeIdentity: RECIPE_IDENTITY,
     requestKey: REQUEST_KEY,
     now: NOW,
   });
@@ -282,6 +283,7 @@ test("completed reuse creates a fresh conversation from copied intent only", asy
     actor: ACTOR,
     sourceConversationId: SOURCE_CONVERSATION_ID,
     resultArtifactId: RESULT_ARTIFACT_ID,
+    recipeIdentity: RECIPE_IDENTITY,
     requestKey: REQUEST_KEY,
     now: NOW,
   });
@@ -299,6 +301,20 @@ test("completed reuse creates a fresh conversation from copied intent only", asy
 });
 
 test("reuse refuses a nonterminal receipt and any returned source identity", async () => {
+  const wrongReceipt = harness();
+  assert.deepEqual(
+    await wrongReceipt.reuse({
+      actor: ACTOR,
+      sourceConversationId: SOURCE_CONVERSATION_ID,
+      resultArtifactId: RESULT_ARTIFACT_ID,
+      recipeIdentity: "another.recipe",
+      requestKey: REQUEST_KEY,
+      now: NOW,
+    }),
+    { status: "unavailable" }
+  );
+  assert.equal(wrongReceipt.createCalls(), 0);
+
   const partialReceipt = buildEvryReceiptArtifact({
     ...receipt,
     status: "partially_failed",
@@ -335,6 +351,7 @@ test("reuse refuses a nonterminal receipt and any returned source identity", asy
       actor: ACTOR,
       sourceConversationId: SOURCE_CONVERSATION_ID,
       resultArtifactId: RESULT_ARTIFACT_ID,
+      recipeIdentity: RECIPE_IDENTITY,
       requestKey: REQUEST_KEY,
       now: NOW,
     }),
@@ -352,6 +369,7 @@ test("reuse refuses a nonterminal receipt and any returned source identity", asy
       actor: ACTOR,
       sourceConversationId: SOURCE_CONVERSATION_ID,
       resultArtifactId: RESULT_ARTIFACT_ID,
+      recipeIdentity: RECIPE_IDENTITY,
       requestKey: REQUEST_KEY,
       now: NOW,
     }),
@@ -386,6 +404,7 @@ test("reuse is neutral for another actor and reaches no plan or create boundary"
       actor: { ...ACTOR, userId: "10000000-0000-4000-8000-000000000002" },
       sourceConversationId: SOURCE_CONVERSATION_ID,
       resultArtifactId: RESULT_ARTIFACT_ID,
+      recipeIdentity: RECIPE_IDENTITY,
       requestKey: REQUEST_KEY,
       now: NOW,
     }),
