@@ -54,15 +54,28 @@ const notificationSnapshotSchema = z.strictObject({
 });
 
 export const MAX_REVIEWABLE_MARK_ALL_TARGETS = 100;
-export const MAX_REVIEWABLE_MARK_ALL_UTF16_CODE_UNITS = 4_000 * 64;
+export const MAX_REVIEWABLE_NOTIFICATION_PAYLOAD_UTF16_CODE_UNITS = 4_000 * 64;
+
+function notificationPayloadIsReviewable(
+  rows: readonly NotificationSnapshot[]
+) {
+  return (
+    JSON.stringify(rows).length <=
+    MAX_REVIEWABLE_NOTIFICATION_PAYLOAD_UTF16_CODE_UNITS
+  );
+}
 
 const visibilitySnapshotSchema = z.strictObject({
   categories: z.array(z.enum(notificationCategories)),
   checkedAt: z.string().datetime(),
 });
 
+const reviewableNotificationSnapshotSchema = notificationSnapshotSchema.refine(
+  (notification) => notificationPayloadIsReviewable([notification]),
+  "The exact notification is too large for a complete confirmation"
+);
 const markOneArgumentsSchema = z.strictObject({
-  notification: notificationSnapshotSchema,
+  notification: reviewableNotificationSnapshotSchema,
   visibility: visibilitySnapshotSchema,
 });
 const markAllArgumentsSchema = z.strictObject({
@@ -71,8 +84,7 @@ const markAllArgumentsSchema = z.strictObject({
     .min(1)
     .max(MAX_REVIEWABLE_MARK_ALL_TARGETS)
     .refine(
-      (rows) =>
-        JSON.stringify(rows).length <= MAX_REVIEWABLE_MARK_ALL_UTF16_CODE_UNITS,
+      notificationPayloadIsReviewable,
       "The exact notification set is too large for a complete confirmation"
     ),
   visibility: visibilitySnapshotSchema,

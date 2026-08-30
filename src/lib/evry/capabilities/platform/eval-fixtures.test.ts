@@ -33,8 +33,12 @@ const LIVE_EFFECT_LAYERS = new Set<EvryCapabilityEvalLayer>([
   "errors",
 ]);
 const BEHAVIOR_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "policy",
+  "selection",
+  "arguments",
   "tenancy",
   "permission",
+  "confirmation",
   "ui_artifact",
 ]);
 

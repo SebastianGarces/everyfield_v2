@@ -15,6 +15,7 @@ import {
 import {
   MARK_ALL_NOTIFICATIONS_PLAN,
   MARK_ONE_NOTIFICATION_PLAN,
+  MAX_REVIEWABLE_NOTIFICATION_PAYLOAD_UTF16_CODE_UNITS,
   PLATFORM_ARTIFACT_REVIEWS,
   PLATFORM_EXECUTION_CAPABILITIES,
   SUBMIT_FEEDBACK_PLAN,
@@ -216,10 +217,10 @@ test("maximum legal feedback is losslessly paged into a review artifact", () => 
   assert.ok(descriptionPages?.every(({ content }) => content.length <= 4_000));
 });
 
-test("a maximum-size mark-one payload is losslessly paged", () => {
+test("a legal bounded mark-one payload is losslessly paged", () => {
   const notification = {
     ...snapshot,
-    body: "exact body ".repeat(24_000),
+    body: "exact body ".repeat(20_000),
   };
   const document = parseEvryActionPlanCandidate({
     candidate: {
@@ -253,6 +254,39 @@ test("a maximum-size mark-one payload is losslessly paged", () => {
     JSON.stringify([notification])
   );
   assert.ok(previews?.every(({ content }) => content.length <= 4_000));
+});
+
+test("mark-one refuses hostile review material before plan persistence", () => {
+  const hostileBody = "x".repeat(10_000_000);
+  const arguments_ = {
+    notification: { ...snapshot, body: hostileBody },
+    visibility: {
+      categories: ["meetings"],
+      checkedAt: "2030-01-01T00:00:00.000Z",
+    },
+  };
+  assert.ok(
+    hostileBody.length > MAX_REVIEWABLE_NOTIFICATION_PAYLOAD_UTF16_CODE_UNITS
+  );
+  assert.equal(markOneArgumentsSchema.safeParse(arguments_).success, false);
+  assert.throws(
+    () =>
+      parseEvryActionPlanCandidate({
+        candidate: {
+          steps: [
+            {
+              id: "mark-notification-read",
+              capabilityIdentity: "notifications.feed.mark-one-read",
+              arguments: arguments_,
+              dependsOn: [],
+            },
+          ],
+        },
+        registry: PLATFORM_EVRY_PLAN_REGISTRY,
+        eligibleCapabilities: eligibleEvryCapabilitiesFor(actor),
+      }),
+    /notifications\.feed\.mark-one-read has invalid arguments/
+  );
 });
 
 test("the largest legal mark-all plan renders every exact target", () => {
