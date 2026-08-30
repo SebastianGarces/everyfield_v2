@@ -140,7 +140,14 @@ function orderedSteps(document: EvryActionPlanDocument) {
 function publicDurable(
   outcome: EvryDurableStepOutcome
 ): EvryExecutionStepResult {
-  return Object.freeze({ ...outcome, durable: true as const });
+  return Object.freeze({
+    stepId: outcome.stepId,
+    capabilityIdentity: outcome.capabilityIdentity,
+    status: outcome.status,
+    durable: true as const,
+    affectedCount: outcome.affectedCount,
+    excludedCount: outcome.excludedCount,
+  });
 }
 
 /** Claim lookup is a network boundary; transport failures stay retryable. */
@@ -223,6 +230,9 @@ function executionRegistryForRecipe(input: {
         planCapability: registration.planCapability,
         ...(registration.reconcileClaimed
           ? { reconcileClaimed: registration.reconcileClaimed }
+          : {}),
+        ...(registration.dependencyOutputSchema
+          ? { dependencyOutputSchema: registration.dependencyOutputSchema }
           : {}),
         async executeIfCurrent(effectInput) {
           const result = await registration.executeIfCurrent(effectInput);
@@ -374,6 +384,9 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
     const results = new Map(
       snapshot.steps.map((outcome) => [outcome.stepId, publicDurable(outcome)])
     );
+    const durableOutcomes = new Map(
+      snapshot.steps.map((outcome) => [outcome.stepId, outcome])
+    );
     const canonicalDocument = canonicalEvryPlanJson({
       actorUserId: exact.actorUserId,
       plantId: exact.plantId,
@@ -457,10 +470,42 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         stepId: step.id,
         capabilityIdentity: step.capabilityIdentity,
       };
+      const dependencyOutputs = step.dependsOn.flatMap((dependencyStepId) => {
+        const dependencyStep = document.steps.find(
+          ({ id }) => id === dependencyStepId
+        );
+        const outcome = durableOutcomes.get(dependencyStepId);
+        if (
+          !dependencyStep ||
+          !outcome ||
+          outcome.status !== "completed" ||
+          outcome.effectKey !==
+            executionEffectKey(exact.id, exact.fingerprint, dependencyStepId) ||
+          outcome.dependencyOutput === null
+        ) {
+          return [];
+        }
+        const producer = registry.registrationFor(
+          dependencyStep.capabilityIdentity
+        );
+        const parsed = producer?.dependencyOutputSchema?.safeParse(
+          outcome.dependencyOutput
+        );
+        if (!parsed?.success) return [];
+        return [
+          Object.freeze({
+            stepId: dependencyStepId,
+            capabilityIdentity: dependencyStep.capabilityIdentity,
+            effectKey: outcome.effectKey,
+            value: parsed.data,
+          }),
+        ];
+      });
       let reconciliation = await reconcileClaimedEffect(executionRegistration, {
         effectKey,
         execution,
         arguments: step.arguments,
+        dependencyOutputs,
       });
       let resumeStartedEffect = reconciliation?.status === "resume";
       let effect: EvryEffectResult | null =
@@ -480,6 +525,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
                 effectKey,
                 execution,
                 arguments: step.arguments,
+                dependencyOutputs,
               }
             );
             resumeStartedEffect = reconciliation?.status === "resume";
@@ -540,6 +586,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
                 effectKey,
                 execution,
                 arguments: step.arguments,
+                dependencyOutputs,
               }
             );
             resumeStartedEffect = reconciliation?.status === "resume";
@@ -570,6 +617,7 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
               effectKey,
               execution,
               arguments: currentStep!.arguments,
+              dependencyOutputs,
             });
           } catch {
             // The adapter may have committed its keyed effect before
@@ -602,9 +650,14 @@ export function createEvryExecutor(boundaries: EvryExecutorBoundaries) {
         effectKey: effect.status === "completed" ? effectKey : null,
         affectedCount: effect.status === "completed" ? effect.affectedCount : 0,
         excludedCount: effect.excludedCount,
+        ...(effect.status === "completed" &&
+        effect.dependencyOutput !== undefined
+          ? { dependencyOutput: effect.dependencyOutput }
+          : {}),
         occurredAt: boundaries.now(),
       });
       results.set(step.id, publicDurable(durable));
+      durableOutcomes.set(step.id, durable);
     }
 
     const ordered = orderedSteps(document).map((step) => {
