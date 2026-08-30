@@ -2,7 +2,7 @@ import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
-import { evryExecutionEffectClaims } from "@/db/schema";
+import { evryExecutionEffectClaims, evryExecutionOutcomes } from "@/db/schema";
 import { type EvryAuditKey } from "@/lib/evry/audit/identity";
 import type { EvryEffectInput, EvryEffectResult } from "./registry";
 
@@ -49,6 +49,44 @@ export async function findExactEvryDatabaseEffectClaim(
           input.execution.capabilityIdentity
         ),
         eq(evryExecutionEffectClaims.effectKey, input.effectKey)
+      )
+    )
+    .limit(1);
+  return row
+    ? {
+        status: "completed",
+        affectedCount: row.affectedCount,
+        excludedCount: row.excludedCount,
+      }
+    : null;
+}
+
+/** A terminal step row proves a concurrent reconciler finished this claim. */
+export async function findExactEvryDatabaseEffectOutcome(
+  input: Pick<EvryEffectInput, "execution" | "effectKey">
+): Promise<EvryEffectResult | null> {
+  const [row] = await db
+    .select({
+      affectedCount: evryExecutionOutcomes.affectedCount,
+      excludedCount: evryExecutionOutcomes.excludedCount,
+    })
+    .from(evryExecutionOutcomes)
+    .where(
+      and(
+        eq(evryExecutionOutcomes.attemptId, input.execution.attemptId),
+        eq(evryExecutionOutcomes.planId, input.execution.planId),
+        eq(evryExecutionOutcomes.churchId, input.execution.plantId),
+        eq(evryExecutionOutcomes.actorUserId, input.execution.actorUserId),
+        eq(evryExecutionOutcomes.planFingerprint, input.execution.fingerprint),
+        eq(evryExecutionOutcomes.correlationId, input.execution.correlationId),
+        eq(evryExecutionOutcomes.subject, "step"),
+        eq(evryExecutionOutcomes.stepId, input.execution.stepId),
+        eq(
+          evryExecutionOutcomes.capabilityIdentity,
+          input.execution.capabilityIdentity
+        ),
+        eq(evryExecutionOutcomes.effectKey, input.effectKey),
+        eq(evryExecutionOutcomes.status, "completed")
       )
     )
     .limit(1);

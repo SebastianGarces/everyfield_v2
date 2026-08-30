@@ -100,7 +100,14 @@ function argumentsFor(identity: string): Record<string, unknown> {
             scheduledFor: AT,
           },
         ],
-        notificationExclusions: [{ reason: "oversight_privacy", count: 1 }],
+        notificationExclusions: [],
+        source: {
+          sendingChurchId: RELATED_ID,
+          sendingNetworkId: null,
+          oversightSharingEnabled: true,
+          recipientIds: ["00000000-0000-4000-8000-000000000005"],
+          misprovisionedIds: [],
+        },
       },
     };
   }

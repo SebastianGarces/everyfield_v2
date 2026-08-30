@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
@@ -75,6 +77,13 @@ function scheduleStoredPlan(): StoredEvryActionPlan {
               readiness: [],
               notifications: [],
               notificationExclusions: [],
+              source: {
+                sendingChurchId: null,
+                sendingNetworkId: null,
+                oversightSharingEnabled: false,
+                recipientIds: [],
+                misprovisionedIds: [],
+              },
             },
           },
           dependsOn: [],
@@ -292,4 +301,27 @@ test("only the exact bare null token means database null", () => {
     assert.equal(selected.outcome.outcomeNotes, value.expected, value.wire);
     assert.equal(selected.outcome.captureTheDay, null, value.wire);
   }
+});
+
+test("schedule and recurrence sources are locked and rechecked inside the claim SQL", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/lib/evry/capabilities/launch/effects.ts"),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /launch_source_church as materialized \([\s\S]*?for update[\s\S]*?launch_source_privacy as materialized \([\s\S]*?for update[\s\S]*?launch_source_audience as materialized \([\s\S]*?for update/
+  );
+  assert.match(
+    source,
+    /mutationCtes: sql`\$\{sourceGate\.ctes\}, \$\{mutation\.ctes\}`/
+  );
+  assert.match(
+    source,
+    /launch_task_source_parent as materialized \([\s\S]*?for update[\s\S]*?launch_task_source_rows as materialized \([\s\S]*?for update/
+  );
+  assert.match(
+    source,
+    /recurrenceSourceCtes[\s\S]*?mutationCtes: recurrenceSourceCtes/
+  );
 });

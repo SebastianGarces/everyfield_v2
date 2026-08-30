@@ -580,6 +580,47 @@ async function main() {
       createdAt: new Date(Date.UTC(2030, 0, 1, 0, 0, index)),
     }));
     await db.insert(launchEvents).values(journalRows);
+    const mutableHistoryPage = readArtifact(
+      await conversationThroughProduction(production, "show launch history"),
+      "Launch history"
+    );
+    const mutableCursorReason = mutableHistoryPage.exclusions.find(
+      ({ reason }) =>
+        typeof reason === "string" &&
+        reason.startsWith("Older history available after cursor ")
+    )?.reason;
+    if (typeof mutableCursorReason !== "string") {
+      throw new Error(
+        "Launch history did not disclose its continuation cursor"
+      );
+    }
+    const mutableCursor = mutableCursorReason.slice(
+      "Older history available after cursor ".length
+    );
+    assert.equal(
+      (
+        await applyThroughProduction(
+          production,
+          `complete launch milestone ${productionMilestone.id}`
+        )
+      ).result.status,
+      "completed"
+    );
+    const staleHistoryPage = readArtifact(
+      await conversationThroughProduction(
+        production,
+        `show launch history after ${mutableCursor}`
+      ),
+      "Launch history"
+    );
+    assert.equal(staleHistoryPage.items.length, 0);
+    assert.deepEqual(staleHistoryPage.exclusions, [
+      {
+        reason: "Launch history changed; restart without a cursor",
+        count: 1,
+      },
+    ]);
+
     const seenJournalIds = new Set<string>();
     let journalMessage = "show launch history";
     for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
@@ -753,6 +794,60 @@ async function main() {
       .where(eq(tasks.id, demotionTask.id));
     assert.equal(stillOpen?.status, "not_started");
 
+    const scheduleSourceRace = await fixture("production-source-lock-race");
+    const scheduleSourceRacePlan = await prepareThroughProduction(
+      scheduleSourceRace,
+      `schedule launch for ${today} | Atomic source race`
+    );
+    await db.execute(sql`
+      create function evry_launch_source_race_pause() returns trigger
+      language plpgsql as $$ begin
+        perform pg_sleep(2);
+        return new;
+      end $$
+    `);
+    await db.execute(sql`
+      create trigger evry_launch_source_race_pause
+      before update of name on churches
+      for each row execute function evry_launch_source_race_pause()
+    `);
+    const scheduleSourceDrift = renameLaunchLiveProofChurch(
+      scheduleSourceRace.plant.churchId,
+      `${SCRATCH} source changed inside claim race`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const racedSchedule = await scheduleSourceRacePlan.execute();
+    await scheduleSourceDrift;
+    assert.equal(racedSchedule.status, "refused");
+    assert.equal(racedSchedule.httpStatus, 409);
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionEffectClaims)
+          .where(
+            eq(
+              evryExecutionEffectClaims.planId,
+              scheduleSourceRacePlan.plan.planId
+            )
+          )
+      ).length,
+      0
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(launches)
+          .where(eq(launches.churchId, scheduleSourceRace.plant.churchId))
+      ).length,
+      0
+    );
+    await db.execute(
+      sql`drop trigger evry_launch_source_race_pause on churches`
+    );
+    await db.execute(sql`drop function evry_launch_source_race_pause()`);
+
     const copyDrift = await fixture("production-copy-drift");
     const copyDriftPlan = await prepareThroughProduction(
       copyDrift,
@@ -901,6 +996,58 @@ async function main() {
       parentTaskId: recurringParent.id,
       createdById: recurring.user.id,
     });
+    const staleRecurringSourcePlan = await prepareThroughProduction(
+      recurring,
+      `mark launch task ${recurringParent.id} complete`
+    );
+    await db.execute(sql`
+      create function evry_launch_child_race_pause() returns trigger
+      language plpgsql as $$ begin
+        perform pg_sleep(2);
+        return new;
+      end $$
+    `);
+    await db.execute(sql`
+      create trigger evry_launch_child_race_pause
+      before update of title on tasks
+      for each row execute function evry_launch_child_race_pause()
+    `);
+    const childSourceDrift = (async () => {
+      await db
+        .update(tasks)
+        .set({ title: "Changed while the exact claim waited" })
+        .where(eq(tasks.id, childId));
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const racedRecurringSource = await staleRecurringSourcePlan.execute();
+    await childSourceDrift;
+    assert.equal(racedRecurringSource.status, "refused");
+    assert.equal(racedRecurringSource.httpStatus, 409);
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionEffectClaims)
+          .where(
+            eq(
+              evryExecutionEffectClaims.planId,
+              staleRecurringSourcePlan.plan.planId
+            )
+          )
+      ).length,
+      0
+    );
+    const [unclaimedParent] = await db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.id, recurringParent.id));
+    assert.equal(unclaimedParent?.status, "not_started");
+    await db.execute(sql`drop trigger evry_launch_child_race_pause on tasks`);
+    await db.execute(sql`drop function evry_launch_child_race_pause()`);
+    await db
+      .update(tasks)
+      .set({ title: "Exact recurring checklist item" })
+      .where(eq(tasks.id, childId));
     const recurringPlan = await prepareThroughProduction(
       recurring,
       `mark launch task ${recurringParent.id} complete`
@@ -928,13 +1075,12 @@ async function main() {
       sql`drop trigger evry_launch_task_effect_crash_once on churches`
     );
     await db.execute(sql`drop function evry_launch_task_effect_crash_once()`);
-    const recoveredTasks = await Promise.all([
-      recurringPlan.execute(),
-      recurringPlan.execute(),
-    ]);
+    const recoveredTasks = await Promise.all(
+      Array.from({ length: 8 }, () => recurringPlan.execute())
+    );
     assert.deepEqual(
       recoveredTasks.map(({ status }) => status),
-      ["completed", "completed"]
+      Array.from({ length: 8 }, () => "completed")
     );
     const openSeries = await db
       .select()

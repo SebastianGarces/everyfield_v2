@@ -54,6 +54,26 @@ test("journal pagination fails closed on forged or stale cursors", () => {
   assert.ok(first.status === "available" && first.nextCursor);
   assert.equal(
     paginateLaunchJournalRows([row(1)], 1, first.nextCursor).status,
-    "missing_cursor"
+    "stale_cursor"
   );
+});
+
+test("journal pagination refuses a non-anchor milestone reordered between pages", () => {
+  const source = [
+    row(3),
+    row(2),
+    { ...row(1), key: "milestone:mutable", id: "mutable-milestone" },
+  ];
+  const first = paginateLaunchJournalRows(source, 2, null);
+  assert.equal(first.status, "available");
+  assert.ok(first.status === "available" && first.nextCursor);
+
+  const changed = source.map((entry) =>
+    entry.key === "milestone:mutable"
+      ? { ...entry, at: new Date("2040-01-01T00:00:00.000Z") }
+      : entry
+  );
+  const continuation = paginateLaunchJournalRows(changed, 2, first.nextCursor);
+  assert.equal(continuation.status, "stale_cursor");
+  assert.deepEqual(continuation.rows, []);
 });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   churches,
+  churchPrivacySettings,
   launchMilestones,
   launchMilestoneTasks,
   launchMilestoneAreas,
@@ -38,6 +39,7 @@ import {
   claimEvryDatabaseEffect,
   claimEvryDatabaseEffectDecision,
   findExactEvryDatabaseEffectClaim,
+  findExactEvryDatabaseEffectOutcome,
 } from "@/lib/evry/executor/database-effect";
 import {
   parseEvryActionPlanCandidate,
@@ -160,6 +162,13 @@ const launchNotificationExclusionSchema = z.strictObject({
   reason: z.enum(["outside_church", "oversight_privacy", "misprovisioned"]),
   count: z.number().int().min(1).max(100),
 });
+const launchScheduleSourceSchema = z.strictObject({
+  sendingChurchId: z.string().uuid().nullable(),
+  sendingNetworkId: z.string().uuid().nullable(),
+  oversightSharingEnabled: z.boolean(),
+  recipientIds: z.array(z.string().uuid()).max(100),
+  misprovisionedIds: z.array(z.string().uuid()).max(100),
+});
 const launchScheduleConsequencesSchema = z.strictObject({
   launchId: z.string().uuid(),
   changedAt: z.string().datetime(),
@@ -167,6 +176,7 @@ const launchScheduleConsequencesSchema = z.strictObject({
   readiness: z.array(launchSeedMilestoneSchema).max(32),
   notifications: z.array(launchNotificationSchema).max(100),
   notificationExclusions: z.array(launchNotificationExclusionSchema).max(3),
+  source: launchScheduleSourceSchema,
 });
 export const launchTaskSnapshotSchema = z.strictObject({
   id: z.string().uuid(),
@@ -513,13 +523,27 @@ async function resolveScheduleConsequences(input: {
   readiness?: LaunchScheduleConsequences["readiness"];
 }): Promise<LaunchScheduleConsequences | null> {
   const [plant] = await db
-    .select({ name: churches.name })
+    .select({
+      name: churches.name,
+      sendingChurchId: churches.sendingChurchId,
+      sendingNetworkId: churches.sendingNetworkId,
+      oversightSharingEnabled: churchPrivacySettings.shareActivityWithOversight,
+    })
     .from(churches)
+    .leftJoin(
+      churchPrivacySettings,
+      eq(churchPrivacySettings.churchId, churches.id)
+    )
     .where(eq(churches.id, input.plantId))
     .limit(1);
   if (!plant) return null;
   const audience = await listOversightRecipientsForChurch(input.plantId);
-  if (audience.recipients.length > 100) return null;
+  if (
+    audience.recipients.length > 100 ||
+    audience.misprovisioned.length > 100
+  ) {
+    return null;
+  }
   const notifications: LaunchScheduleConsequences["notifications"] = [];
   const skipped: ("outside_church" | "oversight_privacy")[] = [];
   for (const recipient of audience.recipients) {
@@ -572,7 +596,129 @@ async function resolveScheduleConsequences(input: {
       audience,
       skipped,
     }),
+    source: {
+      sendingChurchId: plant.sendingChurchId,
+      sendingNetworkId: plant.sendingNetworkId,
+      oversightSharingEnabled: plant.oversightSharingEnabled ?? false,
+      recipientIds: audience.recipients.map(({ id }) => id).sort(),
+      misprovisionedIds: audience.misprovisioned.map(({ id }) => id).sort(),
+    },
   });
+}
+
+function exactAudienceIds(where: SQL, expectedIds: readonly string[]): SQL {
+  return sql`(
+    select coalesce(jsonb_agg(candidate.id order by candidate.id), '[]'::jsonb)
+    from (
+      select u.id::text as id
+      from launch_source_audience u
+      where ${where}
+    ) candidate
+  ) = ${JSON.stringify([...expectedIds].sort())}::jsonb`;
+}
+
+/**
+ * The mutable sources behind a reviewed schedule, repeated inside the same SQL
+ * statement that writes the Launch row and its immutable effect claim.
+ */
+function scheduleSourceGate(
+  plantId: string,
+  reviewed: LaunchScheduleConsequences
+): Readonly<{ ctes: SQL; eligibility: SQL }> {
+  const source = reviewed.source;
+  const reachesSendingChurch = source.sendingChurchId
+    ? sql`u.sending_church_id = ${source.sendingChurchId}::uuid`
+    : sql`false`;
+  const reachesNetwork = source.sendingNetworkId
+    ? sql`u.sending_network_id = ${source.sendingNetworkId}::uuid`
+    : sql`false`;
+  const reached = sql`(${reachesSendingChurch} or ${reachesNetwork})`;
+  const exactOversightTenancy = sql`${reached}
+    and u.church_id is null
+    and num_nonnulls(u.church_id, u.sending_church_id, u.sending_network_id) = 1`;
+  const misprovisioned = sql`${reached} and not (${exactOversightTenancy})`;
+  const expectedMissing = new Set(
+    reviewed.readiness.map(({ templateKey }) => templateKey)
+  );
+  const canonicalTemplateKeys = planLaunchMilestoneSeedRows().map(
+    ({ templateKey }) => templateKey
+  );
+
+  const ctes = sql`
+    launch_source_church as materialized (
+      select id, name, sending_church_id, sending_network_id
+      from churches
+      where id = ${plantId}::uuid
+      for update
+    ), launch_source_privacy as materialized (
+      select church_id, share_activity_with_oversight
+      from church_privacy_settings
+      where church_id = ${plantId}::uuid
+      for update
+    ), launch_source_sending_church as materialized (
+      select id
+      from sending_churches
+      where id = ${source.sendingChurchId}::uuid
+      for update
+    ), launch_source_sending_network as materialized (
+      select id
+      from sending_networks
+      where id = ${source.sendingNetworkId}::uuid
+      for update
+    ), launch_source_audience as materialized (
+      select u.id, u.church_id, u.sending_church_id, u.sending_network_id
+      from users u
+      where ${reached}
+      for update
+    ), launch_source_milestones as materialized (
+      select id, template_key
+      from launch_milestones
+      where launch_id = ${reviewed.launchId}::uuid
+        and church_id = ${plantId}::uuid
+      for update
+    )`;
+
+  const eligibility = and(
+    sql`exists (
+      select 1
+      from launch_source_church source_church
+      where source_church.id = ${plantId}::uuid
+        and source_church.name = ${reviewed.plantName}
+        and source_church.sending_church_id is not distinct from ${source.sendingChurchId}::uuid
+        and source_church.sending_network_id is not distinct from ${source.sendingNetworkId}::uuid
+        and coalesce((
+          select privacy.share_activity_with_oversight
+          from launch_source_privacy privacy
+          limit 1
+        ), false) = ${source.oversightSharingEnabled}
+    )`,
+    source.sendingChurchId === null
+      ? sql`true`
+      : sql`exists (
+          select 1 from launch_source_sending_church
+          where id = ${source.sendingChurchId}::uuid
+        )`,
+    source.sendingNetworkId === null
+      ? sql`true`
+      : sql`exists (
+          select 1 from launch_source_sending_network
+          where id = ${source.sendingNetworkId}::uuid
+        )`,
+    exactAudienceIds(exactOversightTenancy, source.recipientIds),
+    exactAudienceIds(misprovisioned, source.misprovisionedIds),
+    ...canonicalTemplateKeys.map((templateKey) =>
+      expectedMissing.has(templateKey)
+        ? sql`not exists (
+            select 1 from launch_source_milestones source_milestone
+            where source_milestone.template_key = ${templateKey}
+          )`
+        : sql`exists (
+            select 1 from launch_source_milestones source_milestone
+            where source_milestone.template_key = ${templateKey}
+          )`
+    )
+  )!;
+  return { ctes, eligibility };
 }
 
 async function scheduleConsequencesAreCurrent(input: {
@@ -1118,6 +1264,114 @@ function serviceRecurrencePlan(
   };
 }
 
+function exactReviewedSourceChild(
+  child: z.infer<typeof reviewedRecurrenceSourceTaskSchema>
+): SQL {
+  return sql`exists (
+    select 1
+    from launch_task_source_rows source_child
+    where source_child.id = ${child.id}::uuid
+      and source_child.church_id = ${child.churchId}::uuid
+      and source_child.title = ${child.title}
+      and source_child.description is not distinct from ${child.description}
+      and source_child.status = ${child.status}
+      and source_child.priority = ${child.priority}
+      and source_child.due_date is not distinct from ${child.dueDate}::date
+      and source_child.due_time is not distinct from ${child.dueTime}::time
+      and source_child.assigned_to_id is not distinct from ${child.assignedToId}::uuid
+      and source_child.category is not distinct from ${child.category}::varchar
+      and source_child.related_type is not distinct from ${child.relatedType}::varchar
+      and source_child.related_id is not distinct from ${child.relatedId}::uuid
+      and source_child.parent_task_id is not distinct from ${child.parentTaskId}::uuid
+      and source_child.is_recurring = ${child.isRecurring}
+      and ${
+        child.recurrenceRule === null
+          ? sql`source_child.recurrence_rule is null`
+          : sql`source_child.recurrence_rule is not distinct from ${JSON.stringify(child.recurrenceRule)}::jsonb`
+      }
+      and source_child.created_by_id = ${child.createdById}::uuid
+      and date_trunc('milliseconds', source_child.created_at at time zone 'UTC') = ${new Date(child.createdAt)}
+      and date_trunc('milliseconds', source_child.updated_at at time zone 'UTC') = ${new Date(child.updatedAt)}
+      and source_child.deleted_at is null
+  )`;
+}
+
+/** Bind every recurrence source row inside the parent completion/claim SQL. */
+function reviewedRecurrenceSourceGate(input: {
+  plantId: string;
+  expected: z.infer<typeof launchTaskSnapshotSchema>;
+  completion: z.infer<typeof reviewedTaskCompletionSchema>;
+}): Readonly<{ ctes: SQL | null; eligibility: SQL }> {
+  const recurrence = input.completion.recurrence;
+  if (!input.expected.isRecurring || recurrence === null) {
+    return { ctes: null, eligibility: sql`true` };
+  }
+  const openSeries = sql`
+    source_series.church_id = ${input.plantId}::uuid
+    and source_series.id <> ${input.expected.id}::uuid
+    and source_series.is_recurring
+    and source_series.status <> 'complete'
+    and source_series.deleted_at is null
+    and source_series.recurrence_rule ->> 'seriesId' = ${recurrence.seriesId}
+  `;
+  const ctes = sql`
+    launch_task_source_parent as materialized (
+      select id
+      from tasks
+      where id = ${input.expected.id}::uuid
+        and church_id = ${input.plantId}::uuid
+      for update
+    ), launch_task_source_rows as materialized (
+      select source_task.*
+      from tasks source_task
+      where source_task.church_id = ${input.plantId}::uuid
+        and (
+          source_task.parent_task_id = ${input.expected.id}::uuid
+          or (
+            source_task.id <> ${input.expected.id}::uuid
+            and source_task.is_recurring
+            and source_task.status <> 'complete'
+            and source_task.deleted_at is null
+            and source_task.recurrence_rule ->> 'seriesId' = ${recurrence.seriesId}
+          )
+        )
+      for update
+    )`;
+  if (recurrence.disposition === "existing") {
+    return {
+      ctes,
+      eligibility: and(
+        sql`exists (select 1 from launch_task_source_parent)`,
+        sql`(
+          select count(*)::int = 1
+            and max(source_series.id::text) = ${recurrence.successorId}
+          from launch_task_source_rows source_series
+          where ${openSeries}
+        )`
+      )!,
+    };
+  }
+
+  return {
+    ctes,
+    eligibility: and(
+      sql`exists (select 1 from launch_task_source_parent)`,
+      sql`not exists (
+        select 1 from launch_task_source_rows source_series
+        where ${openSeries}
+      )`,
+      sql`(
+        select count(*)::int
+        from launch_task_source_rows source_child
+        where source_child.church_id = ${input.plantId}::uuid
+          and source_child.parent_task_id = ${input.expected.id}::uuid
+          and source_child.deleted_at is null
+      ) = ${recurrence.sourceChildren.length}`,
+      ...recurrence.sourceChildren.map(exactReviewedSourceChild)
+    )!,
+  };
+}
+
 async function reviewedRecurrenceIsCurrent(input: {
   plantId: string;
   expected: z.infer<typeof launchTaskSnapshotSchema>;
@@ -1286,7 +1540,7 @@ async function reconcileFrozenTaskCompletion(input: {
   );
 }
 
-async function reconcileClaimedLaunchEffect(
+async function reconcileClaimedLaunchEffectOnce(
   input: EvryClaimedEffectInput,
   identity: string,
   result: NonNullable<
@@ -1342,9 +1596,29 @@ async function reconcileClaimedLaunchEffect(
   return result;
 }
 
+async function reconcileClaimedLaunchEffect(
+  input: EvryClaimedEffectInput,
+  identity: string,
+  result: NonNullable<
+    Awaited<ReturnType<typeof findExactEvryDatabaseEffectClaim>>
+  >
+) {
+  let lastError: unknown = new Error("Launch reconciliation did not run");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await reconcileClaimedLaunchEffectOnce(input, identity, result);
+    } catch (error) {
+      lastError = error;
+      const concurrent = await findExactEvryDatabaseEffectOutcome(input);
+      if (concurrent) return concurrent;
+    }
+  }
+  throw lastError;
+}
+
 async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
   const actor = input.authorization.actor;
-  const writeEligibility = exactWriteEligibility(actor);
+  const actorWriteEligibility = exactWriteEligibility(actor);
 
   if (identity === LAUNCH_EFFECT_IDENTITIES.schedule) {
     const parsed = launchScheduleArgumentsSchema.safeParse(input.arguments);
@@ -1359,6 +1633,10 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     ) {
       return { status: "refused" as const, excludedCount: 1 };
     }
+    const sourceGate = scheduleSourceGate(
+      actor.plantId,
+      parsed.data.consequences
+    );
     const mutation = setLaunchDateEffectMutation({
       churchId: actor.plantId,
       actorUserId: actor.userId,
@@ -1378,16 +1656,25 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
             updatedAt: new Date(parsed.data.expected.updatedAt),
           }
         : null,
-      writeEligibility,
+      writeEligibility: and(actorWriteEligibility, sourceGate.eligibility)!,
     });
     const claim = await claimEvryDatabaseEffectDecision({
       execution: input.execution,
       effectKey: input.effectKey,
-      mutationCtes: mutation.ctes,
+      mutationCtes: sql`${sourceGate.ctes}, ${mutation.ctes}`,
       mutation: mutation.result,
       async targetIsCurrent() {
         if (!(await actorStillAuthorized(actor, "launch.schedule")))
           return false;
+        if (
+          !(await scheduleConsequencesAreCurrent({
+            plantId: actor.plantId,
+            targetDate: parsed.data.targetDate,
+            reviewed: parsed.data.consequences,
+          }))
+        ) {
+          return false;
+        }
         const current = await getLaunchForChurch(actor.plantId);
         return parsed.data.expected
           ? Boolean(current && sameLaunch(parsed.data.expected, current))
@@ -1423,7 +1710,7 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
           expectedTitle: parsed.data.expected.title,
           expectedUpdatedAt: new Date(parsed.data.expected.updatedAt),
           expectedOpenTaskCount: parsed.data.expected.openTaskCount,
-          writeEligibility,
+          writeEligibility: actorWriteEligibility,
         })
       : reopenLaunchMilestoneStatement({
           milestoneId: parsed.data.expected.id,
@@ -1434,7 +1721,7 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
             : undefined,
           expectedUpdatedAt: new Date(parsed.data.expected.updatedAt),
           expectedOpenTaskCount: parsed.data.expected.openTaskCount,
-          writeEligibility,
+          writeEligibility: actorWriteEligibility,
         });
     return claimEvryDatabaseEffect({
       execution: input.execution,
@@ -1460,16 +1747,20 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     if (!parsed.success)
       return { status: "refused" as const, excludedCount: 1 };
     const expected = parsed.data.expected;
-    if (parsed.data.complete !== (parsed.data.completion !== null)) {
+    const completion = parsed.data.completion;
+    if (
+      (parsed.data.complete && completion === null) ||
+      (!parsed.data.complete && completion !== null)
+    ) {
       return { status: "refused" as const, excludedCount: 1 };
     }
     if (
       parsed.data.complete &&
-      parsed.data.completion &&
+      completion &&
       !(await reviewedRecurrenceIsCurrent({
         plantId: actor.plantId,
         expected,
-        completion: parsed.data.completion,
+        completion,
       }))
     ) {
       return { status: "refused" as const, excludedCount: 1 };
@@ -1480,12 +1771,26 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     ) {
       return { status: "refused" as const, excludedCount: 1 };
     }
-    const completedAt = parsed.data.completion
-      ? new Date(parsed.data.completion.completedAt)
+    const completedAt = completion
+      ? new Date(completion.completedAt)
       : new Date();
-    const taskWriteEligibility = parsed.data.complete
-      ? exactTaskWriteEligibility(actor)
-      : exactTaskReopenWriteEligibility(actor);
+    let taskWriteEligibility: SQL;
+    let recurrenceSourceCtes: SQL | null = null;
+    if (parsed.data.complete) {
+      if (!completion) return { status: "refused" as const, excludedCount: 1 };
+      const recurrenceSourceGate = reviewedRecurrenceSourceGate({
+        plantId: actor.plantId,
+        expected,
+        completion,
+      });
+      recurrenceSourceCtes = recurrenceSourceGate.ctes;
+      taskWriteEligibility = and(
+        exactTaskWriteEligibility(actor),
+        recurrenceSourceGate.eligibility
+      )!;
+    } else {
+      taskWriteEligibility = exactTaskReopenWriteEligibility(actor);
+    }
     const commonExpected = {
       expectedTitle: expected.title,
       expectedStatus: expected.status,
@@ -1522,6 +1827,7 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
     const claim = await claimEvryDatabaseEffectDecision({
       execution: input.execution,
       effectKey: input.effectKey,
+      ...(recurrenceSourceCtes ? { mutationCtes: recurrenceSourceCtes } : {}),
       mutation: statement,
       async targetIsCurrent() {
         if (!(await taskActorStillAuthorized(actor, expected.assignedToId)))
@@ -1529,7 +1835,14 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
         const current = await taskSnapshot(actor.plantId, expected.id);
         return (
           current !== null &&
-          JSON.stringify(current) === JSON.stringify(expected)
+          JSON.stringify(current) === JSON.stringify(expected) &&
+          (!parsed.data.complete ||
+            !parsed.data.completion ||
+            (await reviewedRecurrenceIsCurrent({
+              plantId: actor.plantId,
+              expected,
+              completion: parsed.data.completion,
+            })))
         );
       },
     });
@@ -1570,14 +1883,14 @@ async function claimLaunchEffect(input: EvryEffectInput, identity: string) {
           asOfDay: new Date().toISOString().slice(0, 10),
           ...parsed.data.outcome,
           expected: source,
-          writeEligibility,
+          writeEligibility: actorWriteEligibility,
         })
       : updateLaunchOutcomeEffectMutation({
           churchId: actor.plantId,
           actorUserId: actor.userId,
           ...parsed.data.outcome,
           expected: source,
-          writeEligibility,
+          writeEligibility: actorWriteEligibility,
         });
   const claim = await claimEvryDatabaseEffectDecision({
     execution: input.execution,
