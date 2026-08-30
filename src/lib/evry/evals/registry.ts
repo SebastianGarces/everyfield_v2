@@ -74,6 +74,12 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "platform-behavior-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-behavior.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "platform-effect-live",
     testFile: "src/lib/evry/capabilities/platform/effect-live.test.ts",
     lane: "live_database",
@@ -236,26 +242,36 @@ function platformCapabilityFixture(
     );
   }
   const liveLayers = new Set<EvryCapabilityEvalLayer>([
+    "tenancy",
+    "permission",
     "execution",
     "idempotency",
     "errors",
   ]);
   const evalCase = (layer: EvryCapabilityEvalLayer) => {
     const live = operationKind === "effect" && liveLayers.has(layer);
+    const behavior =
+      layer === "ui_artifact" ||
+      (operationKind === "read" &&
+        (layer === "tenancy" || layer === "permission"));
     const readRuntime = operationKind === "read" && liveLayers.has(layer);
     return [
       Object.freeze({
         id: `${capabilityIdentity}:${layer}`,
         proofId: live
           ? "platform-effect-live"
-          : readRuntime
-            ? "platform-read-contract"
-            : "platform-capability-contract",
+          : behavior
+            ? "platform-behavior-contract"
+            : readRuntime
+              ? "platform-read-contract"
+              : "platform-capability-contract",
         testName: live
           ? `${capabilityIdentity}:${layer}:live`
-          : readRuntime
-            ? `${capabilityIdentity}:${layer}:read`
-            : `${capabilityIdentity}:${layer}`,
+          : behavior
+            ? `${capabilityIdentity}:${layer}:behavior`
+            : readRuntime
+              ? `${capabilityIdentity}:${layer}:read`
+              : `${capabilityIdentity}:${layer}`,
       }),
     ];
   };

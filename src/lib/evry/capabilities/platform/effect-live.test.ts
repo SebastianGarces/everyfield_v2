@@ -9,7 +9,13 @@ const IDENTITIES = [
   "notifications.feed.mark-all-read",
   "platform.feedback.submit",
 ] as const;
-const LAYERS = ["execution", "idempotency", "errors"] as const;
+const LAYERS = [
+  "tenancy",
+  "permission",
+  "execution",
+  "idempotency",
+  "errors",
+] as const;
 
 let outcomes: ReadonlySet<string> | Error | null = null;
 

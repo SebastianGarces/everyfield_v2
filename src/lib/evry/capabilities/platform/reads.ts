@@ -261,6 +261,10 @@ export async function continuePlatformEvryRead(input: {
                 },
               ]
             : []),
+          {
+            label: "Mark-read command",
+            value: `mark notification ${row.id} read`,
+          },
           { label: "Created", value: row.createdAt.toISOString() },
           { label: "Read", value: row.readAt ? "Yes" : "No" },
         ],

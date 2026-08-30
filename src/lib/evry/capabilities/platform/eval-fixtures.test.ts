@@ -26,9 +26,16 @@ const COMMANDS: Readonly<Record<string, string>> = {
     'submit feedback {"category":"bug","description":"literal"}',
 };
 const LIVE_EFFECT_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "tenancy",
+  "permission",
   "execution",
   "idempotency",
   "errors",
+]);
+const BEHAVIOR_LAYERS = new Set<EvryCapabilityEvalLayer>([
+  "tenancy",
+  "permission",
+  "ui_artifact",
 ]);
 
 function hasExecution(identity: string) {
@@ -53,7 +60,10 @@ for (const capability of inventory.capabilities) {
     ) {
       continue;
     }
-    if (capability.operationKind === "read" && LIVE_EFFECT_LAYERS.has(layer)) {
+    if (
+      (capability.operationKind === "read" && LIVE_EFFECT_LAYERS.has(layer)) ||
+      BEHAVIOR_LAYERS.has(layer)
+    ) {
       continue;
     }
     test(`${capability.identity}:${layer}`, () => {

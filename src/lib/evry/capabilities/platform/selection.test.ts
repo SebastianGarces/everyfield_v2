@@ -29,6 +29,22 @@ test("platform selection is closed across reads and confirmed effects", () => {
   assert.equal(selectPlatformEvryRequest("query the database"), null);
 });
 
+test("incomplete platform effects select a focused clarification", () => {
+  assert.deepEqual(selectPlatformEvryRequest("mark notification read"), {
+    kind: "clarification",
+    subject: "notification",
+    prompt:
+      "Which notification should be marked read? Ask “show notifications,” then send the visible Mark-read command for the notification you mean, or say “mark all notifications read.”",
+  });
+  assert.deepEqual(selectPlatformEvryRequest("submit feedback"), {
+    kind: "clarification",
+    subject: "feedback",
+    prompt:
+      "What feedback should be submitted? Include a category (bug, suggestion, question, or other) and the exact description you want stored.",
+  });
+  assert.equal(selectPlatformEvryRequest("mark a task complete"), null);
+});
+
 test("feedback classifier preserves literal user payload under compatibility text", () => {
   const description = "Ｆｕｌｌｗｉｄｔｈ body ① ﬀ 👩🏽‍💻";
   const selection = selectPlatformEvryRequest(
@@ -57,6 +73,15 @@ test("feedback selection matches the UI's empty source-page normalization", () =
       description: "literal",
       pageUrl: null,
     }
+  );
+});
+
+test("malformed feedback payload remains inside the clarification boundary", () => {
+  const selection = selectPlatformEvryRequest("submit feedback not-json");
+  assert.equal(selection?.kind, "clarification");
+  assert.equal(
+    selection?.kind === "clarification" ? selection.subject : null,
+    "feedback"
   );
 });
 

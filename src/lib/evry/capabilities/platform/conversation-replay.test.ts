@@ -197,3 +197,35 @@ test("a recovered request-key plan with another capability fails closed", async 
     /integrity validation/
   );
 });
+
+test("an incomplete platform effect returns a typed clarification without reading or planning", async () => {
+  let boundaryCalls = 0;
+  const continuation = createPlatformEvryConversationContinuation({
+    async findPlan() {
+      boundaryCalls += 1;
+      return null;
+    },
+    async propose() {
+      boundaryCalls += 1;
+      return null;
+    },
+    async read() {
+      boundaryCalls += 1;
+      return null;
+    },
+  });
+
+  const result = await continuation.continue({
+    actor,
+    conversation: conversation(),
+    userRequestKey,
+    literalUserText: "mark notification read",
+    pageContext: null,
+    requestPageContext: null,
+    now: createdAt,
+  });
+
+  assert.equal(boundaryCalls, 0);
+  assert.equal(result?.artifacts[0]?.kind, "clarification");
+  assert.match(result?.body ?? "", /which notification/i);
+});

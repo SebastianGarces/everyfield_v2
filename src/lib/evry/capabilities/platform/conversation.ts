@@ -8,6 +8,7 @@ import {
 } from "@/lib/evry/artifacts/trusted-plan-review";
 import {
   parseEvryConversationArtifactDocument,
+  storedEvryClarificationArtifactDocument,
   storedEvryReadArtifactDocument,
 } from "@/lib/evry/conversations/artifacts";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
@@ -177,24 +178,27 @@ async function proposeEffect(input: {
     now: input.now,
   });
   if (exact.notifications.length === 0) return null;
-  return input.selection.kind === "mark_one"
-    ? storePlan({
-        actor: input.actor,
-        identity: MARK_ONE_NOTIFICATION_IDENTITY,
-        requestKey: input.requestKey,
-        stepId: "mark-notification-read",
-        arguments: markOneArgumentsSchema.parse({
-          notification: exact.notifications[0],
-          visibility: exact.visibility,
-        }),
-      })
-    : storePlan({
-        actor: input.actor,
-        identity: MARK_ALL_NOTIFICATIONS_IDENTITY,
-        requestKey: input.requestKey,
-        stepId: "mark-all-notifications-read",
-        arguments: markAllArgumentsSchema.parse(exact),
-      });
+  if (input.selection.kind === "mark_one") {
+    return storePlan({
+      actor: input.actor,
+      identity: MARK_ONE_NOTIFICATION_IDENTITY,
+      requestKey: input.requestKey,
+      stepId: "mark-notification-read",
+      arguments: markOneArgumentsSchema.parse({
+        notification: exact.notifications[0],
+        visibility: exact.visibility,
+      }),
+    });
+  }
+  const reviewable = markAllArgumentsSchema.safeParse(exact);
+  if (!reviewable.success) return null;
+  return storePlan({
+    actor: input.actor,
+    identity: MARK_ALL_NOTIFICATIONS_IDENTITY,
+    requestKey: input.requestKey,
+    stepId: "mark-all-notifications-read",
+    arguments: reviewable.data,
+  });
 }
 
 function recoverPlan(input: {
@@ -252,6 +256,18 @@ export function createPlatformEvryConversationContinuation(
     async continue(input) {
       const selection = selectPlatformEvryRequest(input.literalUserText);
       if (!selection) return null;
+      if (selection.kind === "clarification") {
+        const clarification = {
+          kind: "clarification" as const,
+          mode: "missing" as const,
+          entityType: selection.subject,
+          prompt: selection.prompt,
+        };
+        return {
+          body: clarification.prompt,
+          artifacts: [storedEvryClarificationArtifactDocument(clarification)],
+        };
+      }
       if (
         selection.kind === "dashboard" ||
         selection.kind === "notification_count" ||
@@ -299,8 +315,12 @@ export function createPlatformEvryConversationContinuation(
       });
       if (!proposal) {
         return refusal(
-          "Change unavailable",
-          "The requested target is unavailable, already read, or no longer visible.",
+          selection.kind === "mark_all"
+            ? "Notification set needs narrowing"
+            : "Change unavailable",
+          selection.kind === "mark_all"
+            ? "The complete unread set is empty or too large to show in one exact confirmation. Mark a visible notification individually, or open notifications to review the set."
+            : "The requested target is unavailable, already read, or no longer visible.",
           selection.kind === "feedback"
             ? { label: "Open dashboard", href: "/dashboard" }
             : { label: "Open notifications", href: "/notifications" }
