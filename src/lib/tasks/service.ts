@@ -899,11 +899,13 @@ export async function createTask(
     recurrence
   );
 
-  const [task] = await insertExactTenantTasks([values], {
+  const write = await insertExactTenantTasks([values], {
     ...options,
     authorityUserId: userId,
   });
-  if (!task) throw new Error(TASK_ASSIGNEE_ERROR);
+  if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+  const [task] = write.inserted;
+  if (!task) throw new Error("Task insert did not land");
 
   // The row exists before anything is announced about it (T-018). A task with
   // no assignee or no due date enqueues nothing — the plan says so, not this
@@ -1150,8 +1152,10 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
 
   async insertSuccessor(values, options) {
     await assertExactTaskAssignee(values.churchId, values.assignedToId);
-    const [next] = await insertExactTenantTasks([values], options);
-    if (!next) throw new Error(TASK_ASSIGNEE_ERROR);
+    const write = await insertExactTenantTasks([values], options);
+    if (!write.authorized) throw new Error(TASK_ASSIGNEE_ERROR);
+    const [next] = write.inserted;
+    if (!next) throw new Error("Recurring task insert did not land");
     return next;
   },
 
@@ -1187,9 +1191,12 @@ export const defaultRecurrenceDeps: RecurrenceDeps = {
     )) {
       await assertExactTaskAssignee(values[0]!.churchId, assigneeId);
     }
-    const inserted = await insertExactTenantTasks(values, options);
-    if (inserted.length !== values.length) {
+    const write = await insertExactTenantTasks(values, options);
+    if (!write.authorized) {
       throw new Error(TASK_ASSIGNEE_ERROR);
+    }
+    if (write.inserted.length !== values.length) {
+      throw new Error("Recurring checklist insert did not land every row");
     }
   },
 };

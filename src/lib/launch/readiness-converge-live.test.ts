@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test, type TestContext } from "node:test";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -9,6 +9,7 @@ import {
   launchMilestones,
   launchMilestoneTasks,
   launches,
+  sendingChurches,
   tasks,
   users,
 } from "@/db/schema";
@@ -22,10 +23,12 @@ import {
   UNREACHABLE,
   type ScratchPlant,
 } from "@/lib/testing/ministry-teams-scratch";
+import { runPostgresStatement } from "@/lib/testing/postgres-transaction-barrier";
 
 import {
   convergeLaunchReadiness,
   LAUNCH_MILESTONE_TEMPLATES,
+  seedLaunchMilestones,
 } from "./milestones";
 import { getLaunchForChurch, type LaunchRecord } from "./queries";
 
@@ -86,6 +89,9 @@ async function sweep(): Promise<void> {
   }
 
   await sweepScratch(SCRATCH_NAME);
+  await db
+    .delete(sendingChurches)
+    .where(like(sendingChurches.name, SCRATCH_NAME));
 }
 
 /**
@@ -157,6 +163,60 @@ test(
     // And it is STORED, not assembled in memory for one render.
     assert.equal((await milestoneRows(launch.id)).length, MILESTONE_COUNT);
     assert.equal((await taskRows(plant.churchId)).length, TASK_COUNT);
+  }
+);
+
+test(
+  "readiness seeding refuses an actor whose tenancy changes after lookup",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+    await sweep();
+
+    const plant = await createScratchPlant(SCRATCH_NAME);
+    const launch = await scratchLaunch(plant);
+    const [sendingChurch] = await db
+      .insert(sendingChurches)
+      .values({ name: SCRATCH_NAME })
+      .returning({ id: sendingChurches.id });
+
+    try {
+      const refused = await seedLaunchMilestones(
+        {
+          launchId: launch.id,
+          churchId: plant.churchId,
+          actorUserId: plant.actorId,
+        },
+        {
+          beforeSeed: () =>
+            runPostgresStatement(
+              `update users set sending_church_id = '${sendingChurch.id}'::uuid where id = '${plant.actorId}'::uuid;`
+            ),
+        }
+      );
+
+      assert.deepEqual(refused, { milestonesCreated: 0, tasksCreated: 0 });
+      assert.deepEqual(await milestoneRows(launch.id), []);
+      assert.deepEqual(await taskRows(plant.churchId), []);
+
+      await runPostgresStatement(
+        `update users set sending_church_id = null where id = '${plant.actorId}'::uuid;`
+      );
+      const retried = await seedLaunchMilestones({
+        launchId: launch.id,
+        churchId: plant.churchId,
+        actorUserId: plant.actorId,
+      });
+      assert.deepEqual(retried, {
+        milestonesCreated: MILESTONE_COUNT,
+        tasksCreated: TASK_COUNT,
+      });
+    } finally {
+      await runPostgresStatement(
+        `update users set sending_church_id = null where id = '${plant.actorId}'::uuid;`
+      );
+      await sweep();
+    }
   }
 );
 

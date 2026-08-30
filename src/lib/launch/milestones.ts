@@ -395,11 +395,18 @@ export interface SeedLaunchMilestonesResult {
  * because the seeded tasks need a `created_by_id`, and that is the session's
  * user — never an id that arrived from a client.
  */
-export async function seedLaunchMilestones(input: {
-  launchId: string;
-  churchId: string;
-  actorUserId: string;
-}): Promise<SeedLaunchMilestonesResult> {
+export async function seedLaunchMilestones(
+  input: {
+    launchId: string;
+    churchId: string;
+    actorUserId: string;
+  },
+  options: {
+    /** Test seam: production never supplies this. */
+    beforeSeed?: () => Promise<void>;
+  } = {}
+): Promise<SeedLaunchMilestonesResult> {
+  await options.beforeSeed?.();
   const result = await db.execute<{
     milestone_count: number;
     task_count: number;

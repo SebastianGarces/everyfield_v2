@@ -211,13 +211,17 @@ export async function importTaskTemplate(
     createdAt: new Date(stampedAt + index),
   }));
 
-  const created = await insertExactTenantTasks(values, {
+  const write = await insertExactTenantTasks(values, {
     ...options,
     authorityUserId: input.userId,
   });
-  if (created.length !== values.length) {
+  if (!write.authorized) {
     throw new Error(TASK_ASSIGNEE_ERROR);
   }
+  if (write.inserted.length !== values.length) {
+    throw new Error("Task template insert did not land every row");
+  }
+  const created = write.inserted;
 
   // T-018. Every imported row carries an assignee (the importer) and a computed
   // due date, so every one of them owes a due and an overdue notification —

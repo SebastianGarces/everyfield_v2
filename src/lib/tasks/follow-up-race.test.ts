@@ -935,6 +935,16 @@ test(
           churchId: fixture.churchId,
         })
         .returning({ id: users.id });
+      const [historicalCreator] = await db
+        .insert(users)
+        .values({
+          email: `${crypto.randomUUID()}@scratch.invalid`,
+          passwordHash: "scratch",
+          name: "Historical recurrence creator",
+          seat: "member",
+          churchId: fixture.churchId,
+        })
+        .returning({ id: users.id });
 
       const makeActorDual = () =>
         runPostgresStatement(
@@ -952,6 +962,46 @@ test(
         runPostgresStatement(
           `update users set sending_church_id = null where id = '${assignee.id}'::uuid;`
         );
+      const makeCreatorDual = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = '${sendingChurch.id}'::uuid where id = '${historicalCreator.id}'::uuid;`
+        );
+      const makeCreatorExact = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = null where id = '${historicalCreator.id}'::uuid;`
+        );
+
+      const meetingPerson = await addPerson(fixture, "Planter drift");
+      await assert.rejects(
+        handleMeetingAttendanceFinalized(
+          fixture.meetingId,
+          "vision_meeting",
+          fixture.churchId,
+          [attendee(meetingPerson)],
+          { beforeInsert: makeActorDual }
+        ),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.deepEqual(
+        await followUpsFor(fixture, meetingPerson),
+        [],
+        "the attendee follow-up landed after the selected planter became dual-tenant"
+      );
+      assert.deepEqual(
+        await evaluationsFor(fixture),
+        [],
+        "the meeting evaluation landed after the selected planter became dual-tenant"
+      );
+
+      await makeActorExact();
+      await handleMeetingAttendanceFinalized(
+        fixture.meetingId,
+        "vision_meeting",
+        fixture.churchId,
+        [attendee(meetingPerson)]
+      );
+      assert.equal((await followUpsFor(fixture, meetingPerson)).length, 1);
+      assert.equal((await evaluationsFor(fixture)).length, 1);
 
       await assert.rejects(
         createTask(
@@ -1089,6 +1139,81 @@ test(
           },
         ]
       );
+
+      const creatorRecurring = await createTask(
+        fixture.churchId,
+        historicalCreator.id,
+        {
+          title: "Recurring historical creator boundary",
+          status: "not_started",
+          priority: "medium",
+          dueDate: "2026-09-15",
+          assignedToId: assignee.id,
+          category: "general",
+        },
+        {
+          isRecurring: true,
+          recurrenceRule: { interval: "weekly", endDate: null },
+        }
+      );
+      await createTask(fixture.churchId, historicalCreator.id, {
+        title: "Historical creator checklist",
+        status: "not_started",
+        priority: "medium",
+        assignedToId: assignee.id,
+        category: "general",
+        parentTaskId: creatorRecurring.id,
+      });
+      const creatorCompletedAt = new Date();
+      await db
+        .update(tasks)
+        .set({
+          status: "complete",
+          completedAt: creatorCompletedAt,
+          completedById: fixture.planterId,
+        })
+        .where(eq(tasks.id, creatorRecurring.id));
+      const completedWithFreshAuthority = {
+        ...creatorRecurring,
+        status: "complete" as const,
+        completedAt: creatorCompletedAt,
+        completedById: fixture.planterId,
+      };
+
+      await assert.rejects(
+        createNextRecurrence(
+          completedWithFreshAuthority,
+          "2026-09-15",
+          undefined,
+          { beforeSuccessorInsert: makeCreatorDual }
+        ),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(tasks)
+            .where(eq(tasks.title, creatorRecurring.title))
+        )[0]?.count,
+        1,
+        "a fresh exact completer must not carry a now-dual historical creator into a successor"
+      );
+
+      await makeCreatorExact();
+      const creatorSuccessor = await createNextRecurrence(
+        completedWithFreshAuthority,
+        "2026-09-15"
+      );
+      assert.ok(creatorSuccessor);
+      assert.equal(creatorSuccessor.createdById, historicalCreator.id);
+      const creatorChildren = await db
+        .select({ createdById: tasks.createdById })
+        .from(tasks)
+        .where(eq(tasks.parentTaskId, creatorSuccessor.id));
+      assert.deepEqual(creatorChildren, [
+        { createdById: historicalCreator.id },
+      ]);
 
       const childRace = await createTask(
         fixture.churchId,
