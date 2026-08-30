@@ -16,6 +16,7 @@ import {
   notifications,
   personActivities,
   persons,
+  sendingChurches,
   sessions,
   teamMemberships,
   teamResponsibilities,
@@ -129,6 +130,7 @@ async function main(): Promise<void> {
         proposeTeamsEvryEffect,
         TEAMS_EXECUTION_CAPABILITIES,
         TEAMS_EXECUTION_REGISTRY,
+        TEAMS_PLAN_REGISTRY,
       },
       planRepository,
       plans,
@@ -139,6 +141,9 @@ async function main(): Promise<void> {
       atomicEffect,
       executor,
       meetingNotifications,
+      executorRepository,
+      capabilityAuthorization,
+      auditIdentity,
     ] = await Promise.all([
       import("./resolver"),
       import("./runtime"),
@@ -151,6 +156,9 @@ async function main(): Promise<void> {
       import("./atomic-effect"),
       import("@/lib/evry/executor"),
       import("@/lib/meetings/notifications"),
+      import("@/lib/evry/executor/repository"),
+      import("@/lib/evry/eligibility/capabilities"),
+      import("@/lib/evry/audit/identity"),
     ]);
     const actorRef = await viewer.requireEvryPlantViewer();
     const post = route.createEvryPlanExecutePost({
@@ -295,6 +303,108 @@ async function main(): Promise<void> {
     created = [updatedCreated!];
     assert.ok(
       ["Update Winner A", "Update Winner B"].includes(created[0]!.name)
+    );
+
+    // Authorization was minted while this was an exact plant account. A
+    // competing tenancy appears before the adapter's single SQL statement.
+    // The statement itself must fail closed rather than rely on the earlier
+    // session reload and write through a malformed actor row.
+    const dualTenancyPlan = await approve({
+      kind: "effect",
+      operation: "createTeamAction",
+      values: { name: "Dual Tenancy Must Not Land" },
+    });
+    const dualTenancyStored = await planRepository.findExactEvryActionPlan({
+      planId: dualTenancyPlan.planId,
+      actorUserId: actorId,
+      plantId,
+      fingerprint: dualTenancyPlan.fingerprint,
+    });
+    assert.ok(dualTenancyStored);
+    const dualTenancyDocument = plans.parseStoredEvryActionPlan({
+      document: dualTenancyStored.document,
+      registry: TEAMS_PLAN_REGISTRY,
+    });
+    const dualTenancyStep = dualTenancyDocument.steps[0];
+    assert.ok(dualTenancyStep);
+    const dualTenancyAuthorization =
+      await capabilityAuthorization.authorizeEvryEffectCapability(
+        dualTenancyStep.capabilityIdentity
+      );
+    assert.ok(dualTenancyAuthorization);
+    const dualTenancySnapshot =
+      await executorRepository.startOrResumeEvryExecution({
+        planId: dualTenancyPlan.planId,
+        actorUserId: actorId,
+        plantId,
+        fingerprint: dualTenancyPlan.fingerprint,
+        startedAt: new Date(),
+      });
+    assert.ok(dualTenancySnapshot);
+    const [competingTenancy] = await db
+      .insert(sendingChurches)
+      .values({ name: "__Evry Teams competing tenancy__" })
+      .returning({ id: sendingChurches.id });
+    assert.ok(competingTenancy);
+    await db
+      .update(users)
+      .set({ sendingChurchId: competingTenancy.id })
+      .where(eq(users.id, actorId));
+    const dualTenancyResult = await atomicEffect.executeTeamsEffect({
+      authorization: dualTenancyAuthorization,
+      effectKey: auditIdentity.executionEffectKey(
+        dualTenancyPlan.planId,
+        dualTenancyPlan.fingerprint,
+        dualTenancyStep.id
+      ),
+      execution: {
+        attemptId: dualTenancySnapshot.attempt.id,
+        planId: dualTenancyPlan.planId,
+        actorUserId: actorId,
+        plantId,
+        fingerprint: dualTenancyPlan.fingerprint,
+        correlationId: dualTenancySnapshot.attempt.correlationId,
+        stepId: dualTenancyStep.id,
+        capabilityIdentity: dualTenancyStep.capabilityIdentity,
+      },
+      arguments: dualTenancyStep.arguments,
+    });
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, actorId));
+    assert.deepEqual(dualTenancyResult, {
+      status: "refused",
+      excludedCount: 1,
+    });
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(ministryTeams)
+          .where(
+            and(
+              eq(ministryTeams.churchId, plantId),
+              eq(ministryTeams.name, "Dual Tenancy Must Not Land")
+            )
+          )
+      ).length,
+      0
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(evryExecutionEffectClaims)
+          .where(
+            eq(
+              evryExecutionEffectClaims.planId,
+              dualTenancyPlan.planId
+            )
+          )
+      ).length,
+      0,
+      "malformed tenancy cannot claim an exact Teams effect"
     );
 
     const drift = await approve({
