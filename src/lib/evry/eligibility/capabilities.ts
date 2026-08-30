@@ -2,6 +2,10 @@ import communicationInventory from "@/lib/evry/capabilities/communication/invent
 import peopleInventory from "@/lib/evry/capabilities/people/inventory.generated.json";
 import parityInventory from "@/lib/evry/capabilities/inventory.generated.json";
 import {
+  PLATFORM_AUTHORITATIVE_SURFACES,
+  PLATFORM_CAPABILITIES,
+} from "@/lib/evry/capabilities/platform/catalog";
+import {
   ALL_CAPABILITIES,
   holdsSeatFor,
   type Capability,
@@ -242,11 +246,21 @@ const REGISTRY = createEvryCapabilityRegistry({
   registrations: [
     ...generatedPeopleRegistrations(),
     ...generatedCommunicationRegistrations(),
+    ...PLATFORM_CAPABILITIES.map((capability) =>
+      defineEvryCapabilityRegistration({
+        identity: capability.identity,
+        surfaceIdentities: capability.surfaceIdentities,
+        parityCapability: capability.parityCapability,
+        operationKind: capability.operationKind,
+        applicationCapability: capability.applicationCapability,
+      })
+    ),
     ...REFERENCE_REGISTRATIONS,
   ],
   authoritativeSurfaces: [
     ...generatedPeopleSurfaces(),
     ...generatedCommunicationSurfaces(),
+    ...PLATFORM_AUTHORITATIVE_SURFACES,
     ...referenceSurfaces(),
   ],
 });

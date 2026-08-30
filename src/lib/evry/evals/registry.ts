@@ -4,6 +4,7 @@ import {
   SEND_MESSAGE_IDENTITY,
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
+import platformInventory from "@/lib/evry/capabilities/platform/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -57,6 +58,24 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
   {
     id: "communication-effect-live",
     testFile: "src/lib/communication/evry-effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "platform-capability-contract",
+    testFile: "src/lib/evry/capabilities/platform/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-read-contract",
+    testFile: "src/lib/evry/capabilities/platform/reads.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
+    id: "platform-effect-live",
+    testFile: "src/lib/evry/capabilities/platform/effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
   },
@@ -207,6 +226,56 @@ function communicationCapabilityFixture(
   });
 }
 
+function platformCapabilityFixture(
+  capabilityIdentity: string,
+  operationKind: string
+): EvryCapabilityEvalFixture {
+  if (operationKind !== "read" && operationKind !== "effect") {
+    throw new Error(
+      `Platform capability ${capabilityIdentity} has an invalid operation kind`
+    );
+  }
+  const liveLayers = new Set<EvryCapabilityEvalLayer>([
+    "execution",
+    "idempotency",
+    "errors",
+  ]);
+  const evalCase = (layer: EvryCapabilityEvalLayer) => {
+    const live = operationKind === "effect" && liveLayers.has(layer);
+    const readRuntime = operationKind === "read" && liveLayers.has(layer);
+    return [
+      Object.freeze({
+        id: `${capabilityIdentity}:${layer}`,
+        proofId: live
+          ? "platform-effect-live"
+          : readRuntime
+            ? "platform-read-contract"
+            : "platform-capability-contract",
+        testName: live
+          ? `${capabilityIdentity}:${layer}:live`
+          : readRuntime
+            ? `${capabilityIdentity}:${layer}:read`
+            : `${capabilityIdentity}:${layer}`,
+      }),
+    ];
+  };
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
@@ -223,6 +292,9 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
     .map(capabilityFixture),
   ...communicationInventory.capabilities.map(({ identity, operationKind }) =>
     communicationCapabilityFixture(identity, operationKind)
+  ),
+  ...platformInventory.capabilities.map(({ identity, operationKind }) =>
+    platformCapabilityFixture(identity, operationKind)
   ),
 ]);
 
