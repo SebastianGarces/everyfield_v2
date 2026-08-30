@@ -12,8 +12,6 @@ import {
   COMMUNICATION_TEMPLATE_EXECUTIONS,
   COMMUNICATION_TEMPLATE_REVIEWS,
 } from "./communication/templates";
-import { createEvryExecutionCapabilityRegistry } from "@/lib/evry/executor";
-import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
 import { continuePlantIntelligenceEvryConversation } from "./plant-intelligence/conversation";
 import {
   PLANT_INTELLIGENCE_EXECUTIONS,
@@ -58,4 +56,4 @@ export const productionEvryPlanTargetIsCurrent = async (
     ? taskEvryPlanTargetIsCurrent(input)
     : input.step.capabilityIdentity.startsWith("plant-intelligence.")
       ? plantIntelligenceEvryPlanTargetIsCurrent(input)
-    : communicationEvryPlanTargetIsCurrent(input);
+      : communicationEvryPlanTargetIsCurrent(input);

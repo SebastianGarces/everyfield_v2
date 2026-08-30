@@ -8,6 +8,7 @@ import {
   ministryTeams,
   persons,
   plantAssessments,
+  plantInsights,
   tasks,
 } from "@/db/schema";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
@@ -160,6 +161,29 @@ async function scopedRecord(
             label: safeEvryPageContextLabel(
               `Plant Intelligence · ${record.generatedAt.toISOString()}`,
               "Plant Intelligence assessment"
+            ),
+          }
+        : null;
+    }
+    case "plant_insight": {
+      if (!parsedRecordId.success) return null;
+      const [record] = await db
+        .select({ id: plantInsights.id, title: plantInsights.title })
+        .from(plantInsights)
+        .where(
+          and(
+            eq(plantInsights.id, parsedRecordId.data),
+            eq(plantInsights.churchId, actor.plantId),
+            eq(plantInsights.audience, "planter")
+          )
+        )
+        .limit(1);
+      return record
+        ? {
+            recordId: record.id,
+            label: safeEvryPageContextLabel(
+              `Observation: ${record.title}`,
+              "Plant Intelligence observation"
             ),
           }
         : null;

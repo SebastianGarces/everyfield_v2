@@ -52,6 +52,8 @@ const USER_ID = "20000000-0000-4000-8000-000000000001";
 const OTHER_USER_ID = "20000000-0000-4000-8000-000000000002";
 const LOCAL_TASK_ID = "50000000-0000-4000-8000-000000000001";
 const FOREIGN_TASK_ID = "50000000-0000-4000-8000-000000000002";
+const LOCAL_INSIGHT_ID = "70000000-0000-4000-8000-000000000001";
+const FOREIGN_INSIGHT_ID = "70000000-0000-4000-8000-000000000002";
 const LOCAL_LAUNCH_ID = "60000000-0000-4000-8000-000000000001";
 const CONVERSATION_ID = evryConversationIdSchema.parse(
   "30000000-0000-4000-8000-000000000001"
@@ -111,6 +113,29 @@ const fakeDatabase = {
             contextQueries.push({ sql: query.sql, params: query.params });
             return {
               async limit() {
+                if (query.sql.includes('"plant_insights"')) {
+                  const [recordId, plantId, audience] = query.params;
+                  if (
+                    recordId === LOCAL_INSIGHT_ID &&
+                    plantId === PLANT_ID &&
+                    audience === "planter"
+                  ) {
+                    return [
+                      {
+                        id: LOCAL_INSIGHT_ID,
+                        title: "Volunteer onboarding is unclear",
+                      },
+                    ];
+                  }
+                  if (
+                    recordId === FOREIGN_INSIGHT_ID &&
+                    plantId === "10000000-0000-4000-8000-000000000002"
+                  ) {
+                    return [{ id: FOREIGN_INSIGHT_ID, title: "Foreign" }];
+                  }
+                  return [];
+                }
+
                 if (query.sql.includes('"tasks"')) {
                   const [recordId, plantId] = query.params;
                   if (recordId === LOCAL_TASK_ID && plantId === PLANT_ID) {
@@ -491,6 +516,28 @@ async function main(): Promise<void> {
     body: { status: "unavailable" },
   });
 
+  sessions = [user()];
+  events.length = 0;
+  const forgedHandoff = await response(
+    await createPost(
+      request("http://localhost/api/evry/conversations", {
+        requestKey: randomUUID(),
+        message: "Create task: title=Hidden task",
+        pageContext: {
+          kind: "plant_insight",
+          recordId: LOCAL_INSIGHT_ID,
+          effectArguments: { title: "Hidden task" },
+        },
+      })
+    )
+  );
+  assert.deepEqual(events, ["auth", "body"]);
+  assert.deepEqual(forgedHandoff, {
+    status: 400,
+    cacheControl: "private, no-store",
+    body: { status: "invalid" },
+  });
+
   const conflictingCreatePost = createRoute.createEvryConversationCreatePost({
     resolvePageContext,
     create: async () => {
@@ -630,6 +677,37 @@ async function main(): Promise<void> {
   assert.deepEqual(contextQueries.at(-1)?.params.slice(0, 2), [
     FOREIGN_TASK_ID,
     PLANT_ID,
+  ]);
+
+  assert.deepEqual(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "plant_insight", recordId: LOCAL_INSIGHT_ID },
+    }),
+    {
+      kind: "plant_insight",
+      recordId: LOCAL_INSIGHT_ID,
+      label: "Observation: Volunteer onboarding is unclear",
+    }
+  );
+  assert.equal(contextQueries.at(-1)?.sql.includes('"plant_insights"'), true);
+  assert.deepEqual(contextQueries.at(-1)?.params, [
+    LOCAL_INSIGHT_ID,
+    PLANT_ID,
+    "planter",
+  ]);
+
+  assert.equal(
+    await pageContextResolver.resolveAuthorizedEvryPageContext({
+      actor: capturedActor,
+      pageContext: { kind: "plant_insight", recordId: FOREIGN_INSIGHT_ID },
+    }),
+    null
+  );
+  assert.deepEqual(contextQueries.at(-1)?.params, [
+    FOREIGN_INSIGHT_ID,
+    PLANT_ID,
+    "planter",
   ]);
 
   assert.deepEqual(
