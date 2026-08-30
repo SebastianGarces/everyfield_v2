@@ -101,14 +101,32 @@ export type TaskEvryCapabilityInventory = Readonly<{
 const read = taskReadIdentity;
 
 const READ_CONTRACTS = new Map<string, SupportedContract>([
-  ...[
+  [
     read("src/app/(dashboard)/tasks/page.tsx", "getTaskCounts"),
+    {
+      capabilityIdentity: "tasks.read.counts",
+      domain: "list",
+      operationKind: "read",
+      mutationShape: null,
+      applicationCapability: "read",
+    },
+  ],
+  ...[
     read("src/app/(dashboard)/tasks/page.tsx", "listFollowUpAssignees"),
     read("src/app/(dashboard)/tasks/page.tsx", "listFollowUpContacts"),
     read("src/app/(dashboard)/tasks/page.tsx", "listOpenFollowUpTasks"),
-    read("src/app/(dashboard)/tasks/page.tsx", "readTaskListPage"),
   ].map((identity): readonly [string, SupportedContract] => [
     identity,
+    {
+      capabilityIdentity: "tasks.read.follow-up-ownership",
+      domain: "list",
+      operationKind: "read",
+      mutationShape: null,
+      applicationCapability: "read",
+    },
+  ]),
+  [
+    read("src/app/(dashboard)/tasks/page.tsx", "readTaskListPage"),
     {
       capabilityIdentity: "tasks.read.list",
       domain: "list",
@@ -116,7 +134,7 @@ const READ_CONTRACTS = new Map<string, SupportedContract>([
       mutationShape: null,
       applicationCapability: "read",
     },
-  ]),
+  ],
   ...[
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "db.select"),
     read("src/app/(dashboard)/tasks/[id]/page.tsx", "getTask"),

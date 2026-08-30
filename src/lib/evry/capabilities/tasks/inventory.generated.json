@@ -200,6 +200,18 @@
       "mutationShape": "compound_write"
     },
     {
+      "identity": "tasks.read.counts",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → getTaskCounts"
+      ],
+      "parityCapability": "tasks",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
       "identity": "tasks.read.detail",
       "surfaceIdentities": [
         "read-operation:src/app/(dashboard)/tasks/[id]/page.tsx → db.select",
@@ -218,13 +230,23 @@
       "mutationShape": null
     },
     {
+      "identity": "tasks.read.follow-up-ownership",
+      "surfaceIdentities": [
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpAssignees",
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpContacts",
+        "read-operation:src/app/(dashboard)/tasks/page.tsx → listOpenFollowUpTasks"
+      ],
+      "parityCapability": "tasks",
+      "domain": "list",
+      "operationKind": "read",
+      "applicationCapability": "read",
+      "confirmation": "not_required",
+      "mutationShape": null
+    },
+    {
       "identity": "tasks.read.list",
       "surfaceIdentities": [
         "action:src/app/(dashboard)/tasks/actions.ts → loadMoreTasksAction",
-        "read-operation:src/app/(dashboard)/tasks/page.tsx → getTaskCounts",
-        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpAssignees",
-        "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpContacts",
-        "read-operation:src/app/(dashboard)/tasks/page.tsx → listOpenFollowUpTasks",
         "read-operation:src/app/(dashboard)/tasks/page.tsx → readTaskListPage",
         "route:/tasks"
       ],
@@ -697,7 +719,7 @@
       "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → getTaskCounts",
       "source": "src/app/(dashboard)/tasks/page.tsx",
       "exportName": "getTaskCounts",
-      "capabilityIdentity": "tasks.read.list",
+      "capabilityIdentity": "tasks.read.counts",
       "domain": "list",
       "operationKind": "read",
       "applicationCapability": "read",
@@ -710,7 +732,7 @@
       "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpAssignees",
       "source": "src/app/(dashboard)/tasks/page.tsx",
       "exportName": "listFollowUpAssignees",
-      "capabilityIdentity": "tasks.read.list",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
       "domain": "list",
       "operationKind": "read",
       "applicationCapability": "read",
@@ -723,7 +745,7 @@
       "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listFollowUpContacts",
       "source": "src/app/(dashboard)/tasks/page.tsx",
       "exportName": "listFollowUpContacts",
-      "capabilityIdentity": "tasks.read.list",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
       "domain": "list",
       "operationKind": "read",
       "applicationCapability": "read",
@@ -736,7 +758,7 @@
       "identity": "read-operation:src/app/(dashboard)/tasks/page.tsx → listOpenFollowUpTasks",
       "source": "src/app/(dashboard)/tasks/page.tsx",
       "exportName": "listOpenFollowUpTasks",
-      "capabilityIdentity": "tasks.read.list",
+      "capabilityIdentity": "tasks.read.follow-up-ownership",
       "domain": "list",
       "operationKind": "read",
       "applicationCapability": "read",
@@ -906,7 +928,7 @@
     "routes": 4,
     "rscReads": 25,
     "exclusions": 9,
-    "readCapabilities": 5,
+    "readCapabilities": 7,
     "effectCapabilities": 17,
     "unclassified": 0
   }
