@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { phasePromptAnswers, phaseTransitions } from "@/db/schema";
@@ -8,7 +8,11 @@ import { PHASES, type PhaseNumber } from "@/lib/constants";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 
 import { importTaskTemplate, planTemplateImport } from "./import";
-import { assertExactTaskAssignee } from "./assignees";
+import {
+  assertExactTaskAssignee,
+  isExactTaskAssignee,
+  TASK_ASSIGNEE_ERROR,
+} from "./assignees";
 import { phaseTemplatesFor, taskTemplateSize } from "./templates";
 
 // ============================================================================
@@ -355,10 +359,22 @@ interface ClaimInput {
   answer: PhasePromptAnswerKind;
 }
 
+interface PhasePromptMutationOptions {
+  /** Test seam: production never supplies this. */
+  beforeClaim?: () => Promise<void>;
+}
+
+type PhasePromptClaim =
+  | { status: "claimed"; id: string }
+  | { status: "taken" }
+  | { status: "stale" }
+  | { status: "unavailable" };
+
 /**
  * Claim the one answer this transition is allowed, or discover it is taken.
  *
- * Returns the new row's id, or `null` when a row already existed. This is a
+ * Returns a closed outcome: the new row, the row a concurrent press owns, a
+ * transition that disappeared, or a freshly unavailable actor. This is a
  * compare-and-set against `phase_prompt_answers_transition_unique_idx` and NOT
  * a read: `ON CONFLICT DO NOTHING` is decided by the database, so two presses
  * in the same millisecond — two tabs, two devices, a double-click — cannot both
@@ -368,20 +384,52 @@ interface ClaimInput {
  * that supplied a different `churchId` for the same transition still loses.
  */
 async function claimPhaseTemplatePromptAnswer(
-  input: ClaimInput
-): Promise<string | null> {
-  const [claimed] = await db
-    .insert(phasePromptAnswers)
-    .values({
-      churchId: input.churchId,
-      transitionId: input.transitionId,
-      answeredById: input.userId,
-      answer: input.answer,
-    })
-    .onConflictDoNothing({ target: phasePromptAnswers.transitionId })
-    .returning({ id: phasePromptAnswers.id });
+  input: ClaimInput,
+  options: PhasePromptMutationOptions = {}
+): Promise<PhasePromptClaim> {
+  await options.beforeClaim?.();
 
-  return claimed?.id ?? null;
+  const claimed = await db.execute<{ id: string }>(sql`
+    insert into phase_prompt_answers (
+      church_id, transition_id, answered_by_id, answer
+    )
+    select transition.church_id,
+           transition.id,
+           actor.id,
+           ${input.answer}::varchar
+    from phase_transitions transition
+    join users actor
+      on actor.id = ${input.userId}::uuid
+     and actor.church_id = transition.church_id
+     and actor.sending_church_id is null
+     and actor.sending_network_id is null
+    where transition.id = ${input.transitionId}::uuid
+      and transition.church_id = ${input.churchId}::uuid
+    on conflict (transition_id) do nothing
+    returning id
+  `);
+
+  const id = claimed.rows[0]?.id;
+  if (id) return { status: "claimed", id };
+
+  // This read only classifies why the mutation wrote nothing; it grants no
+  // authority. A concurrent claimant can commit after the statement snapshot,
+  // while an actor whose tenancy changed must get a refusal, not an
+  // already-answered success.
+  if (!(await isExactTaskAssignee(input.churchId, input.userId))) {
+    return { status: "unavailable" };
+  }
+  const [existing] = await db
+    .select({ id: phasePromptAnswers.id })
+    .from(phasePromptAnswers)
+    .where(
+      and(
+        eq(phasePromptAnswers.churchId, input.churchId),
+        eq(phasePromptAnswers.transitionId, input.transitionId)
+      )
+    )
+    .limit(1);
+  return existing ? { status: "taken" } : { status: "stale" };
 }
 
 /**
@@ -445,13 +493,16 @@ export type DeclinePhaseTemplatePromptResult = {
  * transition is declined". There is no opt-out: a caller with no id has no
  * rendered prompt behind it, and therefore nothing it is entitled to decline.
  */
-export async function declinePhaseTemplatePrompt(input: {
-  churchId: string;
-  userId: string;
-  /** The transition the prompt being answered was rendered for. A mismatch is
-   *  refused rather than redirected. */
-  expectedTransitionId: string;
-}): Promise<DeclinePhaseTemplatePromptResult | null> {
+export async function declinePhaseTemplatePrompt(
+  input: {
+    churchId: string;
+    userId: string;
+    /** The transition the prompt being answered was rendered for. A mismatch is
+     *  refused rather than redirected. */
+    expectedTransitionId: string;
+  },
+  options: PhasePromptMutationOptions = {}
+): Promise<DeclinePhaseTemplatePromptResult | null> {
   await assertExactTaskAssignee(input.churchId, input.userId);
 
   const transition = await getLatestPhaseTransition(input.churchId);
@@ -468,12 +519,19 @@ export async function declinePhaseTemplatePrompt(input: {
   // arrived between them wins the row. `ON CONFLICT DO NOTHING` is what decides
   // it — not the read (`memory/invariants.md` → Transactions). Either way the
   // transition ends up answered, which is all the caller acts on.
-  await claimPhaseTemplatePromptAnswer({
-    churchId: input.churchId,
-    transitionId: transition.id,
-    userId: input.userId,
-    answer: "declined",
-  });
+  const claim = await claimPhaseTemplatePromptAnswer(
+    {
+      churchId: input.churchId,
+      transitionId: transition.id,
+      userId: input.userId,
+      answer: "declined",
+    },
+    options
+  );
+  if (claim.status === "unavailable") {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
+  if (claim.status === "stale") return null;
 
   return { transitionId: transition.id };
 }
@@ -520,7 +578,8 @@ export async function declinePhaseTemplatePrompt(input: {
  * prompt up": nothing was created and nothing has been answered.
  */
 export async function acceptPhaseTemplatePrompt(
-  input: AcceptPhaseTemplatePromptInput
+  input: AcceptPhaseTemplatePromptInput,
+  options: PhasePromptMutationOptions = {}
 ): Promise<AcceptPhaseTemplatePromptResult | null> {
   await assertExactTaskAssignee(input.churchId, input.userId);
 
@@ -547,17 +606,25 @@ export async function acceptPhaseTemplatePrompt(
   // A forged key list must not be able to burn the planter's real prompt.
   if (keys.length === 0) return null;
 
-  const claimId = await claimPhaseTemplatePromptAnswer({
-    churchId: input.churchId,
-    transitionId: transition.id,
-    userId: input.userId,
-    answer: "accepted",
-  });
+  const claim = await claimPhaseTemplatePromptAnswer(
+    {
+      churchId: input.churchId,
+      transitionId: transition.id,
+      userId: input.userId,
+      answer: "accepted",
+    },
+    options
+  );
 
   // The database refused the second answer. This is the whole ruling.
-  if (!claimId) {
+  if (claim.status === "taken") {
     return { status: "already_answered", transitionId: transition.id };
   }
+  if (claim.status === "unavailable") {
+    throw new Error(TASK_ASSIGNEE_ERROR);
+  }
+  if (claim.status === "stale") return null;
+  const claimId = claim.id;
 
   let createdCount = 0;
   const templateNames: string[] = [];
