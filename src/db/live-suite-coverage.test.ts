@@ -141,6 +141,18 @@ test("`test:live` preloads the endpoint switch, and nothing in src/ does it inst
   );
 });
 
+test("`test:live` serializes suites that share the CI proxy", () => {
+  const runner = readFileSync(
+    path.join(process.cwd(), "scripts", "live-db-run.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    runner.includes('"--test-concurrency=1"'),
+    "suite files share one runner and neon-http proxy; CPU-wide concurrency can starve nested effect proofs past their deadlines"
+  );
+});
+
 // ----------------------------------------------------------------------------
 // AND EACH OF THOSE SUITES OWNS ITS OWN DATABASE (#594).
 //

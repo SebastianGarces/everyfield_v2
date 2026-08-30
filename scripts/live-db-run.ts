@@ -21,6 +21,13 @@
 // imports `@/db`. node:test's own file runner does both, propagating execArgv
 // to the children it forks, so the job here is to hand it the right argv and
 // pass its exit code through.
+//
+// WHY THE FILES RUN ONE AT A TIME. Their databases are separate, but their
+// GitHub job still shares one small runner and one neon-http proxy. Letting
+// node:test choose CPU-wide concurrency made the longest effect proofs starve
+// behind the rest of the lane until their child-process deadlines expired.
+// Serial files keep each proof's timeout about the proof itself, while the
+// assertions inside a proof still exercise the intended PostgreSQL races.
 // ============================================================================
 
 import { spawnSync } from "node:child_process";
@@ -47,6 +54,7 @@ async function main(): Promise<number> {
       "--import",
       "./scripts/live-db-endpoint.ts",
       "--test",
+      "--test-concurrency=1",
       ...LIVE_SUITES,
     ],
     { cwd: REPO_ROOT, stdio: "inherit" }
