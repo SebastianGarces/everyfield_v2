@@ -17,6 +17,7 @@ import {
   evryProductAuditEvents,
   persons,
   phaseTransitions,
+  sendingChurches,
   sessions,
   taskDependencies,
   tasks,
@@ -539,6 +540,52 @@ async function runEffect(input: {
     effectKey,
     arguments: resolved.arguments,
   };
+
+  if (input.exportName === "createTaskAction") {
+    const [competingTenancy] = await db
+      .insert(sendingChurches)
+      .values({ name: `${SCRATCH} competing tenancy` })
+      .returning({ id: sendingChurches.id });
+    assert.ok(competingTenancy);
+    await db
+      .update(users)
+      .set({ sendingChurchId: competingTenancy.id })
+      .where(eq(users.id, input.actor.userId));
+    let malformedTenancyResult;
+    try {
+      malformedTenancyResult = await input.execute(effectInput);
+    } finally {
+      await db
+        .update(users)
+        .set({ sendingChurchId: null })
+        .where(eq(users.id, input.actor.userId));
+    }
+    assert.deepEqual(malformedTenancyResult, {
+      status: "refused",
+      excludedCount: 1,
+    });
+    assert.equal(
+      (
+        await db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.id, resolved.arguments.taskWrites[0]!.taskId))
+      ).length,
+      0,
+      "malformed actor tenancy created a Task"
+    );
+    assert.equal(
+      (
+        await db
+          .select({ id: evryExecutionOutcomes.id })
+          .from(evryExecutionOutcomes)
+          .where(eq(evryExecutionOutcomes.effectKey, effectKey))
+      ).length,
+      0,
+      "malformed actor tenancy claimed a Task outcome"
+    );
+    console.log("PASS tasks:malformed-current-tenancy-refusal");
+  }
 
   const tenantRefusal = await input.execute({
     ...effectInput,
