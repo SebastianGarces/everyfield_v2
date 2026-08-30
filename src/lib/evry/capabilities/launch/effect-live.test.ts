@@ -14,6 +14,12 @@ const identities = [
 ] as const;
 let outcomes: ReadonlySet<string> | Error | null = null;
 
+// The production-route proof consistently completes in ~276s both locally and
+// on its Launch-only hosted run. The larger stacked app exceeded the old 420s
+// deadline once despite passing all 18 assertions in an isolated reproduction;
+// 600s preserves a finite deadlock bound with measured CI variance.
+const LIVE_PROOF_TIMEOUT_MS = 600_000;
+
 before(() => {
   if (!LIVE) return;
   const result = spawnSync(
@@ -29,7 +35,12 @@ before(() => {
         "src/lib/evry/capabilities/launch/effect-live-proof.ts"
       ),
     ],
-    { cwd: process.cwd(), encoding: "utf8", env: process.env, timeout: 420_000 }
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: process.env,
+      timeout: LIVE_PROOF_TIMEOUT_MS,
+    }
   );
   if (result.status !== 0) {
     outcomes = new Error(
