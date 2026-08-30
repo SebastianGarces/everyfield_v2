@@ -574,6 +574,7 @@ export const evryExecutionOutcomes = pgTable(
       .notNull(),
     affectedCount: integer("affected_count").default(0).notNull(),
     excludedCount: integer("excluded_count").default(0).notNull(),
+    dependencyOutput: jsonb("dependency_output"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
   },
   (table) => [

@@ -1,0 +1,1 @@
+ALTER TABLE "evry_execution_outcomes" ADD COLUMN "dependency_output" jsonb;
