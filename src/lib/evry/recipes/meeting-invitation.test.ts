@@ -17,6 +17,7 @@ import {
   createMeetingInvitationRecipeRegistry,
   createMeetingInvitationReferenceResolver,
   meetingInvitationPlanResolverRegistration,
+  MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA,
   MEETING_INVITATION_RECIPE_IDENTITY,
   MEETING_INVITATION_REVIEW_REGISTRY,
   type MeetingInvitationReferenceFacts,
@@ -415,6 +416,110 @@ test("an ambiguous church location returns closed choices and zero resolved effe
   }
 });
 
+test("nine active locations use durable focused narrowing through the ordinary continuation", async () => {
+  const locations = Array.from({ length: 9 }, (_, index) => ({
+    id: `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    name: `Location ${index + 1}`,
+    address: `${index + 1} Main Street`,
+  }));
+  const manyLocations = resolver({
+    facts: facts({
+      church: {
+        ...facts().church,
+        streetAddress: null,
+        city: null,
+        stateRegion: null,
+        country: null,
+      },
+      locations,
+    }),
+  }).resolve;
+  assert.deepEqual(
+    await manyLocations({ actor: ACTOR, request: BASE_REQUEST }),
+    {
+      kind: "clarification",
+      artifact: {
+        kind: "clarification",
+        mode: "missing",
+        entityType: "meeting_location",
+        prompt:
+          "There are more than eight active locations. Reply with one exact location name or address from Meetings.",
+      },
+    }
+  );
+
+  let selectedLocationId: string | null = null;
+  const continuation = createMeetingInvitationConversationContinuation({
+    async findPlan() {
+      return null;
+    },
+    async authorizeRead() {
+      return {
+        actor: ACTOR,
+        registration: {
+          identity: "people.crm.people.load-more-people",
+        },
+      } as unknown as EvryReadCapabilityAuthorization;
+    },
+    async resolveAuthorized(input: {
+      request: MeetingInvitationReferenceRequest;
+    }) {
+      const resolution = await manyLocations({
+        actor: ACTOR,
+        request: input.request,
+      });
+      if (resolution.kind === "resolved") {
+        selectedLocationId = resolution.location.id;
+        return { kind: "unavailable" as const };
+      }
+      return resolution;
+    },
+    async createPlan() {
+      throw new Error("focused narrowing proof must not persist");
+    },
+  } as never);
+  const requestText =
+    "Create a meeting for August 5, 2026 at 10 AM at the church location, lasting 90 minutes. Invite the core team and add prospects who have not visited a Vision Meeting. Draft an email invitation and send it to them.";
+  const first = await continuation.continue({
+    actor: ACTOR,
+    conversation: {
+      id: "40000000-0000-4000-8000-000000000001",
+      activePlan: null,
+      messages: [],
+    } as never,
+    userRequestKey: "many-locations",
+    literalUserText: requestText,
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-01T12:00:00.000Z"),
+  });
+  assert.equal(first?.artifacts[0]?.kind, "clarification");
+  assert.equal(first?.artifacts[0]?.mode, "missing");
+  const second = await continuation.continue({
+    actor: ACTOR,
+    conversation: {
+      id: "40000000-0000-4000-8000-000000000001",
+      activePlan: null,
+      messages: [
+        { author: "user", body: requestText, artifacts: [] },
+        {
+          author: "assistant",
+          body: first?.body ?? "",
+          artifacts: [{ artifact: first?.artifacts[0] }],
+        },
+        { author: "user", body: "Location 9", artifacts: [] },
+      ],
+    } as never,
+    userRequestKey: "location-nine",
+    literalUserText: "Location 9",
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-01T12:00:00.000Z"),
+  });
+  assert.equal(second, null);
+  assert.equal(selectedLocationId, locations[8]!.id);
+});
+
 test("a supplied location is exact and foreign or stale ids are neutral", async () => {
   const available = facts({
     church: { ...facts().church, streetAddress: null },
@@ -667,6 +772,32 @@ test("the exact planner feeds the future meeting into Communication and refuses 
     document: compiled.document,
   });
   assert.equal(artifact.actionLabel, "Create meeting and send invitations");
+  assert.deepEqual(artifact.steps[0]?.dateTime, {
+    startsAt: {
+      calendarDate: "2026-08-05",
+      localTime: "10:00 AM",
+      timeZone: "America/New_York",
+      utcOffset: "-04:00",
+      instantUtc: "2026-08-05T14:00:00.000Z",
+      interpretation: {
+        basis: "explicit-calendar-date",
+        sourceText: "2026-08-05 10:00 AM America/New_York",
+        statedCalendarDate: "2026-08-05",
+      },
+    },
+    endsAt: {
+      calendarDate: "2026-08-05",
+      localTime: "11:30 AM",
+      timeZone: "America/New_York",
+      utcOffset: "-04:00",
+      instantUtc: "2026-08-05T15:30:00.000Z",
+      interpretation: {
+        basis: "explicit-calendar-date",
+        sourceText: "90 minutes after 2026-08-05 10:00 AM America/New_York",
+        statedCalendarDate: "2026-08-05",
+      },
+    },
+  });
   assert.deepEqual(
     artifact.steps.map(({ stepId }) => stepId),
     ["create-meeting", "add-guests", "send-invitations"]
@@ -682,6 +813,116 @@ test("the exact planner feeds the future meeting into Communication and refuses 
     trustedReviewForEvryPlanDocument({
       plan: planIdentity,
       document: compiled.document,
+      reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
+    })
+  );
+
+  const peopleBoundary = Array.from({ length: 100 }, (_, index) => {
+    const suffix = String(index + 1).padStart(12, "0");
+    return {
+      personId: `60000000-0000-4000-8000-${suffix}`,
+      attendanceId: `70000000-0000-4000-8000-${suffix}`,
+      label: `Person ${index + 1}`,
+      email: `person-${index + 1}@example.test`,
+    };
+  });
+  const boundarySnapshot = MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA.parse({
+    meeting: { ...snapshot.meeting, estimatedAttendance: 100 },
+    guests: {
+      ...snapshot.guests,
+      targets: peopleBoundary.map((person) => ({
+        attendanceId: person.attendanceId,
+        personId: person.personId,
+        label: person.label,
+        email: person.email,
+        expectedPersonUpdatedAt: "2026-08-01T12:00:00.000Z",
+        expectedAttendanceAbsent: true,
+      })),
+      exclusions: [],
+      notificationTargets: [],
+    },
+    communication: {
+      ...snapshot.communication,
+      recipientSource: {
+        kind: "people",
+        recipientIds: peopleBoundary.map(({ personId }) => personId),
+      },
+      audience: {
+        ...snapshot.communication.audience,
+        recipients: peopleBoundary.map((person) => ({
+          personId: person.personId,
+          label: person.label,
+          email: person.email,
+          subject: BASE_REQUEST.subject,
+          bodyHtml: `<p>${BASE_REQUEST.body}</p>`,
+          bodyText: BASE_REQUEST.body,
+        })),
+      },
+    },
+  });
+  const boundaryRegistry = createMeetingInvitationRecipeRegistry({
+    planResolver: meetingInvitationPlanResolverRegistration({
+      async resolveAuthorized() {
+        return { kind: "planned", snapshot: boundarySnapshot };
+      },
+    }),
+  });
+  const boundaryCompiled = await compile({
+    actor: ACTOR,
+    registry: boundaryRegistry,
+    recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
+    inputValues: {
+      plan: {
+        request: BASE_REQUEST,
+        requestKey: mintEvryPlanRequestKey(),
+        now: "2026-08-01T12:00:00.000Z",
+      },
+    },
+    eligibleCapabilities: [
+      { identity: "meetings.create" },
+      { identity: "meetings.add-guests" },
+      { identity: "communication.messages.send" },
+    ],
+  });
+  assert.equal(
+    boundaryCompiled.document.steps.every((step) =>
+      step.disclosure?.items.every(({ value }) => value.length <= 4_000)
+    ),
+    true
+  );
+  const boundaryArtifact = buildMeetingInvitationConfirmation({
+    plan: planIdentity,
+    document: boundaryCompiled.document,
+  });
+  assert.equal(boundaryArtifact.steps[1]?.counts[0]?.count, 100);
+  assert.equal(boundaryArtifact.steps[1]?.contentPreviews.length, 100);
+  assert.equal(
+    boundaryArtifact.steps[1]?.contentPreviews[99]?.content,
+    JSON.stringify(boundarySnapshot.guests.targets[99])
+  );
+  assert.equal(boundaryArtifact.steps[2]?.contentPreviews.length, 300);
+  assert.deepEqual(boundaryArtifact.steps[2]?.contentPreviews.slice(-3), [
+    {
+      label: "Person 100 recipient",
+      content: JSON.stringify({
+        personId: peopleBoundary[99]!.personId,
+        label: "Person 100",
+        email: "person-100@example.test",
+      }),
+    },
+    {
+      label: "Person 100 subject",
+      content: BASE_REQUEST.subject,
+    },
+    {
+      label: "Person 100 message",
+      content: BASE_REQUEST.body,
+    },
+  ]);
+  assert.ok(
+    trustedReviewForEvryPlanDocument({
+      plan: planIdentity,
+      document: boundaryCompiled.document,
       reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
     })
   );

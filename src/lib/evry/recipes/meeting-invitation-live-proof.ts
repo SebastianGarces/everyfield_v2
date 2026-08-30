@@ -256,6 +256,20 @@ async function persistApprovedPlan(
   return plan;
 }
 
+function productionDispatcher(
+  modules: Modules,
+  registry: ReturnType<
+    Modules["recipes"]["createMeetingInvitationRecipeRegistry"]
+  >
+) {
+  return modules.production.createProductionEvryActionPlanDispatcher({
+    findPlan: modules.planRepository.findExactEvryActionPlan,
+    executeGeneric: modules.executor.executeEvryActionPlan,
+    executeRecipe: modules.executor.executeEvryRecipePlan,
+    meetingInvitationRegistry: registry,
+  });
+}
+
 function pausingGuestExecution(
   modules: Modules,
   dependencyFault?: "missing" | "tampered"
@@ -308,6 +322,7 @@ async function proveSendOnlyRetry(modules: Modules) {
   const registry = modules.recipes.createMeetingInvitationRecipeRegistry({
     send,
   });
+  const execute = productionDispatcher(modules, registry);
   const now = new Date();
   const created = await modules.conversations.createEvryConversation({
     actor: scenario.actor,
@@ -345,14 +360,7 @@ async function proveSendOnlyRetry(modules: Modules) {
     resume: modules.conversations.resumeEvryConversation,
     append: modules.conversations.appendTrustedEvryConversationMessage,
     confirm: modules.planService.confirmEvryActionPlan,
-    async execute(input) {
-      return modules.recipes.runEvryRecipe({
-        actor: input.actor,
-        planId: input.planId,
-        fingerprint: input.fingerprint,
-        registry,
-      });
-    },
+    execute,
     cancel: modules.planRepository.cancelExactEvryActionPlan,
     reviewPlan: (input) =>
       modules.trustedReview.trustedEvryPlanReview({
@@ -498,12 +506,12 @@ async function proveDependencyRefusal(
       },
     }),
   });
+  const execute = productionDispatcher(modules, registry);
   const plan = await persistApprovedPlan(modules, scenario, registry);
-  const first = await modules.recipes.runEvryRecipe({
+  const first = await execute({
     actor: scenario.actor,
     planId: plan.id,
     fingerprint: plan.fingerprint,
-    registry,
   });
   assert.equal(first.status, "retryable");
   if (kind === "drift") {
@@ -523,11 +531,10 @@ async function proveDependencyRefusal(
       .set({ sendingChurchId: sendingChurch.id })
       .where(eq(users.id, scenario.guestUsers[0]!.id));
   }
-  const second = await modules.recipes.runEvryRecipe({
+  const second = await execute({
     actor: scenario.actor,
     planId: plan.id,
     fingerprint: plan.fingerprint,
-    registry,
   });
   assert.equal(second.status, "partially_failed");
   assert.deepEqual(

@@ -86,6 +86,7 @@ export function meetingInvitationRequestForConversation(
   let durationMinutes = original.durationMinutes;
   let sourceText = original.sourceText;
   let locationId = original.locationId;
+  let locationQuery = original.locationQuery;
   for (const reply of replies) {
     const duration = /\b(\d{1,4})\s*minutes?\b/i.exec(reply);
     if (duration) durationMinutes = Number(duration[1]);
@@ -93,19 +94,29 @@ export function meetingInvitationRequestForConversation(
     if (year) sourceText = addYear(sourceText, year[1]);
   }
   const clarification = latestMeetingClarification(input);
+  if (
+    clarification?.mode === "missing" &&
+    clarification.entityType === "meeting_location"
+  ) {
+    locationQuery = input.literalUserText.normalize("NFKC").trim();
+  }
   if (clarification?.mode === "choice") {
     const reply = input.literalUserText.normalize("NFKC").trim().toLowerCase();
     const choice = clarification.choices.find(
       ({ id, label }) =>
         reply === id.toLowerCase() || reply === label.trim().toLowerCase()
     );
-    if (choice) locationId = choice.id;
+    if (choice) {
+      locationId = choice.id;
+      locationQuery = undefined;
+    }
   }
   return Object.freeze({
     ...original,
     sourceText,
     durationMinutes,
     locationId,
+    locationQuery,
   });
 }
 
