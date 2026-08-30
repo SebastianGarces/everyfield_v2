@@ -69,9 +69,10 @@ test("all conversation routes authenticate before path or body parsing", () => {
     "route.ts",
     "[conversationId]/route.ts",
     "[conversationId]/messages/route.ts",
+    "[conversationId]/reuse/route.ts",
   ]) {
     const source = readFileSync(path.join(ROOT, relative), "utf8");
-    const factory = source.indexOf("export function createEvryConversation");
+    const factory = source.indexOf("export function create");
     const auth = source.indexOf(
       "const actor = await requireEvryPlantViewer()",
       factory
@@ -108,6 +109,7 @@ test("the route surface is private, neutral, and has no model or effect seam", (
     "route.ts",
     "[conversationId]/route.ts",
     "[conversationId]/messages/route.ts",
+    "[conversationId]/reuse/route.ts",
   ]
     .map((relative) => readFileSync(path.join(ROOT, relative), "utf8"))
     .join("\n");

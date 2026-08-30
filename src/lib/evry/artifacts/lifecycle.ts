@@ -79,6 +79,9 @@ type AppendMessage = typeof appendTrustedEvryConversationMessage;
 
 export type EvryTrustedPlanReview = Readonly<{
   confirmation: EvryDetailedConfirmationArtifactDocument;
+  source:
+    | Readonly<{ kind: "generic" }>
+    | Readonly<{ kind: "recipe"; identity: string }>;
 }>;
 
 export type EvryArtifactLifecycleBoundaries = Readonly<{
@@ -95,6 +98,7 @@ export type EvryArtifactLifecycleBoundaries = Readonly<{
     plan: EvryConversationPlanIdentity;
     registry: EvryPlanCapabilityRegistry;
   }): Promise<EvryTrustedPlanReview | null>;
+  reusableRecipeIdentities?: ReadonlySet<string>;
   cleanupPlanResources?(input: {
     actor: EvryPlantActor;
     plan: EvryConversationPlanIdentity;
@@ -298,6 +302,7 @@ function publicStepError(status: "failed" | "refused") {
 export function receiptFromEvryExecution(input: {
   confirmation: EvryDetailedConfirmationArtifactDocument;
   result: ExecuteEvryActionPlanResult;
+  reuse?: EvryDetailedReceiptArtifactDocument["reuse"];
 }): EvryDetailedReceiptArtifactDocument {
   if (
     input.result.status === "retryable" ||
@@ -386,6 +391,7 @@ export function receiptFromEvryExecution(input: {
     plan: input.confirmation.plan,
     title: `Receipt: ${input.confirmation.title}`,
     status: receiptStatus(steps),
+    ...(input.reuse ? { reuse: input.reuse } : {}),
     steps,
   });
 }
@@ -832,6 +838,15 @@ export function createEvryArtifactLifecycle(
     const executionReceipt = receiptFromEvryExecution({
       confirmation,
       result: execution,
+      reuse:
+        execution.status === "completed" &&
+        trustedReview.source.kind === "recipe" &&
+        boundaries.reusableRecipeIdentities?.has(trustedReview.source.identity)
+          ? {
+              recipeIdentity: trustedReview.source.identity,
+              label: "Reuse",
+            }
+          : undefined,
     });
     await appendLifecycleMessage({
       boundaries,

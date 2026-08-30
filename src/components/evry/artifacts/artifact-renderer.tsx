@@ -94,9 +94,16 @@ export type EvryProgressControls = Readonly<{
   onSafeRetry(): void;
 }>;
 
+export type EvryReceiptControls = Readonly<{
+  disabled: boolean;
+  label: string;
+  onReuse(): void;
+}>;
+
 export type EvryArtifactRenderOptions = Readonly<{
   confirmationControls?: EvryConfirmationControls;
   progressControls?: EvryProgressControls;
+  receiptControls?: EvryReceiptControls;
   onChoice?: (choiceId: string) => void;
 }>;
 
@@ -672,13 +679,30 @@ function ReceiptError({
   );
 }
 
-function renderReceipt(artifact: ArtifactByVariant["receipt"]) {
+function renderReceipt(
+  artifact: ArtifactByVariant["receipt"],
+  options: EvryArtifactRenderOptions
+) {
   return (
     <ArtifactFrame
       variant="receipt"
       badge="Execution receipt"
       title={artifact.title}
       icon={<FileText className="size-4" />}
+      footer={
+        options.receiptControls ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={options.receiptControls.disabled}
+            onClick={options.receiptControls.onReuse}
+            className="cursor-pointer active:scale-[0.96]"
+          >
+            <RotateCcw aria-hidden="true" />
+            {options.receiptControls.label}
+          </Button>
+        ) : null
+      }
     >
       <ol className="space-y-3">
         {artifact.steps.map((step) => (
@@ -769,7 +793,7 @@ export const EVRY_ARTIFACT_REGISTRY = {
   settings: (artifact, _options) => renderSettings(artifact),
   confirmation: (artifact, options) => renderConfirmation(artifact, options),
   progress: (artifact, options) => renderProgress(artifact, options),
-  receipt: (artifact, _options) => renderReceipt(artifact),
+  receipt: (artifact, options) => renderReceipt(artifact, options),
   boundary: (artifact, _options) => renderBoundary(artifact),
 } satisfies EvryArtifactRegistry;
 
