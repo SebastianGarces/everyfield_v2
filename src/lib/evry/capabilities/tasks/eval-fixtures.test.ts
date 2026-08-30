@@ -41,31 +41,68 @@ const PLAN = evryConversationPlanIdentitySchema.parse({
   fingerprint: "a".repeat(64),
 });
 const READ_SELECTIONS: Readonly<Record<string, string>> = Object.freeze({
+  [TASK_READ_IDENTITIES.counts]: "Show task counts",
   [TASK_READ_IDENTITIES.list]: "Show tasks",
   [TASK_READ_IDENTITIES.detail]: `Show task ${TASK_FIXTURE_ID}`,
+  [TASK_READ_IDENTITIES.followUpOwnership]: "Show task follow-up contacts",
   [TASK_READ_IDENTITIES.phasePrompt]: "Show the pending phase checklist prompt",
   [TASK_READ_IDENTITIES.planning]: `Show planning options for task ${TASK_FIXTURE_ID}`,
   [TASK_READ_IDENTITIES.templates]: "Show task checklist templates",
 });
 
-test("Task list selection preserves filters and the owning cursor for load more", () => {
-  assert.deepEqual(
-    selectTaskEvryRead(
-      `Load more tasks matching launch follow-up after ${TASK_FIXTURE_ID}`
-    ),
-    {
-      kind: "list",
-      search: "launch follow-up",
-      includeCompleted: true,
-      cursor: TASK_FIXTURE_ID,
-    }
-  );
+test("Task list source reads have truthful closed capability owners", () => {
+  const capabilityFor = (sourceRead: string) =>
+    inventory.entries.find(
+      (entry) =>
+        entry.identity ===
+        `read-operation:src/app/(dashboard)/tasks/page.tsx → ${sourceRead}`
+    )?.capabilityIdentity;
+  assert.equal(capabilityFor("getTaskCounts"), TASK_READ_IDENTITIES.counts);
+  assert.equal(capabilityFor("readTaskListPage"), TASK_READ_IDENTITIES.list);
+  for (const sourceRead of [
+    "listFollowUpAssignees",
+    "listFollowUpContacts",
+    "listOpenFollowUpTasks",
+  ]) {
+    assert.equal(
+      capabilityFor(sourceRead),
+      TASK_READ_IDENTITIES.followUpOwnership
+    );
+  }
+});
+
+test("Task list selection preserves the product view and owning cursor", () => {
   assert.deepEqual(
     selectTaskEvryRead(`Load more tasks after ${TASK_FIXTURE_ID}`),
     {
       kind: "list",
-      search: "",
-      includeCompleted: false,
+      view: "my_tasks",
+      showCompleted: false,
+      status: [],
+      priority: [],
+      category: [],
+      cursor: TASK_FIXTURE_ID,
+    }
+  );
+  assert.deepEqual(selectTaskEvryRead("Show all tasks"), {
+    kind: "list",
+    view: "all",
+    showCompleted: false,
+    status: [],
+    priority: [],
+    category: [],
+    cursor: null,
+  });
+});
+
+test("Task ownership selection preserves its typed section and cursor", () => {
+  assert.deepEqual(
+    selectTaskEvryRead(
+      `Load more task follow-up contacts after ${TASK_FIXTURE_ID}`
+    ),
+    {
+      kind: "follow_up_ownership",
+      section: "contacts",
       cursor: TASK_FIXTURE_ID,
     }
   );

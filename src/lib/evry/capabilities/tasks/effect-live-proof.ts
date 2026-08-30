@@ -45,7 +45,9 @@ const NOW = new Date("2026-08-29T12:00:00.000Z");
 let phaseTransitionSequence = 0;
 const SCRATCH = `__evry tasks proof ${randomUUID()}__`;
 const READ_IDENTITIES = {
+  counts: "tasks.read.counts",
   detail: "tasks.read.detail",
+  followUpOwnership: "tasks.read.follow-up-ownership",
   list: "tasks.read.list",
   phasePrompt: "tasks.read.phase-template-prompt",
   planning: "tasks.read.planning-options",
@@ -2047,7 +2049,18 @@ async function runStructureBarrierRaces(input: {
 function readInput(registration: EvryReadRegistration, taskId: string) {
   switch (registration.id) {
     case "tasks.list":
-      return { search: SCRATCH, includeCompleted: true, cursor: null };
+      return {
+        view: "all",
+        showCompleted: true,
+        status: [],
+        priority: [],
+        category: [],
+        cursor: null,
+      };
+    case "tasks.counts":
+      return { view: "all", status: [], priority: [], category: [] };
+    case "tasks.follow-up-ownership":
+      return { section: "contacts", cursor: null };
     case "tasks.detail":
       return { taskId };
     case "tasks.detail.checklist":
@@ -2120,6 +2133,29 @@ async function runReads(input: {
   }
 }
 
+async function runUncoveredFollowUpContactProof(input: {
+  actor: EvryPlantActor;
+  registration: EvryReadRegistration;
+}) {
+  const contact = await seedContact(input.actor.plantId, input.actor.userId);
+  const result = await input.registration.execute(
+    {
+      literalUserText: "Show task follow-up contacts",
+      pageContext: null,
+    },
+    { section: "contacts", cursor: null }
+  );
+  assert.ok(result?.kind === "read");
+  const item = result.items.find(({ id }) => id === contact.id);
+  assert.ok(item, "follow-up contact with no Task must remain visible");
+  assert.equal(
+    item.facts.find(({ label }) => label === "Coverage")?.value,
+    "Needs owner"
+  );
+  assert.ok(Number(filterValue(result, "Contacts needing an owner")) >= 1);
+  console.log("PASS tasks.read.follow-up-ownership:uncovered-contact");
+}
+
 async function runListCursorProof(input: {
   actor: EvryPlantActor;
   continueRead: EvryReadContinuation;
@@ -2137,44 +2173,46 @@ async function runListCursorProof(input: {
     )
   );
   const invocation = {
-    literalUserText: `Find tasks matching ${marker}`,
+    literalUserText: "Show all tasks",
     pageContext: null,
   } as const;
   const first = await input.registration.execute(invocation, {
-    search: marker,
-    includeCompleted: true,
+    view: "all",
+    showCompleted: false,
+    status: [],
+    priority: [],
+    category: [],
     cursor: null,
   });
   assert.ok(first?.kind === "read");
   assert.equal(first.items.length, 50);
   assert.equal(first.counts.excluded, 0);
   assert.deepEqual(first.exclusions, []);
-  const nextCursor = first.filters.find(
-    ({ label }) => label === "Next page cursor"
-  )?.value;
-  assert.ok(nextCursor && nextCursor !== "End of results");
-
-  const second = await input.continueRead({
-    eligibleCapabilities: input.eligibleCapabilities,
-    literalUserText: `Load more tasks matching ${marker} after ${nextCursor}`,
-    pageContext: null,
-  });
-  assert.ok(second?.kind === "read");
-  assert.equal(second.items.length, 1);
-  assert.equal(second.counts.excluded, 0);
-  assert.deepEqual(second.exclusions, []);
+  const pages = [first];
+  for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+    const nextCursor = pages
+      .at(-1)
+      ?.filters.find(({ label }) => label === "Next page cursor")?.value;
+    if (!nextCursor || nextCursor === "End of results") break;
+    const next = await input.continueRead({
+      eligibleCapabilities: input.eligibleCapabilities,
+      literalUserText: `Load more all tasks after ${nextCursor}`,
+      pageContext: null,
+    });
+    assert.ok(next?.kind === "read");
+    assert.ok(next.items.length <= 50);
+    assert.equal(next.counts.excluded, 0);
+    assert.deepEqual(next.exclusions, []);
+    assert.equal(filterValue(next, "Page cursor"), nextCursor);
+    pages.push(next);
+  }
   assert.equal(
-    second.filters.find(({ label }) => label === "Page cursor")?.value,
-    nextCursor
-  );
-  assert.equal(
-    second.filters.find(({ label }) => label === "Next page cursor")?.value,
+    filterValue(pages.at(-1)!, "Next page cursor"),
     "End of results"
   );
-  assert.deepEqual(
-    [...first.items, ...second.items].map(({ id }) => id).toSorted(),
-    seeded.map(({ id }) => id).toSorted()
-  );
+  const observedIds = pages.flatMap(({ items }) => items.map(({ id }) => id));
+  assert.equal(new Set(observedIds).size, observedIds.length);
+  assert.ok(seeded.every(({ id }) => observedIds.includes(id)));
   console.log("PASS tasks.read.list:cursor-pagination");
 }
 
@@ -2541,6 +2579,10 @@ async function main() {
     foreignUserId: seeded.foreignUserId,
     localTransitionId: localTransition.id,
     foreignTransitionId: foreignTransition.id,
+  });
+  await runUncoveredFollowUpContactProof({
+    actor,
+    registration: reads.TASK_FOLLOW_UP_OWNERSHIP_READ,
   });
   await runListCursorProof({
     actor,

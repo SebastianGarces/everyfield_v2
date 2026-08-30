@@ -6,7 +6,9 @@ import { before, test } from "node:test";
 import { TASK_ACTION_CONTRACTS } from "./contracts";
 
 const TASK_READ_IDENTITIES = [
+  "tasks.read.counts",
   "tasks.read.detail",
+  "tasks.read.follow-up-ownership",
   "tasks.read.list",
   "tasks.read.phase-template-prompt",
   "tasks.read.planning-options",
@@ -75,8 +77,18 @@ run("A resolver-shaped 100-Task completion reaches trusted review", () => {
   assert.match(output, /PASS tasks:resolver-shaped-bulk-review/);
 });
 
-run("Task list cursors reach 51 matching rows without page exclusions", () => {
-  assert.match(output, /PASS tasks\.read\.list:cursor-pagination/);
+run(
+  "Task list cursors reach all 51 seeded rows without page exclusions",
+  () => {
+    assert.match(output, /PASS tasks\.read\.list:cursor-pagination/);
+  }
+);
+
+run("Task ownership exposes a follow-up contact with no Task", () => {
+  assert.match(
+    output,
+    /PASS tasks\.read\.follow-up-ownership:uncovered-contact/
+  );
 });
 
 run(
