@@ -36,8 +36,8 @@ import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import { recordAddressSuppression } from "@/lib/notifications/channels/suppression";
 
 import {
+  EVRY_COMMUNICATION_ATTEMPTED_PREFIX,
   EVRY_COMMUNICATION_LOCAL_PREFIX,
-  EVRY_COMMUNICATION_PERMANENT_PREFIX,
   type EvryCommunicationMailer,
   resolveEvryCommunicationAudience,
   sendFrozenEvryCommunication,
@@ -220,7 +220,10 @@ function deterministicMailer(
       const providerId = `fake-${deliveries.size + 1}`;
       deliveries.set(input.idempotencyKey, providerId);
       if (outcome === "accepted_response_lost") {
-        throw new Error("response lost after provider acceptance");
+        return {
+          status: "retryable",
+          reason: "response lost after provider acceptance",
+        };
       }
       return { status: "accepted", providerId };
     },
@@ -798,6 +801,193 @@ async function main(): Promise<void> {
   assert.equal(new Set(transientMailer.calls).size, 1);
   assert.equal(transientMailer.deliveries.size, 1);
 
+  // A provider may accept the stable request while its response is lost. Once
+  // that boundary is ambiguous, later recipient drift cannot truthfully turn
+  // the durable row into a local exclusion; replay must reconcile the same
+  // provider key first.
+  const lostResponseEmail = `${randomUUID()}@scratch.invalid`;
+  const [lostResponsePerson] = await db
+    .insert(persons)
+    .values({
+      churchId: plant.id,
+      firstName: "Lost",
+      lastName: "Response",
+      email: lostResponseEmail,
+      createdBy: owner.id,
+    })
+    .returning({ id: persons.id });
+  assert.ok(lostResponsePerson);
+  const lostResponseAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [lostResponsePerson.id],
+    subject: "Lost provider response",
+    body: "Approved before recipient drift",
+  });
+  assert.ok(lostResponseAudience);
+  const lostResponseEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-after-lost-response",
+  });
+  const lostResponseCommunicationId = randomUUID();
+  const lostResponseMailer = deterministicMailer([
+    "accepted_response_lost",
+    "accepted",
+  ]);
+  const lostResponseInput = {
+    effect: lostResponseEffect,
+    identity: SEND_MESSAGE,
+    communicationId: lostResponseCommunicationId,
+    audience: lostResponseAudience,
+    mailer: lostResponseMailer.mailer,
+  };
+  assert.deepEqual(await sendFrozenEvryCommunication(lostResponseInput), {
+    status: "retryable",
+  });
+  const [ambiguousRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, lostResponseCommunicationId)
+    );
+  assert.equal(ambiguousRecipient?.status, "failed");
+  assert.match(
+    ambiguousRecipient?.errorMessage ?? "",
+    new RegExp(`^${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}`)
+  );
+  await db
+    .update(persons)
+    .set({ email: `${randomUUID()}@scratch.invalid` })
+    .where(eq(persons.id, lostResponsePerson.id));
+  assert.deepEqual(await sendFrozenEvryCommunication(lostResponseInput), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  assert.equal(lostResponseMailer.calls.length, 2);
+  assert.equal(new Set(lostResponseMailer.calls).size, 1);
+  assert.equal(lostResponseMailer.deliveries.size, 1);
+  const [reconciledRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, lostResponseCommunicationId)
+    );
+  assert.deepEqual(reconciledRecipient, {
+    status: "sent",
+    errorMessage: null,
+    externalId: "fake-1",
+  });
+
+  // The same attempted marker must also survive a concurrent local safety
+  // change. Hold executor A inside the provider seam, suppress the recipient,
+  // then let executor B observe the committed marker. Both requests reuse one
+  // provider key and both report the one truthful delivery.
+  const inFlightEmail = `${randomUUID()}@scratch.invalid`;
+  const [inFlightPerson] = await db
+    .insert(persons)
+    .values({
+      churchId: plant.id,
+      firstName: "In flight",
+      lastName: "Recipient",
+      email: inFlightEmail,
+      createdBy: owner.id,
+    })
+    .returning({ id: persons.id });
+  assert.ok(inFlightPerson);
+  const inFlightAudience = await resolveEvryCommunicationAudience({
+    churchId: plant.id,
+    recipientIds: [inFlightPerson.id],
+    subject: "Concurrent provider reconciliation",
+    body: "Approved before concurrent suppression",
+  });
+  assert.ok(inFlightAudience);
+  const inFlightEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-during-concurrent-suppression",
+  });
+  const inFlightCalls: string[] = [];
+  const inFlightDeliveries = new Map<string, string>();
+  let providerEntrants = 0;
+  let releaseProvider!: () => void;
+  const providerRelease = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  let firstProviderEntered!: () => void;
+  const firstProviderEntry = new Promise<void>((resolve) => {
+    firstProviderEntered = resolve;
+  });
+  let bothProvidersEntered!: () => void;
+  const bothProviderEntries = new Promise<void>((resolve) => {
+    bothProvidersEntered = resolve;
+  });
+  const inFlightMailer: EvryCommunicationMailer = {
+    async send(input) {
+      inFlightCalls.push(input.idempotencyKey);
+      providerEntrants += 1;
+      if (providerEntrants === 1) firstProviderEntered();
+      if (providerEntrants === 2) bothProvidersEntered();
+      await providerRelease;
+      const existing = inFlightDeliveries.get(input.idempotencyKey);
+      if (existing) return { status: "accepted", providerId: existing };
+      const providerId = `in-flight-${inFlightDeliveries.size + 1}`;
+      inFlightDeliveries.set(input.idempotencyKey, providerId);
+      return { status: "accepted", providerId };
+    },
+  };
+  const inFlightInput = {
+    effect: inFlightEffect,
+    identity: SEND_MESSAGE,
+    communicationId: randomUUID(),
+    audience: inFlightAudience,
+    mailer: inFlightMailer,
+  };
+  const firstInFlightExecution = sendFrozenEvryCommunication(inFlightInput);
+  await firstProviderEntry;
+  await recordAddressSuppression({
+    email: inFlightEmail,
+    reason: "spam_complaint",
+    source: "live-proof-while-provider-in-flight",
+  });
+  const secondInFlightExecution = sendFrozenEvryCommunication(inFlightInput);
+  await bothProviderEntries;
+  releaseProvider();
+  assert.deepEqual(
+    await Promise.all([firstInFlightExecution, secondInFlightExecution]),
+    [
+      { status: "completed", affectedCount: 1, excludedCount: 0 },
+      { status: "completed", affectedCount: 1, excludedCount: 0 },
+    ]
+  );
+  assert.equal(inFlightCalls.length, 2);
+  assert.equal(new Set(inFlightCalls).size, 1);
+  assert.equal(inFlightDeliveries.size, 1);
+  const [inFlightRecipient] = await db
+    .select({
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
+      externalId: communicationRecipients.externalId,
+    })
+    .from(communicationRecipients)
+    .where(
+      eq(communicationRecipients.communicationId, inFlightInput.communicationId)
+    );
+  assert.deepEqual(inFlightRecipient, {
+    status: "sent",
+    errorMessage: null,
+    externalId: "in-flight-1",
+  });
+
   const shrinkEmail = `${randomUUID()}@scratch.invalid`;
   const [shrinkPerson] = await db
     .insert(persons)
@@ -1330,6 +1520,8 @@ async function main(): Promise<void> {
     deleteEffect,
     concurrentEffect,
     transientEffect,
+    lostResponseEffect,
+    inFlightEffect,
     authorityRaceEffect,
     raceEffect,
     resendEffect,
