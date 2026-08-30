@@ -28,12 +28,11 @@ function casesFor(capability: (typeof inventory.capabilities)[number]) {
     ui_artifact: [],
   };
   for (const layer of EVRY_CAPABILITY_EVAL_LAYERS) {
-    const live =
-      capability.operationKind === "effect" && LIVE_LAYERS.has(layer);
+    const live = LIVE_LAYERS.has(layer);
     cases[layer].push({
       id: `${capability.identity}:${layer}`,
       proofId: live
-        ? "plant-intelligence-effect-live"
+        ? "plant-intelligence-capability-live"
         : "plant-intelligence-capability-contract",
       testName: `${capability.identity}:${layer}${live ? ":live" : ""}`,
     });

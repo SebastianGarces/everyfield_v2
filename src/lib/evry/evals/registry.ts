@@ -69,7 +69,7 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: ["prohibited_tool_access"],
   },
   {
-    id: "plant-intelligence-effect-live",
+    id: "plant-intelligence-capability-live",
     testFile:
       "src/lib/evry/capabilities/plant-intelligence/effect-live.test.ts",
     lane: "live_database",

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import path from "node:path";
 
 import { and, eq, sql } from "drizzle-orm";
 
@@ -19,6 +21,7 @@ import {
   plantInsights,
   plantSignals,
   users,
+  wikiArticles,
 } from "@/db/schema";
 import {
   correlationForPlanRequest,
@@ -31,7 +34,11 @@ import {
   type EvryEffectCapabilityAuthorization,
 } from "@/lib/evry/eligibility/capabilities";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
-import type { EvryEffectInput, EvryEffectResult } from "@/lib/evry/executor";
+import {
+  createEvryExecutionCapabilityRegistry,
+  type EvryEffectInput,
+  type EvryEffectResult,
+} from "@/lib/evry/executor";
 import { mintEvryPlanRequestKey, type EvryJsonValue } from "@/lib/evry/plans";
 import { evryPublicArtifactSchema } from "@/lib/evry/artifacts/public";
 import { ACTIVE_RUBRIC } from "@/lib/phase-engine/rubric";
@@ -42,8 +49,9 @@ import {
   acknowledgeArgumentsSchema,
   attestationArgumentsSchema,
   checkinArgumentsSchema,
+  createPlantIntelligenceExecutions,
   feedbackArgumentsSchema,
-  PLANT_INTELLIGENCE_EXECUTION_REGISTRY,
+  resolvePlantIntelligenceEffectArguments,
   transitionArgumentsSchema,
 } from "./effects";
 import {
@@ -57,6 +65,12 @@ import {
 const FINGERPRINT = "a".repeat(64);
 const effectOutcomes = new Set<string>();
 const identities = PLANT_INTELLIGENCE_EFFECT_IDENTITIES;
+const refreshes: string[][] = [];
+const liveExecutionRegistry = createEvryExecutionCapabilityRegistry(
+  createPlantIntelligenceExecutions((paths) => {
+    refreshes.push([...paths]);
+  })
+);
 
 function record(
   identity: string,
@@ -175,7 +189,7 @@ async function seedEffect(input: {
 }
 
 async function execute(input: EvryEffectInput): Promise<EvryEffectResult> {
-  const registration = PLANT_INTELLIGENCE_EXECUTION_REGISTRY.registrationFor(
+  const registration = liveExecutionRegistry.registrationFor(
     input.execution.capabilityIdentity
   );
   assert.ok(registration);
@@ -278,6 +292,14 @@ async function main() {
       .returning(),
   ]).then((rows) => rows.map(([row]) => row));
   assert.ok(assessment && foreignAssessment);
+  const irregularWikiSlug = "guides/100% ready #1?";
+  await db.insert(wikiArticles).values({
+    slug: irregularWikiSlug,
+    title: "Irregular stored source",
+    content: "Stored source body",
+    contentType: "guide",
+    status: "published",
+  });
   const [insight, foreignInsight] = await Promise.all([
     db
       .insert(plantInsights)
@@ -289,6 +311,7 @@ async function main() {
         severity: "info",
         title: "Stored local insight",
         body: "Stored body",
+        relatedArticleSlugs: [irregularWikiSlug],
         rank: 1,
       })
       .returning(),
@@ -371,6 +394,49 @@ async function main() {
         .where(eq(churches.id, plant.id))
     )[0]?.phase,
     2
+  );
+  const differentKeyTransitions = await Promise.all(
+    [3, 4].map(async (toPhase) =>
+      seedEffect({
+        churchId: plant.id,
+        actorUserId: owner.id,
+        actorSeat: "owner",
+        capabilityIdentity: identities.transitionPhase,
+        arguments: transitionArgumentsSchema.parse({
+          expected: { currentPhase: 2 },
+          toPhase,
+          reason: `Different-key transition to ${toPhase}`,
+        }),
+      })
+    )
+  );
+  const differentKeyResults = await Promise.all(
+    differentKeyTransitions.map(execute)
+  );
+  assert.deepEqual(
+    differentKeyResults.map(({ status }) => status).sort(),
+    ["completed", "refused"],
+    "a current-phase CAS permits exactly one differently keyed transition"
+  );
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(phaseTransitions)
+        .where(eq(phaseTransitions.churchId, plant.id))
+    ).length,
+    2,
+    "the losing key writes no audit row"
+  );
+  assert.ok(
+    [3, 4].includes(
+      (
+        await db
+          .select({ phase: churches.currentPhase })
+          .from(churches)
+          .where(eq(churches.id, plant.id))
+      )[0]?.phase ?? -1
+    )
   );
   record(identities.transitionPhase, "execution");
   record(identities.transitionPhase, "idempotency");
@@ -476,6 +542,70 @@ async function main() {
         )
     ).length,
     1
+  );
+  const oldAttestationTime = new Date("2020-01-01T00:00:00.000Z");
+  const [oldAttestation] = await db
+    .update(plantSignals)
+    .set({ attestedAt: oldAttestationTime, updatedAt: oldAttestationTime })
+    .where(
+      and(
+        eq(plantSignals.churchId, plant.id),
+        eq(plantSignals.signalKey, "values_documented")
+      )
+    )
+    .returning();
+  assert.ok(oldAttestation);
+  const [plantBeforeSameValueAttestation] = await db
+    .select({ lastMaterialEventAt: churches.lastMaterialEventAt })
+    .from(churches)
+    .where(eq(churches.id, plant.id));
+  assert.ok(plantBeforeSameValueAttestation?.lastMaterialEventAt);
+  const resolvedSameValueAttestation =
+    await resolvePlantIntelligenceEffectArguments(
+      { userId: owner.id, plantId: plant.id, seat: "owner" } as EvryPlantActor,
+      {
+        kind: "attestation",
+        signalKey: "values_documented",
+        value: "Exact attestation",
+      }
+    );
+  assert.ok(resolvedSameValueAttestation);
+  const sameValueAttestation = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    actorSeat: "owner",
+    capabilityIdentity: identities.setAttestation,
+    arguments: attestationArgumentsSchema.parse({
+      signalKey: "values_documented",
+      expected: {
+        id: oldAttestation.id,
+        value: oldAttestation.value,
+        attestedById: oldAttestation.attestedById,
+        attestedAt: oldAttestation.attestedAt.toISOString(),
+        updatedAt: oldAttestation.updatedAt.toISOString(),
+      },
+      value: "Exact attestation",
+    }),
+  });
+  assert.deepEqual(await execute(sameValueAttestation), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  const [refreshedAttestation] = await db
+    .select()
+    .from(plantSignals)
+    .where(eq(plantSignals.id, oldAttestation.id));
+  const [dirtiedPlant] = await db
+    .select({ lastMaterialEventAt: churches.lastMaterialEventAt })
+    .from(churches)
+    .where(eq(churches.id, plant.id));
+  assert.equal(refreshedAttestation?.attestedById, owner.id);
+  assert.ok(refreshedAttestation!.attestedAt > oldAttestationTime);
+  assert.ok(refreshedAttestation!.updatedAt > oldAttestationTime);
+  assert.ok(
+    dirtiedPlant!.lastMaterialEventAt! >
+      plantBeforeSameValueAttestation.lastMaterialEventAt
   );
   record(identities.setAttestation, "execution");
   record(identities.setAttestation, "idempotency");
@@ -676,6 +806,61 @@ async function main() {
     ).length,
     1
   );
+  const oldCheckinTime = new Date("2020-01-02T00:00:00.000Z");
+  const [oldCheckin] = await db
+    .update(planterCheckins)
+    .set({ updatedAt: oldCheckinTime })
+    .where(eq(planterCheckins.churchId, plant.id))
+    .returning();
+  assert.ok(oldCheckin);
+  const resolvedSameValueCheckin =
+    await resolvePlantIntelligenceEffectArguments(
+      { userId: owner.id, plantId: plant.id, seat: "owner" } as EvryPlantActor,
+      {
+        kind: "checkin",
+        spiritually: oldCheckin.spiritually,
+        marriageFamily: oldCheckin.marriageFamily,
+        financially: oldCheckin.financially,
+        pace: oldCheckin.pace,
+        note: oldCheckin.note,
+      }
+    );
+  assert.ok(resolvedSameValueCheckin);
+  const sameValueCheckin = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    actorSeat: "owner",
+    capabilityIdentity: identities.saveCheckin,
+    arguments: checkinArgumentsSchema.parse({
+      weekStart: week,
+      expected: {
+        id: oldCheckin.id,
+        spiritually: oldCheckin.spiritually,
+        marriageFamily: oldCheckin.marriageFamily,
+        financially: oldCheckin.financially,
+        pace: oldCheckin.pace,
+        note: oldCheckin.note,
+        answeredById: oldCheckin.answeredById,
+        updatedAt: oldCheckin.updatedAt.toISOString(),
+      },
+      spiritually: oldCheckin.spiritually,
+      marriageFamily: oldCheckin.marriageFamily,
+      financially: oldCheckin.financially,
+      pace: oldCheckin.pace,
+      note: oldCheckin.note,
+    }),
+  });
+  assert.deepEqual(await execute(sameValueCheckin), {
+    status: "completed",
+    affectedCount: 1,
+    excludedCount: 0,
+  });
+  const [refreshedCheckin] = await db
+    .select()
+    .from(planterCheckins)
+    .where(eq(planterCheckins.id, oldCheckin.id));
+  assert.equal(refreshedCheckin?.answeredById, owner.id);
+  assert.ok(refreshedCheckin!.updatedAt > oldCheckinTime);
   record(identities.saveCheckin, "execution");
   record(identities.saveCheckin, "idempotency");
   const staleCheckin = await seedEffect({
@@ -701,32 +886,79 @@ async function main() {
 
   const [outcomeCount] = await db
     .select({ count: sql<number>`count(*)::integer` })
-    .from(evryExecutionOutcomes);
+    .from(evryExecutionOutcomes)
+    .where(eq(evryExecutionOutcomes.churchId, plant.id));
   assert.equal(
     outcomeCount?.count,
-    5,
+    8,
     "replay/race/refusal/retry must not duplicate or falsely claim outcomes"
+  );
+  assert.equal(refreshes.length, 8, "only newly claimed effects refresh");
+  assert.equal(
+    refreshes.filter((paths) => paths.includes("/dashboard")).length,
+    2,
+    "each claimed phase transition invalidates the dashboard"
+  );
+  assert.equal(
+    refreshes.every((paths) => paths.includes("/phase")),
+    true,
+    "every claimed Plant Intelligence effect reconciles /phase"
   );
 
   // Lossless read reconstruction beyond both the 80-item page and 100-item
   // public artifact boundaries. Every continuation is parsed through the real
   // command selector and every page passes the public artifact schema.
-  const largeBody = Array.from(
+  const originalLargeBody = Array.from(
     { length: 110 },
     (_, index) => `${String(index).padStart(3, "0")}:${"x".repeat(443)}`
   ).join("");
   await db
     .update(plantInsights)
-    .set({ title: "Stored local insight", body: largeBody })
+    .set({ title: "Stored local insight", body: originalLargeBody })
     .where(eq(plantInsights.id, insight.id));
+  type AssessmentCursor = NonNullable<
+    Parameters<typeof readPlantIntelligenceAssessmentForPlant>[0]["cursor"]
+  >;
+  const firstAssessmentPage = await readPlantIntelligenceAssessmentForPlant({
+    plantId: plant.id,
+    assessmentId: assessment.id,
+    cursor: null,
+  });
+  const firstAssessmentCommand = continuationCommand(
+    firstAssessmentPage,
+    "show plant intelligence assessment"
+  );
+  assert.ok(firstAssessmentCommand);
+  const firstAssessmentSelection = selectPlantIntelligenceEvryRead(
+    firstAssessmentCommand
+  );
+  const staleAssessmentCursor = firstAssessmentSelection?.input
+    .cursor as AssessmentCursor;
+  const largeBody = `${originalLargeBody}mutation-between-pages`;
+  await db
+    .update(plantInsights)
+    .set({ body: largeBody })
+    .where(eq(plantInsights.id, insight.id));
+  const refusedAssessmentContinuation =
+    await readPlantIntelligenceAssessmentForPlant({
+      plantId: plant.id,
+      assessmentId: assessment.id,
+      cursor: staleAssessmentCursor,
+    });
+  assert.equal(refusedAssessmentContinuation.items.length, 0);
+  assert.equal(
+    refusedAssessmentContinuation.exclusions[0]?.reason,
+    "The stored assessment changed; start again"
+  );
   const assessmentItems = new Set<string>();
   const assessmentValues = new Map<string, string>();
-  let assessmentOffset = 0;
+  const assessmentLinks = new Map<string, string>();
+  let assessmentCursor: AssessmentCursor | null = null;
   for (;;) {
     const artifact = await readPlantIntelligenceAssessmentForPlant({
       plantId: plant.id,
       assessmentId: assessment.id,
-      offset: assessmentOffset,
+      cursor: assessmentCursor,
     });
     evryPublicArtifactSchema.parse(artifact);
     appendUnique(
@@ -734,6 +966,7 @@ async function main() {
       artifact.items.map(({ id }) => id)
     );
     for (const item of artifact.items) {
+      if (item.sourceLink) assessmentLinks.set(item.id, item.sourceLink.href);
       const exact = item.facts.find(
         ({ label }) => label === "Exact stored text"
       );
@@ -747,8 +980,7 @@ async function main() {
     const selected = selectPlantIntelligenceEvryRead(command);
     assert.equal(selected?.readId, "plant-intelligence.assessment");
     assert.equal(selected?.input.assessmentId, assessment.id);
-    assert.ok(typeof selected?.input.offset === "number");
-    assessmentOffset = selected.input.offset;
+    assessmentCursor = selected?.input.cursor as AssessmentCursor;
   }
   const rebuiltBody = [...assessmentItems]
     .filter((id) => id.startsWith(`${insight.id}:body:`))
@@ -762,6 +994,14 @@ async function main() {
     rebuiltBody,
     largeBody,
     "every exact stored body code unit must be reconstructed"
+  );
+  assert.ok(
+    assessmentItems.has(`${insight.id}:article:${irregularWikiSlug}`),
+    "the stored article source remains present in the lossless reconstruction"
+  );
+  assert.equal(
+    assessmentLinks.get(`${insight.id}:article:${irregularWikiSlug}`),
+    "/wiki/guides/100%25%20ready%20%231%3F"
   );
 
   const historyRows = Array.from({ length: 90 }, (_, index) => ({
@@ -812,6 +1052,30 @@ async function main() {
   type SignalCursor = NonNullable<
     Parameters<typeof readPlantIntelligenceSignalsForPlant>[0]["cursor"]
   >;
+  const firstSignalPage = await readPlantIntelligenceSignalsForPlant({
+    plantId: plant.id,
+    cursor: null,
+  });
+  const firstSignalCommand = continuationCommand(
+    firstSignalPage,
+    "show plant intelligence signals"
+  );
+  assert.ok(firstSignalCommand);
+  const staleSignalCursor = selectPlantIntelligenceEvryRead(firstSignalCommand)
+    ?.input.cursor as SignalCursor;
+  await db
+    .update(phaseTransitions)
+    .set({ toPhase: 6 })
+    .where(eq(phaseTransitions.id, insertedHistory[0]!.id));
+  const refusedSignalContinuation = await readPlantIntelligenceSignalsForPlant({
+    plantId: plant.id,
+    cursor: staleSignalCursor,
+  });
+  assert.equal(refusedSignalContinuation.items.length, 0);
+  assert.equal(
+    refusedSignalContinuation.exclusions[0]?.reason,
+    "The stored signal page changed; start again"
+  );
   const signalItems = new Set<string>();
   let signalCursor: SignalCursor | null = null;
   for (;;) {
@@ -871,6 +1135,34 @@ async function main() {
   type FeedbackCursor = NonNullable<
     Parameters<typeof readPlantIntelligenceFeedbackForPlant>[0]["cursor"]
   >;
+  const firstFeedbackPage = await readPlantIntelligenceFeedbackForPlant({
+    plantId: plant.id,
+    userId: member.id,
+    cursor: null,
+  });
+  const firstFeedbackCommand = continuationCommand(
+    firstFeedbackPage,
+    "show plant intelligence feedback"
+  );
+  assert.ok(firstFeedbackCommand);
+  const staleFeedbackCursor = selectPlantIntelligenceEvryRead(
+    firstFeedbackCommand
+  )?.input.cursor as FeedbackCursor;
+  await db
+    .update(insightFeedback)
+    .set({ comment: "Feedback source mutated between pages" })
+    .where(eq(insightFeedback.id, feedbackRows[0]!.id));
+  const refusedFeedbackContinuation =
+    await readPlantIntelligenceFeedbackForPlant({
+      plantId: plant.id,
+      userId: member.id,
+      cursor: staleFeedbackCursor,
+    });
+  assert.equal(refusedFeedbackContinuation.items.length, 0);
+  assert.equal(
+    refusedFeedbackContinuation.exclusions[0]?.reason,
+    "The stored feedback changed; start again"
+  );
   const feedbackItems = new Set<string>();
   let feedbackCursor: FeedbackCursor | null = null;
   for (;;) {
@@ -899,7 +1191,52 @@ async function main() {
       `missing stored feedback ${row.id}`
     );
 
-  assert.equal(effectOutcomes.size, 15);
+  const productionProof = spawnSync(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--experimental-test-module-mocks",
+      "--import",
+      "tsx",
+      "--import",
+      "./scripts/live-db-endpoint.ts",
+      path.join(
+        process.cwd(),
+        "src/lib/evry/capabilities/plant-intelligence/production-lifecycle-live-proof.ts"
+      ),
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EVRY_PI_PROOF_PLANT_ID: plant.id,
+        EVRY_PI_PROOF_ACTOR_ID: owner.id,
+      },
+      timeout: 180_000,
+    }
+  );
+  assert.equal(
+    productionProof.status,
+    0,
+    `Plant Intelligence production lifecycle failed\nstdout:\n${productionProof.stdout}\nstderr:\n${productionProof.stderr}`
+  );
+  assert.match(
+    productionProof.stdout,
+    /Plant Intelligence production lifecycle proof passed/
+  );
+  const readOutcomes = /^EVRY_PLANT_INTELLIGENCE_READ_OUTCOMES=(.+)$/m.exec(
+    productionProof.stdout
+  )?.[1];
+  assert.ok(readOutcomes);
+  const parsedReadOutcomes = JSON.parse(readOutcomes) as unknown;
+  assert.ok(Array.isArray(parsedReadOutcomes));
+  for (const outcome of parsedReadOutcomes) {
+    assert.equal(typeof outcome, "string");
+    effectOutcomes.add(outcome as string);
+  }
+
+  assert.equal(effectOutcomes.size, 33);
   console.log("Plant Intelligence effect live proof passed");
   console.log(
     `EVRY_PLANT_INTELLIGENCE_EFFECT_OUTCOMES=${JSON.stringify([...effectOutcomes].sort())}`
