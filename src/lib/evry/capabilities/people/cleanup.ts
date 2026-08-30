@@ -10,8 +10,12 @@ import {
   removeEvryPeopleAttachment,
   type EvryPeopleAttachmentReference,
 } from "./attachments";
+import { EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH } from "./attachment-contract";
 
-const attachmentReferenceSchema = z.string().min(1).max(4_000);
+const attachmentReferenceSchema = z
+  .string()
+  .min(1)
+  .max(EVRY_PEOPLE_ATTACHMENT_REFERENCE_MAX_LENGTH);
 const storedPlanDocumentSchema = z
   .object({
     steps: z.array(

@@ -1,3 +1,9 @@
+import {
+  EVRY_PEOPLE_ATTACHMENT_CHUNK_BYTES,
+  EVRY_PEOPLE_ATTACHMENT_MAX_CHUNKS,
+  EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH,
+} from "@/lib/evry/capabilities/people/attachment-contract";
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
@@ -17,6 +23,12 @@ export type PreparedEvryPeopleFile = Readonly<{
     label: string;
     mergeTarget: string;
   }>[];
+}>;
+
+export type PreparedEvryPeopleUpload = Readonly<{
+  reference: string;
+  chunkBytes: number;
+  chunkCount: number;
 }>;
 
 type PlanIdentity = Readonly<{
@@ -137,13 +149,39 @@ export function preparedEvryPeopleFileFromStage(
   return staged?.status === "staged" &&
     typeof staged.reference === "string" &&
     staged.reference.length > 0 &&
-    staged.reference.length <= 4_000 &&
+    staged.reference.length <=
+      EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH &&
     typeof metadata?.digest === "string" &&
     /^[0-9a-f]{64}$/.test(metadata.digest)
     ? {
         reference: staged.reference,
         digest: metadata.digest,
         duplicateRows: duplicateRowsFromPeopleStage(value),
+      }
+    : null;
+}
+
+/** Accept only a compact, bounded upload manifest delivered by the API. */
+export function preparedEvryPeopleUploadFromResponse(
+  value: unknown
+): PreparedEvryPeopleUpload | null {
+  const prepared = record(value);
+  return prepared?.status === "prepared" &&
+    typeof prepared.reference === "string" &&
+    prepared.reference.length > 0 &&
+    prepared.reference.length <=
+      EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH &&
+    typeof prepared.chunkBytes === "number" &&
+    Number.isSafeInteger(prepared.chunkBytes) &&
+    prepared.chunkBytes === EVRY_PEOPLE_ATTACHMENT_CHUNK_BYTES &&
+    typeof prepared.chunkCount === "number" &&
+    Number.isSafeInteger(prepared.chunkCount) &&
+    prepared.chunkCount > 0 &&
+    prepared.chunkCount <= EVRY_PEOPLE_ATTACHMENT_MAX_CHUNKS
+    ? {
+        reference: prepared.reference,
+        chunkBytes: prepared.chunkBytes,
+        chunkCount: prepared.chunkCount,
       }
     : null;
 }

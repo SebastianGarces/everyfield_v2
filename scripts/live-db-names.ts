@@ -54,6 +54,8 @@ import { fileURLToPath } from "node:url";
  */
 export const PEOPLE_EFFECT_LIVE_SUITE =
   "src/lib/people/evry-effect-live.test.ts" as const;
+export const DOCUMENTS_WIKI_EFFECT_LIVE_SUITE =
+  "src/lib/evry/capabilities/documents-wiki/effect-live.test.ts" as const;
 
 export const LIVE_SUITES = [
   "src/db/seat-owner-uniqueness.test.ts",
@@ -77,6 +79,7 @@ export const LIVE_SUITES = [
   "src/lib/people/person-link-live.test.ts",
   "src/lib/people/duplicate-match-live.test.ts",
   PEOPLE_EFFECT_LIVE_SUITE,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
   "src/lib/phase-engine/transitions/declaration-race.test.ts",
   "src/lib/seats/seat-removal-live.test.ts",
   "src/lib/tasks/follow-up-race.test.ts",
@@ -88,7 +91,10 @@ export const LIVE_SUITES = [
  * People capability in one fixture lifecycle. Run it without sibling suites
  * competing for the two-core CI runner and the shared Neon proxy.
  */
-export const DEDICATED_LIVE_SUITES = [PEOPLE_EFFECT_LIVE_SUITE] as const;
+export const DEDICATED_LIVE_SUITES = [
+  PEOPLE_EFFECT_LIVE_SUITE,
+  DOCUMENTS_WIKI_EFFECT_LIVE_SUITE,
+] as const;
 
 const dedicatedLiveSuites = new Set<string>(DEDICATED_LIVE_SUITES);
 
@@ -96,9 +102,13 @@ export const PARALLEL_LIVE_SUITES = LIVE_SUITES.filter(
   (suite) => !dedicatedLiveSuites.has(suite)
 );
 
-/** Ordered, fail-fast phases for the live lane. */
+const dedicatedLiveSuitePhases = DEDICATED_LIVE_SUITES.map(
+  (suite) => [suite] as const
+);
+
+/** Ordered, fail-fast phases: each monolithic proof runs without a sibling. */
 export const LIVE_SUITE_PHASES = [
-  DEDICATED_LIVE_SUITES,
+  ...dedicatedLiveSuitePhases,
   PARALLEL_LIVE_SUITES,
 ] as const;
 

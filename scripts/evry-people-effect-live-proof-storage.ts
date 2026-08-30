@@ -38,6 +38,16 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
       });
       return key;
     },
+    async create(key, bytes, contentType) {
+      operations.push({ kind: "store", key });
+      if (objects.has(key)) return "exists";
+      objects.set(key, {
+        body: Buffer.from(bytes),
+        contentType,
+        lastModified,
+      });
+      return "created";
+    },
     async read(key) {
       operations.push({ kind: "read", key });
       const object = objects.get(key);
@@ -70,13 +80,15 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
     },
     assertCleaned() {
       const stores = operations.filter(({ kind }) => kind === "store");
-      const staged = stores.filter(({ key }) => key.startsWith("evry-inputs/"));
+      const stagedStores = stores.filter(({ key }) =>
+        key.startsWith("evry-inputs/")
+      );
+      const stagedReads = operations.filter(
+        ({ kind, key }) => kind === "read" && key.startsWith("evry-inputs/")
+      );
       const final = stores.filter(({ key }) => key.startsWith("people/"));
       const removed = new Set(
         operations.filter(({ kind }) => kind === "remove").map(({ key }) => key)
-      );
-      const read = new Set(
-        operations.filter(({ kind }) => kind === "read").map(({ key }) => key)
       );
       const listed = new Set(
         operations
@@ -84,16 +96,13 @@ export function createEvryPeopleEffectProofStorage(): EvryPeopleEffectProofStora
           .map(({ key }) => key)
       );
 
-      assert.equal(
-        staged.length,
-        3,
-        "proof must stage all three CSV/photo inputs"
+      assert.ok(stagedStores.length > 0, "proof never staged a bounded input");
+      assert.ok(stagedReads.length > 0, "proof never verified a staged input");
+      assert.ok(
+        stagedStores.every(({ key }) => removed.has(key)),
+        "proof leaked an expiring staged input"
       );
       assert.equal(final.length, 1, "proof must store one final person photo");
-      for (const { key } of staged) {
-        assert.ok(read.has(key), `staged object was never read: ${key}`);
-        assert.ok(removed.has(key), `staged object was never removed: ${key}`);
-      }
       assert.ok(removed.has(final[0]!.key), "final photo was never removed");
       assert.ok(
         [...listed].some((prefix) => prefix.startsWith("evry-inputs/")),

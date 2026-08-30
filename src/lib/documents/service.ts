@@ -13,7 +13,8 @@
 // never a storage key; a foreign id reads as missing.
 // ============================================================================
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
 import {
@@ -24,6 +25,7 @@ import {
 import { getTemplateById } from "@/lib/documents/templates";
 import { FORMAT_OUTPUT, type DocumentFormat } from "@/lib/documents/types";
 import { deleteFile, getSignedDownloadUrl, uploadFile } from "@/lib/storage";
+import { evryDocumentStorage } from "@/lib/evry/capabilities/documents-wiki/document-storage";
 
 /** Signed re-download URLs expire after one hour, same as commitment files. */
 export const GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN = 3600;
@@ -38,6 +40,7 @@ export const GENERATED_DOCUMENT_SIGNED_URL_EXPIRES_IN = 3600;
  * older ones. Retired by the first paging control on this surface.
  */
 export const GENERATED_DOCUMENT_HISTORY_LIMIT = 100;
+export const EVRY_GENERATED_DOCUMENT_PAGE_SIZE = 25;
 
 export type GeneratedDocumentListItem = {
   id: string;
@@ -127,6 +130,16 @@ export function insertGeneratedDocumentQuery(row: NewGeneratedDocument) {
   return db.insert(generatedDocuments).values(row).returning();
 }
 
+export function insertGeneratedDocumentIfAbsentQuery(
+  row: NewGeneratedDocument
+) {
+  return db
+    .insert(generatedDocuments)
+    .values(row)
+    .onConflictDoNothing()
+    .returning();
+}
+
 export async function listGeneratedDocuments(
   churchId: string
 ): Promise<GeneratedDocumentListItem[]> {
@@ -140,6 +153,94 @@ export async function getGeneratedDocument(
 ): Promise<GeneratedDocument | null> {
   const [row] = await generatedDocumentForChurchQuery(churchId, id);
   return row ?? null;
+}
+
+type GeneratedDocumentCursor = Readonly<{
+  createdAtExact: string;
+  id: string;
+}>;
+
+export function encodeGeneratedDocumentCursor(
+  row: GeneratedDocumentCursor
+): string {
+  return Buffer.from(
+    JSON.stringify({ createdAtExact: row.createdAtExact, id: row.id }),
+    "utf8"
+  ).toString("base64url");
+}
+
+const generatedDocumentCursorTimestamp = z
+  .string()
+  .regex(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/)
+  .refine((value) => {
+    const match =
+      /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/.exec(
+        value
+      );
+    if (!match) return false;
+    const [year, month, day, hour, minute, second] = match
+      .slice(1, 7)
+      .map(Number);
+    if (
+      !year ||
+      month! < 1 ||
+      month! > 12 ||
+      hour! > 23 ||
+      minute! > 59 ||
+      second! > 59
+    )
+      return false;
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return day! >= 1 && day! <= days[month! - 1]!;
+  });
+
+const generatedDocumentCursorSchema = z.strictObject({
+  createdAtExact: generatedDocumentCursorTimestamp,
+  id: z.string().uuid(),
+});
+
+export function decodeGeneratedDocumentCursor(
+  value: string | null
+): GeneratedDocumentCursor | null {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as unknown;
+    const cursor = generatedDocumentCursorSchema.safeParse(parsed);
+    return cursor.success ? cursor.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function listGeneratedDocumentPage(
+  churchId: string,
+  cursorValue: string | null
+) {
+  const cursor = decodeGeneratedDocumentCursor(cursorValue);
+  if (cursorValue !== null && !cursor) return null;
+  const cursorPredicate = cursor
+    ? sql`(${generatedDocuments.createdAt}, ${generatedDocuments.id}) < (${cursor.createdAtExact}::timestamp, ${cursor.id}::uuid)`
+    : undefined;
+  const rows = await db
+    .select({
+      ...getTableColumns(generatedDocuments),
+      createdAtExact: sql<string>`${generatedDocuments.createdAt}::text`,
+    })
+    .from(generatedDocuments)
+    .where(and(eq(generatedDocuments.churchId, churchId), cursorPredicate))
+    .orderBy(desc(generatedDocuments.createdAt), desc(generatedDocuments.id))
+    .limit(EVRY_GENERATED_DOCUMENT_PAGE_SIZE + 1);
+  const page = rows.slice(0, EVRY_GENERATED_DOCUMENT_PAGE_SIZE);
+  return {
+    items: page.map(toGeneratedDocumentListItem),
+    nextCursor:
+      rows.length > EVRY_GENERATED_DOCUMENT_PAGE_SIZE && page.length > 0
+        ? encodeGeneratedDocumentCursor(page[page.length - 1]!)
+        : null,
+  };
 }
 
 /**
@@ -219,4 +320,55 @@ export async function recordGeneratedDocument(
     }
     throw error;
   }
+}
+
+/**
+ * Persist one Evry-generated artifact at an effect-key-derived id.
+ *
+ * The object key and row id are both deterministic. A crash after upload simply
+ * uploads the same immutable bytes again, while a crash after insert observes
+ * the exact row before doing any render or storage work. `ON CONFLICT DO
+ * NOTHING` is the same-key concurrency fence; a conflict is accepted only when
+ * the existing row has the exact expected owner/template/format/key tuple.
+ */
+export async function recordGeneratedDocumentAtId(input: {
+  id: string;
+  churchId: string;
+  userId: string;
+  templateId: string;
+  format: DocumentFormat;
+  bytes: Buffer;
+}): Promise<GeneratedDocument> {
+  const expected = generatedDocumentRow(input);
+  const existing = await getGeneratedDocument(input.churchId, input.id);
+  if (existing) {
+    if (
+      existing.userId !== expected.userId ||
+      existing.templateId !== expected.templateId ||
+      existing.format !== expected.format ||
+      existing.storageKey !== expected.storageKey
+    ) {
+      throw new Error("Generated document effect identity mismatch");
+    }
+    return existing;
+  }
+
+  await evryDocumentStorage().store(
+    expected.storageKey,
+    input.bytes,
+    FORMAT_OUTPUT[input.format].mime
+  );
+  const inserted = (await insertGeneratedDocumentIfAbsentQuery(expected))[0];
+  if (inserted) return inserted;
+  const winner = await getGeneratedDocument(input.churchId, input.id);
+  if (
+    !winner ||
+    winner.userId !== expected.userId ||
+    winner.templateId !== expected.templateId ||
+    winner.format !== expected.format ||
+    winner.storageKey !== expected.storageKey
+  ) {
+    throw new Error("Generated document effect did not converge");
+  }
+  return winner;
 }

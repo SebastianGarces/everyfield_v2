@@ -20,6 +20,8 @@
     "evry:communication-inventory:check": "tsx ops/evry/generate-communication-inventory.ts --check",
     "evry:people-inventory": "tsx ops/evry/generate-people-inventory.ts",
     "evry:people-inventory:check": "tsx ops/evry/generate-people-inventory.ts --check",
+    "evry:documents-wiki-inventory": "tsx ops/evry/generate-documents-wiki-inventory.ts",
+    "evry:documents-wiki-inventory:check": "tsx ops/evry/generate-documents-wiki-inventory.ts --check",
     "evry:people-file-cleanup": "tsx --env-file-if-exists=.env.local scripts/evry-people-file-cleanup.ts",
     "evry:cost:audit": "node ops/evry-cost-audit.mjs",
     "evry:benchmark": "tsx --env-file-if-exists=.env.local scripts/evry-model-benchmark.ts",
