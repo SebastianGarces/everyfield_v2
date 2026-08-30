@@ -2,7 +2,13 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { churches, users } from "@/db/schema";
+import {
+  churches,
+  taskCategories,
+  taskPriorities,
+  taskStatuses,
+  users,
+} from "@/db/schema";
 import {
   buildEvryReadArtifact,
   trustedEvryApplicationSourceLink,
@@ -14,13 +20,23 @@ import {
   listTaskPrerequisites,
 } from "@/lib/tasks/dependencies";
 import { taskDescriptionPreview } from "@/lib/tasks/descriptions";
-import { listFollowUpAssignees } from "@/lib/tasks/follow-up-ownership";
+import {
+  isOwned,
+  listFollowUpAssignees,
+  listFollowUpContacts,
+  listOpenFollowUpTasks,
+  selectUnownedContacts,
+} from "@/lib/tasks/follow-up-ownership";
+import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
+import { TASK_LIST_VIEWS } from "@/lib/tasks/list-params";
 import { readPhaseTemplatePrompt } from "@/lib/tasks/phase-prompt";
-import { getTask, listSubtasks, listTasks } from "@/lib/tasks/service";
+import { getTask, getTaskCounts, listSubtasks } from "@/lib/tasks/service";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
 
 export const TASK_READ_IDENTITIES = {
+  counts: "tasks.read.counts",
   detail: "tasks.read.detail",
+  followUpOwnership: "tasks.read.follow-up-ownership",
   list: "tasks.read.list",
   phasePrompt: "tasks.read.phase-template-prompt",
   planning: "tasks.read.planning-options",
@@ -28,7 +44,6 @@ export const TASK_READ_IDENTITIES = {
 } as const;
 
 const uuid = z.string().uuid();
-const TASK_READ_LIMIT = 50;
 export const TASK_RELATED_READ_LIMIT = 25;
 
 function displayText(
@@ -196,25 +211,37 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
   id: "tasks.list",
   capabilityIdentity: TASK_READ_IDENTITIES.list,
   inputShape: {
-    search: z.string().trim().max(160),
-    includeCompleted: z.boolean(),
+    view: z.enum(TASK_LIST_VIEWS),
+    showCompleted: z.boolean(),
+    status: z.array(z.enum(taskStatuses)).max(taskStatuses.length),
+    priority: z.array(z.enum(taskPriorities)).max(taskPriorities.length),
+    category: z.array(z.enum(taskCategories)).max(taskCategories.length),
     cursor: uuid.nullable(),
   },
   async run({ authorization }, input) {
-    const result = await listTasks(authorization.actor.plantId, {
-      search: input.search || undefined,
-      includeCompleted: input.includeCompleted,
-      cursor: input.cursor ?? undefined,
-      limit: TASK_READ_LIMIT,
-    });
+    const result = await readTaskListPage(
+      authorization.actor.plantId,
+      authorization.actor.userId,
+      {
+        view: input.view,
+        completed: input.showCompleted ? "true" : undefined,
+        status: input.status,
+        priority: input.priority,
+        category: input.category,
+      },
+      input.cursor ?? undefined
+    );
     return buildEvryReadArtifact({
-      title: input.search ? `Tasks matching “${input.search}”` : "Tasks",
+      title: "Tasks",
       filters: [
-        ...(input.search ? [{ label: "Search", value: input.search }] : []),
+        { label: "View", value: input.view },
         {
           label: "Completed",
-          value: input.includeCompleted ? "Included" : "Excluded",
+          value: input.showCompleted ? "Included" : "Excluded",
         },
+        { label: "Statuses", value: input.status.join(", ") || "Any" },
+        { label: "Priorities", value: input.priority.join(", ") || "Any" },
+        { label: "Categories", value: input.category.join(", ") || "Any" },
         { label: "Matching tasks", value: String(result.total) },
         { label: "Page cursor", value: input.cursor ?? "First page" },
         {
@@ -225,16 +252,188 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
       // Pagination is continuation, not exclusion: the next cursor above
       // reaches the remaining matching rows without inflating excluded counts.
       exclusions: [],
-      items: result.tasks.map((task) => ({
-        id: task.id,
-        label: artifactLabel(task.title, "Untitled task"),
-        facts: taskFacts(task),
-        sourceLink: link(
-          artifactLabel(`Open ${task.title}`, "Open task"),
-          `/tasks/${task.id}`
-        ),
-      })),
+      items: result.tasks.map((task) => {
+        const note =
+          task.relatedType === "person" && task.relatedId
+            ? result.personNotes[task.relatedId]
+            : undefined;
+        return {
+          id: task.id,
+          label: artifactLabel(task.title, "Untitled task"),
+          facts: [
+            ...taskFacts(task),
+            ...(note
+              ? [
+                  {
+                    label: "Latest person note",
+                    value: artifactFact(note, "No note"),
+                  },
+                ]
+              : []),
+          ],
+          sourceLink: link(
+            artifactLabel(`Open ${task.title}`, "Open task"),
+            `/tasks/${task.id}`
+          ),
+        };
+      }),
       sourceLinks: [link("Open Tasks", "/tasks")],
+    });
+  },
+});
+
+const taskListScopeInput = {
+  view: z.enum(TASK_LIST_VIEWS),
+  status: z.array(z.enum(taskStatuses)).max(taskStatuses.length),
+  priority: z.array(z.enum(taskPriorities)).max(taskPriorities.length),
+  category: z.array(z.enum(taskCategories)).max(taskCategories.length),
+} as const;
+
+export const TASK_COUNTS_READ = defineEvryReadRegistration({
+  id: "tasks.counts",
+  capabilityIdentity: TASK_READ_IDENTITIES.counts,
+  inputShape: taskListScopeInput,
+  async run({ authorization }, input) {
+    const counts = await getTaskCounts(
+      authorization.actor.plantId,
+      taskListScope(authorization.actor.userId, {
+        ...input,
+        showCompleted: false,
+      })
+    );
+    return buildEvryReadArtifact({
+      title: "Task counts",
+      filters: [
+        { label: "View", value: input.view },
+        { label: "Statuses", value: input.status.join(", ") || "Any" },
+        { label: "Priorities", value: input.priority.join(", ") || "Any" },
+        { label: "Categories", value: input.category.join(", ") || "Any" },
+      ],
+      exclusions: [],
+      items: [
+        {
+          id: "task-counts",
+          label: "Tasks in scope",
+          facts: [
+            { label: "Not started", value: String(counts.notStarted) },
+            { label: "In progress", value: String(counts.inProgress) },
+            { label: "Blocked", value: String(counts.blocked) },
+            { label: "Complete", value: String(counts.complete) },
+            { label: "Overdue", value: String(counts.overdue) },
+            { label: "Total", value: String(counts.total) },
+            {
+              label: "Checklist items",
+              value: `${counts.checklistComplete}/${counts.checklistTotal} complete`,
+            },
+          ],
+          sourceLink: link("Open Tasks", "/tasks"),
+        },
+      ],
+      sourceLinks: [link("Open Tasks", "/tasks")],
+    });
+  },
+});
+
+export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
+  id: "tasks.follow-up-ownership",
+  capabilityIdentity: TASK_READ_IDENTITIES.followUpOwnership,
+  inputShape: {
+    section: z.enum(["contacts", "open_tasks", "assignees"]),
+    cursor: uuid.nullable(),
+  },
+  async run({ authorization }, input) {
+    const [assignees, contacts, openTasks] = await Promise.all([
+      listFollowUpAssignees(authorization.actor.plantId),
+      listFollowUpContacts(authorization.actor.plantId),
+      listOpenFollowUpTasks(authorization.actor.plantId),
+    ]);
+    const unownedContactIds = new Set(
+      selectUnownedContacts(contacts, openTasks).map(({ personId }) => personId)
+    );
+    const rows =
+      input.section === "contacts"
+        ? contacts.map((contact) => ({
+            id: contact.personId,
+            label: artifactLabel(contact.name, "Unnamed contact"),
+            facts: [
+              { label: "Status", value: contact.status },
+              {
+                label: "Coverage",
+                value: unownedContactIds.has(contact.personId)
+                  ? "Needs owner"
+                  : "Owned",
+              },
+              {
+                label: "Last touched",
+                value: contact.lastTouchedAt.toISOString(),
+              },
+            ],
+            sourceLink: link("Open person", `/people/${contact.personId}`),
+          }))
+        : input.section === "open_tasks"
+          ? openTasks.map((task) => ({
+              id: task.taskId,
+              label: artifactLabel(task.title, "Untitled task"),
+              facts: [
+                {
+                  label: "Owner",
+                  value: isOwned(task)
+                    ? artifactFact(
+                        task.ownerName ?? task.ownerEmail,
+                        "Unnamed member"
+                      )
+                    : "Needs owner",
+                },
+                { label: "Due date", value: task.dueDate ?? "Not set" },
+                { label: "Contact", value: task.contactId ?? "Not linked" },
+              ],
+              sourceLink: link("Open task", `/tasks/${task.taskId}`),
+            }))
+          : assignees.map((assignee) => ({
+              id: assignee.id,
+              label: artifactLabel(
+                assignee.name ?? assignee.email,
+                "Unnamed member"
+              ),
+              facts: [
+                { label: "Email", value: assignee.email },
+                { label: "Status", value: assignee.status },
+                {
+                  label: "Planter",
+                  value: assignee.isPlanter ? "Yes" : "No",
+                },
+              ],
+              sourceLink: link("Open Tasks", "/tasks?view=assignments"),
+            }));
+    const page = cursorPage(rows, input.cursor);
+    if (!page && input.cursor) {
+      return unavailableCursorArtifact({
+        title: "Task follow-up ownership",
+        taskId: null,
+        section: input.section,
+        cursor: input.cursor,
+      });
+    }
+    return buildEvryReadArtifact({
+      title: "Task follow-up ownership",
+      filters: [
+        { label: "Section", value: input.section },
+        { label: "Open follow-up tasks", value: String(openTasks.length) },
+        { label: "Follow-up contacts", value: String(contacts.length) },
+        { label: "Eligible assignees", value: String(assignees.length) },
+        {
+          label: "Contacts needing an owner",
+          value: String(unownedContactIds.size),
+        },
+        { label: "Page cursor", value: input.cursor ?? "First page" },
+        {
+          label: "Next page cursor",
+          value: page?.nextCursor ?? "End of results",
+        },
+      ],
+      exclusions: [],
+      items: page?.items ?? [],
+      sourceLinks: [link("Open Task assignments", "/tasks?view=assignments")],
     });
   },
 });
@@ -799,8 +998,20 @@ export const TASK_TEMPLATES_READ = defineEvryReadRegistration({
 export type TaskEvryReadSelection =
   | Readonly<{
       kind: "list";
-      search: string;
-      includeCompleted: boolean;
+      view: (typeof TASK_LIST_VIEWS)[number];
+      showCompleted: boolean;
+      status: (typeof taskStatuses)[number][];
+      priority: (typeof taskPriorities)[number][];
+      category: (typeof taskCategories)[number][];
+      cursor: string | null;
+    }>
+  | Readonly<{
+      kind: "counts";
+      view: (typeof TASK_LIST_VIEWS)[number];
+    }>
+  | Readonly<{
+      kind: "follow_up_ownership";
+      section: "contacts" | "open_tasks" | "assignees";
       cursor: string | null;
     }>
   | Readonly<{ kind: "detail"; taskId: string | null }>
@@ -839,26 +1050,18 @@ export function selectTaskEvryRead(
   const text = literalUserText.normalize("NFKC").trim();
   let match: RegExpExecArray | null;
   match = new RegExp(
-    `^load more tasks matching\\s+(.+?)\\s+after\\s+${UUID}[.!?]*$`,
+    `^load more all tasks( including completed)? after\\s+${UUID}[.!?]*$`,
     "i"
   ).exec(text);
-  if (match?.[1] && match[2]) {
+  if (match?.[2]) {
     return {
       kind: "list",
-      search: match[1].trim(),
-      includeCompleted: true,
+      view: "all",
+      showCompleted: Boolean(match[1]),
+      status: [],
+      priority: [],
+      category: [],
       cursor: match[2],
-    };
-  }
-  match = new RegExp(`^load more all tasks after\\s+${UUID}[.!?]*$`, "i").exec(
-    text
-  );
-  if (match?.[1]) {
-    return {
-      kind: "list",
-      search: "",
-      includeCompleted: true,
-      cursor: match[1],
     };
   }
   match = new RegExp(`^load more tasks after\\s+${UUID}[.!?]*$`, "i").exec(
@@ -867,23 +1070,75 @@ export function selectTaskEvryRead(
   if (match?.[1]) {
     return {
       kind: "list",
-      search: "",
-      includeCompleted: false,
+      view: "my_tasks",
+      showCompleted: false,
+      status: [],
+      priority: [],
+      category: [],
       cursor: match[1],
     };
   }
   if (/^(?:show|list)(?: me)? tasks[.!?]*$/i.test(text)) {
-    return { kind: "list", search: "", includeCompleted: false, cursor: null };
-  }
-  if (/^(?:show|list)(?: me)? all tasks[.!?]*$/i.test(text)) {
-    return { kind: "list", search: "", includeCompleted: true, cursor: null };
-  }
-  match = /^find tasks matching\s+(.+?)[.!?]*$/i.exec(text);
-  if (match?.[1]) {
     return {
       kind: "list",
-      search: match[1].trim(),
-      includeCompleted: true,
+      view: "my_tasks",
+      showCompleted: false,
+      status: [],
+      priority: [],
+      category: [],
+      cursor: null,
+    };
+  }
+  match =
+    /^(?:show|list)(?: me)? all tasks( including completed)?[.!?]*$/i.exec(
+      text
+    );
+  if (match) {
+    return {
+      kind: "list",
+      view: "all",
+      showCompleted: Boolean(match[1]),
+      status: [],
+      priority: [],
+      category: [],
+      cursor: null,
+    };
+  }
+  if (/^(?:show|list)(?: me)? task counts[.!?]*$/i.test(text)) {
+    return { kind: "counts", view: "my_tasks" };
+  }
+  match = new RegExp(
+    `^load more task follow-up (contacts|tasks|assignees) after\\s+${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2]) {
+    const subject = match[1].toLocaleLowerCase("en-US");
+    const section =
+      subject === "tasks"
+        ? "open_tasks"
+        : subject === "contacts"
+          ? "contacts"
+          : "assignees";
+    return {
+      kind: "follow_up_ownership",
+      section,
+      cursor: match[2],
+    };
+  }
+  if (/^(?:show|list)(?: me)? task follow-up contacts[.!?]*$/i.test(text)) {
+    return { kind: "follow_up_ownership", section: "contacts", cursor: null };
+  }
+  if (/^(?:show|list)(?: me)? open task follow-ups[.!?]*$/i.test(text)) {
+    return {
+      kind: "follow_up_ownership",
+      section: "open_tasks",
+      cursor: null,
+    };
+  }
+  if (/^(?:show|list)(?: me)? task follow-up assignees[.!?]*$/i.test(text)) {
+    return {
+      kind: "follow_up_ownership",
+      section: "assignees",
       cursor: null,
     };
   }
@@ -1138,6 +1393,8 @@ export function selectTaskEvryRead(
 
 export const TASK_EVRY_READ_REGISTRATIONS = [
   TASK_LIST_READ,
+  TASK_COUNTS_READ,
+  TASK_FOLLOW_UP_OWNERSHIP_READ,
   TASK_DETAIL_READ,
   TASK_CHECKLIST_DETAIL_READ,
   TASK_PREREQUISITE_DETAIL_READ,
@@ -1159,8 +1416,29 @@ export const continueTaskEvryRead = createEvryReadContinuation({
           return {
             readId: TASK_LIST_READ.id,
             input: {
-              search: selection.search,
-              includeCompleted: selection.includeCompleted,
+              view: selection.view,
+              showCompleted: selection.showCompleted,
+              status: selection.status,
+              priority: selection.priority,
+              category: selection.category,
+              cursor: selection.cursor,
+            },
+          };
+        case "counts":
+          return {
+            readId: TASK_COUNTS_READ.id,
+            input: {
+              view: selection.view,
+              status: [],
+              priority: [],
+              category: [],
+            },
+          };
+        case "follow_up_ownership":
+          return {
+            readId: TASK_FOLLOW_UP_OWNERSHIP_READ.id,
+            input: {
+              section: selection.section,
               cursor: selection.cursor,
             },
           };

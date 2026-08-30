@@ -54,13 +54,28 @@ const generated = inventoryDocument as Readonly<{
 }>;
 
 const READ_METADATA = {
+  "tasks.read.counts": {
+    label: "Review task counts",
+    argumentKeys: ["view", "status", "priority", "category"],
+  },
   "tasks.read.detail": {
     label: "Review task details",
     argumentKeys: ["taskId", "detailSection", "cursor"],
   },
   "tasks.read.list": {
     label: "List tasks",
-    argumentKeys: ["filters", "cursor"],
+    argumentKeys: [
+      "view",
+      "showCompleted",
+      "status",
+      "priority",
+      "category",
+      "cursor",
+    ],
+  },
+  "tasks.read.follow-up-ownership": {
+    label: "Review follow-up ownership",
+    argumentKeys: ["section", "cursor"],
   },
   "tasks.read.phase-template-prompt": {
     label: "Review phase checklist prompt",
