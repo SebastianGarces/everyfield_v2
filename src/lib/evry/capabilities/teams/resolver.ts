@@ -158,8 +158,15 @@ function finish(input: {
   sets?: SetAssertion[];
   mutations: Mutation[];
   notificationIntents?: readonly {
+    churchId: string;
     recipientUserId: string;
+    category: "meetings";
     type: string;
+    title: string;
+    body: string;
+    entityType: "meeting";
+    entityId: string;
+    dedupeKey: string;
     scheduledFor: string;
   }[];
   title: string;
@@ -1568,6 +1575,30 @@ export async function resolveTeamsEvryEffect(input: {
       },
       now
     );
+    const notificationIntents = planned.notifications.map((notification) => {
+      if (
+        !notification.churchId ||
+        notification.category !== "meetings" ||
+        notification.entityType !== "meeting" ||
+        !notification.entityId ||
+        !notification.dedupeKey
+      ) {
+        return null;
+      }
+      return {
+        churchId: notification.churchId,
+        recipientUserId: notification.recipientUserId,
+        category: notification.category,
+        type: notification.type,
+        title: notification.title,
+        body: notification.body,
+        entityType: notification.entityType,
+        entityId: notification.entityId,
+        dedupeKey: notification.dedupeKey,
+        scheduledFor: (notification.scheduledFor ?? now).toISOString(),
+      };
+    });
+    if (notificationIntents.some((intent) => intent === null)) return null;
     const rows: [Table, RawRow][] = [
       ...(locationRow ? [["locations", locationRow] as [Table, RawRow]] : []),
       ["church_meetings", meeting],
@@ -1614,11 +1645,9 @@ export async function resolveTeamsEvryEffect(input: {
       mutations: rows.map(([tableName, row]) =>
         mutation(tableName, String(row.id), null, row)
       ),
-      notificationIntents: planned.notifications.map((notification) => ({
-        recipientUserId: notification.recipientUserId,
-        type: notification.type,
-        scheduledFor: (notification.scheduledFor ?? now).toISOString(),
-      })),
+      notificationIntents: notificationIntents as NonNullable<
+        (typeof notificationIntents)[number]
+      >[],
       title: "Schedule team meeting",
       targets: [
         {

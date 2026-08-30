@@ -324,13 +324,71 @@ test("operation contracts reject a mutation from another Teams domain", () => {
   );
 });
 
-test("meeting notification intent is disclosed but raw F11 rows are outside the Teams mutation contract", () => {
+test("full literal meeting notification intent is disclosed while raw F11 rows stay outside the mutation contract", () => {
   const fixture = TEAMS_EVAL_FIXTURES.find(
     ({ operation }) => operation === "createMeetingAction"
   )!;
+  const meetingId = fixture.arguments.mutations[0]!.id;
+  const churchId = String(fixture.arguments.mutations[0]!.after!.church_id);
+  const literal = {
+    churchId,
+    recipientUserId: "00000000-0000-4000-8000-000000000004",
+    category: "meetings" as const,
+    type: "meeting.scheduled",
+    title: "Scheduled: Literal Team Meeting",
+    body: "Literal Team Meeting is on Jan 2, 2030 at 1:00 PM.",
+    entityType: "meeting" as const,
+    entityId: meetingId,
+    dedupeKey: `meeting.scheduled:${meetingId}`,
+    scheduledFor: "2030-01-01T00:00:00.000Z",
+  };
+  const arguments_ = parseTeamsEffectArguments("createMeetingAction", {
+    ...fixture.arguments,
+    notificationIntents: [literal],
+  });
+  const document = parseEvryActionPlanCandidate({
+    candidate: {
+      steps: [
+        {
+          id: fixture.identity,
+          capabilityIdentity: fixture.identity,
+          arguments: arguments_,
+          dependsOn: [],
+        },
+      ],
+    },
+    registry: TEAMS_PLAN_REGISTRY,
+    eligibleCapabilities: TEAMS_CAPABILITY_REGISTRATIONS,
+  });
+  const review = trustedReviewForEvryPlanDocument({
+    plan: evryConversationPlanIdentitySchema.parse({
+      planId: "00000000-0000-4000-8000-000000000010",
+      fingerprint: "0".repeat(64),
+    }),
+    document,
+    reviewRegistry: TEAMS_REVIEW_REGISTRY,
+  });
+  assert.ok(review);
+  const preview = review.confirmation.steps[0]!.contentPreviews.map(
+    ({ content }) => content
+  ).join("");
+  assert.equal(preview, JSON.stringify(arguments_));
+  for (const value of [
+    literal.category,
+    literal.type,
+    literal.title,
+    literal.body,
+    literal.entityType,
+    literal.entityId,
+    literal.dedupeKey,
+    literal.scheduledFor,
+    literal.recipientUserId,
+  ]) {
+    assert.ok(preview.includes(value), `preview binds ${value}`);
+  }
   assert.throws(() =>
     parseTeamsEffectArguments("createMeetingAction", {
-      ...fixture.arguments,
+      ...arguments_,
       expected: [
         ...fixture.arguments.expected,
         {
@@ -354,6 +412,58 @@ test("meeting notification intent is disclosed but raw F11 rows are outside the 
       ],
     })
   );
+});
+
+test("deployment copy or dedupe drift refuses before the durable meeting claim", async () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createMeetingAction"
+  )!;
+  const meetingId = fixture.arguments.mutations[0]!.id;
+  const intent = {
+    churchId: ACTOR.plantId,
+    recipientUserId: "30000000-0000-4000-8000-000000000004",
+    category: "meetings" as const,
+    type: "meeting.scheduled",
+    title: "Scheduled: Confirmed Team Meeting",
+    body: "Confirmed Team Meeting is on Jan 2, 2030 at 1:00 PM.",
+    entityType: "meeting" as const,
+    entityId: meetingId,
+    dedupeKey: `meeting.scheduled:${meetingId}`,
+    scheduledFor: "2030-01-01T00:00:00.000Z",
+  };
+  const arguments_ = parseTeamsEffectArguments("createMeetingAction", {
+    ...fixture.arguments,
+    mutations: fixture.arguments.mutations.map((mutation) => ({
+      ...mutation,
+      after: mutation.after
+        ? { ...mutation.after, church_id: ACTOR.plantId }
+        : null,
+    })),
+    notificationIntents: [intent],
+  });
+  const input = effectInput(fixture.identity, arguments_, ACTOR.plantId);
+  for (const drift of [
+    { title: "Scheduled: Changed After Confirmation" },
+    { dedupeKey: `${intent.dedupeKey}:v2` },
+  ]) {
+    let durableCalls = 0;
+    const result = await executeTeamsEffect(input, {
+      findCompletedOutcome: async () => null,
+      composeMeetingNotificationIntents: () => [
+        {
+          ...intent,
+          ...drift,
+          scheduledFor: new Date(intent.scheduledFor),
+        },
+      ],
+      executeStatement: async () => {
+        durableCalls += 1;
+        return { status: "completed", affectedCount: 1, excludedCount: 0 };
+      },
+    });
+    assert.deepEqual(result, { status: "refused", excludedCount: 1 });
+    assert.equal(durableCalls, 0);
+  }
 });
 
 test("unknown execution failures stay retryable while proved races and replays close", async () => {
@@ -402,13 +512,13 @@ test("unknown execution failures stay retryable while proved races and replays c
   assert.equal(attempts, 2);
 });
 
-test("a completed meeting effect runs notification sync outside the durable statement on first execution and claim recovery", async () => {
+test("a completed meeting effect reconciles confirmed F11 intents after the durable statement and claim recovery", async () => {
   const fixture = TEAMS_EVAL_FIXTURES.find(
     ({ operation }) => operation === "createMeetingAction"
   )!;
   const input = effectInput(fixture.identity, fixture.arguments, ACTOR.plantId);
   const syncCalls: string[] = [];
-  const synchronize = async (churchId: string, meetingId: string) => {
+  const reconcile = async (churchId: string, meetingId: string) => {
     syncCalls.push(`${churchId}:${meetingId}`);
     throw new Error("best-effort F11 outage");
   };
@@ -422,7 +532,8 @@ test("a completed meeting effect runs notification sync outside the durable stat
     await executeTeamsEffect(input, {
       findCompletedOutcome: async () => null,
       executeStatement: async () => completed,
-      syncMeetingNotifications: synchronize,
+      composeMeetingNotificationIntents: () => [],
+      reconcileMeetingNotifications: reconcile,
     }),
     completed,
     "a notification transport failure cannot change the committed meeting result"
@@ -433,7 +544,7 @@ test("a completed meeting effect runs notification sync outside the durable stat
       executeStatement: async () => {
         throw new Error("the durable statement must not repeat");
       },
-      syncMeetingNotifications: synchronize,
+      reconcileMeetingNotifications: reconcile,
     }),
     completed,
     "claim recovery converges only the best-effort notification side"
@@ -442,6 +553,34 @@ test("a completed meeting effect runs notification sync outside the durable stat
     `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
     `${ACTOR.plantId}:00000000-0000-4000-8000-000000000002`,
   ]);
+});
+
+test("a process interruption after the domain claim escapes before reconciliation or terminal step", async () => {
+  const fixture = TEAMS_EVAL_FIXTURES.find(
+    ({ operation }) => operation === "createMeetingAction"
+  )!;
+  const input = effectInput(fixture.identity, fixture.arguments, ACTOR.plantId);
+  let reconciliations = 0;
+  await assert.rejects(
+    executeTeamsEffect(input, {
+      findCompletedOutcome: async () => null,
+      composeMeetingNotificationIntents: () => [],
+      executeStatement: async () => ({
+        status: "completed",
+        affectedCount: 2,
+        excludedCount: 0,
+      }),
+      afterDurableCommit: () => {
+        throw new Error("simulated process interruption");
+      },
+      reconcileMeetingNotifications: async () => {
+        reconciliations += 1;
+        throw new Error("must remain unreachable");
+      },
+    }),
+    /simulated process interruption/
+  );
+  assert.equal(reconciliations, 0);
 });
 
 test("a legal roster above two thousand rows compiles with bounded browser disclosure", () => {

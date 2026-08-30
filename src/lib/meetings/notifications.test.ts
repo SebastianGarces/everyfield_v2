@@ -30,6 +30,7 @@ import {
   guestListUserIdsQuery,
   meetingNotificationFactsQuery,
   personUserIdsQuery,
+  reconcileMeetingNotificationIntents,
   meetingNotificationsDiffer,
   meetingReminderType,
   registerMeetingStillLivePredicates,
@@ -359,6 +360,74 @@ test("a save that moves nothing a reminder says leaves the live rows alone", asy
     h.queue.pending().map((row) => row.id),
     ids,
     "the same rows, with the same ids"
+  );
+});
+
+test("confirmed literal reconciliation isolates one recipient failure and replay fills only the missing row", async () => {
+  const h = harness();
+  const scheduledFor = new Date("2026-08-14T09:00:00.000Z");
+  const literal = (recipientUserId: string) => ({
+    churchId: CHURCH,
+    recipientUserId,
+    category: "meetings" as const,
+    type: MEETING_SCHEDULED_TYPE,
+    title: "Scheduled: Confirmed wording",
+    body: "Confirmed wording and punctuation — unchanged.",
+    entityType: "meeting" as const,
+    entityId: MEETING,
+    dedupeKey: `${MEETING_SCHEDULED_TYPE}:${MEETING}`,
+    scheduledFor,
+  });
+  const intents = [literal(ORGANISER), literal(GUEST)];
+
+  const first = await reconcileMeetingNotificationIntents(
+    CHURCH,
+    MEETING,
+    intents,
+    {
+      ...h.deps,
+      enqueue: async (intent) => {
+        if (intent.recipientUserId === GUEST) {
+          throw new Error("one recipient transport failed");
+        }
+        return h.deps.enqueue(intent);
+      },
+    }
+  );
+  assert.deepEqual(
+    {
+      considered: first.considered,
+      created: first.created,
+      failed: first.failed,
+    },
+    { considered: 2, created: 1, failed: 1 }
+  );
+
+  const replay = await reconcileMeetingNotificationIntents(
+    CHURCH,
+    MEETING,
+    intents,
+    h.deps
+  );
+  assert.deepEqual(
+    {
+      considered: replay.considered,
+      recorded: replay.recorded,
+      created: replay.created,
+      failed: replay.failed,
+    },
+    { considered: 2, recorded: 2, created: 1, failed: 0 }
+  );
+  const rows = h.queue.pending(MEETING_SCHEDULED_TYPE);
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(({ title }) => title === intents[0]!.title));
+  assert.ok(rows.every(({ body }) => body === intents[0]!.body));
+  assert.ok(rows.every(({ entityId }) => entityId === MEETING));
+  assert.ok(
+    rows.every(
+      ({ scheduledFor: stored }) =>
+        stored.toISOString() === scheduledFor.toISOString()
+    )
   );
 });
 
