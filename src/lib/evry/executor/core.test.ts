@@ -96,6 +96,7 @@ type HarnessOptions = Readonly<{
   initiallyExpired?: boolean;
   claimDuringAuthorizationRefusal?: boolean;
   reconcileThrows?: boolean;
+  resumeStartedEffectForStep?: string;
 }>;
 
 function createHarness(options: HarnessOptions = {}) {
@@ -129,7 +130,13 @@ function createHarness(options: HarnessOptions = {}) {
         if (options.reconcileThrows) {
           throw new Error("claim store temporarily unavailable");
         }
-        return effectClaims.get(input.effectKey) ?? null;
+        const claimed = effectClaims.get(input.effectKey);
+        if (claimed) return claimed;
+        const targetId = String(input.arguments.targetId);
+        return options.resumeStartedEffectForStep === targetId &&
+          (effectCalls.get(targetId) ?? 0) > 0
+          ? { status: "resume" as const }
+          : null;
       },
       async executeIfCurrent(input) {
         const targetId = String(input.arguments.targetId);
@@ -438,6 +445,30 @@ test("an open attempt crossing expiry closes from per-step revalidation", async 
   assert.equal(harness.effectCalls.has("target-3"), false);
   assert.equal(harness.stats().finishes, 1);
   assert.equal(harness.checks.includes("expired-audit"), false);
+});
+
+test("an irreversible started effect resumes from immutable inputs after expiry", async () => {
+  const harness = createHarness({
+    resumeStartedEffectForStep: "target-1",
+    effectResultForStep(_step, call) {
+      return call === 1
+        ? { status: "retryable" }
+        : { status: "completed", affectedCount: 1, excludedCount: 0 };
+    },
+  });
+
+  assert.equal((await harness.execute(harness.input)).status, "retryable");
+  harness.advancePastExpiry();
+  const replay = await harness.execute(harness.input);
+  assert.equal(replay.status, "completed");
+  assert.equal(replay.steps[0]?.status, "completed");
+  assert.equal(harness.effectCalls.get("target-1"), 2);
+  assert.equal(
+    harness.checks.filter((check) => check === "confirmation-expiry-args")
+      .length,
+    1,
+    "recovery reuses the exact stored step instead of reopening mutable plan freshness"
+  );
 });
 
 test("a terminal middle failure durably skips its dependent and blocks follow-on work", async () => {

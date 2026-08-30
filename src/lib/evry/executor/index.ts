@@ -11,6 +11,7 @@ export {
   defineEvryExecutionCapability,
   type EvryClaimedEffectInput,
   type EvryEffectInput,
+  type EvryEffectReconciliation,
   type EvryEffectResult,
   type EvryExecutionCapabilityRegistration,
   type EvryExecutionCapabilityRegistry,

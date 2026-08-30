@@ -20,6 +20,7 @@ import { EMAIL_FROM, resend } from "@/lib/email/client";
 import type {
   EvryClaimedEffectInput,
   EvryEffectInput,
+  EvryEffectReconciliation,
   EvryEffectResult,
 } from "@/lib/evry/executor";
 import { findExactEvryDatabaseEffectClaim } from "@/lib/evry/executor/database-effect";
@@ -46,6 +47,7 @@ import { storedTemplateContent } from "./templates";
 
 export const EVRY_COMMUNICATION_TRANSIENT_PREFIX = "evry-transient:";
 export const EVRY_COMMUNICATION_PERMANENT_PREFIX = "evry-permanent:";
+export const EVRY_COMMUNICATION_ATTEMPTED_PREFIX = "evry-attempted:";
 /**
  * One Evry confirmation is intentionally one provider-sized send batch. This
  * keeps the immutable plan, API response, and eagerly rendered confirmation
@@ -89,9 +91,15 @@ function dispatchableRecipient() {
     eq(communicationRecipients.status, "pending"),
     and(
       eq(communicationRecipients.status, "failed"),
-      like(
-        communicationRecipients.errorMessage,
-        `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`
+      or(
+        like(
+          communicationRecipients.errorMessage,
+          `${EVRY_COMMUNICATION_TRANSIENT_PREFIX}%`
+        ),
+        like(
+          communicationRecipients.errorMessage,
+          `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}%`
+        )
       )
     )
   );
@@ -329,13 +337,15 @@ async function exactFrozenCommunication(input: {
       audience: input.audience,
     }))
   ) {
-    return false;
+    return null;
   }
   const rows = await db
     .select({
       id: communicationRecipients.id,
       personId: communicationRecipients.personId,
       email: communicationRecipients.email,
+      status: communicationRecipients.status,
+      errorMessage: communicationRecipients.errorMessage,
     })
     .from(communicationRecipients)
     .where(
@@ -344,7 +354,7 @@ async function exactFrozenCommunication(input: {
         eq(communicationRecipients.communicationId, input.communicationId)
       )
     );
-  return (
+  const exact =
     rows.length === input.audience.recipients.length &&
     input.audience.recipients.every((recipient) => {
       const expectedId = communicationEvryEffectUuid(
@@ -357,20 +367,26 @@ async function exactFrozenCommunication(input: {
           row.personId === recipient.personId &&
           row.email === recipient.email
       );
-    })
-  );
+    });
+  return exact ? rows : null;
 }
 
-export async function hasExactFrozenEvryCommunication(input: {
+export type EvryFrozenCommunicationState = "absent" | "prepared" | "started";
+
+export async function frozenEvryCommunicationState(input: {
   effect: EvryClaimedEffectInput;
   communicationId: string;
   audience: EvryCommunicationAudienceSnapshot;
-}): Promise<boolean> {
-  return exactFrozenCommunication({
-    effect: input.effect,
-    communicationId: input.communicationId,
-    audience: input.audience,
-  });
+}): Promise<EvryFrozenCommunicationState> {
+  const rows = await exactFrozenCommunication(input);
+  if (!rows) return "absent";
+  return rows.some(
+    (row) =>
+      row.status !== "pending" ||
+      row.errorMessage?.startsWith(EVRY_COMMUNICATION_ATTEMPTED_PREFIX)
+  )
+    ? "started"
+    : "prepared";
 }
 
 /**
@@ -383,10 +399,12 @@ export async function reconcileFrozenEvryCommunication(input: {
   effect: EvryClaimedEffectInput;
   communicationId: string;
   audience: EvryCommunicationAudienceSnapshot;
-}): Promise<EvryEffectResult | null> {
+}): Promise<EvryEffectReconciliation | null> {
   const claimed = await findExactEvryDatabaseEffectClaim(input.effect);
   if (claimed) return claimed;
-  if (!(await hasExactFrozenEvryCommunication(input))) return null;
+  const state = await frozenEvryCommunicationState(input);
+  if (state === "absent") return null;
+  if (state === "started") return { status: "resume" };
   return (await actorStillHoldsCommunicationSend(input.effect.execution))
     ? null
     : { status: "retryable" };
@@ -438,11 +456,13 @@ async function prepareFrozenCommunication(input: {
       )
     );
   if (existingRecipients.length > 0) {
-    return exactFrozenCommunication({
-      effect: input.effect,
-      communicationId: input.communicationId,
-      audience: input.audience,
-    });
+    return (
+      (await exactFrozenCommunication({
+        effect: input.effect,
+        communicationId: input.communicationId,
+        audience: input.audience,
+      })) !== null
+    );
   }
   if (input.audience.recipients.length > 0) {
     const recipientsJson = JSON.stringify(
@@ -484,11 +504,13 @@ async function prepareFrozenCommunication(input: {
       on conflict (id) do nothing
     `);
   }
-  return exactFrozenCommunication({
-    effect: input.effect,
-    communicationId: input.communicationId,
-    audience: input.audience,
-  });
+  return (
+    (await exactFrozenCommunication({
+      effect: input.effect,
+      communicationId: input.communicationId,
+      audience: input.audience,
+    })) !== null
+  );
 }
 
 async function currentRecipientIds(input: {
@@ -600,7 +622,9 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "refused", excludedCount: 1 };
   }
   if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
-    return { status: "refused", excludedCount: 1 };
+    return (await frozenEvryCommunicationState(input)) === "started"
+      ? { status: "retryable" }
+      : { status: "refused", excludedCount: 1 };
   }
   // This gate deliberately precedes the communication row, recipient rows,
   // RSVP tokens, and provider calls. A stale confirmation must leave no trace.
@@ -709,6 +733,14 @@ export async function sendFrozenEvryCommunication(input: {
     if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
       return { status: "retryable" };
     }
+    await db
+      .update(communicationRecipients)
+      .set({
+        errorMessage: `${EVRY_COMMUNICATION_ATTEMPTED_PREFIX}provider request may have started`,
+      })
+      .where(
+        and(eq(communicationRecipients.id, row.id), dispatchableRecipient())
+      );
     const result = await mailer.send({
       to: recipient.email,
       subject: recipient.subject,

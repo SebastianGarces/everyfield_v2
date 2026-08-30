@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import {
   EVRY_COMMUNICATION_MAX_RECIPIENTS,
-  hasExactFrozenEvryCommunication,
+  frozenEvryCommunicationState,
   reconcileFrozenEvryCommunication,
   type EvryCommunicationAudienceSnapshot,
   type EvryCommunicationMailer,
@@ -496,13 +496,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
-        const prepared = await hasExactFrozenEvryCommunication({
+        const frozenState = await frozenEvryCommunicationState({
           effect: input,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
         });
         if (
-          !prepared &&
+          frozenState !== "started" &&
           !(await sendAudienceIsCurrent({
             actor: input.authorization.actor,
             recipientSource: parsed.data.recipientSource,
@@ -547,13 +547,13 @@ export function createCommunicationEvryMessageExecutions(
         return { status: "refused", excludedCount: 1 };
       }
       try {
-        const prepared = await hasExactFrozenEvryCommunication({
+        const frozenState = await frozenEvryCommunicationState({
           effect: input,
           communicationId: parsed.data.communicationId,
           audience: parsed.data.audience,
         });
         if (
-          !prepared &&
+          frozenState !== "started" &&
           !(await resendAudienceIsCurrent({
             actor: input.authorization.actor,
             source: parsed.data.source,

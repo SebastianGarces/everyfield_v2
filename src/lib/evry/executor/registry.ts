@@ -37,7 +37,15 @@ const effectResultSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("retryable") }),
 ]);
 
+const effectReconciliationSchema = z.union([
+  effectResultSchema,
+  z.strictObject({ status: z.literal("resume") }),
+]);
+
 export type EvryEffectResult = Readonly<z.infer<typeof effectResultSchema>>;
+export type EvryEffectReconciliation = Readonly<
+  z.infer<typeof effectReconciliationSchema>
+>;
 
 export type EvryEffectInput = Readonly<{
   authorization: EvryEffectCapabilityAuthorization;
@@ -63,9 +71,9 @@ export type EvryExecutionCapabilityRegistration = Readonly<{
   planCapability: EvryPlanCapabilityRegistration;
   /**
    * First return an existing exact `effectKey` claim's original closed result.
-   * Only an unclaimed key may atomically revalidate target state, claim, and
-   * apply. This ordering lets a crash-after-commit replay recover even when
-   * the applied effect changed the target. Raw errors must not cross here.
+   * `resume` means an irreversible boundary started before the final claim and
+   * must continue from its immutable inputs after fresh capability authority,
+   * even when ordinary plan freshness has elapsed. Raw errors must not cross.
    */
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
   /**
@@ -76,7 +84,7 @@ export type EvryExecutionCapabilityRegistration = Readonly<{
    */
   reconcileClaimed?(
     input: EvryClaimedEffectInput
-  ): Promise<EvryEffectResult | null>;
+  ): Promise<EvryEffectReconciliation | null>;
   [EVRY_EXECUTION_CAPABILITY]: true;
 }>;
 
@@ -91,7 +99,7 @@ export function defineEvryExecutionCapability(input: {
   executeIfCurrent(input: EvryEffectInput): Promise<EvryEffectResult>;
   reconcileClaimed?(
     input: EvryClaimedEffectInput
-  ): Promise<EvryEffectResult | null>;
+  ): Promise<EvryEffectReconciliation | null>;
 }): EvryExecutionCapabilityRegistration {
   if (!isEvryEffectCapabilityIdentity(input.planCapability.identity)) {
     throw new Error(
@@ -109,7 +117,9 @@ export function defineEvryExecutionCapability(input: {
       ? {
           async reconcileClaimed(effectInput: EvryClaimedEffectInput) {
             const result = await input.reconcileClaimed!(effectInput);
-            return result === null ? null : effectResultSchema.parse(result);
+            return result === null
+              ? null
+              : effectReconciliationSchema.parse(result);
           },
         }
       : {}),
