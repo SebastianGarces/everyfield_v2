@@ -470,6 +470,7 @@ async function proveSendOnlyRetry(modules: Modules) {
     actor: scenario.actor,
     sourceConversationId: second.resumed.conversation.id,
     resultArtifactId: resultArtifact.id,
+    recipeIdentity: modules.recipes.MEETING_INVITATION_RECIPE_IDENTITY,
     requestKey: reuseRequestKey,
     now: new Date(),
   });
@@ -481,6 +482,7 @@ async function proveSendOnlyRetry(modules: Modules) {
     actor: scenario.actor,
     sourceConversationId: second.resumed.conversation.id,
     resultArtifactId: resultArtifact.id,
+    recipeIdentity: modules.recipes.MEETING_INVITATION_RECIPE_IDENTITY,
     requestKey: reuseRequestKey,
     now: new Date(),
   });

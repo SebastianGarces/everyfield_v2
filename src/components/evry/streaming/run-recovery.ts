@@ -6,7 +6,7 @@ import {
 } from "@/lib/evry/runs/wire";
 
 const STORAGE_KEY = "evry.active-run.v1";
-const markerSchema = z
+const ordinaryMarkerSchema = z
   .object({
     version: z.literal(1),
     requestId: z.string().uuid(),
@@ -16,7 +16,34 @@ const markerSchema = z
   .strict()
   .readonly();
 
+const reuseMarkerSchema = z
+  .object({
+    version: z.literal(2),
+    requestId: z.string().uuid(),
+    kind: z.literal("conversation"),
+    operation: z.literal("reuse"),
+    conversationId: z.string().uuid().nullable(),
+    sourceConversationId: z.string().uuid(),
+    resultArtifactId: z.string().uuid(),
+    recipeIdentity: z.string().trim().min(1).max(160),
+    sourceLocation: z
+      .object({ pathname: z.string().min(1), search: z.string() })
+      .strict()
+      .readonly(),
+  })
+  .strict()
+  .readonly();
+
+const markerSchema = z.union([ordinaryMarkerSchema, reuseMarkerSchema]);
+
 export type EvryRunRecoveryMarker = z.infer<typeof markerSchema>;
+export type EvryRecipeReuseRecoveryMarker = z.infer<typeof reuseMarkerSchema>;
+
+export function isEvryRecipeReuseRecoveryMarker(
+  marker: EvryRunRecoveryMarker
+): marker is EvryRecipeReuseRecoveryMarker {
+  return marker.version === 2;
+}
 
 function browserStorage(): Storage | null {
   return typeof window === "undefined" ? null : window.sessionStorage;
@@ -37,7 +64,9 @@ export function readEvryRunRecoveryMarker(
 }
 
 export function writeEvryRunRecoveryMarker(
-  marker: Omit<EvryRunRecoveryMarker, "version">,
+  marker:
+    | Omit<z.infer<typeof ordinaryMarkerSchema>, "version">
+    | Omit<EvryRecipeReuseRecoveryMarker, "version">,
   storage: Storage | null = browserStorage()
 ): void {
   if (!storage) return;
@@ -45,7 +74,7 @@ export function writeEvryRunRecoveryMarker(
     STORAGE_KEY,
     JSON.stringify(
       markerSchema.parse({
-        version: 1,
+        version: "operation" in marker ? 2 : 1,
         ...marker,
       })
     )
@@ -74,6 +103,21 @@ export function markerMatchesEvryLocation(
   marker: EvryRunRecoveryMarker,
   location: Readonly<{ pathname: string; search: string }>
 ): boolean {
+  if (isEvryRecipeReuseRecoveryMarker(marker)) {
+    if (
+      location.pathname === marker.sourceLocation.pathname &&
+      location.search === marker.sourceLocation.search
+    ) {
+      return true;
+    }
+    if (location.pathname !== "/evry" || marker.conversationId === null) {
+      return false;
+    }
+    return (
+      new URLSearchParams(location.search).get("conversation") ===
+      marker.conversationId
+    );
+  }
   if (location.pathname !== "/evry") return true;
   const params = new URLSearchParams(location.search);
   if (params.get("new") === "1") return marker.conversationId === null;
@@ -122,6 +166,13 @@ function validateSnapshot(
   }
   if ("kind" in snapshot && snapshot.kind !== marker.kind) {
     throw new Error("Evry recovery response changed run kind");
+  }
+  if (
+    isEvryRecipeReuseRecoveryMarker(marker) &&
+    snapshot.status === "active" &&
+    snapshot.operation !== "reuse"
+  ) {
+    throw new Error("Evry recovery response changed reuse operation");
   }
   const conversationId =
     snapshot.status === "durable"

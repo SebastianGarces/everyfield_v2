@@ -64,9 +64,12 @@ import {
   markerMatchesEvryLocation,
   readEvryRunRecoveryMarker,
   reconnectEvryRun,
+  isEvryRecipeReuseRecoveryMarker,
   writeEvryRunRecoveryMarker,
+  type EvryRecipeReuseRecoveryMarker,
   type EvryRunRecoveryMarker,
 } from "./streaming/run-recovery";
+import { requestEvryRecipeReuse } from "./artifacts/reuse-request";
 
 const EvryPanel = dynamic(() =>
   import("./evry-panel").then((module) => module.EvryPanel)
@@ -97,7 +100,12 @@ type EvryShellValue = Readonly<{
   isWorking: boolean;
   isWatchingDetached: boolean;
   loadConversation: (conversationId: string) => Promise<void>;
-  navigateToConversation: (conversationId: string) => void;
+  acknowledgeConversationMounted: (conversationId: string) => void;
+  startRecipeReuse: (input: {
+    sourceConversationId: string;
+    resultArtifactId: string;
+    recipeIdentity: string;
+  }) => Promise<"started" | "unavailable">;
   openPanel: (trigger: HTMLButtonElement) => void;
   observeWork: (requestId: string, controller: AbortController) => void;
   resetConversation: () => void;
@@ -204,11 +212,15 @@ export function EvryShell({
   const [requestedConversationId, setRequestedConversationId] = useState<
     string | null
   >(null);
+  const [pendingRecipeReuse, setPendingRecipeReuse] =
+    useState<EvryRecipeReuseRecoveryMarker | null>(null);
   const [expandedFromPanel, setExpandedFromPanel] = useState(false);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
   const pendingPeopleFileRef = useRef<PendingPeopleFileSubmission | null>(null);
+  const pendingRecipeReuseRef = useRef(pendingRecipeReuse);
+  const mountedConversationIdRef = useRef<string | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
   const workAbortRef = useRef<Readonly<{
@@ -227,7 +239,10 @@ export function EvryShell({
   const routeLocationRef = useRef(routeLocation);
   routeLocationRef.current = routeLocation;
   const draftRef = useRef(draft);
-  const isWorking = pendingWorkRequestId !== null || detachedRequestId !== null;
+  const isWorking =
+    pendingWorkRequestId !== null ||
+    detachedRequestId !== null ||
+    pendingRecipeReuse !== null;
 
   const setDraft = useCallback((nextDraft: string) => {
     draftRef.current = nextDraft;
@@ -521,18 +536,11 @@ export function EvryShell({
     setDetachedRequestId(requestId);
   }, [finishWork, updateWork]);
 
-  const resumeWatching = useCallback(() => {
-    const marker = readEvryRunRecoveryMarker();
-    if (!marker || marker.requestId !== detachedRequestId) return;
-    document.getElementById("evry-work-status")?.focus();
-    setDetachedRequestId(null);
-    void recoverMarker(marker);
-  }, [detachedRequestId, recoverMarker]);
-
   useEffect(() => {
     if (!enabled) return;
     const marker = readEvryRunRecoveryMarker();
     if (!marker) return;
+    if (isEvryRecipeReuseRecoveryMarker(marker)) return;
     if (!markerMatchesEvryLocation(marker, routeLocation)) {
       pauseRecoveryForRoute(marker.requestId);
       return;
@@ -605,21 +613,213 @@ export function EvryShell({
     router.push("/dashboard");
   }, [cancelActiveConversationLoads, expandedFromPanel, router]);
 
-  const navigateToConversation = useCallback(
-    (conversationId: string) => {
-      if (pathname !== "/evry") return;
-      const next = new URLSearchParams(locationSearch);
-      next.delete("new");
-      next.set("conversation", conversationId);
-      router.push(`/evry?${next.toString()}`);
+  const clearPendingRecipeReuse = useCallback(
+    (requestId: string, sequence: number) => {
+      const current = pendingRecipeReuseRef.current;
+      if (!current || current.requestId !== requestId) return;
+      clearEvryRunRecoveryMarker(requestId);
+      pendingRecipeReuseRef.current = null;
+      setPendingRecipeReuse(null);
+      finishWork(requestId, sequence);
     },
-    [locationSearch, pathname, router]
+    [finishWork]
   );
+
+  const presentRecipeReuseDestination = useCallback(
+    (
+      marker: EvryRecipeReuseRecoveryMarker,
+      nextConversation: PublicEvryConversation
+    ) => {
+      const current = pendingRecipeReuseRef.current;
+      if (
+        !current ||
+        current.requestId !== marker.requestId ||
+        !markerMatchesEvryLocation(current, routeLocationRef.current)
+      ) {
+        return false;
+      }
+      const bound = Object.freeze({
+        ...current,
+        conversationId: nextConversation.id,
+      });
+      bindEvryRunRecoveryConversation(marker.requestId, nextConversation.id);
+      pendingRecipeReuseRef.current = bound;
+      setPendingRecipeReuse(bound);
+      cancelActiveConversationLoads();
+      if (!applyWorkConversation(marker.requestId, 1, nextConversation)) {
+        return false;
+      }
+      if (bound.sourceLocation.pathname === "/evry") {
+        const next = new URLSearchParams(bound.sourceLocation.search);
+        next.delete("new");
+        next.set("conversation", nextConversation.id);
+        router.push(`/evry?${next.toString()}`);
+      }
+      return true;
+    },
+    [applyWorkConversation, cancelActiveConversationLoads, router]
+  );
+
+  const runRecipeReuse = useCallback(
+    async (marker: EvryRecipeReuseRecoveryMarker) => {
+      const controller = new AbortController();
+      observeWith(marker.requestId, controller);
+      beginWork(marker.requestId, {
+        phase: "reading",
+        message: "Refreshing this recipe from current application data",
+      });
+      try {
+        const result = await requestEvryRecipeReuse({
+          marker,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return "unavailable" as const;
+        if (
+          result.status !== "conversation" ||
+          !presentRecipeReuseDestination(marker, result.conversation)
+        ) {
+          clearPendingRecipeReuse(marker.requestId, 2);
+          return "unavailable" as const;
+        }
+        return "started" as const;
+      } catch (error) {
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError")
+        ) {
+          return "unavailable" as const;
+        }
+        updateWork(marker.requestId, 1, {
+          phase: "failed",
+          message:
+            "Unable to reconnect right now. The exact reuse request is retained.",
+        });
+        setDetachedRequestId(marker.requestId);
+        return "started" as const;
+      } finally {
+        if (workAbortRef.current?.controller === controller) {
+          workAbortRef.current = null;
+          setObservedRequestId(null);
+        }
+      }
+    },
+    [
+      beginWork,
+      clearPendingRecipeReuse,
+      observeWith,
+      presentRecipeReuseDestination,
+      updateWork,
+    ]
+  );
+
+  const resumeWatching = useCallback(() => {
+    const marker = readEvryRunRecoveryMarker();
+    if (!marker || marker.requestId !== detachedRequestId) return;
+    document.getElementById("evry-work-status")?.focus();
+    setDetachedRequestId(null);
+    if (isEvryRecipeReuseRecoveryMarker(marker)) {
+      void runRecipeReuse(marker);
+      return;
+    }
+    void recoverMarker(marker);
+  }, [detachedRequestId, recoverMarker, runRecipeReuse]);
+
+  const startRecipeReuse = useCallback(
+    async (input: {
+      sourceConversationId: string;
+      resultArtifactId: string;
+      recipeIdentity: string;
+    }) => {
+      if (
+        pendingRecipeReuseRef.current ||
+        pendingWorkRequestIdRef.current ||
+        detachedRequestId !== null
+      ) {
+        return "unavailable" as const;
+      }
+      const marker: EvryRecipeReuseRecoveryMarker = Object.freeze({
+        version: 2,
+        requestId: crypto.randomUUID(),
+        kind: "conversation",
+        operation: "reuse",
+        conversationId: null,
+        ...input,
+        sourceLocation: routeLocationRef.current,
+      });
+      writeEvryRunRecoveryMarker(marker);
+      pendingRecipeReuseRef.current = marker;
+      setPendingRecipeReuse(marker);
+      return runRecipeReuse(marker);
+    },
+    [detachedRequestId, runRecipeReuse]
+  );
+
+  const acknowledgeConversationMounted = useCallback(
+    (conversationId: string) => {
+      mountedConversationIdRef.current = conversationId;
+      const marker = pendingRecipeReuseRef.current;
+      if (!marker || marker.conversationId !== conversationId) return;
+      if (marker.sourceLocation.pathname === "/evry") {
+        if (
+          routeLocationRef.current.pathname !== "/evry" ||
+          new URLSearchParams(routeLocationRef.current.search).get(
+            "conversation"
+          ) !== conversationId
+        ) {
+          return;
+        }
+      } else if (
+        routeLocationRef.current.pathname !== marker.sourceLocation.pathname ||
+        routeLocationRef.current.search !== marker.sourceLocation.search
+      ) {
+        return;
+      }
+      clearPendingRecipeReuse(marker.requestId, 2);
+    },
+    [clearPendingRecipeReuse]
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    const stored = readEvryRunRecoveryMarker();
+    if (!stored || !isEvryRecipeReuseRecoveryMarker(stored)) return;
+    if (!markerMatchesEvryLocation(stored, routeLocation)) {
+      if (workAbortRef.current?.requestId === stored.requestId) {
+        workAbortRef.current.controller.abort();
+      }
+      clearPendingRecipeReuse(stored.requestId, 2);
+      return;
+    }
+    if (
+      stored.conversationId !== null &&
+      mountedConversationIdRef.current === stored.conversationId &&
+      routeLocation.pathname === "/evry" &&
+      new URLSearchParams(routeLocation.search).get("conversation") ===
+        stored.conversationId
+    ) {
+      clearPendingRecipeReuse(stored.requestId, 2);
+      return;
+    }
+    const current = pendingRecipeReuseRef.current;
+    if (
+      current?.requestId !== stored.requestId ||
+      current.conversationId !== stored.conversationId
+    ) {
+      pendingRecipeReuseRef.current = stored;
+      setPendingRecipeReuse(stored);
+    }
+    if (
+      stored.conversationId === null &&
+      workAbortRef.current?.requestId !== stored.requestId
+    ) {
+      void runRecipeReuse(stored);
+    }
+  }, [clearPendingRecipeReuse, enabled, routeLocation, runRecipeReuse]);
 
   const clearContext = useCallback(() => setActiveContext(null), []);
   const loadConversation = useCallback(
     async (conversationId: string) => {
-      if (isSending || isWorking) return;
+      if (isSending || isWorking || pendingRecipeReuseRef.current) return;
       if (conversation?.id === conversationId) {
         setRequestedConversationId(null);
         return;
@@ -696,7 +896,7 @@ export function EvryShell({
   );
 
   const resetConversation = useCallback(() => {
-    if (isSending || isWorking) return;
+    if (isSending || isWorking || pendingRecipeReuseRef.current) return;
     cancelActiveConversationLoads();
     pendingSubmissionRef.current = null;
     setConversation(null);
@@ -719,6 +919,7 @@ export function EvryShell({
       message === null ||
       isSending ||
       isWorking ||
+      pendingRecipeReuseRef.current !== null ||
       isLoading ||
       requestedConversationId !== null ||
       conversationLoadStateRef.current.latest !== null
@@ -880,6 +1081,7 @@ export function EvryShell({
       if (
         isSending ||
         isWorking ||
+        pendingRecipeReuseRef.current !== null ||
         isLoading ||
         requestedConversationId !== null
       )
@@ -1050,6 +1252,7 @@ export function EvryShell({
     () => ({
       activeContext,
       acknowledgement,
+      acknowledgeConversationMounted,
       applyWorkConversation,
       beginWork,
       canStopWatching:
@@ -1071,7 +1274,7 @@ export function EvryShell({
       isWorking,
       isWatchingDetached: detachedRequestId !== null,
       loadConversation,
-      navigateToConversation,
+      startRecipeReuse,
       openPanel,
       observeWork: observeWith,
       resetConversation,
@@ -1090,6 +1293,7 @@ export function EvryShell({
     [
       activeContext,
       acknowledgement,
+      acknowledgeConversationMounted,
       applyWorkConversation,
       beginWork,
       clearContext,
@@ -1106,7 +1310,6 @@ export function EvryShell({
       isWorking,
       detachedRequestId,
       loadConversation,
-      navigateToConversation,
       openPanel,
       observeWith,
       observedRequestId,
@@ -1119,6 +1322,7 @@ export function EvryShell({
       sendMessage,
       setDraft,
       stopWatching,
+      startRecipeReuse,
       sequencedWork,
       suggestions,
       submitPeopleFile,

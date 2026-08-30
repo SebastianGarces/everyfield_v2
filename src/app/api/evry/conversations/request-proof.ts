@@ -931,12 +931,14 @@ async function main(): Promise<void> {
   }
 
   const reusePost = reuseRoute.createEvryRecipeReusePost({
+    activeRuns,
     now: () => RETURN,
     async reuse(input) {
       events.push("reuse");
       assert.equal(input.actor.userId, USER_ID);
       assert.equal(input.actor.plantId, PLANT_ID);
       assert.equal(input.sourceConversationId, CONVERSATION_ID);
+      assert.equal(input.recipeIdentity, "fixture.recipe");
       assert.equal(input.now, RETURN);
       assert.ok(stored);
       return {
@@ -959,6 +961,7 @@ async function main(): Promise<void> {
         {
           requestKey: "not-a-uuid",
           resultArtifactId: "not-a-uuid",
+          recipeIdentity: "fixture.recipe",
         }
       ),
       { params: Promise.resolve({ conversationId: "not-a-uuid" }) }
@@ -980,6 +983,7 @@ async function main(): Promise<void> {
         {
           requestKey: randomUUID(),
           resultArtifactId: randomUUID(),
+          recipeIdentity: "fixture.recipe",
         }
       ),
       { params: Promise.resolve({ conversationId: CONVERSATION_ID }) }

@@ -3,10 +3,7 @@
 import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import {
-  parseEvryConversationEnvelope,
-  type PublicEvryConversation,
-} from "@/components/evry/client-contract";
+import type { PublicEvryConversation } from "@/components/evry/client-contract";
 import { useEvryShell } from "@/components/evry/evry-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -216,8 +213,8 @@ export function EvryProductionArtifact({
     beginWork,
     finishWork,
     isWorking,
-    navigateToConversation,
     observeWork,
+    startRecipeReuse,
     updateWork,
   } = useEvryShell();
   const [state, setState] = useState<LocalState>({ status: "idle" });
@@ -246,41 +243,19 @@ export function EvryProductionArtifact({
 
   async function reuseRecipe() {
     if (!canReuse || !receipt?.reuse) return;
-    const requestKey = crypto.randomUUID();
-    beginWork(requestKey, {
-      phase: "reading",
-      message: "Refreshing this recipe from current application data",
-    });
     setState({ status: "submitting", action: "reuse" });
     requestAnimationFrame(() =>
       document.getElementById("evry-work-status")?.focus()
     );
     try {
-      const response = await fetch(
-        `/api/evry/conversations/${encodeURIComponent(conversationId)}/reuse`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ requestKey, resultArtifactId: artifactId }),
-        }
-      );
-      if (!response.ok) throw new Error("reuse unavailable");
-      const nextConversation = parseEvryConversationEnvelope(
-        await response.json()
-      );
-      if (!applyWorkConversation(requestKey, 1, nextConversation)) {
-        throw new Error("stale reuse response");
-      }
-      navigateToConversation(nextConversation.id);
-      finishWork(requestKey, 2);
+      const result = await startRecipeReuse({
+        sourceConversationId: conversationId,
+        resultArtifactId: artifactId,
+        recipeIdentity: receipt.reuse.recipeIdentity,
+      });
+      if (result === "unavailable") throw new Error("reuse unavailable");
       setState({ status: "complete", action: "reuse" });
     } catch {
-      updateWork(requestKey, 1, {
-        phase: "failed",
-        message:
-          "Unable to reuse this recipe. Reopen the receipt and try again.",
-      });
-      finishWork(requestKey, 2);
       setState({
         status: "error",
         error: {

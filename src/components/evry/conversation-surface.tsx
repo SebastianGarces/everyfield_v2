@@ -56,6 +56,7 @@ export function ConversationSurface({ className }: { className?: string }) {
   const {
     activeContext,
     acknowledgement,
+    acknowledgeConversationMounted,
     canStopWatching,
     clearContext,
     conversation,
@@ -101,6 +102,10 @@ export function ConversationSurface({ className }: { className?: string }) {
             conversation.activePlan.identity.fingerprint ===
               artifact.plan.fingerprint)
       )?.id ?? null;
+
+  useEffect(() => {
+    if (conversation) acknowledgeConversationMounted(conversation.id);
+  }, [acknowledgeConversationMounted, conversation]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
