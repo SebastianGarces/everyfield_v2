@@ -16,6 +16,7 @@ import { addCalendarDays } from "@/lib/datetime";
 
 import { syncTaskNotificationsFor } from "./notifications";
 import { exactTaskAssigneeJoin } from "./assignees";
+import { insertExactTenantTasks } from "./write-boundary";
 
 // ============================================================================
 // Event Types
@@ -450,11 +451,10 @@ export async function handleMeetingAttendanceFinalized(
   // so it covers both indexes rather than one named arbiter. `returning()`
   // yields only the rows that LANDED, which is what the notification sync
   // below needs.
-  const created = await db
-    .insert(tasks)
-    .values(tasksToCreate)
-    .onConflictDoNothing()
-    .returning({ id: tasks.id });
+  const created = await insertExactTenantTasks(tasksToCreate, {
+    authorityUserId: planterId,
+    onConflictDoNothing: true,
+  });
 
   // T-018. Every generated row carries an assignee (the planter) and a due
   // date, so every one owes a due and an overdue notification — and a

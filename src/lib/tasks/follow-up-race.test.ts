@@ -7,6 +7,8 @@ import { db } from "@/db";
 import {
   churchMeetings,
   churches,
+  phasePromptAnswers,
+  phaseTransitions,
   persons,
   sendingChurches,
   tasks,
@@ -20,6 +22,7 @@ import {
   bulkCompleteTasks,
   bulkRescheduleTasks,
   completeTask,
+  createNextRecurrence,
   createTask,
   deleteTask,
   getTask,
@@ -43,6 +46,7 @@ import {
   acceptPhaseTemplatePrompt,
   declinePhaseTemplatePrompt,
 } from "./phase-prompt";
+import { runPostgresStatement } from "@/lib/testing/postgres-transaction-barrier";
 
 // ----------------------------------------------------------------------------
 // #521 — THE TWO RESIDUALS #323 DEFERRED, ASSERTED AGAINST A REAL POSTGRES.
@@ -210,6 +214,12 @@ async function sweep(): Promise<void> {
 
   for (const church of scratch) {
     await db.delete(tasks).where(eq(tasks.churchId, church.id));
+    await db
+      .delete(phasePromptAnswers)
+      .where(eq(phasePromptAnswers.churchId, church.id));
+    await db
+      .delete(phaseTransitions)
+      .where(eq(phaseTransitions.churchId, church.id));
     await db
       .delete(churchMeetings)
       .where(eq(churchMeetings.churchId, church.id));
@@ -896,6 +906,285 @@ test(
       );
       assert.equal(omittedUrl.cursorAvailable, true);
       assert.ok(omittedUrl.tasks.length > 0);
+    } finally {
+      await sweep();
+    }
+  }
+);
+
+test(
+  "task and phase-answer mutations recheck exact tenancy after their preflight read",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
+    await sweep();
+    const fixture = await seed();
+    try {
+      const [sendingChurch] = await db
+        .insert(sendingChurches)
+        .values({ name: SCRATCH_NAME })
+        .returning({ id: sendingChurches.id });
+      const [assignee] = await db
+        .insert(users)
+        .values({
+          email: `${crypto.randomUUID()}@scratch.invalid`,
+          passwordHash: "scratch",
+          name: "Race assignee",
+          seat: "member",
+          churchId: fixture.churchId,
+        })
+        .returning({ id: users.id });
+
+      const makeActorDual = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = '${sendingChurch.id}'::uuid where id = '${fixture.planterId}'::uuid;`
+        );
+      const makeActorExact = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = null where id = '${fixture.planterId}'::uuid;`
+        );
+      const makeAssigneeDual = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = '${sendingChurch.id}'::uuid where id = '${assignee.id}'::uuid;`
+        );
+      const makeAssigneeExact = () =>
+        runPostgresStatement(
+          `update users set sending_church_id = null where id = '${assignee.id}'::uuid;`
+        );
+
+      await assert.rejects(
+        createTask(
+          fixture.churchId,
+          fixture.planterId,
+          {
+            title: "Race must not land",
+            status: "not_started",
+            priority: "medium",
+            assignedToId: assignee.id,
+            category: "general",
+          },
+          undefined,
+          { beforeInsert: makeAssigneeDual }
+        ),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(tasks)
+            .where(
+              and(
+                eq(tasks.churchId, fixture.churchId),
+                eq(tasks.title, "Race must not land")
+              )
+            )
+        )[0]?.count,
+        0,
+        "the separate connection changed tenancy after preflight, but the task still landed"
+      );
+
+      await makeAssigneeExact();
+      const beforeImport = (
+        await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(tasks)
+          .where(eq(tasks.churchId, fixture.churchId))
+      )[0]!.count;
+      await assert.rejects(
+        importTaskTemplate(
+          {
+            churchId: fixture.churchId,
+            userId: fixture.planterId,
+            templateKey: "post-meeting-follow-up",
+          },
+          { beforeInsert: makeActorDual }
+        ),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(tasks)
+            .where(eq(tasks.churchId, fixture.churchId))
+        )[0]?.count,
+        beforeImport,
+        "the template import landed a partial or complete set after its user became dual-tenant"
+      );
+
+      await makeActorExact();
+      const valid = await createTask(fixture.churchId, fixture.planterId, {
+        title: "Exact actor still lands",
+        status: "not_started",
+        priority: "medium",
+        assignedToId: assignee.id,
+        category: "general",
+      });
+      assert.equal(valid.assignedToId, assignee.id);
+
+      const recurring = await createTask(
+        fixture.churchId,
+        fixture.planterId,
+        {
+          title: "Recurring mutation boundary",
+          status: "not_started",
+          priority: "medium",
+          dueDate: "2026-09-01",
+          assignedToId: assignee.id,
+          category: "general",
+        },
+        {
+          isRecurring: true,
+          recurrenceRule: { interval: "weekly", endDate: null },
+        }
+      );
+      await createTask(fixture.churchId, fixture.planterId, {
+        title: "Recurring checklist item",
+        status: "not_started",
+        priority: "medium",
+        assignedToId: assignee.id,
+        category: "general",
+        parentTaskId: recurring.id,
+      });
+      await db
+        .update(tasks)
+        .set({ status: "complete", completedAt: new Date() })
+        .where(eq(tasks.id, recurring.id));
+
+      const completedRecurring = { ...recurring, status: "complete" as const };
+      await assert.rejects(
+        createNextRecurrence(completedRecurring, "2026-09-01", undefined, {
+          beforeSuccessorInsert: makeAssigneeDual,
+        }),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(tasks)
+            .where(eq(tasks.title, recurring.title))
+        )[0]?.count,
+        1,
+        "the recurrence successor landed after the exact assignee preflight became stale"
+      );
+
+      await makeAssigneeExact();
+      const successor = await createNextRecurrence(
+        completedRecurring,
+        "2026-09-01"
+      );
+      assert.ok(successor);
+      assert.equal(successor.assignedToId, assignee.id);
+      assert.deepEqual(
+        (await listSubtasks(fixture.churchId, successor.id)).map(
+          ({ title, assignedToId }) => ({ title, assignedToId })
+        ),
+        [
+          {
+            title: "Recurring checklist item",
+            assignedToId: assignee.id,
+          },
+        ]
+      );
+
+      const childRace = await createTask(
+        fixture.churchId,
+        fixture.planterId,
+        {
+          title: "Recurring checklist mutation boundary",
+          status: "not_started",
+          priority: "medium",
+          dueDate: "2026-10-01",
+          assignedToId: assignee.id,
+          category: "general",
+        },
+        {
+          isRecurring: true,
+          recurrenceRule: { interval: "weekly", endDate: null },
+        }
+      );
+      await createTask(fixture.churchId, fixture.planterId, {
+        title: "Child race must not land",
+        status: "not_started",
+        priority: "medium",
+        assignedToId: assignee.id,
+        category: "general",
+        parentTaskId: childRace.id,
+      });
+      await db
+        .update(tasks)
+        .set({ status: "complete", completedAt: new Date() })
+        .where(eq(tasks.id, childRace.id));
+      const childRaceSuccessor = await createNextRecurrence(
+        { ...childRace, status: "complete" },
+        "2026-10-01",
+        undefined,
+        { beforeChildrenInsert: makeAssigneeDual }
+      );
+      assert.ok(childRaceSuccessor);
+      assert.deepEqual(
+        await listSubtasks(fixture.churchId, childRaceSuccessor.id),
+        [],
+        "the recurrence checklist landed after its assignee preflight became stale"
+      );
+
+      await makeAssigneeExact();
+      const [transition] = await db
+        .insert(phaseTransitions)
+        .values({
+          churchId: fixture.churchId,
+          fromPhase: 1,
+          toPhase: 2,
+          initiatedById: fixture.planterId,
+          reason: "exact-tenancy mutation race",
+          kind: "transition",
+          rubricVersion: "race-proof",
+        })
+        .returning({ id: phaseTransitions.id });
+
+      await assert.rejects(
+        declinePhaseTemplatePrompt(
+          {
+            churchId: fixture.churchId,
+            userId: fixture.planterId,
+            expectedTransitionId: transition.id,
+          },
+          { beforeClaim: makeActorDual }
+        ),
+        { message: TASK_ASSIGNEE_ERROR }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(phasePromptAnswers)
+            .where(eq(phasePromptAnswers.transitionId, transition.id))
+        )[0]?.count,
+        0,
+        "the separate connection changed tenancy after preflight, but the answer claim still landed"
+      );
+
+      await makeActorExact();
+      assert.deepEqual(
+        await declinePhaseTemplatePrompt({
+          churchId: fixture.churchId,
+          userId: fixture.planterId,
+          expectedTransitionId: transition.id,
+        }),
+        { transitionId: transition.id }
+      );
+      assert.equal(
+        (
+          await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(phasePromptAnswers)
+            .where(eq(phasePromptAnswers.transitionId, transition.id))
+        )[0]?.count,
+        1
+      );
     } finally {
       await sweep();
     }

@@ -339,7 +339,15 @@ export function seedLaunchMilestonesStatement(input: {
   );
 
   return sql`
-    with milestone_template as (
+    with exact_actor as materialized (
+      select actor.id
+      from users actor
+      where actor.id = ${input.actorUserId}::uuid
+        and actor.church_id = ${input.churchId}::uuid
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat is not null
+    ), milestone_template as (
       select * from (values ${milestoneValues})
         as t(id, template_key, area, title, description, sort_order)
     ), task_template as (
@@ -352,7 +360,7 @@ export function seedLaunchMilestonesStatement(input: {
       select
         mt.id, ${input.launchId}, ${input.churchId},
         mt.template_key, mt.area, mt.title, mt.description, mt.sort_order
-      from milestone_template mt
+      from milestone_template mt cross join exact_actor
       on conflict (launch_id, template_key) do nothing
       returning id
     ), seeded_tasks as (
