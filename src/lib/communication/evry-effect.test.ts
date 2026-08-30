@@ -24,4 +24,12 @@ test("Communication effects require one current admin-plus plant tenancy", () =>
       ?.length === 3,
     "send preparation, token rendering, and provider dispatch stay authority-gated"
   );
+  assert.match(
+    send,
+    /insert into communications[\s\S]*from users actor[\s\S]*actor\.church_id = [\s\S]*actor\.sending_church_id is null[\s\S]*actor\.sending_network_id is null[\s\S]*actor\.seat in \('owner', 'admin'\)/
+  );
+  assert.match(
+    send,
+    /insert into communication_recipients[\s\S]*from users actor[\s\S]*join communications message[\s\S]*actor\.sending_church_id is null[\s\S]*actor\.sending_network_id is null[\s\S]*actor\.seat in \('owner', 'admin'\)/
+  );
 });

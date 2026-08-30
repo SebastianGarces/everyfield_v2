@@ -318,22 +318,25 @@ async function prepareFrozenCommunication(input: {
 }): Promise<boolean> {
   const churchId = input.effect.execution.plantId;
   const actorUserId = input.effect.execution.actorUserId;
-  await db
-    .insert(communications)
-    .values({
-      id: input.communicationId,
-      churchId,
-      subject: input.audience.subject,
-      body: input.audience.body,
-      bodyHtml: input.audience.bodyHtml,
-      channel: input.audience.channel,
-      templateId: input.audience.templateId,
-      meetingId: input.audience.meetingId,
-      status: "sending",
-      recipientCount: input.audience.recipients.length,
-      createdById: actorUserId,
-    })
-    .onConflictDoNothing({ target: communications.id });
+  await db.execute(sql`
+    insert into communications (
+      id, church_id, subject, body, body_html, channel, template_id,
+      meeting_id, status, recipient_count, created_by_id
+    )
+    select
+      ${input.communicationId}::uuid, actor.church_id, ${input.audience.subject},
+      ${input.audience.body}, ${input.audience.bodyHtml},
+      ${input.audience.channel}, ${input.audience.templateId}::uuid,
+      ${input.audience.meetingId}::uuid, 'sending',
+      ${input.audience.recipients.length}::int, actor.id
+    from users actor
+    where actor.id = ${actorUserId}::uuid
+      and actor.church_id = ${churchId}::uuid
+      and actor.sending_church_id is null
+      and actor.sending_network_id is null
+      and actor.seat in ('owner', 'admin')
+    on conflict (id) do nothing
+  `);
   if (
     !(await exactCommunication({
       churchId,
@@ -345,23 +348,44 @@ async function prepareFrozenCommunication(input: {
     return false;
   }
   if (input.audience.recipients.length > 0) {
-    await db
-      .insert(communicationRecipients)
-      .values(
-        input.audience.recipients.map((recipient) => ({
-          id: communicationEvryEffectUuid(
-            input.effect.effectKey,
-            `recipient:${recipient.personId}`
-          ),
-          churchId,
-          communicationId: input.communicationId,
-          personId: recipient.personId,
-          email: recipient.email,
-          channel: "email" as const,
-          status: "pending" as const,
-        }))
+    const recipientsJson = JSON.stringify(
+      input.audience.recipients.map((recipient) => ({
+        id: communicationEvryEffectUuid(
+          input.effect.effectKey,
+          `recipient:${recipient.personId}`
+        ),
+        person_id: recipient.personId,
+        email: recipient.email,
+      }))
+    );
+    await db.execute(sql`
+      insert into communication_recipients (
+        id, church_id, communication_id, person_id, email, channel, status
       )
-      .onConflictDoNothing({ target: communicationRecipients.id });
+      select
+        recipient.id::uuid, actor.church_id, message.id,
+        recipient.person_id::uuid, recipient.email, 'email', 'pending'
+      from users actor
+      join communications message
+        on message.id = ${input.communicationId}::uuid
+        and message.church_id = actor.church_id
+        and message.created_by_id = actor.id
+        and message.subject is not distinct from ${input.audience.subject}
+        and message.body = ${input.audience.body}
+        and message.body_html is not distinct from ${input.audience.bodyHtml}
+        and message.channel = ${input.audience.channel}
+        and message.template_id is not distinct from ${input.audience.templateId}::uuid
+        and message.meeting_id is not distinct from ${input.audience.meetingId}::uuid
+        and message.recipient_count = ${input.audience.recipients.length}::int
+      cross join jsonb_to_recordset(${recipientsJson}::jsonb)
+        as recipient(id text, person_id text, email text)
+      where actor.id = ${actorUserId}::uuid
+        and actor.church_id = ${churchId}::uuid
+        and actor.sending_church_id is null
+        and actor.sending_network_id is null
+        and actor.seat in ('owner', 'admin')
+      on conflict (id) do nothing
+    `);
   }
   const rows = await db
     .select()
@@ -523,7 +547,14 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "refused", excludedCount: 1 };
   }
   if (!(await prepareFrozenCommunication(input))) {
-    return { status: "refused", excludedCount: 1 };
+    return (await exactCommunication({
+      churchId: actor.plantId,
+      communicationId: input.communicationId,
+      actorUserId: actor.userId,
+      audience: input.audience,
+    }))
+      ? { status: "retryable" }
+      : { status: "refused", excludedCount: 1 };
   }
   const storedRows = await db
     .select()
@@ -565,7 +596,7 @@ export async function sendFrozenEvryCommunication(input: {
     // mailed from a now-stale batch. The terminal row makes the skip visible
     // and prevents a retry from attempting it again.
     if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
-      return { status: "refused", excludedCount: 1 };
+      return { status: "retryable" };
     }
     if (
       !(await recipientIsStillDispatchable({
@@ -593,7 +624,7 @@ export async function sendFrozenEvryCommunication(input: {
       recipient,
     });
     if (!(await actorStillHoldsCommunicationSend(input.effect.execution))) {
-      return { status: "refused", excludedCount: 1 };
+      return { status: "retryable" };
     }
     const result = await mailer.send({
       to: recipient.email,
@@ -654,7 +685,7 @@ export async function sendFrozenEvryCommunication(input: {
     return { status: "failed", excludedCount };
   }
 
-  return claimEvryCommunicationDatabaseEffect({
+  const completion = await claimEvryCommunicationDatabaseEffect({
     execution: input.effect.execution,
     effectKey: input.effect.effectKey,
     mutation: sql`
@@ -677,4 +708,5 @@ export async function sendFrozenEvryCommunication(input: {
       });
     },
   });
+  return completion.status === "refused" ? { status: "retryable" } : completion;
 }
