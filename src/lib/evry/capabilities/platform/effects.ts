@@ -66,7 +66,13 @@ function notificationPayloadIsReviewable(
 }
 
 const visibilitySnapshotSchema = z.strictObject({
-  categories: z.array(z.enum(notificationCategories)),
+  categories: z
+    .array(z.enum(notificationCategories))
+    .max(notificationCategories.length)
+    .refine(
+      (categories) => new Set(categories).size === categories.length,
+      "Notification visibility categories must be unique"
+    ),
   checkedAt: z.string().datetime(),
 });
 
