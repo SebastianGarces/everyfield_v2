@@ -679,9 +679,9 @@ export function buildMeetingInvitationConfirmation(input: {
         exclusions: communication.audience.exclusions,
         dateTime: null,
         contentPreviews: communication.audience.recipients.flatMap(
-          (recipient) => [
+          (recipient, index) => [
             {
-              label: `${recipient.label} recipient`,
+              label: `Recipient ${index + 1} identity`,
               content: JSON.stringify({
                 personId: recipient.personId,
                 label: recipient.label,
@@ -689,11 +689,11 @@ export function buildMeetingInvitationConfirmation(input: {
               }),
             },
             {
-              label: `${recipient.label} subject`,
+              label: `Recipient ${index + 1} subject`,
               content: recipient.subject,
             },
             {
-              label: `${recipient.label} message`,
+              label: `Recipient ${index + 1} message`,
               content: recipient.bodyText,
             },
           ]
@@ -908,16 +908,17 @@ function resolveLocation(
   });
 }
 
-function locationChoice(location: MeetingInvitationLocation) {
+function locationChoice(location: MeetingInvitationLocation, index: number) {
   return Object.freeze({
     entityType: "meeting_location",
     id: location.id!,
-    label: location.name,
+    label: `Location ${index + 1}`,
     distinguishingFacts: Object.freeze([
+      Object.freeze({ label: "Name", value: location.name }),
       Object.freeze({ label: "Address", value: location.address }),
     ]),
     sourceLink: trustedEvryApplicationSourceLink({
-      label: `Open ${location.name}`,
+      label: "Open Meetings",
       href: "/meetings",
     }),
   });
