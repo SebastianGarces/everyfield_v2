@@ -16,6 +16,7 @@ import {
   evryProductAuditEvents,
   messageTemplates,
   persons,
+  sendingChurches,
   users,
 } from "@/db/schema";
 import {
@@ -661,6 +662,74 @@ async function main(): Promise<void> {
     body: "<p>Welcome {{first_name}}</p>",
   });
   assert.ok(audience);
+
+  // Authorization was minted while this was one exact plant account. A
+  // competing tenancy appears before execution; neither durable preparation
+  // nor the provider seam may be reached through that stale authorization.
+  const dualTenancyEffect = await seedEffect({
+    churchId: plant.id,
+    actorUserId: owner.id,
+    capabilityIdentity: SEND_MESSAGE,
+    stepId: "send-dual-tenancy",
+  });
+  const dualTenancyMailer = deterministicMailer();
+  const dualTenancyCommunicationId = randomUUID();
+  const [competingTenancy] = await db
+    .insert(sendingChurches)
+    .values({ name: "__Communication competing tenancy__" })
+    .returning({ id: sendingChurches.id });
+  assert.ok(competingTenancy);
+  await db
+    .update(users)
+    .set({ sendingChurchId: competingTenancy.id })
+    .where(eq(users.id, owner.id));
+  let dualTenancyResult;
+  try {
+    dualTenancyResult = await sendFrozenEvryCommunication({
+      effect: dualTenancyEffect,
+      identity: SEND_MESSAGE,
+      communicationId: dualTenancyCommunicationId,
+      audience,
+      mailer: dualTenancyMailer.mailer,
+    });
+  } finally {
+    await db
+      .update(users)
+      .set({ sendingChurchId: null })
+      .where(eq(users.id, owner.id));
+  }
+  assert.deepEqual(dualTenancyResult, {
+    status: "refused",
+    excludedCount: 1,
+  });
+  assert.equal(dualTenancyMailer.calls.length, 0);
+  assert.deepEqual(
+    await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communications)
+        .where(eq(communications.id, dualTenancyCommunicationId))
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(communicationRecipients)
+        .where(
+          eq(
+            communicationRecipients.communicationId,
+            dualTenancyCommunicationId
+          )
+        )
+        .then(([row]) => row?.count ?? -1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(evryExecutionOutcomes)
+        .where(
+          eq(evryExecutionOutcomes.planId, dualTenancyEffect.execution.planId)
+        )
+        .then(([row]) => row?.count ?? -1),
+    ]),
+    [0, 0, 0]
+  );
   assert.equal(audience.recipients.length, 1);
   assert.equal(
     audience.exclusions.reduce((sum, item) => sum + item.count, 0),
