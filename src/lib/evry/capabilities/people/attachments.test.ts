@@ -112,10 +112,10 @@ test("malformed, oversize, and foreign attachments refuse before storage", async
   assert.equal(stores, 0);
 });
 
-test("persisted-plan execution can still read an exact legacy v2 reference", async () => {
+test("persisted-plan execution can still read exact legacy v1 and v2 references", async () => {
   const bytes = Buffer.from("legacy pending plan bytes");
   const digest = createHash("sha256").update(bytes).digest("hex");
-  const reference = sealEvryPeopleAttachmentReference(
+  const v2Reference = sealEvryPeopleAttachmentReference(
     {
       version: 2,
       kind: "commitment_document",
@@ -132,19 +132,48 @@ test("persisted-plan execution can still read an exact legacy v2 reference", asy
     },
     SECRET
   );
-  assert.deepEqual(
-    (
-      await readExactEvryPeopleAttachment({
-        reference,
-        actor: ACTOR,
-        expectedKind: "commitment_document",
-        expectedDigest: digest,
-        now: NOW,
-        secret: SECRET,
-      })
-    )?.bytes,
-    bytes
+  const storageKey = evryPeopleStagedAttachmentStorageKey({
+    actor: ACTOR,
+    expiresAt: new Date("2099-08-30T12:00:00.000Z"),
+    uploadId: "10000000-0000-4000-8000-000000000098",
+    digest,
+    extension: "pdf",
+  });
+  const v1Reference = sealEvryPeopleAttachmentReference(
+    {
+      version: 1,
+      kind: "commitment_document",
+      actorUserId: ACTOR.userId,
+      plantId: ACTOR.plantId,
+      personId: ACTOR.userId,
+      digest,
+      contentType: "application/pdf",
+      size: bytes.length,
+      originalName: "legacy.pdf",
+      expiresAt: "2099-08-30T12:00:00.000Z",
+      storageKey,
+    },
+    SECRET
   );
+  for (const reference of [v1Reference, v2Reference]) {
+    assert.deepEqual(
+      (
+        await readExactEvryPeopleAttachment({
+          reference,
+          actor: ACTOR,
+          expectedKind: "commitment_document",
+          expectedDigest: digest,
+          now: NOW,
+          secret: SECRET,
+          read: async (key) => {
+            assert.equal(key, storageKey);
+            return { body: bytes, contentType: "application/pdf" };
+          },
+        })
+      )?.bytes,
+      bytes
+    );
+  }
 });
 
 test("CSV preview uses only an expiring staged chunk and verifies its bytes", async () => {

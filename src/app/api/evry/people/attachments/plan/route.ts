@@ -6,7 +6,7 @@ import { isUnauthorized } from "@/lib/auth/unauthorized";
 import { EVRY_PEOPLE_ATTACHMENT_TRANSPORT_REFERENCE_MAX_LENGTH } from "@/lib/evry/capabilities/people/attachment-contract";
 import {
   openEvryPeopleAttachmentReference,
-  removeEvryPeopleAttachment,
+  removeEvryPeopleStagedAttachment,
 } from "@/lib/evry/capabilities/people/attachments";
 import {
   persistEvryPeopleFileReview,
@@ -73,13 +73,13 @@ const bodySchema = z.discriminatedUnion("kind", [
 
 export function createEvryPeopleAttachmentPlanPost({
   requireViewer = requireEvryPlantViewer,
-  removeAttachment = removeEvryPeopleAttachment,
+  removeAttachment = removeEvryPeopleStagedAttachment,
   openAttachment = openEvryPeopleAttachmentReference,
   recoverReview = recoverEvryPeopleFileReview,
   proposePhoto = proposePeoplePhotoUpload,
 }: {
   requireViewer?: typeof requireEvryPlantViewer;
-  removeAttachment?: typeof removeEvryPeopleAttachment;
+  removeAttachment?: typeof removeEvryPeopleStagedAttachment;
   openAttachment?: typeof openEvryPeopleAttachmentReference;
   recoverReview?: typeof recoverEvryPeopleFileReview;
   proposePhoto?: typeof proposePeoplePhotoUpload;

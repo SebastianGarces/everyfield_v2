@@ -292,6 +292,30 @@ export async function removeEvryPeopleAttachment(input: {
 }
 
 /**
+ * Remove only the v3 chunks minted by the external staging workflow. Legacy
+ * v1/v2 references belong to internal persisted-plan compatibility and can
+ * never authorize deletion from an external plan request.
+ */
+export async function removeEvryPeopleStagedAttachment(input: {
+  reference: string;
+  actor: Scope;
+  expectedKind: EvryPeopleAttachmentReference["kind"];
+  secret?: string;
+  remove?: EvryPeopleFileStorage["remove"];
+}): Promise<boolean> {
+  const document = openScopedEvryPeopleAttachmentReference(input);
+  if (document?.version !== 3) return false;
+  await Promise.all(
+    Array.from({ length: document.chunkCount }, (_, chunkIndex) =>
+      (input.remove ?? evryPeopleFileStorage().remove)(
+        chunkStorageKey(document, chunkIndex)
+      )
+    )
+  );
+  return true;
+}
+
+/**
  * Sweep expired staged inputs by the expiry embedded in their first-party key.
  * Deletion is idempotent, so an interrupted sweep converges.
  */
