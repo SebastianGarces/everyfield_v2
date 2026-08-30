@@ -2,20 +2,32 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import type { EvryReadCapabilityAuthorization } from "@/lib/evry/eligibility/capabilities";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans";
 import type { EvryDateTimeResolution } from "@/lib/evry/resolvers/datetime";
 import { evryConversationPlanIdentitySchema } from "@/lib/evry/conversations/contract";
-import { compileEvryRecipe } from "./compiler";
+import {
+  createEvryRecipeCompiler,
+  EvryRecipeCompilationError,
+} from "./compiler";
 
 import {
   buildMeetingInvitationConfirmation,
   createMeetingInvitationPlanResolver,
+  createMeetingInvitationRecipeRegistry,
   createMeetingInvitationReferenceResolver,
+  meetingInvitationPlanResolverRegistration,
   MEETING_INVITATION_RECIPE_IDENTITY,
-  MEETING_INVITATION_RECIPE_REGISTRY,
+  MEETING_INVITATION_REVIEW_REGISTRY,
   type MeetingInvitationReferenceFacts,
   type MeetingInvitationReferenceRequest,
 } from "./meeting-invitation";
+import { trustedReviewForEvryPlanDocument } from "@/lib/evry/artifacts/trusted-plan-review";
+import {
+  createMeetingInvitationConversationContinuation,
+  meetingInvitationRequestForConversation,
+} from "./meeting-invitation-conversation";
+import { selectMeetingInvitationReferenceRequest } from "./meeting-invitation-selection";
 
 const ACTOR = {
   userId: "10000000-0000-4000-8000-000000000001",
@@ -42,6 +54,9 @@ const BASE_REQUEST: MeetingInvitationReferenceRequest = {
   subject: "You're invited to Vision Meeting",
   body: "Join us for Vision Meeting.",
 };
+
+const FRD_REQUEST =
+  "Create a meeting for August 5 at 10 AM at the church location. Invite the core team and add prospects who have not visited a Vision Meeting. Draft an email invitation and send it to them.";
 
 const PEOPLE = [
   person(
@@ -147,6 +162,157 @@ function resolver(input: {
   return { resolve, factReads: () => factReads };
 }
 
+test("the canonical FRD request enters the ordinary recipe continuation and asks only for missing duration", async () => {
+  assert.deepEqual(selectMeetingInvitationReferenceRequest(FRD_REQUEST), {
+    sourceText: "August 5 at 10 AM",
+    durationMinutes: undefined,
+    subject: "You're invited to Vision Meeting",
+    body: "Join us for Vision Meeting at our church location. We look forward to seeing you.",
+  });
+  let createCalls = 0;
+  const continuation = createMeetingInvitationConversationContinuation({
+    async findPlan() {
+      return null;
+    },
+    async authorizeRead() {
+      return {
+        actor: ACTOR,
+        registration: {
+          identity: "people.crm.people.load-more-people",
+        },
+      } as unknown as EvryReadCapabilityAuthorization;
+    },
+    async resolveAuthorized() {
+      return {
+        kind: "clarification" as const,
+        artifact: {
+          kind: "clarification" as const,
+          mode: "missing" as const,
+          entityType: "meeting_duration",
+          prompt: "How many minutes should the Vision Meeting last?",
+        },
+      };
+    },
+    async createPlan() {
+      createCalls++;
+      throw new Error("clarification must not persist a plan");
+    },
+  } as never);
+  const result = await continuation.continue({
+    actor: ACTOR,
+    conversation: {
+      id: "30000000-0000-4000-8000-000000000001",
+    } as never,
+    userRequestKey: "canonical-frd-request",
+    literalUserText: FRD_REQUEST,
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-30T12:00:00.000Z"),
+  });
+  assert.equal(
+    result?.body,
+    "How many minutes should the Vision Meeting last?"
+  );
+  assert.equal(result?.artifacts[0]?.kind, "clarification");
+  assert.equal(createCalls, 0);
+});
+
+test("ordinary recipe continuation denies missing and stale read sessions before resolution", async (t) => {
+  for (const mode of ["denied", "stale"] as const) {
+    await t.test(mode, async () => {
+      let resolutionCalls = 0;
+      const continuation = createMeetingInvitationConversationContinuation({
+        async findPlan() {
+          return null;
+        },
+        async authorizeRead() {
+          if (mode === "denied") return null;
+          return {
+            actor: {
+              ...ACTOR,
+              plantId: "20000000-0000-4000-8000-000000000099",
+            },
+            registration: {
+              identity: "people.crm.people.load-more-people",
+            },
+          } as unknown as EvryReadCapabilityAuthorization;
+        },
+        async resolveAuthorized() {
+          resolutionCalls++;
+          return { kind: "unavailable" as const };
+        },
+        async createPlan() {
+          throw new Error("denied continuation must not persist");
+        },
+      } as never);
+      assert.equal(
+        await continuation.continue({
+          actor: ACTOR,
+          conversation: {
+            id: "30000000-0000-4000-8000-000000000001",
+          } as never,
+          userRequestKey: `canonical-${mode}`,
+          literalUserText: FRD_REQUEST,
+          pageContext: null,
+          requestPageContext: null,
+          now: new Date("2026-08-30T12:00:00.000Z"),
+        }),
+        null
+      );
+      assert.equal(resolutionCalls, 0);
+    });
+  }
+});
+
+test("focused duration and year replies continue the original immutable recipe request", () => {
+  const request = meetingInvitationRequestForConversation({
+    actor: ACTOR,
+    conversation: {
+      activePlan: null,
+      messages: [
+        { author: "user", body: FRD_REQUEST, artifacts: [] },
+        {
+          author: "assistant",
+          body: "How long?",
+          artifacts: [
+            {
+              artifact: {
+                kind: "clarification",
+                mode: "missing",
+                entityType: "meeting_duration",
+                prompt: "How many minutes?",
+              },
+            },
+          ],
+        },
+        { author: "user", body: "90 minutes", artifacts: [] },
+        {
+          author: "assistant",
+          body: "Which year?",
+          artifacts: [
+            {
+              artifact: {
+                kind: "clarification",
+                mode: "missing",
+                entityType: "meeting_datetime",
+                prompt: "Which year?",
+              },
+            },
+          ],
+        },
+        { author: "user", body: "2027", artifacts: [] },
+      ],
+    } as never,
+    userRequestKey: "year-answer",
+    literalUserText: "2027",
+    pageContext: null,
+    requestPageContext: null,
+    now: new Date("2026-08-30T12:00:00.000Z"),
+  });
+  assert.equal(request?.durationMinutes, 90);
+  assert.equal(request?.sourceText, "August 5, 2027 at 10 AM");
+});
+
 test("the canonical audience combines core team with unvisited prospects and discloses exact exclusions", async () => {
   const { resolve } = resolver({});
   const result = await resolve({ actor: ACTOR, request: BASE_REQUEST });
@@ -176,45 +342,6 @@ test("the canonical audience combines core team with unvisited prospects and dis
     address: "144 Oak Street, Albany, NY, USA",
   });
   assert.equal(result.dateTime.timeZone, "America/New_York");
-
-  const artifact = buildMeetingInvitationConfirmation({
-    plan: evryConversationPlanIdentitySchema.parse({
-      planId: "40000000-0000-4000-8000-000000000001",
-      fingerprint: "a".repeat(64),
-    }),
-    resolved: result,
-  });
-  assert.equal(artifact.actionLabel, "Create meeting and send 3");
-  assert.deepEqual(
-    artifact.steps.map(({ stepId }) => stepId),
-    ["create-meeting", "add-guests", "send-invitations"]
-  );
-  assert.deepEqual(artifact.steps[0]?.dateTime, {
-    startsAt: DATE_TIME,
-    endsAt: {
-      calendarDate: "2026-08-05",
-      localTime: "11:30 AM",
-      timeZone: "America/New_York",
-      utcOffset: "-04:00",
-      instantUtc: "2026-08-05T15:30:00.000Z",
-      interpretation: {
-        basis: "explicit-calendar-date",
-        sourceText: "90 minutes after August 5, 2026 at 10 AM",
-        statedCalendarDate: "2026-08-05",
-      },
-    },
-  });
-  assert.equal(artifact.steps[1]?.resolvedTargets.length, 3);
-  assert.deepEqual(artifact.steps[1]?.exclusions, [
-    { reason: "Missing email address", count: 1 },
-    { reason: "Prior Vision Meeting attendance", count: 1 },
-    { reason: "Duplicate email address", count: 1 },
-    { reason: "Suppressed email address", count: 1 },
-  ]);
-  assert.deepEqual(artifact.steps[2]?.contentPreviews, [
-    { label: "Subject", content: "You're invited to Vision Meeting" },
-    { label: "Message", content: "Join us for Vision Meeting." },
-  ]);
 });
 
 test("missing year and duration return focused clarifications before any fact read", async () => {
@@ -228,7 +355,7 @@ test("missing year and duration return focused clarifications before any fact re
     artifact: {
       kind: "clarification",
       mode: "missing",
-      entityType: "meeting duration",
+      entityType: "meeting_duration",
       prompt: "How many minutes should the Vision Meeting last?",
     },
   });
@@ -324,6 +451,71 @@ test("a supplied location is exact and foreign or stale ids are neutral", async 
   );
 });
 
+test("foreign-plant facts are neutral even when every record otherwise resolves", async () => {
+  const { resolve } = resolver({
+    facts: facts({
+      church: {
+        ...facts().church,
+        id: "20000000-0000-4000-8000-000000000099",
+      },
+    }),
+  });
+  assert.deepEqual(await resolve({ actor: ACTOR, request: BASE_REQUEST }), {
+    kind: "unavailable",
+  });
+});
+
+test("the registered People resolver denies missing and stale-session authority before facts", async (t) => {
+  for (const mode of ["denied", "stale-actor"] as const) {
+    await t.test(mode, async () => {
+      let resolverCalls = 0;
+      const registry = createMeetingInvitationRecipeRegistry({
+        planResolver: meetingInvitationPlanResolverRegistration({
+          async resolveAuthorized() {
+            resolverCalls++;
+            throw new Error("resolution must not run");
+          },
+        }),
+      });
+      const compile = createEvryRecipeCompiler({
+        async authorizeResolver() {
+          if (mode === "denied") return null;
+          return {
+            actor: {
+              ...ACTOR,
+              userId: "10000000-0000-4000-8000-000000000099",
+            },
+            registration: {
+              identity: "people.crm.people.load-more-people",
+            },
+          } as unknown as EvryReadCapabilityAuthorization;
+        },
+      });
+      await assert.rejects(
+        compile({
+          actor: ACTOR,
+          registry,
+          recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
+          inputValues: {
+            plan: {
+              request: BASE_REQUEST,
+              requestKey: mintEvryPlanRequestKey(),
+              now: "2026-08-01T12:00:00.000Z",
+            },
+          },
+          eligibleCapabilities: [
+            { identity: "meetings.create" },
+            { identity: "meetings.add-guests" },
+            { identity: "communication.messages.send" },
+          ],
+        }),
+        EvryRecipeCompilationError
+      );
+      assert.equal(resolverCalls, 0);
+    });
+  }
+});
+
 test("the exact planner feeds the future meeting into Communication and refuses audience drift", async () => {
   const resolved = await resolver({}).resolve({
     actor: ACTOR,
@@ -374,6 +566,7 @@ test("the exact planner feeds the future meeting into Communication and refuses 
       meetingId: input.create.meetingId,
       dependencyStepId: input.dependencyStepId,
       targets: [...input.targets],
+      exclusions: [...input.exclusions],
       expectedCoreGroupUserIds: [],
       expectedReminderUserIds: [],
       notificationTargets: [],
@@ -408,19 +601,45 @@ test("the exact planner feeds the future meeting into Communication and refuses 
   });
   assert.ok(snapshot);
   assert.equal(snapshot.guests.targets.length, 3);
-  assert.deepEqual(
-    snapshot.communication.recipientSource.recipientIds,
-    resolved.guests.map(({ personId }) => personId)
-  );
+  assert.equal(snapshot.communication.recipientSource.kind, "people");
+  if (snapshot.communication.recipientSource.kind === "people") {
+    assert.deepEqual(
+      snapshot.communication.recipientSource.recipientIds,
+      resolved.guests.map(({ personId }) => personId)
+    );
+  }
   assert.equal(
     (audienceInputs[0] as { plannedMeeting: { id: string } }).plannedMeeting.id,
     snapshot.guests.meetingId
   );
-  const compiled = await compileEvryRecipe({
+  const registry = createMeetingInvitationRecipeRegistry({
+    planResolver: meetingInvitationPlanResolverRegistration({
+      async resolveAuthorized() {
+        return { kind: "planned", snapshot };
+      },
+    }),
+  });
+  const compile = createEvryRecipeCompiler({
+    async authorizeResolver() {
+      return {
+        actor: ACTOR,
+        registration: {
+          identity: "people.crm.people.load-more-people",
+        },
+      } as unknown as EvryReadCapabilityAuthorization;
+    },
+  });
+  const compiled = await compile({
     actor: ACTOR,
-    registry: MEETING_INVITATION_RECIPE_REGISTRY,
+    registry,
     recipeIdentity: MEETING_INVITATION_RECIPE_IDENTITY,
-    inputValues: snapshot,
+    inputValues: {
+      plan: {
+        request: BASE_REQUEST,
+        requestKey: mintEvryPlanRequestKey(),
+        now: "2026-08-01T12:00:00.000Z",
+      },
+    },
     eligibleCapabilities: [
       { identity: "meetings.create" },
       { identity: "meetings.add-guests" },
@@ -438,6 +657,33 @@ test("the exact planner feeds the future meeting into Communication and refuses 
   assert.deepEqual(
     compiled.document.steps[1]?.arguments.targets,
     snapshot.guests.targets
+  );
+  const planIdentity = evryConversationPlanIdentitySchema.parse({
+    planId: "40000000-0000-4000-8000-000000000001",
+    fingerprint: "a".repeat(64),
+  });
+  const artifact = buildMeetingInvitationConfirmation({
+    plan: planIdentity,
+    document: compiled.document,
+  });
+  assert.equal(artifact.actionLabel, "Create meeting and send invitations");
+  assert.deepEqual(
+    artifact.steps.map(({ stepId }) => stepId),
+    ["create-meeting", "add-guests", "send-invitations"]
+  );
+  assert.equal(artifact.steps[1]?.counts[0]?.count, 3);
+  assert.deepEqual(artifact.steps[1]?.exclusions, [
+    { reason: "Missing email address", count: 1 },
+    { reason: "Prior Vision Meeting attendance", count: 1 },
+    { reason: "Duplicate email address", count: 1 },
+    { reason: "Suppressed email address", count: 1 },
+  ]);
+  assert.ok(
+    trustedReviewForEvryPlanDocument({
+      plan: planIdentity,
+      document: compiled.document,
+      reviewRegistry: MEETING_INVITATION_REVIEW_REGISTRY,
+    })
   );
 
   const drifted = createMeetingInvitationPlanResolver({

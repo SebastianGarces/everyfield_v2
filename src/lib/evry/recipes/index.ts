@@ -35,11 +35,16 @@ export {
   createMeetingInvitationRecipeRegistry,
   createMeetingInvitationPlanResolver,
   createMeetingInvitationReferenceResolver,
+  meetingInvitationPlanResolverRegistration,
+  MEETING_INVITATION_ARTIFACT_REVIEW,
   MEETING_INVITATION_CAPABILITY_IDENTITY,
+  MEETING_INVITATION_PLAN_RESOLVER_IDENTITY,
   MEETING_INVITATION_RECIPE_REGISTRY,
   MEETING_INVITATION_RECIPE_IDENTITY,
+  MEETING_INVITATION_REVIEW_REGISTRY,
   resolveMeetingInvitationPlan,
-  resolveMeetingInvitationReference,
+  resolveAuthorizedMeetingInvitationRequest,
+  type AuthorizedMeetingInvitationResolution,
   type MeetingInvitationExclusion,
   type MeetingInvitationGuest,
   type MeetingInvitationLocation,
@@ -50,3 +55,8 @@ export {
   type MeetingInvitationReferenceResolution,
   type ResolvedMeetingInvitationReference,
 } from "./meeting-invitation";
+export {
+  continueMeetingInvitationConversation,
+  createMeetingInvitationConversationContinuation,
+} from "./meeting-invitation-conversation";
+export { selectMeetingInvitationReferenceRequest } from "./meeting-invitation-selection";

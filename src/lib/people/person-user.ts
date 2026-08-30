@@ -85,7 +85,10 @@ export function isRecruitedContact(): SQL {
  * tables (`memory/invariants.md` → Multi-Tenancy, `oversightAudienceCondition`).
  */
 export function personIsUserInChurch(churchId: string): SQL {
-  return sql`${eq(users.churchId, churchId)} and lower(${users.email}) = lower(${persons.email})`;
+  return sql`${eq(users.churchId, churchId)}
+    and ${isNull(users.sendingChurchId)}
+    and ${isNull(users.sendingNetworkId)}
+    and lower(${users.email}) = lower(${persons.email})`;
 }
 
 /**

@@ -23,8 +23,21 @@ export const MEETING_CREATE_DEPENDENCY_OUTPUT_SCHEMA = z.strictObject({
 const guestTargetSchema = z.strictObject({
   attendanceId: uuid,
   personId: uuid,
+  label: z.string().trim().min(1).max(511),
+  email: z.string().email().max(255),
   expectedPersonUpdatedAt: timestamp,
   expectedAttendanceAbsent: z.literal(true),
+});
+
+const guestExclusionSchema = z.strictObject({
+  personId: uuid,
+  label: z.string().trim().min(1).max(511),
+  reason: z.enum([
+    "Missing email address",
+    "Prior Vision Meeting attendance",
+    "Duplicate email address",
+    "Suppressed email address",
+  ]),
 });
 
 export const MEETING_GUEST_BATCH_ARGUMENT_SCHEMA = z
@@ -33,6 +46,7 @@ export const MEETING_GUEST_BATCH_ARGUMENT_SCHEMA = z
     meetingId: uuid,
     dependencyStepId: z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/),
     targets: z.array(guestTargetSchema).min(1).max(1_000),
+    exclusions: z.array(guestExclusionSchema).max(10_000),
     expectedCoreGroupUserIds: uuidSet,
     expectedReminderUserIds: uuidSet,
     notificationTargets: meetingNotificationTargetsSchema,

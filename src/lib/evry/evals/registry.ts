@@ -338,12 +338,14 @@ export const EVRY_RECIPE_EVAL_FIXTURES: readonly EvryRecipeEvalFixture[] =
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
             proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:end_to_end`,
           },
         ],
         partial_failure: [
           {
             id: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
             proofId: "recipe-end-to-end",
+            testName: `${MEETING_INVITATION_RECIPE_IDENTITY}:partial_failure`,
           },
         ],
       },

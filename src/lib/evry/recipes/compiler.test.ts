@@ -13,6 +13,7 @@ import {
 } from "@/lib/evry/plans";
 import { mintEvryPlanRequestKey } from "@/lib/evry/plans/request-key";
 import type { EvryAllowedPolicyDecision } from "@/lib/evry/policy";
+import { createEvryArtifactReviewRegistry } from "@/lib/evry/artifacts/trusted-plan-review";
 
 import {
   createEvryRecipeCompiler,
@@ -22,6 +23,7 @@ import {
 } from "./compiler";
 import {
   createFixtureRecipeRegistry,
+  createFixtureRecipeReviewRegistry,
   fixtureRecipeDefinition,
   FIXTURE_RECIPE_VALUES,
   FIXTURE_RESOLVED_PERSON_IDS,
@@ -280,6 +282,7 @@ test("resolver authorization and planning preconditions fail before persistence"
           throw new Error("persistence must not be reached");
         },
       });
+      const reviewRegistry = createFixtureRecipeReviewRegistry(registry);
 
       await assert.rejects(
         create({
@@ -293,6 +296,7 @@ test("resolver authorization and planning preconditions fail before persistence"
           inputValues: FIXTURE_RECIPE_VALUES,
           requestKey: mintEvryPlanRequestKey(),
           registry,
+          reviewRegistry,
           eligibleCapabilities: eligible(registry),
         }),
         EvryRecipeCompilationError
@@ -300,6 +304,42 @@ test("resolver authorization and planning preconditions fail before persistence"
       assert.equal(persistenceCalls, 0);
     });
   }
+});
+
+test("a compiled recipe without a complete trusted review never reaches persistence", async () => {
+  const registry = createFixtureRecipeRegistry();
+  let persistenceCalls = 0;
+  const create = createEvryRecipePlanCreator({
+    compile: createEvryRecipeCompiler({
+      async authorizeResolver() {
+        return readAuthorization();
+      },
+    }),
+    async persist() {
+      persistenceCalls++;
+      throw new Error("persistence must not be reached");
+    },
+  });
+  await assert.rejects(
+    create({
+      actor: ACTOR,
+      policy: {
+        classification: "application_action",
+        continuation: {
+          kind: "application_action",
+          literalUserText: "Create the fixture.",
+        },
+      },
+      recipeIdentity: RECIPE_IDENTITY,
+      inputValues: FIXTURE_RECIPE_VALUES,
+      requestKey: mintEvryPlanRequestKey(),
+      registry,
+      reviewRegistry: createEvryArtifactReviewRegistry([]),
+      eligibleCapabilities: eligible(registry),
+    }),
+    /no complete trusted review/
+  );
+  assert.equal(persistenceCalls, 0);
 });
 
 test("an ineligible recipe capability fails at the ordinary plan boundary", async () => {

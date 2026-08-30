@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
 import {
@@ -11,7 +12,6 @@ import {
 import { toCalendarDate, utcOffsetForZonedTime } from "@/lib/datetime";
 import {
   resolveEvryCommunicationAudience,
-  type EvryCommunicationAudienceSnapshot,
   type EvryPlannedCommunicationMeeting,
 } from "@/lib/communication/evry-send";
 import { communicationEvryEffectUuid } from "@/lib/communication/evry-effect";
@@ -20,6 +20,11 @@ import {
   type EvryDetailedConfirmationArtifactDocument,
 } from "@/lib/evry/artifacts/review";
 import {
+  createEvryArtifactReviewRegistry,
+  defineEvryArtifactReview,
+  type EvryArtifactReviewRegistration,
+} from "@/lib/evry/artifacts/trusted-plan-review";
+import {
   trustedEvryApplicationSourceLink,
   type EvryConfirmationDateTimeDocument,
 } from "@/lib/evry/artifacts/types";
@@ -27,21 +32,37 @@ import type { EvryClarificationArtifact } from "@/lib/evry/artifacts/types";
 import type { EvryConversationPlanIdentity } from "@/lib/evry/conversations/contract";
 import { resolveMeetingsEvryEffect } from "@/lib/evry/capabilities/meetings/resolver";
 import { resolveMeetingGuestBatchAfterCreate } from "@/lib/evry/capabilities/meetings/resolver";
-import type { MeetingGuestBatchArguments } from "@/lib/evry/capabilities/meetings/dependency-output";
 import { MEETING_GUEST_BATCH_ARGUMENT_SCHEMA } from "@/lib/evry/capabilities/meetings/dependency-output";
 import { MEETINGS_EFFECT_ARGUMENT_SCHEMAS } from "@/lib/evry/capabilities/meetings/effect-contracts";
-import { MEETINGS_EXECUTION_CAPABILITIES } from "@/lib/evry/capabilities/meetings/runtime";
 import {
+  MEETINGS_EXECUTION_CAPABILITIES,
+  meetingsPlanTargetIsCurrent,
+} from "@/lib/evry/capabilities/meetings/runtime";
+import {
+  COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA,
   COMMUNICATION_MESSAGE_SEND_EXECUTION,
-  COMMUNICATION_MESSAGE_SEND_PLAN,
 } from "@/lib/evry/capabilities/communication/messages";
-import type { EvryJsonValue, EvryPlanRequestKey } from "@/lib/evry/plans";
+import type {
+  EvryActionPlanDocument,
+  EvryActionStep,
+  EvryPlanRequestKey,
+} from "@/lib/evry/plans";
+import { parseStoredEvryActionPlan } from "@/lib/evry/plans";
 import type { EvryPlantActor } from "@/lib/evry/eligibility/viewer";
+import {
+  EVRY_PEOPLE_READ_PROBE_IDENTITY,
+  type EvryReadCapabilityAuthorization,
+} from "@/lib/evry/eligibility/capabilities";
 import {
   createEvryExecutionCapabilityRegistry,
   type EvryExecutionCapabilityRegistration,
 } from "@/lib/evry/executor";
-import { createEvryRecipeRegistry } from "./schema";
+import {
+  createEvryRecipeRegistry,
+  defineEvryRecipeResolver,
+  type EvryRecipeResolverRegistration,
+} from "./schema";
+import { storedDocumentMatchesEvryRecipe } from "./contract";
 import {
   resolveEvryPlantDateTimeRequest,
   type EvryDateTimeResolution,
@@ -57,6 +78,8 @@ export const MEETING_INVITATION_RECIPE_IDENTITY =
 export const MEETING_INVITATION_CAPABILITY_IDENTITY = "meetings.create";
 export const MEETING_INVITATION_ADD_GUESTS_IDENTITY = "meetings.add-guests";
 export const MEETING_INVITATION_SEND_IDENTITY = "communication.messages.send";
+export const MEETING_INVITATION_PLAN_RESOLVER_IDENTITY =
+  "meeting.invitation.plan.resolve";
 
 const CORE_TEAM_STATUSES = new Set(["core_group", "launch_team", "leader"]);
 
@@ -132,18 +155,31 @@ export type MeetingInvitationReferenceResolution =
   | Readonly<{ kind: "clarification"; artifact: EvryClarificationArtifact }>
   | Readonly<{ kind: "unavailable" }>;
 
-export type MeetingInvitationPlanSnapshot = Readonly<{
-  meeting: Readonly<Record<string, EvryJsonValue>>;
-  guests: MeetingGuestBatchArguments;
-  communication: Readonly<{
-    communicationId: string;
-    recipientSource: Readonly<{
-      kind: "people";
-      recipientIds: readonly string[];
-    }>;
-    audience: EvryCommunicationAudienceSnapshot;
-  }>;
-}>;
+export const MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA = z.strictObject({
+  meeting: MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction,
+  guests: MEETING_GUEST_BATCH_ARGUMENT_SCHEMA,
+  communication: COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA,
+});
+export type MeetingInvitationPlanSnapshot = Readonly<
+  z.infer<typeof MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA>
+>;
+
+const meetingInvitationRequestSchema = z.strictObject({
+  sourceText: z.string().trim().min(1).max(4_000),
+  durationMinutes: z.number().int().min(1).max(1_440).optional(),
+  locationId: z.string().uuid().optional(),
+  subject: z.string().trim().min(1).max(998),
+  body: z.string().trim().min(1).max(200_000),
+});
+
+export const MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA = z.strictObject({
+  request: meetingInvitationRequestSchema,
+  requestKey: z.string().uuid(),
+  now: z.string().datetime({ offset: true }),
+});
+export type MeetingInvitationPlanResolverInput = z.infer<
+  typeof MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA
+>;
 
 type MeetingInvitationPlanDependencies = Readonly<{
   resolveMeeting: typeof resolveMeetingsEvryEffect;
@@ -238,6 +274,8 @@ export function createMeetingInvitationPlanResolver(
           `meeting-guest:${guest.personId}`
         ),
         personId: guest.personId,
+        label: guest.label,
+        email: guest.email,
         expectedPersonUpdatedAt: guest.expectedPersonUpdatedAt,
         expectedAttendanceAbsent: true as const,
       })
@@ -247,24 +285,25 @@ export function createMeetingInvitationPlanResolver(
       create: meetingArguments,
       dependencyStepId: "create-meeting",
       targets: guestTargets,
+      exclusions: [...input.resolved.exclusions],
       requestKey: input.requestKey,
       now: input.now,
     });
     if (!guests) return null;
-    return Object.freeze({
+    return MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA.parse({
       meeting: meetingArguments,
       guests,
-      communication: Object.freeze({
+      communication: {
         communicationId: communicationEvryEffectUuid(
           input.requestKey,
           "communication"
         ),
-        recipientSource: Object.freeze({
+        recipientSource: {
           kind: "people" as const,
-          recipientIds: Object.freeze(recipientIds),
-        }),
+          recipientIds: [...recipientIds],
+        },
         audience,
-      }),
+      },
     });
   };
 }
@@ -277,11 +316,15 @@ export const resolveMeetingInvitationPlan = createMeetingInvitationPlanResolver(
   }
 );
 
-function inputBindings(keys: readonly string[], inputKey: string) {
+function inputBindings(
+  keys: readonly string[],
+  inputKey: string,
+  prefix: readonly string[] = []
+) {
   return Object.fromEntries(
     keys.map((key) => [
       key,
-      { kind: "input_path" as const, inputKey, path: [key] },
+      { kind: "input_path" as const, inputKey, path: [...prefix, key] },
     ])
   );
 }
@@ -298,6 +341,7 @@ const GUEST_BATCH_KEYS = [
   "meetingId",
   "dependencyStepId",
   "targets",
+  "exclusions",
   "expectedCoreGroupUserIds",
   "expectedReminderUserIds",
   "notificationTargets",
@@ -317,17 +361,17 @@ export function meetingInvitationRecipeDefinition() {
     identity: MEETING_INVITATION_RECIPE_IDENTITY,
     requiredInputs: [
       {
-        key: "meeting",
-        schema: MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction,
-      },
-      { key: "guests", schema: MEETING_GUEST_BATCH_ARGUMENT_SCHEMA },
-      {
-        key: "communication",
-        schema: COMMUNICATION_MESSAGE_SEND_PLAN.argumentsSchema,
+        key: "plan",
+        schema: MEETING_INVITATION_PLAN_SNAPSHOT_SCHEMA,
       },
     ],
     optionalInputs: [],
-    recordResolvers: [],
+    recordResolvers: [
+      {
+        inputKey: "plan",
+        resolverIdentity: MEETING_INVITATION_PLAN_RESOLVER_IDENTITY,
+      },
+    ],
     preconditions: [],
     eligibleCapabilities: [
       MEETING_INVITATION_CAPABILITY_IDENTITY,
@@ -342,31 +386,37 @@ export function meetingInvitationRecipeDefinition() {
       {
         id: "create-meeting",
         capabilityIdentity: MEETING_INVITATION_CAPABILITY_IDENTITY,
-        arguments: inputBindings(meetingKeys, "meeting"),
+        arguments: inputBindings(meetingKeys, "plan", ["meeting"]),
         dependsOn: [],
         disclosure: {
           title: "Create Vision Meeting",
           items: disclosureItems(meetingKeys),
-          consequences: ["Creates one Vision Meeting in the plant calendar."],
+          consequences: [
+            "Creates one Vision Meeting in the plant calendar.",
+            "Schedules the exact meeting notifications shown in this review.",
+          ],
         },
         failurePolicy: { retry: "same_plan" },
       },
       {
         id: "add-guests",
         capabilityIdentity: MEETING_INVITATION_ADD_GUESTS_IDENTITY,
-        arguments: inputBindings(GUEST_BATCH_KEYS, "guests"),
+        arguments: inputBindings(GUEST_BATCH_KEYS, "plan", ["guests"]),
         dependsOn: ["create-meeting"],
         disclosure: {
           title: "Add resolved guests",
           items: disclosureItems(GUEST_BATCH_KEYS),
-          consequences: ["Adds the exact resolved people to the guest list."],
+          consequences: [
+            "Adds the exact resolved people to the guest list.",
+            "Schedules the exact guest notifications shown in this review.",
+          ],
         },
         failurePolicy: { retry: "same_plan" },
       },
       {
         id: "send-invitations",
         capabilityIdentity: MEETING_INVITATION_SEND_IDENTITY,
-        arguments: inputBindings(COMMUNICATION_KEYS, "communication"),
+        arguments: inputBindings(COMMUNICATION_KEYS, "plan", ["communication"]),
         dependsOn: ["add-guests"],
         disclosure: {
           title: "Send the invitation",
@@ -389,6 +439,7 @@ export function createMeetingInvitationRecipeRegistry(
   overrides: Readonly<{
     addGuests?: EvryExecutionCapabilityRegistration;
     send?: EvryExecutionCapabilityRegistration;
+    planResolver?: EvryRecipeResolverRegistration;
   }> = {}
 ) {
   const createExecution = invitationMeetingsExecutions.find(
@@ -419,7 +470,9 @@ export function createMeetingInvitationRecipeRegistry(
       addGuests,
       send,
     ]),
-    resolvers: [],
+    resolvers: [
+      overrides.planResolver ?? meetingInvitationPlanResolverRegistration(),
+    ],
     preconditions: [],
     definitions: [meetingInvitationRecipeDefinition()],
   });
@@ -438,7 +491,7 @@ function localTimeAt(instant: Date, timeZone: string): string {
 }
 
 function endDateTime(
-  start: EvryResolvedPlantDateTime,
+  start: EvryConfirmationDateTimeDocument,
   durationMinutes: number
 ): EvryConfirmationDateTimeDocument {
   const instant = new Date(
@@ -468,7 +521,7 @@ function endDateTime(
   };
 }
 
-function exclusionCounts(exclusions: readonly MeetingInvitationExclusion[]) {
+function exclusionCounts(exclusions: readonly Readonly<{ reason: string }>[]) {
   const counts = new Map<string, number>();
   for (const { reason } of exclusions) {
     counts.set(reason, (counts.get(reason) ?? 0) + 1);
@@ -476,102 +529,256 @@ function exclusionCounts(exclusions: readonly MeetingInvitationExclusion[]) {
   return [...counts].map(([reason, count]) => ({ reason, count }));
 }
 
-/** Build the one review artifact solely from the exact resolved recipe data. */
+function persistedTargets(step: EvryActionStep) {
+  if (!step.disclosure) throw new Error("Recipe step disclosure is missing");
+  return step.disclosure.items.map(({ label, value }) => ({
+    label,
+    value,
+    sourceLink: null,
+  }));
+}
+
+function persistedMeetingDateTime(
+  meeting: z.infer<typeof MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction>
+) {
+  const instant = new Date(meeting.datetime);
+  const calendarDate = toCalendarDate(instant, meeting.timezone);
+  const localTime = localTimeAt(instant, meeting.timezone);
+  const match = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(localTime);
+  if (!match) throw new Error("Meeting invitation start time is invalid");
+  const hour = (Number(match[1]) % 12) + (match[3] === "PM" ? 12 : 0);
+  const startsAt: EvryConfirmationDateTimeDocument = {
+    calendarDate,
+    localTime,
+    timeZone: meeting.timezone,
+    utcOffset: utcOffsetForZonedTime(
+      calendarDate,
+      hour,
+      Number(match[2]),
+      instant
+    ),
+    instantUtc: instant.toISOString(),
+    interpretation: {
+      basis: "explicit-calendar-date",
+      sourceText: `${calendarDate} ${localTime} ${meeting.timezone}`,
+      statedCalendarDate: calendarDate,
+    },
+  };
+  return {
+    startsAt,
+    endsAt:
+      meeting.durationMinutes === null
+        ? null
+        : endDateTime(startsAt, meeting.durationMinutes),
+  };
+}
+
+/** Build the review solely from the fingerprinted persisted recipe steps. */
 export function buildMeetingInvitationConfirmation(input: {
   plan: EvryConversationPlanIdentity;
-  resolved: ResolvedMeetingInvitationReference;
+  document: EvryActionPlanDocument;
 }): EvryDetailedConfirmationArtifactDocument {
-  const { resolved } = input;
-  const exclusions = exclusionCounts(resolved.exclusions);
-  const guestTargets = resolved.guests.map((guest) => ({
-    label: "Guest",
-    value: `${guest.label} · ${guest.email}`,
-    sourceLink: trustedEvryApplicationSourceLink({
-      label: `Open ${guest.label}`,
-      href: `/people/${guest.personId}`,
-    }),
-  }));
+  const [createStep, guestStep, sendStep] = input.document.steps;
+  if (
+    !createStep ||
+    !guestStep ||
+    !sendStep ||
+    input.document.steps.length !== 3
+  ) {
+    throw new Error("Meeting invitation review requires its exact three steps");
+  }
+  const meeting = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.parse(
+    createStep.arguments
+  );
+  const guests = MEETING_GUEST_BATCH_ARGUMENT_SCHEMA.parse(guestStep.arguments);
+  const communication = COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA.parse(
+    sendStep.arguments
+  );
   return buildEvryConfirmationArtifact({
     kind: "confirmation",
     artifactVersion: 1,
     plan: input.plan,
-    title: "Create Vision Meeting and send invitations",
-    actionLabel: `Create meeting and send ${resolved.guests.length}`,
+    title: input.document.confirmation?.title ?? "",
+    actionLabel: input.document.confirmation?.actionLabel ?? "",
     steps: [
       {
-        stepId: "create-meeting",
-        title: "Create Vision Meeting",
+        stepId: createStep.id,
+        title: createStep.disclosure?.title ?? "",
         effectKind: "meeting",
         reversibility: "reversible",
-        resolvedTargets: [
-          { label: "Meeting", value: "Vision Meeting", sourceLink: null },
+        resolvedTargets: persistedTargets(createStep),
+        counts: [
+          { label: "Meetings created", count: 1 },
           {
-            label: "Location",
-            value: `${resolved.location.name} · ${resolved.location.address}`,
-            sourceLink: null,
+            label: "Meeting notifications scheduled",
+            count: meeting.notificationTargets.length,
           },
         ],
-        counts: [{ label: "Meetings created", count: 1 }],
         exclusions: [],
-        dateTime: {
-          startsAt: {
-            calendarDate: resolved.dateTime.calendarDate,
-            localTime: resolved.dateTime.localTime,
-            timeZone: resolved.dateTime.timeZone,
-            utcOffset: resolved.dateTime.utcOffset,
-            instantUtc: resolved.dateTime.instantUtc,
-            interpretation: { ...resolved.dateTime.interpretation },
-          },
-          endsAt: endDateTime(resolved.dateTime, resolved.durationMinutes),
-        },
-        contentPreviews: [],
+        dateTime: persistedMeetingDateTime(meeting),
+        contentPreviews: meeting.notificationTargets.map(
+          (notification, index) => ({
+            label: `Meeting notification ${index + 1}`,
+            content: JSON.stringify(notification),
+          })
+        ),
         beforeAfter: [],
       },
       {
-        stepId: "add-guests",
-        title: "Add resolved guests",
+        stepId: guestStep.id,
+        title: guestStep.disclosure?.title ?? "",
         effectKind: "other",
         reversibility: "reversible",
-        resolvedTargets: guestTargets,
-        counts: [{ label: "Guests added", count: resolved.guests.length }],
-        exclusions,
+        resolvedTargets: persistedTargets(guestStep),
+        counts: [
+          { label: "Guests added", count: guests.targets.length },
+          {
+            label: "Guest notifications scheduled",
+            count: guests.notificationTargets.length,
+          },
+        ],
+        exclusions: exclusionCounts(guests.exclusions),
         dateTime: null,
-        contentPreviews: [],
+        contentPreviews: guests.notificationTargets.map(
+          (notification, index) => ({
+            label: `Guest notification ${index + 1}`,
+            content: JSON.stringify(notification),
+          })
+        ),
         beforeAfter: [],
       },
       {
-        stepId: "send-invitations",
-        title: "Send the invitation",
+        stepId: sendStep.id,
+        title: sendStep.disclosure?.title ?? "",
         effectKind: "communication",
         reversibility: "irreversible",
-        resolvedTargets: guestTargets.map(({ value, sourceLink }) => ({
-          label: "Recipient",
-          value,
-          sourceLink,
-        })),
-        counts: [{ label: "Emails sent", count: resolved.guests.length }],
-        exclusions,
-        dateTime: null,
-        contentPreviews: [
-          { label: "Subject", content: resolved.subject },
-          { label: "Message", content: resolved.body },
+        resolvedTargets: persistedTargets(sendStep),
+        counts: [
+          {
+            label: "Invitation emails sent",
+            count: communication.audience.recipients.length,
+          },
         ],
+        exclusions: communication.audience.exclusions,
+        dateTime: null,
+        contentPreviews: communication.audience.recipients.flatMap(
+          (recipient) => [
+            {
+              label: `${recipient.label} subject`,
+              content: recipient.subject,
+            },
+            {
+              label: `${recipient.label} message`,
+              content: recipient.bodyText,
+            },
+          ]
+        ),
         beforeAfter: [
           {
             label: "Invitation delivery",
             before: "Not sent",
             after: "Sent immediately",
-            count: resolved.guests.length,
+            count: communication.audience.recipients.length,
           },
         ],
       },
     ],
-    consequences: [
-      "Creates one Vision Meeting in the plant calendar.",
-      `Adds ${resolved.guests.length} guests to the meeting.`,
-      `Sends ${resolved.guests.length} invitation emails immediately.`,
-    ],
+    consequences: input.document.steps.flatMap(
+      (step) => step.disclosure?.consequences ?? []
+    ),
   });
+}
+
+export const MEETING_INVITATION_ARTIFACT_REVIEW: EvryArtifactReviewRegistration =
+  defineEvryArtifactReview({
+    source: {
+      kind: "recipe",
+      identity: MEETING_INVITATION_RECIPE_IDENTITY,
+      registry: MEETING_INVITATION_RECIPE_REGISTRY,
+    },
+    build: buildMeetingInvitationConfirmation,
+  });
+
+export const MEETING_INVITATION_REVIEW_REGISTRY =
+  createEvryArtifactReviewRegistry([MEETING_INVITATION_ARTIFACT_REVIEW]);
+
+/** Revalidate the whole pre-create recipe against its planned future meeting. */
+export async function meetingInvitationPlanTargetsAreCurrent(input: {
+  actor: EvryPlantActor;
+  plan: { document: unknown };
+  checkedAt: Date;
+}): Promise<boolean> {
+  try {
+    const document = parseStoredEvryActionPlan({
+      document: input.plan.document,
+      registry:
+        MEETING_INVITATION_RECIPE_REGISTRY.executionRegistry.planRegistry,
+    });
+    if (document.recipe?.identity !== MEETING_INVITATION_RECIPE_IDENTITY) {
+      return false;
+    }
+    const definition = MEETING_INVITATION_RECIPE_REGISTRY.registrationFor(
+      MEETING_INVITATION_RECIPE_IDENTITY
+    );
+    if (
+      !definition ||
+      !storedDocumentMatchesEvryRecipe({ definition, document })
+    ) {
+      return false;
+    }
+    const [createStep, guestStep, sendStep] = document.steps;
+    if (!createStep || !guestStep || !sendStep || document.steps.length !== 3) {
+      return false;
+    }
+    if (
+      !(await meetingsPlanTargetIsCurrent({
+        ...input,
+        step: createStep,
+      })) ||
+      !(await meetingsPlanTargetIsCurrent({
+        ...input,
+        step: guestStep,
+      }))
+    ) {
+      return false;
+    }
+    const meeting = MEETINGS_EFFECT_ARGUMENT_SCHEMAS.createMeetingAction.parse(
+      createStep.arguments
+    );
+    const communication = COMMUNICATION_MESSAGE_SEND_ARGUMENT_SCHEMA.parse(
+      sendStep.arguments
+    );
+    if (
+      communication.recipientSource.kind !== "people" ||
+      communication.audience.meetingId !== meeting.meetingId
+    ) {
+      return false;
+    }
+    const currentAudience = await resolveEvryCommunicationAudience({
+      churchId: input.actor.plantId,
+      recipientIds: communication.recipientSource.recipientIds,
+      subject: communication.audience.subject,
+      body: communication.audience.body,
+      channel: "email",
+      templateId: communication.audience.templateId,
+      meetingId: meeting.meetingId,
+      plannedMeeting: {
+        id: meeting.meetingId,
+        title: meeting.title,
+        type: meeting.type,
+        datetime: new Date(meeting.datetime),
+        locationName: meeting.locationName,
+        locationAddress: meeting.locationAddress,
+        agenda: meeting.agenda,
+      },
+    });
+    return (
+      currentAudience !== null &&
+      JSON.stringify(currentAudience) === JSON.stringify(communication.audience)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export type MeetingInvitationReferenceResolverDependencies = Readonly<{
@@ -631,7 +838,7 @@ function resolveLocation(
   }
   if (facts.locations.length === 0) {
     return missing(
-      "meeting location",
+      "meeting_location",
       "Which exact church location should Evry use for this meeting?"
     );
   }
@@ -642,7 +849,7 @@ function resolveLocation(
     artifact: Object.freeze({
       kind: "clarification" as const,
       mode: "choice" as const,
-      entityType: "meeting location",
+      entityType: "meeting_location",
       prompt: "Which exact church location should Evry use?",
       choices: facts.locations.map(locationChoice) as [
         ReturnType<typeof locationChoice>,
@@ -656,7 +863,7 @@ function resolveLocation(
 
 function locationChoice(location: MeetingInvitationLocation) {
   return Object.freeze({
-    entityType: "meeting location",
+    entityType: "meeting_location",
     id: location.id!,
     label: location.name,
     distinguishingFacts: Object.freeze([
@@ -740,7 +947,7 @@ export function createMeetingInvitationReferenceResolver(
   }): Promise<MeetingInvitationReferenceResolution> {
     if (!input.request.durationMinutes) {
       return missing(
-        "meeting duration",
+        "meeting_duration",
         "How many minutes should the Vision Meeting last?"
       );
     }
@@ -756,7 +963,7 @@ export function createMeetingInvitationReferenceResolver(
       sourceText: input.request.sourceText,
     });
     if (dateTime.status === "clarification") {
-      return missing("meeting date and time", dateTime.prompt);
+      return missing("meeting_datetime", dateTime.prompt);
     }
     if (dateTime.status !== "resolved") return { kind: "unavailable" };
 
@@ -867,8 +1074,71 @@ async function loadProductionFacts(
   });
 }
 
-export const resolveMeetingInvitationReference =
-  createMeetingInvitationReferenceResolver({
-    resolveDateTime: resolveEvryPlantDateTimeRequest,
-    loadFacts: loadProductionFacts,
+const productionReferenceResolver = createMeetingInvitationReferenceResolver({
+  resolveDateTime: resolveEvryPlantDateTimeRequest,
+  loadFacts: loadProductionFacts,
+});
+
+export type AuthorizedMeetingInvitationResolution =
+  | MeetingInvitationReferenceResolution
+  | Readonly<{
+      kind: "planned";
+      snapshot: MeetingInvitationPlanSnapshot;
+    }>;
+
+/**
+ * Production fact lookup is reachable only through a freshly authorized,
+ * inventory-backed People read. The compiler obtains the same authorization
+ * again immediately before it resolves and fingerprints the persisted plan.
+ */
+export async function resolveAuthorizedMeetingInvitationRequest(input: {
+  authorization: EvryReadCapabilityAuthorization;
+  request: MeetingInvitationReferenceRequest;
+  requestKey: EvryPlanRequestKey;
+  now: Date;
+}): Promise<AuthorizedMeetingInvitationResolution> {
+  if (
+    input.authorization.registration.identity !==
+    EVRY_PEOPLE_READ_PROBE_IDENTITY
+  ) {
+    return { kind: "unavailable" };
+  }
+  const resolved = await productionReferenceResolver({
+    actor: input.authorization.actor,
+    request: input.request,
   });
+  if (resolved.kind !== "resolved") return resolved;
+  const snapshot = await resolveMeetingInvitationPlan({
+    actor: input.authorization.actor,
+    resolved,
+    requestKey: input.requestKey,
+    now: input.now,
+  });
+  return snapshot
+    ? Object.freeze({ kind: "planned" as const, snapshot })
+    : { kind: "unavailable" };
+}
+
+export function meetingInvitationPlanResolverRegistration(
+  input: {
+    resolveAuthorized?: typeof resolveAuthorizedMeetingInvitationRequest;
+  } = {}
+): EvryRecipeResolverRegistration {
+  const resolveAuthorized =
+    input.resolveAuthorized ?? resolveAuthorizedMeetingInvitationRequest;
+  return defineEvryRecipeResolver({
+    identity: MEETING_INVITATION_PLAN_RESOLVER_IDENTITY,
+    readCapabilityIdentity: EVRY_PEOPLE_READ_PROBE_IDENTITY,
+    async resolve({ authorization, rawValue }) {
+      const parsed =
+        MEETING_INVITATION_PLAN_RESOLVER_INPUT_SCHEMA.parse(rawValue);
+      const result = await resolveAuthorized({
+        authorization,
+        request: parsed.request,
+        requestKey: parsed.requestKey as EvryPlanRequestKey,
+        now: new Date(parsed.now),
+      });
+      return result.kind === "planned" ? result.snapshot : null;
+    },
+  });
+}

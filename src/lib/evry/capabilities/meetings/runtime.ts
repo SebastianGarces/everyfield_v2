@@ -496,6 +496,8 @@ async function notificationBaselineIsCurrent(input: {
     select distinct u.id::text as id
     from persons p
     join users u on u.church_id = ${plantId}::uuid
+      and u.sending_church_id is null
+      and u.sending_network_id is null
       and lower(u.email) = lower(p.email)
     where p.church_id = ${plantId}::uuid
       and p.deleted_at is null and p.email is not null
@@ -534,6 +536,8 @@ async function notificationBaselineIsCurrent(input: {
         select distinct u.id::text
         from persons p
         join users u on u.church_id = ${plantId}::uuid
+          and u.sending_church_id is null
+          and u.sending_network_id is null
           and lower(u.email) = lower(p.email)
         where p.church_id = ${plantId}::uuid
           and p.id in (
@@ -554,6 +558,8 @@ async function notificationBaselineIsCurrent(input: {
           from meeting_attendance a
           join persons p on p.id = a.person_id and p.church_id = a.church_id
           join users u on u.church_id = a.church_id
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and lower(u.email) = lower(p.email)
           where a.meeting_id = ${input.meetingId}::uuid
             and a.church_id = ${plantId}::uuid
@@ -564,6 +570,8 @@ async function notificationBaselineIsCurrent(input: {
           select u.id
           from persons p
           join users u on u.church_id = p.church_id
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and lower(u.email) = lower(p.email)
           where p.id = ${addPerson ? personId : null}::uuid
             and p.church_id = ${plantId}::uuid
@@ -571,6 +579,8 @@ async function notificationBaselineIsCurrent(input: {
           union
           select u.id from users u
           where u.church_id = ${plantId}::uuid
+            and u.sending_church_id is null
+            and u.sending_network_id is null
             and ${quickAdd ? email : null}::text is not null
             and lower(u.email) = lower(${quickAdd ? email : null}::text)
         ) actual
@@ -711,6 +721,8 @@ async function guestBatchPlanTargetIsCurrent(input: {
         select distinct u.id::text as id
         from persons p join users u
           on u.church_id = ${input.actor.plantId}::uuid
+         and u.sending_church_id is null
+         and u.sending_network_id is null
          and lower(u.email) = lower(p.email)
         where p.church_id = ${input.actor.plantId}::uuid
           and p.deleted_at is null and p.email is not null
@@ -722,6 +734,8 @@ async function guestBatchPlanTargetIsCurrent(input: {
         union select distinct u.id::text
         from persons p join users u
           on u.church_id = ${input.actor.plantId}::uuid
+         and u.sending_church_id is null
+         and u.sending_network_id is null
          and lower(u.email) = lower(p.email)
         where p.church_id = ${input.actor.plantId}::uuid
           and p.id in (

@@ -5,6 +5,7 @@ import {
 } from "@/lib/evry/conversations/artifacts";
 import { authorizeEvryReadCapability } from "@/lib/evry/eligibility/capabilities";
 import { deriveEvryPlanRequestKey } from "@/lib/evry/plans";
+import { selectMeetingInvitationReferenceRequest } from "@/lib/evry/recipes/meeting-invitation-selection";
 
 import type { EvryCapabilityConversationContinuation } from "../conversation";
 
@@ -75,7 +76,10 @@ export function createMeetingsEvryConversationContinuation(
   return {
     identity: "meetings",
     matches(input) {
-      return selectMeetingsEvryRequest(input.literalUserText) !== null;
+      return (
+        selectMeetingInvitationReferenceRequest(input.literalUserText) ===
+          null && selectMeetingsEvryRequest(input.literalUserText) !== null
+      );
     },
     async continue(input) {
       const selection = selectMeetingsEvryRequest(input.literalUserText);

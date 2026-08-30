@@ -40,10 +40,8 @@ test(
   }
 );
 
-test(
-  "the meeting invitation recipe binds create output and resumes only sending",
-  { skip },
-  () => {
+for (const scenario of ["end_to_end", "partial_failure"] as const) {
+  test(`meeting.invitation.reference:${scenario}`, { skip }, () => {
     const proof = spawnSync(
       process.execPath,
       [
@@ -57,6 +55,7 @@ test(
           process.cwd(),
           "src/lib/evry/recipes/meeting-invitation-live-proof.ts"
         ),
+        scenario,
       ],
       {
         cwd: process.cwd(),
@@ -71,5 +70,5 @@ test(
       `live invitation proof failed\nerror: ${proof.error?.message ?? "none"}\nsignal: ${proof.signal ?? "none"}\nstdout:\n${proof.stdout}\nstderr:\n${proof.stderr}`
     );
     assert.match(proof.stdout, /Meeting invitation live proof passed/);
-  }
-);
+  });
+}

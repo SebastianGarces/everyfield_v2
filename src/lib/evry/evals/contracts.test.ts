@@ -32,6 +32,25 @@ test("every generated capability and recipe fixture is complete", () => {
   assert.ok(EVRY_RECIPE_EVAL_FIXTURES.length > 0);
 });
 
+test("recipe outcomes bind distinct named production-path proofs", () => {
+  const [fixture] = EVRY_RECIPE_EVAL_FIXTURES;
+  assert.ok(fixture);
+  assert.deepEqual(fixture.cases.end_to_end, [
+    {
+      id: "meeting.invitation.reference:end_to_end",
+      proofId: "recipe-end-to-end",
+      testName: "meeting.invitation.reference:end_to_end",
+    },
+  ]);
+  assert.deepEqual(fixture.cases.partial_failure, [
+    {
+      id: "meeting.invitation.reference:partial_failure",
+      proofId: "recipe-end-to-end",
+      testName: "meeting.invitation.reference:partial_failure",
+    },
+  ]);
+});
+
 test("capability registry rejects each missing required layer", () => {
   for (const missing of EVRY_CAPABILITY_EVAL_LAYERS) {
     const cases = casesFor(EVRY_CAPABILITY_EVAL_LAYERS) as Record<
