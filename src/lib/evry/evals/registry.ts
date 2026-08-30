@@ -5,6 +5,7 @@ import {
 } from "@/lib/evry/recipes/fixtures.test-helper";
 import communicationInventory from "@/lib/evry/capabilities/communication/inventory.generated.json";
 import launchInventory from "@/lib/evry/capabilities/launch/inventory.generated.json";
+import teamsInventory from "@/lib/evry/capabilities/teams/inventory.generated.json";
 
 import {
   defineEvryCapabilityEvalFixture,
@@ -68,8 +69,20 @@ export const EVRY_EVAL_PROOFS: readonly EvryEvalProof[] = Object.freeze([
     safetyGates: [],
   },
   {
+    id: "teams-capability-contract",
+    testFile: "src/lib/evry/capabilities/teams/eval-fixtures.test.ts",
+    lane: "deterministic",
+    safetyGates: [],
+  },
+  {
     id: "launch-capability-live",
     testFile: "src/lib/evry/capabilities/launch/effect-live.test.ts",
+    lane: "live_database",
+    safetyGates: [],
+  },
+  {
+    id: "teams-effect-live",
+    testFile: "src/lib/evry/capabilities/teams/effect-live.test.ts",
     lane: "live_database",
     safetyGates: [],
   },
@@ -262,6 +275,33 @@ function launchCapabilityFixture(
   });
 }
 
+function teamsCapabilityFixture(
+  capabilityIdentity: string
+): EvryCapabilityEvalFixture {
+  const evalCase = (layer: EvryCapabilityEvalLayer) => [
+    {
+      id: `${capabilityIdentity}:${layer}`,
+      proofId: "teams-capability-contract",
+      testName: `${capabilityIdentity}:${layer}`,
+    },
+  ];
+  return defineEvryCapabilityEvalFixture({
+    capabilityIdentity,
+    cases: {
+      policy: evalCase("policy"),
+      selection: evalCase("selection"),
+      arguments: evalCase("arguments"),
+      tenancy: evalCase("tenancy"),
+      permission: evalCase("permission"),
+      confirmation: evalCase("confirmation"),
+      execution: evalCase("execution"),
+      idempotency: evalCase("idempotency"),
+      errors: evalCase("errors"),
+      ui_artifact: evalCase("ui_artifact"),
+    },
+  });
+}
+
 /**
  * Only concrete effect registrations exercised by the reference recipe enter
  * this release corpus. Each slot names its own node:test outcome; shared live
@@ -281,6 +321,9 @@ export const EVRY_CAPABILITY_EVAL_FIXTURES = Object.freeze([
   ),
   ...launchInventory.capabilities.map(({ identity, operationKind }) =>
     launchCapabilityFixture(identity, operationKind)
+  ),
+  ...teamsInventory.capabilities.map(({ identity }) =>
+    teamsCapabilityFixture(identity)
   ),
 ]);
 
