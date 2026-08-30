@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -28,7 +30,7 @@ import {
   selectUnownedContacts,
 } from "@/lib/tasks/follow-up-ownership";
 import { readTaskListPage, taskListScope } from "@/lib/tasks/list-page";
-import { TASK_LIST_VIEWS } from "@/lib/tasks/list-params";
+import { TASK_STANDARD_LIST_VIEWS } from "@/lib/tasks/list-params";
 import { readPhaseTemplatePrompt } from "@/lib/tasks/phase-prompt";
 import { getTask, getTaskCounts, listSubtasks } from "@/lib/tasks/service";
 import { TASK_TEMPLATES, taskTemplateSize } from "@/lib/tasks/templates";
@@ -44,7 +46,89 @@ export const TASK_READ_IDENTITIES = {
 } as const;
 
 const uuid = z.string().uuid();
+const standardTaskListViewSchema = z.enum(TASK_STANDARD_LIST_VIEWS);
+const taskStatusSchema = z.enum(taskStatuses);
+const taskPrioritySchema = z.enum(taskPriorities);
+const taskCategorySchema = z.enum(taskCategories);
 export const TASK_RELATED_READ_LIMIT = 25;
+
+async function plantAssigneeOptions(plantId: string) {
+  return db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.churchId, plantId));
+}
+
+async function readPlantPhase(plantId: string) {
+  const [plant] = await db
+    .select({ phase: churches.currentPhase })
+    .from(churches)
+    .where(and(eq(churches.id, plantId)))
+    .limit(1);
+  return plant ?? null;
+}
+
+type TaskReadBoundaries = Readonly<{
+  getTask: typeof getTask;
+  getTaskCounts: typeof getTaskCounts;
+  listFollowUpAssignees: typeof listFollowUpAssignees;
+  listFollowUpContacts: typeof listFollowUpContacts;
+  listOpenFollowUpTasks: typeof listOpenFollowUpTasks;
+  listPrerequisiteCandidates: typeof listPrerequisiteCandidates;
+  listSubtasks: typeof listSubtasks;
+  listTaskPrerequisites: typeof listTaskPrerequisites;
+  plantAssigneeOptions: typeof plantAssigneeOptions;
+  readPhaseTemplatePrompt: typeof readPhaseTemplatePrompt;
+  readPlantPhase: typeof readPlantPhase;
+  readTaskListPage: typeof readTaskListPage;
+}>;
+export type TaskReadBoundaryName = keyof TaskReadBoundaries;
+
+const TASK_READ_BOUNDARIES: TaskReadBoundaries = {
+  getTask,
+  getTaskCounts,
+  listFollowUpAssignees,
+  listFollowUpContacts,
+  listOpenFollowUpTasks,
+  listPrerequisiteCandidates,
+  listSubtasks,
+  listTaskPrerequisites,
+  plantAssigneeOptions,
+  readPhaseTemplatePrompt,
+  readPlantPhase,
+  readTaskListPage,
+};
+const taskReadBoundaryScope = new AsyncLocalStorage<
+  Partial<TaskReadBoundaries>
+>();
+
+function taskReadBoundaries(): TaskReadBoundaries {
+  return { ...TASK_READ_BOUNDARIES, ...taskReadBoundaryScope.getStore() };
+}
+
+/** Live-proof seam: production callers can never replace backing readers. */
+export async function withTaskReadProofBoundaries<Result>(
+  overrides: Partial<TaskReadBoundaries>,
+  run: () => Promise<Result>
+): Promise<Result> {
+  if (process.env.LIVE_DB_TESTS !== "1") {
+    throw new Error("Task read proof boundaries require LIVE_DB_TESTS=1");
+  }
+  return taskReadBoundaryScope.run(overrides, run);
+}
+
+export async function withTaskReadProofFailure<Result>(
+  boundary: TaskReadBoundaryName,
+  run: () => Promise<Result>
+): Promise<Result> {
+  const failure = async () => {
+    throw new Error(`Forced Task read boundary failure: ${boundary}`);
+  };
+  return withTaskReadProofBoundaries(
+    { [boundary]: failure } as Partial<TaskReadBoundaries>,
+    run
+  );
+}
 
 function displayText(
   value: string | null | undefined,
@@ -175,6 +259,22 @@ function unavailableCursorArtifact(input: {
   });
 }
 
+function unavailableTaskListCursorArtifact(input: {
+  view: (typeof TASK_STANDARD_LIST_VIEWS)[number];
+  cursor: string;
+}) {
+  return buildEvryReadArtifact({
+    title: "Task list cursor unavailable",
+    filters: [
+      { label: "View", value: input.view },
+      { label: "Page cursor", value: input.cursor },
+    ],
+    exclusions: [{ reason: "Cursor is not in this result set", count: 1 }],
+    items: [],
+    sourceLinks: [link("Open Tasks", "/tasks")],
+  });
+}
+
 function taskPageSource(taskId: string | null) {
   return link(
     taskId ? "Open task" : "Create a task",
@@ -207,19 +307,50 @@ function planningContinuationCommand(input: {
     : `Show ${subject}${context}${search}`;
 }
 
+type StandardTaskListView = (typeof TASK_STANDARD_LIST_VIEWS)[number];
+type TaskStatus = (typeof taskStatuses)[number];
+type TaskPriority = (typeof taskPriorities)[number];
+type TaskCategory = (typeof taskCategories)[number];
+
+function closedValues<Value>(
+  literal: string,
+  schema: z.ZodType<Value>
+): Value[] | null {
+  if (literal.toLocaleLowerCase("en-US") === "any") return [];
+  const values = literal.split(",").map((value) => value.trim());
+  if (values.length === 0 || new Set(values).size !== values.length) {
+    return null;
+  }
+  const parsed = values.map((value) => schema.safeParse(value));
+  if (parsed.some((result) => !result.success)) return null;
+  return parsed.flatMap((result) => (result.success ? [result.data] : []));
+}
+
+function taskListContinuationCommand(input: {
+  view: StandardTaskListView;
+  showCompleted: boolean;
+  status: readonly TaskStatus[];
+  priority: readonly TaskPriority[];
+  category: readonly TaskCategory[];
+  cursor: string;
+}) {
+  const values = (items: readonly string[]) => items.join(",") || "any";
+  return `Load more tasks: view=${input.view}; completed=${String(input.showCompleted)}; status=${values(input.status)}; priority=${values(input.priority)}; category=${values(input.category)}; after=${input.cursor}`;
+}
+
 export const TASK_LIST_READ = defineEvryReadRegistration({
   id: "tasks.list",
   capabilityIdentity: TASK_READ_IDENTITIES.list,
   inputShape: {
-    view: z.enum(TASK_LIST_VIEWS),
+    view: standardTaskListViewSchema,
     showCompleted: z.boolean(),
-    status: z.array(z.enum(taskStatuses)).max(taskStatuses.length),
-    priority: z.array(z.enum(taskPriorities)).max(taskPriorities.length),
-    category: z.array(z.enum(taskCategories)).max(taskCategories.length),
+    status: z.array(taskStatusSchema).max(taskStatuses.length),
+    priority: z.array(taskPrioritySchema).max(taskPriorities.length),
+    category: z.array(taskCategorySchema).max(taskCategories.length),
     cursor: uuid.nullable(),
   },
   async run({ authorization }, input) {
-    const result = await readTaskListPage(
+    const result = await taskReadBoundaries().readTaskListPage(
       authorization.actor.plantId,
       authorization.actor.userId,
       {
@@ -231,6 +362,12 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
       },
       input.cursor ?? undefined
     );
+    if (!result.cursorAvailable && input.cursor) {
+      return unavailableTaskListCursorArtifact({
+        view: input.view,
+        cursor: input.cursor,
+      });
+    }
     return buildEvryReadArtifact({
       title: "Tasks",
       filters: [
@@ -247,6 +384,15 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
         {
           label: "Next page cursor",
           value: result.nextCursor ?? "End of results",
+        },
+        {
+          label: "Next page command",
+          value: result.nextCursor
+            ? taskListContinuationCommand({
+                ...input,
+                cursor: result.nextCursor,
+              })
+            : "End of results",
         },
       ],
       // Pagination is continuation, not exclusion: the next cursor above
@@ -283,10 +429,10 @@ export const TASK_LIST_READ = defineEvryReadRegistration({
 });
 
 const taskListScopeInput = {
-  view: z.enum(TASK_LIST_VIEWS),
-  status: z.array(z.enum(taskStatuses)).max(taskStatuses.length),
-  priority: z.array(z.enum(taskPriorities)).max(taskPriorities.length),
-  category: z.array(z.enum(taskCategories)).max(taskCategories.length),
+  view: standardTaskListViewSchema,
+  status: z.array(taskStatusSchema).max(taskStatuses.length),
+  priority: z.array(taskPrioritySchema).max(taskPriorities.length),
+  category: z.array(taskCategorySchema).max(taskCategories.length),
 } as const;
 
 export const TASK_COUNTS_READ = defineEvryReadRegistration({
@@ -294,7 +440,7 @@ export const TASK_COUNTS_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.counts,
   inputShape: taskListScopeInput,
   async run({ authorization }, input) {
-    const counts = await getTaskCounts(
+    const counts = await taskReadBoundaries().getTaskCounts(
       authorization.actor.plantId,
       taskListScope(authorization.actor.userId, {
         ...input,
@@ -343,9 +489,9 @@ export const TASK_FOLLOW_UP_OWNERSHIP_READ = defineEvryReadRegistration({
   },
   async run({ authorization }, input) {
     const [assignees, contacts, openTasks] = await Promise.all([
-      listFollowUpAssignees(authorization.actor.plantId),
-      listFollowUpContacts(authorization.actor.plantId),
-      listOpenFollowUpTasks(authorization.actor.plantId),
+      taskReadBoundaries().listFollowUpAssignees(authorization.actor.plantId),
+      taskReadBoundaries().listFollowUpContacts(authorization.actor.plantId),
+      taskReadBoundaries().listOpenFollowUpTasks(authorization.actor.plantId),
     ]);
     const unownedContactIds = new Set(
       selectUnownedContacts(contacts, openTasks).map(({ personId }) => personId)
@@ -443,9 +589,10 @@ export const TASK_PHASE_TEMPLATE_PROMPT_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.phasePrompt,
   inputShape: {},
   async run({ authorization }) {
-    const { transitionId, prompt } = await readPhaseTemplatePrompt(
-      authorization.actor.plantId
-    );
+    const { transitionId, prompt } =
+      await taskReadBoundaries().readPhaseTemplatePrompt(
+        authorization.actor.plantId
+      );
     if (!prompt) {
       return buildEvryReadArtifact({
         title: "Phase checklist prompt",
@@ -500,11 +647,17 @@ export const TASK_DETAIL_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.detail,
   inputShape: { taskId: uuid },
   async run({ authorization }, { taskId }) {
-    const task = await getTask(authorization.actor.plantId, taskId);
+    const task = await taskReadBoundaries().getTask(
+      authorization.actor.plantId,
+      taskId
+    );
     if (!task) return unavailableTaskArtifact(taskId);
     const [subtasks, prerequisites] = await Promise.all([
-      listSubtasks(authorization.actor.plantId, task.id),
-      listTaskPrerequisites(authorization.actor.plantId, task.id),
+      taskReadBoundaries().listSubtasks(authorization.actor.plantId, task.id),
+      taskReadBoundaries().listTaskPrerequisites(
+        authorization.actor.plantId,
+        task.id
+      ),
     ]);
     return buildEvryReadArtifact({
       title: artifactTitle(task.title, "Task"),
@@ -566,10 +719,16 @@ export const TASK_CHECKLIST_DETAIL_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.detail,
   inputShape: { taskId: uuid, cursor: uuid.nullable() },
   async run({ authorization }, { taskId, cursor }) {
-    const task = await getTask(authorization.actor.plantId, taskId);
+    const task = await taskReadBoundaries().getTask(
+      authorization.actor.plantId,
+      taskId
+    );
     if (!task) return unavailableTaskArtifact(taskId);
 
-    const rows = await listSubtasks(authorization.actor.plantId, task.id);
+    const rows = await taskReadBoundaries().listSubtasks(
+      authorization.actor.plantId,
+      task.id
+    );
     const page = cursorPage(rows, cursor);
     if (!page && cursor) {
       return unavailableCursorArtifact({
@@ -634,10 +793,13 @@ export const TASK_PREREQUISITE_DETAIL_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.detail,
   inputShape: { taskId: uuid, cursor: uuid.nullable() },
   async run({ authorization }, { taskId, cursor }) {
-    const task = await getTask(authorization.actor.plantId, taskId);
+    const task = await taskReadBoundaries().getTask(
+      authorization.actor.plantId,
+      taskId
+    );
     if (!task) return unavailableTaskArtifact(taskId);
 
-    const rows = await listTaskPrerequisites(
+    const rows = await taskReadBoundaries().listTaskPrerequisites(
       authorization.actor.plantId,
       task.id
     );
@@ -703,15 +865,15 @@ export const TASK_PLANNING_READ = defineEvryReadRegistration({
   inputShape: { taskId: uuid.nullable() },
   async run({ authorization }, { taskId }) {
     if (taskId) {
-      const task = await getTask(authorization.actor.plantId, taskId);
+      const task = await taskReadBoundaries().getTask(
+        authorization.actor.plantId,
+        taskId
+      );
       if (!task) return unavailableTaskArtifact(taskId);
     }
     const [plantUsers, prerequisites] = await Promise.all([
-      db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.churchId, authorization.actor.plantId)),
-      listPrerequisiteCandidates(
+      taskReadBoundaries().plantAssigneeOptions(authorization.actor.plantId),
+      taskReadBoundaries().listPrerequisiteCandidates(
         authorization.actor.plantId,
         taskId ?? undefined
       ),
@@ -781,13 +943,6 @@ export const TASK_PLANNING_READ = defineEvryReadRegistration({
   },
 });
 
-async function plantAssigneeOptions(plantId: string) {
-  return db
-    .select({ id: users.id, name: users.name, email: users.email })
-    .from(users)
-    .where(eq(users.churchId, plantId));
-}
-
 export const TASK_ASSIGNEE_PLANNING_READ = defineEvryReadRegistration({
   id: "tasks.planning-options.assignees",
   capabilityIdentity: TASK_READ_IDENTITIES.planning,
@@ -798,12 +953,15 @@ export const TASK_ASSIGNEE_PLANNING_READ = defineEvryReadRegistration({
   },
   async run({ authorization }, { taskId, search, cursor }) {
     if (taskId) {
-      const task = await getTask(authorization.actor.plantId, taskId);
+      const task = await taskReadBoundaries().getTask(
+        authorization.actor.plantId,
+        taskId
+      );
       if (!task) return unavailableTaskArtifact(taskId);
     }
     const [plantUsers, followUpAssignees] = await Promise.all([
-      plantAssigneeOptions(authorization.actor.plantId),
-      listFollowUpAssignees(authorization.actor.plantId),
+      taskReadBoundaries().plantAssigneeOptions(authorization.actor.plantId),
+      taskReadBoundaries().listFollowUpAssignees(authorization.actor.plantId),
     ]);
     const followUpIds = new Set(followUpAssignees.map(({ id }) => id));
     const rows = plantUsers
@@ -887,11 +1045,14 @@ export const TASK_PREREQUISITE_PLANNING_READ = defineEvryReadRegistration({
   },
   async run({ authorization }, { taskId, search, cursor }) {
     if (taskId) {
-      const task = await getTask(authorization.actor.plantId, taskId);
+      const task = await taskReadBoundaries().getTask(
+        authorization.actor.plantId,
+        taskId
+      );
       if (!task) return unavailableTaskArtifact(taskId);
     }
     const rows = (
-      await listPrerequisiteCandidates(
+      await taskReadBoundaries().listPrerequisiteCandidates(
         authorization.actor.plantId,
         taskId ?? undefined
       )
@@ -963,11 +1124,9 @@ export const TASK_TEMPLATES_READ = defineEvryReadRegistration({
   capabilityIdentity: TASK_READ_IDENTITIES.templates,
   inputShape: {},
   async run({ authorization }) {
-    const [plant] = await db
-      .select({ phase: churches.currentPhase })
-      .from(churches)
-      .where(and(eq(churches.id, authorization.actor.plantId)))
-      .limit(1);
+    const plant = await taskReadBoundaries().readPlantPhase(
+      authorization.actor.plantId
+    );
     return buildEvryReadArtifact({
       title: "Task checklist templates",
       filters: [
@@ -998,7 +1157,7 @@ export const TASK_TEMPLATES_READ = defineEvryReadRegistration({
 export type TaskEvryReadSelection =
   | Readonly<{
       kind: "list";
-      view: (typeof TASK_LIST_VIEWS)[number];
+      view: StandardTaskListView;
       showCompleted: boolean;
       status: (typeof taskStatuses)[number][];
       priority: (typeof taskPriorities)[number][];
@@ -1007,7 +1166,10 @@ export type TaskEvryReadSelection =
     }>
   | Readonly<{
       kind: "counts";
-      view: (typeof TASK_LIST_VIEWS)[number];
+      view: StandardTaskListView;
+      status: TaskStatus[];
+      priority: TaskPriority[];
+      category: TaskCategory[];
     }>
   | Readonly<{
       kind: "follow_up_ownership";
@@ -1049,6 +1211,100 @@ export function selectTaskEvryRead(
 ): TaskEvryReadSelection | null {
   const text = literalUserText.normalize("NFKC").trim();
   let match: RegExpExecArray | null;
+  match = new RegExp(
+    `^load more tasks: view=(my_tasks|all);\\s*completed=(true|false);\\s*status=([^;]+);\\s*priority=([^;]+);\\s*category=([^;]+);\\s*after=${UUID}[.!?]*$`,
+    "i"
+  ).exec(text);
+  if (match?.[1] && match[2] && match[3] && match[4] && match[5] && match[6]) {
+    const view = standardTaskListViewSchema.safeParse(
+      match[1].toLocaleLowerCase("en-US")
+    );
+    const status = closedValues(
+      match[3].toLocaleLowerCase("en-US"),
+      taskStatusSchema
+    );
+    const priority = closedValues(
+      match[4].toLocaleLowerCase("en-US"),
+      taskPrioritySchema
+    );
+    const category = closedValues(
+      match[5].toLocaleLowerCase("en-US"),
+      taskCategorySchema
+    );
+    if (view.success && status && priority && category) {
+      return {
+        kind: "list",
+        view: view.data,
+        showCompleted: match[2].toLocaleLowerCase("en-US") === "true",
+        status,
+        priority,
+        category,
+        cursor: match[6],
+      };
+    }
+  }
+  match =
+    /^(?:show|list)(?: me)? tasks: view=(my_tasks|all);\s*completed=(true|false);\s*status=([^;]+);\s*priority=([^;]+);\s*category=([^;.!?]+)[.!?]*$/i.exec(
+      text
+    );
+  if (match?.[1] && match[2] && match[3] && match[4] && match[5]) {
+    const view = standardTaskListViewSchema.safeParse(
+      match[1].toLocaleLowerCase("en-US")
+    );
+    const status = closedValues(
+      match[3].toLocaleLowerCase("en-US"),
+      taskStatusSchema
+    );
+    const priority = closedValues(
+      match[4].toLocaleLowerCase("en-US"),
+      taskPrioritySchema
+    );
+    const category = closedValues(
+      match[5].toLocaleLowerCase("en-US"),
+      taskCategorySchema
+    );
+    if (view.success && status && priority && category) {
+      return {
+        kind: "list",
+        view: view.data,
+        showCompleted: match[2].toLocaleLowerCase("en-US") === "true",
+        status,
+        priority,
+        category,
+        cursor: null,
+      };
+    }
+  }
+  match =
+    /^(?:show|list)(?: me)? task counts: view=(my_tasks|all);\s*status=([^;]+);\s*priority=([^;]+);\s*category=([^;.!?]+)[.!?]*$/i.exec(
+      text
+    );
+  if (match?.[1] && match[2] && match[3] && match[4]) {
+    const view = standardTaskListViewSchema.safeParse(
+      match[1].toLocaleLowerCase("en-US")
+    );
+    const status = closedValues(
+      match[2].toLocaleLowerCase("en-US"),
+      taskStatusSchema
+    );
+    const priority = closedValues(
+      match[3].toLocaleLowerCase("en-US"),
+      taskPrioritySchema
+    );
+    const category = closedValues(
+      match[4].toLocaleLowerCase("en-US"),
+      taskCategorySchema
+    );
+    if (view.success && status && priority && category) {
+      return {
+        kind: "counts",
+        view: view.data,
+        status,
+        priority,
+        category,
+      };
+    }
+  }
   match = new RegExp(
     `^load more all tasks( including completed)? after\\s+${UUID}[.!?]*$`,
     "i"
@@ -1105,7 +1361,20 @@ export function selectTaskEvryRead(
     };
   }
   if (/^(?:show|list)(?: me)? task counts[.!?]*$/i.test(text)) {
-    return { kind: "counts", view: "my_tasks" };
+    return {
+      kind: "counts",
+      view: "my_tasks",
+      status: [],
+      priority: [],
+      category: [],
+    };
+  }
+  if (/^(?:show|list)(?: me)? (?:task )?assignments[.!?]*$/i.test(text)) {
+    return {
+      kind: "follow_up_ownership",
+      section: "open_tasks",
+      cursor: null,
+    };
   }
   match = new RegExp(
     `^load more task follow-up (contacts|tasks|assignees) after\\s+${UUID}[.!?]*$`,
@@ -1429,9 +1698,9 @@ export const continueTaskEvryRead = createEvryReadContinuation({
             readId: TASK_COUNTS_READ.id,
             input: {
               view: selection.view,
-              status: [],
-              priority: [],
-              category: [],
+              status: selection.status,
+              priority: selection.priority,
+              category: selection.category,
             },
           };
         case "follow_up_ownership":

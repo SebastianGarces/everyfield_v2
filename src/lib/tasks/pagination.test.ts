@@ -165,3 +165,23 @@ test("listTasks orders by the same expression it pages by", () => {
     "the cursor must not compare created_at while ORDER BY uses another key"
   );
 });
+
+test("listTasks accepts a cursor only inside the exact filtered result", () => {
+  const source = stripComments(
+    readFileSync(path.join(process.cwd(), "src/lib/tasks/service.ts"), "utf8")
+  );
+  const listTasks = sourceReader(source, "tasks/service.ts (stripped)").span(
+    "export async function listTasks(",
+    "export function taskCountConditions("
+  );
+  assert.match(
+    listTasks,
+    /where\(and\(eq\(tasks\.id, cursor\), \.\.\.baseConditions\)\)/,
+    "cursor lookup must carry completed, assignee, status, priority, category, and plant predicates"
+  );
+  assert.match(
+    listTasks,
+    /cursorAvailable: false/,
+    "an unavailable cursor must not fall through to the first page"
+  );
+});
