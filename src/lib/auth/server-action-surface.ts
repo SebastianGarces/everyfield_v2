@@ -38,6 +38,10 @@ export const TS_FILES: string[] = (function collect(dir: string): string[] {
   }
   return found;
 })(SRC);
+const REACHABILITY_TREE_FILES = TS_FILES.filter(
+  (file) => !/\.test\.tsx?$/.test(file)
+);
+const REACHABILITY_TREE_FILE_SET = new Set(REACHABILITY_TREE_FILES);
 
 const CODE_CACHE = new Map<string, string>();
 
@@ -416,12 +420,191 @@ export function importedBindings(
   return bindings;
 }
 
-const REACHING_EXPORTS = new Map<string, readonly string[]>();
-
-type ReachingNamesResult = {
-  readonly names: Set<string>;
-  readonly cycleFree: boolean;
+type ReachabilityModule = {
+  readonly code: string;
+  readonly imports: Map<string, { module: string; original: string }>;
+  readonly functions: ReturnType<typeof functionBodies>;
+  readonly callsByFunction: Map<string, ReadonlySet<string>>;
+  readonly exportedFunctions: ReadonlySet<string>;
 };
+
+export type ReachabilityStats = {
+  /** Each module is parsed at most once, including through an import cycle. */
+  readonly moduleCount: number;
+  /** Unique dependency edges in the symbol graph. */
+  readonly edgeCount: number;
+  /** Each reachable symbol is dequeued at most once. */
+  readonly visitedNameCount: number;
+};
+
+type ReachabilityResult = {
+  readonly namesByFile: ReadonlyMap<string, readonly string[]>;
+  readonly stats: ReachabilityStats;
+};
+
+const REACHABILITY_MODULES = new Map<string, ReachabilityModule>();
+const TREE_REACHABILITY = new Map<string, ReachabilityResult>();
+
+function callsIn(body: string): ReadonlySet<string> {
+  return new Set([...body.matchAll(/\b(\w+)\s*\(/g)].map((match) => match[1]));
+}
+
+function reachabilityModule(file: string, code: string): ReachabilityModule {
+  const cached = REACHABILITY_MODULES.get(file);
+  if (cached?.code === code) return cached;
+
+  const functions = functionBodies(code);
+  const module = {
+    code,
+    imports: importedBindings(file, code),
+    functions,
+    callsByFunction: new Map(
+      functions.map((fn) => [fn.name, callsIn(fn.body)] as const)
+    ),
+    exportedFunctions: new Set(
+      functions.filter((fn) => fn.exported).map((fn) => fn.name)
+    ),
+  } satisfies ReachabilityModule;
+
+  REACHABILITY_MODULES.set(file, module);
+  return module;
+}
+
+function exportsName(
+  module: ReachabilityModule,
+  name: string,
+  roots: ReadonlySet<string>
+): boolean {
+  if (module.exportedFunctions.has(name)) return true;
+  if (!roots.has(name)) return false;
+
+  // A root exported from the module that DEFINES it — `verifySession` and
+  // `getCurrentSession` in session.ts, `requireSeat` in seats.ts — is a base
+  // case. `functionBodies` does not read an exported const, hence this explicit
+  // check retained from the recursive resolver.
+  return new RegExp(
+    `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
+  ).test(module.code);
+}
+
+const symbolKey = (file: string, name: string): string => `${file}\0${name}`;
+
+/**
+ * Solve the monotone reachability relation as a symbol graph.
+ *
+ * An edge points FROM a name that already reaches a root TO a name that calls
+ * it. A queue therefore visits each reachable symbol once. Import cycles are
+ * ordinary graph cycles: the visited set both terminates them and still lets a
+ * root discovered on either side propagate around the whole strongly connected
+ * component. The previous recursive walk cut that back-edge and deliberately
+ * left every cyclic result uncached; the expanded People graph consequently
+ * rebuilt the same overlapping subgraphs thousands of times.
+ */
+function solveReachability(
+  modules: ReadonlyMap<string, ReachabilityModule>,
+  rootsIn: readonly string[]
+): ReachabilityResult {
+  const roots = new Set(rootsIn);
+  const dependents = new Map<string, Set<string>>();
+  const symbols = new Map<string, { file: string; name: string }>();
+  let edgeCount = 0;
+
+  const remember = (file: string, name: string): string => {
+    const key = symbolKey(file, name);
+    if (!symbols.has(key)) symbols.set(key, { file, name });
+    return key;
+  };
+  const addEdge = (
+    sourceFile: string,
+    sourceName: string,
+    dependentFile: string,
+    dependentName: string
+  ): void => {
+    const source = remember(sourceFile, sourceName);
+    const dependent = remember(dependentFile, dependentName);
+    const next = dependents.get(source) ?? new Set<string>();
+    if (!next.has(dependent)) {
+      next.add(dependent);
+      edgeCount++;
+    }
+    dependents.set(source, next);
+  };
+
+  for (const [file, module] of modules) {
+    for (const [local, imported] of module.imports) {
+      const target = modules.get(imported.module);
+      if (target && exportsName(target, imported.original, roots)) {
+        addEdge(imported.module, imported.original, file, local);
+      }
+    }
+
+    for (const fn of module.functions) {
+      for (const called of module.callsByFunction.get(fn.name) ?? []) {
+        addEdge(file, called, file, fn.name);
+      }
+    }
+  }
+
+  const queue: string[] = [];
+  const visited = new Set<string>();
+  for (const file of modules.keys()) {
+    for (const root of rootsIn) {
+      const key = remember(file, root);
+      if (!visited.has(key)) {
+        visited.add(key);
+        queue.push(key);
+      }
+    }
+  }
+
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    for (const dependent of dependents.get(queue[cursor]) ?? []) {
+      if (visited.has(dependent)) continue;
+      visited.add(dependent);
+      queue.push(dependent);
+    }
+  }
+
+  const namesByFile = new Map<string, string[]>();
+  for (const key of queue) {
+    const symbol = symbols.get(key);
+    if (!symbol) continue;
+    const names = namesByFile.get(symbol.file) ?? [];
+    names.push(symbol.name);
+    namesByFile.set(symbol.file, names);
+  }
+
+  return {
+    namesByFile,
+    stats: {
+      moduleCount: modules.size,
+      edgeCount,
+      visitedNameCount: visited.size,
+    },
+  };
+}
+
+function collectReachabilityModules(
+  file: string,
+  code: string,
+  excluded: ReadonlySet<string>
+): Map<string, ReachabilityModule> {
+  const modules = new Map<string, ReachabilityModule>();
+
+  const visit = (current: string, currentCode: string): void => {
+    if (modules.has(current)) return;
+    const module = reachabilityModule(current, currentCode);
+    modules.set(current, module);
+
+    for (const { module: imported } of module.imports.values()) {
+      if (excluded.has(imported) || modules.has(imported)) continue;
+      visit(imported, codeOf(imported));
+    }
+  };
+
+  visit(file, code);
+  return modules;
+}
 
 /**
  * The names that MINT an actor when called from `file`: the two session reads,
@@ -438,9 +621,10 @@ type ReachingNamesResult = {
  * an exemption list is exactly the thing that hid the invitations surface for a
  * whole round.
  *
- * `stack` breaks import cycles: a module already being resolved contributes
- * nothing rather than recursing, which under-approximates (a cyclic mint would
- * be missed) and so fails CLOSED — the assertion complains rather than passing.
+ * Import cycles are solved as strongly connected graph regions. A name is
+ * visited once and roots propagate around the cycle, so the result is both
+ * fail-closed and bounded. `stack` remains an explicit exclusion seam for the
+ * synthetic tests and callers that ask about a deliberately cut graph.
  *
  * IT IS PARAMETERISED BY ITS ROOTS because the seat guard asks the identical
  * question of a different base case (#498): "which names reach `requireSeat`",
@@ -449,48 +633,44 @@ type ReachingNamesResult = {
  * `requireChurchSession`), and a re-export. That is this walk exactly, and a
  * second copy of it would be a second set of blind spots to keep in sync.
  */
-function reachingNamesResult(
+export function reachingNamesAnalysis(
   file: string,
   code: string,
   roots: readonly string[],
-  stack: ReadonlySet<string>
-): ReachingNamesResult {
-  const reaching = new Set(roots);
-  let cycleFree = true;
+  stack: ReadonlySet<string> = new Set()
+): { names: Set<string>; stats: ReachabilityStats } {
+  const isTreeModule =
+    stack.size === 0 &&
+    REACHABILITY_TREE_FILE_SET.has(file) &&
+    code === codeOf(file);
+  const rootKey = roots.join("\0");
 
-  for (const [local, { module, original }] of importedBindings(file, code)) {
-    if (stack.has(module)) {
-      cycleFree = false;
-      continue;
+  let result: ReachabilityResult;
+  if (isTreeModule) {
+    const cached = TREE_REACHABILITY.get(rootKey);
+    if (cached) {
+      result = cached;
+    } else {
+      const modules = new Map(
+        REACHABILITY_TREE_FILES.map((treeFile) => [
+          treeFile,
+          reachabilityModule(treeFile, codeOf(treeFile)),
+        ])
+      );
+      result = solveReachability(modules, roots);
+      TREE_REACHABILITY.set(rootKey, result);
     }
-
-    const imported = reachingExportsResult(
-      module,
-      roots,
-      new Set([...stack, file])
+  } else {
+    result = solveReachability(
+      collectReachabilityModules(file, code, stack),
+      roots
     );
-    cycleFree &&= imported.cycleFree;
-    if (imported.names.has(original)) reaching.add(local);
   }
 
-  const bodies = functionBodies(code);
-
-  for (let pass = 0; pass <= bodies.length; pass++) {
-    let grew = false;
-    for (const fn of bodies) {
-      if (reaching.has(fn.name)) continue;
-      for (const root of reaching) {
-        if (new RegExp(`\\b${root}\\s*\\(`).test(fn.body)) {
-          reaching.add(fn.name);
-          grew = true;
-          break;
-        }
-      }
-    }
-    if (!grew) break;
-  }
-
-  return { names: reaching, cycleFree };
+  return {
+    names: new Set(result.namesByFile.get(file) ?? roots),
+    stats: result.stats,
+  };
 }
 
 export function reachingNames(
@@ -499,48 +679,7 @@ export function reachingNames(
   roots: readonly string[],
   stack: ReadonlySet<string> = new Set()
 ): Set<string> {
-  return reachingNamesResult(file, code, roots, stack).names;
-}
-
-function reachingExportsResult(
-  file: string,
-  roots: readonly string[],
-  stack: ReadonlySet<string>
-): ReachingNamesResult {
-  const key = `${roots.join(",")}\0${file}`;
-  const cached = REACHING_EXPORTS.get(key);
-  if (cached !== undefined) {
-    return { names: new Set(cached), cycleFree: true };
-  }
-
-  const code = codeOf(file);
-  const reaching = reachingNamesResult(file, code, roots, stack);
-  const exported = new Set(
-    functionBodies(code)
-      .filter((fn) => fn.exported && reaching.names.has(fn.name))
-      .map((fn) => fn.name)
-  );
-
-  // A root exported from the module that DEFINES it — `verifySession` and
-  // `getCurrentSession` in session.ts, `requireSeat` in seats.ts — is a base
-  // case: it qualifies by definition rather than by reaching anything.
-  for (const name of roots) {
-    if (
-      new RegExp(
-        `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
-      ).test(code)
-    ) {
-      exported.add(name);
-    }
-  }
-
-  // A recursive result is context-independent exactly when it never had to
-  // cut an edge back into the active import stack. Cache those completed
-  // subgraphs even when reached below a root call. Cyclic partials stay
-  // uncached, preserving the existing fail-closed cycle behavior.
-  if (reaching.cycleFree)
-    REACHING_EXPORTS.set(key, Object.freeze([...exported]));
-  return { names: exported, cycleFree: reaching.cycleFree };
+  return reachingNamesAnalysis(file, code, roots, stack).names;
 }
 
 /** Which of `file`'s exported functions reach `roots`, for an importer. */
@@ -549,7 +688,16 @@ export function reachingExportsOf(
   roots: readonly string[],
   stack: ReadonlySet<string>
 ): Set<string> {
-  return reachingExportsResult(file, roots, stack).names;
+  const code = codeOf(file);
+  const names = reachingNames(file, code, roots, stack);
+  const module = reachabilityModule(file, code);
+  const rootSet = new Set(roots);
+
+  return new Set(
+    [...module.exportedFunctions, ...roots].filter(
+      (name) => names.has(name) && exportsName(module, name, rootSet)
+    )
+  );
 }
 
 /** The mint walk — {@link reachingNames} rooted at the two session reads. */

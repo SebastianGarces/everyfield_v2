@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const EVRY_CONVERSATION_STATE_VERSION = 1 as const;
 export const EVRY_CONVERSATION_MAX_MESSAGE_CHARACTERS = 8_000;
+/** Enough for the complete production Meetings detail projection, still bounded. */
+export const EVRY_READ_ITEM_MAX_FACTS = 32;
 
 const SEMANTIC_KEY_PATTERN = /^[a-z][a-z0-9_.:-]{0,127}$/;
 const PLAN_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;

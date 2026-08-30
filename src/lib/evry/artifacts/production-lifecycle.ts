@@ -9,6 +9,7 @@ import {
   PRODUCTION_EVRY_PLAN_REGISTRY,
   PRODUCTION_EVRY_REVIEW_REGISTRY,
 } from "@/lib/evry/capabilities/production";
+import { cleanupEvryPeoplePlanAttachments } from "@/lib/evry/capabilities/people/cleanup";
 import { revalidateProductionEvryConversationPlan } from "@/lib/evry/conversations/plan-resume";
 import {
   appendTrustedEvryConversationMessage,
@@ -34,6 +35,7 @@ export const runEvryProductionArtifactLifecycle = createEvryArtifactLifecycle({
   confirm: confirmEvryActionPlan,
   execute: executeEvryActionPlan,
   cancel: cancelExactEvryActionPlan,
+  cleanupPlanResources: cleanupEvryPeoplePlanAttachments,
   reviewPlan: (input) =>
     trustedEvryPlanReview({
       ...input,

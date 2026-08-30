@@ -33,6 +33,13 @@ import {
   type PendingEvrySubmission,
 } from "./interaction-state";
 import {
+  evryPeopleFilePlanBody,
+  pendingPeopleFileSubmissionFor,
+  preparedEvryPeopleFileFromStage,
+  type PendingPeopleFileSubmission,
+  type PreparedEvryPeopleFile,
+} from "./people-file-state";
+import {
   visibleEvryPageContextFor,
   type VisibleEvryPageContext,
 } from "./page-context";
@@ -105,9 +112,39 @@ type EvryShellValue = Readonly<{
     state: EvryWorkState
   ) => boolean;
   suggestions: readonly EligibleEvrySuggestion[];
+  submitPeopleFile: (
+    input: EvryPeopleFileSubmission
+  ) => Promise<EvryPeopleFileSubmissionResult>;
   workRequestId: string | null;
   workState: EvryWorkState;
 }>;
+
+export type EvryPeopleFileSubmission =
+  | Readonly<{
+      kind: "people_csv";
+      file: File;
+      prepared: PreparedEvryPeopleFile | null;
+      duplicateResolutions: Readonly<
+        Record<string, "skip" | "create" | "merge">
+      > | null;
+    }>
+  | Readonly<{ kind: "person_photo"; file: File; personId: string }>
+  | Readonly<{
+      kind: "commitment_document";
+      file: File;
+      personId: string;
+      commitmentType: "core_group" | "launch_team";
+      signedDate: string;
+      notes: string | null;
+    }>;
+
+export type EvryPeopleFileSubmissionResult =
+  | Readonly<{ status: "submitted" }>
+  | Readonly<{
+      status: "needs_duplicate_resolution";
+      prepared: PreparedEvryPeopleFile;
+    }>
+  | Readonly<{ status: "failed" }>;
 
 const EvryShellContext = createContext<EvryShellValue | null>(null);
 
@@ -170,6 +207,7 @@ export function EvryShell({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const conversationLoadStateRef = useRef(initialEvryConversationLoadState());
   const pendingSubmissionRef = useRef<PendingEvrySubmission | null>(null);
+  const pendingPeopleFileRef = useRef<PendingPeopleFileSubmission | null>(null);
   const sequencedWorkRef = useRef<EvrySequencedWorkState | null>(null);
   const pendingWorkRequestIdRef = useRef<string | null>(null);
   const workAbortRef = useRef<Readonly<{
@@ -823,6 +861,179 @@ export function EvryShell({
     updateWork,
   ]);
 
+  const submitPeopleFile = useCallback(
+    async (
+      input: EvryPeopleFileSubmission
+    ): Promise<EvryPeopleFileSubmissionResult> => {
+      if (
+        isSending ||
+        isWorking ||
+        isLoading ||
+        requestedConversationId !== null
+      )
+        return { status: "failed" };
+      let workRequestId = crypto.randomUUID();
+      setAcknowledgement({
+        requestId: workRequestId,
+        submittedAt: performance.now(),
+      });
+      setSending(true);
+      setError(null);
+      beginWork(workRequestId, {
+        phase: "reading",
+        message: "Checking the file and current People records",
+      });
+      try {
+        let prepared = input.kind === "people_csv" ? input.prepared : null;
+        if (!prepared) {
+          const form = new FormData();
+          form.set("kind", input.kind);
+          form.set("file", input.file);
+          if ("personId" in input) form.set("personId", input.personId);
+          const stagedResponse = await fetch("/api/evry/people/attachments", {
+            method: "POST",
+            body: form,
+          });
+          const staged: unknown = await stagedResponse.json();
+          prepared = preparedEvryPeopleFileFromStage(staged);
+          if (!stagedResponse.ok || !prepared) {
+            const reason =
+              typeof staged === "object" &&
+              staged !== null &&
+              "reason" in staged &&
+              typeof staged.reason === "string"
+                ? staged.reason
+                : null;
+            throw new Error(
+              reason === "unsupported_file_type"
+                ? "Choose a PDF, JPEG, or PNG file."
+                : reason === "file_too_large"
+                  ? "Choose a file that is 10 MB or smaller."
+                  : "Unable to stage this file."
+            );
+          }
+        }
+        if (
+          input.kind === "people_csv" &&
+          input.duplicateResolutions === null &&
+          prepared.duplicateRows.length > 0
+        ) {
+          updateWork(workRequestId, 1, {
+            phase: "complete",
+            message: "Choose how to handle each possible duplicate",
+          });
+          finishWork(workRequestId, 2);
+          return {
+            status: "needs_duplicate_resolution",
+            prepared,
+          };
+        }
+        const duplicateResolutions =
+          input.kind === "people_csv" ? (input.duplicateResolutions ?? {}) : {};
+        const semanticKey = [
+          input.kind,
+          prepared.digest,
+          "personId" in input ? input.personId : "",
+          "commitmentType" in input ? input.commitmentType : "",
+          "signedDate" in input ? input.signedDate : "",
+          "notes" in input ? (input.notes ?? "") : "",
+          JSON.stringify(Object.entries(duplicateResolutions).toSorted()),
+          conversation?.id ?? "new",
+        ].join(":");
+        const pending = pendingPeopleFileSubmissionFor(
+          pendingPeopleFileRef.current,
+          semanticKey,
+          () => crypto.randomUUID()
+        );
+        pendingPeopleFileRef.current = pending;
+        workRequestId = pending.requestKey;
+        setAcknowledgement({
+          requestId: pending.requestKey,
+          submittedAt: performance.now(),
+        });
+        beginWork(pending.requestKey, {
+          phase: "planning",
+          message: "Preparing the exact file review",
+        });
+        const planBody = evryPeopleFilePlanBody(
+          input.kind === "people_csv"
+            ? {
+                kind: input.kind,
+                prepared,
+                duplicateResolutions,
+                conversationId: conversation?.id ?? null,
+                requestKey: pending.requestKey,
+              }
+            : input.kind === "person_photo"
+              ? {
+                  kind: input.kind,
+                  prepared,
+                  conversationId: conversation?.id ?? null,
+                  requestKey: pending.requestKey,
+                }
+              : {
+                  kind: input.kind,
+                  prepared,
+                  commitmentType: input.commitmentType,
+                  signedDate: input.signedDate,
+                  notes: input.notes,
+                  conversationId: conversation?.id ?? null,
+                  requestKey: pending.requestKey,
+                }
+        );
+        const reviewResponse = await fetch(
+          "/api/evry/people/attachments/plan",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(planBody),
+          }
+        );
+        const nextConversation = await responseConversation(reviewResponse);
+        setConversation(nextConversation);
+        pendingPeopleFileRef.current = null;
+        setDraft("");
+        updateWork(
+          pending.requestKey,
+          2,
+          evryWorkStateForConversation(nextConversation)
+        );
+        finishWork(pending.requestKey, 3);
+        requestAnimationFrame(() =>
+          document.getElementById("evry-work-status")?.focus()
+        );
+        return { status: "submitted" };
+      } catch (error) {
+        const failure =
+          error instanceof Error &&
+          (error.message === "Choose a PDF, JPEG, or PNG file." ||
+            error.message === "Choose a file that is 10 MB or smaller.")
+            ? error.message
+            : "Unable to prepare this file review. Keep the file selected and try again.";
+        setError(failure);
+        updateWork(workRequestId, 2, {
+          phase: "failed",
+          message: failure,
+        });
+        finishWork(workRequestId, 3);
+        return { status: "failed" };
+      } finally {
+        setSending(false);
+      }
+    },
+    [
+      beginWork,
+      conversation,
+      finishWork,
+      isLoading,
+      isSending,
+      isWorking,
+      requestedConversationId,
+      setDraft,
+      updateWork,
+    ]
+  );
+
   const value = useMemo<EvryShellValue>(
     () => ({
       activeContext,
@@ -859,6 +1070,7 @@ export function EvryShell({
       stopWatching,
       updateWork,
       suggestions,
+      submitPeopleFile,
       workRequestId: sequencedWork?.requestId ?? null,
       workState: sequencedWork?.state ?? { phase: "idle" },
     }),
@@ -895,6 +1107,7 @@ export function EvryShell({
       stopWatching,
       sequencedWork,
       suggestions,
+      submitPeopleFile,
       updateWork,
     ]
   );
